@@ -3,13 +3,106 @@
 //  osaurus
 //
 //  Created by Terence on 8/17/25.
-//  Intel fork — minimal handler returning 200 for all routes. M3 milestone.
+//  Intel fork — cloud proxy with SSE streaming. M4 milestone.
 //
 
 import Foundation
 import NIOCore
 import NIOHTTP1
 import NIOPosix
+
+// MARK: - OpenAI-compatible types
+
+struct ChatMessage: Codable, Sendable {
+    let role: String
+    let content: String?
+    let tool_calls: [ToolCall]?
+    let tool_call_id: String?
+    let reasoning_content: String?
+
+    init(role: String, content: String? = nil, tool_calls: [ToolCall]? = nil,
+         tool_call_id: String? = nil, reasoning_content: String? = nil) {
+        self.role = role
+        self.content = content
+        self.tool_calls = tool_calls
+        self.tool_call_id = tool_call_id
+        self.reasoning_content = reasoning_content
+    }
+}
+
+struct ToolCall: Codable, Sendable {
+    let id: String?
+    let type: String?
+    let function: ToolCallFunction?
+}
+
+struct ToolCallFunction: Codable, Sendable {
+    let name: String?
+    let arguments: String?
+}
+
+struct ChatCompletionRequest: Codable, Sendable {
+    let model: String?
+    let messages: [ChatMessage]
+    let stream: Bool?
+    let temperature: Double?
+    let max_tokens: Int?
+    let top_p: Double?
+    let stream_options: StreamOptions?
+}
+
+struct StreamOptions: Codable, Sendable {
+    let include_usage: Bool?
+}
+
+struct ChatCompletionChunk: Codable, Sendable {
+    let id: String?
+    let object: String?
+    let created: Int?
+    let model: String?
+    let choices: [ChunkChoice]?
+    let usage: UsageInfo?
+}
+
+struct ChunkChoice: Codable, Sendable {
+    let index: Int?
+    let delta: ChunkDelta?
+    let finish_reason: String?
+}
+
+struct ChunkDelta: Codable, Sendable {
+    let role: String?
+    let content: String?
+    let reasoning_content: String?
+    let tool_calls: [ToolCall]?
+}
+
+struct UsageInfo: Codable, Sendable {
+    let prompt_tokens: Int?
+    let completion_tokens: Int?
+    let total_tokens: Int?
+}
+
+struct OpenAIModel: Codable, Sendable {
+    let id: String
+    let object: String
+    let created: Int
+    let owned_by: String
+
+    init(id: String) {
+        self.id = id
+        self.object = "model"
+        self.created = Int(Date().timeIntervalSince1970)
+        self.owned_by = "deepseek"
+    }
+}
+
+struct ModelsResponse: Codable, Sendable {
+    let object: String
+    let data: [OpenAIModel]
+}
+
+// MARK: - HTTP Handler
 
 private final class SendableBool: @unchecked Sendable {
     private var _value: Bool
@@ -31,9 +124,21 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     private let trustLoopback: Bool
     private let _isChannelActive = SendableBool(false)
 
+    private let jsonEncoder: JSONEncoder = {
+        let e = JSONEncoder()
+        return e
+    }()
+    private let jsonDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        return d
+    }()
+
     final class RequestState {
         var requestHead: HTTPRequestHead?
         var requestBodyBuffer: ByteBuffer?
+        var isStreaming = false
+        var streamingDone = false
+        var contextBox: ChannelHandlerContext?
     }
     let stateRef: NIOLoopBound<RequestState>
 
@@ -52,11 +157,13 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     func channelActive(context: ChannelHandlerContext) {
         _isChannelActive.value = true
+        stateRef.value.contextBox = context
         context.fireChannelActive()
     }
 
     func channelInactive(context: ChannelHandlerContext) {
         _isChannelActive.value = false
+        stateRef.value.contextBox = nil
         context.fireChannelInactive()
     }
 
@@ -67,6 +174,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case .head(let head):
             stateRef.value.requestHead = head
             stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: 0)
+            stateRef.value.isStreaming = false
+            stateRef.value.streamingDone = false
 
         case .body(var buffer):
             if stateRef.value.requestBodyBuffer != nil {
@@ -79,40 +188,245 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 return
             }
 
-            if let bodyBytes = try? authCheck(head: head, context: context) {
-                return
-            }
+            handleRequest(context: context, head: head)
+        }
+    }
 
-            let method = head.method.rawValue
-            let path = head.uri
+    // MARK: - Request Dispatch
 
+    private func handleRequest(context: ChannelHandlerContext, head: HTTPRequestHead) {
+        let path = Router.normalizeStatic(head.uri)
+
+        switch (head.method, path) {
+        case (.GET, "/health"):
+            serveHealth(context: context)
+        case (.GET, "/"):
+            serveRoot(context: context)
+        case (.GET, "/models"):
+            serveModels(context: context)
+        case (.POST, "/chat/completions"):
+            serveChatCompletions(context: context)
+        default:
             var router = Router(context: context, handler: self)
             let bodyBuffer = stateRef.value.requestBodyBuffer ?? context.channel.allocator.buffer(capacity: 0)
-            let (status, headers, body) = router.route(method: method, path: path, bodyBuffer: bodyBuffer)
-
+            let (status, headers, body) = router.route(method: head.method.rawValue, path: head.uri, bodyBuffer: bodyBuffer)
             sendResponse(context: context, status: status, headers: headers, body: body)
         }
     }
 
-    private func authCheck(head: HTTPRequestHead, context: ChannelHandlerContext) -> Error? {
-        let validator = apiKeyValidator
+    // MARK: - Health / Root
 
-        if validator.hasKeys && !trustLoopback {
-            guard let apiKey = head.headers["Authorization"].first ?? head.headers["x-api-key"].first else {
-                sendJSONError(context: context, status: .unauthorized, message: "API key required")
-                return NSError(domain: "auth", code: 401)
-            }
+    private func serveHealth(context: ChannelHandlerContext) {
+        let body = #"{"status":"healthy","timestamp":"\#(ISO8601DateFormatter().string(from: Date()))"}"#
+        sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: body)
+    }
 
-            let raw = apiKey.hasPrefix("Bearer ") ? String(apiKey.dropFirst(7)) : apiKey
-            let result = validator.validate(rawKey: raw)
-            if case .valid = result { } else {
-                sendJSONError(context: context, status: .unauthorized, message: "Invalid API key")
-                return NSError(domain: "auth", code: 401)
-            }
+    private func serveRoot(context: ChannelHandlerContext) {
+        let body = "Osaurus (Intel) is running! \u{1F995}"
+        sendResponse(context: context, status: .ok, headers: textHeaders(), body: body)
+    }
+
+    // MARK: - Models
+
+    private func serveModels(context: ChannelHandlerContext) {
+        let models = [
+            "deepseek-v4-pro",
+            "deepseek-v4-flash",
+        ].map { OpenAIModel(id: $0) }
+        let resp = ModelsResponse(object: "list", data: models)
+        if let data = try? jsonEncoder.encode(resp), let json = String(data: data, encoding: .utf8) {
+            sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: json)
+        } else {
+            sendEmptyResponse(context: context, status: .internalServerError)
+        }
+    }
+
+    // MARK: - Chat Completions (Cloud Proxy)
+
+    private func serveChatCompletions(context: ChannelHandlerContext) {
+        guard let bodyBuffer = stateRef.value.requestBodyBuffer,
+              let bodyData = bodyBuffer.getBytes(at: 0, length: bodyBuffer.readableBytes).map({ Data($0) }) else {
+            sendJSONError(context: context, status: .badRequest, message: "Empty request body")
+            return
         }
 
-        return nil
+        guard let request = try? jsonDecoder.decode(ChatCompletionRequest.self, from: bodyData) else {
+            sendJSONError(context: context, status: .badRequest, message: "Invalid JSON body")
+            return
+        }
+
+        let shouldStream = request.stream ?? false
+        let model = request.model ?? "deepseek-v4-pro"
+
+        guard let apiKey = DeepSeekAPIKeyStore.shared.load() else {
+            sendJSONError(context: context, status: .internalServerError, message: "DEEPSEEK_API_KEY not set")
+            return
+        }
+
+        if shouldStream {
+            serveChatCompletionsStreaming(context: context, request: request, model: model, apiKey: apiKey)
+        } else {
+            serveChatCompletionsNonStreaming(context: context, request: request, model: model, apiKey: apiKey)
+        }
     }
+
+    // MARK: - Streaming
+
+    private func serveChatCompletionsStreaming(
+        context: ChannelHandlerContext,
+        request: ChatCompletionRequest,
+        model: String,
+        apiKey: String
+    ) {
+        stateRef.value.isStreaming = true
+        sendSSEHeaders(context: context)
+
+        var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.timeoutInterval = 300
+
+        var body: [String: Any] = [
+            "model": model,
+            "messages": request.messages.map { msg -> [String: Any] in
+                var m: [String: Any] = ["role": msg.role]
+                if let content = msg.content { m["content"] = content }
+                return m
+            },
+            "stream": true,
+        ]
+        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
+
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
+            sendSSEError(context: context, message: "Failed to encode request")
+            return
+        }
+        urlRequest.httpBody = httpBody
+
+        let eventLoop = context.eventLoop
+        let stateRef = self.stateRef
+
+        Task {
+            do {
+                let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+                guard let httpResponse = response as? HTTPURLResponse,
+                      httpResponse.statusCode == 200 else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 502
+                    eventLoop.execute {
+                        guard let ctx = stateRef.value.contextBox else { return }
+                        self.sendSSEError(context: ctx, message: "Upstream returned \(status)")
+                    }
+                    return
+                }
+
+                for try await line in asyncBytes.lines {
+                    guard line.hasPrefix("data: ") else { continue }
+                    let dataStr = String(line.dropFirst(6))
+                    let isDone = dataStr == "[DONE]"
+                    let sseLine = isDone ? "data: [DONE]\n\n" : "data: \(dataStr)\n\n"
+
+                    eventLoop.execute {
+                        guard let ctx = stateRef.value.contextBox else { return }
+                        self.writeSSELine(context: ctx, line: sseLine)
+                    }
+
+                    if isDone { break }
+                }
+
+                eventLoop.execute {
+                    guard let ctx = stateRef.value.contextBox else { return }
+                    self.sendSSEEnd(context: ctx)
+                }
+            } catch {
+                eventLoop.execute {
+                    guard let ctx = stateRef.value.contextBox else { return }
+                    self.sendSSEError(context: ctx, message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    // MARK: - Non-streaming
+
+    private func serveChatCompletionsNonStreaming(
+        context: ChannelHandlerContext,
+        request: ChatCompletionRequest,
+        model: String,
+        apiKey: String
+    ) {
+        var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
+        urlRequest.httpMethod = "POST"
+        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        urlRequest.timeoutInterval = 300
+
+        var body: [String: Any] = [
+            "model": model,
+            "messages": request.messages.map { msg -> [String: Any] in
+                var m: [String: Any] = ["role": msg.role]
+                if let content = msg.content { m["content"] = content }
+                return m
+            },
+            "stream": false,
+        ]
+        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
+
+        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
+            sendJSONError(context: context, status: .internalServerError, message: "Failed to encode request")
+            return
+        }
+        urlRequest.httpBody = httpBody
+
+        let eventLoop = context.eventLoop
+        let stateRef = self.stateRef
+
+        Task {
+            do {
+                let (data, response) = try await URLSession.shared.data(for: urlRequest)
+                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
+                      let json = String(data: data, encoding: .utf8) else {
+                    let status = (response as? HTTPURLResponse)?.statusCode ?? 502
+                    let errBody = String(data: data, encoding: .utf8) ?? "Upstream error"
+                    eventLoop.execute {
+                        guard let ctx = stateRef.value.contextBox else { return }
+                        self.sendResponse(context: ctx, status: HTTPResponseStatus(statusCode: status), headers: self.jsonHeaders(), body: errBody)
+                    }
+                    return
+                }
+                eventLoop.execute {
+                    guard let ctx = stateRef.value.contextBox else { return }
+                    self.sendResponse(context: ctx, status: .ok, headers: self.jsonHeaders(), body: json)
+                }
+            } catch {
+                eventLoop.execute {
+                    guard let ctx = stateRef.value.contextBox else { return }
+                    self.sendJSONError(context: ctx, status: .internalServerError, message: error.localizedDescription)
+                }
+            }
+        }
+    }
+
+    // MARK: - SSE Helpers
+
+    private func writeSSELine(context: ChannelHandlerContext, line: String) {
+        var buf = context.channel.allocator.buffer(capacity: line.utf8.count)
+        buf.writeString(line)
+        context.writeAndFlush(wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
+    }
+
+    private func sendSSEEnd(context: ChannelHandlerContext) {
+        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+    }
+
+    private func sendSSEError(context: ChannelHandlerContext, message: String) {
+        let errJSON = "{\"error\":{\"message\":\"\(message)\"}}"
+        writeSSELine(context: context, line: "data: \(errJSON)\n\n")
+        writeSSELine(context: context, line: "data: [DONE]\n\n")
+        sendSSEEnd(context: context)
+    }
+
+    // MARK: - Response Helpers
 
     private func sendResponse(
         context: ChannelHandlerContext,
@@ -121,7 +435,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         body: String
     ) {
         var responseHeaders = HTTPHeaders()
-        responseHeaders.add(name: "content-type", value: "application/json; charset=utf-8")
         for (name, value) in headers {
             responseHeaders.add(name: name, value: value)
         }
@@ -137,6 +450,17 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
     }
 
+    private func sendSSEHeaders(context: ChannelHandlerContext) {
+        var headers = HTTPHeaders()
+        headers.add(name: "content-type", value: "text/event-stream")
+        headers.add(name: "cache-control", value: "no-cache")
+        headers.add(name: "connection", value: "keep-alive")
+        headers.add(name: "x-accel-buffering", value: "no")
+
+        let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
+        context.writeAndFlush(wrapOutboundOut(.head(head)), promise: nil)
+    }
+
     private func sendEmptyResponse(context: ChannelHandlerContext, status: HTTPResponseStatus) {
         let head = HTTPResponseHead(version: .http1_1, status: status)
         context.write(wrapOutboundOut(.head(head)), promise: nil)
@@ -145,7 +469,26 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     private func sendJSONError(context: ChannelHandlerContext, status: HTTPResponseStatus, message: String) {
         let body = "{\"error\":{\"message\":\"\(message)\"}}"
-        let headers: [(String, String)] = [("Content-Type", "application/json; charset=utf-8")]
-        sendResponse(context: context, status: status, headers: headers, body: body)
+        let hs: [(String, String)] = [("Content-Type", "application/json; charset=utf-8")]
+        sendResponse(context: context, status: status, headers: hs, body: body)
+    }
+
+    private func jsonHeaders() -> [(String, String)] {
+        [("Content-Type", "application/json; charset=utf-8")]
+    }
+
+    private func textHeaders() -> [(String, String)] {
+        [("Content-Type", "text/plain; charset=utf-8")]
+    }
+}
+
+// MARK: - API Key Store
+
+final class DeepSeekAPIKeyStore: @unchecked Sendable {
+    static let shared = DeepSeekAPIKeyStore()
+    private init() {}
+
+    func load() -> String? {
+        ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
     }
 }

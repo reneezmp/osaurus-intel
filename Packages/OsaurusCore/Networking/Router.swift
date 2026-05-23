@@ -81,7 +81,8 @@ public struct Router {
 
     // MARK: - Helpers
 
-    private func normalize(_ path: String) -> String {
+    /// Static path normalizer usable without a Router instance.
+    public static func normalizeStatic(_ path: String) -> String {
         func stripPrefix(_ prefix: String, from s: String) -> String? {
             if s == prefix { return "/" }
             if s.hasPrefix(prefix + "/") {
@@ -95,5 +96,9 @@ public struct Router {
         if let r = stripPrefix("/api", from: path) { return r }
         if let r = stripPrefix("/v1", from: path) { return r }
         return path
+    }
+
+    private func normalize(_ path: String) -> String {
+        Self.normalizeStatic(path)
     }
 }
