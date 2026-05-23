@@ -1,5 +1,5 @@
 {
-  "originHash" : "abb95c1a863b79c3b6e7b989559332fb4c7fed0a2864be3eefce80d7345ce5f6",
+  "originHash" : "cbbfe5e8b129a3d642e6df893a55098b5590b6ddb0acf833f45cd4971d56650f",
   "pins" : [
     {
       "identity" : "aachartkit-swift",
@@ -20,57 +20,12 @@
       }
     },
     {
-      "identity" : "containerization",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/containerization.git",
-      "state" : {
-        "revision" : "f1ee6f8b737ab8dffbd620bfa47283f6f0bc1822",
-        "version" : "0.31.0"
-      }
-    },
-    {
       "identity" : "eventsource",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mattt/eventsource.git",
       "state" : {
         "revision" : "a3a85a85214caf642abaa96ae664e4c772a59f6e",
         "version" : "1.4.1"
-      }
-    },
-    {
-      "identity" : "fluidaudio",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/FluidInference/FluidAudio.git",
-      "state" : {
-        "revision" : "d302273d49ef4d8914b27f20d342be482e8810f1",
-        "version" : "0.14.1"
-      }
-    },
-    {
-      "identity" : "grpc-swift-2",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/grpc/grpc-swift-2.git",
-      "state" : {
-        "revision" : "d19a94824cc6fa182211e8197ce391ff712b69f1",
-        "version" : "2.4.0"
-      }
-    },
-    {
-      "identity" : "grpc-swift-nio-transport",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/grpc/grpc-swift-nio-transport.git",
-      "state" : {
-        "revision" : "f62a09000685b5b86ee383b63e042f286b1a5422",
-        "version" : "2.7.0"
-      }
-    },
-    {
-      "identity" : "grpc-swift-protobuf",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/grpc/grpc-swift-protobuf.git",
-      "state" : {
-        "revision" : "8723cf856dc23d9c2fad4d874e7b9ed3254acf03",
-        "version" : "2.3.0"
       }
     },
     {
@@ -92,15 +47,6 @@
       }
     },
     {
-      "identity" : "jinja",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/huggingface/swift-jinja",
-      "state" : {
-        "revision" : "0aeefadec459ce8e11a333769950fb86183aca43",
-        "version" : "2.3.5"
-      }
-    },
-    {
       "identity" : "sparkle",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/sparkle-project/Sparkle",
@@ -116,15 +62,6 @@
       "state" : {
         "revision" : "87e50f483c54e6efd60e885f7f5aa946cee68023",
         "version" : "1.2.1"
-      }
-    },
-    {
-      "identity" : "swift-argument-parser",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-argument-parser.git",
-      "state" : {
-        "revision" : "626b5b7b2f45e1b0b1c6f4a309296d1d21d7311b",
-        "version" : "1.7.1"
       }
     },
     {
@@ -200,15 +137,6 @@
       }
     },
     {
-      "identity" : "swift-embeddings",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jkrukowski/swift-embeddings.git",
-      "state" : {
-        "branch" : "main",
-        "revision" : "66994e3b3ed172a9b691b59d11bd0702c3f5eb33"
-      }
-    },
-    {
       "identity" : "swift-http-structured-headers",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-http-structured-headers.git",
@@ -224,15 +152,6 @@
       "state" : {
         "revision" : "45eb0224913ea070ec4fba17291b9e7ecf4749ca",
         "version" : "1.5.1"
-      }
-    },
-    {
-      "identity" : "swift-huggingface",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/huggingface/swift-huggingface.git",
-      "state" : {
-        "revision" : "b721959445b617d0bf03910b2b4aced345fd93bf",
-        "version" : "0.9.0"
       }
     },
     {
@@ -299,24 +218,6 @@
       }
     },
     {
-      "identity" : "swift-protobuf",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/apple/swift-protobuf.git",
-      "state" : {
-        "revision" : "81558271e243f8f47dfe8e9fdd55f3c2b5413f68",
-        "version" : "1.37.0"
-      }
-    },
-    {
-      "identity" : "swift-safetensors",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jkrukowski/swift-safetensors.git",
-      "state" : {
-        "revision" : "3852f0bd561071588361c26c49c016d344234c60",
-        "version" : "0.1.1"
-      }
-    },
-    {
       "identity" : "swift-sdk",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/modelcontextprotocol/swift-sdk.git",
@@ -332,15 +233,6 @@
       "state" : {
         "revision" : "8c62aba8a3011c9bcea232e5ee007fb0b34a15e2",
         "version" : "0.21.1"
-      }
-    },
-    {
-      "identity" : "swift-sentencepiece",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/jkrukowski/swift-sentencepiece",
-      "state" : {
-        "revision" : "36a8b2b45733f6adb3092100f16e4c7d38a10a7c",
-        "version" : "0.0.6"
       }
     },
     {
@@ -362,15 +254,6 @@
       }
     },
     {
-      "identity" : "swift-syntax",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/swiftlang/swift-syntax.git",
-      "state" : {
-        "revision" : "0687f71944021d616d34d922343dcef086855920",
-        "version" : "600.0.1"
-      }
-    },
-    {
       "identity" : "swift-system",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/apple/swift-system.git",
@@ -380,55 +263,12 @@
       }
     },
     {
-      "identity" : "swift-transformers",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/huggingface/swift-transformers.git",
-      "state" : {
-        "revision" : "3f85b5c7e889c57465aea4e5842376a8abada344",
-        "version" : "1.3.1"
-      }
-    },
-    {
       "identity" : "swiftmath",
       "kind" : "remoteSourceControl",
       "location" : "https://github.com/mgriebling/SwiftMath",
       "state" : {
         "revision" : "fa8244ed032f4a1ade4cb0571bf87d2f1a9fd2d7",
         "version" : "1.7.3"
-      }
-    },
-    {
-      "identity" : "vecturakit",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/rryam/VecturaKit",
-      "state" : {
-        "revision" : "a1b93774d16d8a6e7fc39b7cda9449b719f07f48"
-      }
-    },
-    {
-      "identity" : "vmlx-swift",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/osaurus-ai/vmlx-swift",
-      "state" : {
-        "revision" : "4356ef1985344757a4326dd08ba27b5cbff230ab"
-      }
-    },
-    {
-      "identity" : "yyjson",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/ibireme/yyjson.git",
-      "state" : {
-        "revision" : "8b4a38dc994a110abaec8a400615567bd996105f",
-        "version" : "0.12.0"
-      }
-    },
-    {
-      "identity" : "zstd",
-      "kind" : "remoteSourceControl",
-      "location" : "https://github.com/facebook/zstd.git",
-      "state" : {
-        "revision" : "f8745da6ff1ad1e7bab384bd1f9d742439278e99",
-        "version" : "1.5.7"
       }
     }
   ],
