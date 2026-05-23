@@ -35,6 +35,9 @@ public struct MTPBundleStatus { public init() {} }
 public struct JangLoader { public init() {} }
 public struct BatchEngineConfigurationError: Error { public init() {} }
 public struct BatchEngine { public init() {} }
+public enum MLXBatchAdapter {
+    public static func snapshotDiagnostics() async -> Any? { nil }
+}
 public struct Generation { public init() {} }
 public struct LoadConfiguration { public init() {} }
 public struct MLXPressStatus { public init() {} }
@@ -80,7 +83,10 @@ public struct GenerateParameters: Codable, Sendable { public init() {} }
 
 public struct VMLXBlockDiskCacheSettings: Codable, Sendable { public init() {} }
 public struct VMLXDiskCacheSettings: Codable, Sendable { public init() {} }
-public struct VMLXKVCacheCodec: Codable, Sendable { public init() {} }
+public struct VMLXKVCacheCodec: Codable, Sendable, CaseIterable {
+    public static var allCases: [VMLXKVCacheCodec] { [.init()] }
+    public init() {}
+}
 public struct VMLXMTPServerMode: RawRepresentable, Codable, Sendable {
     public var rawValue: String
     public init?(rawValue: String) { self.rawValue = rawValue }
@@ -103,7 +109,10 @@ public struct VMLXServerPowerSettings: Codable, Sendable, Equatable { public ini
 public enum VMLXServerSettingsIssue: String, Codable, Sendable, Equatable { case placeholder }
 public enum VMLXServerSmeltMode: String, Codable, Sendable, Equatable { case off, engineSelected }
 public struct VMLXServerToolSettings: Codable, Sendable, Equatable { public init() {} }
-public struct VMLXStoredKVCacheCodec: Codable, Sendable { public init() {} }
+public struct VMLXStoredKVCacheCodec: Codable, Sendable, CaseIterable {
+    public static var allCases: [VMLXStoredKVCacheCodec] { [.init()] }
+    public init() {}
+}
 public enum VMLXVLMServerMode: String, Codable, Sendable { case disabled }
 
 public func nemotronOmniLoadAudioFile(_: URL) throws -> Any { fatalError() }
