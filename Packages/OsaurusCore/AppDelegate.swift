@@ -89,6 +89,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             } catch {
                 NSLog("[Osaurus Intel] Server start failed: \(error)")
             }
+
+            do {
+                try await MCPBridge.shared.start()
+                NSLog("[Osaurus Intel] MCP server started")
+            } catch {
+                NSLog("[Osaurus Intel] MCP start failed: \(error)")
+            }
         }
 
         Task { @MainActor in
@@ -200,6 +207,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     public func applicationWillTerminate(_ notification: Notification) {
         NSLog("Osaurus (Intel) terminating")
         Task { @MainActor in
+            await MCPBridge.shared.stop()
             await server.stop()
         }
         SharedConfigurationService.shared.remove()
