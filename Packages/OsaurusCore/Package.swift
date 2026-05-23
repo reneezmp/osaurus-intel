@@ -10,15 +10,8 @@ let package = Package(
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.88.0"),
-        // Keep package-local SwiftPM builds aligned with the workspace
-        // lockfiles. Containerization 0.32.x changed Process.kill's signal
-        // parameter type while the app CI graph is still pinned to 0.31.x.
-        .package(url: "https://github.com/apple/containerization.git", .upToNextMinor(from: "0.31.0")),
         .package(url: "https://github.com/modelcontextprotocol/swift-sdk.git", from: "0.12.0"),
-        // MCP pulls EventSource transitively. Enable its AsyncHTTPClient
-        // trait at the root so the target's conditional AsyncHTTPClient
-        // source has declared NIO/shim dependencies when vmlx/MLX is also
-        // in the graph.
+        // MCP pulls EventSource transitively. Enable its AsyncHTTPClient trait.
         .package(
             url: "https://github.com/mattt/eventsource.git",
             from: "1.4.1",
@@ -26,32 +19,12 @@ let package = Package(
         ),
         .package(url: "https://github.com/orlandos-nl/IkigaJSON", from: "2.3.2"),
         .package(url: "https://github.com/sparkle-project/Sparkle", from: "2.7.0"),
-        // Single consolidated vMLX dependency. This package vendors the MLX,
-        // MLXLMCommon, MLXLLM, MLXVLM, Tokenizers, Jinja, cache, parser,
-        // MTP, and media-runtime surfaces Osaurus previously pulled from
-        // separate MLX, inference, tokenizer, template, and transformer pins.
-        // Keep this revision pinned until the package-switch gate has
-        // live model, cache, parser, API, and UI evidence.
-        .package(
-            url: "https://github.com/osaurus-ai/vmlx-swift",
-            revision: "4356ef1985344757a4326dd08ba27b5cbff230ab"
-        ),
-        // FluidAudio 0.14.3 added a breaking `language:` parameter to TTS
-        // calls that osaurus's `TTSService` doesn't pass. Pinning to the
-        // last working version until osaurus catches up. Bumping requires
-        // a paired osaurus-side TTSService update.
-        .package(url: "https://github.com/FluidInference/FluidAudio.git", "0.14.0" ..< "0.14.2"),
-        // Pinned by commit (was `branch: "main"`) — same reasoning as the
-        // consolidated vmlx-swift pin above.
-        .package(
-            url: "https://github.com/rryam/VecturaKit",
-            revision: "a1b93774d16d8a6e7fc39b7cda9449b719f07f48"
-        ),
         .package(url: "https://github.com/21-DOT-DEV/swift-secp256k1", exact: "0.21.1"),
         .package(path: "../OsaurusRepository"),
         .package(url: "https://github.com/mgriebling/SwiftMath", from: "1.7.3"),
         .package(url: "https://github.com/raspu/Highlightr", from: "2.3.0"),
         .package(url: "https://github.com/AAChartModel/AAChartKit-Swift.git", from: "9.5.0"),
+        .package(path: "../IntelStubs"),
     ],
     targets: [
         // Vendored SQLCipher 4.6.1 amalgamation (CommonCrypto
@@ -161,35 +134,100 @@ let package = Package(
                 .product(name: "MCP", package: "swift-sdk"),
                 .product(name: "IkigaJSON", package: "IkigaJSON"),
                 .product(name: "Sparkle", package: "Sparkle"),
-                .product(name: "MLX", package: "vmlx-swift"),
-                .product(name: "MLXLLM", package: "vmlx-swift"),
-                .product(name: "MLXVLM", package: "vmlx-swift"),
-                .product(name: "MLXLMCommon", package: "vmlx-swift"),
-                .product(name: "VMLXTokenizers", package: "vmlx-swift"),
-                .product(name: "FluidAudio", package: "FluidAudio"),
-                .product(name: "VecturaKit", package: "VecturaKit"),
                 .product(name: "OsaurusRepository", package: "OsaurusRepository"),
                 .product(name: "P256K", package: "swift-secp256k1"),
                 .product(name: "SwiftMath", package: "SwiftMath"),
-                .product(name: "Containerization", package: "containerization"),
-                .product(name: "ContainerizationExtras", package: "containerization"),
                 .product(name: "Highlightr", package: "Highlightr"),
                 .product(name: "AAInfographics", package: "AAChartKit-Swift"),
+                .product(name: "MLX", package: "IntelStubs"),
+                .product(name: "MLXRandom", package: "IntelStubs"),
+                .product(name: "MLXLLM", package: "IntelStubs"),
+                .product(name: "MLXVLM", package: "IntelStubs"),
+                .product(name: "MLXLMCommon", package: "IntelStubs"),
+                .product(name: "VMLXTokenizers", package: "IntelStubs"),
+                .product(name: "FluidAudio", package: "IntelStubs"),
+                .product(name: "Containerization", package: "IntelStubs"),
+                .product(name: "ContainerizationExtras", package: "IntelStubs"),
+                .product(name: "VecturaKit", package: "IntelStubs"),
             ],
             path: ".",
-            exclude: ["Tests", "SQLCipher"],
-            resources: [.process("Resources")]
+            exclude: [
+                "Tests",
+                "SQLCipher",
+                "Managers/Model/ModelManager.swift",
+                "Managers/Model/SpeechModelManager.swift",
+                "Managers/SpeechService.swift",
+                "Managers/TTSService.swift",
+                "Models/Chat/LiveVoiceAudioInputRegistry.swift",
+                "Models/Configuration/ServerRuntimeSettingsStore.swift",
+                "Models/Configuration/VLMDetection.swift",
+                "Networking/ServerController.swift",
+                "Services/Inference/MLXService.swift",
+                "Services/MCP/Stdio/SandboxStdioRunner.swift",
+                "Services/Memory/EmbeddingService.swift",
+                "Services/Memory/MemorySearchService.swift",
+                "Services/Memory/MetalSafeEmbedder.swift",
+                "Services/Method/MethodSearchService.swift",
+                "Services/ModelRuntime.swift",
+                "Services/ModelRuntime/GenerationEventMapper.swift",
+                "Services/ModelRuntime/InferenceFeatureFlags.swift",
+                "Services/ModelRuntime/MLXBatchAdapter.swift",
+                "Services/ModelRuntime/MLXErrorRecovery.swift",
+                "Services/ModelRuntime/RuntimeConfig.swift",
+                "Services/ModelRuntime/SwiftTransformersTokenizerLoader.swift",
+                "Services/Sandbox/LiveExecSink.swift",
+                "Services/Sandbox/SandboxManager.swift",
+                "Services/Sandbox/TeeWriter.swift",
+                "Services/Skill/SkillSearchService.swift",
+                "Services/Tool/ToolSearchService.swift",
+                "Tools/BuiltinSandboxTools.swift",
+                "Views/Chat/ChatView.swift",
+                "Views/Settings/ServerSettings/AuthenticationSection.swift",
+                "Views/Settings/ServerSettings/CacheSection.swift",
+                "Views/Settings/ServerSettings/ConcurrencySection.swift",
+                "Views/Settings/ServerSettings/ConnectionSection.swift",
+                "Views/Settings/ServerSettings/GenerationDefaultsSection.swift",
+                "Views/Settings/ServerSettings/MTPSection.swift",
+                "Views/Settings/ServerSettings/MultimodalSection.swift",
+                "Views/Settings/ServerSettings/PowerSection.swift",
+                "Views/Settings/ServerSettings/ServerSettingsBanners.swift",
+                "Views/Settings/ServerSettings/ToolsTemplatesSection.swift",
+                "Views/Settings/ServerSettingsTabContent.swift",
+                "AppDelegate.swift",                 "Folder/FolderTools.swift",                 "Managers/BackgroundTaskManager.swift",                 "Managers/Chat/ChatWindowManager.swift",                 "Managers/Chat/ChatWindowState.swift",                 "Managers/ExecutionContext.swift",                 "Managers/MCPProviderManager.swift",                 "Managers/ManagementBadgeStore.swift",                 "Managers/Model/ModelPickerItemCache.swift",                 "Managers/Plugin/SandboxPluginManager.swift",                 "Managers/SkillManager.swift",                 "Models/BackgroundTaskModels.swift",                 "Models/Configuration/MLXModel.swift",                 "Models/Configuration/ModelInfo.swift",                 "Networking/HTTPHandler.swift",                 "Networking/HostAPIBridgeServer.swift",                 "Networking/Router.swift",                 "Services/Chat/ChatEngine.swift",                 "Services/Chat/SystemPromptComposer.swift",                 "Services/Context/CapabilitySearchEvaluator.swift",                 "Services/Context/PreflightCapabilitySearch.swift",                 "Services/Context/PreflightCompanions.swift",                 "Services/Context/PreflightEvaluator.swift",                 "Services/DirectoryPickerService.swift",                 "Services/HuggingFaceService.swift",                 "Services/Inference/CoreModelService.swift",                 "Services/LocalGenerationDefaults.swift",                 "Services/LocalReasoningCapability.swift",                 "Services/Memory/MemoryConsolidator.swift",                 "Services/Memory/MemoryPlanner.swift",                 "Services/Memory/MemoryService.swift",                 "Services/Method/MethodService.swift",                 "Services/ModelDownloadService.swift",                 "Services/Plugin/PluginHostAPI.swift",                 "Services/Sandbox/SandboxAgentProvisioner.swift",                 "Services/Sandbox/SandboxPluginRegistration.swift",                 "Services/Sandbox/SandboxToolRegistrar.swift",                 "Services/Skill/ClaudePluginInstaller.swift",                 "Services/SystemPermissionService.swift",                 "Services/Tool/ToolIndexService.swift",                 "Services/Voice/TranscriptionCleanupService.swift",                 "Services/Voice/TranscriptionModeService.swift",                 "Services/Voice/VADService.swift",                 "Storage/StorageMigrator.swift",                 "Tools/AgentLoopTools.swift",                 "Tools/CapabilityTools.swift",                 "Tools/SandboxPluginTool.swift",                 "Tools/SearchMemoryTool.swift",                 "Views/Agent/AgentsView.swift",                 "Views/Chat/ChatEmptyState.swift",                 "Views/Chat/FloatingInputCard.swift",                 "Views/Chat/NativeBlockViews.swift",                 "Views/Chat/NativeMessageCellView.swift",                 "Views/Chat/NativeToolCallGroupView.swift",                 "Views/Common/EmptyStateView.swift",                 "Views/Common/SimpleComponents.swift",                 "Views/Identity/IdentityView.swift",                 "Views/Memory/MemoryView.swift",                 "Views/Model/ModelCacheInspectorView.swift",                 "Views/Model/ModelDetailView.swift",                 "Views/Model/ModelDownloadView.swift",                 "Views/Model/ModelPickerView.swift",                 "Views/Onboarding/OnboardingConfigureAIView.swift",                 "Views/Onboarding/OnboardingSandboxSetupView.swift",                 "Views/Onboarding/OnboardingView.swift",                 "Views/Sandbox/PostStartTasksCard.swift",                 "Views/Sandbox/ProvisioningJourneyView.swift",                 "Views/Sandbox/SandboxView.swift",                 "Views/Settings/ConfigurationView.swift",                 "Views/Settings/ServerSettings/LiveActivitySection.swift",                 "Views/Settings/ServerView.swift",                 "Views/Settings/StatusPanelView.swift",                 "Views/Voice/AudioSettingsTab.swift",                 "Views/Voice/TTSModeSettingsTab.swift",                 "Views/Voice/TranscriptionModeSettingsTab.swift",                 "Views/Voice/VADModeSettingsTab.swift",                 "Views/Voice/VoiceSetupTab.swift",                 "Views/Voice/VoiceView.swift",                 "Folder/FolderContextService.swift",                 "Identity/OsaurusIdentity.swift",                 "Managers/AgentManager.swift",                 "Managers/Plugin/PluginManager.swift",                 "Managers/SlashCommandRegistry.swift",                 "Managers/TaskDispatcher.swift",                 "Managers/ToastManager.swift",                 "Models/Agent/AgentInvite.swift",                 "Models/Chat/ChatConfiguration.swift",                 "Models/Chat/ChatTurn.swift",                 "Models/Chat/ContentBlock.swift",                 "Models/Configuration/ModelOptions.swift",                 "Models/Configuration/ModelPickerItem.swift",                 "Models/Plugin/ExternalPlugin.swift",                 "Networking/HTTPLoopHelpers.swift",                 "Networking/HTTPProtocolErrors.swift",                 "Networking/HTTPRequestParse.swift",                 "Networking/OsaurusServer.swift",                 "Networking/RelayTunnelManager.swift",                 "Services/Chat/AgentNameDetector.swift",                 "Services/Chat/ComposeRequest.swift",                 "Services/Chat/ContextSizeClass.swift",                 "Services/Chat/GenerativeGreetingPool.swift",                 "Services/Chat/GenerativeGreetingService.swift",                 "Services/Chat/PromptManifest.swift",                 "Services/Chat/ResolvedToolset.swift",                 "Services/Context/SessionToolStateStore.swift",                 "Services/GitHubSkillService.swift",                 "Services/Memory/DistillationCoordinator.swift",                 "Services/Memory/MemoryContextAssembler.swift",                 "Services/Memory/MemoryDiagnostics.swift",                 "Services/NotificationService.swift",                 "Services/Plugin/PluginHostAPI+SessionPersistence.swift",                 "Services/Plugin/PluginRepositoryService.swift",                 "Services/SearchService.swift",                 "Services/Themes/ThemeShareService.swift",                 "Storage/StorageExportService.swift",                 "Tools/FolderToolManager.swift",                 "Tools/MCPProviderTool.swift",                 "Tools/SandboxPluginRegisterTool.swift",                 "Tools/ToolEnvelope.swift",                 "Tools/ToolRegistry.swift",                 "Utils/MockChatData.swift",                 "Views/Agent/AgentCapabilityManagerView.swift",                 "Views/Agent/IncomingPairSheet.swift",                 "Views/Agent/RemoteAgentViews.swift",                 "Views/Chat/MarkdownMessageView.swift",                 "Views/Chat/MessageTableRepresentable.swift",                 "Views/Chat/NativeMarkdownView.swift",                 "Views/Chat/SlashCommandPopup.swift",                 "Views/Common/NotchView.swift",                 "Views/Common/NotchWindowController.swift",                 "Views/Common/SharedHeaderComponents.swift",                 "Views/Management/ManagementView.swift",                 "Views/Memory/MemoryComponents.swift",                 "Views/Memory/MemoryDiagnosticsViews.swift",                 "Views/Model/ModelRowView.swift",                 "Views/Onboarding/OnboardingCards.swift",                 "Views/Onboarding/OnboardingCreateAgentView.swift",                 "Views/Onboarding/OnboardingTokens.swift",                 "Views/Plugin/PluginsView.swift",                 "Views/Plugin/ToolsManagerView.swift",                 "Views/Settings/DirectoryPickerView.swift",                 "Views/Settings/PermissionsView.swift",                 "Views/Settings/ProvidersView.swift",                 "Views/Settings/StorageSettingsView.swift",                 "Views/Skill/GitHubImportSheet.swift",                 "Views/Skill/InstalledPluginsSection.swift",                 "Views/Skill/SkillsView.swift",                 "Views/Storage/StorageMigrationOverlay.swift",                 "Views/Toast/BackgroundTaskToastView.swift",                 "Views/Toast/ToastContainerView.swift",                 "Folder/FolderPluginHints.swift",                 "Managers/BlockMemoizer.swift",                 "Managers/Chat/ChatSessionExportCoordinator.swift",                 "Managers/Chat/ChatSessionExporter.swift",                 "Managers/HotKeyManager.swift",                 "Managers/InsightsService.swift",                 "Managers/NextRunScheduler.swift",                 "Managers/RemoteAgentManager.swift",                 "Managers/ScheduleManager.swift",                 "Managers/ThreadCache.swift",                 "Managers/ToastManager+Localized.swift",                 "Managers/TranscriptionHotKeyManager.swift",                 "Managers/WatcherManager.swift",                 "Models/API/OpenAIAPI.swift",                 "Models/Agent/AgentInviteStore.swift",                 "Models/Chat/ChatConfigurationStore.swift",                 "Models/Chat/ChatSessionStore.swift",                 "Models/Chat/ChatTurnData.swift",                 "Models/Chat/SessionSource.swift",                 "Models/Chat/SharedArtifact.swift",                 "Models/Configuration/AppConfiguration.swift",                 "Models/Voice/TranscriptionConfiguration.swift",                 "Networking/BonjourAdvertiser.swift",                 "Networking/BonjourBrowser.swift",                 "Services/AgentBridge/LocalAgentBridge.swift",                 "Services/Chat/AgentConfigSnapshot.swift",                 "Services/Chat/ContextBudgetManager.swift",                 "Services/Context/CapabilitySearchHealth.swift",                 "Services/Inference/ModelService.swift",                 "Services/Keychain/ToolSecretsKeychain.swift",                 "Services/MCP/MCPServerManager.swift",                 "Services/ModelOptionsStore.swift",                 "Services/Pairing/IncomingPairCoordinator.swift",                 "Services/Pairing/PairingDeepLinkRouter.swift",                 "Services/Plugin/PluginInstructionsResolver.swift",                 "Services/Provider/RemoteProviderService.swift",                 "Services/Themes/ThemesDeepLinkRouter.swift",                 "Services/ToolPermissionPromptService.swift",                 "Storage/AgentDatabase.swift",                 "Storage/ChatHistoryDatabase.swift",                 "Storage/ChatHistoryWriter.swift",                 "Storage/MemoryDatabase.swift",                 "Storage/MethodDatabase.swift",                 "Storage/PluginDatabase.swift",                 "Storage/SchedulerDatabase.swift",                 "Storage/ToolDatabase.swift",                 "Tools/Database/DatabaseTools.swift",                 "Tools/Database/SchedulerTools.swift",                 "Tools/ExternalTool.swift",                 "Tools/OsaurusTool.swift",                 "Tools/RenderChartTool.swift",                 "Tools/SandboxSecretTools.swift",                 "Tools/ShareArtifactTool.swift",                 "Tools/ToolErrorEnvelope.swift",                 "Utils/StreamingDeltaProcessor.swift",                 "Views/Agent/AgentDBTabViews.swift",                 "Views/Agent/AgentReorderSheet.swift",                 "Views/Agent/NextRunPanelView.swift",                 "Views/Agent/ShareAgentSheet.swift",                 "Views/Chat/ChatSessionSidebar.swift",                 "Views/Chat/MessageThreadView.swift",                 "Views/Chat/NativeThinkingView.swift",                 "Views/Chat/TerminalSnapshot.swift",                 "Views/Model/ModelPickerTableRepresentable.swift",                 "Views/Onboarding/OnboardingBodyLayouts.swift",                 "Views/Onboarding/OnboardingButtons.swift",                 "Views/Onboarding/OnboardingChoosePluginsView.swift",                 "Views/Onboarding/OnboardingChromeShell.swift",                 "Views/Onboarding/OnboardingFields.swift",                 "Views/Onboarding/OnboardingIdentitySetupView.swift",                 "Views/Onboarding/OnboardingSegmentedControl.swift",                 "Views/Onboarding/OnboardingWalkthroughView.swift",                 "Views/Onboarding/OnboardingWelcomeView.swift",                 "Views/Plugin/PluginConfigView.swift",                 "Views/Plugin/ToolSecretsSheet.swift",                 "Views/Schedule/SchedulesView.swift",                 "Views/Settings/SlashCommandsSettingsSection.swift",                 "Views/SlashCommand/SlashCommandsView.swift",                 "Views/Theme/ImportThemeByIdSheet.swift",                 "Views/Theme/ShareThemeSheet.swift",                 "Views/Voice/HotkeyRecorder.swift",                 "Views/Watcher/WatchersView.swift",                 "Managers/Chat/ChatSessionsManager.swift",                 "Managers/RemoteProviderManager.swift",                 "Models/API/AnthropicAPI.swift",                 "Models/API/GeminiAPI.swift",                 "Models/API/OpenResponsesAPI.swift",                 "Models/Agent/AgentStore.swift",                 "Models/Chat/ChatSessionData.swift",                 "Models/Chat/DispatchRequest.swift",                 "Models/Chat/LegacySessionImporter.swift",                 "Models/Chat/ResponseWriters.swift",                 "Models/Chat/SessionCapability.swift",                 "Models/Plugin/SandboxPlugin.swift",                 "Services/AgentBridge/AgentRuntimeBridge.swift",                 "Services/AgentBridge/SchemaDumper.swift",                 "Services/AgentBridge/SchemaSnapshot.swift",                 "Services/Chat/ChatEngineProtocol.swift",                 "Services/Chat/PromptBuilder.swift",                 "Services/Inference/FoundationModelService.swift",                 "Services/Keychain/AgentSecretsKeychain.swift",                 "Services/Provider/RemoteToolDetection.swift",                 "Storage/AgentDatabaseStore.swift",                 "Storage/AttachmentBlobStore.swift",                 "Tools/SchemaValidator.swift",                 "Utils/ActivityTracker.swift",                 "Views/Chat/ExportChooserSheet.swift",                 "Views/Chat/MarkdownImageView.swift",                 "Views/Chat/NativeArtifactCardView.swift",                 "Views/Chat/SelectableTextView.swift",                 "Views/Chat/TerminalDisplayView.swift",                 "Views/Insights/InsightsView.swift",                 "Views/Plugin/SandboxPluginEditorView.swift",                 "Views/Theme/ThemesView.swift", "Models/Configuration/MLXModelDownloadCache.swift", "Managers/WindowManager.swift",                 "Models/Voice/VADConfiguration.swift",                 "Services/Context/ClipboardService.swift",                 "Utils/DocumentParser.swift",                 "Views/Chat/DocumentChip.swift",                 "Views/Chat/PastedContentSheet.swift",                 "Views/Chat/PromptQueue.swift", "Views/Chat/ClarifyPromptOverlay.swift",                  "Managers/Chat/ChatSessionsManager.swift",                 "Managers/RemoteProviderManager.swift",                 "Models/API/AnthropicAPI.swift",                 "Models/API/GeminiAPI.swift",                 "Models/API/OpenResponsesAPI.swift",                 "Models/Agent/AgentStore.swift",                 "Models/Chat/ChatSessionData.swift",                 "Models/Chat/DispatchRequest.swift",                 "Models/Chat/LegacySessionImporter.swift",                 "Models/Chat/ResponseWriters.swift",                 "Models/Chat/SessionCapability.swift",                 "Models/Plugin/SandboxPlugin.swift",                 "Services/AgentBridge/AgentRuntimeBridge.swift",                 "Services/AgentBridge/SchemaDumper.swift",                 "Services/AgentBridge/SchemaSnapshot.swift",                 "Services/Chat/ChatEngineProtocol.swift",                 "Services/Chat/PromptBuilder.swift",                 "Services/Inference/FoundationModelService.swift",                 "Services/Keychain/AgentSecretsKeychain.swift",                 "Services/Provider/RemoteToolDetection.swift",                 "Storage/AgentDatabaseStore.swift",                 "Storage/AttachmentBlobStore.swift",                 "Tools/SchemaValidator.swift",                 "Utils/ActivityTracker.swift",                 "Views/Chat/ExportChooserSheet.swift",                 "Views/Chat/MarkdownImageView.swift",                 "Views/Chat/NativeArtifactCardView.swift",                 "Views/Chat/SelectableTextView.swift",                 "Views/Chat/TerminalDisplayView.swift",                 "Views/Insights/InsightsView.swift",                 "Views/Plugin/SandboxPluginEditorView.swift",                 "Views/Theme/ThemesView.swift",                 "Managers/Plugin/SandboxPluginLibrary.swift",                 "Models/Chat/Attachment.swift",                 "Models/Chat/ChatExportOptions.swift",                 "Services/AgentBridge/AgentBundleService.swift",                 "Services/Sandbox/SandboxSecurity.swift",                 "Views/Chat/SecretPromptOverlay.swift",                 "Views/Settings/RemoteProviderEditSheet.swift",                 "Views/Settings/RemoteProvidersView.swift",                    "Views/Voice/VoiceInputSettingsTab.swift",  
+            ],
+            resources: [.process("Resources")],
+            swiftSettings: [
+                .define("OSAURUS_INTEL")
+            ]
         ),
         .testTarget(
             name: "OsaurusCoreTests",
             dependencies: [
                 "OsaurusCore",
                 "OsaurusSQLCipher",
-                .product(name: "VMLXJinja", package: "vmlx-swift"),
                 .product(name: "NIOEmbedded", package: "swift-nio"),
-                .product(name: "VecturaKit", package: "VecturaKit"),
+                .product(name: "VMLXJinja", package: "IntelStubs"),
+                .product(name: "VecturaKit", package: "IntelStubs"),
             ],
-            path: "Tests"
+            path: "Tests",
+            exclude: [
+                "Voice/LiveVoiceResidentPreencodeIntegrationTests.swift",
+                "Sandbox/BuiltinSandboxToolsTests.swift",
+                "Sandbox/TeeWriterTests.swift",
+                "Model/FoundationMLXParityTests.swift",
+                "Model/MaterializeMediaDataUrlMCDCTests.swift",
+                "Model/MultimodalContentPartTests.swift",
+                "Model/ModelRuntimeMappingTests.swift",
+                "Service/MLXErrorRecoveryTests.swift",
+                "Service/VecturaRecoveryTests.swift",
+                "Service/DSV4ParserPipelineTests.swift",
+                "Service/SwiftTransformersTokenizerLoaderTests.swift",
+                "Service/VecturaTopKGuardTests.swift",
+                "Service/JinjaTemplateCompatibilityTests.swift",
+                "Service/GenerationEventMapperTests.swift",
+                "Service/MLXBatchAdapterTests.swift",
+                "Helpers/FakeEmbedder.swift",
+            ]
         ),
     ]
 )
