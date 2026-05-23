@@ -3,7 +3,7 @@
 //  osaurus
 //
 //  Created by Terence on 8/17/25.
-//  Intel fork — minimal launch shell. M2 milestone.
+//  Intel fork — with HTTP server. M3 milestone.
 //
 
 import AppKit
@@ -20,6 +20,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private var popover: NSPopover?
     private var cancellables: Set<AnyCancellable> = []
     let updater = UpdaterViewModel()
+    private let server = OsaurusServer()
 
     private static let swiftUISettingsPlaceholderID = "com_apple_SwiftUI_Settings_window"
     private static let swiftUISettingsPlaceholderNotifications: [Notification.Name] = [
@@ -74,6 +75,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         #if DEBUG
             MainThreadWatchdog.shared.start()
         #endif
+
+        let serverStartupTask = Task { @MainActor in
+            let config = ServerConfigurationStore.load() ?? .default
+            let serverConfig = OsaurusServer.Config(
+                host: "127.0.0.1",
+                port: 1338,
+                trustLoopback: true
+            )
+            do {
+                try await server.start(serverConfig, serverConfiguration: config)
+                NSLog("[Osaurus Intel] HTTP server started on port \(config.port)")
+            } catch {
+                NSLog("[Osaurus Intel] Server start failed: \(error)")
+            }
+        }
 
         Task { @MainActor in
             try? await Task.sleep(nanoseconds: 300_000_000)
@@ -183,6 +199,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     public func applicationWillTerminate(_ notification: Notification) {
         NSLog("Osaurus (Intel) terminating")
+        Task { @MainActor in
+            await server.stop()
+        }
         SharedConfigurationService.shared.remove()
     }
 
