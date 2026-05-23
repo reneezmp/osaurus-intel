@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  InsightsView.swift
 //  osaurus
@@ -635,4 +636,12 @@ extension RequestSource {
         InsightsView()
             .frame(width: 900, height: 600)
     }
+#endif
+#else
+import SwiftUI
+struct InsightsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Insights", symbol: "apple.logo")
+    }
+}
 #endif

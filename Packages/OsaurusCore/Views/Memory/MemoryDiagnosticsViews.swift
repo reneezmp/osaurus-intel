@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MemoryDiagnosticsViews.swift
 //  osaurus
@@ -687,3 +688,4 @@ extension MemoryView {
         return DiagnosticHeadline(text: "Pipeline healthy.", color: .green)
     }
 }
+#endif

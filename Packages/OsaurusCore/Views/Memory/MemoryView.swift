@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MemoryView.swift
 //  osaurus
@@ -1073,3 +1074,11 @@ struct MemoryView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct MemoryView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Memory", symbol: "apple.logo")
+    }
+}
+#endif

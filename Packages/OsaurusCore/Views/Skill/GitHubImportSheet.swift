@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  GitHubImportSheet.swift
 //  osaurus
@@ -1501,4 +1502,12 @@ private extension View {
             onCancel: {}
         )
     }
+#endif
+#else
+import SwiftUI
+struct GitHubImportSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Import Skills", symbol: "apple.logo")
+    }
+}
 #endif

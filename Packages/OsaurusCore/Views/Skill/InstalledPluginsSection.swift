@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  InstalledPluginsSection.swift
 //  osaurus
@@ -782,3 +783,11 @@ private struct ArtifactChip: View {
         .background(Capsule().fill(tint.opacity(0.14)))
     }
 }
+#else
+import SwiftUI
+struct InstalledPluginsSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Installed Plugins", symbol: "apple.logo")
+    }
+}
+#endif

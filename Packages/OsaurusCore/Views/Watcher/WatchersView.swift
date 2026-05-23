@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  WatchersView.swift
 //  osaurus
@@ -1263,4 +1264,12 @@ private struct WatcherSecondaryButtonStyle: ButtonStyle {
     #Preview {
         WatchersView()
     }
+#endif
+#else
+import SwiftUI
+struct WatchersView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Watchers", symbol: "apple.logo")
+    }
+}
 #endif

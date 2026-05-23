@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SkillsView.swift
 //  osaurus
@@ -793,4 +794,12 @@ private struct SkillRow: View {
     #Preview {
         SkillsView()
     }
+#endif
+#else
+import SwiftUI
+struct SkillsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Skills", symbol: "apple.logo")
+    }
+}
 #endif

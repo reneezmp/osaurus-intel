@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SlashCommandsView.swift
 //  osaurus
@@ -189,3 +190,11 @@ struct SlashCommandsView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct SlashCommandsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Slash Commands", symbol: "apple.logo")
+    }
+}
+#endif

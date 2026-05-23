@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  BackgroundTaskToastView.swift
 //  osaurus
@@ -384,4 +385,12 @@ private struct ActivityRow: View {
             .background(Color.black.opacity(0.8))
         }
     }
+#endif
+#else
+import SwiftUI
+struct BackgroundTaskToastView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Background Tasks", symbol: "apple.logo")
+    }
+}
 #endif

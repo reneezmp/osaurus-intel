@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ToastContainerView.swift
 //  osaurus
@@ -308,4 +309,12 @@ struct ToastOverlayWindowContent: View {
             .frame(width: 800, height: 600)
         }
     }
+#endif
+#else
+import SwiftUI
+struct ToastOverlayWindowContent: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Toasts", symbol: "apple.logo")
+    }
+}
 #endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MemoryComponents.swift
 //  osaurus
@@ -790,3 +791,4 @@ struct ContextPreviewSheet: View {
         .environment(\.theme, themeManager.currentTheme)
     }
 }
+#endif

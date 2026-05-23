@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SchedulesView.swift
 //  osaurus
@@ -2683,4 +2684,12 @@ private struct ScheduleSecondaryButtonStyle: ButtonStyle {
     #Preview {
         SchedulesView()
     }
+#endif
+#else
+import SwiftUI
+struct SchedulesView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Schedules", symbol: "apple.logo")
+    }
+}
 #endif
