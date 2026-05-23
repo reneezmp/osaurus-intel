@@ -410,7 +410,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    // MARK: - Non-streaming
+    // MARK: - Non-streaming (Agentic with tool calls)
 
     private func serveChatCompletionsNonStreaming(
         context: ChannelHandlerContext,
@@ -418,56 +418,120 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         model: String,
         apiKey: String
     ) {
-        var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.timeoutInterval = 300
-
-        var body: [String: Any] = [
-            "model": model,
-            "messages": request.messages.map { msg -> [String: Any] in
-                var m: [String: Any] = ["role": msg.role]
-                if let content = msg.content { m["content"] = content }
-                return m
-            },
-            "stream": false,
-        ]
-        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
-
-        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
-            sendJSONError(context: context, status: .internalServerError, message: "Failed to encode request")
-            return
-        }
-        urlRequest.httpBody = httpBody
-
         let eventLoop = context.eventLoop
         let stateRef = self.stateRef
 
         Task {
-            do {
-                let (data, response) = try await URLSession.shared.data(for: urlRequest)
-                guard let httpResponse = response as? HTTPURLResponse, httpResponse.statusCode == 200,
-                      let json = String(data: data, encoding: .utf8) else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? 502
-                    let errBody = String(data: data, encoding: .utf8) ?? "Upstream error"
-                    eventLoop.execute {
-                        guard let ctx = stateRef.value.contextBox else { return }
-                        self.sendResponse(context: ctx, status: HTTPResponseStatus(statusCode: status), headers: self.jsonHeaders(), body: errBody)
-                    }
-                    return
-                }
-                eventLoop.execute {
-                    guard let ctx = stateRef.value.contextBox else { return }
+            let result = await runAgentLoop(messages: request.messages, model: model, apiKey: apiKey)
+
+            eventLoop.execute {
+                guard let ctx = stateRef.value.contextBox else { return }
+                switch result {
+                case .success(let json):
                     self.sendResponse(context: ctx, status: .ok, headers: self.jsonHeaders(), body: json)
-                }
-            } catch {
-                eventLoop.execute {
-                    guard let ctx = stateRef.value.contextBox else { return }
-                    self.sendJSONError(context: ctx, status: .internalServerError, message: error.localizedDescription)
+                case .failure(let message):
+                    self.sendJSONError(context: ctx, status: .internalServerError, message: message)
                 }
             }
         }
+    }
+
+    private enum AgentResult {
+        case success(String)
+        case failure(String)
+    }
+
+    private func runAgentLoop(messages: [ChatMessage], model: String, apiKey: String, maxTurns: Int = 5) async -> AgentResult {
+        var conversation: [[String: Any]] = messages.map { msg in
+            var m: [String: Any] = ["role": msg.role]
+            if let content = msg.content { m["content"] = content }
+            return m
+        }
+
+        let tools = MCPBridge.shared.getToolsForOpenAI()
+
+        for _ in 0..<maxTurns {
+            var body: [String: Any] = [
+                "model": model,
+                "messages": conversation,
+                "stream": false,
+                "tools": tools,
+            ]
+
+            guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
+                return .failure("Failed to encode request body")
+            }
+
+            var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
+            urlRequest.httpMethod = "POST"
+            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+            urlRequest.timeoutInterval = 300
+            urlRequest.httpBody = httpBody
+
+            let data: Data
+            do {
+                data = try await URLSession.shared.data(for: urlRequest).0
+            } catch {
+                return .failure("Upstream request failed: \(error.localizedDescription)")
+            }
+
+            guard let responseJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                  let choices = responseJSON["choices"] as? [[String: Any]],
+                  let choice = choices.first else {
+                if let errStr = String(data: data, encoding: .utf8) {
+                    return .success(errStr)
+                }
+                return .failure("Invalid response from upstream")
+            }
+
+            let finishReason = choice["finish_reason"] as? String
+
+            guard finishReason == "tool_calls",
+                  let message = choice["message"] as? [String: Any],
+                  let toolCalls = message["tool_calls"] as? [[String: Any]] else {
+                // No tool calls — final response
+                if let jsonStr = String(data: data, encoding: .utf8) {
+                    return .success(jsonStr)
+                }
+                return .failure("Failed to stringify response")
+            }
+
+            // Append assistant message to conversation
+            conversation.append(message)
+
+            // Execute each tool call
+            for tc in toolCalls {
+                guard let function = tc["function"] as? [String: Any],
+                      let name = function["name"] as? String else { continue }
+
+                let argsStr = function["arguments"] as? String ?? "{}"
+                let argsData = argsStr.data(using: .utf8) ?? Data()
+                let argsJson = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
+
+                // Convert to MCP.Value
+                var mcpArgs: [String: MCP.Value] = [:]
+                for (k, v) in argsJson {
+                    switch v {
+                    case let s as String: mcpArgs[k] = .string(s)
+                    case let n as Double: mcpArgs[k] = .double(n)
+                    case let n as Int: mcpArgs[k] = .double(Double(n))
+                    case let b as Bool: mcpArgs[k] = .bool(b)
+                    default: break
+                    }
+                }
+
+                let (result, _) = await MCPBridge.shared.callTool(name: name, arguments: mcpArgs)
+
+                conversation.append([
+                    "role": "tool",
+                    "tool_call_id": tc["id"] as? String ?? name,
+                    "content": result,
+                ])
+            }
+        }
+
+        return .failure("Max agent turns (\(maxTurns)) reached without final answer")
     }
 
     // MARK: - SSE Helpers

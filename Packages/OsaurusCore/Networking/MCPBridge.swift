@@ -9,8 +9,7 @@ import Foundation
 import MCP
 import Logging
 
-@MainActor
-final class MCPBridge {
+final class MCPBridge: @unchecked Sendable {
     static let shared = MCPBridge()
 
     private var server: MCP.Server?
@@ -82,6 +81,76 @@ final class MCPBridge {
 
     private func getTransport() -> StatelessHTTPServerTransport? {
         transport
+    }
+
+    // MARK: - Public Tool API
+
+    /// Execute a tool by name and return the result text.
+    nonisolated func callTool(name: String, arguments: [String: MCP.Value]?) async -> (String, Bool) {
+        switch name {
+        case "echo":
+            let msg: String
+            if let args = arguments,
+               case let .string(s) = args["message"] {
+                msg = s
+            } else {
+                msg = "(no message)"
+            }
+            return ("Echo: \(msg)", false)
+
+        case "get_time":
+            let df = ISO8601DateFormatter()
+            return ("Current time: \(df.string(from: Date()))", false)
+
+        case "os_info":
+            let info = """
+            Osaurus (Intel Fork)
+            Platform: x86_64
+            macOS: \(ProcessInfo.processInfo.operatingSystemVersionString)
+            Host: \(ProcessInfo.processInfo.hostName)
+            MCP: stateless HTTP transport
+            """
+            return (info, false)
+
+        default:
+            return ("Unknown tool: \(name)", true)
+        }
+    }
+
+    /// Returns tool definitions in OpenAI function-calling format.
+    nonisolated func getToolsForOpenAI() -> [[String: Any]] {
+        [
+            [
+                "type": "function",
+                "function": [
+                    "name": "echo",
+                    "description": "Echoes back the input message.",
+                    "parameters": [
+                        "type": "object",
+                        "properties": [
+                            "message": ["type": "string", "description": "The message to echo back."],
+                        ],
+                        "required": ["message"],
+                    ],
+                ],
+            ],
+            [
+                "type": "function",
+                "function": [
+                    "name": "get_time",
+                    "description": "Returns the current date and time.",
+                    "parameters": ["type": "object", "properties": [:]],
+                ],
+            ],
+            [
+                "type": "function",
+                "function": [
+                    "name": "os_info",
+                    "description": "Returns information about this Osaurus Intel server.",
+                    "parameters": ["type": "object", "properties": [:]],
+                ],
+            ],
+        ]
     }
 
     // MARK: - Tool Registration
