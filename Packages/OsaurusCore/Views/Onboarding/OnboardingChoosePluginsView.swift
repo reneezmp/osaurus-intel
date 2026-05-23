@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingChoosePluginsView.swift
 //  osaurus
@@ -472,4 +473,12 @@ struct ChoosePluginsSecondary: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 640)
         }
     }
+#endif
+#else
+import SwiftUI
+struct OnboardingPluginPick: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Choose Plugins", symbol: "apple.logo")
+    }
+}
 #endif

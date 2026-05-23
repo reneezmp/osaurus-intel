@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingButtons.swift
 //  osaurus
@@ -432,3 +433,11 @@ struct OnboardingBackButton: View {
         }
     }
 }
+#else
+import SwiftUI
+struct OnboardingStatefulButton: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "OnboardingButtons", symbol: "apple.logo")
+    }
+}
+#endif

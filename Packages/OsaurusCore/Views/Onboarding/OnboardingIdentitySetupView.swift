@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingIdentitySetupView.swift
 //  osaurus
@@ -546,4 +547,12 @@ struct IdentitySecondary: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 640)
         }
     }
+#endif
+#else
+import SwiftUI
+struct IdentityBody: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Identity Setup", symbol: "apple.logo")
+    }
+}
 #endif

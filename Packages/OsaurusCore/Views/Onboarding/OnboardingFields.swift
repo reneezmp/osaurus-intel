@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingFields.swift
 //  osaurus
@@ -176,3 +177,11 @@ struct OnboardingTextEditor: View {
         }
     }
 }
+#else
+import SwiftUI
+struct OnboardingSecureField: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "OnboardingFields", symbol: "apple.logo")
+    }
+}
+#endif

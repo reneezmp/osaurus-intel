@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingChromeShell.swift
 //  osaurus
@@ -203,3 +204,11 @@ struct OnboardingCloseButton: View {
         }
     }
 }
+#else
+import SwiftUI
+struct OnboardingChromeShell: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "OnboardingChromeShell", symbol: "apple.logo")
+    }
+}
+#endif

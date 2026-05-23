@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ShareThemeSheet.swift
 //  osaurus
@@ -556,3 +557,11 @@ private func setPasteboardString(_ string: String) {
     pb.clearContents()
     pb.setString(string, forType: .string)
 }
+#else
+import SwiftUI
+struct ShareThemeSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Share Theme", symbol: "apple.logo")
+    }
+}
+#endif

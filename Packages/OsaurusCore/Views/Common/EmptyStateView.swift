@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  EmptyStateView.swift
 //  osaurus
@@ -90,3 +91,11 @@ struct EmptyStateView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct EmptyStateView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "EmptyState", symbol: "apple.logo")
+    }
+}
+#endif

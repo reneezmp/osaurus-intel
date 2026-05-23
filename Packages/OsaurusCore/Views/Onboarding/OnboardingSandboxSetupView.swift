@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingSandboxSetupView.swift
 //  osaurus
@@ -250,4 +251,12 @@ struct SandboxSetupSecondary: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 640)
         }
     }
+#endif
+#else
+import SwiftUI
+struct SandboxSetupBody: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Sandbox Setup", symbol: "apple.logo")
+    }
+}
 #endif

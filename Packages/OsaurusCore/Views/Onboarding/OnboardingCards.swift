@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingCards.swift
 //  osaurus
@@ -661,3 +662,11 @@ private struct OnboardingBadgeChip: View {
         .background(shape.fill(color.opacity(0.15)))
     }
 }
+#else
+import SwiftUI
+struct OnboardingGlassCard: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Model Cards", symbol: "apple.logo")
+    }
+}
+#endif

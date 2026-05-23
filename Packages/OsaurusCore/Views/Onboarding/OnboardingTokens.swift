@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingTokens.swift
 //  osaurus
@@ -220,3 +221,4 @@ extension View {
         }
     }
 }
+#endif

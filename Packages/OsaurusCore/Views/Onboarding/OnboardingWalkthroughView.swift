@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingWalkthroughView.swift
 //  osaurus
@@ -288,4 +289,12 @@ struct WalkthroughCTA: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 620)
         }
     }
+#endif
+#else
+import SwiftUI
+struct WalkthroughBody: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "WalkthroughBody", symbol: "apple.logo")
+    }
+}
 #endif

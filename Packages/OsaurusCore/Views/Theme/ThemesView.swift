@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ThemesView.swift
 //  osaurus
@@ -1184,3 +1185,11 @@ struct ThemeDocument: FileDocument {
         return FileWrapper(regularFileWithContents: data)
     }
 }
+#else
+import SwiftUI
+struct ThemesView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Themes", symbol: "apple.logo")
+    }
+}
+#endif

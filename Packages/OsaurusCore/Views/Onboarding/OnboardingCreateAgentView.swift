@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingCreateAgentView.swift
 //  osaurus
@@ -469,4 +470,12 @@ struct CreateAgentSecondary: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 620)
         }
     }
+#endif
+#else
+import SwiftUI
+struct CreateAgentBody: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Create Agent", symbol: "apple.logo")
+    }
+}
 #endif

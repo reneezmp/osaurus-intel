@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ImportThemeByIdSheet.swift
 //  osaurus
@@ -335,3 +336,11 @@ struct ImportThemeByIdSheet: View {
         return FailureDetail(message: message, hint: hint)
     }
 }
+#else
+import SwiftUI
+struct ImportThemeByIdSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Import Theme", symbol: "apple.logo")
+    }
+}
+#endif

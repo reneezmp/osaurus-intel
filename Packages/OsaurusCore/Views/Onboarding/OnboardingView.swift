@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingView.swift
 //  osaurus
@@ -432,4 +433,12 @@ public struct OnboardingView: View {
                 .frame(width: OnboardingMetrics.windowWidth, height: OnboardingMetrics.windowHeight)
         }
     }
+#endif
+#else
+import SwiftUI
+struct OnboardingView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Onboarding", symbol: "apple.logo")
+    }
+}
 #endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingSegmentedControl.swift
 //  osaurus
@@ -118,3 +119,11 @@ struct OnboardingSegmentedControl<Tag: Hashable>: View {
         .buttonStyle(.plain)
     }
 }
+#else
+import SwiftUI
+struct OnboardingSegmentItem: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "OnboardingSegmentedControl", symbol: "apple.logo")
+    }
+}
+#endif

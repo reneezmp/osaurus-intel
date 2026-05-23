@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingWelcomeView.swift
 //  osaurus
@@ -52,4 +53,12 @@ struct WelcomeCTA: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 540)
         }
     }
+#endif
+#else
+import SwiftUI
+struct WelcomeBody: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "WelcomeBody", symbol: "apple.logo")
+    }
+}
 #endif

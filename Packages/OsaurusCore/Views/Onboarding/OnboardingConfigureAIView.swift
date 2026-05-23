@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingConfigureAIView.swift
 //  osaurus
@@ -1604,4 +1605,12 @@ private struct HelpStepRow: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 660)
         }
     }
+#endif
+#else
+import SwiftUI
+struct ResolvedProviderConfig: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Configure AI", symbol: "apple.logo")
+    }
+}
 #endif

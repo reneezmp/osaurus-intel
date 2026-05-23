@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingBodyLayouts.swift
 //  osaurus
@@ -450,3 +451,11 @@ enum OnboardingAssetCheck {
         return exists
     }
 }
+#else
+import SwiftUI
+struct OnboardingScrollContainer: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "OnboardingBodyLayouts", symbol: "apple.logo")
+    }
+}
+#endif
