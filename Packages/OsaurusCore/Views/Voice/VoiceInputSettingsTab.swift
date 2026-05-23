@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  VoiceInputSettingsTab.swift
 //  osaurus
@@ -329,4 +330,12 @@ struct VoiceInputSettingsTab: View {
                 .themedBackground()
         }
     }
+#endif
+#else
+import SwiftUI
+struct VoiceInputSettingsTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Voice Input", symbol: "keyboard")
+    }
+}
 #endif

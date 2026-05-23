@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelPickerView.swift
 //  osaurus
@@ -436,4 +437,12 @@ struct ModelPickerView: View {
             PreviewWrapper()
         }
     }
+#endif
+#else
+import SwiftUI
+struct ModelPickerView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+    }
+}
 #endif

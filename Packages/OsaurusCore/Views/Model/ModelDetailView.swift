@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelDetailView.swift
 //  osaurus
@@ -1045,3 +1046,11 @@ private extension View {
         modifier(ShimmerModifier())
     }
 }
+#else
+import SwiftUI
+struct ModelDetailView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+    }
+}
+#endif

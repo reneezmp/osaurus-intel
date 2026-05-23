@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  HotkeyRecorder.swift
 //  osaurus
@@ -308,3 +309,11 @@ private struct RecordingCatcher: NSViewRepresentable {
 
     }
 }
+#else
+import SwiftUI
+struct HotkeyRecorder: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Hotkey Recorder", symbol: "command")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ProvisioningJourneyView.swift
 //  osaurus
@@ -334,4 +335,12 @@ import SwiftUI
         }
     }
 
+#endif
+#else
+import SwiftUI
+struct ProvisioningJourneyView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Sandbox Provisioning", symbol: "arrow.triangle.branch")
+    }
+}
 #endif

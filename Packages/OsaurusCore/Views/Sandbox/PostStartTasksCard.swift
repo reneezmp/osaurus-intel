@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PostStartTasksCard.swift
 //  osaurus
@@ -107,4 +108,12 @@ import SwiftUI
         }
     }
 
+#endif
+#else
+import SwiftUI
+struct PostStartTasksCard: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Post-Start Tasks", symbol: "list.bullet.clipboard")
+    }
+}
 #endif

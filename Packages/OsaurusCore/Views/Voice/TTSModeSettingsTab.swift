@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  TTSModeSettingsTab.swift
 //  osaurus
@@ -385,4 +386,12 @@ struct TTSModeSettingsTab: View {
                 .frame(width: 720, height: 640)
         }
     }
+#endif
+#else
+import SwiftUI
+struct TTSModeSettingsTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Text-to-Speech", symbol: "waveform")
+    }
+}
 #endif

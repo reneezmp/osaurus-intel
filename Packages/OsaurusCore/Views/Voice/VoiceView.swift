@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  VoiceView.swift
 //  osaurus
@@ -580,4 +581,12 @@ private struct SpeechModelRow: View {
     #Preview {
         VoiceView()
     }
+#endif
+#else
+import SwiftUI
+struct VoiceView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Voice", symbol: "mic.fill")
+    }
+}
 #endif

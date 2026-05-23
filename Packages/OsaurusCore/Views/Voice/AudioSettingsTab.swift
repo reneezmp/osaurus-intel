@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  AudioSettingsTab.swift
 //  osaurus
@@ -553,4 +554,12 @@ private struct AudioSettingsPulseModifier: ViewModifier {
                 .themedBackground()
         }
     }
+#endif
+#else
+import SwiftUI
+struct AudioSettingsTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Voice Settings", symbol: "mic.fill")
+    }
+}
 #endif

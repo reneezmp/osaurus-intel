@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelDownloadView.swift
 //  osaurus
@@ -1679,4 +1680,12 @@ private struct HuggingFaceImportSheet: View {
     #Preview {
         ModelDownloadView()
     }
+#endif
+#else
+import SwiftUI
+struct ModelDownloadView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+    }
+}
 #endif

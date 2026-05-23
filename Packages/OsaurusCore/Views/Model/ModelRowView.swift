@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelRowView.swift
 //  osaurus
@@ -516,3 +517,11 @@ func repositoryName(from urlString: String) -> String {
     // Fallback to showing the full URL if parsing fails
     return urlString
 }
+#else
+import SwiftUI
+struct ModelRowView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+    }
+}
+#endif

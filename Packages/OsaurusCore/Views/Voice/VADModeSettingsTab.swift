@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  VADModeSettingsTab.swift
 //  osaurus
@@ -1101,4 +1102,12 @@ private struct SettingsCardStyle: ViewModifier {
                 .themedBackground()
         }
     }
+#endif
+#else
+import SwiftUI
+struct VADModeSettingsTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Voice Detection", symbol: "ear")
+    }
+}
 #endif

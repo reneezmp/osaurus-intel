@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  VoiceSetupTab.swift
 //  osaurus
@@ -495,4 +496,12 @@ private struct BlinkingCursor: View {
                 .themedBackground()
         }
     }
+#endif
+#else
+import SwiftUI
+struct VoiceSetupTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Voice Setup", symbol: "gearshape")
+    }
+}
 #endif

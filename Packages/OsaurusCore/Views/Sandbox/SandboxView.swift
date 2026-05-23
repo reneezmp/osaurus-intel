@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SandboxView.swift
 //  osaurus
@@ -1240,4 +1241,12 @@ private struct SandboxProvisionSheet: View {
     #Preview {
         SandboxView()
     }
+#endif
+#else
+import SwiftUI
+struct SandboxView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Sandbox VM", symbol: "shippingbox")
+    }
+}
 #endif

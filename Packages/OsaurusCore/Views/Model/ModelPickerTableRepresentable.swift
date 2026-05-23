@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelPickerTableRepresentable.swift
 //  osaurus
@@ -1059,3 +1060,11 @@ extension ModelPickerTableRepresentable {
         }
     }
 }
+#else
+import SwiftUI
+struct ModelPickerTableRepresentable: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+    }
+}
+#endif

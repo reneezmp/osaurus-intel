@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  TranscriptionModeSettingsTab.swift
 //  osaurus
@@ -481,4 +482,12 @@ private struct PulsingIndicatorModifier: ViewModifier {
                 .themedBackground()
         }
     }
+#endif
+#else
+import SwiftUI
+struct TranscriptionModeSettingsTab: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Transcription", symbol: "text.bubble")
+    }
+}
 #endif
