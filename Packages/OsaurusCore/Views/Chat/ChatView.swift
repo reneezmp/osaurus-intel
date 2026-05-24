@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ChatView.swift
 //  osaurus
@@ -3912,11 +3911,3 @@ private enum PairingClient {
 
 // MARK: - Shared Header Components
 // HeaderActionButton, SettingsButton, CloseButton, PinButton are now in SharedHeaderComponents.swift
-#else
-import SwiftUI
-struct QueuedSend: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Chat", symbol: "apple.logo")
-    }
-}
-#endif

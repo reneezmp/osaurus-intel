@@ -501,9 +501,7 @@ final class ChatWindowState: ObservableObject {
     }
 }
 #else
-
-// MARK: - Intel fork: minimal ChatWindowState stub
-
+// Intel fork: ChatWindowState stub matching original properties
 import AppKit
 import Foundation
 import SwiftUI
@@ -511,31 +509,38 @@ import SwiftUI
 @MainActor
 final class ChatWindowState: ObservableObject {
     let windowId: UUID
-    let session: ChatWindowSessionStub
+    let session: Any? = nil
     let foundationModelAvailable: Bool = false
 
     @Published var showSidebar: Bool = false
-    @Published var isStreaming: Bool = false
-    @Published var streamingContent: String = ""
-    @Published var showVoiceInput: Bool = false
-    @Published var agents: [AgentStub] = []
-    @Published var filteredSessions: [Any] = []
+    @Published var showCloseConfirmation: Bool = false
+    @Published var agentId: UUID
+    @Published var agents: [Agent] = []
+    @Published var discoveredAgents: [DiscoveredAgent] = []
+    @Published var selectedDiscoveredAgent: DiscoveredAgent? = nil
+    @Published var selectedDiscoveredAgentProviderId: UUID? = nil
+    @Published var pairedRelayAgents: [PairedRelayAgent] = []
+    @Published var selectedRelayAgent: PairedRelayAgent? = nil
+    @Published var theme: ThemeProtocol
+    @Published var cachedBackgroundImage: NSImage? = nil
+    @Published var filteredSessions: [ChatSessionData] = []
+    @Published var cachedSystemPrompt: String = ""
+    @Published var cachedActiveAgent: Agent = .default
+    @Published var cachedAgentDisplayName: String = "Assistant"
     @Published var selectedModel: String = "deepseek-v4-pro"
     @Published var availableModels: [String] = ["deepseek-v4-pro", "deepseek-v4-flash"]
-
+    
+    var activeAgent: Agent { cachedActiveAgent }
+    var themeId: UUID? { nil }
+    
     init(windowId: UUID, executionContext: Any? = nil) {
         self.windowId = windowId
-        self.session = ChatWindowSessionStub()
+        self.agentId = UUID()
+        self.theme = ThemeManager.shared.currentTheme
     }
-
-    struct ChatWindowSessionStub {
-        let id = UUID()
-        let isStreaming = false
-    }
-
-    struct AgentStub: Identifiable {
-        public let id = UUID()
-        public let name: String
-    }
+    
+    func confirmCloseInBackground() { showCloseConfirmation = false }
+    func confirmCloseAndStop() { showCloseConfirmation = false }
+    func refreshPairedRelayAgents(discoveredAgents: [DiscoveredAgent]? = nil) {}
 }
 #endif

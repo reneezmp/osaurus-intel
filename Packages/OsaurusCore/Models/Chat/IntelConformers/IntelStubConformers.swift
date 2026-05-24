@@ -84,4 +84,12 @@ enum IntelSharedArtifact: SharedArtifactProtocol {
     static func fromEnrichedToolResult(_ resultText: String) -> Any? { nil }
 }
 
+typealias SpeechService = IntelSpeechService
+typealias RemoteProviderManager = IntelRemoteProviderManager
+typealias ToolRegistry = IntelToolRegistry
+typealias MemoryService = IntelMemoryService
+typealias GenerativeGreetingPool = IntelGreetingPool
+typealias GenerativeGreetingService = IntelGreetingService
+typealias SharedArtifact = IntelSharedArtifact
+
 #endif

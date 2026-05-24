@@ -162,4 +162,10 @@ final class IntelChatConfiguration: ChatConfigurationProtocol, @unchecked Sendab
     }
 }
 
+typealias AgentManager = IntelAgentManager
+typealias ModelPickerItemCache = IntelModelPickerItemCache
+typealias ChatSessionData = IntelChatSessionData
+typealias ChatSessionsManager = IntelChatSessionsManager
+typealias ChatConfiguration = IntelChatConfiguration
+
 #endif

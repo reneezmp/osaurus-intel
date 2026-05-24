@@ -15,7 +15,7 @@ protocol ModelPickerItemProtocol: Identifiable, Sendable {
 
 enum ModelPickerSource: Sendable {
     case builtIn
-    case remote(providerId: String, modelId: String)
+    case remote(String, String)
     case foundation
 }
 
