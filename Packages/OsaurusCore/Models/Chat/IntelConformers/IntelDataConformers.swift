@@ -22,6 +22,7 @@ struct IntelChatTurn: ChatTurnProtocol, Identifiable, @unchecked Sendable {
     let thinking: String?
     var unclosedReasoning: Bool
     var hasRenderableThinking: Bool { !(thinking ?? "").isEmpty }
+    var visibleContent: String { content }
     var contentIsBlank: Bool { content.trimmingCharacters(in: .whitespaces).isEmpty }
     var thinkingIsBlank: Bool { (thinking ?? "").isEmpty }
     var contentIsEmpty: Bool { content.isEmpty }
@@ -170,6 +171,8 @@ final class SessionToolStateStore: @unchecked Sendable {
 }
 
 final class TTSService: @unchecked Sendable {
+    func toggleSpeak(_ text: String, messageId: String) {}
+    var playingMessageId: String? { nil }
     static let shared = TTSService()
     func refreshModelState() {}
     var selectedVoice: Any? { nil }
@@ -255,6 +258,7 @@ final class MemoryDatabase: @unchecked Sendable {
     var isOpen = false
     var memoryDisabled: Bool { true }
     func open() throws {}
+    func insertTranscriptTurn(_ turn: Any, sessionId: UUID) throws {}
 }
 
 final class ServerController: @unchecked Sendable {
