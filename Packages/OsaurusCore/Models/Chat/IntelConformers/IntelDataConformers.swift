@@ -101,7 +101,7 @@ struct IntelModelOptionValue: ModelOptionValueProtocol, Sendable {
 
 // MARK: - ChatTurnData
 
-struct IntelChatTurnData: ChatTurnDataProtocol, Sendable {
+struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, Sendable, Equatable {
     init(from turn: any ChatTurnProtocol) {}
 }
 
