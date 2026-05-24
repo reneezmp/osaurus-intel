@@ -41,7 +41,7 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
     func isEphemeral(id: String) -> Bool { false }
-    func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String? = nil) {}
+    func updateProvider(_ provider: any RemoteProviderInfoProtocol) {}
     func connect(providerId: String) async throws {}
     func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool) {}
 }
@@ -61,7 +61,7 @@ final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
 
 final class IntelMemoryService: MemoryServiceProtocol, @unchecked Sendable {
     static let shared = IntelMemoryService()
-    func bufferTurn(userMessage: String, assistantMessage: String, agentId: UUID? = nil, conversationId: UUID? = nil, sessionId: UUID? = nil, sessionDate: Date = Date()) async {}
+    func bufferTurn(userMessage: String, assistantMessage: String, agentId: UUID, conversationId: UUID, sessionDate: Date) async {}
 }
 
 // MARK: - GenerativeGreeting (no-op on Intel)
@@ -88,7 +88,7 @@ enum IntelSharedArtifact: SharedArtifactProtocol {
         case destinationRejected(filename: String)
     }
 
-    static func processToolResultDetailed(_ text: String, contextId: String, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
+    static func processToolResultDetailed(_ text: String, contextId: UUID, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
         text
     }
     static func fromEnrichedToolResult(_ resultText: String) -> Any? { nil }
