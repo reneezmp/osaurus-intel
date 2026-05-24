@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  TerminalDisplayView.swift
 //  osaurus
@@ -600,3 +601,11 @@ extension TerminalDisplayView {
         renderer.reset()
     }
 }
+#else
+import SwiftUI
+struct TerminalDisplayView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Terminal Display", symbol: "apple.logo")
+    }
+}
+#endif

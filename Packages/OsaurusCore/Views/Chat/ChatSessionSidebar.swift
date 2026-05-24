@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ChatSessionSidebar.swift
 //  osaurus
@@ -865,4 +866,12 @@ private struct DontAskAgainToggle: View {
             .frame(height: 400)
         }
     }
+#endif
+#else
+import SwiftUI
+struct ChatSessionSidebar: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Chat Sessions", symbol: "apple.logo")
+    }
+}
 #endif

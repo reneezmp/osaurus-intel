@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  StorageMigrationOverlay.swift
 //  osaurus
@@ -541,3 +542,11 @@ public struct StorageMigrationOverlay: View {
         return min(1, max(0, Double(p.completed) / Double(p.total)))
     }
 }
+#else
+import SwiftUI
+struct StorageMigrationOverlay: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Storage Migration", symbol: "apple.logo")
+    }
+}
+#endif

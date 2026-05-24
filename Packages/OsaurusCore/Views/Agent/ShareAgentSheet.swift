@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ShareAgentSheet.swift
 //  osaurus
@@ -576,3 +577,11 @@ struct ShareAgentSheet: View {
         return NSImage(cgImage: cgImage, size: NSSize(width: scaled.extent.width, height: scaled.extent.height))
     }
 }
+#else
+import SwiftUI
+struct ShareAgentSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Share Agent", symbol: "apple.logo")
+    }
+}
+#endif

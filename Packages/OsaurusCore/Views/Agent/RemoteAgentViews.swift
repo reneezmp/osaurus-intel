@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  RemoteAgentViews.swift
 //  osaurus
@@ -570,3 +571,11 @@ struct RemoteAgentDetailView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct RemoteAgentCard: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Remote Agents", symbol: "apple.logo")
+    }
+}
+#endif

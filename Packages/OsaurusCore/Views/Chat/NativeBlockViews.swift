@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NativeBlockViews.swift
 //  osaurus
@@ -1258,3 +1259,11 @@ final class NativeMarkdownTableView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: heightConstraint?.constant ?? 1)
     }
 }
+#else
+import SwiftUI
+struct NativeBlockViews: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Native Blocks", symbol: "apple.logo")
+    }
+}
+#endif

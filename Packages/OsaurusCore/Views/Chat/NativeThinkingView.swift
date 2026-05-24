@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NativeThinkingView.swift
 //  osaurus
@@ -325,3 +326,11 @@ final class NativeThinkingView: NSView {
         return "\(count / 1000)k chars"
     }
 }
+#else
+import SwiftUI
+struct NativeThinkingView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Thinking View", symbol: "apple.logo")
+    }
+}
+#endif

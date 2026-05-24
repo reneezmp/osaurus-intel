@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PromptQueue.swift
 //  osaurus
@@ -161,3 +162,11 @@ public final class ClarifyPromptState: ObservableObject {
         onCancel()
     }
 }
+#else
+import SwiftUI
+struct PromptQueue: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Prompt Queue", symbol: "apple.logo")
+    }
+}
+#endif

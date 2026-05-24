@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NativeArtifactCardView.swift
 //  osaurus
@@ -1005,3 +1006,11 @@ final class NativeArtifactCardView: NSView {
         "\(theme.bodySize)|\(theme.captionSize)|\(theme.glassEnabled)|\(NSColor(theme.accentColor).description)|\(NSColor(theme.secondaryBackground).description)|\(NSColor(theme.primaryBorder).description)|\(NSColor(theme.primaryText).description)|\(NSColor(theme.tertiaryText).description)|\(NSColor(theme.tertiaryBackground).description)"
     }
 }
+#else
+import SwiftUI
+struct NativeArtifactCardView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Artifact Card", symbol: "apple.logo")
+    }
+}
+#endif

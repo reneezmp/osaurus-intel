@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MessageThreadView.swift
 //  osaurus
@@ -132,3 +133,11 @@ struct ScrollToBottomButton: View {
         }
     }
 }
+#else
+import SwiftUI
+struct MessageThreadView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Message Thread", symbol: "apple.logo")
+    }
+}
+#endif

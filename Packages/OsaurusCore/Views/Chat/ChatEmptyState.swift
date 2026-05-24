@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ChatEmptyState.swift
 //  osaurus
@@ -715,4 +716,12 @@ private struct GetStartedButton: View {
             .background(Color(hex: "0f0f10"))
         }
     }
+#endif
+#else
+import SwiftUI
+struct ChatEmptyState: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Chat Empty State", symbol: "apple.logo")
+    }
+}
 #endif

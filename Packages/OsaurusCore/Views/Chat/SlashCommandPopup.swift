@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SlashCommandPopup.swift
 //  osaurus
@@ -192,3 +193,11 @@ struct SlashCommandPopup: View {
         }
     }
 }
+#else
+import SwiftUI
+struct SlashCommandPopup: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Slash Command Popup", symbol: "apple.logo")
+    }
+}
+#endif

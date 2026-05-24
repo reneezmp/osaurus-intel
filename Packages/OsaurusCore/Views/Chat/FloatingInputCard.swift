@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  FloatingInputCard.swift
 //  osaurus
@@ -4172,4 +4173,12 @@ private struct SendNowButton: View {
             PreviewWrapper()
         }
     }
+#endif
+#else
+import SwiftUI
+struct FloatingInputCard: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Floating Input", symbol: "apple.logo")
+    }
+}
 #endif

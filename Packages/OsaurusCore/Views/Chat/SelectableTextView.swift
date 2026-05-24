@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SelectableTextView.swift
 //  osaurus
@@ -1229,3 +1230,11 @@ final class SelectableNSTextView: NSTextView {
         super.draw(dirtyRect)
     }
 }
+#else
+import SwiftUI
+struct SelectableTextView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Selectable Text", symbol: "apple.logo")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  AgentDBTabViews.swift
 //  osaurus
@@ -2393,3 +2394,11 @@ fileprivate struct DataEmptyState: View {
         .padding(32)
     }
 }
+#else
+import SwiftUI
+struct SchemaTabView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Agent Database", symbol: "apple.logo")
+    }
+}
+#endif

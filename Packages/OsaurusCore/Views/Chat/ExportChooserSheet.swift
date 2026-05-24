@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ExportChooserSheet.swift
 //  osaurus
@@ -229,3 +230,11 @@ struct ExportChooserSheet: View {
         return theme.tertiaryBackground.opacity(0.8)
     }
 }
+#else
+import SwiftUI
+struct ExportChooserSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Export", symbol: "apple.logo")
+    }
+}
+#endif

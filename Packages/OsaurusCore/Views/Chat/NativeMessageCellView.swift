@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NativeMessageCellView.swift
 //  osaurus
@@ -2383,3 +2384,11 @@ enum NativeCellHeightEstimator {
         }
     }
 }
+#else
+import SwiftUI
+struct CellRenderingContext: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Message Cell", symbol: "apple.logo")
+    }
+}
+#endif

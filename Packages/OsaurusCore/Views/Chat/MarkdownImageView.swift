@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MarkdownImageView.swift
 //  osaurus
@@ -511,4 +512,12 @@ extension View {
             .background(Color(hex: "0f0f10"))
         }
     }
+#endif
+#else
+import SwiftUI
+struct MarkdownImageView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Markdown Image", symbol: "apple.logo")
+    }
+}
 #endif

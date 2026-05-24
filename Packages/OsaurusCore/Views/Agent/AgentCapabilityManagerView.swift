@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  AgentCapabilityManagerView.swift
 //  osaurus
@@ -875,3 +876,11 @@ struct AgentCapabilityManagerView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct AgentCapabilityManagerView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Agent Capabilities", symbol: "apple.logo")
+    }
+}
+#endif

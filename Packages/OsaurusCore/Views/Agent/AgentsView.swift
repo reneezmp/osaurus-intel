@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 import AppKit
 import OsaurusRepository
 import SwiftUI
@@ -6055,4 +6056,12 @@ fileprivate struct AgentSecretRow: View {
     #Preview {
         AgentsView()
     }
+#endif
+#else
+import SwiftUI
+struct AgentsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Agents", symbol: "apple.logo")
+    }
+}
 #endif

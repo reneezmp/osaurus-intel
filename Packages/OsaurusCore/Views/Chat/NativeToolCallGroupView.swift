@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NativeToolCallGroupView.swift
 //  osaurus
@@ -1205,3 +1206,11 @@ final class NativeToolCallRowView: NSView {
 
     @objc private func tapped() { onToggle?() }
 }
+#else
+import SwiftUI
+struct NativeToolCallGroupView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Tool Call Group", symbol: "apple.logo")
+    }
+}
+#endif

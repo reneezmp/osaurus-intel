@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  AgentReorderSheet.swift
 //  osaurus
@@ -150,3 +151,11 @@ struct AgentReorderSheet: View {
         hasPendingReorder = false
     }
 }
+#else
+import SwiftUI
+struct AgentReorderSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Agent Reorder", symbol: "apple.logo")
+    }
+}
+#endif

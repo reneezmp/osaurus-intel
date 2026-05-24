@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NextRunPanelView.swift
 //  osaurus
@@ -615,3 +616,11 @@ public struct NextRunPanelView: View {
         absoluteFormatter.string(from: when)
     }
 }
+#else
+import SwiftUI
+struct NextRunPanelView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Next Run", symbol: "apple.logo")
+    }
+}
+#endif
