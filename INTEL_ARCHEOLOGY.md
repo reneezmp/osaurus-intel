@@ -28,3 +28,38 @@ The 321-file exclude list in `Package.swift` serves as the authoritative map of 
 ## Conclusion
 
 The amputation is architecturally correct — the four subsystems ARE the only Apple-Silicon-only dependencies — but OsaurusCore's monorepo structure creates a shallow, wide type graph where core infrastructure transitively references subsystem-specific types through internal visibility (no `public` needed — every type is visible module-wide). The plan's surgical approach underestimated this graph depth by an order of magnitude. Future ports should either (a) adopt in-module stub packages (proven viable — `Packages/IntelStubs/` resolves all `import`-level errors) paired with selective body-wrapping, or (b) isolate the four subsystems into true SwiftPM library targets so the dependency edges are explicit and amputation becomes library-level removal rather than file-level exclude cascading.
+
+## M9 Plugin Capability Testing (2026-05-23)
+
+**Status:** Phase 1–3 committed, Phase 4 test manifests created, Phase 5 (docs) pending.
+
+### Test Setup
+
+Two test plugin manifests installed in `~/.osaurus/Tools/`:
+
+- `com.test.hello` — requires `["http"]` (Intel-compatible) → expected: **compatible**
+- `com.test.needs-mlx` — requires `["mlx_inference", "vector_storage"]` → expected: **incompatible** (Apple Silicon required)
+
+### Intel Host Capabilities
+
+```
+http, sqlite, config, logging, dispatch, file_io
+```
+
+### Expected PluginManager Behavior (Phase 2 implementation)
+
+| Plugin | host_capabilities_required | Intel Compatibility | Bucket |
+|---|---|---|---|
+| `com.test.hello` | `["http"]` | `http` is supported | Compatible |
+| `com.test.needs-mlx` | `["mlx_inference", "vector_storage"]` | Both missing | Apple Silicon Required |
+
+### Verification
+
+- `swift build --arch x86_64` — passes
+- `xcodebuild` — BUILD SUCCEEDED
+- `PluginCompatibilityChecker.check(required: ["http"])` → `.compatible`
+- `PluginCompatibilityChecker.check(required: ["mlx_inference", "vector_storage"])` → `.incompatible`
+- `PluginCompatibilityChecker.check(required: nil, optional: ["mlx_inference"])` → `.degraded`
+- Empty requirements (nil) → `.compatible` (backwards compat)
+
+Full end-to-end dylib loading + tool invocation testing is deferred until the full PluginManager C ABI is restored on Intel (requires `ExternalTool`, `PluginHostContext`, etc. — Wave D-level work).
