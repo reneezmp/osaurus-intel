@@ -233,7 +233,12 @@ struct StreamingToolHint: Sendable {
     static func decodeArgs(_ delta: Any) -> String? { nil }
 }
 
-struct StreamingDeltaProcessor: Sendable { init() {} }
+struct StreamingDeltaProcessor: @unchecked Sendable {
+    init(turn: IntelChatTurn, onChange: @escaping @Sendable () -> Void = {}) {}
+    mutating func finalize() {}
+    mutating func receiveReasoning(_ text: String) {}
+    mutating func receiveDelta(_ delta: Any) {}
+}
 struct StreamingReasoningHint: Sendable {
     init() {}
     static func decode(_ delta: Any) -> String? { nil }

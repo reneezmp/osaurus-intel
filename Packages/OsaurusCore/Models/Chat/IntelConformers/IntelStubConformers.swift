@@ -30,9 +30,13 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
 
     struct Provider: RemoteProviderInfoProtocol {
         let id: String
-        let name: String
-        let host: String
+        var name: String
+        var host: String
+        var authType: ProviderAuthType = .apiKey
+        var token: String?
     }
+    
+    enum ProviderAuthType: Sendable { case apiKey, bearerToken, oauth }
 
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
@@ -86,6 +90,7 @@ enum IntelSharedArtifact: SharedArtifactProtocol {
 
 typealias SpeechService = IntelSpeechService
 typealias RemoteProviderManager = IntelRemoteProviderManager
+typealias RemoteProvider = IntelRemoteProviderManager.Provider
 typealias ToolRegistry = IntelToolRegistry
 typealias MemoryService = IntelMemoryService
 typealias GenerativeGreetingPool = IntelGreetingPool
