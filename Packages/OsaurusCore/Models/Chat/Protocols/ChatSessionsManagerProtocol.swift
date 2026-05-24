@@ -12,4 +12,8 @@ protocol ChatSessionsManagerProtocol: AnyObject {
     func delete(id: UUID)
     func rename(id: UUID, title: String)
     func setArchived(id: UUID, archived: Bool)
+    func refresh()
+    func createNew(selectedModel: String?, agentId: UUID?) -> UUID
+    func sessions(for agentId: UUID?) -> [any ChatSessionDataProtocol]
+    func session(for id: UUID) -> (any ChatSessionDataProtocol)?
 }

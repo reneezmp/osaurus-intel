@@ -23,6 +23,8 @@ protocol AgentManagerProtocol: AnyObject {
 protocol AgentInfoProtocol: Identifiable, Sendable {
     var id: UUID { get }
     var name: String { get }
+    var isBuiltIn: Bool { get }
+    var autoSpeak: Bool { get }
 }
 
 struct AgentAutoExecInfo: Sendable {
