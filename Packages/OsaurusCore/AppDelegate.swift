@@ -160,15 +160,54 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApp.unhide(nil)
         _ = NSRunningApplication.current.activate(options: .activateAllWindows)
 
-        let content = IntelChatView()
+        let content = VStack(spacing: 20) {
+            Image(systemName: "apple.logo")
+                .font(.system(size: 40))
+                .foregroundStyle(.secondary)
+
+            Text("Osaurus (Intel)")
+                .font(.title2)
+                .fontWeight(.semibold)
+
+            Text("Cloud-only  ·  MCP-ready  ·  Identity sync")
+                .font(.caption)
+                .foregroundStyle(.tertiary)
+
+            Divider()
+                .frame(width: 280)
+
+            VStack(alignment: .leading, spacing: 10) {
+                FeatureRow(icon: "cloud.fill", label: "DeepSeek V4 Pro / Flash", status: "Active", color: .green)
+                FeatureRow(icon: "hammer.fill", label: "MCP Server (3 tools)", status: "Active", color: .green)
+                FeatureRow(icon: "network", label: "HTTP API · Port 1338", status: "Active", color: .green)
+                FeatureRow(icon: "apple.logo", label: "Local Models", status: "Apple Silicon only", color: .orange)
+                FeatureRow(icon: "mic.fill", label: "Voice Features", status: "Apple Silicon only", color: .orange)
+                FeatureRow(icon: "shippingbox.fill", label: "Sandbox VM", status: "Apple Silicon only", color: .orange)
+            }
+
+            Divider()
+                .frame(width: 280)
+
+            HStack {
+                Circle()
+                    .fill(Color.green)
+                    .frame(width: 8, height: 8)
+                Text("Server running on port 1338")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            }
+        }
+        .padding(36)
+        .frame(width: 420)
+
         let hosting = NSHostingController(rootView: content)
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 640, height: 520),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 420, height: 440),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Osaurus (Intel) — Chat"
+        window.title = "Osaurus (Intel)"
         window.contentViewController = hosting
         window.center()
         window.isReleasedWhenClosed = false
@@ -281,169 +320,25 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 }
 
-// MARK: - Intel Chat View
+// MARK: - Intel Status Dashboard
 
-private struct IntelChatView: View {
-    @State private var messages: [ChatBubble] = []
-    @State private var inputText = ""
-    @State private var isStreaming = false
-    @State private var streamingText = ""
-
-    private let serverURL = "http://127.0.0.1:1338/v1/chat/completions"
+private struct FeatureRow: View {
+    let icon: String
+    let label: String
+    let status: String
+    let color: Color
 
     var body: some View {
-        VStack(spacing: 0) {
-            ScrollViewReader { proxy in
-                ScrollView {
-                    LazyVStack(alignment: .leading, spacing: 12) {
-                        ForEach(messages) { msg in
-                            ChatBubbleView(bubble: msg)
-                        }
-                        if isStreaming {
-                            ChatBubbleView(bubble: ChatBubble(role: "assistant", content: streamingText))
-                                .id("streaming")
-                        }
-                    }
-                    .padding()
-                }
-                .onChange(of: messages.count) { _, _ in
-                    if let last = messages.last {
-                        withAnimation { proxy.scrollTo(last.id, anchor: .bottom) }
-                    }
-                }
-                .onChange(of: streamingText) { _, _ in
-                    withAnimation { proxy.scrollTo("streaming", anchor: .bottom) }
-                }
-            }
-
-            Divider()
-
-            HStack(spacing: 8) {
-                TextField("Type a message...", text: $inputText, axis: .vertical)
-                    .textFieldStyle(.roundedBorder)
-                    .lineLimit(1...5)
-                    .disabled(isStreaming)
-                    .onSubmit { sendMessage() }
-
-                Button(action: sendMessage) {
-                    Image(systemName: isStreaming ? "stop.circle.fill" : "arrow.up.circle.fill")
-                        .font(.title2)
-                }
-                .disabled(inputText.trimmingCharacters(in: .whitespaces).isEmpty)
-                .buttonStyle(.plain)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 8)
-        }
-        .frame(minWidth: 480, minHeight: 360)
-    }
-
-    private func sendMessage() {
-        let text = inputText.trimmingCharacters(in: .whitespaces)
-        guard !text.isEmpty, !isStreaming else { return }
-
-        let userMsg = ChatBubble(role: "user", content: text)
-        messages.append(userMsg)
-        inputText = ""
-        isStreaming = true
-        streamingText = ""
-
-        Task {
-            await streamChatResponse(userMessage: text)
-        }
-    }
-
-    private func streamChatResponse(userMessage: String) async {
-        let conversationMessages: [[String: String]] = messages.map { ["role": $0.role, "content": $0.content] }
-
-        let body: [String: Any] = [
-            "model": "deepseek-v4-pro",
-            "messages": conversationMessages,
-            "stream": true,
-        ]
-
-        guard let httpBody = try? JSONSerialization.data(withJSONObject: body),
-              let url = URL(string: serverURL) else {
-            isStreaming = false
-            return
-        }
-
-        var urlRequest = URLRequest(url: url)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.timeoutInterval = 300
-        urlRequest.httpBody = httpBody
-
-        do {
-            let (asyncBytes, _) = try await URLSession.shared.bytes(for: urlRequest)
-            var fullResponse = ""
-
-            for try await line in asyncBytes.lines {
-                guard line.hasPrefix("data: ") else { continue }
-                let dataStr = String(line.dropFirst(6))
-                if dataStr == "[DONE]" { break }
-
-                if let chunkData = dataStr.data(using: .utf8),
-                   let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any],
-                   let choices = json["choices"] as? [[String: Any]],
-                   let delta = choices.first?["delta"] as? [String: Any] {
-
-                    if let content = delta["content"] as? String, !content.isEmpty {
-                        fullResponse += content
-                    }
-                    // Also capture reasoning_content for DeepSeek thinking
-                    if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
-                        fullResponse += reasoning
-                    }
-                }
-
-                streamingText = fullResponse
-            }
-
-            if !fullResponse.isEmpty {
-                messages.append(ChatBubble(role: "assistant", content: fullResponse))
-            }
-        } catch {
-            messages.append(ChatBubble(role: "assistant", content: "Error: \(error.localizedDescription)"))
-        }
-
-        isStreaming = false
-        streamingText = ""
-    }
-}
-
-private struct ChatBubble: Identifiable {
-    let id = UUID()
-    let role: String
-    let content: String
-}
-
-private struct ChatBubbleView: View {
-    let bubble: ChatBubble
-    let isUser: Bool
-
-    init(bubble: ChatBubble) {
-        self.bubble = bubble
-        self.isUser = bubble.role == "user"
-    }
-
-    var body: some View {
-        HStack {
-            if isUser { Spacer() }
-
-            VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                Text(bubble.role == "user" ? "You" : "Osaurus")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
-                Text(bubble.content)
-                    .font(.body)
-                    .padding(10)
-                    .background(isUser ? Color.blue.opacity(0.15) : Color.secondary.opacity(0.1))
-                    .clipShape(RoundedRectangle(cornerRadius: 12))
-            }
-            .frame(maxWidth: 320, alignment: isUser ? .trailing : .leading)
-
-            if !isUser { Spacer() }
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .frame(width: 20)
+                .foregroundStyle(color)
+            Text(label)
+                .font(.system(size: 13))
+            Spacer()
+            Text(status)
+                .font(.system(size: 11))
+                .foregroundStyle(.secondary)
         }
     }
 }
