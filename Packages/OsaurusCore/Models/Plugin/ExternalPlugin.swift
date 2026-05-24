@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ExternalPlugin.swift
 //  osaurus
@@ -218,6 +219,13 @@ public struct PluginManifest: Decodable, Sendable {
     public let authors: [String]?
     public let min_macos: String?
     public let min_osaurus: String?
+
+    /// Host capabilities the plugin REQUIRES. If any are missing, the plugin is not loaded.
+    /// JSON key: "host_capabilities_required". nil means no requirements (optimistic default).
+    public let host_capabilities_required: [String]?
+    /// Host capabilities the plugin would LIKE to have. Missing optional caps result in
+    /// a "degraded" load rather than a skip. JSON key: "host_capabilities_optional".
+    public let host_capabilities_optional: [String]?
 
     public struct Capabilities: Decodable, Sendable {
         public let tools: [ToolSpec]?
@@ -1080,3 +1088,4 @@ final class ExternalPlugin: @unchecked Sendable {
         return ToolSecretsKeychain.hasAllRequiredSecrets(specs: specs, for: manifest.plugin_id, agentId: agentId)
     }
 }
+#endif
