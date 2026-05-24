@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 import SwiftUI
 
 // MARK: - Configuration View
@@ -1743,3 +1744,11 @@ private struct AgentToolPermissionRow: View {
         }
     }
 }
+#else
+import SwiftUI
+struct ConfigurationView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Configuration", symbol: "apple.logo")
+    }
+}
+#endif

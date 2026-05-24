@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NotchView.swift
 //  osaurus
@@ -802,4 +803,12 @@ struct NotchContentView: View {
             .background(Color.black.opacity(0.8))
         }
     }
+#endif
+#else
+import SwiftUI
+struct NotchShape: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Notch", symbol: "apple.logo")
+    }
+}
 #endif

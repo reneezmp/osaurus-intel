@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SharedHeaderComponents.swift
 //  osaurus
@@ -504,3 +505,11 @@ private struct PopoverRow<Content: View>: View {
         }
     }
 }
+#else
+import SwiftUI
+struct HeaderActionButton: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Shared Headers", symbol: "apple.logo")
+    }
+}
+#endif

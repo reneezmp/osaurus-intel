@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ToolsManagerView.swift
 //  osaurus
@@ -1395,3 +1396,11 @@ private struct RemoteToolRow: View {
         )
     }
 }
+#else
+import SwiftUI
+struct ToolsManagerView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Tool Manager", symbol: "apple.logo")
+    }
+}
+#endif

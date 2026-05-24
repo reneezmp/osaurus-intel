@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SimpleComponents.swift
 //  osaurus
@@ -733,3 +734,11 @@ struct MinimalProgressViewStyle: ProgressViewStyle {
         .frame(height: 4)
     }
 }
+#else
+import SwiftUI
+struct MinimalCard: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Simple Components", symbol: "apple.logo")
+    }
+}
+#endif

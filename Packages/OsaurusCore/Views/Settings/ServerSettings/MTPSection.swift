@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MTPSection.swift
 //  osaurus
@@ -56,3 +57,11 @@ struct MTPSection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct MTPSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "MTP Settings", symbol: "apple.logo")
+    }
+}
+#endif

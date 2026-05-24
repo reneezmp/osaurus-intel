@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  StorageSettingsView.swift
 //  osaurus
@@ -764,3 +765,11 @@ public struct StorageSettingsView: View {
         }
     }
 }
+#else
+import SwiftUI
+struct StorageSettingsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Storage Settings", symbol: "apple.logo")
+    }
+}
+#endif

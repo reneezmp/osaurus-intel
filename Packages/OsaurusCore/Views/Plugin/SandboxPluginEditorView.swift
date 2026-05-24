@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SandboxPluginEditorView.swift
 //  osaurus
@@ -808,3 +809,11 @@ extension SandboxPlugin {
         SandboxPlugin(name: "New Plugin", description: "A new sandbox plugin")
     }
 }
+#else
+import SwiftUI
+struct SandboxPluginEditorView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Sandbox Plugin Editor", symbol: "apple.logo")
+    }
+}
+#endif

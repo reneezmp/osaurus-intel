@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PluginConfigView.swift
 //  osaurus
@@ -755,3 +756,11 @@ struct PluginConfigView: View {
         return config.port
     }
 }
+#else
+import SwiftUI
+struct PluginConfigView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Plugin Config", symbol: "apple.logo")
+    }
+}
+#endif

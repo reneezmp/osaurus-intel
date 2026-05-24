@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  MultimodalSection.swift
 //  osaurus
@@ -56,3 +57,11 @@ struct MultimodalSection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct MultimodalSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Multimodal", symbol: "apple.logo")
+    }
+}
+#endif

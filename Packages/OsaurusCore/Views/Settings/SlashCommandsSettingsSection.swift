@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SlashCommandsSettingsSection.swift
 //  osaurus
@@ -449,3 +450,11 @@ struct SlashCommandButtonStyle: ButtonStyle {
             .opacity(configuration.isPressed ? 0.8 : 1.0)
     }
 }
+#else
+import SwiftUI
+struct SlashCommandsSettingsSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Slash Commands Settings", symbol: "apple.logo")
+    }
+}
+#endif

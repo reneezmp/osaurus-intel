@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ManagementView.swift
 //  osaurus
@@ -260,4 +261,12 @@ private extension ManagementView {
     #Preview {
         ManagementView()
     }
+#endif
+#else
+import SwiftUI
+struct ManagementView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Management", symbol: "apple.logo")
+    }
+}
 #endif

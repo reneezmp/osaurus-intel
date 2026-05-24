@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PowerSection.swift
 //  osaurus
@@ -53,3 +54,11 @@ struct PowerSection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct PowerSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Power Settings", symbol: "apple.logo")
+    }
+}
+#endif

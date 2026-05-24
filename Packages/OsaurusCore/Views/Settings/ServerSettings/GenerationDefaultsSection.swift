@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  GenerationDefaultsSection.swift
 //  osaurus
@@ -86,3 +87,11 @@ struct GenerationDefaultsSection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct GenerationDefaultsSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Generation Defaults", symbol: "apple.logo")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ConnectionSection.swift
 //  osaurus
@@ -97,3 +98,11 @@ struct ConnectionSection: View {
         if draft.network.corsOrigins != normalized { draft.network.corsOrigins = normalized }
     }
 }
+#else
+import SwiftUI
+struct ConnectionSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Connection", symbol: "apple.logo")
+    }
+}
+#endif

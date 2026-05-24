@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  CacheSection.swift
 //  osaurus
@@ -240,3 +241,11 @@ struct CacheSection: View {
         )
     }
 }
+#else
+import SwiftUI
+struct CacheSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Cache Settings", symbol: "apple.logo")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  RemoteProvidersView.swift
 //  osaurus
@@ -459,4 +460,12 @@ private struct ProviderCardView: View {
         RemoteProvidersView()
             .environment(\.theme, DarkTheme())
     }
+#endif
+#else
+import SwiftUI
+struct RemoteProvidersView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Remote Providers", symbol: "apple.logo")
+    }
+}
 #endif

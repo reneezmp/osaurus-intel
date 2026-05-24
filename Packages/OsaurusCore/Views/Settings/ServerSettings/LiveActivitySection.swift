@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  LiveActivitySection.swift
 //  osaurus
@@ -46,3 +47,11 @@ struct LiveActivitySection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct LiveActivitySection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Live Activity", symbol: "apple.logo")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  RemoteProviderEditSheet.swift
 //  osaurus
@@ -2516,4 +2517,12 @@ private struct DeploymentNamesEditor: View {
         RemoteProviderEditSheet(provider: nil) { _, _, _ in }
             .environment(\.theme, DarkTheme())
     }
+#endif
+#else
+import SwiftUI
+struct RemoteProviderEditSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Remote Provider Edit", symbol: "apple.logo")
+    }
+}
 #endif

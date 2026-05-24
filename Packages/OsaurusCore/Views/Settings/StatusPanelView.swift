@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  StatusPanelView.swift
 //  osaurus
@@ -612,4 +613,12 @@ private struct AskAIButton: View {
         StatusPanelView()
             .environmentObject(ServerController())
     }
+#endif
+#else
+import SwiftUI
+struct StatusPanelView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Server Status", symbol: "apple.logo")
+    }
+}
 #endif

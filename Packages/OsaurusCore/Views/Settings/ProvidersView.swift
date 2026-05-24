@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ProvidersView.swift
 //  osaurus
@@ -2830,4 +2831,12 @@ private struct ToolPillsFlowLayout: Layout {
             .frame(width: 700, height: 500)
             .environment(\.theme, DarkTheme())
     }
+#endif
+#else
+import SwiftUI
+struct ProvidersView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Providers", symbol: "apple.logo")
+    }
+}
 #endif

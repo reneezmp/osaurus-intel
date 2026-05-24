@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ConcurrencySection.swift
 //  osaurus
@@ -112,3 +113,11 @@ struct ConcurrencySection: View {
         }
     }
 }
+#else
+import SwiftUI
+struct ConcurrencySection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Concurrency", symbol: "apple.logo")
+    }
+}
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  IncomingPairSheet.swift
 //  osaurus
@@ -245,3 +246,11 @@ struct IncomingPairSheet: View {
         }
     }
 }
+#else
+import SwiftUI
+struct IncomingPairSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Incoming Pair", symbol: "apple.logo")
+    }
+}
+#endif

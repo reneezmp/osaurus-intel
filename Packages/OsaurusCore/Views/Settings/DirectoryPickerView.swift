@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  DirectoryPickerView.swift
 //  osaurus
@@ -129,4 +130,12 @@ struct DirectoryPickerView: View {
     #Preview {
         DirectoryPickerView()
     }
+#endif
+#else
+import SwiftUI
+struct DirectoryPickerView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Directory Picker", symbol: "apple.logo")
+    }
+}
 #endif

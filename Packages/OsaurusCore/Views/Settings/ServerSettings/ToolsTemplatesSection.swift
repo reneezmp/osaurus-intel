@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ToolsTemplatesSection.swift
 //  osaurus
@@ -92,3 +93,11 @@ struct ToolsTemplatesSection: View {
         )
     }
 }
+#else
+import SwiftUI
+struct ToolsTemplatesSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Tool Templates", symbol: "apple.logo")
+    }
+}
+#endif

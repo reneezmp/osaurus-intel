@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ServerView.swift
 //  osaurus
@@ -2188,4 +2189,12 @@ private struct TranscriptionTestRow: View {
             .environmentObject(ServerController())
             .frame(width: 900, height: 700)
     }
+#endif
+#else
+import SwiftUI
+struct ServerView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Server", symbol: "apple.logo")
+    }
+}
 #endif

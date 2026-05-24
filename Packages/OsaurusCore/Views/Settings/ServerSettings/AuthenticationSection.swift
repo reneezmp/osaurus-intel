@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  AuthenticationSection.swift
 //  osaurus
@@ -90,3 +91,11 @@ struct AuthenticationSection: View {
         )
     }
 }
+#else
+import SwiftUI
+struct AuthenticationSection: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Authentication", symbol: "apple.logo")
+    }
+}
+#endif

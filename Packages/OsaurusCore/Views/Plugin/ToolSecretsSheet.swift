@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ToolSecretsSheet.swift
 //  osaurus
@@ -557,4 +558,12 @@ private struct DescriptionText: View {
             onSave: {}
         )
     }
+#endif
+#else
+import SwiftUI
+struct ToolSecretsSheet: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Tool Secrets", symbol: "apple.logo")
+    }
+}
 #endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PluginsView.swift
 //  osaurus
@@ -1805,3 +1806,11 @@ private struct PluginRoutesSummary: View {
         }
     }
 }
+#else
+import SwiftUI
+struct PluginsView: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Plugins", symbol: "apple.logo")
+    }
+}
+#endif

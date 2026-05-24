@@ -25,6 +25,8 @@ import AppKit
 @preconcurrency import MLXLMCommon
 import SwiftUI
 
+
+#if !OSAURUS_INTEL
 struct ServerSettingsTabContent: View {
     @EnvironmentObject var server: ServerController
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -75,9 +77,6 @@ struct ServerSettingsTabContent: View {
     private var requiresRestart: Bool { pendingRestart && server.isRunning }
 
     var body: some View {
-#if OSAURUS_INTEL
-        AppleSiliconOnlyTab(tabName: "Server Settings", symbol: "server.rack")
-#else
         ZStack(alignment: .bottom) {
             VStack(spacing: 0) {
                 HStack(spacing: 0) {
@@ -117,7 +116,6 @@ struct ServerSettingsTabContent: View {
         .onChange(of: server.configuration) { _, newValue in
             if !hasUnsavedChanges { draftLegacy = newValue }
         }
-#endif
     }
 
     // MARK: - Content pane
@@ -254,3 +252,12 @@ struct ServerSettingsTabContent: View {
         }
     }
 }
+
+#else
+import SwiftUI
+struct ServerSettingsTabContent: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Server Settings", symbol: "server.rack")
+    }
+}
+#endif

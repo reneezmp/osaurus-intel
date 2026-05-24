@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  NotchWindowController.swift
 //  osaurus
@@ -228,3 +229,11 @@ private final class NotchPassThroughView: NSView {
 
     override var acceptsFirstResponder: Bool { false }
 }
+#else
+import SwiftUI
+struct NotchWindowController: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Notch Controller", symbol: "apple.logo")
+    }
+}
+#endif

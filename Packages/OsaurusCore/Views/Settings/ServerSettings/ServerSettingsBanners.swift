@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ServerSettingsBanners.swift
 //  osaurus
@@ -69,3 +70,11 @@ struct ServerSettingsValidationBanner: View {
         }
     }
 }
+#else
+import SwiftUI
+struct ServerSettingsValidationBanner: View {
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Settings Banners", symbol: "apple.logo")
+    }
+}
+#endif
