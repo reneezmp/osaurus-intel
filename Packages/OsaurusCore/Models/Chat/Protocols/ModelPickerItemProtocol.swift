@@ -17,4 +17,9 @@ enum ModelPickerSource: Sendable {
     case builtIn
     case remote(String, UUID)
     case foundation
+
+    var remoteProviderId: UUID? {
+        if case .remote(_, let id) = self { return id }
+        return nil
+    }
 }

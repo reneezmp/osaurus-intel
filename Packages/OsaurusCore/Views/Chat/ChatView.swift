@@ -2741,10 +2741,28 @@ struct ChatView: View {
             let sidebarWidth: CGFloat = showSidebar ? 240 : 0
             let chatWidth = windowWidth - sidebarWidth
             let effectiveContentWidth = min(chatWidth, 1100)
-            let onSidebarDelete: (UUID) -> Void = { id in if session.sessionId == id { session.reset() }; ChatSessionsManager.shared.delete(id: id); windowState.refreshSessions() }
-            let onSidebarRename: (UUID, String) -> Void = { id, title in ChatSessionsManager.shared.rename(id: id, title: title); windowState.refreshSessions() }
-            let onSidebarSetArchived: (UUID, Bool) -> Void = { id, archived in ChatSessionsManager.shared.setArchived(id: id, archived: archived); if session.sessionId == id { session.archived = archived }; windowState.refreshSessions() }
-            let onSidebarExport: (ChatSessionData, Any) -> Void = { metadata, format in ChatSessionExportCoordinator.run(metadataSession: metadata, format: format, scope: .chat(windowState.windowId)) }
+            let sessMgr = ChatSessionsManager.shared
+            let ws = windowState
+            let refresh: () -> Void = { ws.refreshSessions() }
+            let onSidebarDelete: (UUID) -> Void = { id in
+                if session.sessionId == id { session.reset() }
+                sessMgr.delete(id: id)
+                refresh()
+            }
+            let onSidebarRename: (UUID, String) -> Void = { id, title in
+                sessMgr.rename(id: id, title: title)
+                refresh()
+            }
+            let onSidebarSetArchived: (UUID, Bool) -> Void = { id, archived in
+                sessMgr.setArchived(id: id, archived: archived)
+                if session.sessionId == id { session.archived = archived }
+                refresh()
+            }
+            let onSidebarExport: (ChatSessionData, Any) -> Void = { metadata, format in
+                let expCoord = ChatSessionExportCoordinator.shared
+                let scope = ChatSessionExportCoordinator.ExportScope.chat(windowState.windowId)
+                expCoord.run(metadataSession: metadata, format: format, scope: scope)
+            }
             let onSidebarOpenInNewWindow: ((ChatSessionData) -> Void)? = { sessionData in ChatWindowManager.shared.createWindow(agentId: sessionData.agentId, sessionData: sessionData) }
 
             HStack(alignment: .top, spacing: 0) {
@@ -2906,14 +2924,16 @@ struct ChatView: View {
             isPinnedToBottom = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectDiscoveredAgent)) { notification in
+            let winId = windowState.windowId
             guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
-            guard targetWindowId == windowState.windowId else { return }
+            guard targetWindowId == winId else { return }
             guard let discoveredAgent = notification.object as? DiscoveredAgent else { return }
             selectDiscoveredAgent(discoveredAgent)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
+            let winId = windowState.windowId
             guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
-            guard targetWindowId == windowState.windowId else { return }
+            guard targetWindowId == winId else { return }
             guard let relay = notification.object as? PairedRelayAgent else { return }
             connectToRelayAgent(relay)
         }
@@ -2965,15 +2985,15 @@ struct ChatView: View {
             guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
             var providerItems: [ModelPickerItem] = []
             for item in newItems {
-                if case .remote(_, let id) = item.source, id == providerId { providerItems.append(item) }
+                if item.source.remoteProviderId == providerId { providerItems.append(item) }
             }
             guard let firstItem = providerItems.firstChatCapable else { return }
             let modelId = session.selectedModel
             var matched: ModelPickerItem?
-            for item in newItems where item.id == modelId { matched = item; break }
+            for item in newItems { if item.id == modelId { matched = item; break } }
             var currentIsFromProvider = false
             if let item = matched {
-                if case .remote(_, let id) = item.source { currentIsFromProvider = (id == providerId) }
+                currentIsFromProvider = (item.source.remoteProviderId == providerId)
             }
             if !currentIsFromProvider {
                 session.selectedModel = firstItem.id
