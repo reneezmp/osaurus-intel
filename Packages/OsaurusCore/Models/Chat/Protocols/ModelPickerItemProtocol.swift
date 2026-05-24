@@ -18,9 +18,3 @@ enum ModelPickerSource: Sendable {
     case remote(String, String)
     case foundation
 }
-
-extension Array where Element == any ModelPickerItemProtocol {
-    var firstChatCapable: (any ModelPickerItemProtocol)? {
-        first { !$0.isVLM }
-    }
-}

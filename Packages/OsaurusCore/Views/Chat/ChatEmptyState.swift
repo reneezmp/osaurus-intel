@@ -721,7 +721,19 @@ private struct GetStartedButton: View {
 #else
 import SwiftUI
 struct ChatEmptyState: View {
-    init(_ args: Any...) {}
+    var hasModels: Bool = true
+    var selectedModel: String? = nil
+    var agents: [Agent] = []
+    var activeAgentId: UUID = UUID()
+    var quickActions: [AgentQuickAction] = []
+    var generativeGreetingState: GenerativeGreetingState = .idle
+    var onOpenModelManager: () -> Void = {}
+    var onUseFoundation: (() -> Void)? = nil
+    var onQuickAction: (String) -> Void = { _ in }
+    var onOpenOnboarding: (() -> Void)? = nil
+    var activeDiscoveredAgent: DiscoveredAgent? = nil
+    var activeRelayAgent: PairedRelayAgent? = nil
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Chat Empty State", symbol: "apple.logo")
     }

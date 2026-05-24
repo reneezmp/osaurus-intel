@@ -9,10 +9,10 @@ import Foundation
 
 protocol RemoteProviderManagerProtocol: AnyObject {
     var configuration: RemoteProviderConfigInfoProtocol { get }
-    func isEphemeral(id: String) -> Bool
+    func isEphemeral(id: UUID) -> Bool
     func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?)
-    func connect(providerId: String) async throws
-    func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool)
+    func connect(providerId: UUID) async throws
+    func addProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?, isEphemeral: Bool)
 }
 
 protocol RemoteProviderConfigInfoProtocol {
@@ -20,7 +20,14 @@ protocol RemoteProviderConfigInfoProtocol {
 }
 
 protocol RemoteProviderInfoProtocol: Identifiable, Sendable {
-    var id: String { get }
+    var id: UUID { get }
     var name: String { get }
-    var host: String { get }
+    var host: String { get set }
+    var providerProtocol: RemoteProviderProtocolKind { get set }
+    var port: Int? { get set }
+    var enabled: Bool { get set }
+    var providerType: Any? { get }
+    var remoteAgentId: UUID? { get }
 }
+
+enum RemoteProviderProtocolKind: Sendable { case http, https }

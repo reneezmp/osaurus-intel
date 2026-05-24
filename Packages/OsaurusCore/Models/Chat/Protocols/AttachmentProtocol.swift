@@ -21,9 +21,3 @@ protocol AttachmentProtocol: Identifiable, Sendable {
     func loadAudioData() async throws -> Data?
     func loadVideoData() async throws -> Data?
 }
-
-extension Array where Element == any AttachmentProtocol {
-    var images: [any AttachmentProtocol] {
-        filter { !$0.isDocument && !$0.isAudio && !$0.isVideo }
-    }
-}

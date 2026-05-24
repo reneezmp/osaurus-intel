@@ -8,6 +8,6 @@
 import Foundation
 
 protocol ToolRegistryProtocol: AnyObject {
-    func resolveExecutionMode(folderContext: Any?, autonomousEnabled: Bool) -> Any?
+    func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode
     func execute(name: String, argumentsJSON: String) async throws -> String
 }

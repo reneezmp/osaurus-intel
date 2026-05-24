@@ -29,21 +29,26 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
     }
 
     struct Provider: RemoteProviderInfoProtocol {
-        let id: String
+        let id: UUID
         var name: String
         var host: String
         var authType: ProviderAuthType = .apiKey
-        var token: String?
+        var token: String? = nil
+        var providerProtocol: RemoteProviderProtocolKind = .https
+        var port: Int? = nil
+        var enabled: Bool = true
+        var providerType: Any? { nil }
+        var remoteAgentId: UUID? { nil }
     }
     
     enum ProviderAuthType: Sendable { case apiKey, bearerToken, oauth }
 
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
-    func isEphemeral(id: String) -> Bool { false }
+    func isEphemeral(id: UUID) -> Bool { false }
     func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?) {}
-    func connect(providerId: String) async throws {}
-    func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool) {}
+    func connect(providerId: UUID) async throws {}
+    func addProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String? = nil, isEphemeral: Bool = false) {}
 }
 
 // MARK: - ToolRegistry (stub)
@@ -51,7 +56,7 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
 final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
     static let shared = IntelToolRegistry()
 
-    func resolveExecutionMode(folderContext: Any?, autonomousEnabled: Bool) -> Any? { nil }
+    func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
     func execute(name: String, argumentsJSON: String) async throws -> String {
         "Tool '\(name)' executed."
     }
@@ -61,7 +66,7 @@ final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
 
 final class IntelMemoryService: MemoryServiceProtocol, @unchecked Sendable {
     static let shared = IntelMemoryService()
-    func bufferTurn(userMessage: String, assistantMessage: String, agentId: UUID, conversationId: UUID, sessionDate: Date) async {}
+    func bufferTurn(userMessage: String, assistantMessage: String?, agentId: String, conversationId: String, sessionDate: String? = nil) async {}
 }
 
 // MARK: - GenerativeGreeting (no-op on Intel)
@@ -69,29 +74,48 @@ final class IntelMemoryService: MemoryServiceProtocol, @unchecked Sendable {
 final class IntelGreetingPool: GenerativeGreetingPoolProtocol, @unchecked Sendable {
     static let shared = IntelGreetingPool()
     func setActive(agent: any AgentInfoProtocol, model: String) async {}
-    func popFresh(for agent: any AgentInfoProtocol, model: String) async -> String? { nil }
-    func seed(_ cached: [String], for agent: any AgentInfoProtocol, model: String) async {}
+    func popFresh(for agent: any AgentInfoProtocol, model: String) async -> GenerativeGreeting? { nil }
+    func seed(_ cached: GenerativeGreeting, for agent: any AgentInfoProtocol, model: String) async {}
     func warmUp(for agent: any AgentInfoProtocol, model: String) async {}
 }
 
 final class IntelGreetingService: GenerativeGreetingServiceProtocol, @unchecked Sendable {
     static let shared = IntelGreetingService()
-    func generate(agent: any AgentInfoProtocol, fallbackModel: String) async throws -> String? { nil }
+    func generate(agent: any AgentInfoProtocol, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
 }
 
 // MARK: - SharedArtifact (stub)
+
+enum ArtifactContextType: String, Sendable {
+    case work
+    case chat
+}
+
+struct ProcessingResult: Sendable {
+    let enrichedToolResult: String
+}
 
 enum IntelSharedArtifact: SharedArtifactProtocol {
     enum ResolutionFailure: Error {
         case markersMissing
         case noContentOrPath
         case destinationRejected(filename: String)
+        case pathRejected(path: String)
+        case fileNotFound(path: String, searchedLocations: [String])
+        case copyFailed(source: String, detail: String)
     }
 
-    static func processToolResultDetailed(_ text: String, contextId: UUID, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
-        text
-    }
     static func fromEnrichedToolResult(_ resultText: String) -> Any? { nil }
+
+    static func processToolResultDetailed(
+        _ text: String,
+        contextId: String,
+        contextType: ArtifactContextType,
+        executionMode: ExecutionMode,
+        sandboxAgentName: String? = nil
+    ) -> Result<ProcessingResult, ResolutionFailure> {
+        .success(ProcessingResult(enrichedToolResult: text))
+    }
 }
 
 typealias SpeechService = IntelSpeechService

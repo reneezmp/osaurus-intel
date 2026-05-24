@@ -10,9 +10,9 @@ import Foundation
 protocol MemoryServiceProtocol: AnyObject {
     func bufferTurn(
         userMessage: String,
-        assistantMessage: String,
-        agentId: UUID,
-        conversationId: UUID,
-        sessionDate: Date
+        assistantMessage: String?,
+        agentId: String,
+        conversationId: String,
+        sessionDate: String?
     ) async
 }

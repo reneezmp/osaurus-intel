@@ -509,7 +509,7 @@ import SwiftUI
 @MainActor
 final class ChatWindowState: ObservableObject {
     let windowId: UUID
-    let session: Any? = nil
+    let session: ChatSession
     let foundationModelAvailable: Bool = false
 
     @Published var showSidebar: Bool = false
@@ -533,9 +533,17 @@ final class ChatWindowState: ObservableObject {
     var activeAgent: Agent { cachedActiveAgent }
     var themeId: UUID? { nil }
     
+    init(windowId: UUID, agentId: UUID, sessionData: ChatSessionData? = nil) {
+        self.windowId = windowId
+        self.agentId = agentId
+        self.session = ChatSession()
+        self.theme = ThemeManager.shared.currentTheme
+    }
+    
     init(windowId: UUID, executionContext: Any? = nil) {
         self.windowId = windowId
         self.agentId = UUID()
+        self.session = ChatSession()
         self.theme = ThemeManager.shared.currentTheme
     }
     

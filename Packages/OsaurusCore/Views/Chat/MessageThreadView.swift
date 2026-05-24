@@ -137,7 +137,33 @@ struct ScrollToBottomButton: View {
 #else
 import SwiftUI
 struct MessageThreadView: View {
-    init(_ args: Any...) {}  
+    var blocks: [ContentBlock] = []
+    var groupHeaderMap: [UUID: UUID]? = nil
+    var width: CGFloat = 400
+    var agentName: String = ""
+    var agentAvatar: String? = nil
+    var agentCustomAvatarPath: String? = nil
+    var isStreaming: Bool = false
+    var lastAssistantTurnId: UUID? = nil
+    var autoScrollEnabled: Bool = true
+    var expandedBlocksStore: ExpandedBlocksStore = ExpandedBlocksStore()
+    var scrollToBottomTrigger: Int = 0
+    var onScrolledToBottom: () -> Void = {}
+    var onScrolledAwayFromBottom: () -> Void = {}
+    var onCopy: (UUID) -> Void = { _ in }
+    var onRegenerate: ((UUID) -> Void)? = nil
+    var onEdit: ((UUID) -> Void)? = nil
+    var onDelete: ((UUID) -> Void)? = nil
+    var onSpeak: ((UUID) -> Void)? = nil
+    var editingTurnId: UUID? = nil
+    var editText: Binding<String>? = nil
+    var onConfirmEdit: (() -> Void)? = nil
+    var onCancelEdit: (() -> Void)? = nil
+    var onUserImagePreview: ((String) -> Void)? = nil
+    var onVisibleTopUserTurnChanged: ((UUID?) -> Void)? = nil
+    var scrollToTurnId: UUID? = nil
+    var scrollToTurnTrigger: Int = 0
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Message Thread", symbol: "apple.logo")
     }

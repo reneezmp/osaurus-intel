@@ -8,5 +8,5 @@
 import Foundation
 
 protocol ContentBlockProtocol: Identifiable, Sendable {
-    var id: UUID { get }
+    var id: String { get }
 }

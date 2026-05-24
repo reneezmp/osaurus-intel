@@ -21,7 +21,8 @@ final class IntelAgentManager: AgentManagerProtocol, @unchecked Sendable {
         let id: UUID
         let name: String
         let isBuiltIn: Bool = true
-        let autoSpeak: Bool = false
+        let autoSpeak: Bool? = false
+        var ttsVoice: String? { nil }
     }
 
     var activeAgentId: UUID = UUID()
@@ -120,19 +121,13 @@ final class IntelAgentManager: AgentManagerProtocol, @unchecked Sendable {
 final class IntelModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked Sendable {
     static let shared = IntelModelPickerItemCache()
 
-    private struct Item: ModelPickerItemProtocol {
-        let id: String
-        let source: ModelPickerSource
-        let isVLM: Bool
-    }
-
     var isLoaded: Bool = false
-    private(set) var items: [any ModelPickerItemProtocol] = []
+    private(set) var items: [IntelModelPickerItem] = []
 
-    func buildModelPickerItems() async -> [any ModelPickerItemProtocol] {
-        let built: [any ModelPickerItemProtocol] = [
-            Item(id: "deepseek-v4-pro", source: .builtIn, isVLM: false),
-            Item(id: "deepseek-v4-flash", source: .builtIn, isVLM: false),
+    func buildModelPickerItems() async -> [IntelModelPickerItem] {
+        let built: [IntelModelPickerItem] = [
+            IntelModelPickerItem(id: "deepseek-v4-pro", source: .builtIn, isVLM: false),
+            IntelModelPickerItem(id: "deepseek-v4-flash", source: .builtIn, isVLM: false),
         ]
         items = built
         isLoaded = true
@@ -154,13 +149,13 @@ final class IntelModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked 
 
 // MARK: - IntelChatSessionData
 
-struct IntelChatSessionData: ChatSessionDataProtocol, Identifiable, @unchecked Sendable {
+struct IntelChatSessionData: Identifiable, @unchecked Sendable {
     let id: UUID
     var title: String
     let createdAt: Date
     var updatedAt: Date
     let agentId: UUID
-    var source: Any?
+    var source: SessionSource
     var sourcePluginId: String?
     var externalSessionKey: String?
     var dispatchTaskId: UUID?
@@ -176,8 +171,8 @@ struct IntelChatSessionData: ChatSessionDataProtocol, Identifiable, @unchecked S
         updatedAt: Date = Date(),
         selectedModel: String? = nil,
         turns: [any ChatTurnProtocol] = [],
-        agentId: UUID = UUID(),
-        source: Any? = nil,
+        agentId: UUID? = nil,
+        source: SessionSource = .chat,
         sourcePluginId: String? = nil,
         externalSessionKey: String? = nil,
         dispatchTaskId: UUID? = nil,
@@ -188,7 +183,7 @@ struct IntelChatSessionData: ChatSessionDataProtocol, Identifiable, @unchecked S
         self.title = title
         self.createdAt = createdAt
         self.updatedAt = updatedAt
-        self.agentId = agentId
+        self.agentId = agentId ?? UUID()
         self.archived = archived
         self.selectedModel = selectedModel
         self.turns = turns
@@ -205,14 +200,12 @@ struct IntelChatSessionData: ChatSessionDataProtocol, Identifiable, @unchecked S
 
 // MARK: - IntelChatSessionsManager
 
-final class IntelChatSessionsManager: ChatSessionsManagerProtocol, @unchecked Sendable {
+final class IntelChatSessionsManager: @unchecked Sendable {
     static let shared = IntelChatSessionsManager()
     private var sessions: [UUID: IntelChatSessionData] = [:]
 
-    func save(_ data: any ChatSessionDataProtocol) {
-        if let d = data as? IntelChatSessionData {
-            sessions[d.id] = d
-        }
+    func save(_ data: IntelChatSessionData) {
+        sessions[data.id] = data
     }
 
     func delete(id: UUID) {
@@ -235,7 +228,7 @@ final class IntelChatSessionsManager: ChatSessionsManagerProtocol, @unchecked Se
         return id
     }
 
-    func sessions(for agentId: UUID?) -> [any ChatSessionDataProtocol] {
+    func sessions(for agentId: UUID?) -> [IntelChatSessionData] {
         Array(sessions.values)
     }
 

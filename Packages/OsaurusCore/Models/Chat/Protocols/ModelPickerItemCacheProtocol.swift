@@ -9,6 +9,6 @@ import Foundation
 
 protocol ModelPickerItemCacheProtocol: AnyObject {
     var isLoaded: Bool { get }
-    var items: [any ModelPickerItemProtocol] { get }
-    func buildModelPickerItems() async -> [any ModelPickerItemProtocol]
+    var items: [ModelPickerItem] { get }
+    func buildModelPickerItems() async -> [ModelPickerItem]
 }
