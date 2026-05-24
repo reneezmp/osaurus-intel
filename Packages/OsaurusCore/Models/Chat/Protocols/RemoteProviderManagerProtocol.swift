@@ -10,7 +10,7 @@ import Foundation
 protocol RemoteProviderManagerProtocol: AnyObject {
     var configuration: RemoteProviderConfigInfoProtocol { get }
     func isEphemeral(id: String) -> Bool
-    func updateProvider(_ provider: any RemoteProviderInfoProtocol)
+    func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?)
     func connect(providerId: String) async throws
     func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool)
 }

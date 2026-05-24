@@ -41,7 +41,7 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
     func isEphemeral(id: String) -> Bool { false }
-    func updateProvider(_ provider: any RemoteProviderInfoProtocol) {}
+    func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?) {}
     func connect(providerId: String) async throws {}
     func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool) {}
 }
