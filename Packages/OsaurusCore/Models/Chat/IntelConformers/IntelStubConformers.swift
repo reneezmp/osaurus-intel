@@ -41,7 +41,7 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
     func isEphemeral(id: String) -> Bool { false }
-    func updateProvider(_ provider: any RemoteProviderInfoProtocol) {}
+    func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String? = nil) {}
     func connect(providerId: String) async throws {}
     func addProvider(_ provider: any RemoteProviderInfoProtocol, isEphemeral: Bool) {}
 }
@@ -82,7 +82,7 @@ final class IntelGreetingService: GenerativeGreetingServiceProtocol, @unchecked 
 // MARK: - SharedArtifact (stub)
 
 enum IntelSharedArtifact: SharedArtifactProtocol {
-    static func processToolResultDetailed(_ text: String, contextId: UUID, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
+    static func processToolResultDetailed(_ text: String, contextId: String, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
         text
     }
     static func fromEnrichedToolResult(_ resultText: String) -> Any? { nil }

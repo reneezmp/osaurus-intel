@@ -61,7 +61,7 @@ struct IntelChatTurn: ChatTurnProtocol, Identifiable, @unchecked Sendable, Equat
 
 // MARK: - Attachment
 
-struct IntelAttachment: AttachmentProtocol, Identifiable, Sendable {
+struct IntelAttachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
     let id: UUID
     var filename: String?
     let isDocument: Bool
