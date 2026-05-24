@@ -8,54 +8,114 @@
 #if OSAURUS_INTEL
 
 import Foundation
+import SwiftUI
 
 // MARK: - ChatTurn
 
-struct IntelChatTurn: ChatTurnProtocol, Identifiable, @unchecked Sendable, Equatable {
+final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @unchecked Sendable, Equatable {
     let id: UUID
-    var turnId: UUID?
-    var role: ChatTurnRole
-    var content: String
-    var toolCalls: [ToolCall]?
-    var toolResults: [String: String]
-    var toolCallId: String?
-    let thinking: String?
-    var unclosedReasoning: Bool
-    var hasRenderableThinking: Bool { !(thinking ?? "").isEmpty }
-    var visibleContent: String { content }
-    var contentIsBlank: Bool { content.trimmingCharacters(in: .whitespaces).isEmpty }
-    var thinkingIsBlank: Bool { (thinking ?? "").isEmpty }
-    var contentIsEmpty: Bool { content.isEmpty }
-    var contentLength: Int { content.count }
-    var attachments: [any AttachmentProtocol]
-    var imageData: Data? { nil }
-    var generationTokenCount: Int?
-    var generationTokensPerSecond: Double?
-    var timeToFirstToken: TimeInterval?
+    let role: MessageRole
+    let createdAt: Date
     var completedAt: Date?
-    var pendingToolName: String?
+
+    @Published var content: String {
+        didSet { _contentLength = content.count }
+    }
+    var contentLength: Int { _contentLength }
+    private var _contentLength: Int
+
+    var contentIsEmpty: Bool { _contentLength == 0 }
+    var contentIsBlank: Bool {
+        content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    @Published var thinking: String {
+        didSet { _thinkingLength = thinking.count }
+    }
+    var thinkingLength: Int { _thinkingLength }
+    private var _thinkingLength: Int
+
+    var thinkingIsEmpty: Bool { _thinkingLength == 0 }
+    var thinkingIsBlank: Bool {
+        thinking.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    var hasThinking: Bool { _thinkingLength > 0 }
+    var hasRenderableThinking: Bool { hasThinking && !thinkingIsBlank }
+
+    @Published var attachments: [any AttachmentProtocol] = []
+    @Published var toolCalls: [ToolCall]? = nil
+    var toolCallId: String? = nil
+    @Published var toolResults: [String: String] = [:]
+
+    var pendingToolName: String? = nil
+    var pendingToolArgPreview: String? = nil
+    var pendingToolArgSize: Int = 0
     var pendingToolArgFragmentCount: Int = 0
-    var preflightCapabilities: Any?
+    var preflightCapabilities: Any? = nil
 
-    private var _pendingToolArgs: String = ""
+    var timeToFirstToken: TimeInterval?
+    var generationTokensPerSecond: Double?
+    var generationTokenCount: Int?
+    var unclosedReasoning: Bool = false
 
-    init(role: ChatTurnRole, content: String, attachments: [any AttachmentProtocol] = [], toolCalls: [ToolCall]? = nil) {
-        self.id = UUID()
+    var turnId: UUID? { id }
+    var imageData: Data? { nil }
+    var hasAttachments: Bool { !attachments.isEmpty }
+    var visibleContent: String { content }
+
+    init(role: MessageRole, content: String, attachments: [any AttachmentProtocol] = [], id: UUID = UUID(), createdAt: Date = Date()) {
+        self.id = id
         self.role = role
+        self.createdAt = createdAt
         self.content = content
+        self._contentLength = content.count
+        self.thinking = ""
+        self._thinkingLength = 0
         self.attachments = attachments
-        self.toolCalls = toolCalls
-        self.toolResults = [:]
-        self.thinking = nil
-        self.unclosedReasoning = false
         self.completedAt = role == .user ? Date() : nil
     }
 
-    mutating func consolidateContent() {}
-    mutating func clearPendingToolArgs() { _pendingToolArgs = "" }
-    mutating func appendToolArgFragment(_ arg: String) {
-        _pendingToolArgs += arg
+    func appendContent(_ s: String) {
+        guard !s.isEmpty else { return }
+        content += s
+    }
+
+    func appendContentAndNotify(_ s: String) {
+        appendContent(s)
+        objectWillChange.send()
+    }
+
+    func appendThinking(_ s: String) {
+        guard !s.isEmpty else { return }
+        thinking += s
+    }
+
+    func appendThinkingAndNotify(_ s: String) {
+        appendThinking(s)
+        objectWillChange.send()
+    }
+
+    func notifyContentChanged() {
+        objectWillChange.send()
+    }
+
+    func consolidateContent() {}
+    func clearPendingToolArgs() {
+        pendingToolArgPreview = nil
+        pendingToolArgSize = 0
+        pendingToolArgFragmentCount = 0
+    }
+
+    func appendToolArgFragment(_ fragment: String) {
+        pendingToolArgSize += fragment.utf8.count
         pendingToolArgFragmentCount += 1
+    }
+
+    func trimTrailingFunctionCallLeakage(toolName: String) {}
+
+    static func == (lhs: IntelChatTurn, rhs: IntelChatTurn) -> Bool {
+        lhs.id == rhs.id
     }
 }
 
@@ -99,6 +159,17 @@ enum ContentBlockKind: Equatable {
     case assistantMessage(String)
     case thinking(String)
     case toolCall(String, String)
+
+    static func == (lhs: ContentBlockKind, rhs: ContentBlockKind) -> Bool {
+        switch (lhs, rhs) {
+        case (.sharedArtifact, .sharedArtifact): return true
+        case let (.userMessage(lText, _), .userMessage(rText, _)): return lText == rText
+        case let (.assistantMessage(lText), .assistantMessage(rText)): return lText == rText
+        case let (.thinking(lText), .thinking(rText)): return lText == rText
+        case let (.toolCall(lName, lArgs), .toolCall(rName, rArgs)): return lName == rName && lArgs == rArgs
+        default: return false
+        }
+    }
 }
 
 struct IntelContentBlock: ContentBlockProtocol, Identifiable, @unchecked Sendable {
@@ -116,8 +187,59 @@ struct IntelModelOptionValue: ModelOptionValueProtocol, Sendable {
 
 // MARK: - ChatTurnData
 
-struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, Sendable, Equatable {
-    init(from turn: any ChatTurnProtocol) {}
+struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable, Equatable {
+    let id: UUID
+    let role: MessageRole
+    var content: String
+    var attachments: [any AttachmentProtocol] = []
+    var toolCalls: [ToolCall]?
+    var toolCallId: String?
+    var toolResults: [String: String]
+    var thinking: String
+    let createdAt: Date
+    var completedAt: Date?
+    var generationTokenCount: Int?
+    var timeToFirstToken: TimeInterval?
+    var generationTokensPerSecond: Double?
+    var pendingToolName: String?
+    var pendingToolArgFragmentCount: Int = 0
+    var unclosedReasoning: Bool = false
+    var preflightCapabilities: Any? = nil
+
+    var turnId: UUID? { id }
+    var imageData: Data? { nil }
+    var hasRenderableThinking: Bool { !thinking.isEmpty }
+    var hasThinking: Bool { !thinking.isEmpty }
+    var contentIsBlank: Bool { content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+    var thinkingIsBlank: Bool { thinking.isEmpty }
+    var contentIsEmpty: Bool { content.isEmpty }
+    var contentLength: Int { content.count }
+    var visibleContent: String { content }
+
+    init(from turn: any ChatTurnProtocol) {
+        self.id = turn.id
+        self.role = turn.role
+        self.content = turn.content
+        self.attachments = turn.attachments
+        self.toolCalls = turn.toolCalls
+        self.toolCallId = turn.toolCallId
+        self.toolResults = turn.toolResults
+        self.thinking = turn.thinking
+        self.createdAt = turn.createdAt
+        self.completedAt = turn.completedAt
+        self.generationTokenCount = turn.generationTokenCount
+        self.timeToFirstToken = turn.timeToFirstToken
+        self.generationTokensPerSecond = turn.generationTokensPerSecond
+        self.preflightCapabilities = turn.preflightCapabilities
+    }
+
+    static func == (lhs: IntelChatTurnData, rhs: IntelChatTurnData) -> Bool {
+        lhs.id == rhs.id && lhs.content == rhs.content
+    }
+
+    func consolidateContent() {}
+    func clearPendingToolArgs() {}
+    func appendToolArgFragment(_ arg: String) {}
 }
 
 // MARK: - Type aliases
@@ -144,7 +266,7 @@ struct ImageFullScreenView: View { init(_ args: Any...) {}; var body: some View 
 final class MemoryContextAssembler: @unchecked Sendable { static let shared = MemoryContextAssembler(); static func assembleContext(agentId: String = "", config: Any? = nil) async -> Any? { nil } }
 final class MemorySearchService: @unchecked Sendable { static let shared = MemorySearchService(); func initialize() async {} }
 
-final class ModelOptionsStore: @unchecked Sendable { static let shared = ModelOptionsStore(); func loadOptions(for model: String) -> [ModelOptionValue] { [:] } }
+final class ModelOptionsStore: @unchecked Sendable { static let shared = ModelOptionsStore(); func loadOptions(for model: String) -> [ModelOptionValue] { [] } }
 final class ModelProfileRegistry: @unchecked Sendable { static let shared = ModelProfileRegistry(); static func thinkingEnabled(for model: String, values: [String: ModelOptionValue]) -> Bool? { nil }; static func normalizedOptions(for model: String, persisted: [String: ModelOptionValue]) -> [String: ModelOptionValue] { persisted } }
 final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: [String]) {}; var runtimeSettings: Any? { nil } }
 
@@ -165,7 +287,10 @@ struct SessionToolState: Sendable { init() {} }
 final class SkillManager: @unchecked Sendable { static let shared = SkillManager() }
 final class SlashCommandRegistry: @unchecked Sendable { static let shared = SlashCommandRegistry() }
 
-struct StreamingStatsHint: Sendable { init() {} }
+enum StreamingStatsHint: Sendable {
+    static func encode(tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool = false, stopReason: String? = nil) -> String { "" }
+    static func decode(_ delta: String) -> (tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool, stopReason: String?)? { nil }
+}
 
 enum SessionSource: Sendable { case chat, dispatch, schedule, watcher }
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
@@ -277,12 +402,21 @@ final class BlockMemoizer: @unchecked Sendable {
     func clear() {}
 }
 
-struct ToolCallDone: Sendable { let callId: String; let result: String = "" }
 struct StreamingToolHint: Sendable {
-    init() {}
-    static func decodeDone(_ delta: Any) -> ToolCallDone? { nil }
-    static func decode(_ delta: Any) -> String? { nil }
-    static func decodeArgs(_ delta: Any) -> String? { nil }
+    static func encode(_ toolName: String) -> String { toolName }
+    static func encodeArgs(_ fragment: String) -> String { fragment }
+    static func encodeDone(callId: String, name: String, arguments: String, result: String) -> String { "" }
+    static func decodeDone(_ delta: String) -> ToolCallDone? { nil }
+    static func isSentinel(_ delta: String) -> Bool { false }
+    static func decode(_ delta: String) -> String? { nil }
+    static func decodeArgs(_ delta: String) -> String? { nil }
+}
+
+struct ToolCallDone: Sendable, Equatable {
+    let callId: String
+    let name: String
+    let arguments: String
+    let result: String
 }
 
 struct StreamingDeltaProcessor: @unchecked Sendable {
@@ -291,9 +425,9 @@ struct StreamingDeltaProcessor: @unchecked Sendable {
     mutating func receiveReasoning(_ text: String) {}
     mutating func receiveDelta(_ delta: Any) {}
 }
-struct StreamingReasoningHint: Sendable {
-    init() {}
-    static func decode(_ delta: Any) -> String? { nil }
+enum StreamingReasoningHint: Sendable {
+    static func encode(_ text: String) -> String { text }
+    static func decode(_ delta: String) -> String? { nil }
 }
 
 final class SystemPromptComposer: @unchecked Sendable {

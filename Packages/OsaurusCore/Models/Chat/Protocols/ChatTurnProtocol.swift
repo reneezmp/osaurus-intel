@@ -10,14 +10,15 @@ import Foundation
 protocol ChatTurnProtocol: Identifiable, Sendable {
     var id: UUID { get }
     var turnId: UUID? { get }
-    var role: ChatTurnRole { get set }
+    var role: MessageRole { get }
     var content: String { get set }
     var toolCalls: [ToolCall]? { get set }
     var toolResults: [String: String] { get set }
     var toolCallId: String? { get set }
-    var thinking: String? { get }
+    var thinking: String { get }
     var unclosedReasoning: Bool { get set }
     var hasRenderableThinking: Bool { get }
+    var hasThinking: Bool { get }
     var contentIsBlank: Bool { get }
     var thinkingIsBlank: Bool { get }
     var contentIsEmpty: Bool { get }
@@ -31,12 +32,10 @@ protocol ChatTurnProtocol: Identifiable, Sendable {
     var pendingToolName: String? { get set }
     var pendingToolArgFragmentCount: Int { get }
     var preflightCapabilities: Any? { get set }
+    var createdAt: Date { get }
+    var visibleContent: String { get }
 
-    mutating func consolidateContent()
-    mutating func clearPendingToolArgs()
-    mutating func appendToolArgFragment(_ arg: String)
-}
-
-enum ChatTurnRole: String, Sendable {
-    case user, assistant, system, tool
+    func consolidateContent()
+    func clearPendingToolArgs()
+    func appendToolArgFragment(_ arg: String)
 }

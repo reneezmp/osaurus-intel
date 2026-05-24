@@ -82,6 +82,12 @@ final class IntelGreetingService: GenerativeGreetingServiceProtocol, @unchecked 
 // MARK: - SharedArtifact (stub)
 
 enum IntelSharedArtifact: SharedArtifactProtocol {
+    enum ResolutionFailure: Error {
+        case markersMissing
+        case noContentOrPath
+        case destinationRejected(filename: String)
+    }
+
     static func processToolResultDetailed(_ text: String, contextId: String, contextType: String, executionMode: Any?, sandboxAgentName: String?) -> String {
         text
     }
@@ -90,7 +96,6 @@ enum IntelSharedArtifact: SharedArtifactProtocol {
 
 typealias SpeechService = IntelSpeechService
 typealias RemoteProviderManager = IntelRemoteProviderManager
-typealias RemoteProvider = IntelRemoteProviderManager.Provider
 typealias ToolRegistry = IntelToolRegistry
 typealias MemoryService = IntelMemoryService
 typealias GenerativeGreetingPool = IntelGreetingPool
