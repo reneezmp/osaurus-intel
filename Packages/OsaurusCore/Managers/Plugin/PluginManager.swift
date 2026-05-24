@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PluginManager.swift
 //  osaurus
@@ -1560,3 +1561,122 @@ final class PluginManager {
         return nil
     }
 }
+#else
+
+// MARK: - Intel fork (M9 Phase 2): capability-aware PluginManager
+
+import Foundation
+
+@MainActor
+public final class PluginManager: ObservableObject {
+    public static let shared = PluginManager()
+
+    /// Successfully loaded (compatible) plugins.
+    @Published public private(set) var loadedPlugins: [LoadedPluginInfo] = []
+
+    /// Plugins that failed to load for non-capability reasons.
+    @Published public private(set) var failedPlugins: [String: FailedPluginInfo] = [:]
+
+    /// Plugins skipped because they require Apple Silicon capabilities.
+    @Published public private(set) var incompatiblePlugins: [IncompatiblePluginInfo] = []
+
+    /// Plugins loaded but missing optional capabilities.
+    @Published public private(set) var degradedPluginIds: Set<String> = []
+
+    public struct LoadedPluginInfo: Identifiable, Sendable {
+        public let id: String
+        public let pluginId: String
+        public let name: String
+        public let version: String
+        public let toolNames: [String]
+    }
+
+    public struct FailedPluginInfo: Sendable {
+        public let pluginId: String
+        public let error: String
+    }
+
+    public struct IncompatiblePluginInfo: Identifiable, Sendable {
+        public let pluginId: String
+        public let name: String
+        public let version: String
+        public let missingRequired: [String]
+        public var id: String { pluginId }
+    }
+
+    private init() {}
+
+    /// Scans the plugin directory, checks capabilities, and loads compatible plugins.
+    public func loadAll(forceReload: Bool = false) async {
+        let pluginsDir = FileManager.default.homeDirectoryForCurrentUser
+            .appendingPathComponent(".osaurus/Tools")
+
+        guard FileManager.default.fileExists(atPath: pluginsDir.path) else { return }
+
+        guard let entries = try? FileManager.default.contentsOfDirectory(at: pluginsDir, includingPropertiesForKeys: nil) else {
+            return
+        }
+
+        for pluginURL in entries {
+            let manifestURL = pluginURL.appendingPathComponent("manifest.json")
+            guard FileManager.default.fileExists(atPath: manifestURL.path),
+                  let data = try? Data(contentsOf: manifestURL),
+                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+                continue
+            }
+
+            let pluginId = json["plugin_id"] as? String ?? pluginURL.lastPathComponent
+            let name = json["name"] as? String ?? pluginId
+            let version = json["version"] as? String ?? "0.0.0"
+
+            let required = json["host_capabilities_required"] as? [String]
+            let optional = json["host_capabilities_optional"] as? [String]
+
+            let compatibility = PluginCompatibilityChecker.check(required: required, optional: optional)
+
+            switch compatibility {
+            case .compatible:
+                let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
+                let toolNames = tools.compactMap { $0["id"] as? String }
+
+                loadedPlugins.append(LoadedPluginInfo(
+                    id: pluginId,
+                    pluginId: pluginId,
+                    name: name,
+                    version: version,
+                    toolNames: toolNames
+                ))
+
+            case .degraded(let missing):
+                let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
+                let toolNames = tools.compactMap { $0["id"] as? String }
+
+                loadedPlugins.append(LoadedPluginInfo(
+                    id: pluginId,
+                    pluginId: pluginId,
+                    name: name,
+                    version: version,
+                    toolNames: toolNames
+                ))
+                degradedPluginIds.insert(pluginId)
+
+            case .incompatible(let missing):
+                incompatiblePlugins.append(IncompatiblePluginInfo(
+                    pluginId: pluginId,
+                    name: name,
+                    version: version,
+                    missingRequired: missing
+                ))
+            }
+        }
+    }
+
+    public func plugin(withId id: String) -> LoadedPluginInfo? {
+        loadedPlugins.first { $0.pluginId == id }
+    }
+
+    public func isDegraded(pluginId: String) -> Bool {
+        degradedPluginIds.contains(pluginId)
+    }
+}
+#endif
