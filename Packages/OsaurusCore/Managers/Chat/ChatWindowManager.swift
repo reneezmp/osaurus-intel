@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ChatWindowManager.swift
 //  osaurus
@@ -871,3 +872,104 @@ private final class ChatWindowDelegate: NSObject, NSWindowDelegate {
         manager?.windowWillClose(id: windowId)
     }
 }
+#else
+
+// MARK: - Intel fork: minimal ChatWindowManager stub
+
+import AppKit
+import Combine
+import SwiftUI
+
+public struct ChatWindowInfo: Identifiable, Sendable {
+    public let id: UUID
+    public let agentId: UUID
+    public let sessionId: UUID?
+    public let createdAt: Date
+
+    public init(id: UUID = UUID(), agentId: UUID, sessionId: UUID? = nil, createdAt: Date = Date()) {
+        self.id = id
+        self.agentId = agentId
+        self.sessionId = sessionId
+        self.createdAt = createdAt
+    }
+}
+
+@MainActor
+public final class ChatWindowManager: NSObject, ObservableObject {
+    public static let shared = ChatWindowManager()
+
+    @Published public private(set) var windows: [UUID: ChatWindowInfo] = [:]
+    @Published public private(set) var lastFocusedWindowId: UUID?
+
+    public var windowCount: Int { windows.count }
+    public var hasVisibleWindows: Bool { !windows.isEmpty }
+
+    private var nsWindows: [UUID: NSWindow] = [:]
+    private var windowStates: [UUID: ChatWindowState] = [:]
+
+    public func createWindow(agentId: UUID = UUID()) -> UUID {
+        let info = ChatWindowInfo(agentId: agentId)
+        windows[info.id] = info
+        lastFocusedWindowId = info.id
+
+        let state = ChatWindowState(windowId: info.id)
+        windowStates[info.id] = state
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Osaurus Chat"
+        window.isReleasedWhenClosed = true
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        nsWindows[info.id] = window
+
+        return info.id
+    }
+
+    func windowState(id: UUID) -> ChatWindowState? {
+        windowStates[id]
+    }
+
+    public func focusAllWindows() {
+        for (_, window) in nsWindows {
+            window.makeKeyAndOrderFront(nil)
+        }
+    }
+
+    public func toggleLastFocused() {
+        if let id = lastFocusedWindowId, let window = nsWindows[id] {
+            window.makeKeyAndOrderFront(nil)
+        } else {
+            _ = createWindow()
+        }
+    }
+
+    public func showWindow(id: UUID) {
+        nsWindows[id]?.makeKeyAndOrderFront(nil)
+    }
+
+    public func closeWindow(id: UUID) {
+        windows.removeValue(forKey: id)
+        nsWindows[id]?.close()
+        nsWindows.removeValue(forKey: id)
+        windowStates.removeValue(forKey: id)
+        if lastFocusedWindowId == id {
+            lastFocusedWindowId = windows.keys.first
+        }
+    }
+
+    public func findWindows(byAgentId agentId: UUID) -> [(id: UUID, info: ChatWindowInfo)] {
+        windows.filter { $0.value.agentId == agentId }.map { ($0.key, $0.value) }
+    }
+
+    public func stopAllSessions() {
+        windows.removeAll()
+        nsWindows.removeAll()
+        windowStates.removeAll()
+    }
+}
+#endif

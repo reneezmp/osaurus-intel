@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ChatWindowState.swift
 //  osaurus
@@ -499,3 +500,42 @@ final class ChatWindowState: ObservableObject {
         )
     }
 }
+#else
+
+// MARK: - Intel fork: minimal ChatWindowState stub
+
+import AppKit
+import Foundation
+import SwiftUI
+
+@MainActor
+final class ChatWindowState: ObservableObject {
+    let windowId: UUID
+    let session: ChatWindowSessionStub
+    let foundationModelAvailable: Bool = false
+
+    @Published var showSidebar: Bool = false
+    @Published var isStreaming: Bool = false
+    @Published var streamingContent: String = ""
+    @Published var showVoiceInput: Bool = false
+    @Published var agents: [AgentStub] = []
+    @Published var filteredSessions: [Any] = []
+    @Published var selectedModel: String = "deepseek-v4-pro"
+    @Published var availableModels: [String] = ["deepseek-v4-pro", "deepseek-v4-flash"]
+
+    init(windowId: UUID, executionContext: Any? = nil) {
+        self.windowId = windowId
+        self.session = ChatWindowSessionStub()
+    }
+
+    struct ChatWindowSessionStub {
+        let id = UUID()
+        let isStreaming = false
+    }
+
+    struct AgentStub: Identifiable {
+        public let id = UUID()
+        public let name: String
+    }
+}
+#endif
