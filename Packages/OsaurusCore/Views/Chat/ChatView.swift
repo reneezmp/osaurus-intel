@@ -2736,11 +2736,11 @@ struct ChatView: View {
     @ViewBuilder
     private var chatModeContent: some View {
         GeometryReader { proxy in
-            let sidebarWidth: CGFloat = windowState.showSidebar ? 240 : 0
-            let chatWidth = proxy.size.width - sidebarWidth
+            let windowWidth: CGFloat = proxy.size.width
+            let showSidebar: Bool = windowState.showSidebar
+            let sidebarWidth: CGFloat = showSidebar ? 240 : 0
+            let chatWidth = windowWidth - sidebarWidth
             let effectiveContentWidth = min(chatWidth, 1100)
-            let onSidebarSelect: (ChatSessionData) -> Void = { d in let ws = windowState; ws.loadSession(d); isPinnedToBottom = true }
-            let onSidebarNewChat: () -> Void = { windowState.startNewChat() }
             let onSidebarDelete: (UUID) -> Void = { id in if session.sessionId == id { session.reset() }; ChatSessionsManager.shared.delete(id: id); windowState.refreshSessions() }
             let onSidebarRename: (UUID, String) -> Void = { id, title in ChatSessionsManager.shared.rename(id: id, title: title); windowState.refreshSessions() }
             let onSidebarSetArchived: (UUID, Bool) -> Void = { id, archived in ChatSessionsManager.shared.setArchived(id: id, archived: archived); if session.sessionId == id { session.archived = archived }; windowState.refreshSessions() }
@@ -2751,12 +2751,13 @@ struct ChatView: View {
                 // Sidebar
                 VStack(alignment: .leading, spacing: 0) {
                     if windowState.showSidebar {
+                        let _ = windowState // help type inference on Intel
                         ChatSessionSidebar(
                             sessions: windowState.filteredSessions,
                             agentId: windowState.agentId,
                             currentSessionId: session.sessionId,
-                            onSelect: onSidebarSelect,
-                            onNewChat: onSidebarNewChat,
+                            onSelect: { d in windowState.loadSession(data: d); isPinnedToBottom = true },
+                            onNewChat: { windowState.startNewChat() },
                             onDelete: onSidebarDelete,
                             onRename: onSidebarRename,
                             onSetArchived: onSidebarSetArchived,
@@ -2905,17 +2906,15 @@ struct ChatView: View {
             isPinnedToBottom = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectDiscoveredAgent)) { notification in
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
-                targetWindowId == windowState.windowId,
-                let agent = notification.object as? DiscoveredAgent
-            else { return }
-            selectDiscoveredAgent(agent)
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
+            guard targetWindowId == windowState.windowId else { return }
+            guard let discoveredAgent = notification.object as? DiscoveredAgent else { return }
+            selectDiscoveredAgent(discoveredAgent)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
-                targetWindowId == windowState.windowId,
-                let relay = notification.object as? PairedRelayAgent
-            else { return }
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
+            guard targetWindowId == windowState.windowId else { return }
+            guard let relay = notification.object as? PairedRelayAgent else { return }
             connectToRelayAgent(relay)
         }
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in

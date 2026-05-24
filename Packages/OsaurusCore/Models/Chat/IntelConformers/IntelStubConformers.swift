@@ -11,8 +11,8 @@ import Foundation
 
 // MARK: - SpeechService (no-op on Intel)
 
-final class IntelSpeechService: SpeechServiceProtocol, @unchecked Sendable {
-    static let shared = IntelSpeechService()
+final class SpeechService: SpeechServiceProtocol, @unchecked Sendable {
+    static let shared = SpeechService()
     let isRecording: Bool = false
 
     func stopStreamingTranscription() async {}
@@ -21,8 +21,8 @@ final class IntelSpeechService: SpeechServiceProtocol, @unchecked Sendable {
 
 // MARK: - RemoteProviderManager (cloud-only)
 
-final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecked Sendable {
-    static let shared = IntelRemoteProviderManager()
+final class RemoteProviderManager: RemoteProviderManagerProtocol, @unchecked Sendable {
+    static let shared = RemoteProviderManager()
 
     struct Config: RemoteProviderConfigInfoProtocol {
         var providers: [any RemoteProviderInfoProtocol] = []
@@ -67,8 +67,8 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
 
 // MARK: - ToolRegistry (stub)
 
-final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
-    static let shared = IntelToolRegistry()
+final class ToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
+    static let shared = ToolRegistry()
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
     func execute(name: String, argumentsJSON: String) async throws -> String {
@@ -78,23 +78,23 @@ final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
 
 // MARK: - MemoryService (disabled on Intel)
 
-final class IntelMemoryService: MemoryServiceProtocol, @unchecked Sendable {
-    static let shared = IntelMemoryService()
+final class MemoryService: MemoryServiceProtocol, @unchecked Sendable {
+    static let shared = MemoryService()
     func bufferTurn(userMessage: String, assistantMessage: String?, agentId: String, conversationId: String, sessionDate: String? = nil) async {}
 }
 
 // MARK: - GenerativeGreeting (no-op on Intel)
 
-final class IntelGreetingPool: GenerativeGreetingPoolProtocol, @unchecked Sendable {
-    static let shared = IntelGreetingPool()
+final class GenerativeGreetingPool: GenerativeGreetingPoolProtocol, @unchecked Sendable {
+    static let shared = GenerativeGreetingPool()
     func setActive(agent: any AgentInfoProtocol, model: String) async {}
     func popFresh(for agent: any AgentInfoProtocol, model: String) async -> GenerativeGreeting? { nil }
     func seed(_ cached: GenerativeGreeting, for agent: any AgentInfoProtocol, model: String) async {}
     func warmUp(for agent: any AgentInfoProtocol, model: String) async {}
 }
 
-final class IntelGreetingService: GenerativeGreetingServiceProtocol, @unchecked Sendable {
-    static let shared = IntelGreetingService()
+final class GenerativeGreetingService: GenerativeGreetingServiceProtocol, @unchecked Sendable {
+    static let shared = GenerativeGreetingService()
     func generate(agent: any AgentInfoProtocol, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
 }
 
@@ -109,7 +109,7 @@ struct ProcessingResult: Sendable {
     let enrichedToolResult: String
 }
 
-enum IntelSharedArtifact: SharedArtifactProtocol {
+enum SharedArtifact: SharedArtifactProtocol {
     enum ResolutionFailure: Error {
         case markersMissing
         case noContentOrPath
@@ -132,13 +132,6 @@ enum IntelSharedArtifact: SharedArtifactProtocol {
     }
 }
 
-typealias SpeechService = IntelSpeechService
-typealias RemoteProviderManager = IntelRemoteProviderManager
-typealias ToolRegistry = IntelToolRegistry
-typealias MemoryService = IntelMemoryService
-typealias GenerativeGreetingPool = IntelGreetingPool
-typealias GenerativeGreetingService = IntelGreetingService
-typealias SharedArtifact = IntelSharedArtifact
 
 extension RemoteProvider: RemoteProviderInfoProtocol {}
 

@@ -12,7 +12,7 @@ import SwiftUI
 
 // MARK: - ChatTurn
 
-final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @unchecked Sendable, Equatable {
+final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @unchecked Sendable, Equatable {
     let id: UUID
     let role: MessageRole
     let createdAt: Date
@@ -43,7 +43,7 @@ final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @un
     var hasThinking: Bool { _thinkingLength > 0 }
     var hasRenderableThinking: Bool { hasThinking && !thinkingIsBlank }
 
-    @Published var attachments: [IntelAttachment] = []
+    @Published var attachments: [Attachment] = []
     @Published var toolCalls: [ToolCall]? = nil
     var toolCallId: String? = nil
     @Published var toolResults: [String: String] = [:]
@@ -64,7 +64,7 @@ final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @un
     var hasAttachments: Bool { !attachments.isEmpty }
     var visibleContent: String { content }
 
-    init(role: MessageRole, content: String, attachments: [IntelAttachment] = [], id: UUID = UUID(), createdAt: Date = Date()) {
+    init(role: MessageRole, content: String, attachments: [Attachment] = [], id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -125,14 +125,14 @@ final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @un
 
     func trimTrailingFunctionCallLeakage(toolName: String) {}
 
-    static func == (lhs: IntelChatTurn, rhs: IntelChatTurn) -> Bool {
+    static func == (lhs: ChatTurn, rhs: ChatTurn) -> Bool {
         lhs.id == rhs.id
     }
 }
 
 // MARK: - Attachment
 
-struct IntelAttachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
+struct Attachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
     let id: UUID
     var filename: String?
     let isDocument: Bool
@@ -228,7 +228,7 @@ enum ContentBlockKind: Equatable {
     }
 }
 
-struct IntelContentBlock: Identifiable, @unchecked Sendable {
+struct ContentBlock: Identifiable, @unchecked Sendable {
     let id: String
     let turnId: UUID
     let kind: ContentBlockKind
@@ -248,14 +248,14 @@ struct IntelContentBlock: Identifiable, @unchecked Sendable {
 
 // MARK: - ModelOptionValue
 
-struct IntelModelOptionValue: ModelOptionValueProtocol, Codable, Sendable {
+struct ModelOptionValue: ModelOptionValueProtocol, Codable, Sendable {
     let boolValue: Bool?
     init(boolValue: Bool?) { self.boolValue = boolValue }
 }
 
 // MARK: - ChatTurnData
 
-struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable, Equatable {
+struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable, Equatable {
     let id: UUID
     let role: MessageRole
     var content: String
@@ -301,7 +301,7 @@ struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sen
         self.preflightCapabilities = turn.preflightCapabilities
     }
 
-    static func == (lhs: IntelChatTurnData, rhs: IntelChatTurnData) -> Bool {
+    static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
         lhs.id == rhs.id && lhs.content == rhs.content
     }
 
@@ -311,9 +311,6 @@ struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sen
 }
 
 // MARK: - Type aliases
-typealias ChatTurn = IntelChatTurn
-typealias Attachment = IntelAttachment
-typealias ContentBlock = IntelContentBlock
 
 // Agent from Agent.swift is NOT excluded; add conformance to AgentInfoProtocol
 extension Agent: AgentInfoProtocol {}
@@ -323,7 +320,7 @@ struct AppChatConfigStub: Sendable { var generativeGreetingsEnabled = false; var
 
 final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
 
-final class ChatConfigurationStore: @unchecked Sendable { static func load() -> ChatConfiguration { IntelChatConfiguration.shared } }
+final class ChatConfigurationStore: @unchecked Sendable { static func load() -> ChatConfiguration { ChatConfiguration.shared } }
 
 final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
 
@@ -416,24 +413,21 @@ enum StreamingStatsHint: Sendable {
 enum SessionSource: Sendable { case chat, dispatch, schedule, watcher }
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
 
-typealias ModelOptionValue = IntelModelOptionValue
-typealias ChatTurnData = IntelChatTurnData
 
-struct IntelModelPickerItem: ModelPickerItemProtocol {
+struct ModelPickerItem: ModelPickerItemProtocol {
     let id: String
     var source: ModelPickerSource
     var isVLM: Bool
 }
 
-extension IntelModelPickerItem: Sendable {}
+extension ModelPickerItem: Sendable {}
 
-typealias ModelPickerItem = IntelModelPickerItem
 
-extension Array where Element == IntelModelPickerItem {
-    var firstChatCapable: IntelModelPickerItem? { first { !$0.isVLM } }
+extension Array where Element == ModelPickerItem {
+    var firstChatCapable: ModelPickerItem? { first { !$0.isVLM } }
 }
 
-extension Array where Element == IntelAttachment {
+extension Array where Element == Attachment {
     var images: [Data] {
         compactMap { $0.imageData }
     }
@@ -515,7 +509,7 @@ struct MockChatData: Sendable {
     init() {}
     static var isEnabled: Bool { false }
     static let shared = MockChatData()
-    static func mockTurnsForPerformanceTest(count: Int = 10) -> [IntelChatTurn] { [] }
+    static func mockTurnsForPerformanceTest(count: Int = 10) -> [ChatTurn] { [] }
 }
 
 struct ServiceToolInvocation: Sendable {
@@ -582,7 +576,7 @@ struct ToolCallDone: Sendable, Equatable {
 }
 
 final class StreamingDeltaProcessor: @unchecked Sendable {
-    init(turn: IntelChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {}
+    init(turn: ChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {}
     func finalize() {}
     func receiveReasoning(_ text: String) {}
     func receiveDelta(_ delta: Any) {}
@@ -601,11 +595,11 @@ final class SystemPromptComposer: @unchecked Sendable {
 
 struct PromptManifest: Sendable { init() {} }
 struct IntelTool: Codable, Sendable {
-    struct IntelToolFunction: Codable, Sendable {
+    struct ToolFunction: Codable, Sendable {
         let name: String
         let description: String?
     }
-    let function: IntelToolFunction
+    let function: ToolFunction
     var type: String { "function" }
 }
 

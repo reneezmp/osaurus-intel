@@ -10,10 +10,10 @@
 
 import Foundation
 
-// MARK: - IntelAgentManager
+// MARK: - AgentManager
 
-final class IntelAgentManager: AgentManagerProtocol, @unchecked Sendable {
-    static let shared = IntelAgentManager()
+final class AgentManager: AgentManagerProtocol, @unchecked Sendable {
+    static let shared = AgentManager()
 
     private var defaultModel = "deepseek-v4-pro"
 
@@ -116,18 +116,18 @@ final class IntelAgentManager: AgentManagerProtocol, @unchecked Sendable {
     }
 }
 
-// MARK: - IntelModelPickerItemCache
+// MARK: - ModelPickerItemCache
 
-final class IntelModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked Sendable {
-    static let shared = IntelModelPickerItemCache()
+final class ModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked Sendable {
+    static let shared = ModelPickerItemCache()
 
     var isLoaded: Bool = false
-    private(set) var items: [IntelModelPickerItem] = []
+    private(set) var items: [ModelPickerItem] = []
 
-    func buildModelPickerItems() async -> [IntelModelPickerItem] {
-        let built: [IntelModelPickerItem] = [
-            IntelModelPickerItem(id: "deepseek-v4-pro", source: .builtIn, isVLM: false),
-            IntelModelPickerItem(id: "deepseek-v4-flash", source: .builtIn, isVLM: false),
+    func buildModelPickerItems() async -> [ModelPickerItem] {
+        let built: [ModelPickerItem] = [
+            ModelPickerItem(id: "deepseek-v4-pro", source: .builtIn, isVLM: false),
+            ModelPickerItem(id: "deepseek-v4-flash", source: .builtIn, isVLM: false),
         ]
         items = built
         isLoaded = true
@@ -147,9 +147,9 @@ final class IntelModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked 
     }
 }
 
-// MARK: - IntelChatSessionData
+// MARK: - ChatSessionData
 
-struct IntelChatSessionData: Identifiable, @unchecked Sendable {
+struct ChatSessionData: Identifiable, @unchecked Sendable {
     let id: UUID
     var title: String
     let createdAt: Date
@@ -198,13 +198,13 @@ struct IntelChatSessionData: Identifiable, @unchecked Sendable {
     }
 }
 
-// MARK: - IntelChatSessionsManager
+// MARK: - ChatSessionsManager
 
-final class IntelChatSessionsManager: @unchecked Sendable {
-    static let shared = IntelChatSessionsManager()
-    private var sessions: [UUID: IntelChatSessionData] = [:]
+final class ChatSessionsManager: @unchecked Sendable {
+    static let shared = ChatSessionsManager()
+    private var sessions: [UUID: ChatSessionData] = [:]
 
-    func save(_ data: IntelChatSessionData) {
+    func save(_ data: ChatSessionData) {
         sessions[data.id] = data
     }
 
@@ -224,23 +224,23 @@ final class IntelChatSessionsManager: @unchecked Sendable {
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {
         let id = UUID()
-        sessions[id] = IntelChatSessionData(id: id, agentId: agentId ?? UUID())
+        sessions[id] = ChatSessionData(id: id, agentId: agentId ?? UUID())
         return id
     }
 
-    func sessions(for agentId: UUID?) -> [IntelChatSessionData] {
+    func sessions(for agentId: UUID?) -> [ChatSessionData] {
         Array(sessions.values)
     }
 
-    func session(for id: UUID) -> IntelChatSessionData? {
+    func session(for id: UUID) -> ChatSessionData? {
         sessions[id]
     }
 }
 
-// MARK: - IntelChatConfiguration
+// MARK: - ChatConfiguration
 
-final class IntelChatConfiguration: ChatConfigurationProtocol, @unchecked Sendable {
-    static let shared = IntelChatConfiguration()
+final class ChatConfiguration: ChatConfigurationProtocol, @unchecked Sendable {
+    static let shared = ChatConfiguration()
 
     let disableTools: Bool = false
     let maxToolAttempts: Int = 5
@@ -261,10 +261,5 @@ final class IntelChatConfiguration: ChatConfigurationProtocol, @unchecked Sendab
     }
 }
 
-typealias AgentManager = IntelAgentManager
-typealias ModelPickerItemCache = IntelModelPickerItemCache
-typealias ChatSessionData = IntelChatSessionData
-typealias ChatSessionsManager = IntelChatSessionsManager
-typealias ChatConfiguration = IntelChatConfiguration
 
 #endif
