@@ -11,6 +11,7 @@
 import SwiftUI
 
 struct MessageThreadView: View {
+    init(_ args: Any...) {}  
     let blocks: [ContentBlock]
     /// Optional precomputed group header map; falls back to local computation when nil.
     var groupHeaderMap: [UUID: UUID]? = nil
@@ -136,6 +137,7 @@ struct ScrollToBottomButton: View {
 #else
 import SwiftUI
 struct MessageThreadView: View {
+    init(_ args: Any...) {}  
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Message Thread", symbol: "apple.logo")
     }

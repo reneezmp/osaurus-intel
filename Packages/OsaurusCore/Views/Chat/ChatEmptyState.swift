@@ -119,6 +119,7 @@ private struct HeroAgentAvatar: View {
 }
 
 struct ChatEmptyState: View {
+    init(_ args: Any...) {}
     let hasModels: Bool
     let selectedModel: String?
     let agents: [Agent]
@@ -720,6 +721,7 @@ private struct GetStartedButton: View {
 #else
 import SwiftUI
 struct ChatEmptyState: View {
+    init(_ args: Any...) {}
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Chat Empty State", symbol: "apple.logo")
     }

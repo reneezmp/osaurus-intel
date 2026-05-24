@@ -118,6 +118,52 @@ struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, Sendable, Equa
 typealias ChatTurn = IntelChatTurn
 typealias Attachment = IntelAttachment
 typealias ContentBlock = IntelContentBlock
+
+final class AppConfiguration: @unchecked Sendable { static let shared = AppConfiguration(); var chatConfig = AppChatConfigStub(); var foundationModelAvailable: Bool { false } }
+struct AppChatConfigStub: Sendable { var generativeGreetingsEnabled = false; var disableTools = false; var maxToolAttempts = 5; var topPOverride: Double? = nil }
+
+final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {} }
+
+final class ChatConfigurationStore: @unchecked Sendable { static func load() -> ChatConfiguration { IntelChatConfiguration.shared } }
+
+final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
+
+struct ClarifyPromptState: Sendable { init() {} }
+struct ClarifyTool: Sendable { init() {}; static func parse(argumentsJSON json: String) -> ClarifyPayload? { nil } }
+
+final class FolderContextService: @unchecked Sendable { static let shared = FolderContextService(); var currentContext: Any? { nil } }
+
+struct ImageFullScreenView: View { init(_ args: Any...) {}; var body: some View { EmptyView() } }
+
+final class MemoryContextAssembler: @unchecked Sendable { static let shared = MemoryContextAssembler(); static func assembleContext(agentId: String = "", config: Any? = nil) async -> Any? { nil } }
+final class MemorySearchService: @unchecked Sendable { static let shared = MemorySearchService(); func initialize() async {} }
+
+final class ModelOptionsStore: @unchecked Sendable { static let shared = ModelOptionsStore(); func loadOptions(for model: String) -> [ModelOptionValue] { [:] } }
+final class ModelProfileRegistry: @unchecked Sendable { static let shared = ModelProfileRegistry(); static func thinkingEnabled(for model: String, values: [String: ModelOptionValue]) -> Bool? { nil }; static func normalizedOptions(for model: String, persisted: [String: ModelOptionValue]) -> [String: ModelOptionValue] { persisted } }
+final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: [String]) {}; var runtimeSettings: Any? { nil } }
+
+final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver() }
+
+final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: UUID) -> String { "agent" } }
+final class SandboxToolRegistrar: @unchecked Sendable { static let shared = SandboxToolRegistrar(); func registerTools(for agentId: UUID) async {} }
+
+struct ScrollToBottomButton: View { init(_ args: Any...) {}; var body: some View { EmptyView() } }
+
+struct SecretPromptParser: Sendable { init() {} }
+struct SecretPromptState: Sendable { init() {} }
+struct SecretToolResult: Sendable { init() {} }
+
+struct SessionCapability: Sendable { init() {}; static func derive(from turnData: Any? = nil) -> [SessionCapability] { [] } }
+struct SessionToolState: Sendable { init() {} }
+
+final class SkillManager: @unchecked Sendable { static let shared = SkillManager() }
+final class SlashCommandRegistry: @unchecked Sendable { static let shared = SlashCommandRegistry() }
+
+struct StreamingStatsHint: Sendable { init() {} }
+
+enum SessionSource: Sendable { case chat, dispatch, schedule, watcher }
+struct LocalAudioSamples: Sendable, Equatable { init() {} }
+
 typealias ModelOptionValue = IntelModelOptionValue
 typealias ChatTurnData = IntelChatTurnData
 
