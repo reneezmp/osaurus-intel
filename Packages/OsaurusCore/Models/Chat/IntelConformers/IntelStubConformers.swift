@@ -61,7 +61,7 @@ final class IntelToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
 
 final class IntelMemoryService: MemoryServiceProtocol, @unchecked Sendable {
     static let shared = IntelMemoryService()
-    func bufferTurn(userMessage: String, assistantMessage: String, agentId: UUID, conversationId: UUID, sessionDate: Date) async {}
+    func bufferTurn(userMessage: String, assistantMessage: String, agentId: UUID? = nil, conversationId: UUID? = nil, sessionId: UUID? = nil, sessionDate: Date = Date()) async {}
 }
 
 // MARK: - GenerativeGreeting (no-op on Intel)

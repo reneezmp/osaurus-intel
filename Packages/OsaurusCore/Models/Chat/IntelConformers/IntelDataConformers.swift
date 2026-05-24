@@ -87,6 +87,12 @@ struct IntelAttachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
 
 // MARK: - ContentBlock
 
+struct SharedArtifactStub: Equatable, @unchecked Sendable {
+    let id: String = ""
+    let isImage: Bool = false
+    let hostPath: String = ""
+}
+
 enum ContentBlockKind: Equatable {
     case sharedArtifact(Any)
     case userMessage(String, Any?)
@@ -230,7 +236,7 @@ final class SessionToolStateStore: @unchecked Sendable {
 }
 
 final class TTSService: @unchecked Sendable {
-    func toggleSpeak(_ text: String, messageId: String) {}
+    func toggleSpeak(_ text: String, messageId: String, voiceOverride: Any? = nil) {}
     var playingMessageId: String? { nil }
     static let shared = TTSService()
     func refreshModelState() {}
@@ -303,7 +309,7 @@ struct ContextBreakdown: Sendable {
     var name: String = ""
     var tokenCount: Int = 0
     init() {}
-    static func from(turns: [Any] = [], estimatedOutput: Int = 0, conversation: Int = 0, memory: Int = 0, system: Int = 0, instructions: Int = 0) -> ContextBreakdown { ContextBreakdown() }
+    static func from(turns: [Any] = [], estimatedOutput: Any? = nil, conversation: Any? = nil, memory: Int = 0, system: Int = 0, instructions: Int = 0) -> ContextBreakdown { ContextBreakdown() }
 }
 
 final class ContextBudgetTracker: @unchecked Sendable {
