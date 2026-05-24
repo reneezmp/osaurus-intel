@@ -23,11 +23,11 @@ protocol RemoteProviderInfoProtocol: Identifiable, Sendable {
     var id: UUID { get }
     var name: String { get }
     var host: String { get set }
-    var providerProtocol: RemoteProviderProtocolKind { get set }
+    var providerProtocol: RemoteProviderProtocol { get set }
     var port: Int? { get set }
     var enabled: Bool { get set }
-    var providerType: Any? { get }
+    var providerType: RemoteProviderType { get }
     var remoteAgentId: UUID? { get }
+    var remoteAgentAddress: String? { get set }
+    var authType: RemoteProviderAuthType { get set }
 }
-
-enum RemoteProviderProtocolKind: Sendable { case http, https }

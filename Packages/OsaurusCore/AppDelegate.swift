@@ -313,6 +313,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApp.activate(ignoringOtherApps: true)
     }
 
+    public func showManagementWindow(initialTab: ManagementTab? = nil, deeplinkAgentId: UUID? = nil) {
+        showMinimalWindow()
+    }
+
     // MARK: - NSPopoverDelegate
 
     public func popoverDidClose(_ notification: Notification) {

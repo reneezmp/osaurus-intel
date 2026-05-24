@@ -43,7 +43,7 @@ final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @un
     var hasThinking: Bool { _thinkingLength > 0 }
     var hasRenderableThinking: Bool { hasThinking && !thinkingIsBlank }
 
-    @Published var attachments: [any AttachmentProtocol] = []
+    @Published var attachments: [IntelAttachment] = []
     @Published var toolCalls: [ToolCall]? = nil
     var toolCallId: String? = nil
     @Published var toolResults: [String: String] = [:]
@@ -64,7 +64,7 @@ final class IntelChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @un
     var hasAttachments: Bool { !attachments.isEmpty }
     var visibleContent: String { content }
 
-    init(role: MessageRole, content: String, attachments: [any AttachmentProtocol] = [], id: UUID = UUID(), createdAt: Date = Date()) {
+    init(role: MessageRole, content: String, attachments: [IntelAttachment] = [], id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
         self.role = role
         self.createdAt = createdAt
@@ -248,7 +248,7 @@ struct IntelContentBlock: Identifiable, @unchecked Sendable {
 
 // MARK: - ModelOptionValue
 
-struct IntelModelOptionValue: ModelOptionValueProtocol, Sendable {
+struct IntelModelOptionValue: ModelOptionValueProtocol, Codable, Sendable {
     let boolValue: Bool?
     init(boolValue: Bool?) { self.boolValue = boolValue }
 }
@@ -259,7 +259,7 @@ struct IntelChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sen
     let id: UUID
     let role: MessageRole
     var content: String
-    var attachments: [any AttachmentProtocol] = []
+    var attachments: [Attachment] = []
     var toolCalls: [ToolCall]?
     var toolCallId: String?
     var toolResults: [String: String]
@@ -321,25 +321,53 @@ extension Agent: AgentInfoProtocol {}
 final class AppConfiguration: @unchecked Sendable { static let shared = AppConfiguration(); var chatConfig = AppChatConfigStub(); var foundationModelAvailable: Bool { false } }
 struct AppChatConfigStub: Sendable { var generativeGreetingsEnabled = false; var disableTools = false; var maxToolAttempts = 5; var topPOverride: Double? = nil }
 
-final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {} }
+final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
 
 final class ChatConfigurationStore: @unchecked Sendable { static func load() -> ChatConfiguration { IntelChatConfiguration.shared } }
 
 final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
 
-struct ClarifyPromptState: Sendable { init() {} }
+struct ClarifyPromptState: Sendable {
+    init(question: String = "", options: [String] = [], allowMultiple: Bool = false, onSubmit: ((String) -> Void)? = nil) {}
+    func cancel() {}
+}
+
+struct SecretPromptState: Sendable {
+    init() {}
+    init(key: String = "", description: String = "", instructions: String = "", agentId: UUID? = nil, onSubmit: ((String) -> Void)? = nil) {}
+    var key: String { "" }
+    var description: String { "" }
+    var instructions: String { "" }
+    var agentId: UUID? { nil }
+    func cancel() {}
+}
+
 struct ClarifyTool: Sendable { init() {}; static func parse(argumentsJSON json: String) -> ClarifyPayload? { nil } }
 
 final class FolderContextService: @unchecked Sendable { static let shared = FolderContextService(); var currentContext: FolderContext? { nil } }
 
 struct ImageFullScreenView: View { var image: Any? = nil; var altText: String = ""; var body: some View { EmptyView() } }
 
+extension View {
+    func imageFullScreenSheetPresentation() -> some View {
+        frame(
+            minWidth: 320,
+            idealWidth: 960,
+            maxWidth: .infinity,
+            minHeight: 240,
+            idealHeight: 720,
+            maxHeight: .infinity
+        )
+        .presentationSizing(.fitted)
+    }
+}
+
 final class MemoryContextAssembler: @unchecked Sendable { static let shared = MemoryContextAssembler(); static func assembleContext(agentId: String = "", config: Any? = nil) async -> Any? { nil } }
 final class MemorySearchService: @unchecked Sendable { static let shared = MemorySearchService(); func initialize() async {}; func indexTranscriptTurn(_ turn: Any) async {} }
 
 final class ModelOptionsStore: @unchecked Sendable { static let shared = ModelOptionsStore(); func loadOptions(for model: String) -> [String: ModelOptionValue] { [:] } }
 final class ModelProfileRegistry: @unchecked Sendable { static let shared = ModelProfileRegistry(); static func thinkingEnabled(for model: String, values: [String: ModelOptionValue]) -> Bool? { nil }; static func normalizedOptions(for model: String, persisted: [String: ModelOptionValue]) -> [String: ModelOptionValue] { persisted } }
-final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: [String]) {}; var runtimeSettings: Any? { nil } }
+final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: Set<String>) {}; var runtimeSettings: Any? { nil } }
 
 final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver(); static func instructions(pluginId: String, agentId: Any? = nil) -> String? { nil } }
 
@@ -348,9 +376,15 @@ final class SandboxToolRegistrar: @unchecked Sendable { static let shared = Sand
 
 struct ScrollToBottomButton: View { var isPinnedToBottom: Bool = false; var hasTurns: Bool = false; var onTap: () -> Void = {}; var body: some View { EmptyView() } }
 
-struct SecretPromptParser: Sendable { init() {} }
-struct SecretPromptState: Sendable { init() {} }
-struct SecretToolResult: Sendable { init() {} }
+struct SecretPromptParser: Sendable {
+    init() {}
+    static func parse(_ text: String) -> SecretPromptState? { nil }
+}
+struct SecretToolResult: Sendable {
+    init() {}
+    static func stored(key: String) -> String { "" }
+    static func cancelled(key: String) -> String { "" }
+}
 
 struct SessionCapability: Sendable { init() {}; static func derive(from turnData: Any? = nil) -> [SessionCapability] { [] } }
 struct SessionToolState: Sendable {
@@ -361,8 +395,18 @@ struct SessionToolState: Sendable {
     var initialAlwaysLoadedNames: Any? { nil }
 }
 
-final class SkillManager: @unchecked Sendable { static let shared = SkillManager(); func skill(for id: UUID) -> Any? { nil }; func buildFullInstructions(for id: UUID, agentId: Any? = nil) -> String? { nil } }
-final class SlashCommandRegistry: @unchecked Sendable { static let shared = SlashCommandRegistry() }
+struct IntelSkillInfo: Sendable {
+    let id: UUID
+    let name: String
+}
+
+final class SkillManager: @unchecked Sendable {
+    static let shared = SkillManager()
+    func skill(for id: UUID) -> IntelSkillInfo? { nil }
+    func buildFullInstructions(for skill: IntelSkillInfo, agentId: Any? = nil) -> String? { nil }
+}
+
+final class SlashCommandRegistry: @unchecked Sendable { static let shared = SlashCommandRegistry(); var isPopupVisible: Bool { false } }
 
 enum StreamingStatsHint: Sendable {
     static func encode(tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool = false, stopReason: String? = nil) -> String { "" }
@@ -375,11 +419,13 @@ struct LocalAudioSamples: Sendable, Equatable { init() {} }
 typealias ModelOptionValue = IntelModelOptionValue
 typealias ChatTurnData = IntelChatTurnData
 
-struct IntelModelPickerItem: ModelPickerItemProtocol, Identifiable, @unchecked Sendable {
+struct IntelModelPickerItem: ModelPickerItemProtocol {
     let id: String
     var source: ModelPickerSource
     var isVLM: Bool
 }
+
+extension IntelModelPickerItem: Sendable {}
 
 typealias ModelPickerItem = IntelModelPickerItem
 
@@ -402,9 +448,9 @@ struct DiscoveredAgent: Identifiable, Sendable {
     var providerId: UUID? { nil }
     var displayName: String { "" }
     var name: String { "" }
-    var host: String { "" }
+    var host: String? { nil }
     var port: Int? { nil }
-    var address: String { "" }
+    var address: String? { nil }
     var kind: String { "" }
     var providerType: String { "" }
 }
@@ -414,7 +460,7 @@ struct PairedRelayAgent: Identifiable, Sendable {
     var token: String? { nil }
     var remoteAgentId: UUID? { nil }
     var remoteAgentAddress: String { "" }
-    var providerId: UUID? { nil }
+    var providerId: UUID { UUID() }
     var address: String { "" }
     var name: String { "" }
     var host: String { "" }
@@ -433,6 +479,8 @@ final class ContextBudgetManager: @unchecked Sendable {
 
 struct ToolEnvelope: Sendable {
     init() {}
+    static func isError(_ result: String) -> Bool { false }
+    static func fromError(_ error: Error, tool: String? = nil) -> String { "{\"ok\":false}" }
     static func success(tool: String? = nil, text: String, warnings: [String]? = nil) -> String { "{\"ok\":true,\"result\":{\"text\":\"\(text)\"}}" }
     static func success(tool: String? = nil, result: Any? = nil, warnings: [String]? = nil) -> String { "{\"ok\":true}" }
     static func successPayload(_ result: String) -> Any? { nil }
@@ -447,6 +495,9 @@ final class SessionToolStateStore: @unchecked Sendable {
     func invalidate(_ key: Any) async {}
     func invalidateIfFingerprintChanged(_ key: Any, liveFingerprint: Any) async {}
     func get(_ key: Any) async -> SessionToolState? { nil }
+    func setInitial(_ key: Any, preflight: Any?, alwaysLoadedNames: Any?, fingerprint: String) async {}
+    func recordSend(sessionId: Any, cacheHint: Any?, trace: Any?) async {}
+    func appendLoadedTools(_ key: Any, names: [String], fallbackPreflight: Any?, fallbackAlwaysLoadedNames: Any?) async {}
 }
 
 final class TTSService: @unchecked Sendable {
@@ -467,15 +518,33 @@ struct MockChatData: Sendable {
     static func mockTurnsForPerformanceTest(count: Int = 10) -> [IntelChatTurn] { [] }
 }
 
-struct ServiceToolInvocation: Sendable { init() {} }
+struct ServiceToolInvocation: Sendable {
+    init() {}
+    var toolCallId: String? { nil }
+    var toolName: String { "" }
+    var jsonArguments: String { "" }
+    var geminiThoughtSignature: String? { nil }
+}
 
 struct ServiceToolInvocations: Error, Sendable {
     let invocations: [ServiceToolInvocation]
 }
 
+enum PromptQueueItem: Identifiable, Sendable {
+    case secret(SecretPromptState)
+    case clarify(ClarifyPromptState)
+
+    var id: String {
+        switch self {
+        case .secret: return "secret"
+        case .clarify: return "clarify"
+        }
+    }
+}
+
 final class PromptQueue: ObservableObject, @unchecked Sendable {
-    var current: Any? { nil }
-    func enqueue(_ item: Any) {}
+    var current: PromptQueueItem? { nil }
+    func enqueue(_ item: PromptQueueItem) {}
     func drainAll() {}
     func advance() {}
 }
@@ -512,11 +581,11 @@ struct ToolCallDone: Sendable, Equatable {
     let result: String
 }
 
-struct StreamingDeltaProcessor: @unchecked Sendable {
+final class StreamingDeltaProcessor: @unchecked Sendable {
     init(turn: IntelChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {}
-    mutating func finalize() {}
-    mutating func receiveReasoning(_ text: String) {}
-    mutating func receiveDelta(_ delta: Any) {}
+    func finalize() {}
+    func receiveReasoning(_ text: String) {}
+    func receiveDelta(_ delta: Any) {}
 }
 enum StreamingReasoningHint: Sendable {
     static func encode(_ text: String) -> String { text }
@@ -527,14 +596,52 @@ final class SystemPromptComposer: @unchecked Sendable {
     static let shared = SystemPromptComposer()
     static func composePreviewContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil) -> ComposedContext { ComposedContext() }
     static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext { ComposedContext() }
+    static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
 }
 
 struct PromptManifest: Sendable { init() {} }
-struct ComposedContext: Sendable {
-    let prompt: String = ""
-    let manifest: PromptManifest = PromptManifest()
-    let toolTokens: Int = 0
-    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0) {
+struct IntelTool: Codable, Sendable {
+    struct IntelToolFunction: Codable, Sendable {
+        let name: String
+        let description: String?
+    }
+    let function: IntelToolFunction
+    var type: String { "function" }
+}
+
+typealias Tool = IntelTool
+
+enum ToolChoiceOption: Codable, Sendable {
+    case auto
+    case none
+    case function(String)
+}
+
+struct ToolFunction: Codable, Sendable {
+    let name: String
+    let description: String?
+}
+
+struct ComposedContext: @unchecked Sendable {
+    let prompt: String
+    let manifest: PromptManifest
+    let toolTokens: Int
+    var tools: [IntelTool]
+    var preflight: Any?
+    var alwaysLoadedNames: Any?
+    var preflightItems: [Any]
+    var memorySection: String?
+    var cacheHint: Any?
+    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0, tools: [IntelTool] = [], preflight: Any? = nil, alwaysLoadedNames: Any? = nil, preflightItems: [Any] = [], memorySection: String? = nil, cacheHint: Any? = nil) {
+        self.prompt = prompt
+        self.manifest = manifest
+        self.toolTokens = toolTokens
+        self.tools = tools
+        self.preflight = preflight
+        self.alwaysLoadedNames = alwaysLoadedNames
+        self.preflightItems = preflightItems
+        self.memorySection = memorySection
+        self.cacheHint = cacheHint
     }
 }
 struct ContextDisableInfo: Sendable { init() {} }
@@ -589,11 +696,13 @@ final class ContextBudgetTracker: @unchecked Sendable {
     func clear() {}
     var estimatedTokens: Int { 0 }
     func activeBreakdown(isActive: Bool = false, outputTurn: ChatTurn? = nil) -> ContextBreakdown? { nil }
+    func snapshot(context: ComposedContext) {}
+    func updateConversation(tokens: Int, finishedOutputTurn: ChatTurn?) {}
 }
 
 final class LiveVoiceAudioInputRegistry: @unchecked Sendable {
     static let shared = LiveVoiceAudioInputRegistry()
-    func samples(for id: UUID) -> Any? { nil }
+    func samples(for id: UUID) -> LocalAudioSamples? { nil }
 }
 
 final class MemoryDatabase: @unchecked Sendable {
@@ -630,6 +739,9 @@ extension ChatMessage {
     }
 }
 
+
+
+struct RemoteProviderServiceError: Error, Sendable {}
 
 
 // Notification names

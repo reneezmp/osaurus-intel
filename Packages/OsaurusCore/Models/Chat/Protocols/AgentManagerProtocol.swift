@@ -14,7 +14,7 @@ protocol AgentManagerProtocol: AnyObject {
     func effectiveModel(for agentId: UUID) -> String?
     func effectiveMemoryDisabled(for agentId: UUID) -> Bool
     func effectiveAutonomousExec(for agentId: UUID) -> AgentAutoExecInfo?
-    func effectiveToolSelectionMode(for agentId: UUID) -> Any?
+    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode?
     func effectiveMaxTokens(for agentId: UUID) -> Int?
     func effectiveTemperature(for agentId: UUID) -> Double?
     func ttsVoice(for agentId: UUID) -> Any?

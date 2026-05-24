@@ -23,7 +23,7 @@ protocol ChatTurnProtocol: Identifiable, Sendable {
     var thinkingIsBlank: Bool { get }
     var contentIsEmpty: Bool { get }
     var contentLength: Int { get }
-    var attachments: [any AttachmentProtocol] { get set }
+    var attachments: [Attachment] { get }
     var imageData: Data? { get }
     var generationTokenCount: Int? { get set }
     var generationTokensPerSecond: Double? { get set }

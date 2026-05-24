@@ -1678,5 +1678,7 @@ public final class PluginManager: ObservableObject {
     public func isDegraded(pluginId: String) -> Bool {
         degradedPluginIds.contains(pluginId)
     }
+
+    public func notifyArtifactHandlers(artifact: Any) async {}
 }
 #endif

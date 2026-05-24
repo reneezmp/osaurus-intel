@@ -32,16 +32,15 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
         let id: UUID
         var name: String
         var host: String
-        var authType: ProviderAuthType = .apiKey
+        var providerProtocol: RemoteProviderProtocol = .https
+        var authType: RemoteProviderAuthType = .none
         var token: String? = nil
-        var providerProtocol: RemoteProviderProtocolKind = .https
         var port: Int? = nil
         var enabled: Bool = true
-        var providerType: Any? { nil }
-        var remoteAgentId: UUID? { nil }
+        var providerType: RemoteProviderType { .osaurus }
+        var remoteAgentId: UUID? = nil
+        var remoteAgentAddress: String? = nil
     }
-    
-    enum ProviderAuthType: Sendable { case apiKey, bearerToken, oauth }
 
     let configuration: RemoteProviderConfigInfoProtocol = Config()
 
@@ -49,6 +48,21 @@ final class IntelRemoteProviderManager: RemoteProviderManagerProtocol, @unchecke
     func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?) {}
     func connect(providerId: UUID) async throws {}
     func addProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String? = nil, isEphemeral: Bool = false) {}
+
+    func addProvider(_ provider: RemoteProvider, apiKey: String?, isEphemeral: Bool) {
+        let bridged = Provider(
+            id: provider.id,
+            name: provider.name,
+            host: provider.host,
+            providerProtocol: provider.providerProtocol,
+            authType: provider.authType,
+            port: provider.port,
+            enabled: provider.enabled,
+            remoteAgentId: provider.remoteAgentId,
+            remoteAgentAddress: provider.remoteAgentAddress
+        )
+        addProvider(bridged as any RemoteProviderInfoProtocol, apiKey: apiKey, isEphemeral: isEphemeral)
+    }
 }
 
 // MARK: - ToolRegistry (stub)
@@ -125,5 +139,7 @@ typealias MemoryService = IntelMemoryService
 typealias GenerativeGreetingPool = IntelGreetingPool
 typealias GenerativeGreetingService = IntelGreetingService
 typealias SharedArtifact = IntelSharedArtifact
+
+extension RemoteProvider: RemoteProviderInfoProtocol {}
 
 #endif

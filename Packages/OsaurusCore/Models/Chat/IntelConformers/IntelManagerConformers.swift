@@ -91,7 +91,7 @@ final class IntelAgentManager: AgentManagerProtocol, @unchecked Sendable {
         true
     }
 
-    func effectiveToolSelectionMode(for agentId: UUID) -> Any? {
+    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode? {
         nil
     }
 

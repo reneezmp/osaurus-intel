@@ -966,6 +966,18 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         windows.filter { $0.value.agentId == agentId }.map { ($0.key, $0.value) }
     }
 
+    public func getNSWindow(id: UUID) -> NSWindow? {
+        nsWindows[id]
+    }
+
+    public func activeLocalModelNames() -> Set<String> {
+        Set()
+    }
+
+    public var isAnySessionStreaming: Bool { false }
+
+    public func setWindowPinned(id: UUID, pinned: Bool) {}
+
     public func stopAllSessions() {
         windows.removeAll()
         nsWindows.removeAll()

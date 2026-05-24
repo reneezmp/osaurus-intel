@@ -35,6 +35,7 @@ struct ToolCall: Codable, Sendable {
     let id: String?
     let type: String?
     let function: ToolCallFunction?
+    var geminiThoughtSignature: String? = nil
 }
 
 struct ToolCallFunction: Codable, Sendable {
@@ -45,11 +46,28 @@ struct ToolCallFunction: Codable, Sendable {
 struct ChatCompletionRequest: Codable, Sendable {
     let model: String?
     let messages: [ChatMessage]
-    let stream: Bool?
-    let temperature: Double?
-    let max_tokens: Int?
-    let top_p: Double?
-    let stream_options: StreamOptions?
+    var temperature: Double?
+    var max_tokens: Int?
+    var stream: Bool?
+    var top_p: Double?
+    var stream_options: StreamOptions? = nil
+    var frequency_penalty: Double?
+    var presence_penalty: Double?
+    var stop: [String]?
+    var n: Int?
+    var tools: [Tool]?
+    var tool_choice: ToolChoiceOption?
+    var session_id: String?
+    var samplingParametersAreImplicit: Bool = false
+    var modelOptions: [String: ModelOptionValue]? = nil
+
+    private enum CodingKeys: String, CodingKey {
+        case model, messages, stream, temperature, max_tokens, top_p
+        case stream_options, frequency_penalty, presence_penalty, stop, n
+        case tools, tool_choice, session_id
+    }
+
+    var ttftTrace: TTFTTrace? = nil
 }
 
 struct StreamOptions: Codable, Sendable {
