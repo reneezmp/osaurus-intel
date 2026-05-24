@@ -144,7 +144,7 @@ final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime
 
 final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver() }
 
-final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: UUID) -> String { "agent" } }
+final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: String) -> String { "agent" } }
 final class SandboxToolRegistrar: @unchecked Sendable { static let shared = SandboxToolRegistrar(); func registerTools(for agentId: UUID) async {} }
 
 struct ScrollToBottomButton: View { init(_ args: Any...) {}; var body: some View { EmptyView() } }
