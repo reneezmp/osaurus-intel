@@ -11,7 +11,7 @@ import Foundation
 
 // MARK: - ChatTurn
 
-struct IntelChatTurn: ChatTurnProtocol, Identifiable, @unchecked Sendable {
+struct IntelChatTurn: ChatTurnProtocol, Identifiable, @unchecked Sendable, Equatable {
     let id: UUID
     var turnId: UUID?
     var role: ChatTurnRole
@@ -87,8 +87,17 @@ struct IntelAttachment: AttachmentProtocol, Identifiable, Sendable {
 
 // MARK: - ContentBlock
 
-struct IntelContentBlock: ContentBlockProtocol, Identifiable, Sendable {
+enum ContentBlockKind: Equatable {
+    case sharedArtifact(Any)
+    case userMessage(String, Any?)
+    case assistantMessage(String)
+    case thinking(String)
+    case toolCall(String, String)
+}
+
+struct IntelContentBlock: ContentBlockProtocol, Identifiable, @unchecked Sendable {
     let id: UUID
+    var kind: ContentBlockKind { .assistantMessage("") }
     init() { self.id = UUID() }
 }
 
@@ -119,6 +128,10 @@ struct IntelModelPickerItem: Identifiable, @unchecked Sendable {
 }
 
 typealias ModelPickerItem = IntelModelPickerItem
+
+extension Array where Element == IntelModelPickerItem {
+    var firstChatCapable: IntelModelPickerItem? { first { !$0.isVLM } }
+}
 
 // MARK: - Additional stubs
 
@@ -212,9 +225,10 @@ final class BlockMemoizer: @unchecked Sendable {
     func clear() {}
 }
 
+struct ToolCallDone: Sendable { let callId: String; let result: String = "" }
 struct StreamingToolHint: Sendable {
     init() {}
-    static func decodeDone(_ delta: Any) -> String? { nil }
+    static func decodeDone(_ delta: Any) -> ToolCallDone? { nil }
     static func decode(_ delta: Any) -> String? { nil }
     static func decodeArgs(_ delta: Any) -> String? { nil }
 }
