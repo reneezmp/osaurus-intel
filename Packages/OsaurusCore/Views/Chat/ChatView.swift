@@ -2650,6 +2650,20 @@ struct ChatView: View {
         _observedSession = ObservedObject(wrappedValue: state.session)
     }
 
+    private func onChangeSelectedProvider(_ providerId: UUID?) {
+        guard providerId == nil else { return }
+        let agentModel: String? = AgentManager.shared.effectiveModel(for: windowState.agentId)
+        if let model = agentModel {
+            let items: [ModelPickerItem] = session.pickerItems
+            var found = false
+            for item in items { if item.id == model { found = true; break } }
+            if found { session.selectedModel = model; return }
+        }
+        if let firstChat = session.pickerItems.firstChatCapable {
+            session.selectedModel = firstChat.id
+        }
+    }
+
     var body: some View {
         let _ = ChatPerfTrace.shared.count("body.ChatView")
         chatModeContent
@@ -2725,6 +2739,13 @@ struct ChatView: View {
             let sidebarWidth: CGFloat = windowState.showSidebar ? 240 : 0
             let chatWidth = proxy.size.width - sidebarWidth
             let effectiveContentWidth = min(chatWidth, 1100)
+            let onSidebarSelect: (ChatSessionData) -> Void = { d in let ws = windowState; ws.loadSession(d); isPinnedToBottom = true }
+            let onSidebarNewChat: () -> Void = { windowState.startNewChat() }
+            let onSidebarDelete: (UUID) -> Void = { id in if session.sessionId == id { session.reset() }; ChatSessionsManager.shared.delete(id: id); windowState.refreshSessions() }
+            let onSidebarRename: (UUID, String) -> Void = { id, title in ChatSessionsManager.shared.rename(id: id, title: title); windowState.refreshSessions() }
+            let onSidebarSetArchived: (UUID, Bool) -> Void = { id, archived in ChatSessionsManager.shared.setArchived(id: id, archived: archived); if session.sessionId == id { session.archived = archived }; windowState.refreshSessions() }
+            let onSidebarExport: (ChatSessionData, Any) -> Void = { metadata, format in ChatSessionExportCoordinator.run(metadataSession: metadata, format: format, scope: .chat(windowState.windowId)) }
+            let onSidebarOpenInNewWindow: ((ChatSessionData) -> Void)? = { sessionData in ChatWindowManager.shared.createWindow(agentId: sessionData.agentId, sessionData: sessionData) }
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
@@ -2734,47 +2755,13 @@ struct ChatView: View {
                             sessions: windowState.filteredSessions,
                             agentId: windowState.agentId,
                             currentSessionId: session.sessionId,
-                            onSelect: { data in
-                                windowState.loadSession(data)
-                                isPinnedToBottom = true
-                            },
-                            onNewChat: {
-                                windowState.startNewChat()
-                            },
-                            onDelete: { id in
-                                if session.sessionId == id {
-                                    session.reset()
-                                }
-                                ChatSessionsManager.shared.delete(id: id)
-                                windowState.refreshSessions()
-                            },
-                            onRename: { id, title in
-                                ChatSessionsManager.shared.rename(id: id, title: title)
-                                windowState.refreshSessions()
-                            },
-                            onSetArchived: { id, archived in
-                                ChatSessionsManager.shared.setArchived(id: id, archived: archived)
-                                // Keep the open view-model in sync so the
-                                // next auto-save doesn't clobber the flag.
-                                if session.sessionId == id {
-                                    session.archived = archived
-                                }
-                                windowState.refreshSessions()
-                            },
-                            onExport: { metadata, format in
-                                ChatSessionExportCoordinator.run(
-                                    metadataSession: metadata,
-                                    format: format,
-                                    scope: .chat(windowState.windowId)
-                                )
-                            },
-                            onOpenInNewWindow: { sessionData in
-                                // Open session in a new window via ChatWindowManager
-                                ChatWindowManager.shared.createWindow(
-                                    agentId: sessionData.agentId,
-                                    sessionData: sessionData
-                                )
-                            }
+                            onSelect: onSidebarSelect,
+                            onNewChat: onSidebarNewChat,
+                            onDelete: onSidebarDelete,
+                            onRename: onSidebarRename,
+                            onSetArchived: onSidebarSetArchived,
+                            onExport: onSidebarExport,
+                            onOpenInNewWindow: onSidebarOpenInNewWindow
                         )
                     }
                 }
@@ -2977,29 +2964,24 @@ struct ChatView: View {
         }
         .onChange(of: observedSession.pickerItems) { _, newItems in
             guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
-            let providerItems = newItems.filter {
-                if case .remote(_, let id) = $0.source { return id == providerId }
-                return false
+            var providerItems: [ModelPickerItem] = []
+            for item in newItems {
+                if case .remote(_, let id) = item.source, id == providerId { providerItems.append(item) }
             }
             guard let firstItem = providerItems.firstChatCapable else { return }
-            let currentIsFromProvider =
-                newItems.first(where: { $0.id == session.selectedModel }).map {
-                    if case .remote(_, let id) = $0.source { return id == providerId }
-                    return false
-                } ?? false
+            let modelId = session.selectedModel
+            var matched: ModelPickerItem?
+            for item in newItems where item.id == modelId { matched = item; break }
+            var currentIsFromProvider = false
+            if let item = matched {
+                if case .remote(_, let id) = item.source { currentIsFromProvider = (id == providerId) }
+            }
             if !currentIsFromProvider {
                 session.selectedModel = firstItem.id
             }
         }
         .onChange(of: windowState.selectedDiscoveredAgentProviderId) { _, providerId in
-            guard providerId == nil else { return }
-            // Bonjour agent deselected — restore agent's preferred model
-            let agentModel = AgentManager.shared.effectiveModel(for: windowState.agentId)
-            if let model = agentModel, session.pickerItems.contains(where: { $0.id == model }) {
-                session.selectedModel = model
-            } else {
-                session.selectedModel = session.pickerItems.firstChatCapable?.id
-            }
+            onChangeSelectedProvider(providerId)
         }
         .environment(\.theme, windowState.theme)
         .tint(theme.accentColor)

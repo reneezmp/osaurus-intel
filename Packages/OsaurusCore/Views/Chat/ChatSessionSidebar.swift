@@ -870,6 +870,17 @@ private struct DontAskAgainToggle: View {
 #else
 import SwiftUI
 struct ChatSessionSidebar: View {
+    // Dummy params for Intel build compat (original takes non-optional params)
+    var sessions: [ChatSessionData] = []
+    var agentId: UUID = UUID()
+    var currentSessionId: UUID? = nil
+    var onSelect: (ChatSessionData) -> Void = { _ in }
+    var onNewChat: () -> Void = {}
+    var onDelete: (UUID) -> Void = { _ in }
+    var onRename: (UUID, String) -> Void = { _, _ in }
+    var onSetArchived: (UUID, Bool) -> Void = { _, _ in }
+    var onExport: (ChatSessionData, Any) -> Void = { _, _ in }
+    var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Chat Sessions", symbol: "apple.logo")
     }
