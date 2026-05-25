@@ -2935,7 +2935,10 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in
             let aId: UUID? = notification.object as? UUID
             let curAgent: UUID = windowState.agentId
-            if let agentId = aId, agentId == curAgent { windowState.startNewChat() }
+            if let agentId = aId {
+                let match = agentId == curAgent
+                if match { windowState.startNewChat() }
+            }
         }
         .onAppear {
             setupKeyMonitor()
