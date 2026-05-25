@@ -2650,6 +2650,25 @@ struct ChatView: View {
         _observedSession = ObservedObject(wrappedValue: state.session)
     }
 
+    private func onPickerItemsChanged(_ newItems: [ModelPickerItem]) {
+        guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
+        var providerItems: [ModelPickerItem] = []
+        for item in newItems {
+            if item.source.remoteProviderId == providerId { providerItems.append(item) }
+        }
+        guard let firstItem = providerItems.firstChatCapable else { return }
+        let modelId = session.selectedModel
+        var matched: ModelPickerItem?
+        for item in newItems { if item.id == modelId { matched = item; break } }
+        var currentIsFromProvider = false
+        if let item = matched {
+            currentIsFromProvider = (item.source.remoteProviderId == providerId)
+        }
+        if !currentIsFromProvider {
+            session.selectedModel = firstItem.id
+        }
+    }
+
     private func onChangeSelectedProvider(_ providerId: UUID?) {
         guard providerId == nil else { return }
         let agentModel: String? = AgentManager.shared.effectiveModel(for: windowState.agentId)
@@ -2741,46 +2760,15 @@ struct ChatView: View {
             let sidebarWidth: CGFloat = showSidebar ? 240 : 0
             let chatWidth = windowWidth - sidebarWidth
             let effectiveContentWidth = min(chatWidth, 1100)
-            let sessMgr = ChatSessionsManager.shared
-            let ws = windowState
-            let refresh: () -> Void = { ws.refreshSessions() }
-            let onSidebarDelete: (UUID) -> Void = { id in
-                if session.sessionId == id { session.reset() }
-                sessMgr.delete(id: id)
-                refresh()
-            }
-            let onSidebarRename: (UUID, String) -> Void = { id, title in
-                sessMgr.rename(id: id, title: title)
-                refresh()
-            }
-            let onSidebarSetArchived: (UUID, Bool) -> Void = { id, archived in
-                sessMgr.setArchived(id: id, archived: archived)
-                if session.sessionId == id { session.archived = archived }
-                refresh()
-            }
-            let onSidebarExport: (ChatSessionData, Any) -> Void = { metadata, format in
-                let expCoord = ChatSessionExportCoordinator.shared
-                let scope = ChatSessionExportCoordinator.ExportScope.chat(windowState.windowId)
-                expCoord.run(metadataSession: metadata, format: format, scope: scope)
-            }
-            let onSidebarOpenInNewWindow: ((ChatSessionData) -> Void)? = { sessionData in ChatWindowManager.shared.createWindow(agentId: sessionData.agentId, sessionData: sessionData) }
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
                 VStack(alignment: .leading, spacing: 0) {
                     if windowState.showSidebar {
-                        let _ = windowState // help type inference on Intel
                         ChatSessionSidebar(
                             sessions: windowState.filteredSessions,
                             agentId: windowState.agentId,
-                            currentSessionId: session.sessionId,
-                            onSelect: { d in windowState.loadSession(data: d); isPinnedToBottom = true },
-                            onNewChat: { windowState.startNewChat() },
-                            onDelete: onSidebarDelete,
-                            onRename: onSidebarRename,
-                            onSetArchived: onSidebarSetArchived,
-                            onExport: onSidebarExport,
-                            onOpenInNewWindow: onSidebarOpenInNewWindow
+                            currentSessionId: session.sessionId
                         )
                     }
                 }
@@ -2809,7 +2797,8 @@ struct ChatView: View {
                                 // and stop hit-testing so the prompt
                                 // visibly takes the foreground without
                                 // letting taps leak through.
-                                messageThread(effectiveContentWidth)
+                                let w: CGFloat = effectiveContentWidth
+                                messageThread(w)
                                     .blur(radius: isPromptOverlayActive ? 1.5 : 0)
                                     .allowsHitTesting(!isPromptOverlayActive)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
@@ -2822,9 +2811,9 @@ struct ChatView: View {
                             // input is the obvious place to type, and
                             // accidental sends here can't race the
                             // prompt resolution.
-                            FloatingInputCard(
-                                text: $observedSession.input,
-                                selectedModel: $observedSession.selectedModel,
+                        FloatingInputCard(
+                            text: $observedSession.input,
+                            selectedModel: $observedSession.selectedModel,
                                 pendingAttachments: $observedSession.pendingAttachments,
                                 isContinuousVoiceMode: $observedSession.isContinuousVoiceMode,
                                 voiceInputState: $observedSession.voiceInputState,
@@ -2982,22 +2971,7 @@ struct ChatView: View {
             cleanupKeyMonitor()
         }
         .onChange(of: observedSession.pickerItems) { _, newItems in
-            guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
-            var providerItems: [ModelPickerItem] = []
-            for item in newItems {
-                if item.source.remoteProviderId == providerId { providerItems.append(item) }
-            }
-            guard let firstItem = providerItems.firstChatCapable else { return }
-            let modelId = session.selectedModel
-            var matched: ModelPickerItem?
-            for item in newItems { if item.id == modelId { matched = item; break } }
-            var currentIsFromProvider = false
-            if let item = matched {
-                currentIsFromProvider = (item.source.remoteProviderId == providerId)
-            }
-            if !currentIsFromProvider {
-                session.selectedModel = firstItem.id
-            }
+            onPickerItemsChanged(newItems)
         }
         .onChange(of: windowState.selectedDiscoveredAgentProviderId) { _, providerId in
             onChangeSelectedProvider(providerId)
