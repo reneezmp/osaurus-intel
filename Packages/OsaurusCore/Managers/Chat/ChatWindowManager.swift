@@ -916,12 +916,14 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         windowStates[info.id] = state
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 800, height: 600),
+            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
             styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
-        window.title = "Osaurus Chat"
+        window.title = "Osaurus (Intel)"
+        let chatView = ChatView(windowState: state)
+        window.contentViewController = NSHostingController(rootView: chatView)
         window.isReleasedWhenClosed = true
         window.center()
         window.makeKeyAndOrderFront(nil)
