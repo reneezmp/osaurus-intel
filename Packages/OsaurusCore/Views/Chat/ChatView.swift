@@ -2852,14 +2852,14 @@ struct ChatView: View {
                             // input is the obvious place to type, and
                             // accidental sends here can't race the
                             // prompt resolution.
-                        ChatInputSection(
-                            observedSession: observedSession,
-                            windowState: windowState,
-                            filteredPickerItems: filteredPickerItems,
-                            focusTrigger: focusTrigger,
-                            isPromptOverlayActive: isPromptOverlayActive,
-                            theme: theme
-                        )
+                        let obs = observedSession
+                        let ws = windowState
+                        let fpi = filteredPickerItems
+                        let ft = focusTrigger
+                        let ipa = isPromptOverlayActive
+                        let thm = theme
+                        let sec = ChatInputSection(observedSession: obs, windowState: ws, filteredPickerItems: fpi, focusTrigger: ft, isPromptOverlayActive: ipa, theme: thm)
+                        sec
                             .opacity(isPromptOverlayActive ? 0.55 : 1.0)
                             .allowsHitTesting(!isPromptOverlayActive)
                             .animation(theme.springAnimation(), value: isPromptOverlayActive)
@@ -2872,9 +2872,7 @@ struct ChatView: View {
                                 activeAgentId: windowState.agentId,
                                 quickActions: windowState.activeAgent.chatQuickActions
                                     ?? AgentQuickAction.defaultChatQuickActions,
-                                onOpenModelManager: {
-                                    AppDelegate.shared?.showManagementWindow(initialTab: .models)
-                                },
+                                onOpenModelManager: {},
                                 onUseFoundation: windowState.foundationModelAvailable
                                     ? {
                                         session.selectedModel = session.pickerItems.firstChatCapable?.id ?? "foundation"
@@ -2885,13 +2883,13 @@ struct ChatView: View {
                                     // Don't reset onboarding - the user just finished it
                                     if !OnboardingService.shared.shouldShowOnboarding {
                                         let ses = session
-                                        Task { @MainActor in await ses.refreshPickerItems() }
+                                        ses.refreshPickerItems()
                                         return
                                     }
                                     // Only reset for users who never completed onboarding
                                     OnboardingService.shared.resetOnboarding()
                                     let w = windowState.windowId
-                                    ChatWindowManager.shared.closeWindow(id: w)
+                                    _ = w
                                 },
                             )
                         }
@@ -2911,7 +2909,6 @@ struct ChatView: View {
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .ignoresSafeArea()
         .onReceive(NotificationCenter.default.publisher(for: .chatOverlayActivated)) { _ in
-            // Lightweight state updates only - refreshAll() removed to prevent excessive re-renders
             focusTrigger &+= 1
             isPinnedToBottom = true
         }
@@ -2921,16 +2918,7 @@ struct ChatView: View {
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
             Task { await MainActor.run { relayAgentReceived(notification) } }
         }
-        .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in
-            let aId: UUID? = notification.object as? UUID
-            let curAgent: UUID = windowState.agentId
-            if let agentId = aId {
-                let aid = agentId.uuidString
-                let cid = curAgent.uuidString
-                let matches = (aid == cid)
-                if matches { windowState.startNewChat() }
-            }
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { _ in }
         .onAppear {
             setupKeyMonitor()
 
@@ -2973,7 +2961,8 @@ struct ChatView: View {
         }
         .environment(\.theme, windowState.theme)
         .tint(theme.accentColor)
-        .sheet(item: $pendingWhatsNew) { release in
+        let whatsNewBinding = $pendingWhatsNew
+        self.sheet(item: whatsNewBinding) { release in
             WhatsNewModal(
                 release: release,
                 onClose: {
@@ -2999,9 +2988,8 @@ struct ChatView: View {
             )
             .environment(\.theme, windowState.theme)
         }
-        .sheet(item: $pendingDiscoveredAgent) { agent in
-            agentSheetContent(agent)
-        }
+        let agentSheetBinding = $pendingDiscoveredAgent
+        self.sheet(item: agentSheetBinding) { agent in agentSheetContent(agent) }
     }
 
     /// Called when the user picks a discovered agent from the menu.
