@@ -160,7 +160,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApp.unhide(nil)
         _ = NSRunningApplication.current.activate(options: .activateAllWindows)
 
-        _ = ChatWindowManager.shared.createWindow()
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable, .miniaturizable],
+            backing: .buffered, defer: false
+        )
+        window.title = "Test 2C+2D"
+        let rootView = VStack {
+            let _ = ChatSession()
+            let _ = ThemeManager.shared.currentTheme
+            Text("2C+2D")
+        }
+        window.contentView = NSHostingView(rootView: rootView)
+        window.center()
+        window.makeKeyAndOrderFront(nil)
     }
 
     // MARK: - Reopen

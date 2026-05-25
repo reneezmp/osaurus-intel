@@ -914,16 +914,18 @@ public final class ChatWindowManager: NSObject, ObservableObject {
 
         let state = ChatWindowState(windowId: info.id)
         windowStates[info.id] = state
+        _ = state  // test: does ChatWindowState init trigger crash?
 
         let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            contentRect: NSRect(x: 0, y: 0, width: 400, height: 300),
+            styleMask: [.titled, .closable, .miniaturizable],
             backing: .buffered,
             defer: false
         )
         window.title = "Osaurus (Intel)"
-        let chatView = ChatView(windowState: state)
-        window.contentViewController = NSHostingController(rootView: chatView)
+        let rootView = Text("Osaurus Intel — OK!")
+            .frame(width: 400, height: 300)
+        window.contentView = NSHostingView(rootView: rootView)
         window.isReleasedWhenClosed = true
         window.center()
         window.makeKeyAndOrderFront(nil)

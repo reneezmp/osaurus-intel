@@ -2755,12 +2755,8 @@ struct ChatView: View {
     }
 
     var body: some View {
-        let _ = ChatPerfTrace.shared.count("body.ChatView")
-        chatModeContent
-            .overlay { promptOverlayLayer }
-            .onChange(of: session.lastCompletedAssistantTurnId) { _, newValue in
-                handleAssistantTurnCompleted(turnId: newValue)
-            }
+        Text("ChatView loaded")
+            .frame(width: 400, height: 300)
     }
 
     /// Shared overlay layer for in-chat prompts (secrets + clarify).
