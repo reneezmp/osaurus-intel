@@ -2678,6 +2678,28 @@ struct ChatView: View {
         AppDelegate.shared?.showManagementWindow(initialTab: tab)
     }
 
+    @ViewBuilder
+    private func whatsNewContent(_ release: WhatsNewRelease) -> some View {
+        WhatsNewModal(
+            release: release,
+            onClose: {
+                WhatsNewGate.markShown(version: release.version)
+                pendingWhatsNew = nil
+            },
+            onAction: { action in
+                WhatsNewGate.markShown(version: release.version)
+                pendingWhatsNew = nil
+                switch action {
+                case .openSandboxSettings: showMgmtWindow(.sandbox)
+                case .openAPIKeysSettings: showMgmtWindow(.server)
+                case .openSecurityDoc(let url): NSWorkspace.shared.open(url)
+                case .openStorageSettings, .exportPlaintextBackup: showMgmtWindow(.storage)
+                }
+            }
+        )
+        .environment(\.theme, windowState.theme)
+    }
+
     private func onPickerItemsChanged(_ newItems: [ModelPickerItem]) {
         guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
         var providerItems: [ModelPickerItem] = []
@@ -2963,30 +2985,7 @@ struct ChatView: View {
         .tint(theme.accentColor)
         let whatsNewBinding = $pendingWhatsNew
         self.sheet(item: whatsNewBinding) { release in
-            WhatsNewModal(
-                release: release,
-                onClose: {
-                    WhatsNewGate.markShown(version: release.version)
-                    pendingWhatsNew = nil
-                },
-                onAction: { action in
-                    // Mark the release seen first so the user can't loop
-                    // back into it if they reopen the chat window quickly.
-                    WhatsNewGate.markShown(version: release.version)
-                    pendingWhatsNew = nil
-                    switch action {
-                    case .openSandboxSettings:
-                        showMgmtWindow(.sandbox)
-                    case .openAPIKeysSettings:
-                        showMgmtWindow(.server)
-                    case .openSecurityDoc(let url):
-                        NSWorkspace.shared.open(url)
-                    case .openStorageSettings, .exportPlaintextBackup:
-                        showMgmtWindow(.storage)
-                    }
-                }
-            )
-            .environment(\.theme, windowState.theme)
+            whatsNewContent(release)
         }
         let agentSheetBinding = $pendingDiscoveredAgent
         self.sheet(item: agentSheetBinding) { agent in agentSheetContent(agent) }
