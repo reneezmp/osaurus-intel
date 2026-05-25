@@ -2650,6 +2650,18 @@ struct ChatView: View {
         _observedSession = ObservedObject(wrappedValue: state.session)
     }
 
+    private func relayAgentReceived(_ notification: Notification) {
+        let winId = windowState.windowId
+        guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
+        guard targetWindowId == winId else { return }
+        guard let relay = notification.object as? PairedRelayAgent else { return }
+        connectToRelayAgent(relay)
+    }
+
+    private func showMgmtWindow(_ tab: ManagementTab) {
+        AppDelegate.shared?.showManagementWindow(initialTab: tab)
+    }
+
     private func onPickerItemsChanged(_ newItems: [ModelPickerItem]) {
         guard let providerId = windowState.selectedDiscoveredAgentProviderId else { return }
         var providerItems: [ModelPickerItem] = []
@@ -2941,12 +2953,7 @@ struct ChatView: View {
             selectDiscoveredAgent(discoveredAgent)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
-            let winId = windowState.windowId
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
-            guard targetWindowId == winId else { return }
-            guard let relay = notification.object as? PairedRelayAgent else { return }
-            let r: PairedRelayAgent = relay
-            connectToRelayAgent(r)
+            Task { await MainActor.run { relayAgentReceived(notification) } }
         }
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in
             let aId: UUID? = notification.object as? UUID
@@ -3009,19 +3016,13 @@ struct ChatView: View {
                     pendingWhatsNew = nil
                     switch action {
                     case .openSandboxSettings:
-                        AppDelegate.shared?.showManagementWindow(initialTab: .sandbox)
+                        showMgmtWindow(.sandbox)
                     case .openAPIKeysSettings:
-                        AppDelegate.shared?.showManagementWindow(initialTab: .server)
+                        showMgmtWindow(.server)
                     case .openSecurityDoc(let url):
                         NSWorkspace.shared.open(url)
                     case .openStorageSettings, .exportPlaintextBackup:
-                        // Both actions land on the Storage panel.
-                        // `exportPlaintextBackup` doesn't auto-open
-                        // the file picker — the user clicks
-                        // "Export plaintext backup…" once they're
-                        // there, which is the safer flow because it
-                        // forces them to pick a destination.
-                        AppDelegate.shared?.showManagementWindow(initialTab: .storage)
+                        showMgmtWindow(.storage)
                     }
                 }
             )
