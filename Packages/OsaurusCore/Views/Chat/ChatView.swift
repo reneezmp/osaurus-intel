@@ -2840,7 +2840,7 @@ struct ChatView: View {
                         }
                         let onStop: () -> Void = { observedSession.stop() }
                         let onClear: () -> Void = { observedSession.reset() }
-                        let onSkill: (String) -> Void = { skillId in observedSession.pendingOneOffSkillId = skillId }
+                        let onSkill: (String) -> Void = { skillId in let s = observedSession; s.pendingOneOffSkillId = skillId }
                         let onSendNow = { observedSession.sendNowInterrupting() }
                         let onCancelSend = { observedSession.cancelQueuedSend() }
                         let pkdBinding = $observedSession.pendingOneOffSkillId
@@ -2945,7 +2945,8 @@ struct ChatView: View {
             guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
             guard targetWindowId == winId else { return }
             guard let relay = notification.object as? PairedRelayAgent else { return }
-            connectToRelayAgent(relay)
+            let r: PairedRelayAgent = relay
+            connectToRelayAgent(r)
         }
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in
             let aId: UUID? = notification.object as? UUID
