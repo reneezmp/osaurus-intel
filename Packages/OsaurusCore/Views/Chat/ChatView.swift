@@ -2763,13 +2763,12 @@ struct ChatView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
+                let fSessions: [ChatSessionData] = windowState.filteredSessions
+                let aId: UUID = windowState.agentId
+                let sessId: UUID? = session.sessionId
                 VStack(alignment: .leading, spacing: 0) {
                     if windowState.showSidebar {
-                        ChatSessionSidebar(
-                            sessions: windowState.filteredSessions,
-                            agentId: windowState.agentId,
-                            currentSessionId: session.sessionId
-                        )
+                        ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
                     }
                 }
                 .frame(width: sidebarWidth, alignment: .top)
@@ -2803,6 +2802,7 @@ struct ChatView: View {
                                     .allowsHitTesting(!isPromptOverlayActive)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                                     .animation(theme.springAnimation(), value: isPromptOverlayActive)
+                                blurred
                             }
 
                             // Floating input card. Dimmed and
@@ -2811,9 +2811,25 @@ struct ChatView: View {
                             // input is the obvious place to type, and
                             // accidental sends here can't race the
                             // prompt resolution.
+                        let inputBinding = $observedSession.input
+                        let selModelBinding = $observedSession.selectedModel
+                        let onSend: (String?) -> Void = { manualText in
+                            if let t = manualText { observedSession.input = t }
+                            if observedSession.isStreaming {
+                                observedSession.enqueueSend(observedSession.input, attachments: observedSession.pendingAttachments)
+                            } else { observedSession.sendCurrent() }
+                        }
+                        let onStop: () -> Void = { observedSession.stop() }
+                        let onClear: () -> Void = { _observedSession.wrappedValue.reset() }
+                        let onSkill: (String) -> Void = { sk in _observedSession.wrappedValue.pendingOneOffSkillId = sk }
+                        let onSendNow: () -> Void = { _observedSession.wrappedValue.sendNowInterrupting() }
+                        let onCancelSend: () -> Void = { _observedSession.wrappedValue.cancelQueuedSend() }
+                        let pkdBinding = $observedSession.pendingOneOffSkillId
+                        let autoSpeakBinding = $observedSession.autoSpeakAssistant
+                        let queuedBinding = $observedSession.queuedSend
                         FloatingInputCard(
-                            text: $observedSession.input,
-                            selectedModel: $observedSession.selectedModel,
+                            text: inputBinding,
+                            selectedModel: selModelBinding,
                                 pendingAttachments: $observedSession.pendingAttachments,
                                 isContinuousVoiceMode: $observedSession.isContinuousVoiceMode,
                                 voiceInputState: $observedSession.voiceInputState,
@@ -2824,33 +2840,19 @@ struct ChatView: View {
                                 supportsImages: observedSession.selectedModelSupportsImages,
                                 estimatedContextTokens: observedSession.estimatedContextTokens,
                                 contextBreakdown: observedSession.estimatedContextBreakdown,
-                                onSend: { manualText in
-                                    if let manualText = manualText {
-                                        observedSession.input = manualText
-                                    }
-                                    if observedSession.isStreaming {
-                                        observedSession.enqueueSend(
-                                            observedSession.input,
-                                            attachments: observedSession.pendingAttachments
-                                        )
-                                    } else {
-                                        observedSession.sendCurrent()
-                                    }
-                                },
-                                onStop: { observedSession.stop() },
+                                onSend: onSend,
+                                onStop: onStop,
                                 focusTrigger: focusTrigger,
                                 agentId: windowState.agentId,
                                 windowId: windowState.windowId,
                                 isCompact: windowState.showSidebar,
-                                onClearChat: { observedSession.reset() },
-                                onSkillSelected: { skillId in
-                                    observedSession.pendingOneOffSkillId = skillId
-                                },
-                                pendingSkillId: $observedSession.pendingOneOffSkillId,
-                                autoSpeakAssistant: $observedSession.autoSpeakAssistant,
-                                queuedSend: $observedSession.queuedSend,
-                                onSendNow: { observedSession.sendNowInterrupting() },
-                                onCancelQueued: { observedSession.cancelQueuedSend() }
+                                onClearChat: onClear,
+                                onSkillSelected: onSkill,
+                                pendingSkillId: pkdBinding,
+                                autoSpeakAssistant: autoSpeakBinding,
+                                queuedSend: queuedBinding,
+                                onSendNow: onSendNow,
+                                onCancelQueued: onCancelSend
                             )
                             .frame(maxWidth: 1100)
                             .frame(maxWidth: .infinity)
@@ -2927,14 +2929,9 @@ struct ChatView: View {
             connectToRelayAgent(relay)
         }
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { notification in
-            // VAD requested a new session for a specific agent
-            // Only handle if this is the targeted window
-            if let agentId = notification.object as? UUID {
-                // Only switch if this window's agent matches the VAD request
-                if agentId == windowState.agentId {
-                    windowState.startNewChat()
-                }
-            }
+            let aId: UUID? = notification.object as? UUID
+            let curAgent: UUID = windowState.agentId
+            if let agentId = aId, agentId == curAgent { windowState.startNewChat() }
         }
         .onAppear {
             setupKeyMonitor()
