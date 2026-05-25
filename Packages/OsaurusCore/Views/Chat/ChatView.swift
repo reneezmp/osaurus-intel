@@ -2852,10 +2852,9 @@ struct ChatView: View {
                         }
                         let onStop: () -> Void = { observedSession.stop() }
                         let onClear: () -> Void = { observedSession.reset() }
-                        let onSkill: (String) -> Void = { skillId in let s = observedSession; s.pendingOneOffSkillId = skillId }
+                        let onSkill: (String) -> Void = { _ in }
                         let onSendNow = { observedSession.sendNowInterrupting() }
                         let onCancelSend = { observedSession.cancelQueuedSend() }
-                        let pkdBinding = $observedSession.pendingOneOffSkillId
                         let autoSpeakBinding = $observedSession.autoSpeakAssistant
                         let queuedBinding = $observedSession.queuedSend
                         FloatingInputCard(
@@ -2879,7 +2878,7 @@ struct ChatView: View {
                                 isCompact: isCompact,
                                 onClearChat: onClear,
                                 onSkillSelected: onSkill,
-                                pendingSkillId: pkdBinding,
+                                pendingSkillId: $observedSession.pendingOneOffSkillId,
                                 autoSpeakAssistant: autoSpeakBinding,
                                 queuedSend: queuedBinding,
                                 onSendNow: onSendNow,
