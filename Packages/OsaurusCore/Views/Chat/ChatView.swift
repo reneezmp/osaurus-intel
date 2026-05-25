@@ -2654,6 +2654,18 @@ struct ChatView: View {
         ChatWindowManager.shared.closeWindow(id: windowState.windowId)
     }
 
+    private func noteDiscoveredAgentSelected(_ agent: DiscoveredAgent) {
+        Task { @MainActor in selectDiscoveredAgent(agent) }
+    }
+
+    private func handleChatToolbarSelectDiscovered(_ notification: Notification) {
+        let winId = windowState.windowId
+        guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
+        guard targetWindowId == winId else { return }
+        guard let d = notification.object as? DiscoveredAgent else { return }
+        DispatchQueue.main.async { selectDiscoveredAgent(d) }
+    }
+
     private func relayAgentReceived(_ notification: Notification) {
         let winId = windowState.windowId
         guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
@@ -2696,6 +2708,27 @@ struct ChatView: View {
         }
         if let firstChat = session.pickerItems.firstChatCapable {
             session.selectedModel = firstChat.id
+        }
+    }
+
+    @ViewBuilder
+    private func agentSheetContent(_ agent: DiscoveredAgent) -> some View {
+        if agent.address != nil {
+            PairingSheet(agent: agent) { apiKey, isPermanent in
+                connectToDiscoveredAgent(agent, token: apiKey, isEphemeral: !isPermanent)
+                pendingDiscoveredAgent = nil
+            } onCancel: {
+                pendingDiscoveredAgent = nil
+            }
+            .environment(\.theme, windowState.theme)
+        } else {
+            BonjourTokenSheet(agentName: agent.name) { token in
+                connectToDiscoveredAgent(agent, token: token)
+                pendingDiscoveredAgent = nil
+            } onCancel: {
+                pendingDiscoveredAgent = nil
+            }
+            .environment(\.theme, windowState.theme)
         }
     }
 
@@ -2868,7 +2901,8 @@ struct ChatView: View {
                                     }
                                     // Only reset for users who never completed onboarding
                                     OnboardingService.shared.resetOnboarding()
-                                    showOnboardingAndClose()
+                                    let w = windowState.windowId
+                                    ChatWindowManager.shared.closeWindow(id: w)
                                 },
                             )
                         }
@@ -2893,11 +2927,7 @@ struct ChatView: View {
             isPinnedToBottom = true
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectDiscoveredAgent)) { notification in
-            let winId = windowState.windowId
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
-            guard targetWindowId == winId else { return }
-            guard let discoveredAgent = notification.object as? DiscoveredAgent else { return }
-            selectDiscoveredAgent(discoveredAgent)
+            self.handleChatToolbarSelectDiscovered(notification)
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
             Task { await MainActor.run { relayAgentReceived(notification) } }
@@ -2976,23 +3006,7 @@ struct ChatView: View {
             .environment(\.theme, windowState.theme)
         }
         .sheet(item: $pendingDiscoveredAgent) { agent in
-            if agent.address != nil {
-                PairingSheet(agent: agent) { apiKey, isPermanent in
-                    connectToDiscoveredAgent(agent, token: apiKey, isEphemeral: !isPermanent)
-                    pendingDiscoveredAgent = nil
-                } onCancel: {
-                    pendingDiscoveredAgent = nil
-                }
-                .environment(\.theme, windowState.theme)
-            } else {
-                BonjourTokenSheet(agentName: agent.name) { token in
-                    connectToDiscoveredAgent(agent, token: token)
-                    pendingDiscoveredAgent = nil
-                } onCancel: {
-                    pendingDiscoveredAgent = nil
-                }
-                .environment(\.theme, windowState.theme)
-            }
+            agentSheetContent(agent)
         }
     }
 
