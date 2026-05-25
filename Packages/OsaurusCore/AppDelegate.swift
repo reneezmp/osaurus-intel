@@ -105,7 +105,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 sweepSwiftUISettingsPlaceholder()
             }
 
-            showMinimalWindow()
+            showChatWindow()
 
             if #available(macOS 26.0, *) {
                 for name in Self.swiftUISettingsPlaceholderNotifications {
@@ -156,69 +156,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     // MARK: - Window
 
     @MainActor
-    private func showMinimalWindow() {
+    private func showChatWindow() {
         NSApp.unhide(nil)
         _ = NSRunningApplication.current.activate(options: .activateAllWindows)
 
-        let content = VStack(spacing: 20) {
-            Image(systemName: "apple.logo")
-                .font(.system(size: 40))
-                .foregroundStyle(.secondary)
-
-            Text("Osaurus (Intel)")
-                .font(.title2)
-                .fontWeight(.semibold)
-
-            Text("Cloud-only  ·  MCP-ready  ·  Identity sync")
-                .font(.caption)
-                .foregroundStyle(.tertiary)
-
-            Divider()
-                .frame(width: 280)
-
-            VStack(alignment: .leading, spacing: 10) {
-                FeatureRow(icon: "cloud.fill", label: "DeepSeek V4 Pro / Flash", status: "Active", color: .green)
-                FeatureRow(icon: "hammer.fill", label: "MCP Server (3 tools)", status: "Active", color: .green)
-                FeatureRow(icon: "network", label: "HTTP API · Port 1338", status: "Active", color: .green)
-                FeatureRow(icon: "apple.logo", label: "Local Models", status: "Apple Silicon only", color: .orange)
-                FeatureRow(icon: "mic.fill", label: "Voice Features", status: "Apple Silicon only", color: .orange)
-                FeatureRow(icon: "shippingbox.fill", label: "Sandbox VM", status: "Apple Silicon only", color: .orange)
-            }
-
-            Divider()
-                .frame(width: 280)
-
-            HStack {
-                Circle()
-                    .fill(Color.green)
-                    .frame(width: 8, height: 8)
-                Text("Server running on port 1338")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-            }
-        }
-        .padding(36)
-        .frame(width: 420)
-
-        let hosting = NSHostingController(rootView: content)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 420, height: 440),
-            styleMask: [.titled, .closable, .miniaturizable],
-            backing: .buffered,
-            defer: false
-        )
-        window.title = "Osaurus (Intel)"
-        window.contentViewController = hosting
-        window.center()
-        window.isReleasedWhenClosed = false
-        window.makeKeyAndOrderFront(nil)
+        _ = ChatWindowManager.shared.createWindow()
     }
 
     // MARK: - Reopen
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         Task { @MainActor in
-            showMinimalWindow()
+            showChatWindow()
         }
         return true
     }
@@ -314,8 +263,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     public func showManagementWindow(initialTab: ManagementTab? = nil, deeplinkAgentId: UUID? = nil) {
-        showMinimalWindow()
-    }
+            showChatWindow()
+        }
 
     // MARK: - NSPopoverDelegate
 
