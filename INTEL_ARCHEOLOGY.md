@@ -267,3 +267,81 @@ da787ae7 M3: Router restored, HTTP server listens, all routes return stub 200
 
 Session closed 2026-05-24 at ~02:00 UTC-3. Working tree clean, 289 errors remaining in ChatView.swift only (down from 32,157 at start). All M2 through M10 infrastructure committed to `intel-fork` branch. ChatView is un-body-swapped with 20 typealiases and ~60 stub types active. The .app builds via xcodebuild and launches with functional cloud chat proxy + MCP server + PluginManager. M10.5 begins by reading this document and the M10.5 auto-sync strategy doc. ☀️🦕
 
+---
+
+## M10.5 Phase 6 — Compile Victory + Runtime Crash Discovery
+
+**Date:** 2026-05-25  
+**Tag:** `m10.5-zero-errors-runtime-crash-investigation`  
+**Working tree:** Clean at `7521dd25` (themedAlert removal commit)
+
+### Compile Reduction: 289 → 0
+
+After 25+ commits across Phases 0-6, `swift build --arch x86_64` produces **zero errors**. The reduction trajectory:
+
+| Phase | Technique | Outcome |
+|---|---|---|
+| Phase 2 | Data type fixes (class→class, enum→enum, protocols) | 289 → 193 (-96) |
+| Phase 3 | Manager expansion | 193 → 193 |
+| Phase 4-5 | Stub cleanup + apiKey fix | 193 → 177 (-16) |
+| Phase A | Concretize existentials (IntelStubConformers, IntelManagerConformers) | 177 → ~20 |
+| Phase A | FloatingInputCard 14 Any→concrete | Margin reduction |
+| Phase A | Hidden errors unmasked (notification names, stub methods) | Final 1 → 0 |
+
+**Key techniques:**
+- **18 typealiases eliminated** — Intel types own original names directly
+- **Phase A concretization** — All `any Protocol` existentials → concrete types matching originals byte-for-byte
+- **Hidden error unmasking** — The 1 remaining type-checker timeout was masking 5 real compilation errors: missing `Notification.Name` extensions (`chatToolbarSelectDiscoveredAgent`, `chatToolbarSelectRelayAgent`, `vadStartNewSession`) and missing stub methods (`setCloseCallback`, `cleanup`, `startNewChat`, `loadSession`, `refreshSessions`, `agents` array, `Equatable` on `ModelPickerSource`)
+- **Phase B extraction** — ChatSidebarSection, ChatInputSection, whatsNewContent, agentSheetContent, handleChatToolbarSelectDiscovered (~85 lines extracted from body)
+- **~50 inline expression splits** (for-loops, typed locals, closure pre-computation)
+
+**Verification:**
+```
+swift build --arch x86_64: 0 errors ✅
+xcodebuild Release x86_64: BUILD SUCCEEDED ✅
+file binary: Mach-O 64-bit executable x86_64 ✅
+```
+
+### Runtime Crash: `_swift_getGenericMetadata` Recursion
+
+Despite zero compile errors, the `.app` crashes on launch with an identical pattern across 7 crash reports (Error1–7.md):
+
+```
+Exception Type: EXC_BAD_ACCESS (SIGSEGV) at stack guard
+Recursion depth: 5,331–6,072 frames through:
+  _swift_getGenericMetadata → AttributeGraph → SwiftUICore
+Trigger: ChatWindowState.init() + NSHostingView/NSHostingController(rootView:)
+```
+
+**Key evidence table:**
+
+| Test | ChatWindowState? | View | Result |
+|---|---|---|---|
+| Minimal OK | No | `Text("hello")` | ✅ Works |
+| Error7 | Yes | `Text("hello")` | ❌ Crash |
+| Error6 | Yes | `ChatView(Text("OK"))` | ❌ Crash |
+| Error1–5 | Yes | `ChatView(...)` via NSHostingController/View | ❌ Crash |
+
+**Working theory:** `ChatWindowState.init()` instantiates types (ChatSession, ThemeManager) that trigger lazy generic metadata resolution. In the `OsaurusCore` module, one of the new View structs (ChatSidebarSection, ChatInputSection) or their `some View` return types forms a circular metadata dependency. When the runtime tries to materialize these types, it recurses until stack overflow.
+
+**Key insight:** The crash occurs even with `Text("hello")` as the rendered view. It's NOT in ChatView's body content — it's in the module-level type metadata that `ChatWindowState` references.
+
+**NSHostingView vs NSHostingController:** `NSHostingController` triggered a different crash (AttributeGraph dependency cycle from `.themedAlert` in the original body). `NSHostingView` avoids that but the `_swift_getGenericMetadata` crash persists through both. The `NSHostingView` switch was correct but insufficient.
+
+### Investigation Plan (in progress)
+
+| Phase | What | Status |
+|---|---|---|
+| Phase 1 | Tag + document compile victory | ✅ Done |
+| Phase 2 | Granular allocation tests (2A–2D): isolate which type triggers crash | Pending |
+| Phase 3 | Crash log forensics: extract exact metadata cycle type from crash trace | Pending |
+| Phase 4 | Module-scope bisection: exclude ChatInputSection/ChatSidebarSection to find cycle source | Pending |
+
+### Remaining work after crash resolved
+
+1. Restore ChatView with `chatModeContent` + real UI
+2. Wire into main window via AppDelegate
+3. Build Release .app
+4. Launch on M4, verify: real Osaurus chat UI renders, send "hello" via DeepSeek-V4-Flash, confirm streaming + markdown + model picker
+5. Update final docs (INTEL_ARCHEOLOGY, M10.5 AutoSync, PathB)
+
