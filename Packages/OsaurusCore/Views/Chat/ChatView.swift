@@ -2650,6 +2650,10 @@ struct ChatView: View {
         _observedSession = ObservedObject(wrappedValue: state.session)
     }
 
+    private func showOnboardingAndClose() {
+        ChatWindowManager.shared.closeWindow(id: windowState.windowId)
+    }
+
     private func relayAgentReceived(_ notification: Notification) {
         let winId = windowState.windowId
         guard let targetWindowId = notification.userInfo?["windowId"] as? UUID else { return }
@@ -2826,66 +2830,14 @@ struct ChatView: View {
                             // input is the obvious place to type, and
                             // accidental sends here can't race the
                             // prompt resolution.
-                        let inputBinding = $observedSession.input
-                        let selModelBinding = $observedSession.selectedModel
-                        let attBinding = $observedSession.pendingAttachments
-                        let voiceBinding = $observedSession.isContinuousVoiceMode
-                        let vstateBinding = $observedSession.voiceInputState
-                        let overlayBinding = $observedSession.showVoiceOverlay
-                        let pickerItems: [ModelPickerItem] = filteredPickerItems
-                        let activeMO = $observedSession.activeModelOptions
-                        let isStreaming = observedSession.isStreaming
-                        let supportsImg = observedSession.selectedModelSupportsImages
-                        let estTokens = observedSession.estimatedContextTokens
-                        let ctxBreakdown = observedSession.estimatedContextBreakdown
-                        let fTrigger = focusTrigger
-                        let agentId = windowState.agentId
-                        let windowId = windowState.windowId
-                        let isCompact = windowState.showSidebar
-                        let onSend: (String?) -> Void = { manualText in
-                            if let t = manualText { observedSession.input = t }
-                            if observedSession.isStreaming {
-                                let inp = observedSession.input
-                                let att = observedSession.pendingAttachments
-                                observedSession.enqueueSend(inp, attachments: att)
-                            } else { observedSession.sendCurrent() }
-                        }
-                        let onStop: () -> Void = { observedSession.stop() }
-                        let onClear: () -> Void = { observedSession.reset() }
-                        let onSkill: (String) -> Void = { _ in }
-                        let onSendNow = { observedSession.sendNowInterrupting() }
-                        let onCancelSend = { observedSession.cancelQueuedSend() }
-                        let autoSpeakBinding = $observedSession.autoSpeakAssistant
-                        let queuedBinding = $observedSession.queuedSend
-                        FloatingInputCard(
-                            text: inputBinding,
-                            selectedModel: selModelBinding,
-                                pendingAttachments: attBinding,
-                                isContinuousVoiceMode: voiceBinding,
-                                voiceInputState: vstateBinding,
-                                showVoiceOverlay: overlayBinding,
-                                pickerItems: pickerItems,
-                                activeModelOptions: activeMO,
-                                isStreaming: isStreaming,
-                                supportsImages: supportsImg,
-                                estimatedContextTokens: estTokens,
-                                contextBreakdown: ctxBreakdown,
-                                onSend: onSend,
-                                onStop: onStop,
-                                focusTrigger: fTrigger,
-                                agentId: agentId,
-                                windowId: windowId,
-                                isCompact: isCompact,
-                                onClearChat: onClear,
-                                onSkillSelected: onSkill,
-                                pendingSkillId: $observedSession.pendingOneOffSkillId,
-                                autoSpeakAssistant: autoSpeakBinding,
-                                queuedSend: queuedBinding,
-                                onSendNow: onSendNow,
-                                onCancelQueued: onCancelSend
-                            )
-                            .frame(maxWidth: 1100)
-                            .frame(maxWidth: .infinity)
+                        ChatInputSection(
+                            observedSession: observedSession,
+                            windowState: windowState,
+                            filteredPickerItems: filteredPickerItems,
+                            focusTrigger: focusTrigger,
+                            isPromptOverlayActive: isPromptOverlayActive,
+                            theme: theme
+                        )
                             .opacity(isPromptOverlayActive ? 0.55 : 1.0)
                             .allowsHitTesting(!isPromptOverlayActive)
                             .animation(theme.springAnimation(), value: isPromptOverlayActive)
@@ -2910,17 +2862,13 @@ struct ChatView: View {
                                     // If onboarding was already completed, just refresh models
                                     // Don't reset onboarding - the user just finished it
                                     if !OnboardingService.shared.shouldShowOnboarding {
-                                        Task { @MainActor in
-                                            await session.refreshPickerItems()
-                                        }
+                                        let ses = session
+                                        Task { @MainActor in await ses.refreshPickerItems() }
                                         return
                                     }
                                     // Only reset for users who never completed onboarding
                                     OnboardingService.shared.resetOnboarding()
-                                    // Close this window so user can focus on onboarding
-                                    ChatWindowManager.shared.closeWindow(id: windowState.windowId)
-                                    // Show onboarding window
-                                    AppDelegate.shared?.showOnboardingWindow()
+                                    showOnboardingAndClose()
                                 },
                             )
                         }

@@ -4177,6 +4177,31 @@ private struct SendNowButton: View {
 #else
 import SwiftUI
 struct FloatingInputCard: View {
+    var text: Any = ""
+    var selectedModel: Any = ""
+    var pendingAttachments: Any = []
+    var isContinuousVoiceMode: Any = false
+    var voiceInputState: Any = 0
+    var showVoiceOverlay: Any = false
+    var pickerItems: Any = []
+    var activeModelOptions: Any = [:]
+    var isStreaming: Bool = false
+    var supportsImages: Bool = false
+    var estimatedContextTokens: Int = 0
+    var contextBreakdown: Any? = nil
+    var onSend: (Any?) -> Void = { _ in }
+    var onStop: () -> Void = {}
+    var focusTrigger: Int = 0
+    var agentId: UUID = UUID()
+    var windowId: UUID = UUID()
+    var isCompact: Bool = false
+    var onClearChat: () -> Void = {}
+    var onSkillSelected: (String) -> Void = { _ in }
+    var pendingSkillId: Any = ""
+    var autoSpeakAssistant: Any = false
+    var queuedSend: Any = false
+    var onSendNow: () -> Void = {}
+    var onCancelQueued: () -> Void = {}
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Floating Input", symbol: "apple.logo")
     }
