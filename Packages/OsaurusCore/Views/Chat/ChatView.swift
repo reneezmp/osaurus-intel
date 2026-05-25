@@ -2797,9 +2797,13 @@ struct ChatView: View {
                                 // visibly takes the foreground without
                                 // letting taps leak through.
                                 let w: CGFloat = effectiveContentWidth
-                                messageThread(w)
-                                    .blur(radius: isPromptOverlayActive ? 1.5 : 0)
-                                    .allowsHitTesting(!isPromptOverlayActive)
+                                let msgThread = messageThread(w)
+                                let blurRadius: CGFloat = isPromptOverlayActive ? 1.5 : 0
+                                let hitTest = !isPromptOverlayActive
+                                let anim = theme.springAnimation()
+                                msgThread
+                                    .blur(radius: blurRadius)
+                                    .allowsHitTesting(hitTest)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                                     .animation(theme.springAnimation(), value: isPromptOverlayActive)
                             }
@@ -2812,10 +2816,26 @@ struct ChatView: View {
                             // prompt resolution.
                         let inputBinding = $observedSession.input
                         let selModelBinding = $observedSession.selectedModel
+                        let attBinding = $observedSession.pendingAttachments
+                        let voiceBinding = $observedSession.isContinuousVoiceMode
+                        let vstateBinding = $observedSession.voiceInputState
+                        let overlayBinding = $observedSession.showVoiceOverlay
+                        let pickerItems: [ModelPickerItem] = filteredPickerItems
+                        let activeMO = $observedSession.activeModelOptions
+                        let isStreaming = observedSession.isStreaming
+                        let supportsImg = observedSession.selectedModelSupportsImages
+                        let estTokens = observedSession.estimatedContextTokens
+                        let ctxBreakdown = observedSession.estimatedContextBreakdown
+                        let fTrigger = focusTrigger
+                        let agentId = windowState.agentId
+                        let windowId = windowState.windowId
+                        let isCompact = windowState.showSidebar
                         let onSend: (String?) -> Void = { manualText in
                             if let t = manualText { observedSession.input = t }
                             if observedSession.isStreaming {
-                                observedSession.enqueueSend(observedSession.input, attachments: observedSession.pendingAttachments)
+                                let inp = observedSession.input
+                                let att = observedSession.pendingAttachments
+                                observedSession.enqueueSend(inp, attachments: att)
                             } else { observedSession.sendCurrent() }
                         }
                         let onStop: () -> Void = { observedSession.stop() }
@@ -2829,22 +2849,22 @@ struct ChatView: View {
                         FloatingInputCard(
                             text: inputBinding,
                             selectedModel: selModelBinding,
-                                pendingAttachments: $observedSession.pendingAttachments,
-                                isContinuousVoiceMode: $observedSession.isContinuousVoiceMode,
-                                voiceInputState: $observedSession.voiceInputState,
-                                showVoiceOverlay: $observedSession.showVoiceOverlay,
-                                pickerItems: filteredPickerItems,
-                                activeModelOptions: $observedSession.activeModelOptions,
-                                isStreaming: observedSession.isStreaming,
-                                supportsImages: observedSession.selectedModelSupportsImages,
-                                estimatedContextTokens: observedSession.estimatedContextTokens,
-                                contextBreakdown: observedSession.estimatedContextBreakdown,
+                                pendingAttachments: attBinding,
+                                isContinuousVoiceMode: voiceBinding,
+                                voiceInputState: vstateBinding,
+                                showVoiceOverlay: overlayBinding,
+                                pickerItems: pickerItems,
+                                activeModelOptions: activeMO,
+                                isStreaming: isStreaming,
+                                supportsImages: supportsImg,
+                                estimatedContextTokens: estTokens,
+                                contextBreakdown: ctxBreakdown,
                                 onSend: onSend,
                                 onStop: onStop,
-                                focusTrigger: focusTrigger,
-                                agentId: windowState.agentId,
-                                windowId: windowState.windowId,
-                                isCompact: windowState.showSidebar,
+                                focusTrigger: fTrigger,
+                                agentId: agentId,
+                                windowId: windowId,
+                                isCompact: isCompact,
                                 onClearChat: onClear,
                                 onSkillSelected: onSkill,
                                 pendingSkillId: pkdBinding,
