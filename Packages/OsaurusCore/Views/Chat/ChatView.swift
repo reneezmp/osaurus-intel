@@ -2757,26 +2757,6 @@ struct ChatView: View {
     var body: some View {
         let _ = ChatPerfTrace.shared.count("body.ChatView")
         chatModeContent
-            .themedAlert(
-                "Do you want Osaurus to auto speak every reply in this chat?",
-                isPresented: $showAutoSpeakPrompt,
-                message: "This only applies to this chat.",
-                primaryButton: .primary("Yes") { session.autoSpeakAssistant = true },
-                secondaryButton: .cancel("No")
-            )
-            .themedAlert(
-                "Keep this chat running?",
-                isPresented: $windowState.showCloseConfirmation,
-                message:
-                    "The model is still generating a reply. Continue in the background and track progress in the menu-bar notch, or stop now.",
-                buttons: [
-                    .primary("Continue in Background") { windowState.confirmCloseInBackground() },
-                    .destructive("Stop and Close") { windowState.confirmCloseAndStop() },
-                    .cancel("Cancel"),
-                ]
-            )
-            .themedAlertScope(.chat(windowState.windowId))
-            .overlay(ThemedAlertHost(scope: .chat(windowState.windowId)))
             .overlay { promptOverlayLayer }
             .onChange(of: session.lastCompletedAssistantTurnId) { _, newValue in
                 handleAssistantTurnCompleted(turnId: newValue)
