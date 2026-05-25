@@ -2812,18 +2812,7 @@ struct ChatView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
-                let fSessions: [ChatSessionData] = windowState.filteredSessions
-                let aId: UUID = windowState.agentId
-                let sessId: UUID? = session.sessionId
-                VStack(alignment: .leading, spacing: 0) {
-                    if windowState.showSidebar {
-                        ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
-                    }
-                }
-                .frame(width: sidebarWidth, alignment: .top)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .clipped()
-                .zIndex(1)
+                ChatSidebarSection(windowState: windowState, sessionId: session.sessionId, sidebarWidth: sidebarWidth)
 
                 // Main chat area
                 ZStack {
@@ -2936,8 +2925,10 @@ struct ChatView: View {
             let aId: UUID? = notification.object as? UUID
             let curAgent: UUID = windowState.agentId
             if let agentId = aId {
-                let match = agentId == curAgent
-                if match { windowState.startNewChat() }
+                let aid = agentId.uuidString
+                let cid = curAgent.uuidString
+                let matches = (aid == cid)
+                if matches { windowState.startNewChat() }
             }
         }
         .onAppear {
