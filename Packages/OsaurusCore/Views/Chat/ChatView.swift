@@ -2905,7 +2905,7 @@ struct ChatView: View {
                                     // Don't reset onboarding - the user just finished it
                                     if !OnboardingService.shared.shouldShowOnboarding {
                                         let ses = session
-                                        ses.refreshPickerItems()
+                                        Task { await ses.refreshPickerItems() }
                                         return
                                     }
                                     // Only reset for users who never completed onboarding

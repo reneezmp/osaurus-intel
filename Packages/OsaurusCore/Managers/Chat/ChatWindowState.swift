@@ -550,5 +550,9 @@ final class ChatWindowState: ObservableObject {
     func confirmCloseInBackground() { showCloseConfirmation = false }
     func confirmCloseAndStop() { showCloseConfirmation = false }
     func refreshPairedRelayAgents(discoveredAgents: [DiscoveredAgent]? = nil) {}
+    func cleanup() {}
+    func startNewChat() {}
+    func loadSession(_ sessionData: ChatSessionData) {}
+    func refreshSessions() {}
 }
 #endif

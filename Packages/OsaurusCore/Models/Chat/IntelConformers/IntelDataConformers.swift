@@ -414,13 +414,11 @@ enum SessionSource: Sendable { case chat, dispatch, schedule, watcher }
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
 
 
-struct ModelPickerItem: ModelPickerItemProtocol {
+struct ModelPickerItem: Identifiable, Sendable, Equatable {
     let id: String
     var source: ModelPickerSource
     var isVLM: Bool
 }
-
-extension ModelPickerItem: Sendable {}
 
 
 extension Array where Element == ModelPickerItem {
@@ -743,6 +741,9 @@ extension NSNotification.Name {
     static let remoteProviderModelsChanged = NSNotification.Name("remoteProviderModelsChanged")
     static let localModelsChanged = NSNotification.Name("localModelsChanged")
     static let chatOverlayActivated = NSNotification.Name("chatOverlayActivated")
+    static let chatToolbarSelectDiscoveredAgent = NSNotification.Name("chatToolbarSelectDiscoveredAgent")
+    static let chatToolbarSelectRelayAgent = NSNotification.Name("chatToolbarSelectRelayAgent")
+    static let vadStartNewSession = NSNotification.Name("vadStartNewSession")
     static let chatViewClosed = NSNotification.Name("chatViewClosed")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
 }

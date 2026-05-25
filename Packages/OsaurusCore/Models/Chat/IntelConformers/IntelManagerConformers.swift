@@ -27,6 +27,7 @@ final class AgentManager: @unchecked Sendable {
     }
 
     var activeAgentId: UUID = UUID()
+    var agents: [Agent] = [Agent(id: UUID(), name: "Default", systemPrompt: "", themeId: nil)]
 
     func agent(for id: UUID) -> Agent? {
         Agent(id: id, name: "Agent", systemPrompt: "", themeId: nil)

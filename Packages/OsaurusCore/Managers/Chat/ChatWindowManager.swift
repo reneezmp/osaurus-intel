@@ -940,6 +940,8 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         }
     }
 
+    func setCloseCallback(for windowId: UUID, callback: @escaping () -> Void) {}
+
     public func toggleLastFocused() {
         if let id = lastFocusedWindowId, let window = nsWindows[id] {
             window.makeKeyAndOrderFront(nil)

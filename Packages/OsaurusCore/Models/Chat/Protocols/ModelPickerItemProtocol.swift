@@ -13,7 +13,7 @@ protocol ModelPickerItemProtocol: Identifiable, Sendable {
     var isVLM: Bool { get }
 }
 
-enum ModelPickerSource: Sendable {
+enum ModelPickerSource: Sendable, Equatable {
     case builtIn
     case remote(String, UUID)
     case foundation
