@@ -2,7 +2,9 @@
 //  IntelStubConformers.swift
 //  OsaurusCore
 //
-//  M10 Phase 4d: Intel stub conformers — no-op/cloud-only implementations.
+//  M10.5 Phase A: Intel stub conformers — concretized (no existential protocol types).
+//  All types use concrete types matching the Apple Silicon originals byte-for-byte.
+//  Protocol conformances dropped — ChatView accesses these directly by type name.
 //
 
 #if OSAURUS_INTEL
@@ -11,7 +13,7 @@ import Foundation
 
 // MARK: - SpeechService (no-op on Intel)
 
-final class SpeechService: SpeechServiceProtocol, @unchecked Sendable {
+final class SpeechService: @unchecked Sendable {
     static let shared = SpeechService()
     let isRecording: Bool = false
 
@@ -19,55 +21,27 @@ final class SpeechService: SpeechServiceProtocol, @unchecked Sendable {
     func clearTranscription() {}
 }
 
-// MARK: - RemoteProviderManager (cloud-only)
+// MARK: - RemoteProviderManager (cloud-only, concretized)
 
-final class RemoteProviderManager: RemoteProviderManagerProtocol, @unchecked Sendable {
+final class RemoteProviderManager: @unchecked Sendable {
     static let shared = RemoteProviderManager()
 
-    struct Config: RemoteProviderConfigInfoProtocol {
-        var providers: [any RemoteProviderInfoProtocol] = []
-    }
+    private var _providers: [RemoteProvider] = []
 
-    struct Provider: RemoteProviderInfoProtocol {
-        let id: UUID
-        var name: String
-        var host: String
-        var providerProtocol: RemoteProviderProtocol = .https
-        var authType: RemoteProviderAuthType = .none
-        var token: String? = nil
-        var port: Int? = nil
-        var enabled: Bool = true
-        var providerType: RemoteProviderType { .osaurus }
-        var remoteAgentId: UUID? = nil
-        var remoteAgentAddress: String? = nil
+    var configuration: RemoteProviderConfiguration {
+        var cfg = RemoteProviderConfiguration()
+        return cfg
     }
-
-    let configuration: RemoteProviderConfigInfoProtocol = Config()
 
     func isEphemeral(id: UUID) -> Bool { false }
-    func updateProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String?) {}
+    func updateProvider(_ provider: RemoteProvider, apiKey: String?) {}
     func connect(providerId: UUID) async throws {}
-    func addProvider(_ provider: any RemoteProviderInfoProtocol, apiKey: String? = nil, isEphemeral: Bool = false) {}
-
-    func addProvider(_ provider: RemoteProvider, apiKey: String?, isEphemeral: Bool) {
-        let bridged = Provider(
-            id: provider.id,
-            name: provider.name,
-            host: provider.host,
-            providerProtocol: provider.providerProtocol,
-            authType: provider.authType,
-            port: provider.port,
-            enabled: provider.enabled,
-            remoteAgentId: provider.remoteAgentId,
-            remoteAgentAddress: provider.remoteAgentAddress
-        )
-        addProvider(bridged as any RemoteProviderInfoProtocol, apiKey: apiKey, isEphemeral: isEphemeral)
-    }
+    func addProvider(_ provider: RemoteProvider, apiKey: String? = nil, isEphemeral: Bool = false) {}
 }
 
 // MARK: - ToolRegistry (stub)
 
-final class ToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
+final class ToolRegistry: @unchecked Sendable {
     static let shared = ToolRegistry()
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
@@ -78,24 +52,24 @@ final class ToolRegistry: ToolRegistryProtocol, @unchecked Sendable {
 
 // MARK: - MemoryService (disabled on Intel)
 
-final class MemoryService: MemoryServiceProtocol, @unchecked Sendable {
+final class MemoryService: @unchecked Sendable {
     static let shared = MemoryService()
     func bufferTurn(userMessage: String, assistantMessage: String?, agentId: String, conversationId: String, sessionDate: String? = nil) async {}
 }
 
 // MARK: - GenerativeGreeting (no-op on Intel)
 
-final class GenerativeGreetingPool: GenerativeGreetingPoolProtocol, @unchecked Sendable {
+final class GenerativeGreetingPool: @unchecked Sendable {
     static let shared = GenerativeGreetingPool()
-    func setActive(agent: any AgentInfoProtocol, model: String) async {}
-    func popFresh(for agent: any AgentInfoProtocol, model: String) async -> GenerativeGreeting? { nil }
-    func seed(_ cached: GenerativeGreeting, for agent: any AgentInfoProtocol, model: String) async {}
-    func warmUp(for agent: any AgentInfoProtocol, model: String) async {}
+    func setActive(agent: Agent, model: String) async {}
+    func popFresh(for agent: Agent, model: String) async -> GenerativeGreeting? { nil }
+    func seed(_ cached: GenerativeGreeting, for agent: Agent, model: String) async {}
+    func warmUp(for agent: Agent, model: String) async {}
 }
 
-final class GenerativeGreetingService: GenerativeGreetingServiceProtocol, @unchecked Sendable {
+final class GenerativeGreetingService: @unchecked Sendable {
     static let shared = GenerativeGreetingService()
-    func generate(agent: any AgentInfoProtocol, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
+    func generate(agent: Agent, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
 }
 
 // MARK: - SharedArtifact (stub)
@@ -109,7 +83,7 @@ struct ProcessingResult: Sendable {
     let enrichedToolResult: String
 }
 
-enum SharedArtifact: SharedArtifactProtocol {
+enum SharedArtifact {
     enum ResolutionFailure: Error {
         case markersMissing
         case noContentOrPath
@@ -131,8 +105,5 @@ enum SharedArtifact: SharedArtifactProtocol {
         .success(ProcessingResult(enrichedToolResult: text))
     }
 }
-
-
-extension RemoteProvider: RemoteProviderInfoProtocol {}
 
 #endif

@@ -2,8 +2,9 @@
 //  IntelManagerConformers.swift
 //  OsaurusCore
 //
-//  M10 Phase 4d + M10.5 Phase 3: Intel-lite manager conformers for ChatView.
-//  Signatures byte-for-byte from original excluded source files.
+//  M10.5 Phase A: Intel-lite manager conformers — concretized.
+//  All types use concrete types, no protocol existentials.
+//  Protocol conformances dropped — ChatView accesses these directly by type name.
 //
 
 #if OSAURUS_INTEL
@@ -12,12 +13,12 @@ import Foundation
 
 // MARK: - AgentManager
 
-final class AgentManager: AgentManagerProtocol, @unchecked Sendable {
+final class AgentManager: @unchecked Sendable {
     static let shared = AgentManager()
 
     private var defaultModel = "deepseek-v4-pro"
 
-    struct AgentInfo: AgentInfoProtocol {
+    struct AgentInfo: Identifiable, Sendable {
         let id: UUID
         let name: String
         let isBuiltIn: Bool = true
@@ -27,12 +28,11 @@ final class AgentManager: AgentManagerProtocol, @unchecked Sendable {
 
     var activeAgentId: UUID = UUID()
 
-    // MARK: Agent lookup
-    func agent(for id: UUID) -> (any AgentInfoProtocol)? {
-        AgentInfo(id: id, name: "Agent")
+    func agent(for id: UUID) -> Agent? {
+        Agent(id: id, name: "Agent", systemPrompt: "", themeId: nil)
     }
 
-    func agent(byAddress address: String) -> (any AgentInfoProtocol)? {
+    func agent(byAddress address: String) -> Agent? {
         nil
     }
 
@@ -40,85 +40,38 @@ final class AgentManager: AgentManagerProtocol, @unchecked Sendable {
         UUID(uuidString: identifier)
     }
 
-    func agentsList() -> [any AgentInfoProtocol] {
-        [AgentInfo(id: UUID(), name: "Default")]
+    func agentsList() -> [Agent] {
+        [Agent(id: UUID(), name: "Default")]
     }
 
-    // MARK: Lifecycle
     func refresh() {}
-
-    func setActiveAgent(_ id: UUID) {
-        activeAgentId = id
-    }
-
+    func setActiveAgent(_ id: UUID) { activeAgentId = id }
     func add(_ agent: Any) {}
     func update(_ agent: Any) {}
+    func delete(id: UUID) async -> Any? { nil }
 
-    func delete(id: UUID) async -> Any? {
-        nil
-    }
-
-    // MARK: Configuration
     func updateDefaultModel(for agentId: UUID, model: String) {
         if agentId == activeAgentId { defaultModel = model }
     }
 
-    func effectiveModel(for agentId: UUID) -> String? {
-        defaultModel
-    }
-
-    func effectiveTemperature(for agentId: UUID) -> Double? {
-        nil
-    }
-
-    func effectiveMaxTokens(for agentId: UUID) -> Int? {
-        nil
-    }
-
-    func effectiveSystemPrompt(for agentId: UUID) -> String {
-        ""
-    }
-
-    func effectiveToolsDisabled(for agentId: UUID) -> Bool {
-        false
-    }
-
-    func effectiveDBEnabled(for agentId: UUID) -> Bool {
-        false
-    }
-
-    func effectiveMemoryDisabled(for agentId: UUID) -> Bool {
-        true
-    }
-
-    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode? {
-        nil
-    }
-
-    func effectiveEnabledToolNames(for agentId: UUID) -> [String]? {
-        nil
-    }
-
-    func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? {
-        nil
-    }
-
-    func effectiveAutonomousExec(for agentId: UUID) -> AgentAutoExecInfo? {
-        AgentAutoExecInfo(enabled: false)
-    }
-
-    func ttsVoice(for agentId: UUID) -> Any? {
-        nil
-    }
-
-    func themeId(for agentId: UUID) -> UUID? {
-        nil
-    }
+    func effectiveModel(for agentId: UUID) -> String? { defaultModel }
+    func effectiveTemperature(for agentId: UUID) -> Double? { nil }
+    func effectiveMaxTokens(for agentId: UUID) -> Int? { nil }
+    func effectiveSystemPrompt(for agentId: UUID) -> String { "" }
+    func effectiveToolsDisabled(for agentId: UUID) -> Bool { false }
+    func effectiveDBEnabled(for agentId: UUID) -> Bool { false }
+    func effectiveMemoryDisabled(for agentId: UUID) -> Bool { true }
+    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode? { nil }
+    func effectiveEnabledToolNames(for agentId: UUID) -> [String]? { nil }
+    func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? { nil }
+    func effectiveAutonomousExec(for agentId: UUID) -> AgentAutoExecInfo? { AgentAutoExecInfo(enabled: false) }
+    func ttsVoice(for agentId: UUID) -> Any? { nil }
+    func themeId(for agentId: UUID) -> UUID? { nil }
 }
 
 // MARK: - ModelPickerItemCache
 
-final class ModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked Sendable {
+final class ModelPickerItemCache: @unchecked Sendable {
     static let shared = ModelPickerItemCache()
 
     var isLoaded: Bool = false
@@ -134,17 +87,9 @@ final class ModelPickerItemCache: ModelPickerItemCacheProtocol, @unchecked Senda
         return built
     }
 
-    func prewarm() {
-        Task { await buildModelPickerItems() }
-    }
-
-    func prewarmModelCache() async {
-        _ = await buildModelPickerItems()
-    }
-
-    func invalidateCache() {
-        isLoaded = false
-    }
+    func prewarm() { Task { await buildModelPickerItems() } }
+    func prewarmModelCache() async { _ = await buildModelPickerItems() }
+    func invalidateCache() { isLoaded = false }
 }
 
 // MARK: - ChatSessionData
@@ -161,7 +106,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
     var dispatchTaskId: UUID?
     var archived: Bool
     var selectedModel: String?
-    var turns: [any ChatTurnProtocol]
+    var turns: [ChatTurnData]
     var capabilities: Any? = nil
 
     init(
@@ -170,7 +115,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
         createdAt: Date = Date(),
         updatedAt: Date = Date(),
         selectedModel: String? = nil,
-        turns: [any ChatTurnProtocol] = [],
+        turns: [ChatTurnData] = [],
         agentId: UUID? = nil,
         source: SessionSource = .chat,
         sourcePluginId: String? = nil,
@@ -193,9 +138,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
         self.dispatchTaskId = dispatchTaskId
     }
 
-    static func generateTitle(from turnData: [any ChatTurnProtocol]) -> String {
-        "Chat"
-    }
+    static func generateTitle(from turnData: [ChatTurnData]) -> String { "Chat" }
 }
 
 // MARK: - ChatSessionsManager
@@ -204,22 +147,10 @@ final class ChatSessionsManager: @unchecked Sendable {
     static let shared = ChatSessionsManager()
     private var sessions: [UUID: ChatSessionData] = [:]
 
-    func save(_ data: ChatSessionData) {
-        sessions[data.id] = data
-    }
-
-    func delete(id: UUID) {
-        sessions.removeValue(forKey: id)
-    }
-
-    func rename(id: UUID, title: String) {
-        sessions[id]?.title = title
-    }
-
-    func setArchived(id: UUID, archived: Bool) {
-        sessions[id]?.archived = archived
-    }
-
+    func save(_ data: ChatSessionData) { sessions[data.id] = data }
+    func delete(id: UUID) { sessions.removeValue(forKey: id) }
+    func rename(id: UUID, title: String) { sessions[id]?.title = title }
+    func setArchived(id: UUID, archived: Bool) { sessions[id]?.archived = archived }
     func refresh() {}
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {
@@ -228,18 +159,13 @@ final class ChatSessionsManager: @unchecked Sendable {
         return id
     }
 
-    func sessions(for agentId: UUID?) -> [ChatSessionData] {
-        Array(sessions.values)
-    }
-
-    func session(for id: UUID) -> ChatSessionData? {
-        sessions[id]
-    }
+    func sessions(for agentId: UUID?) -> [ChatSessionData] { Array(sessions.values) }
+    func session(for id: UUID) -> ChatSessionData? { sessions[id] }
 }
 
 // MARK: - ChatConfiguration
 
-final class ChatConfiguration: ChatConfigurationProtocol, @unchecked Sendable {
+final class ChatConfiguration: @unchecked Sendable {
     static let shared = ChatConfiguration()
 
     let disableTools: Bool = false
@@ -256,10 +182,7 @@ final class ChatConfiguration: ChatConfigurationProtocol, @unchecked Sendable {
     var defaultManualToolNames: [String]? = nil
     var defaultManualSkillNames: [String]? = nil
 
-    static func load() -> any ChatConfigurationProtocol {
-        shared
-    }
+    static func load() -> ChatConfiguration { shared }
 }
-
 
 #endif
