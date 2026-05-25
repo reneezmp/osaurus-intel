@@ -2802,7 +2802,6 @@ struct ChatView: View {
                                     .allowsHitTesting(!isPromptOverlayActive)
                                     .transition(.opacity.combined(with: .move(edge: .bottom)))
                                     .animation(theme.springAnimation(), value: isPromptOverlayActive)
-                                blurred
                             }
 
                             // Floating input card. Dimmed and
@@ -2820,10 +2819,10 @@ struct ChatView: View {
                             } else { observedSession.sendCurrent() }
                         }
                         let onStop: () -> Void = { observedSession.stop() }
-                        let onClear: () -> Void = { _observedSession.wrappedValue.reset() }
-                        let onSkill: (String) -> Void = { sk in _observedSession.wrappedValue.pendingOneOffSkillId = sk }
-                        let onSendNow: () -> Void = { _observedSession.wrappedValue.sendNowInterrupting() }
-                        let onCancelSend: () -> Void = { _observedSession.wrappedValue.cancelQueuedSend() }
+                        let onClear: () -> Void = { observedSession.reset() }
+                        let onSkill: (String) -> Void = { skillId in observedSession.pendingOneOffSkillId = skillId }
+                        let onSendNow = { observedSession.sendNowInterrupting() }
+                        let onCancelSend = { observedSession.cancelQueuedSend() }
                         let pkdBinding = $observedSession.pendingOneOffSkillId
                         let autoSpeakBinding = $observedSession.autoSpeakAssistant
                         let queuedBinding = $observedSession.queuedSend
