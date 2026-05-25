@@ -4177,31 +4177,31 @@ private struct SendNowButton: View {
 #else
 import SwiftUI
 struct FloatingInputCard: View {
-    var text: Any = ""
-    var selectedModel: Any = ""
-    var pendingAttachments: Any = []
-    var isContinuousVoiceMode: Any = false
-    var voiceInputState: Any = 0
-    var showVoiceOverlay: Any = false
-    var pickerItems: Any = []
-    var activeModelOptions: Any = [:]
+    var text: Binding<String> = .constant("")
+    var selectedModel: Binding<String?> = .constant(nil)
+    var pendingAttachments: Binding<[Attachment]> = .constant([])
+    var isContinuousVoiceMode: Binding<Bool> = .constant(false)
+    var voiceInputState: Binding<VoiceInputState> = .constant(.idle)
+    var showVoiceOverlay: Binding<Bool> = .constant(false)
+    var pickerItems: [ModelPickerItem] = []
+    var activeModelOptions: Binding<[String: ModelOptionValue]> = .constant([:])
     var isStreaming: Bool = false
     var supportsImages: Bool = false
     var estimatedContextTokens: Int = 0
-    var contextBreakdown: Any? = nil
-    var onSend: (Any?) -> Void = { _ in }
+    var contextBreakdown: ContextBreakdown = .zero
+    var onSend: (String?) -> Void = { _ in }
     var onStop: () -> Void = {}
     var focusTrigger: Int = 0
-    var agentId: UUID = UUID()
-    var windowId: UUID = UUID()
+    var agentId: UUID? = nil
+    var windowId: UUID? = nil
     var isCompact: Bool = false
-    var onClearChat: () -> Void = {}
-    var onSkillSelected: (String) -> Void = { _ in }
-    var pendingSkillId: Any = ""
-    var autoSpeakAssistant: Any = false
-    var queuedSend: Any = false
-    var onSendNow: () -> Void = {}
-    var onCancelQueued: () -> Void = {}
+    var onClearChat: (() -> Void)? = nil
+    var onSkillSelected: ((UUID) -> Void)? = nil
+    var pendingSkillId: Binding<UUID?> = .constant(nil)
+    var autoSpeakAssistant: Binding<Bool> = .constant(false)
+    var queuedSend: Binding<QueuedSend?> = .constant(nil)
+    var onSendNow: (() -> Void)? = nil
+    var onCancelQueued: (() -> Void)? = nil
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Floating Input", symbol: "apple.logo")
     }
