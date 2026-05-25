@@ -2930,10 +2930,7 @@ struct ChatView: View {
         )
         .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
         .ignoresSafeArea()
-        .onReceive(NotificationCenter.default.publisher(for: .chatOverlayActivated)) { _ in
-            focusTrigger &+= 1
-            isPinnedToBottom = true
-        }
+        .onReceive(NotificationCenter.default.publisher(for: .chatOverlayActivated)) { _ in focusTrigger &+= 1; isPinnedToBottom = true }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectDiscoveredAgent)) { notification in
             self.handleChatToolbarSelectDiscovered(notification)
         }
