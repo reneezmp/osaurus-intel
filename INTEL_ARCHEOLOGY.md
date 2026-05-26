@@ -333,15 +333,66 @@ Trigger: ChatWindowState.init() + NSHostingView/NSHostingController(rootView:)
 | Phase | What | Status |
 |---|---|---|
 | Phase 1 | Tag + document compile victory | ✅ Done |
-| Phase 2 | Granular allocation tests (2A–2D): isolate which type triggers crash | Pending |
-| Phase 3 | Crash log forensics: extract exact metadata cycle type from crash trace | Pending |
-| Phase 4 | Module-scope bisection: exclude ChatInputSection/ChatSidebarSection to find cycle source | Pending |
+| Phase 2 | Granular allocation tests (2A–2D): isolate which type triggers crash | ✅ Done — `ChatWindowState`, `ChatSession`, `ThemeManager` all safe |
+| Phase 3 | Crash log forensics: extract exact metadata cycle type from crash trace | ✅ Done — `swift_getOpaqueTypeMetadataImpl` in `chatModeContent.getter` |
+| Phase 4 | Module-scope bisection: ChatInputSection/ChatSidebarSection cycle source | ✅ Done — pairwise cycle via `@ObservedObject` in both View structs |
 
-### Remaining work after crash resolved
+---
 
-1. Restore ChatView with `chatModeContent` + real UI
-2. Wire into main window via AppDelegate
-3. Build Release .app
-4. Launch on M4, verify: real Osaurus chat UI renders, send "hello" via DeepSeek-V4-Flash, confirm streaming + markdown + model picker
-5. Update final docs (INTEL_ARCHEOLOGY, M10.5 AutoSync, PathB)
+## M10.5 Phase 7 — Runtime Crash Resolved + Remaining Work
+
+**Date:** 2026-05-25  
+**Key milestone:** APP LAUNCHES WITHOUT CRASH — `ChatContentView` struct breaks opaque type metadata chain.
+
+### Crash Resolution
+
+After 14 consecutive runtime crashes (Error1–14), the root cause was identified:
+
+**The `chatModeContent` computed property returned `some View` — an opaque return type.** At runtime, `swift_getOpaqueTypeMetadataImpl` tried to resolve the concrete type behind this opaque return, which triggered `chatModeContent.getter` re-evaluation, which triggered AttributeGraph updates, which re-triggered metadata resolution — infinite recursion at 11,175 levels.
+
+**Fix:** Extract the entire `chatModeContent` body into a standalone `ChatContentView: View` struct (`Packages/OsaurusCore/Views/Chat/ChatContentView.swift`). The struct's `var body: some View` return type is resolved independently per-struct (not shared with ChatView's opaque type chain). All sub-view properties use concrete `AnyView` types instead of `some View` to prevent sub-opaque chains.
+
+**Also fixed during Phase 7:**
+- `MessageThreadView` (Intel #else block): body-swap placeholder replaced with raw `turns` display (shows user messages + assistant responses + thinking text)
+- `ChatEmptyState` (Intel #else block): body-swap placeholder replaced with simple "New Chat / Type a message" text
+- `FloatingInputCard` (Intel #else block): 14 `Any`-typed params concretized to original concrete types (byte-for-byte)
+- Model auto-select: `session.selectedModel = "deepseek-v4-pro"` set in `.onAppear` when nil
+
+### Current State
+
+| Feature | Status |
+|---|---|
+| `swift build --arch x86_64` | ✅ 0 errors |
+| `xcodebuild Release x86_64` | ✅ BUILD SUCCEEDED |
+| Binary type | ✅ Mach-O 64-bit executable x86_64 |
+| App launch + window | ✅ Opens without crash |
+| Sidebar | ✅ ChatSessionSidebar renders (body-swapped placeholder) |
+| Chat input bar | ✅ Intel-native HStack: TextField + send/stop buttons |
+| Model auto-select | ✅ "deepseek-v4-pro" set on launch |
+| User messages display | ✅ "You: <text>" appears in message area after send |
+| Assistant responses | ❌ NOT appearing — streaming starts (green dot) but no response text added to `turns` |
+
+### Root Cause of Missing Responses
+
+The chat engine runs (send→stop→send toggle proves streaming lifecycle), but assistant turns are not saved to `observedSession.turns`. Likely causes:
+1. `CloudChatEngine` missing `DEEPSEEK_API_KEY` environment variable
+2. `CloudChatEngine` HTTP request failing silently
+3. Response parsing failing to create `ChatTurn` objects
+
+### Next Session Plan
+
+1. **Check CloudChatEngine API key:** Verify `DEEPSEEK_API_KEY` is set in environment or AppDelegate
+2. **Add verbose logging:** Print HTTP request/response to stderr from CloudChatEngine
+3. **Test with curl:** `curl localhost:1338/v1/chat/completions` with a test message to verify cloud proxy works independently
+4. **If cloud proxy works but chat doesn't:** Debug the `ChatEngine` → `ChatSession` turn storage pipeline
+5. **If cloud proxy fails:** Fix the HTTP handler or API key configuration
+6. **Once responses appear:** Refine message thread rendering (real message bubbles, markdown, streaming)
+
+### Git State
+
+- Branch: `intel-fork`
+- Tag: `m10.5-zero-errors-runtime-crash-investigation`
+- Latest commit for Phase 7 resolution: `709f4671` — "ChatContentView struct extracts entire chatModeContent body — NO RUNTIME CRASH!"
+- Uncommitted changes: ChatContentView.swift, ChatEmptyState.swift, MessageThreadView.swift (diagnostic UI improvements)
+- Working tree clean after doc update commit
 

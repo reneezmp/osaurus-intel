@@ -735,7 +735,14 @@ struct ChatEmptyState: View {
     var activeRelayAgent: PairedRelayAgent? = nil
 
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Chat Empty State", symbol: "apple.logo")
+        VStack(spacing: 12) {
+            Text("New Chat")
+                .font(.title2)
+            Text("Type a message below to start")
+                .font(.body)
+                .foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 }
 #endif

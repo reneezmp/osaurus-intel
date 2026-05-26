@@ -61,15 +61,41 @@ struct ChatContentView: View {
                 ZStack {
                     chatBackground
                     VStack(spacing: 0) {
-                        chatHeader
+                        HStack(spacing: 8) {
+                            Circle().fill(observedSession.isStreaming ? Color.green : Color.gray).frame(width: 8, height: 8)
+                            Text(observedSession.isStreaming ? "Streaming…" : "Idle")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("Model: \(session.selectedModel ?? "none")")
+                                .font(.caption2).foregroundStyle(.tertiary)
+                            if let err = observedSession.lastStreamError {
+                                Text(err).font(.caption).foregroundStyle(.red)
+                            }
+                        }.padding(.horizontal, 8).padding(.top, 4)
                         if session.hasAnyModel || session.isDiscoveringModels {
-                            if !session.hasVisibleThreadMessages {
-                                emptyStateView
+                            let _ = observedSession.turns.count
+                            if observedSession.turns.isEmpty {
+                                VStack(spacing: 12) {
+                                    Text("New Chat").font(.title2)
+                                    Text("Type a message below to start").font(.body).foregroundStyle(.secondary)
+                                }.frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                messageThread(effectiveContentWidth)
-                                    .blur(radius: false ? 1.5 : 0)
-                                    .allowsHitTesting(true)
-                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
+                                ScrollView {
+                                    LazyVStack(alignment: .leading, spacing: 12) {
+                                        ForEach(Array(observedSession.turns.enumerated()), id: \.offset) { i, turn in
+                                            VStack(alignment: .leading, spacing: 4) {
+                                                Text(turn.role == .user ? "You" : "Assistant")
+                                                    .font(.caption).foregroundStyle(.secondary)
+                                                Text(turn.content)
+                                                    .font(.body).textSelection(.enabled)
+                                                if !turn.thinking.isEmpty {
+                                                    Text(turn.thinking)
+                                                        .font(.body).italic().foregroundStyle(.secondary).textSelection(.enabled)
+                                                }
+                                            }.padding(.horizontal)
+                                            if i < observedSession.turns.count - 1 { Divider() }
+                                        }
+                                    }.padding(.vertical)
+                                }
                             }
                         } else {
                             VStack(spacing: 16) {
@@ -124,7 +150,11 @@ struct ChatContentView: View {
         }
         .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { _ in }
         .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { _ in }
-        .onAppear {}
+        .onAppear {
+            if session.selectedModel == nil {
+                session.selectedModel = "deepseek-v4-pro"
+            }
+        }
         .onDisappear {}
         .onChange(of: observedSession.pickerItems) { _, newItems in
             onPickerItemsChanged(newItems)

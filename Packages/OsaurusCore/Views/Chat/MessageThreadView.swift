@@ -165,7 +165,25 @@ struct MessageThreadView: View {
     var scrollToTurnTrigger: Int = 0
 
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Message Thread", symbol: "apple.logo")
+        VStack(alignment: .leading) {
+            if blocks.isEmpty {
+                Text("No blocks — \(blocks.count) blocks, session has turns")
+                    .foregroundStyle(.secondary)
+            }
+            ScrollViewReader { proxy in
+                ScrollView {
+                    LazyVStack(alignment: .leading, spacing: 8) {
+                        ForEach(Array(blocks.enumerated()), id: \.offset) { i, block in
+                            Text("#\(i): \(String(describing: block.kind).prefix(80))")
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                        }
+                        Color.clear.frame(height: 1).id("bottom")
+                    }
+                    .padding()
+                }
+            }
+        }
     }
 }
 #endif
