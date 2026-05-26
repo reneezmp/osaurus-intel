@@ -2797,181 +2797,32 @@ struct ChatView: View {
         .animation(theme.springAnimation(), value: current?.id)
     }
 
-    /// Chat mode content - the original ChatView implementation
-    @ViewBuilder
+    /// Chat mode content — extracted to ChatContentView struct
     private var chatModeContent: some View {
-        GeometryReader { proxy in
-            let windowWidth: CGFloat = proxy.size.width
-            let showSidebar: Bool = windowState.showSidebar
-            let sidebarWidth: CGFloat = showSidebar ? 240 : 0
-            let chatWidth = windowWidth - sidebarWidth
-            let effectiveContentWidth = min(chatWidth, 1100)
-
-            HStack(alignment: .top, spacing: 0) {
-                // Sidebar
-                let fSessions: [ChatSessionData] = windowState.filteredSessions
-                let aId: UUID = windowState.agentId
-                let sessId: UUID? = session.sessionId
-                VStack(alignment: .leading, spacing: 0) {
-                    if windowState.showSidebar {
-                        ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
-                    }
-                }
-                .frame(width: sidebarWidth, alignment: .top)
-                .frame(maxHeight: .infinity, alignment: .top)
-                .clipped()
-                .zIndex(1)
-
-                // Main chat area
-                ZStack {
-                    // Background
-                    chatBackground
-
-                    // Main content — centered with a max readable width
-                    VStack(spacing: 0) {
-                        // Header
-                        chatHeader
-
-                        // Content area (show immediately, model discovery is async)
-                        if session.hasAnyModel || session.isDiscoveringModels {
-                            if !session.hasVisibleThreadMessages {
-                                emptyStateView
-                            } else {
-                                // Message thread. While a prompt
-                                // overlay is mounted, blur the thread
-                                // and stop hit-testing so the prompt
-                                // visibly takes the foreground without
-                                // letting taps leak through.
-                                let w: CGFloat = effectiveContentWidth
-                                let msgThread = messageThread(w)
-                                let blurRadius: CGFloat = isPromptOverlayActive ? 1.5 : 0
-                                let hitTest = !isPromptOverlayActive
-                                let anim = theme.springAnimation()
-                                msgThread
-                                    .blur(radius: blurRadius)
-                                    .allowsHitTesting(hitTest)
-                                    .transition(.opacity.combined(with: .move(edge: .bottom)))
-                                    .animation(theme.springAnimation(), value: isPromptOverlayActive)
-                            }
-
-                            // Floating input card. Dimmed and
-                            // hit-test-disabled while a prompt overlay
-                            // is mounted so the prompt's embedded
-                            // input is the obvious place to type, and
-                            // accidental sends here can't race the
-                            // prompt resolution.
-                        let obs = observedSession
-                        let ws = windowState
-                        let fpi = filteredPickerItems
-                        let ft = focusTrigger
-                        let ipa = isPromptOverlayActive
-                        let thm = theme
-                        let sec = AnyView(ChatInputSection(observedSession: obs, windowState: ws, filteredPickerItems: fpi, focusTrigger: ft, isPromptOverlayActive: ipa, theme: thm))
-                        sec
-                            .opacity(isPromptOverlayActive ? 0.55 : 1.0)
-                            .allowsHitTesting(!isPromptOverlayActive)
-                            .animation(theme.springAnimation(), value: isPromptOverlayActive)
-                        } else {
-                            // No models empty state
-                            ChatEmptyState(
-                                hasModels: false,
-                                selectedModel: nil,
-                                agents: windowState.agents,
-                                activeAgentId: windowState.agentId,
-                                quickActions: windowState.activeAgent.chatQuickActions
-                                    ?? AgentQuickAction.defaultChatQuickActions,
-                                onOpenModelManager: {},
-                                onUseFoundation: windowState.foundationModelAvailable
-                                    ? {
-                                        session.selectedModel = session.pickerItems.firstChatCapable?.id ?? "foundation"
-                                    } : nil,
-                                onQuickAction: { _ in },
-                                onOpenOnboarding: {
-                                    // If onboarding was already completed, just refresh models
-                                    // Don't reset onboarding - the user just finished it
-                                    if !OnboardingService.shared.shouldShowOnboarding {
-                                        let ses = session
-                                        Task { await ses.refreshPickerItems() }
-                                        return
-                                    }
-                                    // Only reset for users who never completed onboarding
-                                    OnboardingService.shared.resetOnboarding()
-                                    let w = windowState.windowId
-                                    _ = w
-                                },
-                            )
-                        }
-                    }
-                    .animation(theme.springAnimation(responseMultiplier: 0.9), value: session.hasVisibleThreadMessages)
-                }
-            }
-        }
-        .frame(
-            minWidth: 800,
-            idealWidth: 950,
-            maxWidth: .infinity,
-            minHeight: 575,
-            idealHeight: 610,
-            maxHeight: .infinity
+        ChatContentView(
+            windowState: windowState,
+            observedSession: observedSession,
+            session: session,
+            pendingWhatsNew: $pendingWhatsNew,
+            pendingDiscoveredAgent: $pendingDiscoveredAgent,
+            focusTrigger: $focusTrigger,
+            isPinnedToBottom: $isPinnedToBottom,
+            filteredPickerItems: filteredPickerItems,
+            theme: theme,
+            keyMonitor: keyMonitor as Any?,
+            chatBackground: AnyView(chatBackground),
+            chatHeader: AnyView(chatHeader),
+            emptyStateView: AnyView(emptyStateView),
+            messageThread: { w in AnyView(messageThread(w)) },
+            promptOverlayLayer: AnyView(promptOverlayLayer),
+            onChatOverlayActivated: {},
+            handleChatToolbarSelectDiscovered: { n in handleChatToolbarSelectDiscovered(n) },
+            onRelayAgentNotify: { n in relayAgentReceived(n) },
+            onPickerItemsChanged: { items in onPickerItemsChanged(items) },
+            onChangeSelectedProvider: { id in onChangeSelectedProvider(id) },
+            whatsNewContent: { r in AnyView(whatsNewContent(r)) },
+            agentSheetContent: { a in AnyView(agentSheetContent(a)) }
         )
-        .clipShape(RoundedRectangle(cornerRadius: 24, style: .continuous))
-        .ignoresSafeArea()
-        .onReceive(NotificationCenter.default.publisher(for: .chatOverlayActivated)) { _ in focusTrigger &+= 1; isPinnedToBottom = true }
-        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectDiscoveredAgent)) { notification in
-            self.handleChatToolbarSelectDiscovered(notification)
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarSelectRelayAgent)) { notification in
-            Task { await MainActor.run { relayAgentReceived(notification) } }
-        }
-        .onReceive(NotificationCenter.default.publisher(for: .vadStartNewSession)) { _ in }
-        .onAppear {
-            setupKeyMonitor()
-
-            // Register close callback with ChatWindowManager
-            ChatWindowManager.shared.setCloseCallback(for: windowState.windowId) { [weak windowState] in
-                windowState?.cleanup()
-                windowState?.session.save()
-            }
-
-            // Compute the conditional flags so we don't surface the
-            // "restart sandbox" / "review paired devices" pages to users
-            // who would have nothing to do on them.
-            let hasSandbox: Bool = {
-                #if os(macOS)
-                    if #available(macOS 26, *) {
-                        return SandboxConfigurationStore.load().setupComplete
-                    }
-                #endif
-                return false
-            }()
-            let knownAgentAddrs = Set(
-                AgentManager.shared.agents.compactMap { $0.agentAddress }
-            )
-            let hasLegacyPairedKeys = !APIKeyManager.shared
-                .legacyMasterScopedKeys(knownAgentAddresses: knownAgentAddrs)
-                .isEmpty
-            pendingWhatsNew = WhatsNewGate.pendingAutoShowRelease(
-                hasSandbox: hasSandbox,
-                hasLegacyPairedKeys: hasLegacyPairedKeys
-            )
-        }
-        .onDisappear {
-            cleanupKeyMonitor()
-        }
-        .onChange(of: observedSession.pickerItems) { _, newItems in
-            onPickerItemsChanged(newItems)
-        }
-        .onChange(of: windowState.selectedDiscoveredAgentProviderId) { _, providerId in
-            onChangeSelectedProvider(providerId)
-        }
-        .environment(\.theme, windowState.theme)
-        .tint(theme.accentColor)
-        let whatsNewBinding = $pendingWhatsNew
-        self.sheet(item: whatsNewBinding) { release in
-            whatsNewContent(release)
-        }
-        let agentSheetBinding = $pendingDiscoveredAgent
-        self.sheet(item: agentSheetBinding) { agent in agentSheetContent(agent) }
     }
 
     /// Called when the user picks a discovered agent from the menu.
