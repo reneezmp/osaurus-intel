@@ -2755,8 +2755,7 @@ struct ChatView: View {
     }
 
     var body: some View {
-        Text("ChatView loaded")
-            .frame(width: 400, height: 300)
+        chatModeContent
     }
 
     /// Shared overlay layer for in-chat prompts (secrets + clarify).
@@ -2810,7 +2809,18 @@ struct ChatView: View {
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
-                ChatSidebarSection(windowState: windowState, sessionId: session.sessionId, sidebarWidth: sidebarWidth)
+                let fSessions: [ChatSessionData] = windowState.filteredSessions
+                let aId: UUID = windowState.agentId
+                let sessId: UUID? = session.sessionId
+                VStack(alignment: .leading, spacing: 0) {
+                    if windowState.showSidebar {
+                        ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
+                    }
+                }
+                .frame(width: sidebarWidth, alignment: .top)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
+                .zIndex(1)
 
                 // Main chat area
                 ZStack {
@@ -2856,7 +2866,7 @@ struct ChatView: View {
                         let ft = focusTrigger
                         let ipa = isPromptOverlayActive
                         let thm = theme
-                        let sec = ChatInputSection(observedSession: obs, windowState: ws, filteredPickerItems: fpi, focusTrigger: ft, isPromptOverlayActive: ipa, theme: thm)
+                        let sec = AnyView(ChatInputSection(observedSession: obs, windowState: ws, filteredPickerItems: fpi, focusTrigger: ft, isPromptOverlayActive: ipa, theme: thm))
                         sec
                             .opacity(isPromptOverlayActive ? 0.55 : 1.0)
                             .allowsHitTesting(!isPromptOverlayActive)

@@ -2,9 +2,10 @@
 //  ChatInputSection.swift
 //  OsaurusCore
 //
-//  M10.5 Phase B: Extracted FloatingInputCard section from ChatView.
-//  Separate View struct preserves @ObservedObject identity and gets its
-//  own per-expression type-checking budget.
+//  M10.5 Phase 7B: Minimal Intel-native chat input replacing FloatingInputCard.
+//  Concrete types only — eliminates 20+ generic params from metadata graph
+//  (breaking runtime _swift_getGenericMetadata cycle) while providing
+//  working text input + send/stop + Enter support + theme-aware styling.
 //
 
 import SwiftUI
@@ -18,36 +19,36 @@ struct ChatInputSection: View {
     var theme: ThemeProtocol
 
     var body: some View {
-        FloatingInputCard(
-            text: $observedSession.input,
-            selectedModel: $observedSession.selectedModel,
-            pendingAttachments: $observedSession.pendingAttachments,
-            isContinuousVoiceMode: $observedSession.isContinuousVoiceMode,
-            voiceInputState: $observedSession.voiceInputState,
-            showVoiceOverlay: $observedSession.showVoiceOverlay,
-            pickerItems: filteredPickerItems,
-            activeModelOptions: $observedSession.activeModelOptions,
-            isStreaming: observedSession.isStreaming,
-            supportsImages: observedSession.selectedModelSupportsImages,
-            estimatedContextTokens: observedSession.estimatedContextTokens,
-            contextBreakdown: observedSession.estimatedContextBreakdown,
-            onSend: { manualText in
-                if let t = manualText { observedSession.input = t }
-                if observedSession.isStreaming {
-                    observedSession.enqueueSend(observedSession.input, attachments: observedSession.pendingAttachments)
-                } else { observedSession.sendCurrent() }
-            },
-            onStop: { observedSession.stop() },
-            focusTrigger: focusTrigger,
-            agentId: windowState.agentId,
-            windowId: windowState.windowId,
-            isCompact: windowState.showSidebar,
-            onClearChat: { observedSession.reset() },
-            pendingSkillId: $observedSession.pendingOneOffSkillId,
-            autoSpeakAssistant: $observedSession.autoSpeakAssistant,
-            queuedSend: $observedSession.queuedSend,
-            onSendNow: { observedSession.sendNowInterrupting() },
-            onCancelQueued: { observedSession.cancelQueuedSend() }
-        )
+        HStack(spacing: 8) {
+            TextField("Message", text: $observedSession.input)
+                .textFieldStyle(.plain)
+                .font(theme.font(size: 14))
+                .padding(.horizontal, 14)
+                .padding(.vertical, 10)
+
+            if observedSession.isStreaming {
+                Button(action: { observedSession.stop() }) {
+                    Image(systemName: "stop.fill")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.borderless)
+            } else {
+                Button(action: { observedSession.sendCurrent() }) {
+                    Image(systemName: "arrow.up.circle.fill")
+                        .font(.system(size: 20))
+                        .foregroundStyle(
+                            observedSession.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                ? theme.secondaryText : theme.accentColor
+                        )
+                }
+                .buttonStyle(.borderless)
+                .disabled(observedSession.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
+                .keyboardShortcut(.return, modifiers: [])
+            }
+        }
+        .padding(.horizontal, 10)
+        .background(theme.secondaryBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.primaryBorder, lineWidth: 1))
     }
 }
