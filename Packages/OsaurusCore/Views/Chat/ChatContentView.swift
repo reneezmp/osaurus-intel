@@ -92,78 +92,7 @@ struct ChatContentView: View {
                                 }
                                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                ScrollViewReader { scrollProxy in
-                                    ScrollView {
-                                        LazyVStack(alignment: .leading, spacing: 0) {
-                                            ForEach(Array(observedSession.turns.enumerated()), id: \.offset) { i, turn in
-                                                let isUser = turn.role == .user
-                                                VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
-                                                    Text(isUser ? "You" : "Assistant")
-                                                        .font(theme.font(size: 11, weight: .medium))
-                                                        .foregroundStyle(theme.tertiaryText)
-                                                        .padding(.leading, isUser ? 0 : 4)
-                                                        .padding(.trailing, isUser ? 4 : 0)
-
-                                                    if !turn.thinking.isEmpty {
-                                                        DisclosureGroup(
-                                                            content: {
-                                                                Text(turn.thinking)
-                                                                    .font(theme.font(size: 13))
-                                                                    .italic()
-                                                                    .foregroundStyle(theme.secondaryText)
-                                                                    .textSelection(.enabled)
-                                                                    .frame(maxWidth: .infinity, alignment: .leading)
-                                                            },
-                                                            label: { Text("Thinking…").font(theme.font(size: 12, weight: .medium)) }
-                                                        )
-                                                        .padding(.horizontal, 12)
-                                                        .padding(.vertical, 6)
-                                                        .background(theme.secondaryBackground.opacity(0.6))
-                                                        .clipShape(RoundedRectangle(cornerRadius: 10))
-                                                        .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
-                                                    }
-
-                                                    if !turn.content.isEmpty || (turn.contentIsEmpty && !turn.thinking.isEmpty) {
-                                                        if turn.content.isEmpty {
-                                                            ProgressView()
-                                                                .scaleEffect(0.7)
-                                                                .padding(.horizontal, 12)
-                                                                .padding(.vertical, 6)
-                                                                .background(isUser ? theme.accentColor.opacity(0.15) : theme.secondaryBackground)
-                                                                .clipShape(RoundedRectangle(cornerRadius: 14))
-                                                                .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
-                                                        } else {
-                                                            Text(turn.content)
-                                                                .font(theme.font(size: 14))
-                                                                .foregroundStyle(isUser ? theme.primaryText : theme.primaryText)
-                                                                .textSelection(.enabled)
-                                                                .padding(.horizontal, 14)
-                                                                .padding(.vertical, 10)
-                                                                .background(isUser ? theme.accentColor.opacity(0.15) : theme.secondaryBackground)
-                                                                .clipShape(RoundedRectangle(cornerRadius: 16))
-                                                                .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
-                                                        }
-                                                    }
-                                                }
-                                                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
-                                                .padding(.horizontal, 16)
-                                                .padding(.vertical, 6)
-                                                .id(i)
-                                            }
-                                        }
-                                        .padding(.vertical, 12)
-                                    }
-                                    .onChange(of: observedSession.turns.count) { _, _ in
-                                        if let last = observedSession.turns.indices.last {
-                                            withAnimation { scrollProxy.scrollTo(last, anchor: .bottom) }
-                                        }
-                                    }
-                                    .onChange(of: observedSession.turns.last?.content ?? "") { _, _ in
-                                        if let last = observedSession.turns.indices.last {
-                                            withAnimation { scrollProxy.scrollTo(last, anchor: .bottom) }
-                                        }
-                                    }
-                                }
+                                messageThread(effectiveContentWidth)
                             }
                         } else {
                             VStack(spacing: 16) {
