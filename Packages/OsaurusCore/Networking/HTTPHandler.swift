@@ -32,10 +32,25 @@ struct ChatMessage: Codable, Sendable {
 }
 
 struct ToolCall: Codable, Sendable {
-    let id: String?
+    let id: String
     let type: String?
     let function: ToolCallFunction
     var geminiThoughtSignature: String? = nil
+
+    init(id: String = "", type: String? = nil, function: ToolCallFunction = ToolCallFunction(), geminiThoughtSignature: String? = nil) {
+        self.id = id
+        self.type = type
+        self.function = function
+        self.geminiThoughtSignature = geminiThoughtSignature
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id) ?? ""
+        self.type = try container.decodeIfPresent(String.self, forKey: .type)
+        self.function = try container.decodeIfPresent(ToolCallFunction.self, forKey: .function) ?? ToolCallFunction()
+        self.geminiThoughtSignature = try container.decodeIfPresent(String.self, forKey: .geminiThoughtSignature)
+    }
 }
 
 struct ToolCallFunction: Codable, Sendable {

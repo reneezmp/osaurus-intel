@@ -670,11 +670,15 @@ final class NativeToolCallRowView: NSView {
         // Live mode locks at maxBodyHeight; completed mode uses the
         // view's adaptive measured height (60–140pt body + 30pt header).
         let terminalH: CGFloat
+#if !OSAURUS_INTEL
         if let tv = terminalView {
             terminalH = 8 + tv.currentMeasuredHeight
         } else {
             terminalH = 0
         }
+#else
+        terminalH = 0
+#endif
         return rowH + 1 + 8 + sectionTitleH + argsH + terminalH + resultH + 8
     }
 
@@ -778,11 +782,11 @@ final class NativeToolCallRowView: NSView {
     /// in the given mode. The view itself decides between the live
     /// streaming path and the static snapshot render based on the
     /// passed `mode`.
+#if !OSAURUS_INTEL
     private func mountTerminalView(
         mode: TerminalDisplayView.Mode,
         theme: any ThemeProtocol
     ) {
-#if !OSAURUS_INTEL
         let view: TerminalDisplayView
         if let existing = terminalView {
             view = existing
@@ -831,8 +835,8 @@ final class NativeToolCallRowView: NSView {
         // (completed = adaptive 60–140pt body).
         terminalHeightConstraint?.constant = view.currentMeasuredHeight
         applyHeight()
-#endif
     }
+#endif
 
     private func tearDownTerminalView() {
 #if !OSAURUS_INTEL
