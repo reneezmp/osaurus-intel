@@ -198,9 +198,22 @@ struct ToolCallItem: Equatable {
 }
 
 struct PreflightCapabilityItem: Equatable, Sendable {
+    enum CapabilityType: String, Equatable, Sendable {
+        case method, tool, skill
+
+        var icon: String {
+            switch self {
+            case .method: return "doc.text"
+            case .tool: return "wrench"
+            case .skill: return "lightbulb"
+            }
+        }
+    }
+
     let id: String = ""
     let name: String = ""
-    let type: String = ""
+    let type: CapabilityType = .tool
+    let description: String = ""
 }
 
 enum ContentBlockKind: Equatable {
@@ -246,7 +259,7 @@ enum ContentBlockKind: Equatable {
     }
 }
 
-struct ContentBlock: Identifiable, @unchecked Sendable {
+struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
     let id: String
     let turnId: UUID
     let kind: ContentBlockKind

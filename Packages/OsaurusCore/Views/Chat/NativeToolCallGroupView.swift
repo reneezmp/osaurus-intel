@@ -481,14 +481,13 @@ final class NativeToolCallRowView: NSView {
     ///      chrome the live pane used.
     /// Mutually exclusive with `resultView` in the layout pin so we
     /// never double-pin contentContainer's bottom.
+#if !OSAURUS_INTEL
     private var terminalView: TerminalDisplayView?
     private var terminalBottomConstraint: NSLayoutConstraint?
     private var terminalHeightConstraint: NSLayoutConstraint?
     private var liveExecSubscription: AnyCancellable?
-    /// Tool-call-id the live subscription is currently observing.
-    /// Avoids re-subscribing on every layout-only `configure(item:)`
-    /// pass for the same row.
     private var liveExecBoundCallId: String?
+#endif
     private let separatorView = NSView()
     /// pins contentContainer height for hit-testing; toggled when result section is shown
     private var contentBottomToArgs: NSLayoutConstraint?
@@ -634,12 +633,10 @@ final class NativeToolCallRowView: NSView {
                 )
                 av.onHeightChanged = { [weak self] in self?.applyHeight() }
             }
+#if !OSAURUS_INTEL
             applyResultOrLiveState(width: width, theme: theme)
-            // Subscribe so that grace-expiry / late-registration
-            // transitions also trigger a re-decision. Subscription
-            // dedups on toolCallId, so this is a no-op on the second
-            // call for the same row.
             bindLiveOutputIfPresent(toolCallId: item.call.id, theme: theme)
+#endif
         }
 
         // Tear down terminal pane when the row collapses.
@@ -702,6 +699,7 @@ final class NativeToolCallRowView: NSView {
     private func applyResultOrLiveState(width: CGFloat, theme: any ThemeProtocol) {
         guard let item = currentItem else { return }
 
+#if !OSAURUS_INTEL
         // 1) Live path takes priority while a tool is actively running.
         if let entry = LiveExecRegistry.shared.currentEntries()[item.call.id],
             entry.currentStatus() == .running
@@ -722,6 +720,7 @@ final class NativeToolCallRowView: NSView {
             mountTerminalView(mode: .completed(snapshot), theme: theme)
             return
         }
+#endif
 
         // 3) Markdown fallback for everything else.
         tearDownTerminalView()
@@ -756,6 +755,7 @@ final class NativeToolCallRowView: NSView {
     /// Idempotent on the same id so layout-only re-configures don't
     /// re-subscribe.
     private func bindLiveOutputIfPresent(toolCallId: String, theme: any ThemeProtocol) {
+#if !OSAURUS_INTEL
         if liveExecBoundCallId == toolCallId, liveExecSubscription != nil {
             return
         }
@@ -771,6 +771,7 @@ final class NativeToolCallRowView: NSView {
                     self.applyResultOrLiveState(width: width, theme: theme)
                 }
             }
+#endif
     }
 
     /// Lazily install (or reuse) a `TerminalDisplayView` and bind it
@@ -781,6 +782,7 @@ final class NativeToolCallRowView: NSView {
         mode: TerminalDisplayView.Mode,
         theme: any ThemeProtocol
     ) {
+#if !OSAURUS_INTEL
         let view: TerminalDisplayView
         if let existing = terminalView {
             view = existing
@@ -826,13 +828,14 @@ final class NativeToolCallRowView: NSView {
         terminalBottomConstraint?.isActive = true
         view.bind(mode, theme: theme)
         // After bind, `currentMeasuredHeight` reflects the right size
-        // for the mode we just bound in (live = locked maxBodyHeight,
-        // completed = adaptive 60–140pt body).
+        // (completed = adaptive 60–140pt body).
         terminalHeightConstraint?.constant = view.currentMeasuredHeight
         applyHeight()
+#endif
     }
 
     private func tearDownTerminalView() {
+#if !OSAURUS_INTEL
         liveExecSubscription?.cancel()
         liveExecSubscription = nil
         liveExecBoundCallId = nil
@@ -843,10 +846,7 @@ final class NativeToolCallRowView: NSView {
         terminalHeightConstraint = nil
         view.removeFromSuperview()
         terminalView = nil
-        // Restore args' bottom pin so contentContainer keeps a single
-        // bottom anchor (otherwise the layout becomes ambiguous).
-        contentBottomToArgs?.isActive = true
-        applyHeight()
+#endif
     }
 
     // MARK: - Private

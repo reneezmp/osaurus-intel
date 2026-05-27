@@ -34,13 +34,24 @@ struct ChatMessage: Codable, Sendable {
 struct ToolCall: Codable, Sendable {
     let id: String?
     let type: String?
-    let function: ToolCallFunction?
+    let function: ToolCallFunction
     var geminiThoughtSignature: String? = nil
 }
 
 struct ToolCallFunction: Codable, Sendable {
-    let name: String?
-    let arguments: String?
+    let name: String
+    let arguments: String
+
+    init(name: String = "", arguments: String = "") {
+        self.name = name
+        self.arguments = arguments
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.name = try container.decodeIfPresent(String.self, forKey: .name) ?? ""
+        self.arguments = try container.decodeIfPresent(String.self, forKey: .arguments) ?? ""
+    }
 }
 
 struct ChatCompletionRequest: Codable, Sendable {

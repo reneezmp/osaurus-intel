@@ -516,6 +516,16 @@ extension View {
 #else
 import SwiftUI
 struct MarkdownImageView: View {
+    let urlString: String
+    let altText: String
+    let baseWidth: CGFloat
+
+    init(urlString: String, altText: String, baseWidth: CGFloat) {
+        self.urlString = urlString
+        self.altText = altText
+        self.baseWidth = baseWidth
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Markdown Image", symbol: "apple.logo")
     }
