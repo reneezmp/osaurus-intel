@@ -410,7 +410,54 @@ enum StreamingStatsHint: Sendable {
     static func decode(_ delta: String) -> (tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool, stopReason: String?)? { nil }
 }
 
-enum SessionSource: Sendable { case chat, dispatch, schedule, watcher }
+enum SessionSource: String, Codable, CaseIterable, Sendable {
+    case chat, plugin, http, schedule, watcher, selfSchedule = "self_schedule", dispatch
+
+    var iconName: String {
+        switch self {
+        case .chat: return "bubble.left.fill"
+        case .plugin: return "puzzlepiece.extension.fill"
+        case .http: return "network"
+        case .schedule: return "clock.fill"
+        case .watcher: return "eye.fill"
+        case .selfSchedule: return "alarm.fill"
+        case .dispatch: return "arrow.triangle.branch"
+        }
+    }
+
+    var shortLabel: String {
+        switch self {
+        case .chat: return "Chat"
+        case .plugin: return "Plugin"
+        case .http: return "API"
+        case .schedule: return "Schedule"
+        case .watcher: return "Watcher"
+        case .selfSchedule: return "Self-scheduled"
+        case .dispatch: return "Dispatch"
+        }
+    }
+
+    func originLabel(pluginDisplayName: String? = nil) -> String? {
+        switch self {
+        case .chat: return nil
+        case .plugin:
+            if let name = pluginDisplayName, !name.isEmpty { return "via \(name)" }
+            return "via plugin"
+        case .http: return "via API"
+        case .schedule: return "scheduled"
+        case .watcher: return "watcher"
+        case .selfSchedule: return "self-scheduled"
+        case .dispatch: return "dispatched"
+        }
+    }
+}
+
+enum SearchService {
+    static func matches(query: String, in text: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        return text.localizedCaseInsensitiveContains(query)
+    }
+}
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
 
 
@@ -573,11 +620,30 @@ struct ToolCallDone: Sendable, Equatable {
     let result: String
 }
 
+@MainActor
 final class StreamingDeltaProcessor: @unchecked Sendable {
-    init(turn: ChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {}
-    func finalize() {}
-    func receiveReasoning(_ text: String) {}
-    func receiveDelta(_ delta: Any) {}
+    private let turn: ChatTurn
+    private let onChange: @MainActor @Sendable () -> Void
+
+    init(turn: ChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {
+        self.turn = turn
+        self.onChange = onChange
+    }
+
+    func finalize() {
+        onChange()
+    }
+
+    func receiveReasoning(_ text: String) {
+        guard !text.isEmpty else { return }
+        turn.appendThinking(text)
+    }
+
+    func receiveDelta(_ delta: Any) {
+        guard let text = delta as? String, !text.isEmpty else { return }
+        turn.appendContent(text)
+        onChange()
+    }
 }
 enum StreamingReasoningHint: Sendable {
     static func encode(_ text: String) -> String { text }

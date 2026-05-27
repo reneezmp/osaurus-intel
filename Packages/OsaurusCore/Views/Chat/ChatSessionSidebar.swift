@@ -870,7 +870,6 @@ private struct DontAskAgainToggle: View {
 #else
 import SwiftUI
 struct ChatSessionSidebar: View {
-    // Dummy params for Intel build compat (original takes non-optional params)
     var sessions: [ChatSessionData] = []
     var agentId: UUID = UUID()
     var currentSessionId: UUID? = nil
@@ -881,8 +880,87 @@ struct ChatSessionSidebar: View {
     var onSetArchived: (UUID, Bool) -> Void = { _, _ in }
     var onExport: (ChatSessionData, Any) -> Void = { _, _ in }
     var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
+
+    @State private var searchQuery: String = ""
+    @Environment(\.theme) private var theme
+
+    private var filteredSessions: [ChatSessionData] {
+        guard !searchQuery.isEmpty else { return sessions }
+        return sessions.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
+    }
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Chat Sessions", symbol: "apple.logo")
+        VStack(alignment: .leading, spacing: 0) {
+            HStack {
+                Text("Chats")
+                    .font(theme.font(size: 13, weight: .semibold))
+                    .foregroundStyle(theme.secondaryText)
+                Spacer()
+                Button(action: onNewChat) {
+                    Image(systemName: "square.and.pencil")
+                        .font(.system(size: 14))
+                }
+                .buttonStyle(.borderless)
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+
+            TextField("Search", text: $searchQuery)
+                .textFieldStyle(.plain)
+                .font(theme.font(size: 12))
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(theme.secondaryBackground)
+                .clipShape(RoundedRectangle(cornerRadius: 6))
+                .padding(.horizontal, 10)
+                .padding(.bottom, 8)
+
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 2) {
+                    ForEach(filteredSessions) { session in
+                        sessionRow(session)
+                    }
+                }
+                .padding(.horizontal, 8)
+            }
+        }
+        .background(theme.primaryBackground)
+    }
+
+    private func sessionRow(_ session: ChatSessionData) -> some View {
+        let isActive = session.id == currentSessionId
+        return Button(action: { onSelect(session) }) {
+            VStack(alignment: .leading, spacing: 3) {
+                Text(session.title)
+                    .font(theme.font(size: 13, weight: isActive ? .semibold : .regular))
+                    .lineLimit(1)
+                    .foregroundStyle(isActive ? theme.primaryText : theme.secondaryText)
+                Text(formattedDate(session.updatedAt))
+                    .font(theme.font(size: 11))
+                    .foregroundStyle(theme.tertiaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? theme.accentColor.opacity(0.15) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func formattedDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        if Calendar.current.isDateInToday(date) {
+            formatter.dateFormat = "'Today' h:mm a"
+        } else if Calendar.current.isDateInYesterday(date) {
+            formatter.dateFormat = "'Yesterday' h:mm a"
+        } else {
+            formatter.dateFormat = "MMM d, h:mm a"
+        }
+        return formatter.string(from: date)
     }
 }
 #endif

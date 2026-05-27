@@ -512,7 +512,7 @@ final class ChatWindowState: ObservableObject {
     let session: ChatSession
     let foundationModelAvailable: Bool = false
 
-    @Published var showSidebar: Bool = false
+    @Published var showSidebar: Bool = true
     @Published var showCloseConfirmation: Bool = false
     @Published var agentId: UUID
     @Published var agents: [Agent] = []
@@ -538,6 +538,12 @@ final class ChatWindowState: ObservableObject {
         self.agentId = agentId
         self.session = ChatSession()
         self.theme = ThemeManager.shared.currentTheme
+        self.filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
+        self.session.windowState = self
+        self.session.agentId = agentId
+        self.session.onSessionChanged = { [weak self] in
+            self?.refreshSessions()
+        }
     }
     
     init(windowId: UUID, executionContext: Any? = nil) {
@@ -545,14 +551,23 @@ final class ChatWindowState: ObservableObject {
         self.agentId = UUID()
         self.session = ChatSession()
         self.theme = ThemeManager.shared.currentTheme
+        self.filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
     }
     
     func confirmCloseInBackground() { showCloseConfirmation = false }
     func confirmCloseAndStop() { showCloseConfirmation = false }
     func refreshPairedRelayAgents(discoveredAgents: [DiscoveredAgent]? = nil) {}
     func cleanup() {}
-    func startNewChat() {}
-    func loadSession(_ sessionData: ChatSessionData) {}
-    func refreshSessions() {}
+    func startNewChat() {
+        session.reset()
+        refreshSessions()
+    }
+    func loadSession(_ sessionData: ChatSessionData) {
+        session.load(from: sessionData)
+        refreshSessions()
+    }
+    func refreshSessions() {
+        filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
+    }
 }
 #endif

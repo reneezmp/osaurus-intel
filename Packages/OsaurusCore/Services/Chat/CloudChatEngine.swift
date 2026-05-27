@@ -66,6 +66,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             throw EngineError(message: "DEEPSEEK_API_KEY not set")
         }
 
+        NSLog("[CloudChatEngine] Starting streamChat — model=\(request.model ?? model), messages=\(request.messages.count)")
+
         var urlRequest = URLRequest(url: URL(string: apiBase)!)
         urlRequest.httpMethod = "POST"
         urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
@@ -83,16 +85,26 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         ]
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        NSLog("[CloudChatEngine] Request body: model=\(request.model ?? model)")
 
-        let (asyncBytes, _) = try await URLSession.shared.bytes(for: urlRequest)
+        let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+        if let httpResp = response as? HTTPURLResponse {
+            NSLog("[CloudChatEngine] HTTP status: \(httpResp.statusCode)")
+        } else {
+            NSLog("[CloudChatEngine] Response is not HTTP — type: \(type(of: response))")
+        }
 
         return AsyncThrowingStream { continuation in
             Task {
                 do {
+                    var chunkCount = 0
                     for try await line in asyncBytes.lines {
                         guard line.hasPrefix("data: "), !Task.isCancelled else { continue }
                         let dataStr = String(line.dropFirst(6))
-                        if dataStr == "[DONE]" { break }
+                        if dataStr == "[DONE]" {
+                            NSLog("[CloudChatEngine] Received [DONE] after \(chunkCount) content chunks")
+                            break
+                        }
 
                         guard let chunkData = dataStr.data(using: .utf8),
                               let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any],
@@ -100,11 +112,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                               let delta = choices.first?["delta"] as? [String: Any] else { continue }
 
                         if let content = delta["content"] as? String, !content.isEmpty {
+                            chunkCount += 1
                             continuation.yield(content)
                         }
                     }
+                    NSLog("[CloudChatEngine] Stream finished — \(chunkCount) chunks yielded")
                     continuation.finish()
                 } catch {
+                    NSLog("[CloudChatEngine] Stream error: \(error.localizedDescription)")
                     continuation.finish(throwing: error)
                 }
             }

@@ -49,7 +49,12 @@ struct ChatContentView: View {
                 let sessId: UUID? = session.sessionId
                 VStack(alignment: .leading, spacing: 0) {
                     if windowState.showSidebar {
-                        ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
+                        ChatSessionSidebar(
+                            sessions: fSessions,
+                            agentId: aId,
+                            currentSessionId: sessId,
+                            onNewChat: { [weak windowState] in windowState?.startNewChat() }
+                        )
                     }
                 }
                 .frame(width: sidebarWidth, alignment: .top)
@@ -74,27 +79,90 @@ struct ChatContentView: View {
                         if session.hasAnyModel || session.isDiscoveringModels {
                             let _ = observedSession.turns.count
                             if observedSession.turns.isEmpty {
-                                VStack(spacing: 12) {
-                                    Text("New Chat").font(.title2)
-                                    Text("Type a message below to start").font(.body).foregroundStyle(.secondary)
-                                }.frame(maxWidth: .infinity, maxHeight: .infinity)
+                                VStack(spacing: 16) {
+                                    Image(systemName: "bubble.left.and.bubble.right.fill")
+                                        .font(.system(size: 40))
+                                        .foregroundStyle(theme.secondaryText.opacity(0.4))
+                                    Text("New Chat")
+                                        .font(theme.font(size: 20, weight: .semibold))
+                                        .foregroundStyle(theme.primaryText)
+                                    Text("Type a message below to start")
+                                        .font(theme.font(size: 14))
+                                        .foregroundStyle(theme.secondaryText)
+                                }
+                                .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                ScrollView {
-                                    LazyVStack(alignment: .leading, spacing: 12) {
-                                        ForEach(Array(observedSession.turns.enumerated()), id: \.offset) { i, turn in
-                                            VStack(alignment: .leading, spacing: 4) {
-                                                Text(turn.role == .user ? "You" : "Assistant")
-                                                    .font(.caption).foregroundStyle(.secondary)
-                                                Text(turn.content)
-                                                    .font(.body).textSelection(.enabled)
-                                                if !turn.thinking.isEmpty {
-                                                    Text(turn.thinking)
-                                                        .font(.body).italic().foregroundStyle(.secondary).textSelection(.enabled)
+                                ScrollViewReader { scrollProxy in
+                                    ScrollView {
+                                        LazyVStack(alignment: .leading, spacing: 0) {
+                                            ForEach(Array(observedSession.turns.enumerated()), id: \.offset) { i, turn in
+                                                let isUser = turn.role == .user
+                                                VStack(alignment: isUser ? .trailing : .leading, spacing: 4) {
+                                                    Text(isUser ? "You" : "Assistant")
+                                                        .font(theme.font(size: 11, weight: .medium))
+                                                        .foregroundStyle(theme.tertiaryText)
+                                                        .padding(.leading, isUser ? 0 : 4)
+                                                        .padding(.trailing, isUser ? 4 : 0)
+
+                                                    if !turn.thinking.isEmpty {
+                                                        DisclosureGroup(
+                                                            content: {
+                                                                Text(turn.thinking)
+                                                                    .font(theme.font(size: 13))
+                                                                    .italic()
+                                                                    .foregroundStyle(theme.secondaryText)
+                                                                    .textSelection(.enabled)
+                                                                    .frame(maxWidth: .infinity, alignment: .leading)
+                                                            },
+                                                            label: { Text("Thinking…").font(theme.font(size: 12, weight: .medium)) }
+                                                        )
+                                                        .padding(.horizontal, 12)
+                                                        .padding(.vertical, 6)
+                                                        .background(theme.secondaryBackground.opacity(0.6))
+                                                        .clipShape(RoundedRectangle(cornerRadius: 10))
+                                                        .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
+                                                    }
+
+                                                    if !turn.content.isEmpty || (turn.contentIsEmpty && !turn.thinking.isEmpty) {
+                                                        if turn.content.isEmpty {
+                                                            ProgressView()
+                                                                .scaleEffect(0.7)
+                                                                .padding(.horizontal, 12)
+                                                                .padding(.vertical, 6)
+                                                                .background(isUser ? theme.accentColor.opacity(0.15) : theme.secondaryBackground)
+                                                                .clipShape(RoundedRectangle(cornerRadius: 14))
+                                                                .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
+                                                        } else {
+                                                            Text(turn.content)
+                                                                .font(theme.font(size: 14))
+                                                                .foregroundStyle(isUser ? theme.primaryText : theme.primaryText)
+                                                                .textSelection(.enabled)
+                                                                .padding(.horizontal, 14)
+                                                                .padding(.vertical, 10)
+                                                                .background(isUser ? theme.accentColor.opacity(0.15) : theme.secondaryBackground)
+                                                                .clipShape(RoundedRectangle(cornerRadius: 16))
+                                                                .frame(maxWidth: effectiveContentWidth * 0.85, alignment: isUser ? .trailing : .leading)
+                                                        }
+                                                    }
                                                 }
-                                            }.padding(.horizontal)
-                                            if i < observedSession.turns.count - 1 { Divider() }
+                                                .frame(maxWidth: .infinity, alignment: isUser ? .trailing : .leading)
+                                                .padding(.horizontal, 16)
+                                                .padding(.vertical, 6)
+                                                .id(i)
+                                            }
                                         }
-                                    }.padding(.vertical)
+                                        .padding(.vertical, 12)
+                                    }
+                                    .onChange(of: observedSession.turns.count) { _, _ in
+                                        if let last = observedSession.turns.indices.last {
+                                            withAnimation { scrollProxy.scrollTo(last, anchor: .bottom) }
+                                        }
+                                    }
+                                    .onChange(of: observedSession.turns.last?.content ?? "") { _, _ in
+                                        if let last = observedSession.turns.indices.last {
+                                            withAnimation { scrollProxy.scrollTo(last, anchor: .bottom) }
+                                        }
+                                    }
                                 }
                             }
                         } else {

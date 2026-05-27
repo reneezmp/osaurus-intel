@@ -13,7 +13,7 @@ import Foundation
 
 // MARK: - AgentManager
 
-final class AgentManager: @unchecked Sendable {
+final class AgentManager: ObservableObject, @unchecked Sendable {
     static let shared = AgentManager()
 
     private var defaultModel = "deepseek-v4-pro"
