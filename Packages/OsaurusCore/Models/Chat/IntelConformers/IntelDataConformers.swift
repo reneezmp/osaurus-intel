@@ -157,6 +157,30 @@ struct Attachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
 
     func loadAudioData() -> Data? { nil }
     func loadVideoData() -> Data? { nil }
+
+    var isImage: Bool { imageData != nil }
+
+    var fileIcon: String {
+        guard let name = filename else { return "doc" }
+        let ext = (name as NSString).pathExtension.lowercased()
+        switch ext {
+        case "pdf": return "doc.fill"
+        case "png", "jpg", "jpeg", "gif", "heic", "webp": return "photo"
+        case "mp4", "mov", "m4v": return "film"
+        case "mp3", "wav", "m4a", "aac": return "waveform"
+        case "txt", "md", "rtf": return "doc.text"
+        case "html", "htm": return "globe"
+        case "json", "yaml", "yml", "xml": return "curlybraces"
+        case "swift", "js", "ts", "py", "rb", "go", "rs", "c", "cpp", "h": return "chevron.left.forwardslash.chevron.right"
+        case "zip", "tar", "gz": return "doc.zipper"
+        default: return "doc"
+        }
+    }
+
+    var fileSizeFormatted: String? {
+        guard let data = imageData else { return nil }
+        return ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+    }
 }
 
 // MARK: - ContentBlock
@@ -179,19 +203,13 @@ struct PreflightCapabilityItem: Equatable, Sendable {
     let type: String = ""
 }
 
-struct SharedArtifactStub: Equatable, @unchecked Sendable {
-    let id: String = ""
-    let isImage: Bool = false
-    let hostPath: String = ""
-}
-
 enum ContentBlockKind: Equatable {
     case header(role: MessageRole, agentName: String, isFirstInGroup: Bool)
     case paragraph(index: Int, text: String, isStreaming: Bool, role: MessageRole)
     case toolCallGroup(calls: [ToolCallItem])
     case thinking(index: Int, text: String, isStreaming: Bool)
     case userMessage(text: String, attachments: [Attachment])
-    case sharedArtifact(artifact: SharedArtifactStub)
+    case sharedArtifact(artifact: SharedArtifact)
     case pendingToolCall(toolName: String, argPreview: String?, argSize: Int)
     case preflightCapabilities(items: [PreflightCapabilityItem])
     case generationStats(ttft: TimeInterval?, tokensPerSecond: Double?, tokenCount: Int?, unclosedReasoning: Bool)
@@ -542,6 +560,7 @@ final class SessionToolStateStore: @unchecked Sendable {
 final class TTSService: @unchecked Sendable {
     func toggleSpeak(text: String, messageId: UUID, voiceOverride: Any? = nil) {}
     var playingMessageId: UUID? { nil }
+    var activeSpeakCallId: String? { nil }
     static let shared = TTSService()
     func refreshModelState() {}
     var selectedVoice: Any? { nil }
@@ -812,6 +831,7 @@ extension NSNotification.Name {
     static let vadStartNewSession = NSNotification.Name("vadStartNewSession")
     static let chatViewClosed = NSNotification.Name("chatViewClosed")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
+    static let ttsPlaybackStateChanged = NSNotification.Name("osaurus.ttsPlaybackStateChanged")
 }
 #endif
 
