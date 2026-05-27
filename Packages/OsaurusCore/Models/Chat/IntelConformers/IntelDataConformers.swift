@@ -402,8 +402,6 @@ final class PluginInstructionsResolver: @unchecked Sendable { static let shared 
 final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: String) -> String { "agent" } }
 final class SandboxToolRegistrar: @unchecked Sendable { static let shared = SandboxToolRegistrar(); func registerTools(for agentId: UUID) async {} }
 
-struct ScrollToBottomButton: View { var isPinnedToBottom: Bool = false; var hasTurns: Bool = false; var onTap: () -> Void = {}; var body: some View { EmptyView() } }
-
 struct SecretPromptParser: Sendable {
     init() {}
     static func parse(_ text: String) -> SecretPromptState? { nil }
@@ -860,14 +858,6 @@ extension NSNotification.Name {
 // swapped in Phase 4-0c, simultaneous with this commit).
 
 import AppKit
-
-struct ContentSegment: Identifiable {
-    let id: String = ""
-}
-
-struct MessageBlock: Identifiable {
-    let id: String = ""
-}
 
 struct ParsedMarkdown {
     let blocks: [MessageBlock]

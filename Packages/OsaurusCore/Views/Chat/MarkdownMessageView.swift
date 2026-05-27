@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  MarkdownMessageView.swift
 //  osaurus
@@ -1243,12 +1242,4 @@ private func extractStandaloneImageKind(from text: String) -> MessageBlock.Kind?
             .background(Color(hex: "0f0f10"))
         }
     }
-#endif
-#else
-import SwiftUI
-struct MarkdownMessageView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Markdown Message", symbol: "apple.logo")
-    }
-}
 #endif

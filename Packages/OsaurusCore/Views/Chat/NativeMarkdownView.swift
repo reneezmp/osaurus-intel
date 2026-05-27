@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  NativeMarkdownView.swift
 //  osaurus
@@ -694,11 +693,3 @@ final class NativeMarkdownView: NSView {
         "\(theme.primaryFontName)|\(theme.bodySize)|\(theme.codeSize)"
     }
 }
-#else
-import SwiftUI
-struct NativeMarkdownView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Native Markdown", symbol: "apple.logo")
-    }
-}
-#endif

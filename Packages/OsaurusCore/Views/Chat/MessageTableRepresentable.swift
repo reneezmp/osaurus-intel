@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  MessageTableRepresentable.swift
 //  osaurus
@@ -1333,11 +1332,3 @@ extension MessageTableRepresentable {
         }
     }
 }
-#else
-import SwiftUI
-struct MessageTableRepresentable: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Message Table", symbol: "apple.logo")
-    }
-}
-#endif

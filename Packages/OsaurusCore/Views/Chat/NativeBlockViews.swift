@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  NativeBlockViews.swift
 //  osaurus
@@ -141,13 +140,17 @@ final class NativeTypingIndicatorView: NSView {
     /// wins over preflight (which only runs once the model is up), which
     /// in turn wins over a raw model-load tick.
     private enum LoadingPhase {
+#if !OSAURUS_INTEL
         case sandbox
+#endif
         case preflight
         case modelLoad
 
         var labelText: String {
             switch self {
+#if !OSAURUS_INTEL
             case .sandbox: "Sandbox is still loading..."
+#endif
             case .preflight: "Searching capabilities..."
             case .modelLoad: "Loading Model..."
             }
@@ -161,17 +164,21 @@ final class NativeTypingIndicatorView: NSView {
         // six values through CombineLatest, especially since the sandbox
         // gate also requires a per-agent `effectiveAutonomousExec` lookup.
         let progress = InferenceProgressManager.shared
+#if !OSAURUS_INTEL
         let sandbox = SandboxManager.State.shared
+#endif
         let agents = AgentManager.shared
 
-        let triggers: [AnyPublisher<Void, Never>] = [
+        var triggers: [AnyPublisher<Void, Never>] = [
             progress.$loadInFlightCount.map { _ in () }.eraseToAnyPublisher(),
             progress.$isPreflighting.map { _ in () }.eraseToAnyPublisher(),
-            sandbox.$status.map { _ in () }.eraseToAnyPublisher(),
-            sandbox.$isProvisioning.map { _ in () }.eraseToAnyPublisher(),
-            agents.$activeAgentId.map { _ in () }.eraseToAnyPublisher(),
-            agents.$agents.map { _ in () }.eraseToAnyPublisher(),
         ]
+#if !OSAURUS_INTEL
+        triggers.append(sandbox.$status.map { _ in () }.eraseToAnyPublisher())
+        triggers.append(sandbox.$isProvisioning.map { _ in () }.eraseToAnyPublisher())
+#endif
+        triggers.append(agents.$activeAgentId.map { _ in () }.eraseToAnyPublisher())
+        triggers.append(agents.$agents.map { _ in () }.eraseToAnyPublisher())
 
         cancellables.append(
             Publishers.MergeMany(triggers)
@@ -188,14 +195,18 @@ final class NativeTypingIndicatorView: NSView {
 
     private func currentLoadingPhase() -> LoadingPhase? {
         let progress = InferenceProgressManager.shared
+#if !OSAURUS_INTEL
         let sandbox = SandboxManager.State.shared
+#endif
         let agents = AgentManager.shared
 
+#if !OSAURUS_INTEL
         let agentUsesSandbox =
             agents.effectiveAutonomousExec(for: agents.activeAgentId)?.enabled == true
         let sandboxBooting = sandbox.status == .starting || sandbox.isProvisioning
 
         if agentUsesSandbox && sandboxBooting { return .sandbox }
+#endif
         if progress.isPreflighting { return .preflight }
         if progress.loadInFlightCount > 0 { return .modelLoad }
         return nil
@@ -1259,11 +1270,3 @@ final class NativeMarkdownTableView: NSView {
         NSSize(width: NSView.noIntrinsicMetric, height: heightConstraint?.constant ?? 1)
     }
 }
-#else
-import SwiftUI
-struct NativeBlockViews: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Native Blocks", symbol: "apple.logo")
-    }
-}
-#endif
