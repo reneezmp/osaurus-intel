@@ -83,7 +83,65 @@ struct ProcessingResult: Sendable {
     let enrichedToolResult: String
 }
 
-enum SharedArtifact {
+struct SharedArtifact: Identifiable, Sendable, Equatable {
+    let id: String
+    let contextId: String
+    let contextType: ArtifactContextType
+    let filename: String
+    let mimeType: String
+    let fileSize: Int
+    let hostPath: String
+    let isDirectory: Bool
+    let content: String?
+    let description: String?
+    let isFinalResult: Bool
+    let createdAt: Date
+
+    init(
+        id: String = UUID().uuidString,
+        contextId: String,
+        contextType: ArtifactContextType,
+        filename: String,
+        mimeType: String,
+        fileSize: Int,
+        hostPath: String,
+        isDirectory: Bool = false,
+        content: String? = nil,
+        description: String? = nil,
+        isFinalResult: Bool = false,
+        createdAt: Date = Date()
+    ) {
+        self.id = id
+        self.contextId = contextId
+        self.contextType = contextType
+        self.filename = filename
+        self.mimeType = mimeType
+        self.fileSize = fileSize
+        self.hostPath = hostPath
+        self.isDirectory = isDirectory
+        self.content = content
+        self.description = description
+        self.isFinalResult = isFinalResult
+        self.createdAt = createdAt
+    }
+
+    var isImage: Bool { mimeType.hasPrefix("image/") }
+    var isAudio: Bool { mimeType.hasPrefix("audio/") }
+    var isText: Bool { mimeType.hasPrefix("text/") || mimeType == "application/json" }
+    var isHTML: Bool { mimeType == "text/html" }
+    var isVideo: Bool { mimeType.hasPrefix("video/") }
+    var isPDF: Bool { mimeType == "application/pdf" }
+    var categoryLabel: String {
+        if isDirectory { return "Directory" }
+        if isImage { return "Image" }
+        if isPDF { return "PDF" }
+        if isAudio { return "Audio" }
+        if isVideo { return "Video" }
+        if isHTML { return "Web Page" }
+        if isText { return "Text" }
+        return "File"
+    }
+
     enum ResolutionFailure: Error {
         case markersMissing
         case noContentOrPath

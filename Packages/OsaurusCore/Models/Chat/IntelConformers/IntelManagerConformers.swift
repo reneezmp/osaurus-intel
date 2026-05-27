@@ -26,8 +26,8 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         var ttsVoice: String? { nil }
     }
 
-    var activeAgentId: UUID = UUID()
-    var agents: [Agent] = [Agent(id: UUID(), name: "Default", systemPrompt: "", themeId: nil)]
+    @Published var activeAgentId: UUID = UUID()
+    @Published var agents: [Agent] = [Agent(id: UUID(), name: "Default", systemPrompt: "", themeId: nil)]
 
     func agent(for id: UUID) -> Agent? {
         Agent(id: id, name: "Agent", systemPrompt: "", themeId: nil)

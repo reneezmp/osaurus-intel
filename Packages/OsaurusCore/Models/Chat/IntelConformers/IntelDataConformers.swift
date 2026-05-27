@@ -813,5 +813,52 @@ extension NSNotification.Name {
     static let chatViewClosed = NSNotification.Name("chatViewClosed")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
 }
+#endif
+
+#if OSAURUS_INTEL
+
+// MARK: - ThreadCache Intel conformer
+// Mirrors the excluded Managers/ThreadCache.swift. No-op caching:
+// always cache-miss → forces re-parse per render. Correctness preserved.
+//
+// ParsedMarkdown is replicated here because the upstream type lives inside
+// the excluded ThreadCache.swift. MessageBlock + ContentSegment stubs are
+// minimal — real definitions live in MarkdownMessageView.swift (un-body-
+// swapped in Phase 4-0c, simultaneous with this commit).
+
+import AppKit
+
+struct ContentSegment: Identifiable {
+    let id: String = ""
+}
+
+struct MessageBlock: Identifiable {
+    let id: String = ""
+}
+
+struct ParsedMarkdown {
+    let blocks: [MessageBlock]
+    let segments: [ContentSegment]
+}
+
+final class ThreadCache: @unchecked Sendable {
+    static let shared = ThreadCache()
+    private init() {}
+
+    func height(for key: String) -> CGFloat? { nil }
+    func setHeight(_ height: CGFloat, for key: String) {}
+
+    func markdown(for text: String) -> ParsedMarkdown? { nil }
+    func setMarkdown(blocks: [MessageBlock], segments: [ContentSegment], for text: String) {}
+
+    func image(for urlString: String) -> NSImage? { nil }
+    func setImage(_ image: NSImage, for urlString: String) {}
+
+    func clear() {}
+
+    static func imageCacheKey(for urlString: String) -> NSString {
+        urlString as NSString
+    }
+}
 
 #endif
