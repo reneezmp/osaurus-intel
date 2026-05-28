@@ -627,7 +627,57 @@ struct ClarifyPayload: Sendable, Equatable {
 final class BlockMemoizer: @unchecked Sendable {
     init() {}
     static let shared = BlockMemoizer()
-    func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false) -> [ContentBlock] { [] }
+    func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false) -> [ContentBlock] {
+        var blocks: [ContentBlock] = []
+        var groupId: UUID?
+        for (i, turn) in turns.enumerated() {
+            let isUser = turn.role == .user
+            let isFirstInGroup = turn.id != groupId
+            if isFirstInGroup { groupId = turn.id }
+
+            // Header for first turn in group
+            if isFirstInGroup {
+                blocks.append(ContentBlock(
+                    id: "header-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .header(role: turn.role, agentName: agentName, isFirstInGroup: i == 0 || turns[i-1].role != turn.role)
+                ))
+            }
+
+            // Thinking
+            if !turn.thinking.isEmpty {
+                blocks.append(ContentBlock(
+                    id: "thinking-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .thinking(index: blocks.count, text: turn.thinking, isStreaming: turn.id == streamingTurnId)
+                ))
+            }
+
+            // User message
+            if isUser && !turn.content.isEmpty {
+                blocks.append(ContentBlock(
+                    id: "user-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .userMessage(text: turn.content, attachments: turn.attachments)
+                ))
+            }
+
+            // Assistant message (paragraph with role)
+            if !isUser && !turn.content.isEmpty {
+                blocks.append(ContentBlock(
+                    id: "assistant-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .paragraph(
+                        index: blocks.count,
+                        text: turn.content,
+                        isStreaming: turn.id == streamingTurnId,
+                        role: .assistant
+                    )
+                ))
+            }
+        }
+        return blocks
+    }
     var groupHeaderMap: [UUID: UUID] { [:] }
     func memoized<T>(forKey key: String, build: () -> T) -> T { build() }
     func clear() {}
