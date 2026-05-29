@@ -75,13 +75,37 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 final class ModelPickerItemCache: @unchecked Sendable {
     static let shared = ModelPickerItemCache()
 
+    /// Stable synthetic UUID for the built-in DeepSeek provider. The Intel
+    /// build's `RemoteProviderManager` doesn't configure user-facing
+    /// providers (the API key is read from `DEEPSEEK_API_KEY` and the URL
+    /// is hard-coded in `CloudChatEngine`), but `ModelPickerItem.Source`
+    /// still wants a UUID and `ChatView`'s `source.remoteProviderId`
+    /// filter still compares against it — so we pin a stable value here.
+    static let deepSeekProviderId = UUID(uuidString: "00000000-0000-0000-0000-DEEDEEDEEDEE")!
+
     var isLoaded: Bool = false
     private(set) var items: [ModelPickerItem] = []
 
     func buildModelPickerItems() async -> [ModelPickerItem] {
+        let provider: ModelPickerItem.Source = .remote(
+            providerName: "DeepSeek",
+            providerId: Self.deepSeekProviderId
+        )
         let built: [ModelPickerItem] = [
-            ModelPickerItem(id: "deepseek-v4-pro", source: .builtIn, isVLM: false),
-            ModelPickerItem(id: "deepseek-v4-flash", source: .builtIn, isVLM: false),
+            ModelPickerItem(
+                id: "deepseek-v4-pro",
+                displayName: "DeepSeek V4 Pro",
+                source: provider,
+                isVLM: false,
+                description: "DeepSeek's flagship chat model"
+            ),
+            ModelPickerItem(
+                id: "deepseek-v4-flash",
+                displayName: "DeepSeek V4 Flash",
+                source: provider,
+                isVLM: false,
+                description: "DeepSeek's fast tier"
+            ),
         ]
         items = built
         isLoaded = true

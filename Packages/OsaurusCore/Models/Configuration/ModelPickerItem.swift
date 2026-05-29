@@ -106,7 +106,10 @@ extension ModelPickerItem {
         )
     }
 
+#if !OSAURUS_INTEL
     /// Create a local MLX model picker item from an MLXModel.
+    /// Gated on Intel because the entire MLX runtime (and the
+    /// `MLXModel` type that backs it) is amputated.
     static func fromMLXModel(_ model: MLXModel) -> ModelPickerItem {
         ModelPickerItem(
             id: model.id,
@@ -118,6 +121,7 @@ extension ModelPickerItem {
             description: model.description
         )
     }
+#endif
 
     /// Create a remote provider model picker item
     static func fromRemoteModel(

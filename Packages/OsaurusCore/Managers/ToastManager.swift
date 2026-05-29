@@ -367,6 +367,7 @@ public final class ToastManager {
             }
 
         case .openChatSession(let sessionId, let agentId):
+#if !OSAURUS_INTEL
             // Check if there's already a window with this session open
             if let existingWindow = ChatWindowManager.shared.findWindow(bySessionId: sessionId) {
                 ChatWindowManager.shared.showWindow(id: existingWindow.id)
@@ -389,14 +390,33 @@ public final class ToastManager {
                 }
                 print("[ToastManager] Session \(sessionId) not found, opening new chat")
             }
+#else
+            // Intel: ChatWindowManager.findWindow(bySessionId:),
+            // ChatSessionStore.load, and ChatSessionsManager-backed
+            // session-data createWindow are all excluded. Fall back to
+            // a fresh chat window for the agent if one was supplied;
+            // otherwise no-op.
+            _ = sessionId
+            if let agentId = agentId {
+                ChatWindowManager.shared.createWindow(agentId: agentId)
+            } else {
+                ChatWindowManager.shared.createWindow()
+            }
+#endif
 
         case .showChatWindow(let windowId):
             // Show an existing chat window
             ChatWindowManager.shared.showWindow(id: windowId)
 
         case .showExecutionContext(let contextId):
+#if !OSAURUS_INTEL
             // Lazily create a window from a dispatched execution context
             TaskDispatcher.shared.openWindow(for: contextId)
+#else
+            // Intel: TaskDispatcher is amputated (no scheduled/dispatched
+            // execution contexts on Intel). Silently drop the action.
+            _ = contextId
+#endif
 
         case .openSettings(let tab):
             // Open settings window to specific tab

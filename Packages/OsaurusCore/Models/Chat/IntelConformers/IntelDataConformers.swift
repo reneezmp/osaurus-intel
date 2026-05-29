@@ -139,6 +139,68 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
 // `Kind` enum (image/document/audio/video plus spillover refs) and the
 // full Codable surface is what Intel sees now.
 
+// MARK: - VLMDetection (Intel stub)
+//
+// Upstream `Models/Configuration/MLXModel.swift` lives behind the
+// excluded MLX layer, so `VLMDetection.isVLM(at:)` (used by upstream
+// `ModelInfo.swift` to mark local Vision-Language models) is amputated
+// on Intel. Always-false stub: Intel has no local models, no VLMs.
+enum VLMDetection {
+    static func isVLM(at directory: URL) -> Bool { false }
+}
+
+// MARK: - DirectoryPickerService (Intel stub)
+//
+// Upstream's `Services/DirectoryPickerService.swift` is excluded
+// because it drives the local-model directory picker (NSOpenPanel +
+// the on-disk MLX cache). Intel has no local cache to point at, but
+// `ModelInfo.findModelDirectory` still calls it as part of its
+// directory-scan path. Stub returns `~/.osaurus/models` so it has a
+// valid URL to traverse (the directory just won't ever exist on
+// Intel — `fileExists` returns false and the scan bails).
+enum DirectoryPickerService {
+    static func effectiveModelsDirectory() -> URL {
+        let home = FileManager.default.homeDirectoryForCurrentUser
+        return home.appendingPathComponent(".osaurus/models", isDirectory: true)
+    }
+}
+
+// MARK: - LocalReasoningCapability (Intel stub)
+//
+// Upstream's `Services/LocalReasoningCapability.swift` introspects
+// the local MLX model's tokenizer / template to decide whether it
+// supports thinking-toggle. Intel has no local models, so the
+// always-no-thinking capability is the correct answer — keeps
+// `AutoThinkingProfile.matches()` from ever firing on Intel.
+enum LocalReasoningCapability {
+    struct Capability {
+        let isToggleableThinking: Bool
+    }
+    static func capability(forModelId modelId: String) -> Capability {
+        Capability(isToggleableThinking: false)
+    }
+}
+
+// MARK: - NSImage.pngData (Intel-only shim)
+//
+// The upstream `FloatingInputCard.swift` defines an
+// `extension NSImage { func pngData() -> Data? { ... } }` inside its
+// `#if !OSAURUS_INTEL` branch, which means on Intel the helper is
+// invisible — and the un-excluded `DocumentParser.swift` and
+// `ClipboardService.swift` both call it. We mirror the upstream
+// implementation here, gated `#if OSAURUS_INTEL`, so both call sites
+// link cleanly. Phase 8C-main will lift this extension out of
+// `FloatingInputCard.swift` into a shared file at which point this
+// shim should be deleted.
+extension NSImage {
+    func pngData() -> Data? {
+        guard let tiff = self.tiffRepresentation,
+              let bitmap = NSBitmapImageRep(data: tiff)
+        else { return nil }
+        return bitmap.representation(using: .png, properties: [:])
+    }
+}
+
 // MARK: - AttachmentBlobStore (Intel stub)
 //
 // Upstream `AttachmentBlobStore` (in the excluded
@@ -255,11 +317,10 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
 }
 
 // MARK: - ModelOptionValue
-
-struct ModelOptionValue: ModelOptionValueProtocol, Codable, Sendable {
-    let boolValue: Bool?
-    init(boolValue: Bool?) { self.boolValue = boolValue }
-}
+//
+// Now provided by upstream `Models/Configuration/ModelOptions.swift`
+// (un-excluded as part of Phase 8C-prep-2). The Intel `struct
+// ModelOptionValue` stub that used to live here has been removed.
 
 // MARK: - ChatTurnData
 
@@ -370,8 +431,9 @@ extension View {
 final class MemoryContextAssembler: @unchecked Sendable { static let shared = MemoryContextAssembler(); static func assembleContext(agentId: String = "", config: Any? = nil) async -> Any? { nil } }
 final class MemorySearchService: @unchecked Sendable { static let shared = MemorySearchService(); func initialize() async {}; func indexTranscriptTurn(_ turn: Any) async {} }
 
-final class ModelOptionsStore: @unchecked Sendable { static let shared = ModelOptionsStore(); func loadOptions(for model: String) -> [String: ModelOptionValue] { [:] } }
-final class ModelProfileRegistry: @unchecked Sendable { static let shared = ModelProfileRegistry(); static func thinkingEnabled(for model: String, values: [String: ModelOptionValue]) -> Bool? { nil }; static func normalizedOptions(for model: String, persisted: [String: ModelOptionValue]) -> [String: ModelOptionValue] { persisted } }
+// `ModelOptionsStore` and `ModelProfileRegistry` are now provided by
+// upstream (un-excluded as part of Phase 8C-prep-2). The Intel stubs
+// that used to live here have been removed.
 final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: Set<String>) {}; var runtimeSettings: Any? { nil } }
 
 final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver(); static func instructions(pluginId: String, agentId: Any? = nil) -> String? { nil } }
@@ -504,21 +566,26 @@ enum SearchService {
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
 
 
-struct ModelPickerItem: Identifiable, Sendable, Equatable {
-    let id: String
-    var source: ModelPickerSource
-    var isVLM: Bool
+// `ModelPickerItem`, `ModelPickerSource`, and the
+// `Array<ModelPickerItem>.firstChatCapable` extension are now provided
+// by upstream `Models/Configuration/ModelPickerItem.swift` (un-excluded
+// in Phase 8C-prep-2). The Intel duplicates that used to live here have
+// been removed.
+//
+// Note: `Array<Attachment>.images` is similarly provided by upstream
+// `Attachment.swift` (un-excluded in Phase 8C-prep-1).
+
+/// Intel-side ergonomic shim on upstream `ModelPickerItem.Source` so the
+/// few `item.source.remoteProviderId == providerId` filter call sites in
+/// `ChatView` (and friends) don't need to pattern-match the enum directly.
+/// Upstream doesn't expose this because the upstream code uses different
+/// matching idioms in those spots; on Intel we kept the simpler form.
+extension ModelPickerItem.Source {
+    var remoteProviderId: UUID? {
+        if case .remote(_, let providerId) = self { return providerId }
+        return nil
+    }
 }
-
-
-extension Array where Element == ModelPickerItem {
-    var firstChatCapable: ModelPickerItem? { first { !$0.isVLM } }
-}
-
-// Note: `Array<Attachment>.images` is now provided by the upstream
-// `Attachment.swift` (un-excluded as part of Phase 8C-prep) — the Intel
-// duplicate that used to live here has been removed to avoid the
-// "invalid redeclaration of 'images'" collision.
 
 // MARK: - Additional stubs
 
