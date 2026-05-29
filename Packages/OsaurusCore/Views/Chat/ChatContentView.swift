@@ -112,35 +112,29 @@ struct ChatContentView: View {
                             .transition(.opacity)
                         }
                         Spacer()
-                        HStack(spacing: 8) {
-                            TextField("Message", text: $observedSession.input)
-                                .textFieldStyle(.plain)
-                                .font(theme.font(size: 14))
-                                .padding(.horizontal, 14)
-                                .padding(.vertical, 10)
-                            if observedSession.isStreaming {
-                                Button(action: { observedSession.stop() }) {
-                                    Image(systemName: "stop.fill").font(.system(size: 14))
-                                }
-                                .buttonStyle(.borderless)
-                            } else {
-                                Button(action: { observedSession.sendCurrent() }) {
-                                    Image(systemName: "arrow.up.circle.fill")
-                                        .font(.system(size: 20))
-                                        .foregroundStyle(
-                                            observedSession.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                                                ? theme.secondaryText : theme.accentColor
-                                        )
-                                }
-                                .buttonStyle(.borderless)
-                                .disabled(observedSession.input.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
-                                .keyboardShortcut(.return, modifiers: [])
-                            }
-                        }
-                        .padding(.horizontal, 10)
-                        .background(theme.secondaryBackground)
-                        .clipShape(RoundedRectangle(cornerRadius: 14))
-                        .overlay(RoundedRectangle(cornerRadius: 14).stroke(theme.primaryBorder, lineWidth: 1))
+                        FloatingInputCard(
+                            text: $observedSession.input,
+                            selectedModel: $observedSession.selectedModel,
+                            pendingAttachments: $observedSession.pendingAttachments,
+                            isContinuousVoiceMode: $observedSession.isContinuousVoiceMode,
+                            voiceInputState: $observedSession.voiceInputState,
+                            showVoiceOverlay: $observedSession.showVoiceOverlay,
+                            pickerItems: filteredPickerItems,
+                            activeModelOptions: $observedSession.activeModelOptions,
+                            isStreaming: observedSession.isStreaming,
+                            supportsImages: false,
+                            estimatedContextTokens: 0,
+                            onSend: { [weak observedSession] _ in observedSession?.sendCurrent() },
+                            onStop: { [weak observedSession] in observedSession?.stop() },
+                            focusTrigger: focusTrigger,
+                            agentId: windowState.agentId,
+                            windowId: windowState.windowId,
+                            isCompact: windowState.showSidebar,
+                            autoSpeakAssistant: $observedSession.autoSpeakAssistant,
+                            queuedSend: $observedSession.queuedSend
+                        )
+                        .padding(.horizontal, 12)
+                        .padding(.bottom, 12)
                     }
                 }
             }
