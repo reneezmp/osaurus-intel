@@ -124,7 +124,23 @@ struct ChatContentView: View {
                             isStreaming: observedSession.isStreaming,
                             supportsImages: false,
                             estimatedContextTokens: 0,
-                            onSend: { [weak observedSession] _ in observedSession?.sendCurrent() },
+                            onSend: { [weak observedSession] sentText in
+                                // FloatingInputCard clears the `text` binding (which
+                                // is $observedSession.input) just BEFORE calling
+                                // onSend, so `session.sendCurrent()` would see an
+                                // empty input and silently no-op. Instead, route
+                                // the text it passes us directly through `send(_:
+                                // attachments:)` which is what sendCurrent calls
+                                // internally anyway.
+                                guard let session = observedSession else { return }
+                                let attachments = session.pendingAttachments
+                                session.pendingAttachments = []
+                                let body = sentText ?? ""
+                                guard !body.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                                    || !attachments.isEmpty
+                                else { return }
+                                session.send(body, attachments: attachments)
+                            },
                             onStop: { [weak observedSession] in observedSession?.stop() },
                             focusTrigger: focusTrigger,
                             agentId: windowState.agentId,
