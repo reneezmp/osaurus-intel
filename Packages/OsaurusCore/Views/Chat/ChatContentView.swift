@@ -123,7 +123,8 @@ struct ChatContentView: View {
                             activeModelOptions: $observedSession.activeModelOptions,
                             isStreaming: observedSession.isStreaming,
                             supportsImages: false,
-                            estimatedContextTokens: 0,
+                            estimatedContextTokens: observedSession.estimatedContextTokens,
+                            contextBreakdown: observedSession.estimatedContextBreakdown,
                             onSend: { [weak observedSession] sentText in
                                 // FloatingInputCard clears the `text` binding (which
                                 // is $observedSession.input) just BEFORE calling

@@ -111,6 +111,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                               let choices = json["choices"] as? [[String: Any]],
                               let delta = choices.first?["delta"] as? [String: Any] else { continue }
 
+                        // DeepSeek's Max-reasoning mode (and other
+                        // OpenAI-compatible providers like Qwen / vLLM)
+                        // streams the thought process on a sibling
+                        // `reasoning_content` field. Wrap it in the
+                        // `StreamingReasoningHint` sentinel so the
+                        // `ChatView` decode site routes it into
+                        // `ChatTurn.thinking` (which `BlockMemoizer`
+                        // surfaces as the Think panel).
+                        if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                            chunkCount += 1
+                            continuation.yield(StreamingReasoningHint.encode(reasoning))
+                        }
                         if let content = delta["content"] as? String, !content.isEmpty {
                             chunkCount += 1
                             continuation.yield(content)

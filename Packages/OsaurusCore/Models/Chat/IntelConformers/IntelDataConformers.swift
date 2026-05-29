@@ -865,9 +865,24 @@ final class StreamingDeltaProcessor: @unchecked Sendable {
         onChange()
     }
 }
+/// Intel mirror of the upstream `StreamingReasoningHint` (lives in the
+/// excluded `Services/Inference/ModelService.swift` alongside MLX). The
+/// previous Intel stub returned `nil` from `decode(_:)`, which meant
+/// `CloudChatEngine`'s reasoning-content chunks (DeepSeek V4 Pro's
+/// `Max` mode emits a separate `reasoning_content` SSE field) couldn't
+/// be routed to `ChatTurn.thinking` and silently disappeared — so users
+/// got the answer but no Think panel.
+///
+/// Same `\u{FFFE}reasoning:` sentinel prefix as upstream so the
+/// `ChatView` decode site (`StreamingReasoningHint.decode(delta)` at
+/// L1721) works without an architecture-specific branch.
 enum StreamingReasoningHint: Sendable {
-    static func encode(_ text: String) -> String { text }
-    static func decode(_ delta: String) -> String? { nil }
+    private static let reasoningPrefix = "\u{FFFE}reasoning:"
+    static func encode(_ text: String) -> String { reasoningPrefix + text }
+    static func decode(_ delta: String) -> String? {
+        guard delta.hasPrefix(reasoningPrefix) else { return nil }
+        return String(delta.dropFirst(reasoningPrefix.count))
+    }
 }
 
 final class SystemPromptComposer: @unchecked Sendable {
