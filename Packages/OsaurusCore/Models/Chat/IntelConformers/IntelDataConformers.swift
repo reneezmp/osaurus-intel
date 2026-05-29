@@ -131,55 +131,32 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
 }
 
 // MARK: - Attachment
+//
+// `Models/Chat/Attachment.swift` is now compiled directly on Intel
+// (removed from Package.swift's exclude list as part of Phase 8C-prep).
+// The old `struct Attachment: AttachmentProtocol, ...` stub that used to
+// live here is gone — the real 525-line upstream definition with the
+// `Kind` enum (image/document/audio/video plus spillover refs) and the
+// full Codable surface is what Intel sees now.
 
-struct Attachment: AttachmentProtocol, Identifiable, Sendable, Equatable {
-    let id: UUID
-    var filename: String?
-    let isDocument: Bool
-    var documentContent: String?
-    let isAudio: Bool
-    let isVideo: Bool
-    var audioFormat: String?
-    var estimatedTokens: Int = 0
-    var imageData: Data?
-
-    init(filename: String? = nil, isDocument: Bool = false, documentContent: String? = nil) {
-        self.id = UUID()
-        self.filename = filename
-        self.isDocument = isDocument
-        self.documentContent = documentContent
-        self.isAudio = false
-        self.isVideo = false
-    }
-
-    func loadAudioData() async throws -> Data? { nil }
-    func loadVideoData() async throws -> Data? { nil }
-
-    func loadAudioData() -> Data? { nil }
-    func loadVideoData() -> Data? { nil }
-
-    var isImage: Bool { imageData != nil }
-
-    var fileIcon: String {
-        guard let name = filename else { return "doc" }
-        let ext = (name as NSString).pathExtension.lowercased()
-        switch ext {
-        case "pdf": return "doc.fill"
-        case "png", "jpg", "jpeg", "gif", "heic", "webp": return "photo"
-        case "mp4", "mov", "m4v": return "film"
-        case "mp3", "wav", "m4a", "aac": return "waveform"
-        case "txt", "md", "rtf": return "doc.text"
-        case "html", "htm": return "globe"
-        case "json", "yaml", "yml", "xml": return "curlybraces"
-        case "swift", "js", "ts", "py", "rb", "go", "rs", "c", "cpp", "h": return "chevron.left.forwardslash.chevron.right"
-        case "zip", "tar", "gz": return "doc.zipper"
-        default: return "doc"
-        }
-    }
-
-    var fileSizeFormatted: String? {
-        guard let data = imageData else { return nil }
-        return ByteCountFormatter.string(fromByteCount: Int64(data.count), countStyle: .file)
+// MARK: - AttachmentBlobStore (Intel stub)
+//
+// Upstream `AttachmentBlobStore` (in the excluded
+// `Storage/AttachmentBlobStore.swift`) handles encrypted spill of large
+// attachment payloads to disk. On Intel that whole layer is amputated —
+// every Attachment payload lives inline. We provide a throw-only stub so
+// the four `try? AttachmentBlobStore.read(hash)` call sites in
+// `Attachment.swift`'s ref-variant hydration paths convert cleanly to
+// `nil` without dragging the whole storage layer in.
+enum AttachmentBlobStore {
+    static func read(_ hash: String) throws -> Data {
+        throw NSError(
+            domain: "OsaurusIntel.AttachmentBlobStore",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey:
+                "Attachment blob store is amputated on Intel; spillover refs cannot be hydrated."
+            ]
+        )
     }
 }
 
@@ -538,11 +515,10 @@ extension Array where Element == ModelPickerItem {
     var firstChatCapable: ModelPickerItem? { first { !$0.isVLM } }
 }
 
-extension Array where Element == Attachment {
-    var images: [Data] {
-        compactMap { $0.imageData }
-    }
-}
+// Note: `Array<Attachment>.images` is now provided by the upstream
+// `Attachment.swift` (un-excluded as part of Phase 8C-prep) — the Intel
+// duplicate that used to live here has been removed to avoid the
+// "invalid redeclaration of 'images'" collision.
 
 // MARK: - Additional stubs
 
