@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ChatEmptyState.swift
 //  osaurus
@@ -9,6 +8,17 @@
 
 import AppKit
 import SwiftUI
+
+#if OSAURUS_INTEL
+// Mirror of AgentsView.swift's helper. AgentsView is currently body-swapped
+// on Intel, so we re-expose this 3-line utility here to keep HeroAgentAvatar's
+// `AgentAvatarView(tint:)` call working without un-body-swapping that whole
+// 6000-line file. Remove this block once AgentsView is restored.
+fileprivate func agentColorFor(_ name: String) -> Color {
+    let hue = Double(abs(name.hashValue % 360)) / 360.0
+    return Color(hue: hue, saturation: 0.6, brightness: 0.8)
+}
+#endif
 
 // MARK: - Hero Avatar Metrics
 
@@ -119,7 +129,6 @@ private struct HeroAgentAvatar: View {
 }
 
 struct ChatEmptyState: View {
-    init(_ args: Any...) {}
     let hasModels: Bool
     let selectedModel: String?
     let agents: [Agent]
@@ -225,6 +234,13 @@ struct ChatEmptyState: View {
                 VStack(spacing: 0) {
                     Spacer(minLength: 20)
 
+#if OSAURUS_INTEL
+                    // On Intel, cloud chat works without local models, so
+                    // the "no models / downloading" branch (which depends
+                    // on the excluded ModelManager) is replaced with the
+                    // standard hero greeting regardless of `hasModels`.
+                    readyState
+#else
                     if hasModels {
                         readyState
                     } else {
@@ -233,6 +249,7 @@ struct ChatEmptyState: View {
                             onOpenOnboarding: onOpenOnboarding
                         )
                     }
+#endif
 
                     Spacer(minLength: 20)
                 }
@@ -387,6 +404,7 @@ struct ChatEmptyState: View {
     }
 }
 
+#if !OSAURUS_INTEL
 // MARK: - No-Models / Downloading Wrapper (isolates ModelManager observation)
 
 private struct ChatEmptyStateNoModels: View {
@@ -558,6 +576,7 @@ private struct ChatEmptyStateNoModels: View {
         .padding(.horizontal, 40)
     }
 }
+#endif
 
 // MARK: - Quick Action Button (shared by Chat & Work empty states)
 
@@ -717,32 +736,4 @@ private struct GetStartedButton: View {
             .background(Color(hex: "0f0f10"))
         }
     }
-#endif
-#else
-import SwiftUI
-struct ChatEmptyState: View {
-    var hasModels: Bool = true
-    var selectedModel: String? = nil
-    var agents: [Agent] = []
-    var activeAgentId: UUID = UUID()
-    var quickActions: [AgentQuickAction] = []
-    var generativeGreetingState: GenerativeGreetingState = .idle
-    var onOpenModelManager: () -> Void = {}
-    var onUseFoundation: (() -> Void)? = nil
-    var onQuickAction: (String) -> Void = { _ in }
-    var onOpenOnboarding: (() -> Void)? = nil
-    var activeDiscoveredAgent: DiscoveredAgent? = nil
-    var activeRelayAgent: PairedRelayAgent? = nil
-
-    var body: some View {
-        VStack(spacing: 12) {
-            Text("New Chat")
-                .font(.title2)
-            Text("Type a message below to start")
-                .font(.body)
-                .foregroundStyle(.secondary)
-        }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-    }
-}
 #endif

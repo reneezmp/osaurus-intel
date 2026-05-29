@@ -79,18 +79,8 @@ struct ChatContentView: View {
                         if session.hasAnyModel || session.isDiscoveringModels {
                             let _ = observedSession.turns.count
                             if observedSession.turns.isEmpty {
-                                VStack(spacing: 16) {
-                                    Image(systemName: "bubble.left.and.bubble.right.fill")
-                                        .font(.system(size: 40))
-                                        .foregroundStyle(theme.secondaryText.opacity(0.4))
-                                    Text("New Chat")
-                                        .font(theme.font(size: 20, weight: .semibold))
-                                        .foregroundStyle(theme.primaryText)
-                                    Text("Type a message below to start")
-                                        .font(theme.font(size: 14))
-                                        .foregroundStyle(theme.secondaryText)
-                                }
-                                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                emptyStateView
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
                                 messageThread(effectiveContentWidth)
                             }
