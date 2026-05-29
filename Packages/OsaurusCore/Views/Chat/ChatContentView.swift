@@ -53,7 +53,20 @@ struct ChatContentView: View {
                             sessions: fSessions,
                             agentId: aId,
                             currentSessionId: sessId,
-                            onNewChat: { [weak windowState] in windowState?.startNewChat() }
+                            onSelect: { [weak windowState] data in windowState?.loadSession(data) },
+                            onNewChat: { [weak windowState] in windowState?.startNewChat() },
+                            onDelete: { [weak windowState] id in
+                                ChatSessionsManager.shared.delete(id: id)
+                                windowState?.refreshSessions()
+                            },
+                            onRename: { [weak windowState] id, title in
+                                ChatSessionsManager.shared.rename(id: id, title: title)
+                                windowState?.refreshSessions()
+                            },
+                            onSetArchived: { [weak windowState] id, archived in
+                                ChatSessionsManager.shared.setArchived(id: id, archived: archived)
+                                windowState?.refreshSessions()
+                            }
                         )
                     }
                 }

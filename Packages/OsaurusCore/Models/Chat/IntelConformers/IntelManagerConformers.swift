@@ -144,14 +144,29 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
 
 // MARK: - ChatSessionsManager
 
-final class ChatSessionsManager: @unchecked Sendable {
+final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     static let shared = ChatSessionsManager()
-    private var sessions: [UUID: ChatSessionData] = [:]
+    /// `@Published` so `ChatWindowState.observeSessionsManager()` can subscribe
+    /// via `$sessions` and refresh the sidebar when a turn lands during an
+    /// active stream — without this, the sidebar only updates on explicit
+    /// user actions (e.g., clicking "New Chat"). Renamed-from-private to
+    /// `internal` so observers can read it.
+    @Published var sessions: [UUID: ChatSessionData] = [:]
 
     func save(_ data: ChatSessionData) { sessions[data.id] = data }
     func delete(id: UUID) { sessions.removeValue(forKey: id) }
-    func rename(id: UUID, title: String) { sessions[id]?.title = title }
-    func setArchived(id: UUID, archived: Bool) { sessions[id]?.archived = archived }
+    func rename(id: UUID, title: String) {
+        if var s = sessions[id] {
+            s.title = title
+            sessions[id] = s
+        }
+    }
+    func setArchived(id: UUID, archived: Bool) {
+        if var s = sessions[id] {
+            s.archived = archived
+            sessions[id] = s
+        }
+    }
     func refresh() {}
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {
@@ -160,7 +175,9 @@ final class ChatSessionsManager: @unchecked Sendable {
         return id
     }
 
-    func sessions(for agentId: UUID?) -> [ChatSessionData] { Array(sessions.values) }
+    func sessions(for agentId: UUID?) -> [ChatSessionData] {
+        Array(sessions.values).sorted { $0.updatedAt > $1.updatedAt }
+    }
     func session(for id: UUID) -> ChatSessionData? { sessions[id] }
 }
 
