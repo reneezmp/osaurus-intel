@@ -440,9 +440,57 @@ struct ModelPickerView: View {
 #endif
 #else
 import SwiftUI
+/// Intel stub: the upstream rich picker depends on the body-swapped
+/// `ModelPickerTableRepresentable` (which builds the NSTableView with
+/// grouped rows). On Intel we render a minimal SwiftUI list of the
+/// passed-in options instead — the deepseek models still show up and
+/// users can switch between them.
 struct ModelPickerView: View {
+    let options: [ModelPickerItem]
+    @Binding var selectedModel: String?
+    let agentId: UUID?
+    let onDismiss: () -> Void
+
+    @Environment(\.theme) private var theme
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
+        VStack(alignment: .leading, spacing: 4) {
+            Text("Select model", bundle: .module)
+                .font(theme.font(size: 11, weight: .semibold))
+                .foregroundColor(theme.tertiaryText)
+                .padding(.horizontal, 12)
+                .padding(.top, 10)
+                .padding(.bottom, 4)
+            ForEach(options) { item in
+                Button(action: {
+                    selectedModel = item.id
+                    onDismiss()
+                }) {
+                    HStack(spacing: 8) {
+                        Image(systemName: item.id == selectedModel ? "checkmark.circle.fill" : "circle")
+                            .foregroundColor(item.id == selectedModel ? theme.accentColor : theme.secondaryText)
+                            .frame(width: 16)
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(item.displayName)
+                                .font(theme.font(size: 13, weight: .medium))
+                                .foregroundColor(theme.primaryText)
+                            if let description = item.description, !description.isEmpty {
+                                Text(description)
+                                    .font(theme.font(size: 11))
+                                    .foregroundColor(theme.secondaryText)
+                            }
+                        }
+                        Spacer(minLength: 0)
+                    }
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .frame(minWidth: 260)
+        .padding(.bottom, 8)
     }
 }
 #endif

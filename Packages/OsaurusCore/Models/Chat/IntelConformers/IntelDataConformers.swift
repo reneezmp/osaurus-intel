@@ -181,25 +181,10 @@ enum LocalReasoningCapability {
     }
 }
 
-// MARK: - NSImage.pngData (Intel-only shim)
-//
-// The upstream `FloatingInputCard.swift` defines an
-// `extension NSImage { func pngData() -> Data? { ... } }` inside its
-// `#if !OSAURUS_INTEL` branch, which means on Intel the helper is
-// invisible — and the un-excluded `DocumentParser.swift` and
-// `ClipboardService.swift` both call it. We mirror the upstream
-// implementation here, gated `#if OSAURUS_INTEL`, so both call sites
-// link cleanly. Phase 8C-main will lift this extension out of
-// `FloatingInputCard.swift` into a shared file at which point this
-// shim should be deleted.
-extension NSImage {
-    func pngData() -> Data? {
-        guard let tiff = self.tiffRepresentation,
-              let bitmap = NSBitmapImageRep(data: tiff)
-        else { return nil }
-        return bitmap.representation(using: .png, properties: [:])
-    }
-}
+// Note: the Phase 8C-prep-2 `NSImage.pngData()` shim that used to live
+// here has been removed in Phase 8C-main because FloatingInputCard.swift
+// is now un-body-swapped and its own `extension NSImage` brings the
+// helper into scope for the whole Intel module.
 
 // MARK: - AttachmentBlobStore (Intel stub)
 //
@@ -384,8 +369,22 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
 // Agent from Agent.swift is NOT excluded; add conformance to AgentInfoProtocol
 extension Agent: AgentInfoProtocol {}
 
-final class AppConfiguration: @unchecked Sendable { static let shared = AppConfiguration(); var chatConfig = AppChatConfigStub(); var foundationModelAvailable: Bool { false } }
-struct AppChatConfigStub: Sendable { var generativeGreetingsEnabled = false; var disableTools = false; var maxToolAttempts = 5; var topPOverride: Double? = nil }
+final class AppConfiguration: ObservableObject, @unchecked Sendable {
+    static let shared = AppConfiguration()
+    @Published var chatConfig = AppChatConfigStub()
+    var foundationModelAvailable: Bool { false }
+}
+struct AppChatConfigStub: Sendable {
+    var generativeGreetingsEnabled = false
+    var disableTools = false
+    var maxToolAttempts = 5
+    var topPOverride: Double? = nil
+    /// Tracks the upstream `AppConfiguration.chatConfig.enableClipboardMonitoring`
+    /// toggle. Intel reads it from `FloatingInputCard`'s paste-monitor wiring.
+    /// Defaults true so clipboard paste works by default on Intel; users can
+    /// opt-out via the same Settings → Chat row that exists on Apple Silicon.
+    var enableClipboardMonitoring = true
+}
 
 final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
 
@@ -410,7 +409,23 @@ struct SecretPromptState: Sendable {
 
 struct ClarifyTool: Sendable { init() {}; static func parse(argumentsJSON json: String) -> ClarifyPayload? { nil } }
 
-final class FolderContextService: @unchecked Sendable { static let shared = FolderContextService(); var currentContext: FolderContext? { nil } }
+final class FolderContextService: ObservableObject, @unchecked Sendable {
+    static let shared = FolderContextService()
+    @Published var currentContext: FolderContext? = nil
+    /// Folder context is amputated on Intel (the directory-watcher
+    /// + indexing pipeline lives in excluded files), so the
+    /// "is there a working folder attached to the chat?" answer
+    /// is always no.
+    @Published var hasActiveFolder: Bool = false
+
+    /// Folder picker is amputated on Intel — sister to
+    /// `DirectoryPickerService`. No-op on Intel.
+    func selectFolder() async {}
+    func clearFolder() {}
+    /// Re-runs the directory scan on the active folder. Intel has no
+    /// active folder, so the refresh is trivially complete.
+    func refreshContext() async {}
+}
 
 struct ImageFullScreenView: View { var image: Any? = nil; var altText: String = ""; var body: some View { EmptyView() } }
 
@@ -434,12 +449,46 @@ final class MemorySearchService: @unchecked Sendable { static let shared = Memor
 // `ModelOptionsStore` and `ModelProfileRegistry` are now provided by
 // upstream (un-excluded as part of Phase 8C-prep-2). The Intel stubs
 // that used to live here have been removed.
-final class ModelRuntime: @unchecked Sendable { static let shared = ModelRuntime(); func unloadModelsNotIn(_ names: Set<String>) {}; var runtimeSettings: Any? { nil } }
+final class ModelRuntime: @unchecked Sendable {
+    static let shared = ModelRuntime()
+    func unloadModelsNotIn(_ names: Set<String>) {}
+    var runtimeSettings: Any? { nil }
+
+    /// Background pre-encode hook the upstream FloatingInputCard calls so
+    /// MLX can warm the audio encoder while the user is still recording.
+    /// Intel has no resident MLX model, so we always return a `.skipped`
+    /// result — the caller logs it and moves on. Signature mirrors
+    /// upstream (non-optional return) so the chained `.status.rawValue`
+    /// access at the call site type-checks unchanged.
+    func preencodeLiveVoiceAudioIfResident(
+        modelName: String,
+        attachmentId: UUID,
+        samples: [Float],
+        sampleRate: Int
+    ) async -> LiveVoicePreencodeResult {
+        LiveVoicePreencodeResult(
+            status: .skipped,
+            sampleCount: samples.count,
+            sampleRate: sampleRate,
+            encodeMs: 0,
+            message: "MLX preencode amputated on Intel"
+        )
+    }
+}
 
 final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver(); static func instructions(pluginId: String, agentId: Any? = nil) -> String? { nil } }
 
 final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: String) -> String { "agent" } }
-final class SandboxToolRegistrar: @unchecked Sendable { static let shared = SandboxToolRegistrar(); func registerTools(for agentId: UUID) async {} }
+final class SandboxToolRegistrar: @unchecked Sendable {
+    static let shared = SandboxToolRegistrar()
+    func registerTools(for agentId: UUID) async {}
+    /// FloatingInputCard's sandbox chip calls this when the user
+    /// clicks "Retry" after a provisioning failure. Intel has no
+    /// failures to reset (no provisioning ever happens), so no-op.
+    /// `for:` arg is optional to match both upstream call shapes
+    /// (`resetStartupFailures()` and `resetStartupFailures(for:)`).
+    func resetStartupFailures(for agentId: UUID? = nil) {}
+}
 
 struct SecretPromptParser: Sendable {
     init() {}
@@ -498,7 +547,18 @@ final class SkillManager: @unchecked Sendable {
     func buildFullInstructions(for skill: IntelSkillInfo, agentId: Any? = nil) -> String? { nil }
 }
 
-final class SlashCommandRegistry: @unchecked Sendable { static let shared = SlashCommandRegistry(); var isPopupVisible: Bool { false } }
+final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
+    static let shared = SlashCommandRegistry()
+    @Published var isPopupVisible: Bool = false
+    /// FloatingInputCard reads this every time the user types `/` —
+    /// upstream returns the prefix-filtered command list, Intel
+    /// returns an empty array (no slash commands plumbed yet).
+    func filtered(query: String) -> [SlashCommand] { [] }
+}
+
+// `SlashCommand` is provided by upstream
+// `Models/SlashCommand/SlashCommand.swift` (not excluded). The
+// Intel duplicate that used to live here has been removed.
 
 enum StreamingStatsHint: Sendable {
     static func encode(tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool = false, stopReason: String? = nil) -> String { "" }
@@ -862,7 +922,29 @@ struct ComposedContext: @unchecked Sendable {
         self.cacheHint = cacheHint
     }
 }
-struct ContextDisableInfo: Sendable { init() {} }
+/// Auto-disable hints flowed from the context budget composer to the
+/// FloatingInputCard's context-popover. On Intel none of this fires
+/// (the composer's local-model budgeting paths are amputated) but
+/// the upstream popover code reads the props unconditionally — Bool
+/// defaults make the relevant rows collapse correctly.
+struct ContextDisableInfo: Sendable {
+    var modelId: String? = nil
+    var contextLength: Int? = nil
+    var disabledMemory: Bool = false
+    var disabledTools: Bool = false
+
+    init(
+        modelId: String? = nil,
+        contextLength: Int? = nil,
+        disabledMemory: Bool = false,
+        disabledTools: Bool = false
+    ) {
+        self.modelId = modelId
+        self.contextLength = contextLength
+        self.disabledMemory = disabledMemory
+        self.disabledTools = disabledTools
+    }
+}
 
 struct ContextBreakdown: Sendable {
     struct Entry: Identifiable, Equatable, Sendable {
@@ -884,6 +966,25 @@ struct ContextBreakdown: Sendable {
 
     init(context: [Entry] = [], messages: [Entry] = [], disable: ContextDisableInfo? = nil) {
         self.context = context; self.messages = messages; self.disable = disable
+    }
+
+    /// Upsert helper used by `FloatingInputCard.displayContextBreakdown` so
+    /// the typing-tokens entry can be written back into the breakdown
+    /// without dropping the existing context / message rows.
+    mutating func setTokens(
+        for id: String,
+        in keyPath: WritableKeyPath<ContextBreakdown, [Entry]>,
+        tokens: Int,
+        label: String,
+        tint: Tint
+    ) {
+        if let idx = self[keyPath: keyPath].firstIndex(where: { $0.id == id }) {
+            self[keyPath: keyPath][idx].tokens = tokens
+        } else {
+            self[keyPath: keyPath].append(
+                Entry(id: id, label: label, tokens: tokens, tint: tint)
+            )
+        }
     }
 
     static func from(
@@ -921,6 +1022,15 @@ final class ContextBudgetTracker: @unchecked Sendable {
 final class LiveVoiceAudioInputRegistry: @unchecked Sendable {
     static let shared = LiveVoiceAudioInputRegistry()
     func samples(for id: UUID) -> LocalAudioSamples? { nil }
+    /// FloatingInputCard's live-voice preencode session calls this when
+    /// either the session ends or the user discards the recording. Intel
+    /// has no live-voice path (the whole MLX-backed preencode pipeline is
+    /// amputated), so the bookkeeping is a no-op.
+    func remove(for id: UUID) {}
+    /// FloatingInputCard's send path tags the wav attachment with the
+    /// matching live snapshot. Stored snapshots are read back later by
+    /// the (Intel-absent) preencode pipeline. No-op on Intel.
+    func store(snapshot: LiveVoiceAudioSnapshot, for id: UUID) {}
 }
 
 final class MemoryDatabase: @unchecked Sendable {

@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  PastedContentSheet.swift
 //  osaurus
@@ -118,11 +117,3 @@ struct PastedContentSheet: View {
         .padding(.vertical, 12)
     }
 }
-#else
-import SwiftUI
-struct PastedContentSheet: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Pasted Content", symbol: "apple.logo")
-    }
-}
-#endif

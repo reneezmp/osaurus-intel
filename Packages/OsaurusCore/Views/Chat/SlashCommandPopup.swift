@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  SlashCommandPopup.swift
 //  osaurus
@@ -10,7 +9,6 @@
 import SwiftUI
 
 struct SlashCommandPopup: View {
-    init(_ args: Any...) {}
     let commands: [SlashCommand]
     @Binding var selectedIndex: Int
     let onSelect: (SlashCommand) -> Void
@@ -194,12 +192,3 @@ struct SlashCommandPopup: View {
         }
     }
 }
-#else
-import SwiftUI
-struct SlashCommandPopup: View {
-    init(_ args: Any...) {}
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Slash Command Popup", symbol: "apple.logo")
-    }
-}
-#endif

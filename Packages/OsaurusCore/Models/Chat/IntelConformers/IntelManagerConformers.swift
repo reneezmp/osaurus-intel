@@ -66,6 +66,12 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func effectiveEnabledToolNames(for agentId: UUID) -> [String]? { nil }
     func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? { nil }
     func effectiveAutonomousExec(for agentId: UUID) -> AgentAutoExecInfo? { AgentAutoExecInfo(enabled: false) }
+    /// Sandbox autonomous-exec write path. Upstream `AgentManager` persists
+    /// the new config to AgentStore + emits agentManagerDidUpdate. Intel has
+    /// no per-agent autonomous-exec because the whole sandbox subsystem is
+    /// amputated, so the write is a no-op. Throwing signature is preserved
+    /// for upstream call-site parity.
+    func updateAutonomousExec(_ config: AgentAutoExecInfo, for agentId: UUID) async throws {}
     func ttsVoice(for agentId: UUID) -> Any? { nil }
     func themeId(for agentId: UUID) -> UUID? { nil }
 }

@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  DocumentChip.swift
 //  osaurus
@@ -110,11 +109,3 @@ struct DocumentChip: View {
         .buttonStyle(.plain)
     }
 }
-#else
-import SwiftUI
-struct DocumentChip: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Document Chip", symbol: "apple.logo")
-    }
-}
-#endif

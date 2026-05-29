@@ -13,13 +13,195 @@ import Foundation
 
 // MARK: - SpeechService (no-op on Intel)
 
-final class SpeechService: @unchecked Sendable {
-    static let shared = SpeechService()
-    let isRecording: Bool = false
-
-    func stopStreamingTranscription() async {}
-    func clearTranscription() {}
+// MARK: - Voice notification names (Intel stubs)
+//
+// Upstream declares these in `Services/Voice/VADService.swift` (excluded).
+// FloatingInputCard subscribes to both via `NotificationCenter.default`;
+// on Intel nothing posts them (no VAD pipeline, no Settings panel) but
+// the names still need to resolve at compile time.
+extension Notification.Name {
+    public static let startVoiceInputInChat = Notification.Name("startVoiceInputInChat")
+    public static let voiceConfigurationChanged = Notification.Name("voiceConfigurationChanged")
 }
+
+// MARK: - Voice subsystem stubs (Phase 8C)
+//
+// The entire voice pipeline (SpeechService, SpeechModelManager,
+// SpeechConfiguration, LiveVoiceAudioSnapshot, SpeechError,
+// TranscriptionCleanupService) lives behind the excluded
+// `Services/Voice/*.swift` + `Managers/SpeechService.swift` +
+// `Managers/Model/SpeechModelManager.swift` files. FloatingInputCard's
+// microphone button + transcription overlay reach deeply into this
+// surface, so rather than gate every line in the upstream view, we
+// expose no-op stubs here. The buttons render but stay inert; users
+// see "microphone permission denied" semantics by default.
+
+struct LiveVoiceAudioSnapshot: Sendable {
+    var samples: [Float] = []
+    /// Sample rate as `Int` so the Int↔Double comparisons in
+    /// FloatingInputCard's `scheduleLiveVoicePreencodeIfNeeded` type-check
+    /// without explicit conversion. 16_000 is the standard wav rate the
+    /// upstream pipeline uses.
+    var sampleRate: Int = 16_000
+    /// Seconds-of-audio derived from `samples.count / sampleRate`.
+    /// FloatingInputCard logs this on every send; with empty samples
+    /// the value is zero.
+    var durationSeconds: Double {
+        guard sampleRate > 0 else { return 0 }
+        return Double(samples.count) / Double(sampleRate)
+    }
+    /// Best-effort WAV-encoded bytes. Returns nil on Intel because the
+    /// stub never carries actual samples; FloatingInputCard handles the
+    /// nil case (treats it as "no voice attachment").
+    func wavData() -> Data? { nil }
+}
+
+enum SpeechError: Error, LocalizedError {
+    case unavailable
+    case modelNotLoaded
+    case permissionDenied
+    case microphonePermissionDenied
+    case transcriptionFailed(String)
+    var errorDescription: String? {
+        switch self {
+        case .unavailable: return "Speech input is not available on Intel."
+        case .modelNotLoaded: return "Speech model not loaded."
+        case .permissionDenied, .microphonePermissionDenied:
+            return "Microphone permission denied."
+        case .transcriptionFailed(let detail): return "Transcription failed: \(detail)"
+        }
+    }
+}
+
+/// Return type for `ModelRuntime.preencodeLiveVoiceAudioIfResident` —
+/// FloatingInputCard logs every field on completion. Intel never
+/// actually produces one (the method returns nil), but the type has
+/// to exist for the closure body's `result.status.rawValue` access
+/// path to type-check.
+struct LiveVoicePreencodeResult: Sendable {
+    enum Status: String, Sendable {
+        case ok
+        case skipped
+        case failed
+    }
+    let status: Status
+    let sampleCount: Int
+    let sampleRate: Int
+    let encodeMs: Int
+    let message: String?
+}
+
+// `SpeechConfiguration` (with its `.default` static, `confirmationDelay`,
+// `pauseDuration`, etc.) is provided by upstream
+// `Models/Voice/SpeechConfiguration.swift` (un-excluded — it's pure
+// Foundation enums + struct). The stub that used to live here has been
+// removed to avoid a redeclaration collision.
+
+final class SpeechService: ObservableObject, @unchecked Sendable {
+    static let shared = SpeechService()
+
+    // Recording lifecycle
+    @Published var isRecording: Bool = false
+    @Published var isSpeechDetected: Bool = false
+    @Published var audioLevel: Float = 0
+
+    // Transcription state
+    @Published var currentTranscription: String = ""
+    @Published var confirmedTranscription: String = ""
+
+    // Model state
+    @Published var isLoadingModel: Bool = false
+    @Published var isModelLoaded: Bool = false
+
+    // Permission state
+    @Published var microphonePermissionGranted: Bool = false
+
+    // Methods — all no-op on Intel
+    func stopStreamingTranscription(force: Bool = false) async {}
+    func clearTranscription() {}
+    func startStreamingTranscription(config: SpeechConfiguration = .default) async throws {
+        throw SpeechError.unavailable
+    }
+    func loadModel(_ modelId: String? = nil) async throws {
+        throw SpeechError.modelNotLoaded
+    }
+    func requestMicrophonePermission() async -> Bool { false }
+    /// Live snapshot accessor used by `FloatingInputCard.scheduleLiveVoicePreencodeIfNeeded`.
+    /// Upstream is a `currentLiveAudioSnapshot()` method that returns
+    /// the latest live VAD frame; Intel has no recording session so
+    /// the answer is always nil.
+    func currentLiveAudioSnapshot() -> LiveVoiceAudioSnapshot? { nil }
+}
+
+final class SpeechModelManager: ObservableObject, @unchecked Sendable {
+    static let shared = SpeechModelManager()
+    @Published var selectedModel: SpeechModelInfo? = nil
+    @Published var availableModels: [SpeechModelInfo] = []
+    @Published var downloadProgress: Double = 0
+    @Published var isDownloading: Bool = false
+    /// Used by FloatingInputCard's "Speech models" sub-popover header.
+    /// Always zero on Intel.
+    @Published var downloadedModelsCount: Int = 0
+
+    func selectModel(_ model: SpeechModelInfo) {}
+    func downloadModel(_ model: SpeechModelInfo) async {}
+    func deleteModel(_ model: SpeechModelInfo) {}
+}
+
+struct SpeechModelInfo: Identifiable, Sendable, Equatable {
+    let id: String
+    var name: String = ""
+    var isInstalled: Bool = false
+    var sizeBytes: Int64 = 0
+}
+
+final class TranscriptionCleanupService: @unchecked Sendable {
+    static let shared = TranscriptionCleanupService()
+    func cleanup(_ text: String) -> String { text }
+    func cleanupForSend(_ text: String) -> String { text }
+    func clean(_ text: String) -> String { text }
+    static func cleanup(_ text: String) -> String { text }
+    static func cleanupForSend(_ text: String) -> String { text }
+}
+
+// MARK: - ModelManager (Intel stub)
+//
+// Upstream `Managers/Model/ModelManager.swift` orchestrates the MLX
+// local-model lifecycle (download / load / unload / list). Intel has
+// zero local models, so the stub exposes only the surface
+// FloatingInputCard reads — empty everywhere.
+
+final class ModelManager: ObservableObject, @unchecked Sendable {
+    static let shared = ModelManager()
+    @Published var availableModels: [ModelInfo] = []
+    @Published var suggestedModels: [ModelInfo] = []
+    @Published var downloadStates: [String: DownloadState] = [:]
+    @Published var downloadMetrics: [String: DownloadMetrics] = [:]
+
+    enum DownloadState: Sendable, Equatable {
+        case idle
+        case downloading(Double)
+        case completed
+        case failed(String)
+    }
+
+    struct DownloadMetrics: Sendable {
+        var bytesReceived: Int64? = nil
+        var totalBytes: Int64? = nil
+        var bytesPerSecond: Double? = nil
+        var etaSeconds: Double? = nil
+    }
+
+    /// Upstream returns a newer model id when a known-deprecated MLX
+    /// model gets selected (e.g., Qwen 3 → Qwen 3.5). Intel has no
+    /// local-model catalogue, so deprecation never applies.
+    static func replacementForDeprecatedModel(_ modelId: String) -> String? { nil }
+}
+
+// `ModelFamilyNames` is provided by upstream
+// `Models/Configuration/ModelFamilyNames.swift` (not excluded). The
+// Intel stub that used to live here was removed to avoid a
+// redeclaration collision.
 
 // MARK: - RemoteProviderManager (cloud-only, concretized)
 

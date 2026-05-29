@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  FloatingInputCard.swift
 //  osaurus
@@ -370,113 +369,16 @@ struct FloatingInputCard: View {
     var body: some View {
         let _ = ChatPerfTrace.shared.count("body.FloatingInputCard")
         mainContent
-            .onAppear {
-                let isReappear = !localText.isEmpty || voiceInputState != .idle
-                localText = text
-                print("[VoiceDebug] FloatingInputCard onAppear (reappear=\(isReappear))")
-
-                // Focus immediately when view appears
-                isFocused = true
-
-                // Load voice config (cached after first load)
-                loadVoiceConfig()
-
-                if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
-                    && !speechService.isLoadingModel
-                    && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-                {
-                    if let model = SpeechModelManager.shared.selectedModel {
-                        print("[VoiceDebug] Kicking off model load for: \(model.id)")
-                        Task {
-                            try? await speechService.loadModel(model.id)
-                        }
-                    } else {
-                        print("[VoiceDebug] No selected model — cannot load")
-                    }
-                }
-
-                if speechService.isRecording {
-                    if voiceInputState == .idle {
-                        voiceInputState = .recording
-                        lastVoiceActivityTime = Date()
-                        resetPauseDetectionForRecording()
-                    }
-                    if !showVoiceOverlay {
-                        showVoiceOverlay = true
-                    }
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .startVoiceInputInChat)) { notification in
-                // Start voice input when triggered by VAD - enable continuous mode
-                // Only respond if this notification targets our window
-                guard let targetWindowId = notification.object as? UUID,
-                    targetWindowId == windowId
-                else {
-                    return
-                }
-
-                if isVoiceAvailable && !showVoiceOverlay && !isStreaming {
-                    print(
-                        "[FloatingInputCard] Received .startVoiceInputInChat notification for window \(windowId?.uuidString ?? "nil")"
-                    )
-                    isContinuousVoiceMode = true
-                    lastVoiceActivityTime = Date()
-                    startVoiceInput()
-                }
-            }
-            .onReceive(NotificationCenter.default.publisher(for: .voiceConfigurationChanged)) { _ in
-                // Reload voice config when settings change
-                loadVoiceConfig()
-
-                if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
-                    && !speechService.isLoadingModel
-                    && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
-                {
-                    if let model = SpeechModelManager.shared.selectedModel {
-                        Task { try? await speechService.loadModel(model.id) }
-                    }
-                }
-            }
-            .onChange(of: isStreaming) { wasStreaming, nowStreaming in
-                // Safety net: if focus was lost during streaming (e.g.
-                // the user clicked elsewhere or dismissed a dialog),
-                // re-claim it once the agent finishes so the user can
-                // type immediately. The normal send path keeps focus
-                // throughout via `TextViewFocusController.lockFocus`.
-                if wasStreaming && !nowStreaming {
-                    isFocused = true
-                }
-
-                // When AI finishes responding and we're in continuous voice mode, restart voice input
-                if wasStreaming && !nowStreaming && isContinuousVoiceMode {
-                    print("[FloatingInputCard] AI response finished in continuous mode - restarting voice")
-                    // Reset silence timeout for the new turn
-                    lastVoiceActivityTime = Date()
-
-                    // Small delay to let UI settle
-                    Task { @MainActor in
-                        try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
-                        if isContinuousVoiceMode && isVoiceAvailable && !showVoiceOverlay {
-                            startVoiceInput()
-                        }
-                    }
-                }
-            }
-            .onDisappear {
-                // Stop any active voice recording, but check if we should keep continuous mode
-                if isVoiceActive {
-                    print("[FloatingInputCard] onDisappear: Stopping active voice recording")
-                    // Don't use cancelVoiceInput() here as it forces continuous mode off.
-                    // Instead, just stop recording but preserve the mode.
-                    cancelLiveVoicePreencodeSession(removeRegistryEntry: true)
-                    Task {
-                        _ = await speechService.stopStreamingTranscription()
-                        speechService.clearTranscription()
-                    }
-                    voiceInputState = .idle
-                    showVoiceOverlay = false
-                }
-            }
+            .modifier(
+                BodyLifecycleHandlers(
+                    isStreaming: isStreaming,
+                    onAppearHandler: handleOnAppear,
+                    onStartVoiceInputNotification: handleStartVoiceInputNotification,
+                    onVoiceConfigurationChanged: handleVoiceConfigurationChanged,
+                    onIsStreamingChanged: handleIsStreamingChanged,
+                    onDisappearHandler: handleOnDisappear
+                )
+            )
             .onChange(of: text) { _, newValue in
                 // Sync from binding when it changes externally (e.g., quick actions)
                 if newValue != localText {
@@ -498,62 +400,16 @@ struct FloatingInputCard: View {
             .onChange(of: focusTrigger) { _, _ in
                 isFocused = true
             }
-            .onChange(of: speechService.isRecording) { _, isRecording in
-                print(
-                    "[FloatingInputCard] isRecording changed to: \(isRecording). voiceInputState: \(voiceInputState), showVoiceOverlay: \(showVoiceOverlay)"
+            .modifier(
+                SpeechObservers(
+                    speechService: speechService,
+                    voiceInputState: voiceInputState,
+                    onIsRecording: handleIsRecordingChanged,
+                    onSpeechDetected: handleSpeechDetectedChange,
+                    onTranscriptionChange: handleTranscriptionChange,
+                    onVoiceStateRecording: resetPauseDetectionForRecording
                 )
-                // Sync voice state with service
-                if isRecording {
-                    if voiceInputState == .idle && showVoiceOverlay {
-                        voiceInputState = .recording
-                        lastVoiceActivityTime = Date()
-                        resetPauseDetectionForRecording()
-                        print("[FloatingInputCard] Recording confirmed - voice input ready")
-                    } else if voiceInputState == .idle {
-                        print("[FloatingInputCard] External recording detected. Overlay: \(showVoiceOverlay)")
-                        voiceInputState = .recording
-                        lastVoiceActivityTime = Date()
-                        resetPauseDetectionForRecording()
-                    }
-                } else {
-                    // If service stopped recording (e.g. via Esc key in ChatView), sync local state.
-                    // Preserve `.sending` so the overlay stays up during LLM cleanup.
-                    if voiceInputState != .idle && voiceInputState != .sending {
-                        voiceInputState = .idle
-                        showVoiceOverlay = false
-                    }
-                }
-            }
-            .onChange(of: speechService.isSpeechDetected) { _, detected in
-                if detected && voiceInputState == .recording {
-                    hasDetectedSpeechThisTurn = true
-                    lastSpeechTime = Date()
-                }
-            }
-            .onChange(of: speechService.currentTranscription) { _, newValue in
-                // When new transcription arrives, user is speaking
-                // Only reset silence timer if there is also active audio detection or meaningful level
-                if voiceInputState == .recording && !newValue.isEmpty {
-                    if speechService.isSpeechDetected || speechService.audioLevel > 0.05 {
-                        hasDetectedSpeechThisTurn = true
-                        lastSpeechTime = Date()
-                    }
-                }
-            }
-            .onChange(of: speechService.confirmedTranscription) { _, newValue in
-                // When confirmed transcription changes, user was speaking
-                if voiceInputState == .recording && !newValue.isEmpty {
-                    if speechService.isSpeechDetected || speechService.audioLevel > 0.05 {
-                        hasDetectedSpeechThisTurn = true
-                        lastSpeechTime = Date()
-                    }
-                }
-            }
-            .onChange(of: voiceInputState) { _, newState in
-                if newState == .recording {
-                    resetPauseDetectionForRecording()
-                }
-            }
+            )
             .onChange(of: showVoiceOverlay) { _, isShowing in
                 if isShowing {
                     pauseTimerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
@@ -620,6 +476,60 @@ struct FloatingInputCard: View {
         )
     }
 
+}
+
+// MARK: - Body lifecycle + speech observers
+//
+// Extracted from the (very) long modifier chain on
+// FloatingInputCard.body because Swift 6.3's per-expression type
+// checker chokes on the full chain ("unable to type-check this
+// expression in reasonable time") on Intel — particularly when the
+// `@ObservedObject` SpeechService publishers + multiple
+// `.onChange`/`.onReceive` closures pile up. Grouping the handlers
+// into dedicated `ViewModifier` structs keeps the body's chain short.
+
+private struct BodyLifecycleHandlers: ViewModifier {
+    let isStreaming: Bool
+    let onAppearHandler: () -> Void
+    let onStartVoiceInputNotification: (Notification) -> Void
+    let onVoiceConfigurationChanged: () -> Void
+    let onIsStreamingChanged: (Bool, Bool) -> Void
+    let onDisappearHandler: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onAppear { onAppearHandler() }
+            .onDisappear { onDisappearHandler() }
+            .onReceive(NotificationCenter.default.publisher(for: .startVoiceInputInChat)) {
+                onStartVoiceInputNotification($0)
+            }
+            .onReceive(NotificationCenter.default.publisher(for: .voiceConfigurationChanged)) { _ in
+                onVoiceConfigurationChanged()
+            }
+            .onChange(of: isStreaming) { wasStreaming, nowStreaming in
+                onIsStreamingChanged(wasStreaming, nowStreaming)
+            }
+    }
+}
+
+private struct SpeechObservers: ViewModifier {
+    @ObservedObject var speechService: SpeechService
+    let voiceInputState: VoiceInputState
+    let onIsRecording: (Bool) -> Void
+    let onSpeechDetected: (Bool) -> Void
+    let onTranscriptionChange: (String) -> Void
+    let onVoiceStateRecording: () -> Void
+
+    func body(content: Content) -> some View {
+        content
+            .onChange(of: speechService.isRecording) { _, v in onIsRecording(v) }
+            .onChange(of: speechService.isSpeechDetected) { _, v in onSpeechDetected(v) }
+            .onChange(of: speechService.currentTranscription) { _, v in onTranscriptionChange(v) }
+            .onChange(of: speechService.confirmedTranscription) { _, v in onTranscriptionChange(v) }
+            .onChange(of: voiceInputState) { _, newState in
+                if newState == .recording { onVoiceStateRecording() }
+            }
+    }
 }
 
 // MARK: - Voice Debug Helpers
@@ -1303,68 +1213,248 @@ extension FloatingInputCard {
         }
     }
 
+    // MARK: - Notification Handlers
+    //
+    // Lifted out of the chained `.onReceive` calls in `body` so each
+    // closure stays small enough for Swift 6.3's per-expression
+    // type-checker. The notification body fired the
+    // "unable to type-check this expression in reasonable time"
+    // diagnostic on Intel; the helper-method form sidesteps it.
+
+    private func handleOnDisappear() {
+        // Stop any active voice recording, but check if we should keep continuous mode
+        if isVoiceActive {
+            print("[FloatingInputCard] onDisappear: Stopping active voice recording")
+            // Don't use cancelVoiceInput() here as it forces continuous mode off.
+            // Instead, just stop recording but preserve the mode.
+            cancelLiveVoicePreencodeSession(removeRegistryEntry: true)
+            Task {
+                _ = await speechService.stopStreamingTranscription()
+                speechService.clearTranscription()
+            }
+            voiceInputState = .idle
+            showVoiceOverlay = false
+        }
+    }
+
+    private func handleIsStreamingChanged(wasStreaming: Bool, nowStreaming: Bool) {
+        // Safety net: if focus was lost during streaming (e.g.
+        // the user clicked elsewhere or dismissed a dialog),
+        // re-claim it once the agent finishes so the user can
+        // type immediately. The normal send path keeps focus
+        // throughout via `TextViewFocusController.lockFocus`.
+        if wasStreaming && !nowStreaming {
+            isFocused = true
+        }
+
+        // When AI finishes responding and we're in continuous voice mode, restart voice input
+        if wasStreaming && !nowStreaming && isContinuousVoiceMode {
+            print("[FloatingInputCard] AI response finished in continuous mode - restarting voice")
+            // Reset silence timeout for the new turn
+            lastVoiceActivityTime = Date()
+
+            // Small delay to let UI settle
+            Task { @MainActor in
+                try? await Task.sleep(nanoseconds: 500_000_000)  // 500ms
+                if isContinuousVoiceMode && isVoiceAvailable && !showVoiceOverlay {
+                    startVoiceInput()
+                }
+            }
+        }
+    }
+
+    private func handleOnAppear() {
+        let isReappear = !localText.isEmpty || voiceInputState != .idle
+        localText = text
+        print("[VoiceDebug] FloatingInputCard onAppear (reappear=\(isReappear))")
+
+        // Focus immediately when view appears
+        isFocused = true
+
+        // Load voice config (cached after first load)
+        loadVoiceConfig()
+
+        if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
+            && !speechService.isLoadingModel
+            && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        {
+            if let model = SpeechModelManager.shared.selectedModel {
+                print("[VoiceDebug] Kicking off model load for: \(model.id)")
+                Task {
+                    try? await speechService.loadModel(model.id)
+                }
+            } else {
+                print("[VoiceDebug] No selected model — cannot load")
+            }
+        }
+
+        if speechService.isRecording {
+            if voiceInputState == .idle {
+                voiceInputState = .recording
+                lastVoiceActivityTime = Date()
+                resetPauseDetectionForRecording()
+            }
+            if !showVoiceOverlay {
+                showVoiceOverlay = true
+            }
+        }
+    }
+
+    private func handleSpeechDetectedChange(_ detected: Bool) {
+        if detected && voiceInputState == .recording {
+            hasDetectedSpeechThisTurn = true
+            lastSpeechTime = Date()
+        }
+    }
+
+    private func handleTranscriptionChange(_ newValue: String) {
+        // When transcription text arrives, user is speaking — but only
+        // count it as real speech activity when the VAD agrees (either
+        // `isSpeechDetected` is true or the audio level is non-trivial),
+        // otherwise long quiet streams keep falsely reseting the
+        // pause timer.
+        if voiceInputState == .recording && !newValue.isEmpty {
+            if speechService.isSpeechDetected || speechService.audioLevel > 0.05 {
+                hasDetectedSpeechThisTurn = true
+                lastSpeechTime = Date()
+            }
+        }
+    }
+
+    private func handleIsRecordingChanged(_ isRecording: Bool) {
+        print(
+            "[FloatingInputCard] isRecording changed to: \(isRecording). voiceInputState: \(voiceInputState), showVoiceOverlay: \(showVoiceOverlay)"
+        )
+        // Sync voice state with service
+        if isRecording {
+            if voiceInputState == .idle && showVoiceOverlay {
+                voiceInputState = .recording
+                lastVoiceActivityTime = Date()
+                resetPauseDetectionForRecording()
+                print("[FloatingInputCard] Recording confirmed - voice input ready")
+            } else if voiceInputState == .idle {
+                print("[FloatingInputCard] External recording detected. Overlay: \(showVoiceOverlay)")
+                voiceInputState = .recording
+                lastVoiceActivityTime = Date()
+                resetPauseDetectionForRecording()
+            }
+        } else {
+            // If service stopped recording (e.g. via Esc key in ChatView), sync local state.
+            // Preserve `.sending` so the overlay stays up during LLM cleanup.
+            if voiceInputState != .idle && voiceInputState != .sending {
+                voiceInputState = .idle
+                showVoiceOverlay = false
+            }
+        }
+    }
+
+    private func handleVoiceConfigurationChanged() {
+        // Reload voice config when settings change
+        loadVoiceConfig()
+
+        if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
+            && !speechService.isLoadingModel
+            && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+        {
+            if let model = SpeechModelManager.shared.selectedModel {
+                Task { try? await speechService.loadModel(model.id) }
+            }
+        }
+    }
+
+    private func handleStartVoiceInputNotification(_ notification: Notification) {
+        // Start voice input when triggered by VAD - enable continuous mode
+        // Only respond if this notification targets our window
+        guard let targetWindowId = notification.object as? UUID,
+            targetWindowId == windowId
+        else {
+            return
+        }
+
+        if isVoiceAvailable && !showVoiceOverlay && !isStreaming {
+            print(
+                "[FloatingInputCard] Received .startVoiceInputInChat notification for window \(windowId?.uuidString ?? "nil")"
+            )
+            isContinuousVoiceMode = true
+            lastVoiceActivityTime = Date()
+            startVoiceInput()
+        }
+    }
+
     // MARK: - Pending Attachments Preview (Inline)
+
+    /// `@ViewBuilder` helper extracted out of `inlinePendingAttachmentsPreview`
+    /// because SwiftUI's per-expression type-checker chokes on a multi-case
+    /// switch inside a `ForEach` closure ("static method 'buildExpression'
+    /// requires that 'CachedImageThumbnail' conform to 'AccessibilityRotorContent'").
+    /// Lifting the switch to a dedicated `@ViewBuilder` function gives the
+    /// builder a clean per-branch return type and side-steps the inference
+    /// failure on Intel.
+    @ViewBuilder
+    private func pendingAttachmentChip(for attachment: Attachment, at index: Int) -> some View {
+        switch attachment.kind {
+        case .image(let data):
+            CachedImageThumbnail(
+                imageData: data,
+                size: 40,
+                onRemove: {
+                    withAnimation(theme.springAnimation()) {
+                        _ = pendingAttachments.remove(at: index)
+                    }
+                }
+            )
+        case .imageRef:
+            // Pending attachments are pre-spillover; refs only
+            // appear after persistence. Defensive-render an
+            // empty thumbnail so we don't crash on a pending
+            // queue that someone re-hydrated from disk.
+            if let data = attachment.loadImageData() {
+                CachedImageThumbnail(
+                    imageData: data,
+                    size: 40,
+                    onRemove: {
+                        withAnimation(theme.springAnimation()) {
+                            _ = pendingAttachments.remove(at: index)
+                        }
+                    }
+                )
+            }
+        case .document, .documentRef:
+            DocumentChip(
+                attachment: attachment,
+                onRemove: {
+                    withAnimation(theme.springAnimation()) {
+                        _ = pendingAttachments.remove(at: index)
+                    }
+                },
+                onTap: attachment.isPastedContent
+                    ? {
+                        pastedContentPreview = attachment
+                    } : nil,
+                onEdit: attachment.isPastedContent
+                    ? {
+                        pastedContentEdit = attachment
+                    } : nil
+            )
+        case .audio, .audioRef, .video, .videoRef:
+            // Audio/video attachments display as a labeled chip
+            // with a media-type icon. Inline-bytes are kept on
+            // the pending queue (pre-spillover); refs may also
+            // round-trip through chat history. Same on-remove
+            // semantics as image/document chips.
+            DocumentChip(attachment: attachment) {
+                withAnimation(theme.springAnimation()) {
+                    _ = pendingAttachments.remove(at: index)
+                }
+            }
+        }
+    }
 
     private var inlinePendingAttachmentsPreview: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
                 ForEach(Array(pendingAttachments.enumerated()), id: \.element.id) { index, attachment in
-                    switch attachment.kind {
-                    case .image(let data):
-                        CachedImageThumbnail(
-                            imageData: data,
-                            size: 40,
-                            onRemove: {
-                                withAnimation(theme.springAnimation()) {
-                                    _ = pendingAttachments.remove(at: index)
-                                }
-                            }
-                        )
-                    case .imageRef:
-                        // Pending attachments are pre-spillover; refs only
-                        // appear after persistence. Defensive-render an
-                        // empty thumbnail so we don't crash on a pending
-                        // queue that someone re-hydrated from disk.
-                        if let data = attachment.loadImageData() {
-                            CachedImageThumbnail(
-                                imageData: data,
-                                size: 40,
-                                onRemove: {
-                                    withAnimation(theme.springAnimation()) {
-                                        _ = pendingAttachments.remove(at: index)
-                                    }
-                                }
-                            )
-                        }
-                    case .document, .documentRef:
-                        DocumentChip(
-                            attachment: attachment,
-                            onRemove: {
-                                withAnimation(theme.springAnimation()) {
-                                    _ = pendingAttachments.remove(at: index)
-                                }
-                            },
-                            onTap: attachment.isPastedContent
-                                ? {
-                                    pastedContentPreview = attachment
-                                } : nil,
-                            onEdit: attachment.isPastedContent
-                                ? {
-                                    pastedContentEdit = attachment
-                                } : nil
-                        )
-                    case .audio, .audioRef, .video, .videoRef:
-                        // Audio/video attachments display as a labeled chip
-                        // with a media-type icon. Inline-bytes are kept on
-                        // the pending queue (pre-spillover); refs may also
-                        // round-trip through chat history. Same on-remove
-                        // semantics as image/document chips.
-                        DocumentChip(attachment: attachment) {
-                            withAnimation(theme.springAnimation()) {
-                                _ = pendingAttachments.remove(at: index)
-                            }
-                        }
-                    }
+                    pendingAttachmentChip(for: attachment, at: index)
                 }
             }
         }
@@ -4173,37 +4263,4 @@ private struct SendNowButton: View {
             PreviewWrapper()
         }
     }
-#endif
-#else
-import SwiftUI
-struct FloatingInputCard: View {
-    var text: Binding<String> = .constant("")
-    var selectedModel: Binding<String?> = .constant(nil)
-    var pendingAttachments: Binding<[Attachment]> = .constant([])
-    var isContinuousVoiceMode: Binding<Bool> = .constant(false)
-    var voiceInputState: Binding<VoiceInputState> = .constant(.idle)
-    var showVoiceOverlay: Binding<Bool> = .constant(false)
-    var pickerItems: [ModelPickerItem] = []
-    var activeModelOptions: Binding<[String: ModelOptionValue]> = .constant([:])
-    var isStreaming: Bool = false
-    var supportsImages: Bool = false
-    var estimatedContextTokens: Int = 0
-    var contextBreakdown: ContextBreakdown = .zero
-    var onSend: (String?) -> Void = { _ in }
-    var onStop: () -> Void = {}
-    var focusTrigger: Int = 0
-    var agentId: UUID? = nil
-    var windowId: UUID? = nil
-    var isCompact: Bool = false
-    var onClearChat: (() -> Void)? = nil
-    var onSkillSelected: ((UUID) -> Void)? = nil
-    var pendingSkillId: Binding<UUID?> = .constant(nil)
-    var autoSpeakAssistant: Binding<Bool> = .constant(false)
-    var queuedSend: Binding<QueuedSend?> = .constant(nil)
-    var onSendNow: (() -> Void)? = nil
-    var onCancelQueued: (() -> Void)? = nil
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Floating Input", symbol: "apple.logo")
-    }
-}
 #endif

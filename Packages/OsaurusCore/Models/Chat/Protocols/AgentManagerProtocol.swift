@@ -29,5 +29,7 @@ protocol AgentInfoProtocol: Identifiable, Sendable {
 }
 
 struct AgentAutoExecInfo: Sendable {
-    let enabled: Bool
+    var enabled: Bool
+
+    static let `default` = AgentAutoExecInfo(enabled: false)
 }
