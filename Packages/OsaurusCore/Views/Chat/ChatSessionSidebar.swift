@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ChatSessionSidebar.swift
 //  osaurus
@@ -477,8 +476,10 @@ private struct SessionRow: View {
                 }
                 Button(action: onStartRename) { Text("Rename", bundle: .module) }
                 Divider()
+#if !OSAURUS_INTEL
                 Button(action: requestExport) { Text("Export…", bundle: .module) }
                 Divider()
+#endif
                 Button(action: onToggleArchive) {
                     Text(session.archived ? "Unarchive" : "Archive", bundle: .module)
                 }
@@ -496,11 +497,13 @@ private struct SessionRow: View {
                 onStartRename()
             }
             Divider().padding(.vertical, 2)
+#if !OSAURUS_INTEL
             ActionsPopoverButton(icon: "square.and.arrow.up", label: "Export…", isDestructive: false) {
                 showActionsPopover = false
                 requestExport()
             }
             Divider().padding(.vertical, 2)
+#endif
             ActionsPopoverButton(
                 icon: session.archived ? "tray.and.arrow.up" : "archivebox",
                 label: session.archived ? "Unarchive" : "Archive",
@@ -521,6 +524,14 @@ private struct SessionRow: View {
     // MARK: - Export Format Chooser
 
     private func requestExport() {
+#if OSAURUS_INTEL
+        // Export pipeline (ExportChooserSheet body / ChatSessionExportCoordinator)
+        // is amputated on Intel — the chooser sheet and the export coordinator
+        // both live in excluded files. The Export menu item is also gated below
+        // so users never reach this path; keep the function body around for
+        // signature parity with the upstream call sites.
+        onExport(.markdown)
+#else
         let requestId = UUID()
         let scope = alertScope
         let metadata = session
@@ -548,6 +559,7 @@ private struct SessionRow: View {
             ),
             scope: scope
         )
+#endif
     }
 
     // MARK: - Delete Confirmation
@@ -866,101 +878,4 @@ private struct DontAskAgainToggle: View {
             .frame(height: 400)
         }
     }
-#endif
-#else
-import SwiftUI
-struct ChatSessionSidebar: View {
-    var sessions: [ChatSessionData] = []
-    var agentId: UUID = UUID()
-    var currentSessionId: UUID? = nil
-    var onSelect: (ChatSessionData) -> Void = { _ in }
-    var onNewChat: () -> Void = {}
-    var onDelete: (UUID) -> Void = { _ in }
-    var onRename: (UUID, String) -> Void = { _, _ in }
-    var onSetArchived: (UUID, Bool) -> Void = { _, _ in }
-    var onExport: (ChatSessionData, Any) -> Void = { _, _ in }
-    var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
-
-    @State private var searchQuery: String = ""
-    @Environment(\.theme) private var theme
-
-    private var filteredSessions: [ChatSessionData] {
-        guard !searchQuery.isEmpty else { return sessions }
-        return sessions.filter { $0.title.localizedCaseInsensitiveContains(searchQuery) }
-    }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            HStack {
-                Text("Chats")
-                    .font(theme.font(size: 13, weight: .semibold))
-                    .foregroundStyle(theme.secondaryText)
-                Spacer()
-                Button(action: onNewChat) {
-                    Image(systemName: "square.and.pencil")
-                        .font(.system(size: 14))
-                }
-                .buttonStyle(.borderless)
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-
-            TextField("Search", text: $searchQuery)
-                .textFieldStyle(.plain)
-                .font(theme.font(size: 12))
-                .padding(.horizontal, 10)
-                .padding(.vertical, 6)
-                .background(theme.secondaryBackground)
-                .clipShape(RoundedRectangle(cornerRadius: 6))
-                .padding(.horizontal, 10)
-                .padding(.bottom, 8)
-
-            ScrollView {
-                LazyVStack(alignment: .leading, spacing: 2) {
-                    ForEach(filteredSessions) { session in
-                        sessionRow(session)
-                    }
-                }
-                .padding(.horizontal, 8)
-            }
-        }
-        .background(theme.primaryBackground)
-    }
-
-    private func sessionRow(_ session: ChatSessionData) -> some View {
-        let isActive = session.id == currentSessionId
-        return Button(action: { onSelect(session) }) {
-            VStack(alignment: .leading, spacing: 3) {
-                Text(session.title)
-                    .font(theme.font(size: 13, weight: isActive ? .semibold : .regular))
-                    .lineLimit(1)
-                    .foregroundStyle(isActive ? theme.primaryText : theme.secondaryText)
-                Text(formattedDate(session.updatedAt))
-                    .font(theme.font(size: 11))
-                    .foregroundStyle(theme.tertiaryText)
-            }
-            .padding(.horizontal, 10)
-            .padding(.vertical, 6)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(isActive ? theme.accentColor.opacity(0.15) : Color.clear)
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    private func formattedDate(_ date: Date) -> String {
-        let formatter = DateFormatter()
-        if Calendar.current.isDateInToday(date) {
-            formatter.dateFormat = "'Today' h:mm a"
-        } else if Calendar.current.isDateInYesterday(date) {
-            formatter.dateFormat = "'Yesterday' h:mm a"
-        } else {
-            formatter.dateFormat = "MMM d, h:mm a"
-        }
-        return formatter.string(from: date)
-    }
-}
 #endif

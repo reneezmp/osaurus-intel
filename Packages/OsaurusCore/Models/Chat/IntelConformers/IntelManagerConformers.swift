@@ -108,7 +108,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
     var archived: Bool
     var selectedModel: String?
     var turns: [ChatTurnData]
-    var capabilities: Any? = nil
+    var capabilities: Set<SessionCapability> = []
 
     init(
         id: UUID = UUID(),
@@ -123,7 +123,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
         externalSessionKey: String? = nil,
         dispatchTaskId: UUID? = nil,
         archived: Bool = false,
-        capabilities: Any? = nil
+        capabilities: Set<SessionCapability> = []
     ) {
         self.id = id
         self.title = title
@@ -137,6 +137,7 @@ struct ChatSessionData: Identifiable, @unchecked Sendable {
         self.sourcePluginId = sourcePluginId
         self.externalSessionKey = externalSessionKey
         self.dispatchTaskId = dispatchTaskId
+        self.capabilities = capabilities
     }
 
     static func generateTitle(from turnData: [ChatTurnData]) -> String { "Chat" }

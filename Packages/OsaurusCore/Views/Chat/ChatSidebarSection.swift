@@ -20,7 +20,17 @@ struct ChatSidebarSection: View {
         let sessId: UUID? = sessionId
         VStack(alignment: .leading, spacing: 0) {
             if windowState.showSidebar {
-                ChatSessionSidebar(sessions: fSessions, agentId: aId, currentSessionId: sessId)
+                ChatSessionSidebar(
+                    sessions: fSessions,
+                    agentId: aId,
+                    currentSessionId: sessId,
+                    onSelect: { [weak windowState] data in windowState?.loadSession(data) },
+                    onNewChat: { [weak windowState] in windowState?.startNewChat() },
+                    onDelete: { _ in },
+                    onRename: { _, _ in },
+                    onSetArchived: { _, _ in },
+                    onExport: { _, _ in }
+                )
             }
         }
         .frame(width: sidebarWidth, alignment: .top)

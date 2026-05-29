@@ -412,7 +412,34 @@ struct SecretToolResult: Sendable {
     static func cancelled(key: String) -> String { "" }
 }
 
-struct SessionCapability: Sendable { init() {}; static func derive(from turnData: Any? = nil) -> [SessionCapability] { [] } }
+enum SessionCapability: String, Codable, Hashable, Sendable, CaseIterable {
+    case vision
+    case voice
+    case code
+    case search
+
+    var iconName: String {
+        switch self {
+        case .vision: return "eye.fill"
+        case .voice: return "waveform"
+        case .code: return "chevron.left.forwardslash.chevron.right"
+        case .search: return "magnifyingglass"
+        }
+    }
+
+    var label: String {
+        switch self {
+        case .vision: return "Vision"
+        case .voice: return "Voice"
+        case .code: return "Code"
+        case .search: return "Search"
+        }
+    }
+
+    /// No-op derive used by the Intel `ChatSession` path. Capability badges
+    /// stay empty on Intel until a fuller turn-inspection pipeline lands.
+    static func derive(from turnData: Any? = nil) -> Set<SessionCapability> { [] }
+}
 struct SessionToolState: Sendable {
     init() {}
     static func fingerprint(executionMode: Any?, toolMode: Any?) -> String { "" }
@@ -440,7 +467,7 @@ enum StreamingStatsHint: Sendable {
 }
 
 enum SessionSource: String, Codable, CaseIterable, Sendable {
-    case chat, plugin, http, schedule, watcher, selfSchedule = "self_schedule", dispatch
+    case chat, plugin, http, schedule, watcher, selfSchedule = "self_schedule"
 
     var iconName: String {
         switch self {
@@ -450,7 +477,6 @@ enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "clock.fill"
         case .watcher: return "eye.fill"
         case .selfSchedule: return "alarm.fill"
-        case .dispatch: return "arrow.triangle.branch"
         }
     }
 
@@ -462,7 +488,6 @@ enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "Schedule"
         case .watcher: return "Watcher"
         case .selfSchedule: return "Self-scheduled"
-        case .dispatch: return "Dispatch"
         }
     }
 
@@ -476,8 +501,20 @@ enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "scheduled"
         case .watcher: return "watcher"
         case .selfSchedule: return "self-scheduled"
-        case .dispatch: return "dispatched"
         }
+    }
+}
+
+/// Intel-side mirror of upstream `PluginDisplayNameResolver` (lives in the
+/// excluded `SessionSource.swift`). Falls through to the raw plugin id since
+/// `PluginManager` is amputated on Intel and we have nothing to look up.
+@MainActor
+enum PluginDisplayNameResolver {
+    static func displayName(for pluginId: String) -> String {
+        if pluginId.hasPrefix("sandbox:") {
+            return String(pluginId.dropFirst("sandbox:".count))
+        }
+        return pluginId
     }
 }
 

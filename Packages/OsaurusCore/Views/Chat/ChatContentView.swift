@@ -66,6 +66,12 @@ struct ChatContentView: View {
                             onSetArchived: { [weak windowState] id, archived in
                                 ChatSessionsManager.shared.setArchived(id: id, archived: archived)
                                 windowState?.refreshSessions()
+                            },
+                            onExport: { _, _ in
+                                // Export pipeline is amputated on Intel
+                                // (ChatSessionExportCoordinator + ExportChooserSheet
+                                // both live in excluded files). The Export menu
+                                // item is gated to hidden inside the sidebar.
                             }
                         )
                     }
@@ -79,16 +85,16 @@ struct ChatContentView: View {
                 ZStack {
                     chatBackground
                     VStack(spacing: 0) {
-                        HStack(spacing: 8) {
-                            Circle().fill(observedSession.isStreaming ? Color.green : Color.gray).frame(width: 8, height: 8)
-                            Text(observedSession.isStreaming ? "Streaming…" : "Idle")
-                                .font(.caption).foregroundStyle(.secondary)
-                            Text("Model: \(session.selectedModel ?? "none")")
-                                .font(.caption2).foregroundStyle(.tertiary)
-                            if let err = observedSession.lastStreamError {
-                                Text(err).font(.caption).foregroundStyle(.red)
-                            }
-                        }.padding(.horizontal, 8).padding(.top, 4)
+                        chatHeader
+                        if let err = observedSession.lastStreamError {
+                            Text(err)
+                                .font(.caption)
+                                .foregroundStyle(.red)
+                                .padding(.horizontal, 12)
+                                .padding(.vertical, 6)
+                                .frame(maxWidth: .infinity, alignment: .leading)
+                                .transition(.move(edge: .top).combined(with: .opacity))
+                        }
                         if session.hasAnyModel || session.isDiscoveringModels {
                             let _ = observedSession.turns.count
                             if observedSession.turns.isEmpty {
