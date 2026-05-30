@@ -74,7 +74,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.timeoutInterval = 300
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": request.model ?? model,
             "messages": request.messages.map { msg -> [String: Any] in
                 var m: [String: Any] = ["role": msg.role]
@@ -83,6 +83,30 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             },
             "stream": true,
         ]
+
+        // DSV4 reasoning-mode translation. The FloatingInputCard chip
+        // stores `reasoningEffort` ∈ {instruct, high, max} (see
+        // `DSV4ReasoningProfile`); the user-visible "Default" picks
+        // `instruct`. DeepSeek's public chat API only accepts
+        // `reasoning_effort` of `high`/`max` and toggles reasoning OFF
+        // via a separate `thinking: { type: "disabled" }` object, so
+        // we mirror the upstream `RemoteProviderService.dsv4RemoteEffort`
+        // translation.
+        let effort = request.modelOptions?["reasoningEffort"]?.stringValue?
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+            .lowercased()
+        switch effort {
+        case "instruct", "chat", "none", "no_think", "nothink", "off", "disabled", "false":
+            body["thinking"] = ["type": "disabled"]
+        case .some(let nonEmpty) where !nonEmpty.isEmpty:
+            // high / max / etc. — passed through verbatim
+            body["reasoning_effort"] = nonEmpty
+        case .some, .none:
+            // Empty string OR option not supplied: DSV4 default is
+            // `instruct`, so disable thinking explicitly to match the
+            // user's "Default" chip expectation.
+            body["thinking"] = ["type": "disabled"]
+        }
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
         NSLog("[CloudChatEngine] Request body: model=\(request.model ?? model)")

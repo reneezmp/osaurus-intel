@@ -679,9 +679,31 @@ struct PairedRelayAgent: Identifiable, Sendable {
 
 final class ContextBudgetManager: @unchecked Sendable {
     static let shared = ContextBudgetManager()
-    static func estimateOutputTokens(for turns: [ChatTurn]) -> Int { 0 }
-    static func estimateTokens(for turns: [ChatTurn]) -> Int { 0 }
+
+    /// Cheap GPT-style estimator. Mirrors the upstream's "≈4 chars / token"
+    /// approximation that ChatView documents at L590. Off-by-a-few is fine
+    /// for the chip — it's a budget tracker, not a billing meter.
     static func estimateTokens(for text: String) -> Int { max(1, text.count / 4) }
+
+    /// Sum the content + thinking footprint of an arbitrary turn list. The
+    /// previous Intel stub returned 0 here, which meant the FloatingInputCard
+    /// Context Budget popover only showed the typing tokens — every other
+    /// row stayed at zero. Now the popover reflects the live conversation
+    /// the way it does on Apple Silicon.
+    static func estimateTokens(for turns: [ChatTurn]) -> Int {
+        turns.reduce(0) { acc, turn in
+            acc + estimateTokens(for: turn.content) + estimateTokens(for: turn.thinking)
+        }
+    }
+
+    /// The "output" rail tracks just the active streaming turn. ChatView
+    /// uses this to peel it off the total conversation tokens so the
+    /// popover can show "Conversation" + "Output" as distinct lines.
+    static func estimateOutputTokens(for turns: [ChatTurn]) -> Int {
+        guard let last = turns.last, last.role == .assistant else { return 0 }
+        return estimateTokens(for: last.content) + estimateTokens(for: last.thinking)
+    }
+
     static func estimateTokens(for item: Any?) -> Int { 0 }
 }
 
@@ -1008,7 +1030,23 @@ struct ContextBreakdown: Sendable {
         inputTokens: Int = 0,
         outputTokens: Int = 0
     ) -> ContextBreakdown {
-        ContextBreakdown()
+        // Intel can't see into upstream's `ComposedContext` (the system-prompt
+        // composer is excluded), so we emit just the rails the
+        // FloatingInputCard popover actually surfaces from a remote-only
+        // session: conversation history (assistant + user turns), pending
+        // input, and active output. Empty-token rails are skipped so the
+        // popover stays compact.
+        var bd = ContextBreakdown()
+        if conversationTokens > 0 {
+            bd.context.append(Entry(id: "conversation", label: "Conversation", tokens: conversationTokens, tint: .blue))
+        }
+        if inputTokens > 0 {
+            bd.messages.append(Entry(id: "input", label: "Input", tokens: inputTokens, tint: .cyan))
+        }
+        if outputTokens > 0 {
+            bd.messages.append(Entry(id: "output", label: "Output", tokens: outputTokens, tint: .purple))
+        }
+        return bd
     }
 
     static func from(
