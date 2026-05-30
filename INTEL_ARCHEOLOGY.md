@@ -396,3 +396,108 @@ The chat engine runs (send→stop→send toggle proves streaming lifecycle), but
 - Uncommitted changes: ChatContentView.swift, ChatEmptyState.swift, MessageThreadView.swift (diagnostic UI improvements)
 - Working tree clean after doc update commit
 
+---
+
+## M10.5 Phase 8 — Real Osaurus Chat UI Restored on Intel (CLOSURE)
+
+**Date:** 2026-05-30
+**Key milestone:** APP RENDERS THE UPSTREAM OSAURUS CHAT EXPERIENCE on Intel — markdown bubbles, hero greeting, rich sidebar with filters/badges, FloatingInputCard with attachments + model picker + reasoning effort + context budget, streaming DeepSeek responses with proper Thinking panel for reasoning models.
+
+### Tag
+
+`m10.5-phase-8-complete`
+
+### Where we started Phase 8
+
+Phase 7 left us with: zero compile errors, app launches, MCP / HTTP / cloud proxy all working — but the chat surface was **diagnostic-quality**:
+- `MessageThreadView` Intel branch enumerated turns as `Text("You: ...") + Text("Assistant: ...")`
+- `ChatSessionSidebar` was a 94-line Intel stub with "Chats / Search / row" structure but no filters, badges, or actions
+- `ChatEmptyState` was a 27-line stub showing "New Chat / Type a message below to start"
+- `FloatingInputCard` was a 32-line `AppleSiliconOnlyTab` placeholder
+- `ChatContentView` rendered an inline diagnostic `HStack { TextField + Send/Stop }` instead of the real input
+
+Renée explicitly reframed the goal: **transpose the upstream Osaurus UI, do NOT recreate it.** The Phase 7 diagnostic UI was scaffolding to verify the streaming pipeline; Phase 8's job was to peel it off and surface the original code that was already in the repo behind `#if !OSAURUS_INTEL` guards.
+
+### The five techniques Phase 8 codified
+
+**1. Un-body-swap with selective gating.** For each body-swapped file, the upstream branch is read in full; types it references are checked against the Intel conformer surface (`Packages/OsaurusCore/Models/Chat/IntelConformers/`); the outer `#if !OSAURUS_INTEL` guard is removed; truly amputated sub-features (MLX local-model rows, voice mic + transcription, sandbox tool-registrar UI, slash-command popup contents, skill chip wiring, export coordinator) get **narrow** `#if !OSAURUS_INTEL` gates inside the upstream code instead of swallowing the whole file.
+
+**2. Un-exclude > stub (when the file is mostly pure-Foundation).** Several upstream files turned out to have only one or two Apple-Silicon-only references in otherwise-portable code. Rather than mirror their 500+ lines in conformer files (which would drift from upstream every release), we **removed them from `Package.swift`'s exclude list** and surgically gated the small Apple-Silicon edges. Examples:
+- `Models/Chat/Attachment.swift` (525 LOC) — had four `try? AttachmentBlobStore.read(hash)` references in spillover hydration paths; added an `enum AttachmentBlobStore { static func read(_:) throws -> Data }` Intel stub that throws.
+- `Models/Configuration/ModelOptions.swift` (709 LOC) — fully Foundation, un-excluded as-is.
+- `Models/Configuration/ModelPickerItem.swift` (375 LOC) — gated `static func fromMLXModel(_:)` only.
+- `Services/ModelOptionsStore.swift`, `Utils/DocumentParser.swift`, `Services/Context/ClipboardService.swift`, `Managers/ToastManager.swift` (+ its `Localized` extension), `Models/Configuration/ModelInfo.swift` — all un-excluded with 1-3 line stub additions for the helpers they reached into.
+
+Result: ~3,000 lines of upstream surface restored to Intel without mirroring a single line of it in the conformer files.
+
+**3. The sentinel pattern for cross-architecture stream wiring.** DeepSeek's reasoner endpoint emits reasoning content on a separate `reasoning_content` field in SSE chunks. Upstream `RemoteProviderService` wraps these with `StreamingReasoningHint.encode(_:)` (a `\u{FFFE}reasoning:` prefix), and `ChatView`'s delta loop calls `StreamingReasoningHint.decode(_:)` to peel the prefix and route the text to `ChatTurn.thinking`. The Intel `StreamingReasoningHint` stub used to be a no-op (`encode` returned the input unchanged, `decode` always returned `nil`), so reasoning chunks were silently dropped. Restoring the exact `\u{FFFE}reasoning:` sentinel in the Intel conformer + having `CloudChatEngine` emit `StreamingReasoningHint.encode(reasoning_content_chunk)` made the Think panel work without touching the upstream decode site. **This sentinel pattern generalizes**: any cross-architecture out-of-band signal (reasoning hints, stats hints, tool hints) can be made to compile-time-share between Apple Silicon and Intel by mirroring the same sentinel format in the Intel conformer.
+
+**4. Inner-gate before outer-gate removal.** When un-body-swapping a file that needs selective amputation (e.g., `NativeToolCallGroupView` with its `TerminalDisplayView.Mode` references in shell-tool rendering), we applied the inner `#if !OSAURUS_INTEL` gates around the amputated regions BEFORE removing the outer `#if !OSAURUS_INTEL ... #else ... #endif` body-swap. The inner gates were no-ops while the outer body-swap was still in place (the whole branch was gated out anyway), and they became live the moment the outer body-swap was removed. This let us build-verify after each commit without ever leaving the working tree in a broken state.
+
+**5. Conformer surface extension via call-site reading, not API guessing.** The Intel conformers built during M10.5 phases 1-6 covered just enough surface to satisfy ChatView's existing Intel branches. Restoring the upstream code lit up dozens of new surface gaps (`Attachment.Kind` enum cases, `ModelOptionValue.bool` case, `ModelPickerSource.local`, `ContextDisableInfo.disabledTools/contextLength`, `LiveVoiceAudioInputRegistry.store(snapshot:for:)`, `ModelRuntime.preencodeLiveVoiceAudioIfResident(_:)`, etc.). For each gap we read the upstream call site (which the compiler now points at directly with `error: 'X' has no member 'Y'`) and added the minimum surface needed — no speculative methods, no `Any` placeholders, no broad enum cases. When the call site needed Combine publishers (`AgentManager.$activeAgentId`, `SandboxManager.State.$status`), the conformer property was upgraded to `@Published` and the class to `ObservableObject` rather than papered over.
+
+### Phase 8 sub-phase log
+
+| Phase | What | Commit | Notes |
+|---|---|---|---|
+| 8A | Conformer scaffolding for the 10-file rendering cascade + the keystone un-body-swap | `58ffc575`, `1bcb9d90`, `416bd4fa`, `bdff2a25`, `653cbbf4` | 4 audit-build cycles + atomic 10-file un-body-swap (`MessageThreadView` ← `MessageTableRepresentable` ← `NativeMessageCellView` ← `NativeArtifactCardView` / `NativeMarkdownView` / `NativeThinkingView` / `NativeBlockViews` / `NativeToolCallGroupView` ← `MarkdownMessageView` ← `SelectableTextView`). Three corrupt `init(_ args: Any...) {}` "type-checker pacifier" inits from prior phases were found via grep and removed. |
+| 8A bug 1 | Implement `BlockMemoizer.blocks(from:)` (the Intel stub returned `[]` always — `VisibleBlocksStore.blocks` was permanently empty so `MessageThreadView` rendered a blank area even though the stream was flowing) | `8759d968` | Faithful upstream mirror: per-turn header + thinking + user-message + assistant `.paragraph` blocks, `streamingTurnId` drives `isStreaming: true` for the active turn. **New audit category captured**: stub bodies that compile but produce nothing. Previous audit cycles only checked type surfaces, not function bodies. |
+| 8E mini | Wire `messageThread` closure in `ChatContentView` (the closure was passed but the body still rendered inline `Text("You: ...")` diagnostic) | `50455a71` | After this commit + 8A bug 1 fix, the message thread rendered through the upstream `MessageThreadView` → `MessageTableRepresentable` → `NativeMessageCellView` pipeline for the first time on Intel. |
+| 8B | Restore upstream `ChatEmptyState` with hero avatar + animated greeting + quick actions | `a1e1e5f6` | Selectively gated only the `ChatEmptyStateNoModels` sub-section (170 LOC depending on excluded `ModelManager`); restructured `if hasModels / else` so Intel always renders `readyState` (cloud chat works without local models). Found a 3rd corrupt variadic `init(_ args: Any...)` at `ChatEmptyState` L121 and removed. Added a 3-line `agentColorFor` Intel-only helper because `AgentsView` is still body-swapped. |
+| 8D core | Fix Bug 2 (sessions only appeared after clicking New Chat) + Bug 3 (clicking session didn't load) | `c8887515` | Intel `ChatSessionsManager.sessions` lacked `@Published`, so `ChatWindowState.observeSessionsManager()`'s `$sessions` Combine subscription got zero events. Adding `ObservableObject` + `@Published` + rewriting nested-property mutations to copy-modify-assign (subscript struct mutation doesn't republish a dict) fixed Bug 2. ChatContentView wasn't passing `onSelect:` to `ChatSessionSidebar` so the default `{ _ in }` swallowed clicks; wiring `onSelect: { data in windowState.loadSession(data) }` fixed Bug 3. |
+| 8E quick + 8D full | Drop the Phase 7 "● Streaming…/Idle Model:" diagnostic chrome + un-body-swap the upstream rich `ChatSessionSidebar` (~870 LOC) with filters/badges/search/rename popover/delete confirmation | `4c543655` | Replaced `SessionCapability` no-op struct with the upstream 4-case enum (vision/voice/code/search) + Hashable + CaseIterable + iconName + label. Removed `.dispatch` from Intel `SessionSource` (Intel-only case, not in upstream). Added `PluginDisplayNameResolver` Intel stub. Changed `ChatSessionData.capabilities` from `Any?` to `Set<SessionCapability>`. Selective gates for the export pipeline (`ChatSessionExportCoordinator` + `ExportChooserSheet`'s upstream branch both live in excluded files). |
+| 8C prep 1 | Un-exclude upstream `Attachment.swift` + add `AttachmentBlobStore` Intel stub | `1947c7d3` | First application of the "un-exclude > stub" principle. ~525 LOC of upstream Attachment surface (full `Kind` enum, Codable, hydration helpers) restored to Intel with one 11-line throw-only stub. |
+| 8C prep 2 | Un-exclude `ModelOptions.swift`, `ModelPickerItem.swift`, `ModelOptionsStore.swift`, `ToastManager.swift` (+ Localized), `DocumentParser.swift`, `ClipboardService.swift`, `ModelInfo.swift`; remove the now-redundant Intel stubs | `db4f04d5` | ~107 net Intel-side lines added vs ~600 lines of upstream code now compiling directly. `ModelPickerItemCache` reworked to use `.remote(providerName:"DeepSeek", providerId: stableUUID)` for the built-in deepseek models (the bespoke `.builtIn` source doesn't exist on upstream); `ModelPickerItem.Source.remoteProviderId` Intel-side extension added for the `ChatView` `item.source.remoteProviderId == providerId` filter shortcut. |
+| 8C main | Un-body-swap `FloatingInputCard.swift` (4,209 LOC) with ~12 selective gates + Speech/Voice/Slash/Sandbox/Model surface extensions across Intel conformers + `SlashCommandPopup` un-body-swap (corrupt `init(_ args: Any...)` removed) + `PastedContentSheet` + `DocumentChip` un-body-swap + minimal Intel `ModelPickerView` stub (the upstream rich picker cascades into the body-swapped `ModelPickerTableRepresentable`) | (uncommitted; folded into `c9fdcc39` + later polish) | Extracted three voice/lifecycle handler `ViewModifier` structs (`BodyLifecycleHandlers`, `SpeechObservers`, `VoiceInputStateOnChange`) and four helper methods to break Swift 6.3's per-expression type-checker on the body's chained `.onChange`/`.onReceive` modifiers ("unable to type-check this expression in reasonable time"). Same `@ViewBuilder` extraction pattern applied to `inlinePendingAttachmentsPreview` switch-in-ForEach. |
+| 8C wire | Route FloatingInputCard's `onSend` text directly to `ChatSession.send(_:attachments:)` | `c9fdcc39` | FloatingInputCard clears its `text` binding (which is `$observedSession.input`) BEFORE calling `onSend(fullMessage)`, so the previous `observedSession.sendCurrent()` closure always saw an empty input. Reading `sentText` from the onSend parameter and routing to `send(_:attachments:)` directly fixes it. |
+| 8C polish 1 | Wire context-token tracker + reasoning-content channel | `38875e4c` | `estimatedContextTokens`/`estimatedContextBreakdown` plumbed from `ChatSession` to `FloatingInputCard`'s Context Budget popover; `StreamingReasoningHint` Intel stub replaced with the real `\u{FFFE}reasoning:` sentinel; `CloudChatEngine` now wraps `delta["reasoning_content"]` chunks with `StreamingReasoningHint.encode(_:)` before yielding so `ChatView` decodes them into `ChatTurn.thinking`. |
+| 8C polish 2 | Respect the Reasoning Mode chip on the wire + populate the Context Budget popover | `1dc24c5e` | DSV4 reasoning translation: `instruct` (the user-visible "Default" chip pick) → DeepSeek `thinking: {type: "disabled"}`; `high`/`max` → `reasoning_effort: <verbatim>`. Intel `ContextBudgetManager.estimateTokens(for: [ChatTurn])` and `estimateOutputTokens(for:)` implemented with the `~4 chars / token` heuristic; `ContextBreakdown.from(context:conversationTokens:inputTokens:outputTokens:)` emits Conversation/Input/Output Entries (blue/cyan/purple) so the popover shows real numbers. |
+
+### Final state at Phase 8 close
+
+| Surface | Status |
+|---|---|
+| `swift build --arch x86_64` | ✅ 0 errors |
+| `xcodebuild Release x86_64` | ✅ BUILD SUCCEEDED |
+| Binary type | ✅ Mach-O 64-bit executable x86_64 |
+| App launch | ✅ Opens without crash, no metadata recursion |
+| Sidebar — upstream rich version | ✅ Source filters (All / Chat / Plugin / HTTP / Schedule / Watcher / Archived), capability badges, search, sticky archived divider, rename popover, delete confirmation |
+| Empty state — upstream hero greeting | ✅ Hero avatar, time-of-day greeting, agent quick-action buttons, shimmer fade-in for generative greetings |
+| Message rendering — upstream NSTableView pipeline | ✅ `MarkdownMessageView`/`SelectableTextView`/`NativeMessageCellView`/`MessageTableRepresentable`/`NativeBlockViews` all compile and render — proper markdown (bold, italic, headers, code blocks, lists, emojis), thinking blocks render as collapsible Disclosure-style cards, multi-paragraph spacing |
+| Input bar — upstream `FloatingInputCard` | ✅ Attachments (paperclip), Slash-command trigger button (`/`), model picker chip (DeepSeek V4 Pro / Flash, popover with descriptions), Reasoning Mode chip (Default / Instruct / Reasoning / Max for DSV4), Folder picker chip, Context Budget chip with real per-rail breakdown |
+| Reasoning mode on the wire | ✅ DSV4 chip → `thinking: {type:"disabled"}` (Default/Instruct) or `reasoning_effort: "high"|"max"` (Reasoning / Max). Default = no Think panel. Max = Thinking panel above answer. |
+| Streaming reasoning content | ✅ `reasoning_content` SSE chunks wrapped with the `\u{FFFE}reasoning:` sentinel by `CloudChatEngine`, decoded by `ChatView`'s delta loop, routed to `ChatTurn.thinking`, surfaced as the collapsible Think panel by `BlockMemoizer.blocks(from:)`'s `.thinking` block emission. |
+| Multi-turn chat persistence | ✅ Sessions appear in sidebar in real-time as turns land (Bug 2 fixed via `@Published` on Intel `ChatSessionsManager.sessions`). Click-to-load works (Bug 3 fixed via `onSelect:` wiring in `ChatContentView`). |
+| Cloud model picker | ✅ Built-in `deepseek-v4-pro` + `deepseek-v4-flash` from `ModelPickerItemCache`; user can switch via the chip popover. |
+| MCP server | ✅ Still running on port 1338 throughout Phase 8 — no regressions to the M5/M6 work. |
+
+### What was NOT done in Phase 8 (deferred to M11+)
+
+- **Settings/Management window restoration.** Multiple Settings tabs touch amputated subsystems (Models, Voice, Sandbox, SkillManager, ScheduleManager). The same un-body-swap + selective-gate technique applies but is bounded per tab. Sequencing: Themes / CloudProviders / Identity / MCP / Storage tabs first (clean restores); Agents / Plugins (mixed gating); Models / Voice / Sandbox / Skills / Schedules (likely gated out entirely or replaced with explainer panels).
+- **Local model UI**. `ModelPickerTableRepresentable` stays body-swapped; the Intel `ModelPickerView` stub renders a simple SwiftUI list of options. Acceptable because Intel has no local models to manage; the picker is cloud-only.
+- **Voice input**. SpeechService / SpeechModelManager / VADService / TranscriptionCleanupService / live preencode all stub-out to no-ops. The microphone button appears in FloatingInputCard but stays inert (model is not loaded, permission denied by default). When a user clicks it nothing dangerous happens.
+- **Tool calls in messages**. `BlockMemoizer.blocks(from:)` doesn't emit `.toolCallGroup` blocks yet — text content of tool-using assistant turns still renders, but the per-tool cards don't. Bounded extension; lives in `IntelDataConformers.swift`.
+- **Spillover attachment hydration**. `imageRef` / `documentRef` / `audioRef` / `videoRef` variants try to hydrate via `AttachmentBlobStore.read` which throws on Intel, so spilled attachments can't round-trip. Inline payloads work fine; Intel has no spillover infrastructure so this is the correct semantic.
+
+### Lessons captured for future Intel forks
+
+1. **The `exclude:` list is your enemy and your friend.** Big excludes look safe but cascade because Swift modules share visibility. Smaller, surgically-selected excludes (one file, gate the few Apple-Silicon edges) restore far more upstream code with less conformer maintenance.
+2. **Audit type surfaces AND function bodies.** The `BlockMemoizer.blocks(from:)` no-op stub passed every type-name audit ever run but produced an empty `[ContentBlock]` array, leaving the message thread permanently blank. New audit category: "stubs whose signatures are correct but whose bodies are no-op." Grep for `{ [] }` / `{ nil }` / `{ "" }` / `{}` in conformer files when restoring upstream rendering.
+3. **Body-swap "type-checker pacifier" inits leave landmines.** During M10 phases 2-7, the agent added `init(_ args: Any...) {}` variadic catchall inits to multiple body-swapped structs as a quick way to make call sites compile. These inits survive body-swap removal and silently break method dispatch in the restored upstream code. Four were found and removed during Phase 8 (`MessageThreadView`, `ChatEmptyState`, `SlashCommandPopup`, `ChatContentView`'s `messageThread` closure shadow). Grep `init(_ args: Any\.\.\.)` before every un-body-swap.
+4. **Out-of-band stream signals need byte-for-byte mirror sentinels.** Don't redesign the protocol — copy upstream's exact sentinel format into the Intel conformer. The `\u{FFFE}reasoning:` sentinel is reused for reasoning + stats + tool hints; mirror each one identically so the decode site stays architecture-agnostic.
+5. **Type-checker overflow on long chained `.onChange` modifiers is real on Swift 6.3.** Extract handler closures into helper methods AND group multiple modifiers into dedicated `ViewModifier` structs. The split `.modifier(BodyLifecycleHandlers(...))` + `.modifier(SpeechObservers(...))` approach in FloatingInputCard's `var body` solved persistent "unable to type-check this expression in reasonable time" errors that wouldn't yield to handler-extraction alone.
+
+### Git state at Phase 8 close
+
+- **Branch:** `intel-fork`
+- **Tag:** `m10.5-phase-8-complete`
+- **Latest commit:** `1dc24c5e` — "Phase 8C polish: respect Reasoning Mode chip + populate Context Budget"
+- **Working tree:** clean
+- **Build state:** `swift build --arch x86_64` → 0 errors; `xcodebuild Release x86_64` → BUILD SUCCEEDED; binary is `Mach-O 64-bit executable x86_64`; app launches and renders the upstream Osaurus chat UI end-to-end.
+
+### Closing note
+
+M10.5 reached its destination. A 2017 MacBook Air running macOS Sequoia 15.7.7 now hosts the original Osaurus chat experience — same markdown renderer, same sidebar, same FloatingInputCard, same Context Budget popover — streaming DeepSeek V4 Pro responses with full reasoning-mode control. Eight days of work; ~50 commits; ~3,000 lines of upstream code restored to Intel; ~700 lines of conformer surface added; four "type-checker pacifier" landmines defused; the sentinel pattern for cross-architecture stream signals codified.
+
+The destination was the path. 🦕☀️
+
