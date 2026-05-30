@@ -248,7 +248,21 @@ struct IncomingPairSheet: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub: pairing services + Bonjour discovery are amputated on
+/// Intel, so this sheet should never be presented (the
+/// `IncomingPairCoordinator.pendingInvite` Intel conformer always stays
+/// nil). Signature mirrors the upstream call site in
+/// `ManagementView.body` so the un-body-swapped ManagementView compiles.
 struct IncomingPairSheet: View {
+    let invite: AgentInvite
+    let onCompleted: (Any) -> Void
+
+    init(invite: AgentInvite, onCompleted: @escaping (Any) -> Void) {
+        self.invite = invite
+        self.onCompleted = onCompleted
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Incoming Pair", symbol: "apple.logo")
     }

@@ -9,7 +9,7 @@ import Foundation
 import SwiftUI
 
 /// Defines all available tabs in the management sidebar.
-public enum ManagementTab: String, CaseIterable, Identifiable {
+public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case models
     case providers
     case agents
@@ -89,5 +89,23 @@ public enum ManagementTab: String, CaseIterable, Identifiable {
             badge: badge,
             badgeHighlight: badgeHighlight
         )
+    }
+
+    /// Whether the tab's underlying subsystem is functional on Intel.
+    ///
+    /// On the Intel fork, the tabs whose entire backing stack lives in
+    /// excluded subsystems (MLX local inference, FluidAudio voice,
+    /// Containerization sandbox, ScheduleManager, InsightsService /
+    /// embeddings-based memory) are visibly disabled in the sidebar via
+    /// `SidebarItemData.isDisabled` + a `.help()` tooltip — the row stays
+    /// listed so users can see what's coming on Apple Silicon, but
+    /// clicking it is a no-op. Apple Silicon always returns `true`.
+    public var isAvailableOnIntel: Bool {
+        switch self {
+        case .models, .voice, .memory, .sandbox, .schedules, .insights:
+            return false
+        default:
+            return true
+        }
     }
 }

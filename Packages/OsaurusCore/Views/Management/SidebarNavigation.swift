@@ -18,6 +18,14 @@ struct SidebarItemData: Identifiable, Hashable {
     let label: String
     var badge: Int?
     var badgeHighlight: Bool = false
+    /// When `true`, the row is rendered greyed-out and non-interactive.
+    /// Used on the Intel fork to flag tabs whose backing subsystem is
+    /// amputated (see `ManagementTab.isAvailableOnIntel`). Apple Silicon
+    /// builds always pass `false`.
+    var isDisabled: Bool = false
+    /// Tooltip shown on hover when `isDisabled` is `true`. Defaults to
+    /// the item's normal label tooltip when nil.
+    var disabledHelp: String? = nil
 
     func hash(into hasher: inout Hasher) {
         hasher.combine(id)
@@ -261,7 +269,14 @@ private struct SidebarItemView: View {
             }
         }
         .buttonStyle(.plain)
+        .disabled(item.isDisabled)
+        .opacity(item.isDisabled ? 0.45 : 1.0)
+        .help(item.isDisabled ? (item.disabledHelp ?? item.label) : item.label)
         .onHover { hovering in
+            // Suppress the hover-state animation when the row is
+            // disabled so it doesn't visually "respond" to mouse
+            // movement, reinforcing the not-clickable affordance.
+            guard !item.isDisabled else { return }
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovering = hovering
             }

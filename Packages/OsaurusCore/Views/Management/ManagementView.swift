@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ManagementView.swift
 //  osaurus
@@ -207,10 +206,23 @@ private extension ManagementView {
 
     var sidebarItems: [SidebarItemData] {
         ManagementTab.allCases.map { tab in
-            tab.sidebarItem(
+            var item = tab.sidebarItem(
                 badge: badgeCount(for: tab),
                 badgeHighlight: badgeHighlight(for: tab)
             )
+            // On Intel, tabs whose entire backing subsystem is amputated
+            // (Models / Voice / Memory / Sandbox / Schedules / Insights)
+            // stay listed but render disabled so users get a discoverable
+            // explainer instead of a working button that opens an empty
+            // placeholder. `SidebarItemView` applies `.disabled(true)` +
+            // `.opacity(0.45)` + `.help(...)`. Apple Silicon never flips
+            // this branch because `isAvailableOnIntel` always returns
+            // `true` there by definition.
+            if !tab.isAvailableOnIntel {
+                item.isDisabled = true
+                item.disabledHelp = "Not available on Intel — requires Apple Silicon"
+            }
+            return item
         }
     }
 
@@ -261,12 +273,4 @@ private extension ManagementView {
     #Preview {
         ManagementView()
     }
-#endif
-#else
-import SwiftUI
-struct ManagementView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Management", symbol: "apple.logo")
-    }
-}
 #endif

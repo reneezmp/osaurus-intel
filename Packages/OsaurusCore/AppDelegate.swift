@@ -18,6 +18,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     public static weak var shared: AppDelegate?
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
+    private var managementWindow: NSWindow?
     private var cancellables: Set<AnyCancellable> = []
     let updater = UpdaterViewModel()
     private let server = OsaurusServer()
@@ -261,9 +262,42 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         NSApp.activate(ignoringOtherApps: true)
     }
 
-    public func showManagementWindow(initialTab: ManagementTab? = nil, deeplinkAgentId: UUID? = nil) {
-            showChatWindow()
+    @MainActor
+    public func showManagementWindow(
+        initialTab: ManagementTab? = nil,
+        deeplinkAgentId: UUID? = nil
+    ) {
+        NSApp.unhide(nil)
+        _ = NSRunningApplication.current.activate(options: .activateAllWindows)
+
+        // Re-use the existing window if we already opened one this
+        // session — Cmd+, on a window that's already open should bring
+        // it forward, not spawn a duplicate.
+        if let existing = managementWindow {
+            if let tab = initialTab {
+                ManagementStateManager.shared.selectedTab = tab
+            }
+            existing.makeKeyAndOrderFront(nil)
+            return
         }
+
+        let root = ManagementView(
+            initialTab: initialTab,
+            deeplinkAgentId: deeplinkAgentId
+        )
+        .environmentObject(updater)
+
+        let host = NSHostingController(rootView: root)
+        let window = NSWindow(contentViewController: host)
+        window.title = "Osaurus Settings"
+        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
+        window.setContentSize(NSSize(width: 1000, height: 700))
+        window.minSize = NSSize(width: 900, height: 640)
+        window.isReleasedWhenClosed = false
+        window.center()
+        window.makeKeyAndOrderFront(nil)
+        managementWindow = window
+    }
 
     // MARK: - NSPopoverDelegate
 

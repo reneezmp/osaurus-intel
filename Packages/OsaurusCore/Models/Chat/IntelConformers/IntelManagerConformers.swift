@@ -234,4 +234,50 @@ final class ChatConfiguration: @unchecked Sendable {
     static func load() -> ChatConfiguration { shared }
 }
 
+// MARK: - ManagementBadgeStore (Intel stub — M11)
+//
+// Upstream coalesces every sidebar-badge data source (ModelManager,
+// RemoteProviderManager, AgentManager, PluginRepositoryService,
+// SandboxPluginLibrary, SpeechModelManager) into a single throttled
+// snapshot so the Management view's body doesn't re-render on every
+// model-download progress chunk. On Intel none of those sources have
+// badge content to publish (local-model installs amputated, sandbox
+// amputated, speech amputated), so the snapshot stays empty and the
+// store is a no-op ObservableObject.
+
+struct ManagementBadgeSnapshot: Sendable {
+    var counts: [ManagementTab: Int] = [:]
+    var highlights: Set<ManagementTab> = []
+}
+
+@MainActor
+final class ManagementBadgeStore: ObservableObject {
+    static let shared = ManagementBadgeStore()
+    @Published var snapshot = ManagementBadgeSnapshot()
+}
+
+// MARK: - IncomingPairCoordinator (Intel stub — M11)
+//
+// Upstream surfaces `osaurus://...?pair=...` deeplinks here. The
+// pairing services + Bonjour discovery are excluded on Intel, so no
+// invite ever lands; ManagementView's `.sheet(...)` binding reads
+// `pendingInvite` and stays nil.
+
+@MainActor
+final class IncomingPairCoordinator: ObservableObject {
+    static let shared = IncomingPairCoordinator()
+    @Published var pendingInvite: AgentInvite? = nil
+}
+
+// MARK: - AgentInvite (Intel stub — M11)
+//
+// Upstream `AgentInvite` lives in the excluded
+// `Models/Agent/AgentInvite.swift`. We only need an empty Identifiable
+// struct here so the `.sheet(item:)` binding type-checks; the sheet
+// itself is body-swapped to `AppleSiliconOnlyTab` upstream.
+
+struct AgentInvite: Identifiable, Sendable, Equatable {
+    let id = UUID()
+}
+
 #endif

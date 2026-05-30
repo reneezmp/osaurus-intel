@@ -1683,7 +1683,21 @@ private struct HuggingFaceImportSheet: View {
 #endif
 #else
 import SwiftUI
+
+/// Intel stub: local-model management depends on the excluded
+/// `ModelManager` + MLX runtime, so the tab renders the
+/// `AppleSiliconOnlyTab` placeholder. Initializer signature mirrors the
+/// upstream call site in `ManagementView.contentView(for:)` so the
+/// un-body-swapped ManagementView compiles unchanged.
 struct ModelDownloadView: View {
+    let deeplinkModelId: String?
+    let deeplinkFile: String?
+
+    init(deeplinkModelId: String? = nil, deeplinkFile: String? = nil) {
+        self.deeplinkModelId = deeplinkModelId
+        self.deeplinkFile = deeplinkFile
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Local Models", symbol: "square.stack.3d.down.forward")
     }

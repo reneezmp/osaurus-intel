@@ -6059,7 +6059,19 @@ fileprivate struct AgentSecretRow: View {
 #endif
 #else
 import SwiftUI
+
+/// Intel stub: agent management view is body-swapped because the
+/// upstream code reaches into many excluded subsystems (sandbox
+/// autonomous-exec, per-agent MLX runtime settings, voice / TTS
+/// per-agent config, etc.). Init signature mirrors the upstream call
+/// site in `ManagementView.contentView(for:)`.
 struct AgentsView: View {
+    let deeplinkAgentId: UUID?
+
+    init(deeplinkAgentId: UUID? = nil) {
+        self.deeplinkAgentId = deeplinkAgentId
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Agents", symbol: "apple.logo")
     }
