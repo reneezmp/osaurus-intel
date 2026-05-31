@@ -287,13 +287,35 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         )
         .environmentObject(updater)
 
+        // Mirror the upstream `WindowManager.createWindow` construction
+        // order: build the window with an explicit `contentRect` first,
+        // attach the hosting controller second, then call
+        // `layoutSubtreeIfNeeded` + a final `setContentSize` so the
+        // SwiftUI tree doesn't render against a 0x0 frame on first show
+        // (which produced an empty black window in Phase 11.0's first
+        // launch). See `Packages/OsaurusCore/Managers/WindowManager.swift`
+        // L257-326 for the upstream reference (excluded on Intel but
+        // readable on disk).
+        let defaultSize = NSSize(width: 1000, height: 700)
         let host = NSHostingController(rootView: root)
-        let window = NSWindow(contentViewController: host)
+
+        let window = NSWindow(
+            contentRect: NSRect(origin: .zero, size: defaultSize),
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
         window.title = "Osaurus Settings"
-        window.styleMask = [.titled, .closable, .miniaturizable, .resizable]
-        window.setContentSize(NSSize(width: 1000, height: 700))
         window.minSize = NSSize(width: 900, height: 640)
         window.isReleasedWhenClosed = false
+        window.isRestorable = false
+        window.contentViewController = host
+
+        // Pre-layout to avoid jank + force-set the size again so the
+        // first paint uses the intended dimensions.
+        host.view.layoutSubtreeIfNeeded()
+        window.setContentSize(defaultSize)
+
         window.center()
         window.makeKeyAndOrderFront(nil)
         managementWindow = window
