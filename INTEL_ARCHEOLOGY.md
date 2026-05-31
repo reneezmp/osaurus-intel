@@ -501,3 +501,63 @@ M10.5 reached its destination. A 2017 MacBook Air running macOS Sequoia 15.7.7 n
 
 The destination was the path. 🦕☀️
 
+---
+
+## M11 Phase 11.0 — Open the Settings window + disable Group C in sidebar (IN PROGRESS)
+
+**Date:** 2026-05-30
+**Branch:** `intel-fork`
+**Status:** Phase 11.0 + 11.0-bis landed and built clean; manual click-through verified Settings window opens with Cmd+,, chat + MCP still work in parallel, Cmd+, twice re-uses the window. The empty-content-area bug found on first launch was fixed in 11.0-bis. Full Phase 11.0 click-through (sidebar rows visible + Group C greyed out) pending Renée's next launch with the 11.0-bis build.
+
+### What Phase 11.0 unblocks
+
+Until this commit, `AppDelegate.showManagementWindow(initialTab:)` was stubbed to route to `showChatWindow()` on Intel, and `Packages/OsaurusCore/Views/Management/ManagementView.swift` was body-swapped to a single `AppleSiliconOnlyTab` placeholder. None of the 19 upstream tabs (`ManagementTab` enum at `Models/Configuration/ManagementTab.swift:12-31`) were reachable from the Intel build.
+
+After Phase 11.0 + 11.0-bis:
+- Cmd+, opens a real Management window (1000×700, min 900×640)
+- All 19 tabs visible in the sidebar
+- Group C tabs (Models / Voice / Memory / Sandbox / Schedules / Insights — see `ManagementTab.isAvailableOnIntel`) are visibly greyed out (`.opacity(0.45)`), not clickable (`.disabled(true)`), with a hover tooltip ("Not available on Intel — requires Apple Silicon")
+- Group A and B tabs are clickable; their bodies still render the existing `AppleSiliconOnlyTab` placeholders (subsequent phases 11.A.1 onwards replace these with real upstream restorations)
+
+### Sub-phase log
+
+| Phase | Commit | What |
+|---|---|---|
+| 11.0 | `eaba2e83` | Un-body-swap `ManagementView`. Add Intel stubs for the three excluded ObservableObjects ManagementView observes: `ManagementBadgeStore` + `ManagementBadgeSnapshot`, `IncomingPairCoordinator`, `AgentInvite` (all in `IntelManagerConformers.swift`). Add `isAvailableOnIntel: Bool` computed + `Sendable` conformance to `ManagementTab`. Extend `SidebarItemData` with `isDisabled` + `disabledHelp`; apply `.disabled(true) + .opacity(0.45) + .help(...)` + hover suppression to `SidebarItemView` when `isDisabled`. Wire `AppDelegate.showManagementWindow` to actually construct the NSWindow with the existing `updater: UpdaterViewModel` injected as the EnvironmentObject. Extend the body-swap Intel #else stubs for `ModelDownloadView(deeplinkModelId:deeplinkFile:)`, `AgentsView(deeplinkAgentId:)`, `ConfigurationView(searchText:)`, `IncomingPairSheet(invite:onCompleted:)` so the un-body-swapped `ManagementView.contentView(for:)` switch type-checks. |
+| 11.0-bis | `a10020e2` | Fix empty-content-area bug. The first window construction used `NSWindow(contentViewController:)` which lets SwiftUI render at a zero frame on first paint. Switched to upstream `WindowManager.createWindow` order: build the NSWindow with explicit `contentRect`, attach the hosting controller after, call `host.view.layoutSubtreeIfNeeded()`, then re-apply `setContentSize(defaultSize)` so the first paint uses the intended dimensions. Same 1000×700 / 900×640 / `Cmd+,`-reuses-existing behavior. |
+
+### Lesson captured
+
+`NSWindow(contentViewController:)` is unsafe for SwiftUI on macOS when you don't pre-layout. The upstream `WindowManager` makes this explicit with a "force set content size again" comment + an explicit `layoutSubtreeIfNeeded` call. Any future Intel window construction should mirror that pattern, not the convenience initializer.
+
+### Files modified across Phase 11.0 + 11.0-bis
+
+- `Packages/OsaurusCore/AppDelegate.swift` — `managementWindow: NSWindow?` property + real `showManagementWindow` implementation (corrected in 11.0-bis)
+- `Packages/OsaurusCore/Views/Management/ManagementView.swift` — un-body-swapped + `sidebarItems` marks Group C disabled on Intel
+- `Packages/OsaurusCore/Views/Management/SidebarNavigation.swift` — `SidebarItemData` extended + `SidebarItemView` applies the disabled treatment
+- `Packages/OsaurusCore/Models/Configuration/ManagementTab.swift` — `Sendable` conformance + `isAvailableOnIntel` computed
+- `Packages/OsaurusCore/Models/Chat/IntelConformers/IntelManagerConformers.swift` — `ManagementBadgeStore` + `ManagementBadgeSnapshot` + `IncomingPairCoordinator` + `AgentInvite` Intel stubs
+- `Packages/OsaurusCore/Views/Agent/IncomingPairSheet.swift` — Intel #else stub extended with `init(invite:onCompleted:)`
+- `Packages/OsaurusCore/Views/Model/ModelDownloadView.swift` — Intel #else stub extended with `init(deeplinkModelId:deeplinkFile:)`
+- `Packages/OsaurusCore/Views/Agent/AgentsView.swift` — Intel #else stub extended with `init(deeplinkAgentId:)`
+- `Packages/OsaurusCore/Views/Settings/ConfigurationView.swift` — Intel #else stub extended with `init(searchText: Binding<String>)`
+
+### Pending Phase 11.0 click-through (next launch by Renée)
+
+After rebuild + relaunch with `a10020e2`:
+
+- [ ] Open Settings → window opens AND content area renders (1000×700 with sidebar + tab body visible, not the empty black area from the first launch)
+- [ ] Sidebar shows all 19 tab rows with their icons + labels
+- [ ] Group C rows visibly greyed out (~45% opacity)
+- [ ] Hover on a Group C row → tooltip "Not available on Intel — requires Apple Silicon"
+- [ ] Clicking a Group C row does nothing
+- [ ] Group A and B tabs clickable; their bodies render the existing `AppleSiliconOnlyTab` placeholders
+- [ ] Sidebar collapse arrow (top-left) toggles expanded ↔ collapsed (220px ↔ 64px)
+- [ ] Cmd+, twice doesn't duplicate the window (verified in 11.0 launch ✅)
+- [ ] Chat window still works (verified in 11.0 launch ✅)
+- [ ] MCP still responds on 1338 (verified in 11.0 launch ✅)
+
+### Up next after Phase 11.0 click-through succeeds
+
+Phase 11.A.1 (bundled commit): un-body-swap `ThemesView` + `IdentityView` + `SlashCommandsView`. OpenCode-leashed since these are mechanical un-body-swaps. Plan doc at `/Users/renee/.claude/plans/okay-it-is-time-pure-tower.md` has the full per-phase sequencing.
+
