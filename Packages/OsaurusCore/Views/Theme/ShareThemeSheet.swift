@@ -559,7 +559,21 @@ private func setPasteboardString(_ string: String) {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Theme sharing depends on `ThemeShareService` cloud calls
+/// that are excluded on Intel; the sheet renders the standard
+/// "Apple Silicon only" placeholder. Init signature mirrors the
+/// upstream call site in `ThemesView` (un-body-swapped in M11 Phase
+/// 11.A.1) so the type-check passes.
 struct ShareThemeSheet: View {
+    let themeToShare: CustomTheme
+    let onSuccess: (ThemeShareOutcome) -> Void
+
+    init(themeToShare: CustomTheme, onSuccess: @escaping (ThemeShareOutcome) -> Void) {
+        self.themeToShare = themeToShare
+        self.onSuccess = onSuccess
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Share Theme", symbol: "apple.logo")
     }

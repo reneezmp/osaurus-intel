@@ -338,7 +338,27 @@ struct ImportThemeByIdSheet: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Theme import depends on `ThemeShareService` cloud calls
+/// that are excluded on Intel; the sheet renders the standard
+/// "Apple Silicon only" placeholder. Init signature mirrors the
+/// upstream call site in `ThemesView` (un-body-swapped in M11 Phase
+/// 11.A.1) so the type-check passes.
 struct ImportThemeByIdSheet: View {
+    let initialInput: String?
+    let onCompleted: (CustomTheme) -> Void
+    let onError: (String) -> Void
+
+    init(
+        initialInput: String?,
+        onCompleted: @escaping (CustomTheme) -> Void,
+        onError: @escaping (String) -> Void
+    ) {
+        self.initialInput = initialInput
+        self.onCompleted = onCompleted
+        self.onError = onError
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Import Theme", symbol: "apple.logo")
     }

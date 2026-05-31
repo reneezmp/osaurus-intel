@@ -452,9 +452,34 @@ struct SlashCommandButtonStyle: ButtonStyle {
 }
 #else
 import SwiftUI
+
 struct SlashCommandsSettingsSection: View {
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Slash Commands Settings", symbol: "apple.logo")
+    }
+}
+
+/// Intel stub for the editor sheet that lives in this file upstream.
+/// `SlashCommandsView` (un-body-swapped in M11 Phase 11.A.1) presents
+/// this sheet for both create and edit flows. Init signature mirrors
+/// the upstream `SlashCommandEditorSheet` at line 191 of this same
+/// file (only visible in the `#if !OSAURUS_INTEL` branch). The Intel
+/// body is the standard placeholder — the editor's color pickers and
+/// icon grid depend on UI patterns we haven't reconstituted for Intel
+/// yet, and per Phase 11.A.0 discipline we extend the conformer
+/// surface first and restore real bodies in their own focused phase.
+struct SlashCommandEditorSheet: View {
+    let command: SlashCommand?
+    let onSave: (SlashCommand) -> Void
+
+    init(command: SlashCommand?, onSave: @escaping (SlashCommand) -> Void) {
+        self.command = command
+        self.onSave = onSave
+    }
+
+    var body: some View {
+        AppleSiliconOnlyTab(tabName: "Slash Command Editor", symbol: "apple.logo")
+            .frame(minWidth: 480, minHeight: 360)
     }
 }
 #endif

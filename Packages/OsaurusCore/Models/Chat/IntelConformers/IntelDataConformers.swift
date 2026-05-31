@@ -547,13 +547,106 @@ final class SkillManager: @unchecked Sendable {
     func buildFullInstructions(for skill: IntelSkillInfo, agentId: Any? = nil) -> String? { nil }
 }
 
+// `SlashCommandsView` (un-body-swapped in M11 Phase 11.A.1) and
+// `ManagementBadgeStore` both read `customCommands` to drive the
+// Commands sidebar tab + its badge. `SlashCommandStore` (NOT
+// excluded on Intel — see `Models/SlashCommand/SlashCommandStore.swift`)
+// already handles JSON-on-disk persistence inside the OsaurusPaths
+// commands directory, so the Intel conformer can mirror the upstream
+// CRUD surface byte-for-byte rather than running an in-memory shim.
+//
+// `@MainActor` matches the upstream class annotation. Required
+// because `SlashCommandStore`'s static CRUD methods are themselves
+// `@MainActor`-isolated; calling them from a non-isolated context
+// would trigger Swift 6.3's actor-isolated-call diagnostic.
+@MainActor
 final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
     static let shared = SlashCommandRegistry()
+
     @Published var isPopupVisible: Bool = false
-    /// FloatingInputCard reads this every time the user types `/` —
-    /// upstream returns the prefix-filtered command list, Intel
-    /// returns an empty array (no slash commands plumbed yet).
-    func filtered(query: String) -> [SlashCommand] { [] }
+
+    /// User-defined custom commands loaded from disk. Mirrors the
+    /// upstream `SlashCommandRegistry.customCommands` published
+    /// surface. Refresh() reads from `SlashCommandStore.loadAll()`.
+    @Published private(set) var customCommands: [SlashCommand] = []
+
+    private init() {
+        refresh()
+    }
+
+    /// Re-read every persisted command from disk into `customCommands`.
+    /// Called from each CRUD method after the write succeeds.
+    func refresh() {
+        customCommands = SlashCommandStore.loadAll()
+    }
+
+    /// FloatingInputCard reads this every time the user types `/`.
+    /// Upstream does prefix-fuzzy across custom + built-in commands;
+    /// Intel returns prefix matches across custom only (built-ins
+    /// require the amputated slash-command engine).
+    func filtered(query: String) -> [SlashCommand] {
+        let q = query.lowercased()
+        guard !q.isEmpty else { return customCommands }
+        return customCommands.filter { $0.name.lowercased().hasPrefix(q) }
+    }
+
+    @discardableResult
+    func create(
+        name: String,
+        description: String = "",
+        icon: String = "text.bubble",
+        template: String,
+        pluginId: String? = nil
+    ) -> SlashCommand {
+        let cmd = SlashCommand(
+            name: name,
+            description: description,
+            icon: icon,
+            kind: .template,
+            template: template,
+            pluginId: pluginId
+        )
+        SlashCommandStore.save(cmd)
+        refresh()
+        return cmd
+    }
+
+    func update(_ command: SlashCommand) {
+        guard !command.isBuiltIn else { return }
+        var updated = command
+        updated.updatedAt = Date()
+        SlashCommandStore.save(updated)
+        refresh()
+    }
+
+    @discardableResult
+    func delete(id: UUID) -> Bool {
+        let result = SlashCommandStore.delete(id: id)
+        if result { refresh() }
+        return result
+    }
+}
+
+// MARK: - Theme Sharing
+//
+// `ThemeShareOutcome` is defined in the excluded
+// `Services/Themes/ThemeShareService.swift` upstream. `ShareThemeSheet`'s
+// Intel stub (un-body-swap in M11 Phase 11.A.1's bundle) declares
+// `onSuccess: (ThemeShareOutcome) -> Void` in its init signature, so
+// the type has to be in scope. Mirror the upstream public surface
+// byte-for-byte — the closure is never actually invoked on Intel
+// because the share UI immediately routes to `AppleSiliconOnlyTab`,
+// but the type is still required at compile time.
+public struct ThemeShareOutcome: Sendable {
+    public let hash: String
+    public let serverURL: URL
+    public let deepLinkURL: URL
+
+    public init(hash: String, serverURL: URL, deepLinkURL: URL) {
+        self.hash = hash
+        self.serverURL = serverURL
+        self.deepLinkURL = deepLinkURL
+    }
 }
 
 // `SlashCommand` is provided by upstream
@@ -1094,7 +1187,16 @@ final class MemoryDatabase: @unchecked Sendable {
     func insertTranscriptTurn(agentId: String, conversationId: String, chunkIndex: Int, role: String, content: String, tokenCount: Int, title: String? = nil, createdAt: String? = nil) throws {}
 }
 
-final class ServerController: @unchecked Sendable {
+// `IdentityView` (un-body-swapped in M11 Phase 11.A.1) reads
+// `@EnvironmentObject private var server: ServerController`, which
+// requires `ObservableObject` conformance. The upstream class at
+// `Networking/ServerController.swift` (excluded on Intel) is an
+// `ObservableObject` with `@Published` properties; we mirror just
+// the protocol conformance here so SwiftUI's environment-object
+// plumbing type-checks. No `@Published` storage is needed for Intel —
+// the HTTP server is wired through `OsaurusServer` directly in
+// `AppDelegate`, not through this controller surface.
+final class ServerController: ObservableObject, @unchecked Sendable {
     static let shared = ServerController()
     static func signalGenerationStart() {}
     static func signalGenerationEnd() {}
