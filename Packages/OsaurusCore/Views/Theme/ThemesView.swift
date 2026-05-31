@@ -1,9 +1,15 @@
-#if !OSAURUS_INTEL
 //
 //  ThemesView.swift
 //  osaurus
 //
 //  Theme gallery and management view with import/export functionality
+//
+//  Intel fork: un-body-swapped in M11 Phase 11.A.1. Theme system is
+//  fully Intel-native (ThemeManager + CustomTheme + ThemeConfigurationStore
+//  all back onto OsaurusRepository's SQLCipher store). Share/Import
+//  cloud sheets render the `AppleSiliconOnlyTab` placeholder via
+//  their Intel stubs (extended in Phase 11.A.0) since
+//  `ThemeShareService` cloud calls are excluded on Intel.
 //
 
 import SwiftUI
@@ -1185,11 +1191,3 @@ struct ThemeDocument: FileDocument {
         return FileWrapper(regularFileWithContents: data)
     }
 }
-#else
-import SwiftUI
-struct ThemesView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Themes", symbol: "apple.logo")
-    }
-}
-#endif

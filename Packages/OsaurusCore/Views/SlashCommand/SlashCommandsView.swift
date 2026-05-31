@@ -1,10 +1,17 @@
-#if !OSAURUS_INTEL
 //
 //  SlashCommandsView.swift
 //  osaurus
 //
 //  Management view for creating and editing custom slash commands.
 //  Accessible from the Commands tab in the sidebar.
+//
+//  Intel fork: un-body-swapped in M11 Phase 11.A.1. SlashCommandRegistry
+//  Intel conformer (extended in Phase 11.A.0) backs `customCommands`,
+//  `create`, `update`, `delete` against `SlashCommandStore`'s JSON-on-
+//  disk persistence — same backend as upstream. The editor sheet
+//  (`SlashCommandEditorSheet`) renders the Apple-Silicon-only
+//  placeholder since the editor's color/icon pickers depend on UI
+//  surfaces we haven't reconstituted for Intel yet.
 //
 
 import SwiftUI
@@ -190,11 +197,3 @@ struct SlashCommandsView: View {
         }
     }
 }
-#else
-import SwiftUI
-struct SlashCommandsView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Slash Commands", symbol: "apple.logo")
-    }
-}
-#endif
