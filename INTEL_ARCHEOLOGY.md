@@ -559,5 +559,104 @@ After rebuild + relaunch with `a10020e2`:
 
 ### Up next after Phase 11.0 click-through succeeds
 
-Phase 11.A.1 (bundled commit): un-body-swap `ThemesView` + `IdentityView` + `SlashCommandsView`. OpenCode-leashed since these are mechanical un-body-swaps. Plan doc at `/Users/renee/.claude/plans/okay-it-is-time-pure-tower.md` has the full per-phase sequencing.
+Phase 11.A.1 (bundled commit): un-body-swap `ThemesView` + `IdentityView` + `SlashCommandsView`. OpenCode-leashed since these are mechanical un-body-swaps. Plan doc at `~/.claude/plans/okay-it-is-time-pure-tower.md` has the full per-phase sequencing.
+
+---
+
+## M11 Phase 11.0 — Settings window operational (CLOSURE)
+
+**Date:** 2026-05-31
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE**
+
+### The four-round saga
+
+Phase 11.0 took FOUR sub-phases to actually ship, with three of them "fixing" a window that was never even being shown. The root cause was a SwiftUI/AppKit gotcha that became invisible because of a coincidental window-title match.
+
+| Sub-phase | Commit | What was attempted | What it actually did | Verdict |
+|---|---|---|---|---|
+| 11.0 | `eaba2e83` | Un-body-swap ManagementView, sidebar disabled treatment, AppDelegate hand-rolled NSWindow | All correct, but unreachable via Cmd+, | Necessary, insufficient |
+| 11.0-bis | `a10020e2` | NSWindow pre-layout + setContentSize pattern from upstream `WindowManager.createWindow` | Useful hardening for SwiftUI-in-NSHostingController, but NOT the blocker | Belt-and-braces |
+| 11.0-ter | `56621f19` | `window.isOpaque = true` + `window.backgroundColor = .windowBackgroundColor` + `window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)` mirroring `ChatPanel` | Useful hardening, also NOT the blocker | Belt-and-braces |
+| **11.0-quater** | **`7c9bc1b2`** | **Replace `.appSettings` command group with custom button calling `AppDelegate.shared?.showManagementWindow()` bound to Cmd+,** | 🎯 **THE actual fix** | Blocker resolved |
+
+### Root cause (filed in the "wish I'd checked first" bin)
+
+`App/osaurus/osaurusApp.swift` defined a SwiftUI scene:
+
+```swift
+var body: some SwiftUI.Scene {
+    Settings {
+        EmptyView()    // ← what Cmd+, was actually rendering
+    }
+    .commands { aboutCommand }
+}
+```
+
+SwiftUI binds Cmd+, to the `Settings { ... }` scene automatically. Our hand-rolled `AppDelegate.showManagementWindow` was never being called by Cmd+, — the SwiftUI Settings scene was, with its `EmptyView()` body.
+
+The masking: SwiftUI's Settings scene auto-titles its window `"<AppName> Settings"` — which exactly matched the `"Osaurus Settings"` title I'd set on the hand-rolled NSWindow in `showManagementWindow`. Three rounds of debugging targeted a window that wasn't even on screen.
+
+### The fix (Phase 11.0-quater)
+
+`App/osaurus/osaurusApp.swift` gains a `settingsCommand` that replaces the default `.appSettings` group:
+
+```swift
+var settingsCommand: some Commands {
+    CommandGroup(replacing: .appSettings) {
+        Button {
+            AppDelegate.shared?.showManagementWindow()
+        } label: {
+            Text(verbatim: "Settings…")
+        }
+        .keyboardShortcut(",", modifiers: .command)
+    }
+}
+```
+
+The empty `Settings { EmptyView() }` scene is kept as a placeholder so SwiftUI doesn't synthesize its own fallback Settings menu item. The actual Cmd+, key chord lands on our hand-rolled NSWindow.
+
+### Concurrent crisis: iCloud apocalypse + Documents → Developer folder move
+
+While debugging Phase 11.0-ter, iCloud Drive (Documents & Desktop sync was on) decided to re-upload the entire `~/Documents/osaurus/build/` derived data tree — **441 GB of upload queue, 467,840 items**. `cloudd` pinned at 23% CPU thrashing indefinitely. Triggered by a partial folder move attempt that put iCloud's sync state into a circular loop.
+
+Recovery sequence:
+1. Identified split state: half in `~/Documents/osaurus/` (with `.git`, `Packages`, `build`), half in `~/Developer/osaurus/` (with `App`, workspace, docs)
+2. Confirmed no file overlap between the two halves → safe to merge
+3. Moved `.git` + `.github` + `Packages` → Developer with `mv` (metadata-only on same APFS volume, instant)
+4. Deleted `build/intel`, `build/intel-release`, `build/intel-test` (~5.5 GB of derived data) and ultimately the entire `build/` dir
+5. Removed iCloud sync-conflict ghosts: `refs/heads/intel-fork 2` zero-hash ref + `Osaurus_Intel_Fork_PathB 2.md` vault file
+6. Confirmed `~/Documents/osaurus/` empty → `rmdir` → iCloud gave up its 441 GB upload queue
+7. Clean rebuild from `~/Developer/osaurus/`: 3 min Debug build, BUILD SUCCEEDED, binary verified to contain Phase 11.0-quater's `showManagementWindow` symbol via `nm`
+
+### Two new lessons captured
+
+1. **SwiftUI's `Settings { ... }` scene silently hijacks Cmd+,.** Any hand-rolled NSWindow-based settings path MUST replace `.appSettings` in `.commands`, or the SwiftUI scene wins. The window-title default for SwiftUI Settings is `<AppName> Settings` — be aware of coincidental title matches with hand-rolled windows. Audit checklist: before debugging an "empty window" caused by SwiftUI-in-NSWindow, confirm that the NSWindow code is actually being called. Add a `print` to the construction path. Two minutes of verification beats three rounds of speculation.
+2. **Xcode derived data is not portable across folder moves.** Despite `ModuleCache.noindex/` and `CompilationCache.noindex/` looking "warm" after a move, `XCBuildData/*.xcbuilddata` files contain absolute paths to the original location (specifically `SourcePackages/artifacts/.../*.xcframework`). Any cross-directory rebuild fails until the entire derived-data directory is nuked. Treat derived data as ephemeral; never try to preserve it across moves. **`rm -rf build/intel-debug && rebuild`** is the only safe path post-move.
+
+### Files touched (Phase 11.0 → 11.0-quater)
+
+- `App/osaurus/osaurusApp.swift` — new `settingsCommand` group, `+24 / -1` (the actual fix lives here, not in OsaurusCore)
+- `Packages/OsaurusCore/AppDelegate.swift` — `managementWindow` property + full `showManagementWindow` implementation with pre-layout + appearance/opacity hardening
+- `Packages/OsaurusCore/Views/Management/ManagementView.swift` — un-body-swapped, `sidebarItems` Intel-disabled mapping for Group C
+- `Packages/OsaurusCore/Views/Management/SidebarNavigation.swift` — `SidebarItemData.isDisabled` + `disabledHelp` fields, `.disabled + .opacity(0.45) + .help` + hover suppression in `SidebarItemView`
+- `Packages/OsaurusCore/Models/Configuration/ManagementTab.swift` — `Sendable` conformance + `isAvailableOnIntel: Bool` computed
+- `Packages/OsaurusCore/Models/Chat/IntelConformers/IntelManagerConformers.swift` — `ManagementBadgeStore`, `ManagementBadgeSnapshot`, `IncomingPairCoordinator`, `AgentInvite` stubs
+- 4 `#else` Intel stub extensions for tab View files (Model / Agents / Configuration / IncomingPairSheet) so the un-body-swapped `ManagementView.contentView(for:)` switch type-checks
+
+### Click-through verification (Renée, 2026-05-31)
+
+- ✅ App launches, no new crashes
+- ✅ Cmd+, opens Settings window
+- ✅ **Content area renders** — sidebar with all 19 tabs visible, default tab body shows the `AppleSiliconOnlyTab` placeholder for `Configuration`
+- ✅ Group C rows (Models / Voice / Memory / Sandbox / Schedules / Insights) greyed at ~0.45 opacity
+- ✅ Hovering Group C rows shows the tooltip "Not available on Intel — requires Apple Silicon"
+- ✅ Sidebar collapse arrow toggles expanded ↔ collapsed (220px ↔ 64px); Group C icons stay muted when collapsed
+- ✅ Cmd+, twice → existing window forward, no duplicate
+- ✅ Chat window still works in parallel; MCP still responds on 1338
+- ✅ Group A and B rows clickable; their bodies render the existing `AppleSiliconOnlyTab` placeholders (Phase 11.A onwards replaces these with real upstream restorations)
+
+### Project location
+
+`~/Documents/osaurus/` → `~/Developer/osaurus/`. All path references in the Obsidian vault docs swept with `sed`; in-repo `INTEL_ARCHEOLOGY.md` was already path-relative.
 
