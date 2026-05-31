@@ -309,6 +309,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.minSize = NSSize(width: 900, height: 640)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
+
+        // Phase 11.0-ter: mirror the appearance + opacity + background
+        // contract that `ChatWindowManager.createChatPanel` sets on the
+        // chat window (which renders correctly on Intel). Without
+        // these three lines the Settings window was painting solid
+        // black: SwiftUI's semantic colors (`.foregroundStyle(.tertiary)`
+        // in `AppleSiliconOnlyTab`, `theme.primaryBackground` etc.)
+        // were resolving against an indeterminate appearance, and the
+        // window's default transparent background showed through to
+        // nothing. Pinning the appearance to the current theme's
+        // light/dark mode forces SwiftUI to pick the right colors.
+        window.isOpaque = true
+        window.backgroundColor = .windowBackgroundColor
+        window.appearance = NSAppearance(
+            named: ThemeManager.shared.currentTheme.isDark ? .darkAqua : .aqua
+        )
+
         window.contentViewController = host
 
         // Pre-layout to avoid jank + force-set the size again so the
