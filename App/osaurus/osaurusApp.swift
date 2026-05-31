@@ -15,11 +15,24 @@ struct osaurusApp: SwiftUI.App {
     @NSApplicationDelegateAdaptor(AppDelegate.self) var appDelegate
 
     var body: some SwiftUI.Scene {
+        // The SwiftUI `Settings { EmptyView() }` scene is kept as a
+        // placeholder so SwiftUI doesn't synthesize its own default
+        // Settings menu item. The real "Settings…" entry is provided
+        // by `settingsCommand` below, which routes Cmd+, into
+        // `AppDelegate.showManagementWindow()` — our hand-rolled
+        // NSWindow hosting the real `ManagementView`. This was the
+        // root cause of M11 Phase 11.0's empty-black-window
+        // regression: Cmd+, was firing the SwiftUI Settings scene
+        // (an `EmptyView`), and the window's title coincidentally
+        // matched the one we set on the hand-rolled window, so we
+        // spent three sub-phases "fixing" a window that was never
+        // even being shown.
         Settings {
             EmptyView()
         }
         .commands {
             aboutCommand
+            settingsCommand
         }
     }
 }
@@ -40,6 +53,17 @@ private extension osaurusApp {
             } label: {
                 Text(verbatim: "About Osaurus (Intel)")
             }
+        }
+    }
+
+    var settingsCommand: some Commands {
+        CommandGroup(replacing: .appSettings) {
+            Button {
+                AppDelegate.shared?.showManagementWindow()
+            } label: {
+                Text(verbatim: "Settings…")
+            }
+            .keyboardShortcut(",", modifiers: .command)
         }
     }
 }
