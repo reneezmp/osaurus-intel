@@ -77,7 +77,6 @@ private protocol AuthChoiceMode {
 
 extension OpenAIProviderCredentialMode: AuthChoiceMode {}
 extension OpenRouterCredentialMode: AuthChoiceMode {}
-extension XAICredentialMode: AuthChoiceMode {}
 
 // MARK: - Resolved provider config
 
@@ -143,21 +142,15 @@ final class ConfigureAIState: ObservableObject {
     ///   4. The "Custom / OpenAI-compatible" escape hatch lives at the
     ///      tail end.
     static let onboardingPresets: [ProviderPreset] = [
-        .openai, .xai, .openrouter,
+        .openai, .openrouter,
         .ollama,
-        .anthropic, .atlasCloud, .google, .deepseek, .minimax, .venice,
+        .anthropic, .atlasCloud, .google, .deepseek, .xai, .venice,
         .custom,
     ]
 
     @Published var selectedPath: ConfigurePath = .local
     @Published var localSubstate: LocalSubstate = .picker
     @Published var apiSubstate: APISubstate = .picker
-
-    /// Guards `applyDefaultPathIfNeeded(totalMemoryGB:)` so the RAM-based
-    /// default path is only ever applied once. Without it a user who manually
-    /// switched back to Local would be bounced to Cloud again on the next
-    /// `onAppear`.
-    private var didApplyDefaultPath = false
 
     /// Direction the next substate transition should travel. Mirrors the
     /// global step `OnboardingDirection` so the substate slide reads as a
@@ -171,7 +164,6 @@ final class ConfigureAIState: ObservableObject {
     @Published var apiKey: String = ""
     @Published var openAIAuthMode: OpenAIProviderCredentialMode = .chatGPTSubscription
     @Published var openRouterAuthMode: OpenRouterCredentialMode = .oauthSignIn
-    @Published var xaiAuthMode: XAICredentialMode = .oauthSignIn
     @Published var oauthTokens: RemoteProviderOAuthTokens? = nil
     @Published var customForm = CustomProviderForm()
     @Published var isTesting = false
@@ -254,26 +246,6 @@ final class ConfigureAIState: ObservableObject {
         case .downloading(let p), .paused(let p): return p
         case .completed: return 1
         case .notStarted, .failed: return 0
-        }
-    }
-
-    /// At or below this much unified memory, onboarding defaults to the Cloud
-    /// tab: the curated local picks are compute-intensive, so a small machine
-    /// is more likely to have a good first run with a hosted provider.
-    private static let cloudDefaultMemoryCeilingGB: Double = 24
-
-    /// Picks the lowest-friction default tab for this Mac on first appearance
-    /// (see `cloudDefaultMemoryCeilingGB`). Applied at most once (see
-    /// `didApplyDefaultPath`) so it never overrides a path the user chose by
-    /// hand.
-    func applyDefaultPathIfNeeded(totalMemoryGB: Double) {
-        guard !didApplyDefaultPath else { return }
-        // `totalMemoryGB == 0` means the monitor hasn't reported yet; wait for
-        // a real value before committing to a default.
-        guard totalMemoryGB > 0 else { return }
-        didApplyDefaultPath = true
-        if totalMemoryGB <= Self.cloudDefaultMemoryCeilingGB {
-            selectedPath = .apiProvider
         }
     }
 
@@ -375,9 +347,6 @@ final class ConfigureAIState: ObservableObject {
         if provider == .openrouter && openRouterAuthMode == .oauthSignIn {
             return true
         }
-        if provider == .xai && xaiAuthMode == .oauthSignIn {
-            return true
-        }
         // Presets that don't require auth (e.g. Ollama) are connectable as soon
         // as they're selected.
         if provider.configuration.authType == .none {
@@ -410,7 +379,6 @@ final class ConfigureAIState: ObservableObject {
         apiKey = ""
         openAIAuthMode = .chatGPTSubscription
         openRouterAuthMode = .oauthSignIn
-        xaiAuthMode = .oauthSignIn
         oauthTokens = nil
         customForm.reset()
         testResult = nil
@@ -469,11 +437,6 @@ final class ConfigureAIState: ObservableObject {
                     // step to persist via the standard apiKey path.
                     let key = try await OpenRouterOAuthService.signIn()
                     self.apiKey = key
-                } else if self.currentAPIProvider == .xai && self.xaiAuthMode == .oauthSignIn {
-                    // Grok sign-in returns access/refresh tokens stashed for the
-                    // save step to persist via the `.xaiOAuth` path.
-                    let tokens = try await XAIOAuthService.signIn()
-                    self.oauthTokens = tokens
                 } else {
                     _ = try await RemoteProviderManager.shared.testConnection(
                         host: config.host,
@@ -501,14 +464,6 @@ final class ConfigureAIState: ObservableObject {
 
         if currentAPIProvider == .openai && openAIAuthMode == .chatGPTSubscription {
             let provider = OpenAICodexOAuthService.makeProvider()
-            RemoteProviderManager.shared.addProvider(provider, apiKey: nil, oauthTokens: oauthTokens)
-            isSaving = false
-            onComplete()
-            return
-        }
-
-        if currentAPIProvider == .xai && xaiAuthMode == .oauthSignIn {
-            let provider = XAIOAuthService.makeProvider()
             RemoteProviderManager.shared.addProvider(provider, apiKey: nil, oauthTokens: oauthTokens)
             isSaving = false
             onComplete()
@@ -580,10 +535,7 @@ struct ConfigureAIBody: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .onAppear {
-            state.applyDefaultPathIfNeeded(totalMemoryGB: systemMonitor.totalMemoryGB)
-            state.ensureLocalSelection(totalMemoryGB: systemMonitor.totalMemoryGB)
-        }
+        .onAppear { state.ensureLocalSelection(totalMemoryGB: systemMonitor.totalMemoryGB) }
     }
 
     // MARK: - Path subtitle
@@ -1176,7 +1128,6 @@ struct ConfigureAIBody: View {
         switch preset {
         case .custom: return L("Together AI, LM Studio, and more")
         case .openai: return L("ChatGPT, Codex, or Platform API")
-        case .xai: return L("Connect with Grok (SuperGrok / X Premium+) or API key")
         default: return preset.description
         }
     }
@@ -1211,7 +1162,6 @@ struct ConfigureAIBody: View {
             switch provider {
             case .openai: openAIAuthChoiceSection
             case .openrouter: openRouterAuthChoiceSection
-            case .xai: xaiAuthChoiceSection
             default: EmptyView()
             }
 
@@ -1269,8 +1219,6 @@ struct ConfigureAIBody: View {
             return state.openAIAuthMode == .platformAPIKey
         case .openrouter:
             return state.openRouterAuthMode == .apiKey
-        case .xai:
-            return state.xaiAuthMode == .apiKey
         default:
             return provider.configuration.authType == .apiKey
         }
@@ -1403,24 +1351,6 @@ struct ConfigureAIBody: View {
         )
     }
 
-    private var xaiAuthChoiceSection: some View {
-        authChoiceCard(
-            headline: "Choose your Grok access",
-            rows: [
-                authChoiceRowSpec(
-                    mode: XAICredentialMode.oauthSignIn,
-                    isSelected: state.xaiAuthMode == .oauthSignIn,
-                    action: { selectXAIMode(.oauthSignIn) }
-                ),
-                authChoiceRowSpec(
-                    mode: XAICredentialMode.apiKey,
-                    isSelected: state.xaiAuthMode == .apiKey,
-                    action: { selectXAIMode(.apiKey) }
-                ),
-            ]
-        )
-    }
-
     /// State mutation stays unwrapped (no `withAnimation`) so it doesn't
     /// propagate a transaction to observers like the footer CTA.
     private func selectOpenAIMode(_ mode: OpenAIProviderCredentialMode) {
@@ -1433,13 +1363,6 @@ struct ConfigureAIBody: View {
         state.openRouterAuthMode = mode
         // Clear any previously-minted key so the field doesn't read as
         // "already provided" when the user flips back to paste.
-        state.apiKey = ""
-        state.testResult = nil
-    }
-
-    private func selectXAIMode(_ mode: XAICredentialMode) {
-        state.xaiAuthMode = mode
-        state.oauthTokens = nil
         state.apiKey = ""
         state.testResult = nil
     }
@@ -1628,12 +1551,10 @@ struct ConfigureAICTA: View {
         let provider = state.currentAPIProvider
         let isOpenAIChatGPT = provider == .openai && state.openAIAuthMode == .chatGPTSubscription
         let isOpenRouterOAuth = provider == .openrouter && state.openRouterAuthMode == .oauthSignIn
-        let isXAIOAuth = provider == .xai && state.xaiAuthMode == .oauthSignIn
-        let isBrowserSignIn = isOpenAIChatGPT || isOpenRouterOAuth || isXAIOAuth
+        let isBrowserSignIn = isOpenAIChatGPT || isOpenRouterOAuth
         let idleTitle: LocalizedStringKey = {
             if isOpenAIChatGPT { return "Sign in with ChatGPT" }
             if isOpenRouterOAuth { return "Sign in with OpenRouter" }
-            if isXAIOAuth { return "Connect with Grok (SuperGrok / X Premium+)" }
             return "Connect"
         }()
         return OnboardingStatefulButton(
