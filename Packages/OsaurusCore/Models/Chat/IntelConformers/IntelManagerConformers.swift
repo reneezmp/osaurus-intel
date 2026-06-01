@@ -276,7 +276,11 @@ final class ChatConfiguration: @unchecked Sendable {
 
     // Tool / generation behaviour
     var disableTools: Bool = false
-    var maxToolAttempts: Int = 5
+    var maxToolAttempts: Int? = nil
+    // Kept as `Double?` to match the consumer at `ChatView.swift:2148`
+    // (which forwards it to a `Double?` API). Upstream uses `Float?`
+    // here; the Intel divergence is intentional and bridged at the
+    // call-site Bool / numeric conversion if needed.
     var topPOverride: Double? = nil
 
     // Chat-side defaults
@@ -310,6 +314,93 @@ final class ChatConfiguration: @unchecked Sendable {
     // Preflight search mode — picker binds even though search is
     // amputated. Stored for round-trip integrity.
     var preflightSearchMode: PreflightSearchMode? = nil
+
+    init() {}
+
+    /// Designated init mirroring upstream's struct init. Upstream is a
+    /// value type; on Intel `ChatConfiguration` is a class with a
+    /// shared singleton, so this convenience init creates a NEW
+    /// instance carrying the parameters. `ChatConfigurationStore.save(_:)`
+    /// copies the fields from the passed instance into the shared
+    /// singleton, keeping the call sites that do
+    /// `let cfg = ChatConfiguration(...); save(cfg)` working
+    /// byte-for-byte without view-side changes.
+    convenience init(
+        hotkey: Hotkey?,
+        systemPrompt: String,
+        temperature: Float? = nil,
+        maxTokens: Int? = nil,
+        contextLength: Int? = nil,
+        topPOverride: Double? = nil,
+        maxToolAttempts: Int? = nil,
+        defaultModel: String? = nil,
+        coreModelProvider: String? = nil,
+        coreModelName: String? = nil,
+        workTemperature: Float? = nil,
+        workMaxTokens: Int? = nil,
+        workTopPOverride: Float? = nil,
+        workMaxIterations: Int? = nil,
+        preflightSearchMode: PreflightSearchMode? = nil,
+        disableTools: Bool = false,
+        defaultToolSelectionMode: Any? = nil,
+        defaultManualToolNames: [String]? = nil,
+        defaultManualSkillNames: [String]? = nil,
+        enableClipboardMonitoring: Bool = true,
+        generativeGreetingsEnabled: Bool = false,
+        greetingPersona: String = ""
+    ) {
+        self.init()
+        self.hotkey = hotkey
+        self.systemPrompt = systemPrompt
+        self.temperature = temperature
+        self.maxTokens = maxTokens
+        self.contextLength = contextLength
+        self.topPOverride = topPOverride
+        self.maxToolAttempts = maxToolAttempts
+        self.defaultModel = defaultModel
+        self.coreModelProvider = coreModelProvider
+        self.coreModelName = coreModelName
+        self.workTemperature = workTemperature
+        self.workMaxTokens = workMaxTokens
+        self.workTopPOverride = workTopPOverride
+        self.workMaxIterations = workMaxIterations
+        self.preflightSearchMode = preflightSearchMode
+        self.disableTools = disableTools
+        self.defaultToolSelectionMode = defaultToolSelectionMode
+        self.defaultManualToolNames = defaultManualToolNames
+        self.defaultManualSkillNames = defaultManualSkillNames
+        self.enableClipboardMonitoring = enableClipboardMonitoring
+        self.generativeGreetingsEnabled = generativeGreetingsEnabled
+        self.greetingPersona = greetingPersona
+    }
+
+    /// Copy every editable field from another instance into self.
+    /// Used by `ChatConfigurationStore.save(_:)` to fold a freshly-
+    /// constructed `ChatConfiguration` into the shared singleton.
+    func adopt(_ other: ChatConfiguration) {
+        self.hotkey = other.hotkey
+        self.systemPrompt = other.systemPrompt
+        self.temperature = other.temperature
+        self.maxTokens = other.maxTokens
+        self.contextLength = other.contextLength
+        self.topPOverride = other.topPOverride
+        self.maxToolAttempts = other.maxToolAttempts
+        self.defaultModel = other.defaultModel
+        self.coreModelProvider = other.coreModelProvider
+        self.coreModelName = other.coreModelName
+        self.workTemperature = other.workTemperature
+        self.workMaxTokens = other.workMaxTokens
+        self.workTopPOverride = other.workTopPOverride
+        self.workMaxIterations = other.workMaxIterations
+        self.preflightSearchMode = other.preflightSearchMode
+        self.disableTools = other.disableTools
+        self.defaultToolSelectionMode = other.defaultToolSelectionMode
+        self.defaultManualToolNames = other.defaultManualToolNames
+        self.defaultManualSkillNames = other.defaultManualSkillNames
+        self.enableClipboardMonitoring = other.enableClipboardMonitoring
+        self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
+        self.greetingPersona = other.greetingPersona
+    }
 
     static func load() -> ChatConfiguration { shared }
 

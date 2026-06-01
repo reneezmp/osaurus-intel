@@ -311,9 +311,23 @@ private struct RecordingCatcher: NSViewRepresentable {
 }
 #else
 import SwiftUI
+
+/// Intel stub. The full upstream `HotkeyRecorder` registers a global
+/// shortcut via Carbon HIToolbox + `HotKeyManager` (excluded on Intel).
+/// The Intel stub renders the standard placeholder but accepts the
+/// same `Binding<Hotkey?>` so the call site in `ConfigurationView`
+/// (un-body-swapped in M11 Phase 11.A.3.1) type-checks. The hotkey
+/// value itself is still persisted via `ChatConfiguration.hotkey`.
 struct HotkeyRecorder: View {
+    @Binding var value: Hotkey?
+
+    init(value: Binding<Hotkey?>) {
+        self._value = value
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Hotkey Recorder", symbol: "command")
+            .frame(minHeight: 80)
     }
 }
 #endif

@@ -337,7 +337,7 @@ public struct ClaudePluginInstallReport: Sendable {
 
 // MARK: - ToolRegistry (stub)
 
-final class ToolRegistry: @unchecked Sendable {
+final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let shared = ToolRegistry()
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }

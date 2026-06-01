@@ -398,10 +398,19 @@ final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = Capa
 /// the save call no-ops cleanly (no crash, no log noise).
 final class ChatConfigurationStore: @unchecked Sendable {
     static func load() -> ChatConfiguration { ChatConfiguration.shared }
+
+    /// Persists by folding the passed instance's fields into the
+    /// shared singleton. On Intel `ChatConfiguration` is a class
+    /// (not a value type like upstream), so the view-side pattern of
+    /// `let cfg = ChatConfiguration(...); save(cfg)` produces a NEW
+    /// instance — without this fold, mutations would be discarded.
+    /// On-disk persistence on Intel is M11 follow-up; the singleton
+    /// fold gives session-scoped persistence which is enough for
+    /// the view's two-way bindings to round-trip.
     static func save(_ config: ChatConfiguration) {
-        // No-op. The shared instance was already mutated by the view's
-        // two-way binding; nothing else to do until on-disk
-        // persistence lands as a follow-up.
+        if config !== ChatConfiguration.shared {
+            ChatConfiguration.shared.adopt(config)
+        }
     }
 }
 
