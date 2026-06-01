@@ -785,9 +785,23 @@ private struct ArtifactChip: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. `InstalledPluginsAggregator` (the upstream's state
+/// source) depends on excluded plugin / schedule / MCP-provider
+/// managers, so the section renders an `EmptyView` on Intel —
+/// matching the upstream behavior of "render nothing when no
+/// plugin-tagged artifacts exist" (comment at line 287). The init
+/// signature mirrors the upstream call site in `SkillsView`
+/// (un-body-swapped in M11 Phase 11.A.2.1) so the type-check passes.
 struct InstalledPluginsSection: View {
+    let onMessage: (String, Bool) -> Void
+
+    init(onMessage: @escaping (String, Bool) -> Void) {
+        self.onMessage = onMessage
+    }
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Installed Plugins", symbol: "apple.logo")
+        EmptyView()
     }
 }
 #endif

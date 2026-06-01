@@ -1,9 +1,17 @@
-#if !OSAURUS_INTEL
 //
 //  SkillsView.swift
 //  osaurus
 //
 //  Management view for creating, editing, and viewing skills.
+//
+//  Intel fork: un-body-swapped in M11 Phase 11.A.2.1. The
+//  SkillManager Intel conformer (extended in 11.A.2.0) mirrors the
+//  upstream ObservableObject CRUD surface against real on-disk
+//  persistence via SkillStore. The GitHubImportSheet Intel stub
+//  renders AppleSiliconOnlyTab because GitHubSkillService /
+//  ClaudePluginInstaller are excluded. Local skill creation /
+//  editing / import-from-JSON-data / delete all work on Intel; zip
+//  import / export surface throws "unavailable" errors.
 //
 
 import AppKit
@@ -794,12 +802,4 @@ private struct SkillRow: View {
     #Preview {
         SkillsView()
     }
-#endif
-#else
-import SwiftUI
-struct SkillsView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Skills", symbol: "apple.logo")
-    }
-}
 #endif

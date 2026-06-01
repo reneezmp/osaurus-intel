@@ -1,9 +1,21 @@
-#if !OSAURUS_INTEL
 //
 //  RemoteProvidersView.swift
 //  osaurus
 //
 //  View for managing remote API providers (OpenAI, Anthropic, etc.).
+//
+//  Intel fork: un-body-swapped in M11 Phase 11.A.2.1. The
+//  RemoteProviderManager Intel conformer was extended in 11.A.2.0
+//  to mirror the upstream ObservableObject surface
+//  (configuration, providerStates, addProvider, updateProvider,
+//  removeProvider, setEnabled). The RemoteProviderEditSheet Intel
+//  stub init takes the same closure shape as upstream but renders
+//  the Apple Silicon placeholder because the cloud connect /
+//  testConnection paths route through the excluded
+//  RemoteProviderService. Configured providers DO persist
+//  on Intel via RemoteProviderConfigurationStore; they just can't
+//  be connected to from the Intel build (chat streaming uses the
+//  env-var DEEPSEEK path directly).
 //
 
 import SwiftUI
@@ -460,12 +472,4 @@ private struct ProviderCardView: View {
         RemoteProvidersView()
             .environment(\.theme, DarkTheme())
     }
-#endif
-#else
-import SwiftUI
-struct RemoteProvidersView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Remote Providers", symbol: "apple.logo")
-    }
-}
 #endif

@@ -704,6 +704,33 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         )
     }
 
+    /// Export a skill as a SKILL.md document following the Agent Skills
+    /// spec (https://agentskills.io/specification). Used by
+    /// SkillsView's "Export" → "as SKILL.md" affordance. The format
+    /// is a YAML frontmatter block followed by the instructions body.
+    func exportSkillAsAgentSkills(_ skill: Skill) -> String {
+        var lines: [String] = []
+        lines.append("---")
+        lines.append("name: \(skill.name)")
+        if !skill.description.isEmpty {
+            lines.append("description: \(skill.description)")
+        }
+        lines.append("version: \(skill.version)")
+        if let author = skill.author, !author.isEmpty {
+            lines.append("author: \(author)")
+        }
+        if let category = skill.category, !category.isEmpty {
+            lines.append("category: \(category)")
+        }
+        if !skill.keywords.isEmpty {
+            lines.append("keywords: [\(skill.keywords.joined(separator: ", "))]")
+        }
+        lines.append("---")
+        lines.append("")
+        lines.append(skill.instructions)
+        return lines.joined(separator: "\n")
+    }
+
     // Legacy chat-side overloads (unchanged surface for
     // FloatingInputCard's slash popup).
     func skill(for id: UUID) -> IntelSkillInfo? { nil }
