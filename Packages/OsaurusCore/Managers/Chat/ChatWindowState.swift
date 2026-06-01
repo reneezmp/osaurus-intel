@@ -529,10 +529,22 @@ final class ChatWindowState: ObservableObject {
     @Published var cachedAgentDisplayName: String = "Assistant"
     @Published var selectedModel: String = "deepseek-v4-pro"
     @Published var availableModels: [String] = ["deepseek-v4-pro", "deepseek-v4-flash"]
-    
+
+    /// Holds the `.globalThemeChanged` notification observer so it can be
+    /// torn down in `cleanup()`. M11 Phase 11.A.1.x bug fix: prior to this,
+    /// the Intel `ChatWindowState` stub set `theme` once in init and never
+    /// observed the upstream `globalThemeChanged` notification (posted by
+    /// `ThemeManager.applyCustomTheme` / `setAppearanceMode` /
+    /// `clearCustomTheme`). Picking a theme in the Settings → Themes tab
+    /// (un-body-swapped in 11.A.1) updated the management window but left
+    /// chat windows pinned to whatever theme was active at window-creation
+    /// time. Mirrors the upstream observer registered in
+    /// `ChatWindowState.observeAppConfigurationChanges()` (excluded on Intel).
+    private var themeObserver: NSObjectProtocol?
+
     var activeAgent: Agent { cachedActiveAgent }
     var themeId: UUID? { nil }
-    
+
     init(windowId: UUID, agentId: UUID, sessionData: ChatSessionData? = nil) {
         self.windowId = windowId
         self.agentId = agentId
@@ -544,20 +556,56 @@ final class ChatWindowState: ObservableObject {
         self.session.onSessionChanged = { [weak self] in
             self?.refreshSessions()
         }
+        observeThemeChanges()
     }
-    
+
     init(windowId: UUID, executionContext: Any? = nil) {
         self.windowId = windowId
         self.agentId = UUID()
         self.session = ChatSession()
         self.theme = ThemeManager.shared.currentTheme
         self.filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
+        observeThemeChanges()
     }
-    
+
+    /// Subscribe to `.globalThemeChanged` so theme picks in Settings
+    /// propagate to this chat window in real time. Mirrors the upstream
+    /// observer in `ChatWindowState.observeAppConfigurationChanges()`
+    /// (excluded on Intel) that drives the same behavior on Apple Silicon.
+    private func observeThemeChanges() {
+        themeObserver = NotificationCenter.default.addObserver(
+            forName: .globalThemeChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.refreshTheme() }
+        }
+    }
+
+    /// Re-read the active theme from `ThemeManager` and republish it.
+    /// Intel uses the global `currentTheme` directly because the per-agent
+    /// theme override machinery (upstream's `Self.loadTheme(for:)`) is
+    /// excluded — every chat window inherits the user's picked theme
+    /// regardless of which agent is active.
+    func refreshTheme() {
+        let newTheme = ThemeManager.shared.currentTheme
+        // `@Published` deduplicates on Equatable-of-self semantics, but
+        // `ThemeProtocol` isn't Equatable, so we always republish here.
+        // SwiftUI's environment-key diffing inside the view layer handles
+        // no-op redraws cleanly.
+        theme = newTheme
+    }
+
     func confirmCloseInBackground() { showCloseConfirmation = false }
     func confirmCloseAndStop() { showCloseConfirmation = false }
     func refreshPairedRelayAgents(discoveredAgents: [DiscoveredAgent]? = nil) {}
-    func cleanup() {}
+
+    func cleanup() {
+        if let observer = themeObserver {
+            NotificationCenter.default.removeObserver(observer)
+            themeObserver = nil
+        }
+    }
     func startNewChat() {
         session.reset()
         refreshSessions()
