@@ -660,3 +660,141 @@ Recovery sequence:
 
 `~/Documents/osaurus/` → `~/Developer/osaurus/`. All path references in the Obsidian vault docs swept with `sed`; in-repo `INTEL_ARCHEOLOGY.md` was already path-relative.
 
+
+## M11 Phase 11.A.1 + 11.A.2 — Group A bundles 1+2: Themes / Commands / Providers / Skills (CLOSURE)
+
+**Date:** 2026-06-01
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE** — four Group A tabs operational on Intel, two upstream-tier bugs found + fixed as side effects, one critical data-isolation safety net added.
+
+### Phase log
+
+| Phase | Commit | What |
+|---|---|---|
+| 11.A.0 | `8d95e796` | Conformer extensions for Themes + Commands: `ThemeShareOutcome` Intel stub mirroring excluded `ThemeShareService` public surface; `SlashCommandRegistry` Intel conformer extended with full CRUD against `SlashCommandStore` (NOT excluded) + `@MainActor` to satisfy Swift 6.3 actor-isolation against the store's static methods; `SlashCommandEditorSheet` Intel stub in `SlashCommandsSettingsSection.swift`'s `#else` block; `ShareThemeSheet` + `ImportThemeByIdSheet` Intel `#else` inits; `ServerController` Intel conformer gains `ObservableObject` (landed early for the future Identity restoration since it's pure additive). |
+| 11.A.1 | `ac561742` | Plain un-body-swap of `ThemesView` + `SlashCommandsView`. Builds clean on first try because 11.A.0 laid every required surface upfront. |
+| 11.A.1.x | `e9095fa6` | Theme picks in Settings → Themes propagate to chat windows on Intel. Bug surfaced during click-through: the Intel `ChatWindowState` body-swap stub never observed `.globalThemeChanged` notification (the upstream class does in `observeAppConfigurationChanges()`, which is excluded on Intel). Fix added `themeObserver: NSObjectProtocol?` + `observeThemeChanges()` + `refreshTheme()` to the stub, with cleanup in `cleanup()`. |
+| 11.A.1.y | `785cdbed` | Themed-alert overlay env injection. The Delete-Theme confirmation alert rendered with a white background even when the active theme was dark. Root cause: SwiftUI's `.overlay(X)` places X as a **sibling** of the modified view, not a child — so `.environment(\.theme, themeManager.currentTheme)` set on the sidebar subtree didn't propagate into `ThemedAlertHost`, which fell back to `ThemeEnvironmentKey.defaultValue = LightTheme()`. Fix explicitly forwards the theme env onto the overlay content. Same bug almost certainly exists upstream and on Apple Silicon — the `LightTheme()` fallback happens to look close enough to NSAlert's stock chrome that it was invisible. |
+| 11.A.2.0 | `2e4a3d99` | Conformer extensions for Providers + Skills (heavier batch, ~13 surfaces): `RemoteProviderManager` rewritten as `ObservableObject @MainActor` with `@Published configuration` + `providerStates` and real persistence via `RemoteProviderConfigurationStore` (NOT excluded); `SkillManager` similarly rewritten with full CRUD against `SkillStore` (NOT excluded); Intel stubs added for `PluginRepositoryService`, `PluginState`, `ClaudePluginInstallReport`; `RemoteProviderEditSheet` + `GitHubImportSheet` Intel `#else` inits mirroring upstream closure signatures (including `RemoteProviderOAuthTokens` from the not-excluded `RemoteProviderKeychain.swift`). |
+| 11.A.2.1 | `b5709b04` | Un-body-swap of `RemoteProvidersView` + `SkillsView`. Two extra surfaces surfaced during the un-body-swap and were bundled in (still under the 5-gap threshold for "stop and re-plan"): `InstalledPluginsSection` `#else` stub gained `init(onMessage:)` returning `EmptyView()`; `SkillManager.exportSkillAsAgentSkills(_:)` SKILL.md exporter added (YAML frontmatter + body matching the Agent Skills spec). |
+| 11.A.2.x | `62aec888` | **CRITICAL SAFETY FIX.** Intel data root isolated to `~/.osaurus-intel/`. See dedicated section below. |
+
+### Conformer-first discipline paid off (twice)
+
+Both bundles followed the same dance:
+
+1. Optimistic un-body-swap of the target views.
+2. Build → see what the compiler complains about.
+3. If gaps > 5: STOP, revert the un-body-swap, do a focused 11.A.N.0 conformer-extension commit, then 11.A.N.1 un-body-swap on top.
+
+Phase 11.A.1 had 8 gaps from a first attempt on Themes + Commands + Identity (Identity alone contributed 6+). Phase 11.A.2 had 13 gaps from Providers + Skills. Both well past the M10.5-codified threshold, both resolved cleanly by splitting. The pattern works.
+
+The discipline also informed scope refinement: **Identity restoration was promoted to its own milestone (planned 11.A.5 in the renamed sequence) instead of being squeezed into 11.A.1**. The Identity cascade was 15-20+ surfaces deep — its own milestone-tier work, not a sub-phase.
+
+### Two upstream-tier bugs found while restoring Intel
+
+These bugs exist on Apple Silicon too — they just don't surface because of stock-chrome lookalike defaults or different observer registration paths. Worth flagging if these restorations ever PR back upstream:
+
+1. **`.overlay()` doesn't inherit `.environment()` set before it in the modifier chain.** SwiftUI treats overlay content as a sibling of the modified view, not a child. Any time you set an environment value AND apply an overlay that depends on it, you need to forward the env explicitly onto the overlay or move the `.environment(...)` modifier to AFTER the `.overlay(...)`. `ThemedAlertHost` is the canonical victim in this codebase; there may be others.
+
+2. **`@Environment(\.theme)` default value (`LightTheme()`) silently masks env-not-injected bugs.** Anywhere in the view tree that reads the theme env but happens to live outside the `.environment(\.theme, themeManager.currentTheme)` scope falls back to a generic light theme. Hard to notice on Apple Silicon because the result resembles macOS's stock light NSAlert appearance. Recommendation upstream: change the default to a "missing theme" stub that prints a debug warning, or thread the theme through SwiftUI environment more aggressively.
+
+### Type-checker overflow recurrence (cleared)
+
+Mid-11.A.1, `ThemesView`'s outer ZStack/VStack tripped Swift 6.3's "the compiler is unable to type-check this expression in reasonable time" error once. Extracted the inner `ScrollView { VStack { ... } }` to a `themesScrollContent` computed property — same remedy as M10.5 lesson #5 (Phase 8's FloatingInputCard `BodyLifecycleHandlers` / `SpeechObservers` modifier-struct split). When the working tree was later reverted and the un-body-swap retried after 11.A.0 landed all the conformer surfaces, the overflow did not reappear — turns out the conformer-surface incompleteness was contributing to the type-checker complexity, not just the view body itself. **New audit note:** when the type-checker overflows during an un-body-swap, check whether the cascade is also fueling the complexity *before* extracting helpers. Sometimes fixing conformer gaps clears the overflow without any view-side surgery.
+
+### What landed where
+
+User-visible:
+
+- **Themes tab**: full upstream gallery (built-in Dark + Light + Nord + Neon + Paper + others + user-created custom themes), import-from-file, import-from-ID sheet (gated → AppleSiliconOnlyTab), share button (gated), themed delete confirmation alert, theme editor with live preview (Intel-native via `ThemeEditorView`).
+- **Commands tab**: empty state with `/translate /summarize /review` example cards, real CRUD against `SlashCommandStore`'s JSON-on-disk persistence (same backend as upstream), edit/delete/toggle each command. Editor sheet itself gated → placeholder.
+- **Providers tab**: list of configured remote providers (real persistence via `RemoteProviderConfigurationStore`); empty state with 9-preset quick-add cards (Anthropic / Azure OpenAI Foundry / DeepSeek / Google / Ollama / OpenAI / OpenRouter / Venice AI / xAI / Custom); add/edit sheets gated → placeholder; toggle-enable per provider works against on-disk config. Connection status badges always show "Disconnected" because the underlying `connect()` is a no-op on Intel (chat streams via the env-var `DEEPSEEK_API_KEY` path through `OsaurusServer`, not through the provider config).
+- **Skills tab**: full editor (Intel-native), CRUD against `SkillStore`, import-from-JSON-data, import-from-markdown (basic H1-derived metadata), export as SKILL.md or as ZIP (ZIP only when the skill has associated assets/references — upstream's branching, not a JSON-vs-MD toggle), delete with themed confirmation alert (works thanks to 11.A.1.y).
+
+Internal:
+
+- 11 new Intel stub types / methods documented inline with M11 phase markers so future archive readers can trace exactly which surface came from which commit.
+- `RemoteProviderManager` + `SkillManager` are now real `ObservableObject @MainActor` types — substantial conformer upgrades that subsequent phases (Agents, Configuration) can build on.
+
+### 🛡️ CRITICAL: Intel data root isolation (Phase 11.A.2.x)
+
+**The bug Renée caught:** during 11.A.2 click-through, deleting the DeepSeek provider via the Intel test build also deleted it from her production Apple Silicon Osaurus. Themes created via Intel showed up in production. Same `~/.osaurus/` root.
+
+**Root cause:** `OsaurusPaths.defaultRoot` returned `~/.osaurus/` unconditionally. The Intel build and the production Apple Silicon build had different bundle identifiers and binaries but identical file roots — every settings edit, theme creation, provider mutation in the Intel test build was clobbering the user's daily-driver state.
+
+**Fix (`62aec888`):** When `OsaurusBuild.isIntel == true`, the root is `~/.osaurus-intel/` instead. On first access of the Intel root, if it doesn't exist AND `~/.osaurus/` exists, COPY (not move) the production folder into the Intel root — a one-time snapshot so the user doesn't lose themes/providers/skills/sessions when switching to Intel. After the seed, the two roots diverge: Intel never writes to `~/.osaurus/`; production never reads from `~/.osaurus-intel/`.
+
+**Why this matters beyond M11:** every Intel test session before `62aec888` was potentially mutating Renée's production data. The damage from this single session is recoverable (deepseek re-added, custom test themes can be deleted from production manually), but if this hadn't been caught now, it would have compounded over every future Intel test cycle. **This bug should have been caught on Day 1 of the Intel fork** — Apple Silicon and Intel binaries sharing a writable data root is a fork-design failure. The fact that it survived through M1 → M10.5 (~50 commits, 8 days) is a lesson in how easy it is for "the path module just works" assumptions to mask cross-build cross-talk. Audit any centralised path / config / cache module the first time you introduce a build variant.
+
+**Lessons captured:**
+
+1. **A fork is not isolated unless it has its own data root.** Bundle identifier separation, binary separation, even Xcode workspace separation aren't enough — if both builds write to the same `~/Library/Application Support/...` or `~/.appname/` path, the user gets cross-pollination they didn't ask for. Always test cross-build isolation explicitly when forking.
+2. **Port collision is a sibling concern.** Both Intel and production Osaurus default to port 1338 for the local HTTP server. NIO fails to bind on whichever app launches second. Workflow rule for now: quit one before launching the other. A future Intel build might default to 1339 (with the trade-off that MCP clients/scripts expecting 1338 won't see Intel without reconfiguration).
+3. **Xcode derived data is not portable across folder moves.** Already codified in the 11.0 closure but worth re-stating: `XCBuildData/*.xcbuilddata` contains absolute paths to package resolution targets (e.g. `SourcePackages/artifacts/.../*.xcframework`). When a project moves between filesystem locations, the entire derived-data directory must be nuked. `ModuleCache.noindex/` and `CompilationCache.noindex/` look "warm" but contain stale absolute paths.
+
+### Files touched (Phase 11.A.0 → 11.A.2.x)
+
+Conformer / type stubs (in `Models/Chat/IntelConformers/`):
+- `IntelStubConformers.swift` — `RemoteProviderManager` rewritten as `ObservableObject @MainActor`; new `PluginRepositoryService` + `PluginState` + `ClaudePluginInstallReport` stubs
+- `IntelDataConformers.swift` — `SlashCommandRegistry` extended (CRUD against `SlashCommandStore`); `SkillManager` rewritten as `ObservableObject @MainActor` (CRUD against `SkillStore` + import/export including `exportSkillAsAgentSkills` SKILL.md formatter); `ServerController` gained `ObservableObject`; new `ThemeShareOutcome` public stub
+
+Views (un-body-swapped):
+- `Views/Theme/ThemesView.swift`
+- `Views/SlashCommand/SlashCommandsView.swift`
+- `Views/Settings/RemoteProvidersView.swift`
+- `Views/Skill/SkillsView.swift`
+
+Views (`#else` Intel stubs extended with proper inits):
+- `Views/Theme/ShareThemeSheet.swift`
+- `Views/Theme/ImportThemeByIdSheet.swift`
+- `Views/Settings/RemoteProviderEditSheet.swift`
+- `Views/Settings/SlashCommandsSettingsSection.swift` (now also defines `SlashCommandEditorSheet`)
+- `Views/Skill/GitHubImportSheet.swift`
+- `Views/Skill/InstalledPluginsSection.swift`
+
+Polish + safety:
+- `Views/Management/ManagementView.swift` — themed-alert env injection on the overlay (11.A.1.y)
+- `Managers/Chat/ChatWindowState.swift` — Intel stub observes `.globalThemeChanged` + has `refreshTheme()` (11.A.1.x)
+- `Utils/OsaurusPaths.swift` — Intel data root isolation to `~/.osaurus-intel/` (11.A.2.x)
+
+### Click-through verification (Renée, 2026-06-01)
+
+Themes:
+- ✅ Real theme gallery (built-in + custom)
+- ✅ Active theme indicator
+- ✅ Click a theme → applies; **chat window updates instantly too** (11.A.1.x verified)
+- ✅ Import-from-file works
+- ✅ Import-from-link → Apple-Silicon-only placeholder
+- ✅ Share → Apple-Silicon-only placeholder
+- ✅ Theme editor with live preview works
+- ✅ Delete confirmation **renders dark on dark theme** (11.A.1.y verified)
+
+Commands:
+- ✅ Empty state with example cards
+- ✅ New Command → editor placeholder (editor not yet Intel-native; deferred)
+- ✅ Hand-rolled JSON command in `~/.osaurus-intel/commands/` appears in list on next open (persistence verified via the Shakespearean `/shakespeare` test command)
+
+Providers:
+- ✅ Empty state with 9 preset quick-add cards
+- ✅ Click preset → "Remote Provider Edit" placeholder sheet (520×420)
+- ✅ "Add Provider" header → same placeholder
+- ✅ Configured provider appears with toggle + edit + delete buttons
+- ✅ Toggle/delete persist on disk
+
+Skills:
+- ✅ Empty state with example cards
+- ✅ "Create Skill" → Intel-native full editor sheet, with name/description/version/author/category/instructions/enabled
+- ✅ Create + edit + toggle + delete all work, persistence via SkillStore
+- ✅ Export as SKILL.md works (verified hand-readable YAML frontmatter)
+- ✅ GitHub Import → AppleSiliconOnlyTab placeholder
+
+Regression:
+- ✅ Cmd+, opens Settings (11.0-quater)
+- ✅ Group C still greyed (11.0)
+- ✅ Chat streaming works (after a DeepSeek balance top-up the user had forgotten about, which initially looked like a code regression but was HTTP 402 from the API — the path through `CloudChatEngine.streamChat` was never broken)
+- ✅ Slash command `/shakespeare` produces theatrical filth on demand 🎭
+
+### Up next
+
+Phase 11.A.3: un-body-swap `ConfigurationView` (the general Settings tab). Expect MLX-specific sub-sections (default local-model picker, runtime tuning) that need selective gating; other config (default chat model, system prompt, default temperature, generative-greeting toggle, clipboard monitoring toggle) should back onto the existing `AppConfiguration` Intel conformer.
