@@ -345,13 +345,42 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         "Tool '\(name)' executed."
     }
 
-    /// Used by `ConfigurationView`'s per-tool permission rows
-    /// (un-body-swapped in M11 Phase 11.A.3.1) to clear a custom
-    /// allow/deny policy. Intel keeps no per-tool policy state
-    /// (sandbox tools are amputated and cloud tools are unconditional);
-    /// the call is a no-op so the UI's "Reset to default" button
-    /// works without crashing.
-    func clearPolicy(for toolName: String) {}
+    /// Per-tool allow/deny policy state for `ConfigurationView`'s tool
+    /// permission rows (un-body-swapped in M11 Phase 11.A.3.1). Intel
+    /// keeps an in-memory map keyed by tool name. Unlike upstream —
+    /// which persists policies to `tools.json` and enforces them in
+    /// the sandbox executor — Intel's policy state is advisory only
+    /// (sandbox tools are amputated; cloud tools run unconditionally).
+    /// The map exists so the per-tool segmented picker round-trips and
+    /// the `@Published`-style republish via `objectWillChange` keeps
+    /// other rows in sync. Stored on the registry; reads/writes are
+    /// main-thread (the view drives them).
+    private var _policies: [String: ToolPermissionPolicy] = [:]
+
+    /// Returns the configured policy for `toolName`, or nil if the
+    /// user hasn't set one (meaning "Auto" / inherit-default).
+    func configuredPolicy(for toolName: String) -> ToolPermissionPolicy? {
+        _policies[toolName]
+    }
+
+    /// Sets (or clears, when `.auto`) the policy for `toolName` and
+    /// republishes so observing rows refresh. Upstream persists to
+    /// disk; Intel keeps it in-memory for the session.
+    func setPolicy(_ policy: ToolPermissionPolicy, for toolName: String) {
+        objectWillChange.send()
+        if policy == .auto {
+            _policies.removeValue(forKey: toolName)
+        } else {
+            _policies[toolName] = policy
+        }
+    }
+
+    /// Used by `ConfigurationView`'s per-tool permission rows to clear
+    /// a custom allow/deny policy back to the inherited default.
+    func clearPolicy(for toolName: String) {
+        objectWillChange.send()
+        _policies.removeValue(forKey: toolName)
+    }
 }
 
 // MARK: - MemoryService (disabled on Intel)

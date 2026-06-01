@@ -1,4 +1,13 @@
-#if !OSAURUS_INTEL
+//
+//  ConfigurationView.swift
+//  osaurus
+//
+//  General app configuration tab. Intel fork: un-body-swapped in M11
+//  Phase 11.A.3.1 on the conformer surface laid by 11.A.3.0 + bis.
+//  Voice + CoreModel sub-sections are visually gated to
+//  AppleSiliconOnlyOverlay where their backing services are amputated.
+//
+
 import SwiftUI
 
 // MARK: - Configuration View
@@ -1744,24 +1753,3 @@ private struct AgentToolPermissionRow: View {
         }
     }
 }
-#else
-import SwiftUI
-
-/// Intel stub: most config rows route through the excluded MLX runtime
-/// store + Foundation-model toggles, so the tab renders the
-/// `AppleSiliconOnlyTab` placeholder for now. Init signature mirrors
-/// the upstream call site in `ManagementView.contentView(for:)`, which
-/// passes the parent's search field binding so a typed query auto-
-/// navigates here on Apple Silicon.
-struct ConfigurationView: View {
-    @Binding var searchText: String
-
-    init(searchText: Binding<String>) {
-        self._searchText = searchText
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Configuration", symbol: "apple.logo")
-    }
-}
-#endif

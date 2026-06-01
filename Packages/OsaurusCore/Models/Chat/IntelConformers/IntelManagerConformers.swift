@@ -258,6 +258,20 @@ public enum PreflightSearchMode: String, Codable, CaseIterable, Sendable {
         case .wide: return "Wide"
         }
     }
+
+    /// Help text shown beneath the segmented picker in
+    /// `ConfigurationView`. Mirrors upstream verbatim — even though
+    /// preflight search is amputated on Intel, the picker still
+    /// renders + binds, and the explainer keeps the UI honest about
+    /// what each mode would do.
+    public var helpText: String {
+        switch self {
+        case .off: return "Disable pre-flight search. Only explicit tool calls are used."
+        case .narrow: return "Minimal tool injection. Up to 2 tools loaded."
+        case .balanced: return "Default. Up to 5 relevant tools loaded."
+        case .wide: return "Aggressive search. Up to 15 tools loaded, may increase prompt size."
+        }
+    }
 }
 
 // MARK: - ChatConfiguration
@@ -331,7 +345,10 @@ final class ChatConfiguration: @unchecked Sendable {
         temperature: Float? = nil,
         maxTokens: Int? = nil,
         contextLength: Int? = nil,
-        topPOverride: Double? = nil,
+        // Accepts `Float?` to match the view's `parsedTopP: Float?`
+        // call site; stored internally as `Double?` (the type
+        // `ChatView.swift:2148` consumes). Bridged in the body.
+        topPOverride: Float? = nil,
         maxToolAttempts: Int? = nil,
         defaultModel: String? = nil,
         coreModelProvider: String? = nil,
@@ -355,7 +372,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.temperature = temperature
         self.maxTokens = maxTokens
         self.contextLength = contextLength
-        self.topPOverride = topPOverride
+        self.topPOverride = topPOverride.map(Double.init)
         self.maxToolAttempts = maxToolAttempts
         self.defaultModel = defaultModel
         self.coreModelProvider = coreModelProvider
