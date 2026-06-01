@@ -388,7 +388,23 @@ struct AppChatConfigStub: Sendable {
 
 final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
 
-final class ChatConfigurationStore: @unchecked Sendable { static func load() -> ChatConfiguration { ChatConfiguration.shared } }
+/// Intel stub for ChatConfigurationStore. Upstream persists the
+/// config to disk (`Models/Chat/ChatConfigurationStore.swift`,
+/// excluded on Intel); the Intel build keeps the config in-memory
+/// only — `ChatConfiguration` is a shared singleton, so view-driven
+/// mutations stick for the duration of the process but don't survive
+/// app restart. Restoring disk persistence on Intel is M11 follow-up
+/// work; for the M11.A.3 surface restoration what matters is that
+/// the save call no-ops cleanly (no crash, no log noise).
+final class ChatConfigurationStore: @unchecked Sendable {
+    static func load() -> ChatConfiguration { ChatConfiguration.shared }
+    static func save(_ config: ChatConfiguration) {
+        // No-op. The shared instance was already mutated by the view's
+        // two-way binding; nothing else to do until on-disk
+        // persistence lands as a follow-up.
+    }
+}
+
 
 final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
 

@@ -116,6 +116,13 @@ final class SpeechService: ObservableObject, @unchecked Sendable {
     // Permission state
     @Published var microphonePermissionGranted: Bool = false
 
+    /// Identifier of the currently-loaded speech model. Always nil on
+    /// Intel because the speech subsystem is amputated; surface kept
+    /// so `ConfigurationView`'s Voice section (un-body-swapped in M11
+    /// Phase 11.A.3.1, gated visually to AppleSiliconOnlyOverlay)
+    /// type-checks.
+    @Published var loadedModelId: String? = nil
+
     // Methods — all no-op on Intel
     func stopStreamingTranscription(force: Bool = false) async {}
     func clearTranscription() {}
@@ -337,6 +344,14 @@ final class ToolRegistry: @unchecked Sendable {
     func execute(name: String, argumentsJSON: String) async throws -> String {
         "Tool '\(name)' executed."
     }
+
+    /// Used by `ConfigurationView`'s per-tool permission rows
+    /// (un-body-swapped in M11 Phase 11.A.3.1) to clear a custom
+    /// allow/deny policy. Intel keeps no per-tool policy state
+    /// (sandbox tools are amputated and cloud tools are unconditional);
+    /// the call is a no-op so the UI's "Reset to default" button
+    /// works without crashing.
+    func clearPolicy(for toolName: String) {}
 }
 
 // MARK: - MemoryService (disabled on Intel)
@@ -359,6 +374,13 @@ final class GenerativeGreetingPool: @unchecked Sendable {
 final class GenerativeGreetingService: @unchecked Sendable {
     static let shared = GenerativeGreetingService()
     func generate(agent: Agent, fallbackModel: String) async throws -> GenerativeGreeting { throw CancellationError() }
+
+    /// Used by `ConfigurationView`'s greeting persona row
+    /// (un-body-swapped in M11 Phase 11.A.3.1) as placeholder text
+    /// when the user hasn't set a custom persona. The actual
+    /// greeting generation is amputated on Intel; this string is
+    /// purely for the UI's empty-state hint.
+    static let defaultPersonaInstruction: String = "Be warm and playful. Keep it short."
 }
 
 // MARK: - SharedArtifact (stub)

@@ -78,7 +78,13 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 
 // MARK: - ModelPickerItemCache
 
-final class ModelPickerItemCache: @unchecked Sendable {
+// `ConfigurationView`'s CoreModel picker (un-body-swapped in M11
+// Phase 11.A.3.1, gated visually to AppleSiliconOnlyOverlay)
+// observes `$items`, which requires `ObservableObject` + `@Published`
+// surface. Mirrored here. The cache stays Intel-functional for
+// `FloatingInputCard`'s model selector — that's where the DeepSeek
+// rows actually surface, and the Configuration picker is gated.
+final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
     static let shared = ModelPickerItemCache()
 
     /// Stable synthetic UUID for the built-in DeepSeek provider. The Intel
@@ -90,7 +96,7 @@ final class ModelPickerItemCache: @unchecked Sendable {
     static let deepSeekProviderId = UUID(uuidString: "00000000-0000-0000-0000-DEEDEEDEEDEE")!
 
     var isLoaded: Bool = false
-    private(set) var items: [ModelPickerItem] = []
+    @Published private(set) var items: [ModelPickerItem] = []
 
     func buildModelPickerItems() async -> [ModelPickerItem] {
         let provider: ModelPickerItem.Source = .remote(
@@ -212,26 +218,106 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     func session(for id: UUID) -> ChatSessionData? { sessions[id] }
 }
 
+// MARK: - Hotkey (Intel stub)
+//
+// Upstream `Hotkey` is defined inside the excluded
+// `Models/Chat/ChatConfiguration.swift`. Mirror the public surface
+// byte-for-byte so `ConfigurationView`'s chat-hotkey picker row
+// (un-body-swapped in M11 Phase 11.A.3.1) type-checks. The Intel
+// build doesn't currently register a global hotkey through
+// `HotKeyManager` (excluded), but the field is still wired through
+// the config so persistence survives the round-trip.
+public struct Hotkey: Codable, Equatable, Sendable {
+    public let keyCode: UInt32
+    public let carbonModifiers: UInt32
+    public let displayString: String
+
+    public init(keyCode: UInt32, carbonModifiers: UInt32, displayString: String) {
+        self.keyCode = keyCode
+        self.carbonModifiers = carbonModifiers
+        self.displayString = displayString
+    }
+}
+
+// MARK: - PreflightSearchMode (Intel stub)
+//
+// Upstream `PreflightSearchMode` lives in the excluded
+// `Services/Context/PreflightCapabilitySearch.swift`. The view binds
+// the `.balanced` case and presents the four-way picker; persistence
+// goes through the conformer's `preflightSearchMode` field. Search
+// is amputated on Intel so the field's value never drives real
+// behavior — it just keeps the picker's binding alive.
+public enum PreflightSearchMode: String, Codable, CaseIterable, Sendable {
+    case off, narrow, balanced, wide
+
+    public var displayName: String {
+        switch self {
+        case .off: return "Off"
+        case .narrow: return "Narrow"
+        case .balanced: return "Balanced"
+        case .wide: return "Wide"
+        }
+    }
+}
+
 // MARK: - ChatConfiguration
+//
+// Extended in M11 Phase 11.A.3.0 to mirror more of the upstream
+// public surface so `ConfigurationView` (un-body-swapped in 11.A.3.1)
+// can bind to its rows. Fields whose backing subsystem is amputated
+// on Intel (CoreModel picker, workMax* runtime, preflightSearchMode)
+// still persist via the shared singleton so the view's two-way
+// bindings work — they just don't drive real behavior. Persistence
+// is in-memory per process; `ChatConfigurationStore.save` is a no-op
+// (config doesn't survive Intel app restarts yet).
 
 final class ChatConfiguration: @unchecked Sendable {
     static let shared = ChatConfiguration()
 
-    let disableTools: Bool = false
-    let maxToolAttempts: Int = 5
-    let topPOverride: Double? = nil
+    // Tool / generation behaviour
+    var disableTools: Bool = false
+    var maxToolAttempts: Int = 5
+    var topPOverride: Double? = nil
+
+    // Chat-side defaults
+    var hotkey: Hotkey? = nil
     var systemPrompt: String = ""
     var temperature: Float? = nil
     var maxTokens: Int? = nil
     var contextLength: Int? = 128000
     var defaultModel: String? = nil
     var generativeGreetingsEnabled: Bool = false
+    var greetingPersona: String = ""
     var enableClipboardMonitoring: Bool = true
     var defaultToolSelectionMode: Any? = nil
     var defaultManualToolNames: [String]? = nil
     var defaultManualSkillNames: [String]? = nil
 
+    // Core (local) model picker — amputated on Intel.
+    var coreModelProvider: String? = nil
+    var coreModelName: String? = nil
+    var coreModelIdentifier: String? {
+        guard let provider = coreModelProvider, let name = coreModelName else { return nil }
+        return "\(provider)/\(name)"
+    }
+
+    // Work-agent runtime — used by upstream's local agent loop.
+    var workTemperature: Float? = nil
+    var workMaxTokens: Int? = nil
+    var workTopPOverride: Float? = nil
+    var workMaxIterations: Int? = nil
+
+    // Preflight search mode — picker binds even though search is
+    // amputated. Stored for round-trip integrity.
+    var preflightSearchMode: PreflightSearchMode? = nil
+
     static func load() -> ChatConfiguration { shared }
+
+    /// Mirrors `ChatConfiguration.default` from upstream. Upstream
+    /// is a value-type static factory; the Intel class equivalent
+    /// returns the shared singleton so call-site identity checks
+    /// (`config == .default`) hold for the duration of a process.
+    static var `default`: ChatConfiguration { shared }
 }
 
 // MARK: - ManagementBadgeStore (Intel stub — M11)

@@ -23,6 +23,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     let updater = UpdaterViewModel()
     private let server = OsaurusServer()
 
+    /// Surface mirror of upstream `AppDelegate.serverController`,
+    /// read by `ConfigurationView`'s "Apply" affordances when the
+    /// user mutates server-side runtime settings. Intel's actual
+    /// HTTP server is the `server: OsaurusServer` above (env-var
+    /// `DEEPSEEK_API_KEY` proxy via `OsaurusServer`), so this
+    /// surface is a write-accepting no-op: assigning
+    /// `serverController.configuration = ...` succeeds but doesn't
+    /// restart anything. Surface added in M11 Phase 11.A.3.0.
+    let serverController = IntelServerControllerSurface()
+
     private static let swiftUISettingsPlaceholderID = "com_apple_SwiftUI_Settings_window"
     private static let swiftUISettingsPlaceholderNotifications: [Notification.Name] = [
         NSWindow.didBecomeKeyNotification,
@@ -342,6 +352,36 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     public func popoverDidClose(_ notification: Notification) {
         log.debug("Popover closed")
+    }
+
+    // MARK: - Configuration View Surface
+    //
+    // Called from `ConfigurationView`'s hotkey picker (un-body-swapped
+    // in M11 Phase 11.A.3.1) after a new key chord is captured. Intel
+    // doesn't currently wire `HotKeyManager` (excluded), so this is a
+    // no-op surface. The chord is still persisted in
+    // `ChatConfiguration.hotkey` so when the global hotkey
+    // infrastructure eventually lands on Intel the value will round-
+    // trip.
+    @MainActor
+    public func applyChatHotkey() {
+        // No-op until Intel grows a HotKeyManager equivalent.
+    }
+}
+
+// MARK: - Intel Server Controller Surface
+//
+// Tiny mirror of upstream `ServerController`'s `configuration: Any?`
+// setter, read by `ConfigurationView`'s "Apply server settings"
+// affordance. Intel runs `OsaurusServer` directly from `AppDelegate`
+// without a separate controller; the surface accepts assignments
+// silently so the view's bindings type-check. Added in M11 Phase
+// 11.A.3.0.
+public final class IntelServerControllerSurface {
+    public var configuration: Any?
+
+    init(configuration: Any? = nil) {
+        self.configuration = configuration
     }
 }
 
