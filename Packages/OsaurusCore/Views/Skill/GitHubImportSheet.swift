@@ -1505,9 +1505,31 @@ private extension View {
 #endif
 #else
 import SwiftUI
+
+/// Intel stub. GitHub skill / plugin import depends on
+/// `GitHubSkillService` + `ClaudePluginInstaller` (both excluded on
+/// Intel); the sheet renders the standard "Apple Silicon only"
+/// placeholder. Init signature mirrors the upstream surface in
+/// `GitHubImportSheet` at line ~13 of this file so the call site in
+/// `SkillsView` (un-body-swapped in M11 Phase 11.A.2) type-checks.
 struct GitHubImportSheet: View {
+    let onImport: ([Skill]) -> Void
+    let onCancel: () -> Void
+    var onPluginInstallComplete: ((ClaudePluginInstallReport) -> Void)?
+
+    init(
+        onImport: @escaping ([Skill]) -> Void,
+        onCancel: @escaping () -> Void,
+        onPluginInstallComplete: ((ClaudePluginInstallReport) -> Void)? = nil
+    ) {
+        self.onImport = onImport
+        self.onCancel = onCancel
+        self.onPluginInstallComplete = onPluginInstallComplete
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Import Skills", symbol: "apple.logo")
+            .frame(minWidth: 520, minHeight: 420)
     }
 }
 #endif

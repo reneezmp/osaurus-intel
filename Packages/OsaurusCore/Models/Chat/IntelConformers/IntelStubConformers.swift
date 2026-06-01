@@ -204,21 +204,128 @@ final class ModelManager: ObservableObject, @unchecked Sendable {
 // redeclaration collision.
 
 // MARK: - RemoteProviderManager (cloud-only, concretized)
-
-final class RemoteProviderManager: @unchecked Sendable {
+//
+// `RemoteProvidersView` (un-body-swapped in M11 Phase 11.A.2) reads
+// `manager.configuration.providers` + `manager.providerStates` via
+// `@ObservedObject`, and mutates the set via `addProvider`,
+// `updateProvider`, `removeProvider`, `setEnabled`. Extended in M11
+// Phase 11.A.2.0 to mirror the upstream public surface used by the
+// view, with real on-disk persistence via
+// `RemoteProviderConfigurationStore` (NOT excluded on Intel — see
+// `Models/Configuration/RemoteProviderConfiguration.swift:500`).
+// `@MainActor` matches upstream so the view's bindings stay on the
+// main actor and Swift 6.3 actor-isolation diagnostics are quiet.
+//
+// What's deliberately NOT modeled: `connect` / `reconnect` /
+// `testConnection` / `service(for:)` / `connectedServices()` — those
+// route through `RemoteProviderService` which is excluded on Intel
+// (cloud streaming happens via `OsaurusServer` + env-var
+// `DEEPSEEK_API_KEY`, not through the configured provider list).
+// The Intel stubs for those methods stay as no-ops so any chat-side
+// caller doesn't crash.
+@MainActor
+final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     static let shared = RemoteProviderManager()
 
-    private var _providers: [RemoteProvider] = []
+    @Published private(set) var configuration: RemoteProviderConfiguration
+    @Published private(set) var providerStates: [UUID: RemoteProviderState] = [:]
 
-    var configuration: RemoteProviderConfiguration {
-        var cfg = RemoteProviderConfiguration()
-        return cfg
+    private init() {
+        self.configuration = RemoteProviderConfigurationStore.load()
     }
 
     func isEphemeral(id: UUID) -> Bool { false }
-    func updateProvider(_ provider: RemoteProvider, apiKey: String?) {}
+
+    func addProvider(
+        _ provider: RemoteProvider,
+        apiKey: String? = nil,
+        oauthTokens: RemoteProviderOAuthTokens? = nil,
+        isEphemeral: Bool = false
+    ) {
+        configuration.add(provider)
+        RemoteProviderConfigurationStore.save(configuration)
+    }
+
+    func updateProvider(
+        _ provider: RemoteProvider,
+        apiKey: String? = nil,
+        oauthTokens: RemoteProviderOAuthTokens? = nil
+    ) {
+        configuration.update(provider)
+        RemoteProviderConfigurationStore.save(configuration)
+    }
+
+    func removeProvider(id: UUID) {
+        configuration.remove(id: id)
+        providerStates.removeValue(forKey: id)
+        RemoteProviderConfigurationStore.save(configuration)
+    }
+
+    func setEnabled(_ enabled: Bool, for providerId: UUID) {
+        configuration.setEnabled(enabled, for: providerId)
+        RemoteProviderConfigurationStore.save(configuration)
+    }
+
+    // Cloud-routing no-ops kept for compatibility with chat-side callers.
     func connect(providerId: UUID) async throws {}
-    func addProvider(_ provider: RemoteProvider, apiKey: String? = nil, isEphemeral: Bool = false) {}
+    func disconnect(providerId: UUID) {}
+    func reconnect(providerId: UUID) async throws {}
+}
+
+// MARK: - PluginRepositoryService (Intel stub)
+//
+// Upstream `PluginRepositoryService` (excluded on Intel — see
+// `Services/Plugin/PluginRepositoryService.swift`) tracks installed
+// + repository-known plugins and is referenced by `SkillsView` (un-
+// body-swapped in M11 Phase 11.A.2) when rendering "From: <plugin>"
+// breadcrumbs on plugin-attached skills. The Intel stub returns an
+// empty plugin list because plugin installation is amputated; the
+// `Skill.pluginId` field can still be populated by manually-
+// installed skills, but the breadcrumb just falls through to the
+// generic "Plugin" label.
+@MainActor
+final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
+    static let shared = PluginRepositoryService()
+
+    @Published private(set) var plugins: [PluginState] = []
+    @Published private(set) var isRefreshing: Bool = false
+
+    private init() {}
+}
+
+/// Intel stub mirroring just the surface `SkillsView` reads off
+/// `PluginRepositoryService.shared.plugins.first(where:)`. Upstream
+/// definition at `Services/Plugin/PluginRepositoryService.swift:14`
+/// has the full plugin metadata; Intel keeps only `pluginId` +
+/// `displayName` since the only caller is the breadcrumb in SkillRow.
+struct PluginState: Identifiable, Equatable {
+    let pluginId: String
+    var id: String { pluginId }
+    let displayName: String
+
+    init(pluginId: String, displayName: String? = nil) {
+        self.pluginId = pluginId
+        self.displayName = displayName ?? pluginId
+    }
+}
+
+// MARK: - ClaudePluginInstallReport (Intel stub)
+//
+// Upstream `ClaudePluginInstallReport` lives in the excluded
+// `Services/Skill/ClaudePluginInstaller.swift`. The type only
+// surfaces through `GitHubImportSheet.onPluginInstallComplete:
+// ((ClaudePluginInstallReport) -> Void)?` and the closure body at
+// `SkillsView:190` reads four computed totals. The Intel stub
+// returns zeros because the GitHub-installer path itself is Apple-
+// Silicon only (its sheet renders the `AppleSiliconOnlyTab`
+// placeholder), so the callback will never fire with non-zero
+// counts on Intel.
+public struct ClaudePluginInstallReport: Sendable {
+    public init() {}
+    public var totalImportedSkills: Int { 0 }
+    public var totalImportedAgents: Int { 0 }
+    public var totalImportedCommands: Int { 0 }
+    public var totalImportedMCPProviders: Int { 0 }
 }
 
 // MARK: - ToolRegistry (stub)

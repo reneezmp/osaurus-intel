@@ -2520,9 +2520,32 @@ private struct DeploymentNamesEditor: View {
 #endif
 #else
 import SwiftUI
+
+/// Intel stub. The full add/edit flow depends on excluded provider-
+/// service + keychain glue; the sheet renders the standard
+/// "Apple Silicon only" placeholder. Init signature mirrors the
+/// upstream surface in `RemoteProviderEditSheet` at line ~34 of this
+/// file (only visible in the `#if !OSAURUS_INTEL` branch) so the
+/// call sites in `RemoteProvidersView` (un-body-swapped in M11
+/// Phase 11.A.2) type-check.
 struct RemoteProviderEditSheet: View {
+    let provider: RemoteProvider?
+    var initialPreset: ProviderPreset?
+    let onSave: (RemoteProvider, String?, RemoteProviderOAuthTokens?) -> Void
+
+    init(
+        provider: RemoteProvider?,
+        initialPreset: ProviderPreset? = nil,
+        onSave: @escaping (RemoteProvider, String?, RemoteProviderOAuthTokens?) -> Void
+    ) {
+        self.provider = provider
+        self.initialPreset = initialPreset
+        self.onSave = onSave
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Remote Provider Edit", symbol: "apple.logo")
+            .frame(minWidth: 520, minHeight: 420)
     }
 }
 #endif

@@ -541,8 +541,171 @@ struct IntelSkillInfo: Sendable {
     let name: String
 }
 
-final class SkillManager: @unchecked Sendable {
+// `SkillsView` (un-body-swapped in M11 Phase 11.A.2) reads
+// `skillManager.skills`, `skillManager.isRefreshing`,
+// `skillManager.enabledCount`, and mutates via the full CRUD
+// surface — `create`, `update`, `delete`, `setEnabled`, `refresh`,
+// `importSkill(from:)`, `importSkillFromMarkdown(_:)`,
+// `importSkillsFromMarkdown(_:)`, `importSkillFromZip(_:)`,
+// `exportSkillAsZip(_:)`. Extended in M11 Phase 11.A.2.0 to mirror
+// the upstream public surface, with real on-disk persistence via
+// `SkillStore` (NOT excluded on Intel — see
+// `Models/Agent/SkillStore.swift`).
+//
+// The legacy `IntelSkillInfo` overloads stay for the chat-side
+// callers (FloatingInputCard popup, etc.) that haven't been
+// migrated; the new methods use the real `Skill` type from
+// `Models/Agent/Skill.swift`. `@MainActor` matches upstream.
+@MainActor
+final class SkillManager: ObservableObject, @unchecked Sendable {
     static let shared = SkillManager()
+
+    @Published private(set) var skills: [Skill] = []
+    @Published private(set) var isRefreshing: Bool = false
+
+    var enabledCount: Int { skills.filter { $0.enabled }.count }
+
+    private init() {
+        Task { @MainActor in await refresh() }
+    }
+
+    func refresh() async {
+        isRefreshing = true
+        defer { isRefreshing = false }
+        skills = await SkillStore.loadAll()
+    }
+
+    @discardableResult
+    func create(
+        name: String,
+        description: String = "",
+        version: String = "1.0.0",
+        author: String? = nil,
+        category: String? = nil,
+        instructions: String = ""
+    ) async -> Skill {
+        let skill = Skill(
+            name: name,
+            description: description,
+            version: version,
+            author: author,
+            category: category,
+            instructions: instructions
+        )
+        await SkillStore.save(skill)
+        await refresh()
+        return skill
+    }
+
+    func update(_ skill: Skill) async {
+        var updated = skill
+        updated.updatedAt = Date()
+        await SkillStore.save(updated)
+        await refresh()
+    }
+
+    @discardableResult
+    func delete(id: UUID) async -> Bool {
+        let result = await SkillStore.delete(id: id)
+        if result { await refresh() }
+        return result
+    }
+
+    func setEnabled(_ enabled: Bool, for id: UUID) async {
+        guard var skill = await SkillStore.load(id: id) else { return }
+        skill.enabled = enabled
+        skill.updatedAt = Date()
+        await SkillStore.save(skill)
+        await refresh()
+    }
+
+    // Import / export paths.
+    //
+    // The JSON / markdown / zip importers can be implemented on Intel
+    // because `SkillStore` + `Skill`'s Codable surface are both
+    // present. Only the GitHub-installer path lives in
+    // `Services/GitHubSkillService.swift` (excluded), so
+    // `importSkillsFromMarkdown(_:)` — which takes pre-fetched skill
+    // payloads from the GitHub sheet — is a no-op pass-through here
+    // because the sheet is `AppleSiliconOnlyTab` on Intel.
+
+    func importSkill(from data: Data) async throws -> Skill {
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var skill = try decoder.decode(Skill.self, from: data)
+        // New ID so an import doesn't collide with an existing skill.
+        skill = Skill(
+            id: UUID(),
+            name: skill.name,
+            description: skill.description,
+            version: skill.version,
+            author: skill.author,
+            category: skill.category,
+            keywords: skill.keywords,
+            enabled: skill.enabled,
+            instructions: skill.instructions
+        )
+        await SkillStore.save(skill)
+        await refresh()
+        return skill
+    }
+
+    func importSkillFromMarkdown(_ content: String) async throws -> Skill {
+        // Minimal Intel implementation — treats the whole markdown blob
+        // as the instructions body and derives a default name from the
+        // first H1 (or "Imported Skill" if absent). Upstream parses
+        // YAML frontmatter for richer metadata; Intel is intentionally
+        // simpler since the GitHub-importer (which produces the
+        // richest markdown) is amputated.
+        let lines = content.split(separator: "\n", omittingEmptySubsequences: false)
+        let h1 = lines.first(where: { $0.hasPrefix("# ") }).map { String($0.dropFirst(2)) }
+        let skill = Skill(
+            name: h1 ?? "Imported Skill",
+            description: "",
+            instructions: content
+        )
+        await SkillStore.save(skill)
+        await refresh()
+        return skill
+    }
+
+    func importSkillsFromMarkdown(_ skills: [Skill]) async -> [Skill] {
+        // Used by `GitHubImportSheet.onImport` — on Intel the sheet
+        // is `AppleSiliconOnlyTab`, so this path is unreachable from
+        // the UI. Kept as a real implementation in case some other
+        // code path feeds skills in directly.
+        var imported: [Skill] = []
+        for skill in skills {
+            await SkillStore.save(skill)
+            imported.append(skill)
+        }
+        await refresh()
+        return imported
+    }
+
+    func importSkillFromZip(_ zipURL: URL) async throws -> Skill {
+        // Zip import depends on excluded archiver utilities; surface
+        // a clear runtime error rather than silently no-op so the
+        // caller's toast shows useful text.
+        throw NSError(
+            domain: "SkillManager",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Skill .zip import is unavailable on Intel."]
+        )
+    }
+
+    func exportSkillAsZip(_ skill: Skill) async throws -> URL {
+        // Same constraint as import — zip path requires the excluded
+        // archive utilities.
+        throw NSError(
+            domain: "SkillManager",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Skill .zip export is unavailable on Intel."]
+        )
+    }
+
+    // Legacy chat-side overloads (unchanged surface for
+    // FloatingInputCard's slash popup).
     func skill(for id: UUID) -> IntelSkillInfo? { nil }
     func buildFullInstructions(for skill: IntelSkillInfo, agentId: Any? = nil) -> String? { nil }
 }
