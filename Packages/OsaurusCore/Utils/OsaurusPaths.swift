@@ -20,6 +20,54 @@ public enum OsaurusPaths {
 
     private static let defaultRoot: URL = {
         let fm = FileManager.default
+
+        // M11 Phase 11.A.2.x — Intel data isolation.
+        //
+        // On Intel the data dir is `~/.osaurus-intel/`, NOT
+        // `~/.osaurus/`. Without this split, the Intel test build
+        // and the production Apple Silicon Osaurus both wrote to the
+        // same root, so any provider edit / theme change / skill
+        // creation in the Intel build mutated the user's daily-
+        // driver production setup (the regression Renée surfaced on
+        // 2026-06-01 — deleting DeepSeek in Intel Settings made it
+        // vanish from production too).
+        //
+        // The Intel root is seeded ONCE from `~/.osaurus/` on first
+        // access if the production folder exists (so the user
+        // doesn't lose their themes, configured providers, chat
+        // history, etc.); after that the two diverge cleanly.
+        // Production is NEVER written to by the Intel build — the
+        // seed is a one-way snapshot.
+        //
+        // The Apple Silicon build keeps the pre-existing behavior:
+        // legacy migration from `~/Library/Application Support/`,
+        // then `~/.osaurus/` as the root.
+        if OsaurusBuild.isIntel {
+            let intelRoot = fm.homeDirectoryForCurrentUser
+                .appendingPathComponent(".osaurus-intel", isDirectory: true)
+            let productionRoot = fm.homeDirectoryForCurrentUser
+                .appendingPathComponent(".osaurus", isDirectory: true)
+
+            if !fm.fileExists(atPath: intelRoot.path) {
+                if fm.fileExists(atPath: productionRoot.path) {
+                    do {
+                        try fm.copyItem(at: productionRoot, to: intelRoot)
+                        print(
+                            "[Osaurus Intel] Seeded \(intelRoot.path) from production \(productionRoot.path)"
+                        )
+                    } catch {
+                        print(
+                            "[Osaurus Intel] Seed copy failed (\(error)); starting with empty Intel root"
+                        )
+                        try? fm.createDirectory(at: intelRoot, withIntermediateDirectories: true)
+                    }
+                } else {
+                    try? fm.createDirectory(at: intelRoot, withIntermediateDirectories: true)
+                }
+            }
+            return intelRoot
+        }
+
         let newRoot = fm.homeDirectoryForCurrentUser.appendingPathComponent(".osaurus", isDirectory: true)
         let supportDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let oldRoot = supportDir.appendingPathComponent("com.dinoki.osaurus", isDirectory: true)
