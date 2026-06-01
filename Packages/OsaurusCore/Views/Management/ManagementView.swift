@@ -74,7 +74,21 @@ struct ManagementView: View {
             .environment(\.theme, themeManager.currentTheme)
             .tint(theme.accentColor)
             .themedAlertScope(.management)
-            .overlay(ThemedAlertHost(scope: .management))
+            // The `.environment(\.theme, ...)` applied above propagates
+            // to descendants of `sidebarNavigation` but NOT to siblings
+            // — and SwiftUI treats `.overlay()` content as a sibling
+            // of the modified view, not a child. Without an explicit
+            // env injection here, `ThemedAlertHost`'s
+            // `@Environment(\.theme)` falls back to `LightTheme()`
+            // (the env key's default value at Theme.swift:849), which
+            // produced the white-background-on-dark-window alert
+            // surfaced during M11 Phase 11.A.1 click-through on
+            // 2026-06-01. Mirror the theme env onto the overlay
+            // explicitly so the dialog inherits the active theme.
+            .overlay(
+                ThemedAlertHost(scope: .management)
+                    .environment(\.theme, themeManager.currentTheme)
+            )
             .onAppear(perform: handleAppear)
             .onChange(of: stateManager.selectedTab) { handleTabChange(to: $1) }
             .onChange(of: searchText) { handleSearchChange(to: $1) }
