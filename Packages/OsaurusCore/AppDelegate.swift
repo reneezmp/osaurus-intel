@@ -170,14 +170,44 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private func showChatWindow() {
         NSApp.unhide(nil)
         _ = NSRunningApplication.current.activate(options: .activateAllWindows)
-        _ = ChatWindowManager.shared.createWindow()
+        focusExistingChatWindowOrCreate()
+    }
+
+    /// Bring an existing chat window forward if one is open, otherwise
+    /// create a fresh one. M11 fix: previously `showChatWindow` always
+    /// called `createWindow()`, so every dock-icon click (which routes
+    /// through `applicationShouldHandleReopen`) spawned a NEW chat
+    /// window alongside the open one. Mirror the upstream
+    /// `toggleLastFocused`/`showWindow` reuse logic: prefer the last-
+    /// focused window, fall back to the first open window, and only
+    /// create a new one when none exist.
+    @MainActor
+    private func focusExistingChatWindowOrCreate() {
+        let manager = ChatWindowManager.shared
+        if let lastId = manager.lastFocusedWindowId, manager.windows[lastId] != nil {
+            manager.showWindow(id: lastId)
+        } else if let firstId = manager.windows.keys.first {
+            manager.showWindow(id: firstId)
+        } else {
+            _ = manager.createWindow()
+        }
     }
 
     // MARK: - Reopen
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         Task { @MainActor in
-            showChatWindow()
+            // `flag` is true when AppKit already sees a visible window;
+            // in that case just re-activate without touching the window
+            // set. When false (all windows closed/hidden, or only the
+            // status-bar item is alive), focus an existing hidden window
+            // or create one.
+            if flag {
+                NSApp.unhide(nil)
+                _ = NSRunningApplication.current.activate(options: .activateAllWindows)
+            } else {
+                showChatWindow()
+            }
         }
         return true
     }

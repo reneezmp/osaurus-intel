@@ -363,16 +363,22 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         _policies[toolName]
     }
 
-    /// Sets (or clears, when `.auto`) the policy for `toolName` and
-    /// republishes so observing rows refresh. Upstream persists to
-    /// disk; Intel keeps it in-memory for the session.
+    /// Sets the policy for `toolName` and republishes so observing rows
+    /// refresh. Stores ALL three values explicitly — including `.auto`.
+    ///
+    /// Earlier this collapsed `.auto` into a `removeValue` (treating
+    /// Auto as "clear the override"). That broke the picker for
+    /// destructive tools: `shell_run` and `git_commit` default to
+    /// `.ask`, so selecting "Auto" cleared the override, the
+    /// `effectivePolicy` fell back to the `.ask` default, and the
+    /// segmented control immediately snapped back to Ask — making
+    /// Auto un-selectable. Storing the value explicitly lets the
+    /// picker's `get: { configuredPolicy ?? defaultPolicy }` read
+    /// back the user's actual choice. (M11 Phase 11.A.3 click-through
+    /// fix, Renée 2026-06-01.)
     func setPolicy(_ policy: ToolPermissionPolicy, for toolName: String) {
         objectWillChange.send()
-        if policy == .auto {
-            _policies.removeValue(forKey: toolName)
-        } else {
-            _policies[toolName] = policy
-        }
+        _policies[toolName] = policy
     }
 
     /// Used by `ConfigurationView`'s per-tool permission rows to clear
