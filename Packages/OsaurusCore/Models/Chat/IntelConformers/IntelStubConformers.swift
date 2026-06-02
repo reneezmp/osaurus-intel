@@ -185,6 +185,15 @@ final class ModelManager: ObservableObject, @unchecked Sendable {
     @Published var downloadStates: [String: DownloadState] = [:]
     @Published var downloadMetrics: [String: DownloadMetrics] = [:]
 
+    /// A locally-discovered model reference. ServerView reads `.id`.
+    struct LocalModelRef: Sendable { let id: String }
+
+    /// ServerView's API-reference example list calls this to enumerate
+    /// locally-downloaded MLX models. Always empty on Intel (local
+    /// model execution is amputated). Static to match the upstream
+    /// call site `ModelManager.discoverLocalModels()`.
+    static func discoverLocalModels() -> [LocalModelRef] { [] }
+
     enum DownloadState: Sendable, Equatable {
         case idle
         case downloading(Double)

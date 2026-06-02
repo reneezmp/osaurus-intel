@@ -164,7 +164,12 @@ public actor StorageExportService {
         // runs, leaving callers parked on `awaitReady()` for an extra
         // hop. Use a do/catch with explicit `await endMutating` on
         // every exit instead.
-        await MainActor.run { StorageMigrationCoordinator.shared.beginMutating() }
+        // `StorageMigrationCoordinator` (the migration-overlay actor) is
+        // amputated on Intel; key rotation still runs, it just doesn't
+        // drive the migration overlay's mutating-gate.
+        #if !OSAURUS_INTEL
+            await MainActor.run { StorageMigrationCoordinator.shared.beginMutating() }
+        #endif
 
         let result: Result<SymmetricKey, Error>
         do {
@@ -174,7 +179,9 @@ public actor StorageExportService {
             result = .failure(error)
         }
 
-        await MainActor.run { StorageMigrationCoordinator.shared.endMutating() }
+        #if !OSAURUS_INTEL
+            await MainActor.run { StorageMigrationCoordinator.shared.endMutating() }
+        #endif
 
         switch result {
         case .success(let key): return key

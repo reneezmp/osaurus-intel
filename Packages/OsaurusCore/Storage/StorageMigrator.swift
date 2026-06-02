@@ -431,10 +431,13 @@ public actor StorageMigrator {
         try? writeOutcomeReceipt(outcome)
 
         // Step 4 — best-effort vector rebuild from the now-encrypted SQL.
-        Task.detached { [log] in
-            log.info("storage migrator: rebuilding per-agent vector indexes")
-            await MemorySearchService.shared.rebuildIndex()
-        }
+        // Amputated on Intel (no MemorySearchService / vector index).
+        #if !OSAURUS_INTEL
+            Task.detached { [log] in
+                log.info("storage migrator: rebuilding per-agent vector indexes")
+                await MemorySearchService.shared.rebuildIndex()
+            }
+        #endif
 
         progress?(Progress(stepLabel: "Done", completed: dbs.count + 1, total: dbs.count + 1))
         log.info(

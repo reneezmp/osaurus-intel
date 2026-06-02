@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  PermissionsView.swift
 //  osaurus
@@ -378,12 +377,4 @@ private struct SystemPermissionRow: View {
     #Preview {
         PermissionsView()
     }
-#endif
-#else
-import SwiftUI
-struct PermissionsView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Permissions", symbol: "apple.logo")
-    }
-}
 #endif

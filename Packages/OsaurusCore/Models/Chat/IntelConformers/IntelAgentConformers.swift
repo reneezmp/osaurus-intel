@@ -154,11 +154,17 @@ final class WatcherManager: ObservableObject, @unchecked Sendable {
     func refresh() {}
     func watchers(for agentId: UUID) -> [Watcher] { [] }
     func watcherCount(forAgentId agentId: UUID) -> Int { 0 }
+    /// Whether a watcher is actively firing. Always false on Intel
+    /// (the file-watch runtime is amputated).
+    func isRunning(_ id: UUID) -> Bool { false }
+    /// Manually trigger a watcher run. No-op on Intel.
+    func runNow(_ id: UUID) {}
     @discardableResult
     func create(
         name: String,
         instructions: String,
         agentId: UUID?,
+        parameters: [String: String] = [:],
         watchPath: String?,
         watchBookmark: Data?,
         isEnabled: Bool,
@@ -167,7 +173,7 @@ final class WatcherManager: ObservableObject, @unchecked Sendable {
     ) -> Watcher? { nil }
     func update(_ watcher: Watcher) {}
     func delete(id: UUID) {}
-    func setEnabled(_ enabled: Bool, for id: UUID) {}
+    func setEnabled(_ id: UUID, enabled: Bool) {}
 }
 
 // MARK: - Remote Agent Manager (Intel stub)
@@ -293,6 +299,16 @@ enum PocketTTSVoiceCatalog {
     static func displayName(for voiceId: String) -> String { voiceId }
 }
 
+// MARK: - Foundation Model Service (Intel stub)
+//
+// ServerView's API-reference example-model picker asks whether the
+// Apple Foundation local model is available. It never is on Intel
+// (local inference is amputated), so this returns false and the
+// example falls back to a cloud model id.
+enum FoundationModelService {
+    static func isDefaultModelAvailable() -> Bool { false }
+}
+
 // MARK: - Agent sub-view placeholders
 //
 // Every agent-detail tab/sub-view below backs onto an amputated
@@ -371,28 +387,12 @@ struct ScheduleEditorSheet: View {
     }
 }
 
-struct WatcherEditorSheet: View {
-    enum Mode { case create; case edit(Watcher) }
-    let mode: Mode
-    let onSave: (Watcher) -> Void
-    let onCancel: () -> Void
-    let initialAgentId: UUID?
-    init(
-        mode: Mode,
-        onSave: @escaping (Watcher) -> Void,
-        onCancel: @escaping () -> Void,
-        initialAgentId: UUID? = nil
-    ) {
-        self.mode = mode
-        self.onSave = onSave
-        self.onCancel = onCancel
-        self.initialAgentId = initialAgentId
-    }
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Watcher Editor", symbol: "eye")
-            .frame(minWidth: 480, minHeight: 360)
-    }
-}
+// NOTE: `WatcherEditorSheet` is defined by `WatchersView.swift` (Group B,
+// un-body-swapped in M11 Phase 11.B.1) — its real upstream view, not a
+// stub. Removed the duplicate that used to live here to avoid a
+// redeclaration clash. `ScheduleEditorSheet` stays below because
+// `SchedulesView` is Group C (still body-swapped), so nothing else
+// provides it.
 
 struct RemoteAgentDetailView: View {
     let remoteId: UUID

@@ -186,26 +186,10 @@ enum LocalReasoningCapability {
 // is now un-body-swapped and its own `extension NSImage` brings the
 // helper into scope for the whole Intel module.
 
-// MARK: - AttachmentBlobStore (Intel stub)
-//
-// Upstream `AttachmentBlobStore` (in the excluded
-// `Storage/AttachmentBlobStore.swift`) handles encrypted spill of large
-// attachment payloads to disk. On Intel that whole layer is amputated —
-// every Attachment payload lives inline. We provide a throw-only stub so
-// the four `try? AttachmentBlobStore.read(hash)` call sites in
-// `Attachment.swift`'s ref-variant hydration paths convert cleanly to
-// `nil` without dragging the whole storage layer in.
-enum AttachmentBlobStore {
-    static func read(_ hash: String) throws -> Data {
-        throw NSError(
-            domain: "OsaurusIntel.AttachmentBlobStore",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey:
-                "Attachment blob store is amputated on Intel; spillover refs cannot be hydrated."
-            ]
-        )
-    }
-}
+// NOTE: `AttachmentBlobStore` is now the REAL upstream type — un-excluded
+// in M11 Phase 11.B.1 (it imports only CryptoKit/Foundation/os, no
+// amputated deps). The throw-only Intel stub that used to live here was
+// removed; the real `read(_:)` serves the same call sites.
 
 // MARK: - ContentBlock
 
@@ -1426,6 +1410,19 @@ final class ServerController: ObservableObject, @unchecked Sendable {
     var configuration: Any? { nil }
     var port: Int { 1337 }
     var isRunning: Bool { true }
+
+    /// ServerView (un-body-swapped in M11 Phase 11.B.1) reads these for
+    /// the connection URL + status badge. The Intel HTTP server
+    /// (`OsaurusServer`) binds 127.0.0.1:1338 and is always up while the
+    /// app runs, so health is `.running` and the address is loopback.
+    var localNetworkAddress: String { "127.0.0.1" }
+    var serverHealth: ServerHealth { .running }
+
+    /// ServerView's start button. The Intel `OsaurusServer` is started
+    /// from `AppDelegate` at launch and stays up, so this is a no-op
+    /// (the button only shows when health is `.stopped`, which never
+    /// happens on Intel).
+    func startServer() async {}
 
     /// Called by `IdentityView` after an agent's address rotates/revokes
     /// so the HTTP server picks up the new key set. On Intel the server

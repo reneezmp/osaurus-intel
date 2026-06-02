@@ -213,7 +213,11 @@ public enum AttachmentBlobStore {
     /// Compute the union of every `<hash>` referenced by a session's
     /// turns. Used during session-delete GC to know which blobs are
     /// safe to remove.
-    public static func referencedHashes(in turns: [ChatTurnData]) -> Set<String> {
+    // `internal` (not `public`): on Intel `ChatTurnData` is an internal
+    // conformer type, so a `public` signature using it won't compile.
+    // No external caller uses this (session-delete GC is in-module), so
+    // narrowing the visibility is harmless on both architectures.
+    static func referencedHashes(in turns: [ChatTurnData]) -> Set<String> {
         var refs: Set<String> = []
         for turn in turns {
             for attachment in turn.attachments {
