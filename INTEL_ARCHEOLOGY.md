@@ -987,3 +987,47 @@ Notably, the sidebar already shows Server / Permissions / Storage as
 clickable (they were never Group C), so they likely have partial
 functionality already — Group B is mostly verification + selective gating of
 amputated sub-sections.
+
+---
+
+## M11 Phase 11.B.1 — Group B wave 1: Server, Permissions, Storage, Watchers (CLOSURE)
+
+**Date:** 2026-06-02
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE** (4 of 6 Group B tabs; Plugins + Tools deferred to 11.B.2)
+
+### What landed
+
+| Tab | Technique | Functional |
+|---|---|---|
+| Permissions | un-exclude `SystemPermissionService` | ✅ fully (real macOS TCC checks) |
+| Storage | un-exclude `StorageMigrator` + `StorageExportService` + `AttachmentBlobStore` | ✅ fully (real SQLCipher backup/export/key-rotation) |
+| Server | un-body-swap + `ServerController` surface | ✅ (Overview + API Reference; Settings sub-tab gated) |
+| Watchers | un-body-swap + `WatcherManager` surface | ✅ (list + real editor sheet; create no-ops) |
+
+### The un-exclude pattern keeps paying off
+
+Permissions + Storage joined Identity as "fully functional via un-exclude > stub." Their services had **zero amputated dependencies** — excluded only as collateral. Un-exclude + gate the 3-4 amputated one-liners (`AudioInputManager.refreshDevices`, `MemorySearchService.rebuildIndex`, `StorageMigrationCoordinator.begin/endMutating`) with `#if !OSAURUS_INTEL`. `AttachmentBlobStore` was also un-excluded (clean CryptoKit/Foundation), replacing the throw-only Intel stub; `referencedHashes` narrowed to internal because `ChatTurnData` is an internal conformer on Intel.
+
+### Conformer surfaces added
+
+`ServerController`: `localNetworkAddress` ("127.0.0.1"), `serverHealth` (.running), `startServer()` no-op, `port` corrected 1337→1338. `ModelManager`: static `discoverLocalModels()` → empty `[LocalModelRef]`. `FoundationModelService` stub (`isDefaultModelAvailable` → false). `WatcherManager`: `isRunning(_:)`, `runNow(_:)`, `setEnabled(_:enabled:)`, `create(... parameters:)`. Removed the duplicate `WatcherEditorSheet` from `IntelAgentConformers` (WatchersView provides the real one now).
+
+### Click-through bug (11.B.1-bis, commit `42e4c277`)
+
+**Server tab crashed the window on open.** `ServerView` reads `@EnvironmentObject var server: ServerController` in its body, but `AppDelegate.showManagementWindow` only injected `.environmentObject(updater)` — ServerController was never in the window environment → "No ObservableObject of type ServerController found." IdentityView survived the same missing injection only because it touches `server` lazily (in a key-rotation method, never the body). Fix: inject `ServerController.shared` into the ManagementView environment. **Lesson:** SwiftUI resolves `@EnvironmentObject` lazily, so a missing injection can hide for an entire tab and only crash when a *different* view reads the object in its body. When restoring views that take environment objects, verify every required object is injected at the window root, not just the ones that happen to be accessed eagerly.
+
+### Click-through verification (Renée, 2026-06-02)
+
+- ✅ **Permissions**: real OS permission states (Automation/Calendar/Mail/Contacts/Notes/Accessibility/Full Disk Access granted with live counts; Location/Screen Recording show correct un-granted states). The TCC prompts attribute to "Terminal" not "Osaurus" — a dev-launch artifact (raw binary launched from terminal; a bundled double-clicked app would say Osaurus), not an Intel bug.
+- ✅ **Storage**: SQLCipher backup/export genuinely work.
+- ✅ **Server** (after 11.B.1-bis): Overview shows URL `http://127.0.0.1:1338`, Running status, real access keys + relays; Settings sub-tab gated; API Reference shows the full endpoint catalog.
+- ✅ **Watchers**: empty state + the real upstream Create-Watcher sheet (Browse folder / instructions); saving no-ops (watcher runtime amputated).
+
+### Deferred: Plugins + Tools (Phase 11.B.2)
+
+The two deepest Group B tabs (49 + 64 surfaces). They hit a real dependency chain: `JSONValue` (in excluded `Models/API/OpenAIAPI.swift`) → `SandboxPlugin` model graph → `ToolRegistry.ToolEntry`/`ToolPolicyInfo` (with `ToolSpecTokenEstimator`) → full `PluginState` + `PluginRepositoryService`/`PluginManifest` extensions + `SandboxPluginLibrary`/`MCPProviderManager` stubs. Scoped as a separate focused session rather than rushed at the tail of the marathon. `SandboxPlugin.swift` + `ToolSecretsKeychain.swift` were confirmed clean (0 amputated refs) and are un-exclude candidates; `JSONValue` needs mirroring (or un-excluding OpenAIAPI.swift) first.
+
+### M11 status
+
+✅ 11.0 (Settings window) · ✅ 11.A (Group A 7/7, tagged `m11-group-a-complete`) · 🟢 11.B (Group B 4/6) · ⏳ 11.B.2 (Plugins + Tools) · ⏳ 11.C (Group C verification) · ⏳ 11.D (closure + tag `m11-settings-complete`)
