@@ -798,3 +798,107 @@ Regression:
 ### Up next
 
 Phase 11.A.3: un-body-swap `ConfigurationView` (the general Settings tab). Expect MLX-specific sub-sections (default local-model picker, runtime tuning) that need selective gating; other config (default chat model, system prompt, default temperature, generative-greeting toggle, clipboard monitoring toggle) should back onto the existing `AppConfiguration` Intel conformer.
+
+---
+
+## M11 Phase 11.A.3 — ConfigurationView (general Settings tab) (CLOSURE)
+
+**Date:** 2026-06-01
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE**
+
+### Phase log
+
+| Phase | Commit | What |
+|---|---|---|
+| 11.A.3.0 | `6baf52d5` | First conformer-extension wave (18 surfaces): new `Hotkey` struct + `PreflightSearchMode` enum (both live in excluded files upstream); `ChatConfiguration` Intel stub extended with ~10 fields (hotkey, coreModel*, workMax*, preflightSearchMode, greetingPersona); `ModelPickerItemCache` gains ObservableObject; `AppDelegate.serverController` (IntelServerControllerSurface) + `applyChatHotkey()`; `ToolRegistry.clearPolicy`; `SpeechService.loadedModelId`; `GenerativeGreetingService.defaultPersonaInstruction`. |
+| 11.A.3.0-bis | `0261fed3` | Wave-two (6 more surfaces surfaced by the un-body-swap probe): `ChatConfiguration` convenience init (22 params) + `adopt(_:)`; `ChatConfigurationStore.save` folds into the shared singleton; `ToolRegistry` ObservableObject; `HotkeyRecorder` Intel `#else` init. `topPOverride` intentionally kept `Double?` (not upstream's `Float?`) to match `ChatView.swift:2148`'s consumer. |
+| 11.A.3.1 | `0b5116c8` | Un-body-swap. Wave-three (3 surfaces): `PreflightSearchMode.helpText`; init `topPOverride` accepts `Float?` → bridged to `Double?`; `ToolRegistry` real per-tool `[String: ToolPermissionPolicy]` map (configuredPolicy/setPolicy/clearPolicy). |
+| 11.A.3.2 | `519394de` | Two click-through bug fixes (below). |
+
+### ConfigurationView is the deepest-coupled tab
+
+It needed ~27 conformer surfaces across THREE waves — far more than Themes/Commands (8) or Providers/Skills (13) — because it touches the most cross-cutting services of any settings tab: hotkey, voice, MLX runtime, work-agent params, memory, tool permissions, server config. Each section pulls a different amputated subsystem. **Audit note:** the most transitively-dependent views surface their cascade in waves — fixing wave-one exposes wave-two, etc. Don't assume one conformer-extension commit clears it; budget for 2-3 probe→fix cycles on integration-point views.
+
+### Two click-through bugs (11.A.3.2)
+
+1. **Dock icon spawned a new chat window on every click.** `applicationShouldHandleReopen` → `showChatWindow()` → unconditional `createWindow()`. Fixed with `focusExistingChatWindowOrCreate()` (prefer last-focused, fall back to first open, only create when none) + respecting the `hasVisibleWindows` flag.
+2. **Tool-permission picker couldn't select "Auto" for destructive tools** (Run Shell / Git Commit). The Intel `ToolRegistry.setPolicy` collapsed `.auto` into a `removeValue` (treating Auto as "clear override"); for tools whose default is `.ask`, clearing made `effectivePolicy` fall back to `.ask`, snapping the picker back. Fixed by storing all three values explicitly.
+
+### Persistence note
+
+`ChatConfigurationStore.save` folds view mutations into the shared `ChatConfiguration` singleton, so config round-trips within a session (after clicking "Save Changes"). On-disk persistence across app restart is deferred M11 follow-up. The Configuration tab uses an explicit "Save Changes" button — edits live in `tempX` @State until saved (matches upstream; not auto-save).
+
+### Click-through verification (Renée, 2026-06-01)
+
+✅ Full form renders; General/Chat/Work sections; preflight picker + help text; tool permission pickers (Auto sticks); Save Changes persists across tab switches; dock no longer spawns duplicates. Group A reached 5/7.
+
+---
+
+## M11 Phase 11.A.4 — AgentsView, THE BEAST (CLOSURE)
+
+**Date:** 2026-06-02
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE** — the single largest restoration in the entire Intel fork.
+
+### Scope
+
+`AgentsView` + `AgentDetailView` = **~6,079 lines**, the front-end for the entire agent-database subsystem (per-agent SQLite, schedules, watchers, pinned facts, episodes, dynamic tools, relay/Bonjour, agent bundles, per-agent voice/TTS, plugin route tabs). Almost all of it is amputated on Intel.
+
+Renée's strategic call: **full faithful restore** (vs. a slimmer hand-built editor). The upstream view tree compiles + renders verbatim, with every amputated sub-feature falling through to `AppleSiliconOnlyTab` placeholders.
+
+### The cascade by the numbers
+
+- **249 errors at peak** (un-body-swap probe), ~70 unique surfaces, ~15 sub-views.
+- Resolved across **one new foundation file + targeted edits to ~13 files**, over ~6 build-probe-fix cycles.
+- Done in a **single un-body-swap commit** (`3696bb9d`, not split into .0/.1) because the surfaces are so interdependent the view doesn't compile until nearly all land. A follow-up commit (`665532d4`) fixed three click-through issues.
+
+### What got built
+
+**New file — `IntelAgentConformers.swift` (~480 lines):**
+- Types: `AgentDeleteResult`, `SandboxCleanupNotice`, `AgentRelayStatus` (.disconnected/.connecting/.connected(String)/.error), `AgentBundleManifest`
+- Managers (ObservableObject): `RelayTunnelManager`, `ScheduleManager`, `WatcherManager`, `RemoteAgentManager`
+- Services/stores: `AgentBundleService` (+ImportPreview/BundleExportResult), `AgentDatabaseStore`, `AgentSecretsKeychain`, `AgentStore`, `BonjourAdvertiser`, `ChatHistoryDatabase`, `SchedulerDatabase`, `LocalAgentBridge`, `PocketTTSVoiceCatalog`
+- Sub-view placeholders: `HomeTabView`, `DataTabView`, `ActivityTabView`, `ViewsTabView`, `PinnedFactsPanel`, `EpisodeRow`, `ScheduleEditorSheet`, `WatcherEditorSheet`, `RemoteAgentDetailView`
+- Notification names: `agentDetailDeeplink`, `openTTSSettingsRequested`, `schedulesChanged`, `watchersChanged`
+
+**Extended existing conformers:**
+- `PluginManager` (Intel stub): a rich agent-view surface distinct from the M9 capability-bucket UI — `LoadedPlugin` (.plugin.manifest/.routes/.webConfig), `FailedPlugin` typealias + `FailedPluginInfo.lastKnownManifest`, plugins/loadedPlugin/loadError/removeFromQuarantine, and a full `PluginManifest` with nested `RouteAuth` (enum, for switch-exhaustiveness) / `RouteSpec` / `WebConfig` / `ConfigSpec` / `Capabilities`
+- `AgentManager`: delete → `AgentDeleteResult`; setCustomAvatar/clearCustomAvatar; effectiveAutonomousExec returns the real `AutonomousExecConfig`; updateDefaultModel accepts `String?`
+- `MemoryDatabase`: loadPinnedFacts/loadEpisodes (limit, throws), deletePinnedFact(id: String)
+- `TTSService` → ObservableObject; `ToolRegistry.listDynamicTools` (returns DynamicToolRef with .name); `RemoteProviderManager.findService`; `PluginRepositoryService.uninstall`; `AppChatConfigStub.greetingPersona`
+
+**Extended #else Intel stubs (init signatures from call sites):** RemoteAgentCard, ShareAgentSheet, AgentCapabilityManagerView (both live + draft inits), SchemaTabView, PluginConfigView, NextRunPanelView.
+
+**ChatWindowManager:** added `createWindow(agentId:sessionData:)` overload (internal — ChatSessionData is internal) so history rows reopen sessions.
+
+### Three landmines / lessons specific to this beast
+
+1. **Module-scope helper clash (`agentColorFor`).** Once AgentsView un-body-swaps, its top-level `agentColorFor` collides with the `fileprivate` one in `ChatEmptyState.swift` (both visible in the Intel module). Made AgentsView's `fileprivate`. **Lesson:** un-body-swapping a large view can re-expose top-level free functions that duplicate ones in other files compiled into the same Intel module — grep for top-level `func`/`let` name clashes after un-body-swap.
+
+2. **Two type-checker overflows** in long `.onReceive`/`.onChange` modifier chains (Swift 6.3) — extracted `handleAgentDetailDeeplink` + `handleToolsListChanged` to methods (M10.5 lesson #5 again — this view hit it twice).
+
+3. **`RouteAuth` must be an enum, not a RawRepresentable struct,** because the view does `switch route.auth { case .none, .verify, .owner }` and needs exhaustiveness. First attempt as a struct-with-static-lets failed the switch.
+
+### Click-through fixes (11.A.4.1, commit `665532d4`)
+
+1. **Agent persistence.** The Intel `AgentManager` was a hollow stub — `agents` was a throwaway array, `add`/`update` no-ops, `delete` always returned deleted:true. So created agents didn't appear and deleting Default falsely "succeeded." Fixed with **real on-disk persistence** (same pattern as SlashCommandStore/SkillStore): custom agents are JSON files under `OsaurusPaths.agents()`; the built-in Default (`Agent.defaultId`, `isBuiltIn=true`) is pinned first and never written; add/update persist+reload, delete removes the file (and refuses Default → returns deleted:false, which is correct: Default is mandatory). `reload()` drives the @Published grid refresh.
+
+2. **Giant "Next Run" banner.** `NextRunPanelView`'s `AppleSiliconOnlyTab` placeholder (with expanding Spacers) sat ABOVE the detail tab bar and swallowed half the view. Since scheduling is amputated there's never a next run, so the Intel stub now renders `EmptyView`.
+
+3. **Providers "Disconnected" badge.** Enabled providers now seed `providerStates[id].isConnected = true` (chat streams via OsaurusServer + env-var, not a per-provider connection), so the badge reads "Connected."
+
+### Two "looks like a bug, is actually correct" findings
+
+- **"Default disappeared from the grid."** Correct behavior: the Agents grid renders only `customAgents` (filter `!isBuiltIn`); Default is built-in and configured via Settings → Configuration, never a grid card. The *old* hollow stub faked a Default card (its fake Default had `isBuiltIn=false`); the real `Agent.default` has `isBuiltIn=true`, so it's properly excluded now. The "disappearance" is the fix landing.
+- **"Production agents showing up."** The one-time `~/.osaurus` → `~/.osaurus-intel` seed copied production custom agents into the Intel data dir. Verified isolation is airtight: production dir untouched, new Intel agents (e.g. "Lala") exist only in Intel. Working as designed (11.A.2.x).
+
+### Click-through verification (Renée, 2026-06-02)
+
+✅ Agent grid; detail view (tabs at top, no banner); create→card appears; edit persists; delete custom works; Default correctly absent from grid; survives restart; Providers "Connected"; amputated sub-tabs render graceful empty-states or placeholders; chat + `/shakespeare` still work; no dock duplicates.
+
+**Group A reached 6/7** (Themes, Commands, Providers, Skills, Configuration, Agents). Only Identity (Phase 11.A.5) remains.
+
+### Up next
+
+Phase 11.A.5 — Identity (`IdentityView`). The M4↔Rosy sync backbone and the deepest Identity cascade in the codebase (OsaurusIdentity namespace, MasterKey, OsaurusID, IdentityDrift, AgentManager address methods assignAddress/rotateAddress/revokeAddress, ServerController.restartServer, sub-views IdentitySetupCard/MasterAddressSection/AgentAddressesSection/DeviceSection/DangerZoneSection/RecoverFromMnemonicSheet/RecoveryPhraseSheet). The `ServerController` ObservableObject conformance was already pre-landed in 11.A.0 in anticipation.
