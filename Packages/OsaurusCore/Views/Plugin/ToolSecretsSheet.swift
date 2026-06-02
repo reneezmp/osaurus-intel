@@ -561,9 +561,35 @@ private struct DescriptionText: View {
 #endif
 #else
 import SwiftUI
+
+/// Intel stub. Tool/plugin secret entry depends on the amputated
+/// keychain-backed secrets flow; renders the placeholder. Init mirrors
+/// PluginsView's call sites (M11 Phase 11.B.2).
 struct ToolSecretsSheet: View {
+    let pluginId: String
+    let agentId: UUID
+    let pluginName: String
+    let pluginVersion: String?
+    let secrets: [PluginManifest.SecretSpec]
+    let onSave: () -> Void
+    init(
+        pluginId: String,
+        agentId: UUID,
+        pluginName: String,
+        pluginVersion: String?,
+        secrets: [PluginManifest.SecretSpec],
+        onSave: @escaping () -> Void
+    ) {
+        self.pluginId = pluginId
+        self.agentId = agentId
+        self.pluginName = pluginName
+        self.pluginVersion = pluginVersion
+        self.secrets = secrets
+        self.onSave = onSave
+    }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Tool Secrets", symbol: "apple.logo")
+            .frame(minWidth: 480, minHeight: 360)
     }
 }
 #endif

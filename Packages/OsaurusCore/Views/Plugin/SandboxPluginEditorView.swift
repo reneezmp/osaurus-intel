@@ -811,9 +811,29 @@ extension SandboxPlugin {
 }
 #else
 import SwiftUI
+
+/// Intel stub. The sandbox-plugin editor (create/edit) is amputated;
+/// renders the placeholder. Init mirrors the ToolsManagerView call
+/// sites (M11 Phase 11.B.2).
 struct SandboxPluginEditorView: View {
+    let plugin: SandboxPlugin
+    let isNew: Bool
+    let onSave: (SandboxPlugin) -> Void
+    let onDismiss: () -> Void
+    init(
+        plugin: SandboxPlugin,
+        isNew: Bool,
+        onSave: @escaping (SandboxPlugin) -> Void,
+        onDismiss: @escaping () -> Void
+    ) {
+        self.plugin = plugin
+        self.isNew = isNew
+        self.onSave = onSave
+        self.onDismiss = onDismiss
+    }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Sandbox Plugin Editor", symbol: "apple.logo")
+            .frame(minWidth: 480, minHeight: 360)
     }
 }
 #endif

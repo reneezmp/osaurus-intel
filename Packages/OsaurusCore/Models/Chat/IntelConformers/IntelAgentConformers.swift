@@ -36,6 +36,119 @@ extension Notification.Name {
     static let schedulesChanged = Notification.Name("schedulesChanged")
     /// Posted by the (amputated) WatcherManager when watchers change.
     static let watchersChanged = Notification.Name("watchersChanged")
+    /// Posted when an MCP provider connects/disconnects. ToolsManagerView
+    /// observes it; amputated on Intel, but the name must resolve.
+    static let mcpProviderStatusChanged = Notification.Name("mcpProviderStatusChanged")
+}
+
+// MARK: - SemanticVersion + RegistryCapabilities (Intel stubs — M11 11.B.2)
+//
+// Both live inside the excluded `PluginRepositoryService.swift` upstream.
+// `PluginState` (the Plugins-tab row model) reads them. Plugin install/
+// update is amputated on Intel, so versions are nil and capabilities
+// empty — these exist only so the full `PluginState` shape compiles.
+public struct SemanticVersion: Comparable, Sendable, Equatable {
+    public let major: Int
+    public let minor: Int
+    public let patch: Int
+    public init(major: Int = 0, minor: Int = 0, patch: Int = 0) {
+        self.major = major
+        self.minor = minor
+        self.patch = patch
+    }
+    public static func < (l: SemanticVersion, r: SemanticVersion) -> Bool {
+        (l.major, l.minor, l.patch) < (r.major, r.minor, r.patch)
+    }
+    public var description: String { "\(major).\(minor).\(patch)" }
+
+    /// Parse "X.Y.Z" (also tolerates a leading "v"). Used by the
+    /// WhatsNew gate + plugin registry. Returns nil on malformed input.
+    public static func parse(_ string: String) -> SemanticVersion? {
+        var s = string.trimmingCharacters(in: .whitespaces)
+        if s.hasPrefix("v") { s.removeFirst() }
+        let parts = s.split(separator: ".").map { Int($0) }
+        guard parts.count >= 1, parts.allSatisfy({ $0 != nil }) else { return nil }
+        let nums = parts.map { $0! }
+        return SemanticVersion(
+            major: nums.count > 0 ? nums[0] : 0,
+            minor: nums.count > 1 ? nums[1] : 0,
+            patch: nums.count > 2 ? nums[2] : 0
+        )
+    }
+}
+
+public struct RegistryCapabilities: Sendable, Equatable {
+    public struct ToolSummary: Sendable, Equatable {
+        public let name: String
+        public let description: String
+        public init(name: String, description: String = "") {
+            self.name = name
+            self.description = description
+        }
+    }
+    public struct SkillSummary: Sendable, Equatable {
+        public let name: String
+        public let description: String
+        public init(name: String, description: String = "") {
+            self.name = name
+            self.description = description
+        }
+    }
+    public let tools: [ToolSummary]?
+    public let skills: [SkillSummary]?
+    public init(tools: [ToolSummary]? = nil, skills: [SkillSummary]? = nil) {
+        self.tools = tools
+        self.skills = skills
+    }
+}
+
+// MARK: - MCP Provider Manager (Intel stub)
+//
+// `ToolsManagerView` reads `providerManager.configuration.providers`
+// + `.providerStates` + `.disconnect(providerId:)`. MCP *providers*
+// (the config model) are available on Intel
+// (`Models/Configuration/MCPProviderConfiguration.swift`), but the
+// manager runtime is amputated, so the configured list stays empty.
+@MainActor
+final class MCPProviderManager: ObservableObject, @unchecked Sendable {
+    static let shared = MCPProviderManager()
+    @Published private(set) var configuration = MCPProviderConfiguration()
+    @Published private(set) var providerStates: [UUID: MCPProviderState] = [:]
+    private init() {}
+    func disconnect(providerId: UUID) {}
+}
+
+// MARK: - Sandbox Plugin Library (Intel stub)
+//
+// `ToolsManagerView` lists `pluginLibrary.plugins` + calls `.save(_:)`.
+// Sandbox plugins (the model) are available (un-excluded), but the
+// library runtime is amputated, so the list stays empty.
+@MainActor
+final class SandboxPluginLibrary: ObservableObject, @unchecked Sendable {
+    static let shared = SandboxPluginLibrary()
+    @Published private(set) var plugins: [SandboxPlugin] = []
+    private init() {}
+    func save(_ plugin: SandboxPlugin) {}
+    func update(oldId: String, plugin: SandboxPlugin) {}
+    func delete(id: String) {}
+    @discardableResult
+    func importFromFile(_ url: URL) throws -> SandboxPlugin {
+        throw NSError(
+            domain: "SandboxPluginLibrary",
+            code: -1,
+            userInfo: [NSLocalizedDescriptionKey: "Sandbox plugin import is unavailable on Intel."]
+        )
+    }
+    func exportData(for pluginId: String) -> Data? { nil }
+}
+
+extension SandboxPlugin {
+    /// An empty plugin for the "Create Plugin" editor. Upstream has
+    /// this; Intel provides it so `SandboxPluginEditorView(plugin: .blank())`
+    /// type-checks (the editor itself is the AppleSiliconOnly placeholder).
+    static func blank() -> SandboxPlugin {
+        SandboxPlugin(name: "", description: "")
+    }
 }
 
 // MARK: - Agent delete result
@@ -297,6 +410,89 @@ final class LocalAgentBridge: @unchecked Sendable {
 enum PocketTTSVoiceCatalog {
     static let availableVoices: [String] = []
     static func displayName(for voiceId: String) -> String { voiceId }
+}
+
+// MARK: - JSONValue (mirrored from excluded OpenAIAPI.swift)
+//
+// `JSONValue` is the recursive JSON value type the upstream tool-spec
+// machinery uses. It lives in `Models/API/OpenAIAPI.swift` (excluded
+// on Intel). `SandboxPlugin` + `ToolRegistry.ToolEntry` (un-excluded /
+// extended in M11 Phase 11.B.2) need it. Mirrored byte-for-byte rather
+// than un-excluding the whole OpenAI API model graph.
+public enum JSONValue: Codable, Sendable, Equatable {
+    case string(String)
+    case number(Double)
+    case bool(Bool)
+    case object([String: JSONValue])
+    case array([JSONValue])
+    case null
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.singleValueContainer()
+        if container.decodeNil() {
+            self = .null
+        } else if let b = try? container.decode(Bool.self) {
+            self = .bool(b)
+        } else if let n = try? container.decode(Double.self) {
+            self = .number(n)
+        } else if let s = try? container.decode(String.self) {
+            self = .string(s)
+        } else if let arr = try? container.decode([JSONValue].self) {
+            self = .array(arr)
+        } else if let dict = try? container.decode([String: JSONValue].self) {
+            self = .object(dict)
+        } else {
+            throw DecodingError.dataCorruptedError(
+                in: container,
+                debugDescription: "Unsupported JSON value"
+            )
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        var container = encoder.singleValueContainer()
+        switch self {
+        case .null: try container.encodeNil()
+        case .bool(let b): try container.encode(b)
+        case .number(let n): try container.encode(n)
+        case .string(let s): try container.encode(s)
+        case .array(let arr): try container.encode(arr)
+        case .object(let obj): try container.encode(obj)
+        }
+    }
+}
+
+extension JSONValue {
+    var sendableValue: any Sendable {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .number(let n): return n
+        case .string(let s): return s
+        case .array(let arr): return arr.map { $0.sendableValue }
+        case .object(let obj):
+            var dict: [String: any Sendable] = [:]
+            for (k, v) in obj {
+                if case .null = v { continue }
+                dict[k] = v.sendableValue
+            }
+            return dict
+        }
+    }
+
+    var anyValue: Any {
+        switch self {
+        case .null: return NSNull()
+        case .bool(let b): return b
+        case .number(let n): return n
+        case .string(let s): return s
+        case .array(let arr): return arr.map { $0.anyValue }
+        case .object(let obj):
+            var dict: [String: Any] = [:]
+            for (k, v) in obj { dict[k] = v.anyValue }
+            return dict
+        }
+    }
 }
 
 // MARK: - Foundation Model Service (Intel stub)

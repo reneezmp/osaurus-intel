@@ -1713,6 +1713,10 @@ public final class PluginManager: ObservableObject {
         public let routes: [PluginManifest.RouteSpec]
         public let webConfig: PluginManifest.WebConfig?
         public var id: String { plugin.id }
+        /// PluginsView's detail pane reads these (as file URLs) for the
+        /// README / changelog content. Nil on Intel (no installed dirs).
+        public var readmePath: URL? { nil }
+        public var changelogPath: URL? { nil }
     }
 
     /// Agent-view plugin list. Empty on Intel (runtime amputated).
@@ -1726,6 +1730,18 @@ public final class PluginManager: ObservableObject {
 
     /// Quarantine release. No-op on Intel (nothing is quarantined).
     nonisolated public static func removeFromQuarantine(_ pluginId: String) {}
+
+    /// Load-error sentinels PluginsView matches against the stored
+    /// `loadError` string. Mirrors the upstream nested type.
+    public enum PluginLoadError {
+        public static let consentRequiredPrefix = "CONSENT_REQUIRED:"
+    }
+
+    /// Grant a plugin's consent gate (the "this plugin wants X" prompt).
+    /// No-op on Intel — plugins don't load at runtime, so there's
+    /// nothing to consent to. Throwing signature preserved for the
+    /// call site.
+    public func grantConsent(pluginId: String) throws {}
 }
 
 /// Plugin manifest surface AgentDetailView reads. The full upstream
@@ -1762,7 +1778,8 @@ public struct PluginManifest: Sendable {
     }
 
     public struct WebConfig: Sendable {
-        public init() {}
+        public let mount: String
+        public init(mount: String = "") { self.mount = mount }
     }
 
     public struct ConfigSpec: Sendable {
@@ -1780,21 +1797,71 @@ public struct PluginManifest: Sendable {
         }
     }
 
+    // Surfaces the PluginsView secrets sheet + docs links read (M11
+    // Phase 11.B.2). Mirrors the real ExternalPlugin.SecretSpec /
+    // DocsSpec / DocLink (which are gated `#if !OSAURUS_INTEL`).
+    public struct SecretSpec: Sendable {
+        public let id: String
+        public let label: String
+        public let description: String?
+        public let required: Bool
+        public let url: String?
+        public init(
+            id: String,
+            label: String,
+            description: String? = nil,
+            required: Bool = true,
+            url: String? = nil
+        ) {
+            self.id = id
+            self.label = label
+            self.description = description
+            self.required = required
+            self.url = url
+        }
+    }
+
+    public struct DocLink: Sendable {
+        public let label: String
+        public let url: String
+        public init(label: String, url: String) {
+            self.label = label
+            self.url = url
+        }
+    }
+
+    public struct DocsSpec: Sendable {
+        public let readme: String?
+        public let changelog: String?
+        public let links: [DocLink]?
+        public init(readme: String? = nil, changelog: String? = nil, links: [DocLink]? = nil) {
+            self.readme = readme
+            self.changelog = changelog
+            self.links = links
+        }
+    }
+
     public let name: String?
     public let instructions: String?
     public let capabilities: Capabilities
-    public let secrets: [String]?
+    public let secrets: [SecretSpec]?
+    public let version: String?
+    public let docs: DocsSpec?
 
     public init(
         name: String? = nil,
         instructions: String? = nil,
         capabilities: Capabilities = Capabilities(),
-        secrets: [String]? = nil
+        secrets: [SecretSpec]? = nil,
+        version: String? = nil,
+        docs: DocsSpec? = nil
     ) {
         self.name = name
         self.instructions = instructions
         self.capabilities = capabilities
         self.secrets = secrets
+        self.version = version
+        self.docs = docs
     }
 }
 #endif

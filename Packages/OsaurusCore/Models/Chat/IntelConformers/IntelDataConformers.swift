@@ -915,6 +915,13 @@ enum SearchService {
         guard !query.isEmpty else { return true }
         return text.localizedCaseInsensitiveContains(query)
     }
+    /// Plugins/Tools search filters use this. Simple substring fuzzy
+    /// match (case-insensitive contains) — good enough for the
+    /// settings search boxes.
+    static func fuzzyMatch(query: String, in target: String) -> Bool {
+        guard !query.isEmpty else { return true }
+        return target.localizedCaseInsensitiveContains(query)
+    }
 }
 struct LocalAudioSamples: Sendable, Equatable { init() {} }
 

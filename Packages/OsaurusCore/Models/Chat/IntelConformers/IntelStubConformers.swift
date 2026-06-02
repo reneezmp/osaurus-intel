@@ -339,6 +339,11 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var plugins: [PluginState] = []
     @Published private(set) var isRefreshing: Bool = false
+    // PluginsView observes these (M11 Phase 11.B.2). All inert on Intel:
+    // no plugins install, so nothing updates / errors / needs secrets.
+    @Published var updatesAvailableCount: Int = 0
+    @Published var lastError: String? = nil
+    @Published var pendingSecretsPlugin: String? = nil
 
     private init() {}
 
@@ -346,6 +351,13 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
     /// installation is amputated on Intel (the three-bucket M9 UI shows
     /// compatibility but doesn't install), so uninstall is a no-op.
     func uninstall(pluginId: String) async {}
+
+    // PluginsView install/update/refresh affordances. All no-ops on
+    // Intel — the three-bucket UI shows compatibility, but the runtime
+    // that would install/upgrade plugins is amputated.
+    func install(pluginId: String) async throws {}
+    func upgrade(pluginId: String) async throws {}
+    func refresh() async {}
 }
 
 /// Intel stub mirroring just the surface `SkillsView` reads off
@@ -353,14 +365,53 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
 /// definition at `Services/Plugin/PluginRepositoryService.swift:14`
 /// has the full plugin metadata; Intel keeps only `pluginId` +
 /// `displayName` since the only caller is the breadcrumb in SkillRow.
+// Full PluginState shape (M11 Phase 11.B.2) mirroring upstream
+// `Services/Plugin/PluginRepositoryService.swift`. The PluginsView
+// three-bucket UI reads display metadata + install/update state. Empty
+// on Intel (no plugin runtime), but the full shape must compile.
 struct PluginState: Identifiable, Equatable {
     let pluginId: String
     var id: String { pluginId }
-    let displayName: String
+    let name: String?
+    let pluginDescription: String?
+    let authors: [String]?
+    let license: String?
+    let capabilities: RegistryCapabilities?
+    var installedVersion: SemanticVersion?
+    var latestVersion: SemanticVersion?
+    var isInstalling: Bool
+    var loadError: String?
 
-    init(pluginId: String, displayName: String? = nil) {
+    var displayName: String { name ?? pluginId }
+    var hasUpdate: Bool {
+        guard let installed = installedVersion, let latest = latestVersion else { return false }
+        return latest > installed
+    }
+    var isInstalled: Bool { installedVersion != nil }
+    var hasLoadError: Bool { isInstalled && loadError != nil }
+
+    init(
+        pluginId: String,
+        name: String? = nil,
+        pluginDescription: String? = nil,
+        authors: [String]? = nil,
+        license: String? = nil,
+        capabilities: RegistryCapabilities? = nil,
+        installedVersion: SemanticVersion? = nil,
+        latestVersion: SemanticVersion? = nil,
+        isInstalling: Bool = false,
+        loadError: String? = nil
+    ) {
         self.pluginId = pluginId
-        self.displayName = displayName ?? pluginId
+        self.name = name
+        self.pluginDescription = pluginDescription
+        self.authors = authors
+        self.license = license
+        self.capabilities = capabilities
+        self.installedVersion = installedVersion
+        self.latestVersion = latestVersion
+        self.isInstalling = isInstalling
+        self.loadError = loadError
     }
 }
 
@@ -442,6 +493,66 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// is always empty.
     struct DynamicToolRef: Sendable { let name: String }
     func listDynamicTools() -> [DynamicToolRef] { [] }
+
+    // MARK: - ToolsManagerView surface (M11 Phase 11.B.2)
+
+    /// A registered tool as ToolsManagerView lists it. Mirrors upstream
+    /// `ToolRegistry.ToolEntry`.
+    struct ToolEntry: Identifiable, Sendable {
+        var id: String { name }
+        let name: String
+        let description: String
+        var enabled: Bool
+        let parameters: JSONValue?
+        /// Rough heuristic (~4 chars/token) — upstream uses
+        /// ToolSpecTokenEstimator (excluded); the inline estimate is
+        /// close enough for the tool-list token badge.
+        var estimatedTokens: Int {
+            (name.count + description.count) / 4
+        }
+    }
+
+    /// Per-tool policy + permission detail, mirroring upstream
+    /// `ToolRegistry.ToolPolicyInfo`.
+    struct ToolPolicyInfo: Sendable {
+        let isPermissioned: Bool
+        let defaultPolicy: ToolPermissionPolicy
+        let configuredPolicy: ToolPermissionPolicy?
+        let effectivePolicy: ToolPermissionPolicy
+        let requirements: [String]
+        let grantsByRequirement: [String: Bool]
+        let systemPermissions: [SystemPermission]
+        let systemPermissionStates: [SystemPermission: Bool]
+    }
+
+    /// The cloud + MCP tools registered on Intel. Empty until the chat
+    /// engine registers built-ins; ToolsManagerView renders the list.
+    func listTools() -> [ToolEntry] { [] }
+
+    /// Toggle a tool on/off. No-op stub on Intel (tool enablement state
+    /// isn't persisted in this surface yet).
+    func setEnabled(_ enabled: Bool, for name: String) {}
+
+    /// Policy detail for a tool. Returns a default-`.auto` policy with
+    /// no permission requirements on Intel (sandbox-gated tools are
+    /// amputated).
+    func policyInfo(for name: String) -> ToolPolicyInfo? {
+        ToolPolicyInfo(
+            isPermissioned: false,
+            defaultPolicy: .auto,
+            configuredPolicy: _policies[name],
+            effectivePolicy: _policies[name] ?? .auto,
+            requirements: [],
+            grantsByRequirement: [:],
+            systemPermissions: [],
+            systemPermissionStates: [:]
+        )
+    }
+
+    /// Register/unregister sandbox plugin tools. Sandbox runtime is
+    /// amputated on Intel, so these are no-ops.
+    func registerSandboxPluginTools(plugin: SandboxPlugin) {}
+    func unregisterSandboxPluginTools(pluginId: String) {}
 }
 
 // MARK: - MemoryService (disabled on Intel)

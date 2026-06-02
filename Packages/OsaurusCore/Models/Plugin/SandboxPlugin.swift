@@ -249,7 +249,14 @@ extension SandboxPlugin {
 
     /// Validates file paths in the `files` dictionary reject traversal attacks.
     public func validateFilePaths() -> [String] {
-        SandboxPathSanitizer.validatePluginFiles(files)
+        // `SandboxPathSanitizer` is part of the amputated sandbox runtime
+        // on Intel; with no sandbox execution there are no plugin files
+        // to validate, so return "no errors".
+        #if OSAURUS_INTEL
+            return []
+        #else
+            return SandboxPathSanitizer.validatePluginFiles(files)
+        #endif
     }
 }
 
