@@ -902,3 +902,88 @@ Renée's strategic call: **full faithful restore** (vs. a slimmer hand-built edi
 ### Up next
 
 Phase 11.A.5 — Identity (`IdentityView`). The M4↔Rosy sync backbone and the deepest Identity cascade in the codebase (OsaurusIdentity namespace, MasterKey, OsaurusID, IdentityDrift, AgentManager address methods assignAddress/rotateAddress/revokeAddress, ServerController.restartServer, sub-views IdentitySetupCard/MasterAddressSection/AgentAddressesSection/DeviceSection/DangerZoneSection/RecoverFromMnemonicSheet/RecoveryPhraseSheet). The `ServerController` ObservableObject conformance was already pre-landed in 11.A.0 in anticipation.
+
+---
+
+## M11 Phase 11.A.5 — IdentityView (CLOSURE) + GROUP A COMPLETE 🏆
+
+**Date:** 2026-06-02
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE — and FUNCTIONAL, not just restored.**
+
+### The pleasant surprise
+
+Identity isn't a placeholder on Intel — it genuinely works. The M4 ↔ Rosy
+cryptographic identity-sync backbone runs on a 2017 Intel MacBook Air.
+
+**Why:** of the 19 files in `Identity/`, only `OsaurusIdentity.swift` (the
+158-line orchestrator) was excluded — and only as *collateral* from the
+original mass-exclusion (it imports nothing but CryptoKit / Foundation /
+LocalAuthentication; no MLX, no sandbox). The entire crypto/key/recovery
+substrate — `MasterKey`, `AgentKey`, `DeviceKey`, `MasterKeyMnemonic`,
+`MasterMnemonicStore`, `RecoveryManager`, `APIKeyManager`,
+`IdentityHealthCheck`, `CryptoHelpers`, `IdentityModels` — was already
+compiling on Intel.
+
+So this was the cleanest possible restoration: **un-exclude > stub.** Remove
+one line from `Package.swift`'s exclude list and the orchestrator comes back
+whole.
+
+### Cascade
+
+Only 42 errors / **3 unique surfaces** (vs the Agents beast's 249 / 70):
+- `OsaurusIdentity` (resolved by un-excluding the file)
+- `AgentManager.assignAddress(to:)` / `rotateAddress(of:)` / `revokeAddress(of:)`
+- `ServerController.restartServer()`
+
+All the sub-views (`IdentitySetupCard`, `MasterAddressSection`,
+`AgentAddressesSection`, `DeviceSection`, `DangerZoneSection`,
+`RecoverFromMnemonicSheet`, `RecoveryPhraseSheet`, `IdentityDriftBanner`)
+live inside `IdentityView.swift` itself, so they came back for free with the
+un-body-swap. `OsaurusID`, `IdentityPhase`, `IdentityDrift`, `IdentityInfo`
+all already resolved.
+
+### The functional part
+
+The 3 `AgentManager` address methods were mirrored **byte-for-byte from
+upstream** (not stubbed) — `assignAddress` / `rotateAddress` / `revokeAddress`
++ the private helpers `nextUnusedAgentIndex()` and
+`revokeActiveKeys(forAudience:)`. Every dependency they touch
+(`AgentKey.deriveAddress`, `MasterKey.getPrivateKey`,
+`OsaurusIdentityContext.biometric`, `APIKeyManager.listKeys/revoke`) is live
+on Intel, so per-agent addresses really derive from the master key.
+
+`ServerController.restartServer()` is the only genuine no-op: the Intel
+server (`OsaurusServer` in `AppDelegate`) validates access keys against the
+live `APIKeyManager` per-request, so there's no cached key table to reload
+after an address rotation.
+
+### Click-through verification (Renée, 2026-06-02)
+
+✅ Master Address renders a real OsaurusID
+(`0x39Cfb90b604bE45a4c277E603e0aF4E860a9DEAf`); agent addresses derived for
+all 4 custom agents (Sunny Complete / Text Extractor / Sunny 1k / Lala);
+device section shows device ID; "Backed up in iCloud Keychain" + Active;
+View Recovery Phrase works (biometric); Danger Zone present. All 6 other
+Group A tabs + chat + `/shakespeare` still green.
+
+### 🏆 GROUP A COMPLETE — 7/7
+
+| Tab | Technique | Functional |
+|---|---|---|
+| Themes | un-body-swap + conformers | ✅ fully |
+| Commands | un-body-swap + real SlashCommandStore | ✅ fully |
+| Providers | un-body-swap + real config persistence | ✅ fully |
+| Skills | un-body-swap + real SkillStore | ✅ fully |
+| Configuration | un-body-swap + 27 conformer surfaces (3 waves) | ✅ session-scoped |
+| Agents | the ~6000-LOC beast + real agent persistence | ✅ fully |
+| Identity | un-exclude > stub + real crypto address derivation | ✅ fully functional |
+
+### Up next
+
+Group B (partial restores): Server, Permissions, Storage, Plugins, Tools,
+Watchers. Then the Group C verification pass + Phase 11.D documentation/tag.
+Notably, the sidebar already shows Server / Permissions / Storage as
+clickable (they were never Group C), so they likely have partial
+functionality already — Group B is mostly verification + selective gating of
+amputated sub-sections.
