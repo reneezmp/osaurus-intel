@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 import AppKit
 import OsaurusRepository
 import SwiftUI
@@ -6,7 +5,14 @@ import UniformTypeIdentifiers
 
 // MARK: - Shared Helpers
 
-func agentColorFor(_ name: String) -> Color {
+// `fileprivate` to avoid a module-scope redeclaration clash with the
+// `agentColorFor` in `ChatEmptyState.swift`. Both become visible in the
+// same Intel module once AgentsView is un-body-swapped (M11 Phase
+// 11.A.4); scoping this one to the file keeps them from colliding while
+// preserving identical behavior. Upstream ships it internal, but the
+// clash is Intel-specific (the Intel build compiles a different file
+// set into one module).
+fileprivate func agentColorFor(_ name: String) -> Color {
     let hue = Double(abs(name.hashValue % 360)) / 360.0
     return Color(hue: hue, saturation: 0.6, brightness: 0.8)
 }
@@ -1219,26 +1225,7 @@ struct AgentDetailView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .agentDetailDeeplink)) { note in
-            // Tab + entity deep-link handler. Used by:
-            //   - `NotifyTool` taps (`tab: "views"`, `viewRef: ...`)
-            //   - `SchemaTabView` "Browse" button (`tab: "data"`,
-            //     `tableRef: ...`)
-            // AgentsView selects the right agent via the same
-            // notification; this handler just flips the inner tab
-            // and stashes the entity name for the destination tab to
-            // pick up on first load.
-            guard let info = note.userInfo,
-                let targetId = info["agentId"] as? UUID,
-                targetId == agent.id
-            else { return }
-            if let tabRaw = info["tab"] as? String,
-                let tab = DetailTab(rawValue: tabRaw),
-                DetailTab.allTabsForAgent(currentAgent).contains(tab)
-            {
-                pendingFocusedViewName = info["viewRef"] as? String
-                pendingFocusedTableName = info["tableRef"] as? String
-                selectedTab = .builtIn(tab)
-            }
+            handleAgentDetailDeeplink(note)
         }
         .onChange(of: selectedTab) { _, newValue in
             // Drop any leftover notification-driven focus when the
@@ -1257,38 +1244,66 @@ struct AgentDetailView: View {
             }
         }
         .onReceive(NotificationCenter.default.publisher(for: .toolsListChanged)) { _ in
-            loadedPluginsRefreshNonce &+= 1
-            switch selectedTab {
-            case .plugin(let pid):
-                let stillVisible = PluginManager.shared.plugins.contains {
-                    $0.plugin.id == pid && pluginAppearsInAgentDetailTabs($0)
-                }
-                if !stillVisible {
-                    // After a Retry succeeds, a previously failed plugin
-                    // promotes from `failedPlugins` to `plugins`. We
-                    // intentionally let that flow drop the user back to
-                    // Configure here too, so they SEE the success
-                    // message and aren't sitting on a stale view.
-                    selectedTab = .builtIn(.configure)
-                }
-            case .failedPlugin(let pid):
-                // The plugin loaded successfully on Retry → switch to
-                // its real tab so the user lands on the happy path.
-                if let loaded = PluginManager.shared.plugins.first(where: { $0.plugin.id == pid }),
-                    pluginAppearsInAgentDetailTabs(loaded)
-                {
-                    selectedTab = .plugin(pid)
-                } else if PluginManager.shared.failedPlugins[pid] == nil {
-                    // Plugin no longer present in either bucket
-                    // (uninstalled while the failed tab was open).
-                    selectedTab = .builtIn(.configure)
-                }
-            case .builtIn:
-                break
-            }
+            handleToolsListChanged()
         }
         .onReceive(ModelPickerItemCache.shared.$items) { options in
             pickerItems = options
+        }
+    }
+
+    /// Extracted from the `.onReceive(.agentDetailDeeplink)` closure to
+    /// dodge Swift 6.3's type-checker overflow on the long modifier
+    /// chain (M10.5 lesson #5). Routes a tab + entity deep-link to the
+    /// right inner tab.
+    private func handleAgentDetailDeeplink(_ note: Notification) {
+        guard let info = note.userInfo,
+            let targetId = info["agentId"] as? UUID,
+            targetId == agent.id
+        else { return }
+        if let tabRaw = info["tab"] as? String,
+            let tab = DetailTab(rawValue: tabRaw),
+            DetailTab.allTabsForAgent(currentAgent).contains(tab)
+        {
+            pendingFocusedViewName = info["viewRef"] as? String
+            pendingFocusedTableName = info["tableRef"] as? String
+            selectedTab = .builtIn(tab)
+        }
+    }
+
+    /// Extracted from the `.onReceive(.toolsListChanged)` closure to
+    /// dodge Swift 6.3's "unable to type-check this expression in
+    /// reasonable time" error on the long modifier chain (same remedy
+    /// as M10.5 lesson #5). Re-evaluates which plugin tab should be
+    /// shown after a plugin loads/unloads/promotes-from-failed.
+    private func handleToolsListChanged() {
+        loadedPluginsRefreshNonce &+= 1
+        switch selectedTab {
+        case .plugin(let pid):
+            let stillVisible = PluginManager.shared.plugins.contains {
+                $0.plugin.id == pid && pluginAppearsInAgentDetailTabs($0)
+            }
+            if !stillVisible {
+                // After a Retry succeeds, a previously failed plugin
+                // promotes from `failedPlugins` to `plugins`. We
+                // intentionally let that flow drop the user back to
+                // Configure here too, so they SEE the success
+                // message and aren't sitting on a stale view.
+                selectedTab = .builtIn(.configure)
+            }
+        case .failedPlugin(let pid):
+            // The plugin loaded successfully on Retry → switch to
+            // its real tab so the user lands on the happy path.
+            if let loaded = PluginManager.shared.plugins.first(where: { $0.plugin.id == pid }),
+                pluginAppearsInAgentDetailTabs(loaded)
+            {
+                selectedTab = .plugin(pid)
+            } else if PluginManager.shared.failedPlugins[pid] == nil {
+                // Plugin no longer present in either bucket
+                // (uninstalled while the failed tab was open).
+                selectedTab = .builtIn(.configure)
+            }
+        case .builtIn:
+            break
         }
     }
 
@@ -6056,24 +6071,4 @@ fileprivate struct AgentSecretRow: View {
     #Preview {
         AgentsView()
     }
-#endif
-#else
-import SwiftUI
-
-/// Intel stub: agent management view is body-swapped because the
-/// upstream code reaches into many excluded subsystems (sandbox
-/// autonomous-exec, per-agent MLX runtime settings, voice / TTS
-/// per-agent config, etc.). Init signature mirrors the upstream call
-/// site in `ManagementView.contentView(for:)`.
-struct AgentsView: View {
-    let deeplinkAgentId: UUID?
-
-    init(deeplinkAgentId: UUID? = nil) {
-        self.deeplinkAgentId = deeplinkAgentId
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Agents", symbol: "apple.logo")
-    }
-}
 #endif

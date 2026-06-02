@@ -758,7 +758,28 @@ struct PluginConfigView: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Per-agent plugin configuration is amputated (no plugin
+/// runtime on Intel); renders the placeholder. Init mirrors
+/// AgentDetailView's call site (M11 Phase 11.A.4): the `plugin` ref +
+/// `configSpec` come from the Intel `PluginManager.LoadedPlugin` /
+/// `PluginManifest.ConfigSpec` surfaces.
 struct PluginConfigView: View {
+    let pluginId: String
+    let agentId: UUID
+    let configSpec: PluginManifest.ConfigSpec
+    let plugin: PluginManager.LoadedPlugin.PluginRef
+    init(
+        pluginId: String,
+        agentId: UUID,
+        configSpec: PluginManifest.ConfigSpec,
+        plugin: PluginManager.LoadedPlugin.PluginRef
+    ) {
+        self.pluginId = pluginId
+        self.agentId = agentId
+        self.configSpec = configSpec
+        self.plugin = plugin
+    }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Plugin Config", symbol: "apple.logo")
     }

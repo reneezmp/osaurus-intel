@@ -618,7 +618,13 @@ public struct NextRunPanelView: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. The scheduler "next run" panel is amputated (no
+/// ScheduleManager runtime on Intel); renders the placeholder. Init
+/// mirrors AgentDetailView's call site (M11 Phase 11.A.4).
 struct NextRunPanelView: View {
+    let agentId: UUID
+    init(agentId: UUID) { self.agentId = agentId }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Next Run", symbol: "apple.logo")
     }

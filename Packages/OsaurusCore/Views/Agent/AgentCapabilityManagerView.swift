@@ -878,7 +878,30 @@ struct AgentCapabilityManagerView: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Capability management (per-agent tool/skill selection)
+/// renders the placeholder. Both upstream inits (live + draft) are
+/// mirrored so AgentDetailView's Capabilities tab and the Create-Agent
+/// sheet both type-check (M11 Phase 11.A.4).
 struct AgentCapabilityManagerView: View {
+    private let onDismiss: (() -> Void)?
+
+    /// Live-mode init used by the Capabilities tab.
+    init(agentId: UUID, onDismiss: (() -> Void)?, compact: Bool = false) {
+        self.onDismiss = onDismiss
+    }
+
+    /// Draft-mode init used by the Create Agent sheet.
+    init(
+        draftMode: Binding<ToolSelectionMode>,
+        draftTools: Binding<Set<String>>,
+        draftSkills: Binding<Set<String>>,
+        onDismiss: (() -> Void)?,
+        compact: Bool = false
+    ) {
+        self.onDismiss = onDismiss
+    }
+
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Agent Capabilities", symbol: "apple.logo")
     }

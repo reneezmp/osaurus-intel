@@ -1594,7 +1594,16 @@ public final class PluginManager: ObservableObject {
     public struct FailedPluginInfo: Sendable {
         public let pluginId: String
         public let error: String
+        /// AgentDetailView's failed-plugin tab displays the last known
+        /// manifest name. Always nil on Intel (no manifest cache).
+        public var lastKnownManifest: PluginManifest? { nil }
     }
+
+    /// AgentDetailView refers to failed plugins as `FailedPlugin`.
+    /// Alias to the M9 bucket type so `failedPlugins.values` (a
+    /// `[FailedPluginInfo]`) assigns to `[PluginManager.FailedPlugin]`
+    /// without a copy.
+    public typealias FailedPlugin = FailedPluginInfo
 
     public struct IncompatiblePluginInfo: Identifiable, Sendable {
         public let pluginId: String
@@ -1680,5 +1689,112 @@ public final class PluginManager: ObservableObject {
     }
 
     public func notifyArtifactHandlers(artifact: Any) async {}
+
+    // MARK: - AgentDetailView surface (M11 Phase 11.A.4)
+    //
+    // AgentDetailView renders per-agent plugin tabs and needs a richer
+    // surface than the M9 capability-bucket UI: a `plugins` list whose
+    // elements expose `.plugin.manifest.name/.instructions`, a
+    // `failedPlugins` map whose values expose `.lastKnownManifest`, plus
+    // lookup + quarantine helpers. Plugin RUNTIME is amputated on Intel
+    // (no sandbox execution), so these surfaces are intentionally inert:
+    // `plugins` is empty, lookups return nil, quarantine ops no-op.
+
+    /// A loaded plugin as AgentDetailView expects it: a wrapper exposing
+    /// the manifest + materialized routes/web config. Distinct from
+    /// `LoadedPluginInfo` (the M9 bucket type) — the agent view reads
+    /// `loaded.plugin.manifest.name`, `loaded.routes`, `loaded.webConfig`.
+    public struct LoadedPlugin: Identifiable, Sendable {
+        public struct PluginRef: Sendable {
+            public let id: String
+            public let manifest: PluginManifest
+        }
+        public let plugin: PluginRef
+        public let routes: [PluginManifest.RouteSpec]
+        public let webConfig: PluginManifest.WebConfig?
+        public var id: String { plugin.id }
+    }
+
+    /// Agent-view plugin list. Empty on Intel (runtime amputated).
+    public var plugins: [LoadedPlugin] { [] }
+
+    /// Lookup used by `pluginTabContent(for:)`. Returns nil on Intel.
+    public func loadedPlugin(for pluginId: String) -> LoadedPlugin? { nil }
+
+    /// Load-error lookup for the failed-plugin tab. Nil on Intel.
+    public func loadError(for pluginId: String) -> String? { nil }
+
+    /// Quarantine release. No-op on Intel (nothing is quarantined).
+    nonisolated public static func removeFromQuarantine(_ pluginId: String) {}
+}
+
+/// Plugin manifest surface AgentDetailView reads. The full upstream
+/// manifest lives in the excluded plugin runtime; Intel mirrors only
+/// the fields the agent-detail plugin tabs render (name, instructions,
+/// capability routes/web/config, secrets). Everything is populated as
+/// empty/nil on Intel because no plugins load at runtime.
+public struct PluginManifest: Sendable {
+    public enum RouteAuth: String, Sendable, Equatable {
+        case none
+        case verify
+        case owner
+    }
+
+    public struct RouteSpec: Identifiable, Sendable {
+        public let id: String
+        public let path: String
+        public let methods: [String]
+        public let auth: RouteAuth
+        public let description: String?
+        public init(
+            id: String,
+            path: String,
+            methods: [String],
+            auth: RouteAuth,
+            description: String? = nil
+        ) {
+            self.id = id
+            self.path = path
+            self.methods = methods
+            self.auth = auth
+            self.description = description
+        }
+    }
+
+    public struct WebConfig: Sendable {
+        public init() {}
+    }
+
+    public struct ConfigSpec: Sendable {
+        public init() {}
+    }
+
+    public struct Capabilities: Sendable {
+        public let routes: [RouteSpec]?
+        public let web: WebConfig?
+        public let config: ConfigSpec?
+        public init(routes: [RouteSpec]? = nil, web: WebConfig? = nil, config: ConfigSpec? = nil) {
+            self.routes = routes
+            self.web = web
+            self.config = config
+        }
+    }
+
+    public let name: String?
+    public let instructions: String?
+    public let capabilities: Capabilities
+    public let secrets: [String]?
+
+    public init(
+        name: String? = nil,
+        instructions: String? = nil,
+        capabilities: Capabilities = Capabilities(),
+        secrets: [String]? = nil
+    ) {
+        self.name = name
+        self.instructions = instructions
+        self.capabilities = capabilities
+        self.secrets = secrets
+    }
 }
 #endif

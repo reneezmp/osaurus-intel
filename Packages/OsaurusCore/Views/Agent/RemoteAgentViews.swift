@@ -573,7 +573,32 @@ struct RemoteAgentDetailView: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Remote-agent pairing/relay is amputated; the card
+/// renders the placeholder. Init mirrors the upstream call site in
+/// AgentsView (un-body-swapped in M11 Phase 11.A.4).
 struct RemoteAgentCard: View {
+    let remote: RemoteAgent
+    let animationDelay: Double
+    let hasAppeared: Bool
+    let onSelect: () -> Void
+    let onChat: () -> Void
+    let onRemove: () -> Void
+    init(
+        remote: RemoteAgent,
+        animationDelay: Double,
+        hasAppeared: Bool,
+        onSelect: @escaping () -> Void,
+        onChat: @escaping () -> Void,
+        onRemove: @escaping () -> Void
+    ) {
+        self.remote = remote
+        self.animationDelay = animationDelay
+        self.hasAppeared = hasAppeared
+        self.onSelect = onSelect
+        self.onChat = onChat
+        self.onRemove = onRemove
+    }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Remote Agents", symbol: "apple.logo")
     }

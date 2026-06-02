@@ -579,9 +579,16 @@ struct ShareAgentSheet: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. Agent bundle export/share is amputated; renders the
+/// placeholder. Init mirrors the AgentsView call site (M11 Phase
+/// 11.A.4).
 struct ShareAgentSheet: View {
+    let agent: Agent
+    init(agent: Agent) { self.agent = agent }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Share Agent", symbol: "apple.logo")
+            .frame(minWidth: 480, minHeight: 360)
     }
 }
 #endif

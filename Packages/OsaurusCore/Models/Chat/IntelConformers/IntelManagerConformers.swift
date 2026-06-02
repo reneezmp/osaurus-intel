@@ -49,10 +49,18 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func setActiveAgent(_ id: UUID) { activeAgentId = id }
     func add(_ agent: Any) {}
     func update(_ agent: Any) {}
-    func delete(id: UUID) async -> Any? { nil }
+    func delete(id: UUID) async -> AgentDeleteResult { AgentDeleteResult(deleted: true) }
 
-    func updateDefaultModel(for agentId: UUID, model: String) {
-        if agentId == activeAgentId { defaultModel = model }
+    // Per-agent custom avatar. Avatars are amputated on Intel (no
+    // sandbox-side image processing pipeline), so these are no-ops; the
+    // view's `customAvatarURL` reads stay nil. Surface kept so the
+    // AgentDetailView avatar section (un-body-swapped in M11 Phase
+    // 11.A.4) type-checks.
+    func setCustomAvatar(_ data: Data, ext: String, for agentId: UUID) {}
+    func clearCustomAvatar(for agentId: UUID) {}
+
+    func updateDefaultModel(for agentId: UUID, model: String?) {
+        if agentId == activeAgentId, let model { defaultModel = model }
     }
 
     func effectiveModel(for agentId: UUID) -> String? { defaultModel }
@@ -65,13 +73,19 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode? { nil }
     func effectiveEnabledToolNames(for agentId: UUID) -> [String]? { nil }
     func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? { nil }
-    func effectiveAutonomousExec(for agentId: UUID) -> AgentAutoExecInfo? { AgentAutoExecInfo(enabled: false) }
-    /// Sandbox autonomous-exec write path. Upstream `AgentManager` persists
-    /// the new config to AgentStore + emits agentManagerDidUpdate. Intel has
-    /// no per-agent autonomous-exec because the whole sandbox subsystem is
-    /// amputated, so the write is a no-op. Throwing signature is preserved
-    /// for upstream call-site parity.
-    func updateAutonomousExec(_ config: AgentAutoExecInfo, for agentId: UUID) async throws {}
+    // AgentDetailView's sandbox section reads/writes
+    // `AutonomousExecConfig` (the real type from Models/Agent/Agent.swift,
+    // NOT excluded on Intel) — not the lightweight protocol
+    // `AgentAutoExecInfo`. The protocol overloads below are kept for the
+    // chat-side callers that use them; the view-facing overloads use
+    // `AutonomousExecConfig`. Sandbox is amputated on Intel so both are
+    // effectively inert (return `.default`, write no-ops).
+    /// AgentDetailView's sandbox section reads/writes the real
+    /// `AutonomousExecConfig` (Models/Agent/Agent.swift, NOT excluded),
+    /// so `effectiveAutonomousExec` returns that type here. Sandbox is
+    /// amputated on Intel → always `.default` (disabled), write no-ops.
+    func effectiveAutonomousExec(for agentId: UUID) -> AutonomousExecConfig? { .default }
+    func updateAutonomousExec(_ config: AutonomousExecConfig, for agentId: UUID) async throws {}
     func ttsVoice(for agentId: UUID) -> Any? { nil }
     func themeId(for agentId: UUID) -> UUID? { nil }
 }

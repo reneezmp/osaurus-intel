@@ -2396,7 +2396,13 @@ fileprivate struct DataEmptyState: View {
 }
 #else
 import SwiftUI
+
+/// Intel stub. The agent-database schema browser is amputated (no
+/// per-agent SQLite on Intel); renders the placeholder. Init mirrors
+/// AgentDetailView's call site (M11 Phase 11.A.4).
 struct SchemaTabView: View {
+    let agentId: UUID
+    init(agentId: UUID) { self.agentId = agentId }
     var body: some View {
         AppleSiliconOnlyTab(tabName: "Agent Database", symbol: "apple.logo")
     }

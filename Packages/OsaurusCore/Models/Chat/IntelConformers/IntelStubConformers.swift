@@ -277,6 +277,12 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     func connect(providerId: UUID) async throws {}
     func disconnect(providerId: UUID) {}
     func reconnect(providerId: UUID) async throws {}
+
+    /// AgentDetailView's per-agent model picker calls `findService` to
+    /// resolve a provider's live connection. Cloud streaming on Intel
+    /// goes through `OsaurusServer` + the env-var key, not through a
+    /// per-provider service object, so this returns nil.
+    func findService(forModel model: String) -> Any? { nil }
 }
 
 // MARK: - PluginRepositoryService (Intel stub)
@@ -298,6 +304,11 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
     @Published private(set) var isRefreshing: Bool = false
 
     private init() {}
+
+    /// AgentDetailView offers an "uninstall plugin" affordance. Plugin
+    /// installation is amputated on Intel (the three-bucket M9 UI shows
+    /// compatibility but doesn't install), so uninstall is a no-op.
+    func uninstall(pluginId: String) async {}
 }
 
 /// Intel stub mirroring just the surface `SkillsView` reads off
@@ -387,6 +398,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         objectWillChange.send()
         _policies.removeValue(forKey: toolName)
     }
+
+    /// AgentDetailView lists per-agent dynamic (plugin-registered) tools
+    /// and reads each entry's `.name`. Dynamic tools come from the
+    /// sandbox plugin runtime which is amputated on Intel, so the list
+    /// is always empty.
+    struct DynamicToolRef: Sendable { let name: String }
+    func listDynamicTools() -> [DynamicToolRef] { [] }
 }
 
 // MARK: - MemoryService (disabled on Intel)

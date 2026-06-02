@@ -376,6 +376,7 @@ final class AppConfiguration: ObservableObject, @unchecked Sendable {
 }
 struct AppChatConfigStub: Sendable {
     var generativeGreetingsEnabled = false
+    var greetingPersona = ""
     var disableTools = false
     var maxToolAttempts = 5
     var topPOverride: Double? = nil
@@ -1038,7 +1039,7 @@ final class SessionToolStateStore: @unchecked Sendable {
     func appendLoadedTools(_ key: Any, names: [String], fallbackPreflight: Any?, fallbackAlwaysLoadedNames: Any?) async {}
 }
 
-final class TTSService: @unchecked Sendable {
+final class TTSService: ObservableObject, @unchecked Sendable {
     func toggleSpeak(text: String, messageId: UUID, voiceOverride: Any? = nil) {}
     var playingMessageId: UUID? { nil }
     var activeSpeakCallId: String? { nil }
@@ -1400,6 +1401,13 @@ final class MemoryDatabase: @unchecked Sendable {
     var memoryDisabled: Bool { true }
     func open() throws {}
     func insertTranscriptTurn(agentId: String, conversationId: String, chunkIndex: Int, role: String, content: String, tokenCount: Int, title: String? = nil, createdAt: String? = nil) throws {}
+
+    // AgentDetailView's memory section (un-body-swapped in M11 Phase
+    // 11.A.4) reads pinned facts + episodes and deletes facts. Memory
+    // is amputated on Intel, so these return empty / no-op.
+    func loadPinnedFacts(agentId: String, limit: Int = 200) throws -> [PinnedFact] { [] }
+    func loadEpisodes(agentId: String, limit: Int = 100) throws -> [Episode] { [] }
+    func deletePinnedFact(id: String) {}
 }
 
 // `IdentityView` (un-body-swapped in M11 Phase 11.A.1) reads

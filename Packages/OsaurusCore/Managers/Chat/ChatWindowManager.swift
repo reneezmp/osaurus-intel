@@ -932,6 +932,23 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         return info.id
     }
 
+    /// Overload that opens a window pre-loaded with a stored session.
+    /// Used by AgentDetailView's history rows (un-body-swapped in M11
+    /// Phase 11.A.4) to reopen a past conversation. Mirrors the upstream
+    /// `createWindow(agentId:sessionData:showImmediately:)` signature.
+    @discardableResult
+    func createWindow(
+        agentId: UUID,
+        sessionData: ChatSessionData?,
+        showImmediately: Bool = true
+    ) -> UUID {
+        let id = createWindow(agentId: agentId)
+        if let sessionData, let state = windowStates[id] {
+            state.loadSession(sessionData)
+        }
+        return id
+    }
+
     func windowState(id: UUID) -> ChatWindowState? {
         windowStates[id]
     }
