@@ -1408,7 +1408,10 @@ final class ServerController: ObservableObject, @unchecked Sendable {
     static func signalGenerationStart() {}
     static func signalGenerationEnd() {}
     var configuration: Any? { nil }
-    var port: Int { 1337 }
+    /// The Intel HTTP server binds 1338 in `AppDelegate` (see
+    /// `OsaurusServer.Config(port: 1338)`), so report that — the old
+    /// 1337 was a stale default that made ServerView's URL wrong.
+    var port: Int { 1338 }
     var isRunning: Bool { true }
 
     /// ServerView (un-body-swapped in M11 Phase 11.B.1) reads these for

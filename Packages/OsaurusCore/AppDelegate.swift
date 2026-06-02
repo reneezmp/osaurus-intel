@@ -326,6 +326,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             deeplinkAgentId: deeplinkAgentId
         )
         .environmentObject(updater)
+        // ServerView + IdentityView (Group A/B, M11) declare
+        // `@EnvironmentObject var server: ServerController`. SwiftUI
+        // resolves environment objects lazily, so IdentityView survived
+        // without this (it only touches `server` in a key-rotation
+        // method), but ServerView reads `server.serverHealth` in its
+        // body and crashed the window on open ("No ObservableObject of
+        // type ServerController found"). Inject the shared instance so
+        // both are satisfied.
+        .environmentObject(ServerController.shared)
 
         // Mirror the upstream `WindowManager.createWindow` construction
         // order: build the window with an explicit `contentRect` first,
