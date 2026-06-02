@@ -26,30 +26,113 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         var ttsVoice: String? { nil }
     }
 
-    @Published var activeAgentId: UUID = UUID()
-    @Published var agents: [Agent] = [Agent(id: UUID(), name: "Default", systemPrompt: "", themeId: nil)]
+    @Published var activeAgentId: UUID = Agent.defaultId
+    // Real agent list: the built-in Default first, then any custom
+    // agents persisted as JSON under `OsaurusPaths.agents()`. M11 Phase
+    // 11.A.4 click-through (Renée 2026-06-02) found that creating an
+    // agent didn't surface a card because `add` was a no-op and this
+    // array was a single throwaway. Now backed by real on-disk
+    // persistence (same pattern as SlashCommandStore / SkillStore).
+    @Published var agents: [Agent] = [Agent.default]
+
+    private static let iso: JSONEncoder = {
+        let e = JSONEncoder()
+        e.dateEncodingStrategy = .iso8601
+        e.outputFormatting = [.prettyPrinted, .sortedKeys]
+        return e
+    }()
+    private static let isoDecoder: JSONDecoder = {
+        let d = JSONDecoder()
+        d.dateDecodingStrategy = .iso8601
+        return d
+    }()
+
+    private init() {
+        reload()
+    }
+
+    /// Re-read custom agents from disk and rebuild `agents` (Default
+    /// always pinned first). Triggers the `@Published` so the grid +
+    /// pickers refresh.
+    func reload() {
+        let dir = OsaurusPaths.agents()
+        OsaurusPaths.ensureExistsSilent(dir)
+        var custom: [Agent] = []
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ) {
+            for url in files where url.pathExtension == "json" {
+                if let data = try? Data(contentsOf: url),
+                    let agent = try? Self.isoDecoder.decode(Agent.self, from: data)
+                {
+                    custom.append(agent)
+                }
+            }
+        }
+        custom.sort { $0.createdAt < $1.createdAt }
+        agents = [Agent.default] + custom
+    }
+
+    private func persist(_ agent: Agent) {
+        guard agent.id != Agent.defaultId else { return }  // Default is built-in, never written
+        let dir = OsaurusPaths.agents()
+        OsaurusPaths.ensureExistsSilent(dir)
+        let url = dir.appendingPathComponent("\(agent.id.uuidString).json")
+        if let data = try? Self.iso.encode(agent) {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
 
     func agent(for id: UUID) -> Agent? {
-        Agent(id: id, name: "Agent", systemPrompt: "", themeId: nil)
+        agents.first { $0.id == id }
     }
 
     func agent(byAddress address: String) -> Agent? {
-        nil
+        agents.first { $0.agentAddress == address }
     }
 
     func resolveAgentId(_ identifier: String) -> UUID? {
-        UUID(uuidString: identifier)
+        if let uuid = UUID(uuidString: identifier) { return uuid }
+        return agents.first { $0.name == identifier }?.id
     }
 
-    func agentsList() -> [Agent] {
-        [Agent(id: UUID(), name: "Default")]
-    }
+    func agentsList() -> [Agent] { agents }
 
-    func refresh() {}
+    func refresh() { reload() }
+
     func setActiveAgent(_ id: UUID) { activeAgentId = id }
-    func add(_ agent: Any) {}
-    func update(_ agent: Any) {}
-    func delete(id: UUID) async -> AgentDeleteResult { AgentDeleteResult(deleted: true) }
+
+    func add(_ agent: Agent) {
+        persist(agent)
+        reload()
+    }
+
+    func update(_ agent: Agent) {
+        if agent.id == Agent.defaultId {
+            // The Default agent is built-in and not persisted; reflect
+            // the edit in-memory so the editor's bindings stay live for
+            // the session.
+            if let idx = agents.firstIndex(where: { $0.id == Agent.defaultId }) {
+                agents[idx] = agent
+            }
+            return
+        }
+        persist(agent)
+        reload()
+    }
+
+    func delete(id: UUID) async -> AgentDeleteResult {
+        // The Default agent is mandatory and cannot be deleted (matches
+        // upstream). Return `deleted: false` so the UI keeps the card.
+        guard id != Agent.defaultId else {
+            return AgentDeleteResult(deleted: false)
+        }
+        let url = OsaurusPaths.agents().appendingPathComponent("\(id.uuidString).json")
+        try? FileManager.default.removeItem(at: url)
+        if activeAgentId == id { activeAgentId = Agent.defaultId }
+        reload()
+        return AgentDeleteResult(deleted: true)
+    }
 
     // Per-agent custom avatar. Avatars are amputated on Intel (no
     // sandbox-side image processing pipeline), so these are no-ops; the

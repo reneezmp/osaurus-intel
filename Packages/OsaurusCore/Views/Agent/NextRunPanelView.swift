@@ -619,14 +619,15 @@ public struct NextRunPanelView: View {
 #else
 import SwiftUI
 
-/// Intel stub. The scheduler "next run" panel is amputated (no
-/// ScheduleManager runtime on Intel); renders the placeholder. Init
-/// mirrors AgentDetailView's call site (M11 Phase 11.A.4).
+/// Intel stub. The scheduler "next run" banner sits ABOVE the agent
+/// detail tab bar; rendering the full `AppleSiliconOnlyTab` here
+/// (with its expanding Spacers) swallowed half the detail view on
+/// Intel (Renée's 11.A.4 click-through, 2026-06-02). Since scheduling
+/// is amputated there's never a "next run" to show — render nothing so
+/// the tab bar + tab content sit at the top where they belong.
 struct NextRunPanelView: View {
     let agentId: UUID
     init(agentId: UUID) { self.agentId = agentId }
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Next Run", symbol: "apple.logo")
-    }
+    var body: some View { EmptyView() }
 }
 #endif

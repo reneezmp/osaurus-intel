@@ -239,6 +239,22 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
+        seedConnectedStates()
+    }
+
+    /// Mark every enabled provider as "connected" so the Providers tab
+    /// doesn't show a misleading "Disconnected" badge. On Intel,
+    /// streaming goes through `OsaurusServer` + the env-var
+    /// `DEEPSEEK_API_KEY` rather than a per-provider connection — so a
+    /// configured + enabled provider IS effectively usable, and the
+    /// stock "Disconnected" state confused users during the 11.A.2
+    /// click-through. (Renée 2026-06-01/02.)
+    private func seedConnectedStates() {
+        for provider in configuration.providers where provider.enabled {
+            var state = RemoteProviderState(providerId: provider.id)
+            state.isConnected = true
+            providerStates[provider.id] = state
+        }
     }
 
     func isEphemeral(id: UUID) -> Bool { false }
@@ -251,6 +267,11 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     ) {
         configuration.add(provider)
         RemoteProviderConfigurationStore.save(configuration)
+        if provider.enabled {
+            var state = RemoteProviderState(providerId: provider.id)
+            state.isConnected = true
+            providerStates[provider.id] = state
+        }
     }
 
     func updateProvider(
@@ -271,6 +292,13 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     func setEnabled(_ enabled: Bool, for providerId: UUID) {
         configuration.setEnabled(enabled, for: providerId)
         RemoteProviderConfigurationStore.save(configuration)
+        if enabled {
+            var state = RemoteProviderState(providerId: providerId)
+            state.isConnected = true
+            providerStates[providerId] = state
+        } else {
+            providerStates.removeValue(forKey: providerId)
+        }
     }
 
     // Cloud-routing no-ops kept for compatibility with chat-side callers.
