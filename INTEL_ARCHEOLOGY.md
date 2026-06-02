@@ -1031,3 +1031,68 @@ The two deepest Group B tabs (49 + 64 surfaces). They hit a real dependency chai
 ### M11 status
 
 ✅ 11.0 (Settings window) · ✅ 11.A (Group A 7/7, tagged `m11-group-a-complete`) · 🟢 11.B (Group B 4/6) · ⏳ 11.B.2 (Plugins + Tools) · ⏳ 11.C (Group C verification) · ⏳ 11.D (closure + tag `m11-settings-complete`)
+
+---
+
+## M11 Phase 11.B.2 — Plugins + Tools (CLOSURE) + GROUP B COMPLETE 6/6
+
+**Date:** 2026-06-02
+**Branch:** `intel-fork`
+**Status:** ✅ **COMPLETE** — Group B done.
+
+### The deepest Group B dig
+
+PluginsView (1938 LOC) + ToolsManagerView (1406 LOC) had a real
+dependency chain that justified deferring them from 11.B.1:
+
+`JSONValue` (in excluded `OpenAIAPI.swift`, gated `#if !INTEL`) →
+`SandboxPlugin` model graph → `ToolRegistry.ToolEntry`/`ToolPolicyInfo`
+→ full `PluginState` + `PluginRepositoryService`/`PluginManifest`
+extensions + `SandboxPluginLibrary`/`MCPProviderManager` runtime stubs →
+a long tail of nested types (`RegistryCapabilities.ToolSummary/SkillSummary`,
+`PluginManifest.SecretSpec/DocsSpec/DocLink`, `PluginLoadError`) and
+sub-view stubs (`SandboxPluginEditorView`, `ToolSecretsSheet`).
+
+### Techniques used (all three of the fork's restoration patterns in one tab)
+
+1. **Un-exclude** (clean files): `SandboxPlugin.swift` (+ its nested
+   spec types) and `ToolSecretsKeychain.swift` had 0 amputated refs.
+   One line gated (`SandboxPathSanitizer.validatePluginFiles` → `[]`).
+2. **Mirror** (gated type): `JSONValue` lives in `OpenAIAPI.swift` which
+   is entirely `#if !OSAURUS_INTEL` — so the type is invisible on Intel
+   even though the file isn't in the exclude list. Mirrored the enum +
+   `sendableValue`/`anyValue` byte-for-byte into a conformer. (Same
+   situation as `ExternalPlugin.PluginManifest` — a non-excluded file
+   wholly wrapped in `#if !INTEL`, so its public types don't exist on
+   Intel and our stub `PluginManifest` in `PluginManager.swift`'s `#else`
+   is the only one.)
+3. **Stub** (amputated runtime): `MCPProviderManager`, `SandboxPluginLibrary`,
+   the editor/secret sheets — empty/no-op, rendering AppleSiliconOnly
+   placeholders.
+
+### New audit note
+
+**A file can be absent on Intel two ways:** (a) listed in Package.swift
+`exclude:`, or (b) its entire body wrapped in `#if !OSAURUS_INTEL`
+*inside* a non-excluded file. Pattern (b) bit twice this phase
+(`JSONValue`/`OpenAIAPI.swift`, `PluginManifest`/`ExternalPlugin.swift`):
+`grep -c '"path"' Package.swift` returns 0 (not excluded) yet the type
+is unavailable. When a "cannot find type X" appears for a type whose
+file looks un-excluded, check the file's top for a wrapping `#if !OSAURUS_INTEL`.
+
+### 🏆 GROUP B COMPLETE — 6/6
+
+| Tab | Technique | Notes |
+|---|---|---|
+| Server | un-body-swap + ServerController surface | Overview + API Reference; Settings gated |
+| Permissions | un-exclude SystemPermissionService | fully functional (real TCC) |
+| Storage | un-exclude StorageMigrator/Export/AttachmentBlobStore | fully functional (real SQLCipher) |
+| Watchers | un-body-swap + WatcherManager surface | list + real editor; create no-ops |
+| Plugins | un-exclude SandboxPlugin + mirror JSONValue + conformer extensions | M9 three-bucket UI renders; install amputated |
+| Tools | same foundation + ToolRegistry ToolEntry/ToolPolicyInfo | tool list renders; sandbox tools amputated |
+
+Build: clean rebuild from empty .build → 124.80s, 0 errors.
+
+### M11 status
+
+✅ 11.0 · ✅ 11.A (Group A 7/7, tagged) · ✅ 11.B (Group B 6/6) · ⏳ 11.C (Group C verification — already greyed) · ⏳ 11.D (closure + tag `m11-settings-complete`). **All 19 settings tabs now either restored (13) or gracefully disabled (6 Group C). M11 is one verification pass + a doc/tag away from done.**
