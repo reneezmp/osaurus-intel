@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  IdentityView.swift
 //  osaurus
@@ -1270,11 +1269,3 @@ private struct IdentitySection<Content: View>: View {
         )
     }
 }
-#else
-import SwiftUI
-struct IdentityView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Identity", symbol: "apple.logo")
-    }
-}
-#endif

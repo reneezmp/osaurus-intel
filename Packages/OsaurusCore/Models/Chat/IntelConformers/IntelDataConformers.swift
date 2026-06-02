@@ -1426,6 +1426,14 @@ final class ServerController: ObservableObject, @unchecked Sendable {
     var configuration: Any? { nil }
     var port: Int { 1337 }
     var isRunning: Bool { true }
+
+    /// Called by `IdentityView` after an agent's address rotates/revokes
+    /// so the HTTP server picks up the new key set. On Intel the server
+    /// is `OsaurusServer` (driven from `AppDelegate`), and access-key
+    /// validation reads the live `APIKeyManager` on each request — there's
+    /// no cached key table to reload — so this is a no-op. Async signature
+    /// preserved for the upstream call site `await server.restartServer()`.
+    func restartServer() async {}
 }
 
 extension ChatMessage {

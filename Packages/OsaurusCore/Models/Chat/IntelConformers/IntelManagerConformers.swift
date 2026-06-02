@@ -142,6 +142,94 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func setCustomAvatar(_ data: Data, ext: String, for agentId: UUID) {}
     func clearCustomAvatar(for agentId: UUID) {}
 
+    // MARK: - Cryptographic agent addresses (M11 Phase 11.A.5 — Identity)
+    //
+    // These are REAL implementations mirrored byte-for-byte from the
+    // upstream `AgentManager` (Managers/AgentManager.swift, excluded on
+    // Intel only because it pulled MLX deps elsewhere in the class).
+    // Every crypto dependency — `MasterKey`, `AgentKey.deriveAddress`,
+    // `OsaurusIdentityContext`, `APIKeyManager` — is available on Intel
+    // (only `OsaurusIdentity.swift` itself was excluded, now un-excluded
+    // in 11.A.5). So per-agent address derivation genuinely works on
+    // Intel: this is the M4 ↔ Rosy identity-sync backbone, functional,
+    // not stubbed.
+
+    /// Derive + persist a fresh cryptographic address for an agent from
+    /// the master key. No-op for built-in agents, agents that already
+    /// have an address, or when no master key exists.
+    func assignAddress(to agent: Agent) throws {
+        guard !agent.isBuiltIn, agent.agentAddress == nil else { return }
+        guard MasterKey.exists() else { return }
+
+        let context = OsaurusIdentityContext.biometric()
+        var masterKeyData = try MasterKey.getPrivateKey(context: context)
+        defer { masterKeyData.zeroOut() }
+
+        let nextIndex = nextUnusedAgentIndex()
+        let address = try AgentKey.deriveAddress(masterKey: masterKeyData, index: nextIndex)
+
+        var updated = agent
+        updated.agentIndex = nextIndex
+        updated.agentAddress = address
+        update(updated)
+    }
+
+    /// Rotate an agent's address: fresh unused index, re-derive, persist,
+    /// and revoke every active access key bound to the previous address.
+    func rotateAddress(of agent: Agent) throws {
+        guard !agent.isBuiltIn else { return }
+        guard MasterKey.exists() else { throw OsaurusIdentityError.keychainReadFailed }
+
+        let context = OsaurusIdentityContext.biometric()
+        var masterKeyData = try MasterKey.getPrivateKey(context: context)
+        defer { masterKeyData.zeroOut() }
+
+        let nextIndex = nextUnusedAgentIndex()
+        let newAddress = try AgentKey.deriveAddress(masterKey: masterKeyData, index: nextIndex)
+        let previousAddress = agent.agentAddress
+
+        var updated = agent
+        updated.agentIndex = nextIndex
+        updated.agentAddress = newAddress
+        update(updated)
+
+        if let previousAddress {
+            revokeActiveKeys(forAudience: previousAddress)
+        }
+    }
+
+    /// Clear an agent's cryptographic identity + revoke keys bound to it.
+    /// The agent (prompt/settings) survives; it just loses signing
+    /// authority until `assignAddress(to:)` runs again.
+    func revokeAddress(of agent: Agent) {
+        guard !agent.isBuiltIn else { return }
+        guard agent.agentAddress != nil || agent.agentIndex != nil else { return }
+
+        let previousAddress = agent.agentAddress
+
+        var updated = agent
+        updated.agentIndex = nil
+        updated.agentAddress = nil
+        update(updated)
+
+        if let previousAddress {
+            revokeActiveKeys(forAudience: previousAddress)
+        }
+    }
+
+    private func nextUnusedAgentIndex() -> UInt32 {
+        let used = Set(agents.compactMap(\.agentIndex))
+        var index: UInt32 = 0
+        while used.contains(index) { index += 1 }
+        return index
+    }
+
+    private func revokeActiveKeys(forAudience audience: OsaurusID) {
+        for key in APIKeyManager.shared.listKeys(forAudience: audience) where !key.revoked {
+            APIKeyManager.shared.revoke(id: key.id)
+        }
+    }
+
     func updateDefaultModel(for agentId: UUID, model: String?) {
         if agentId == activeAgentId, let model { defaultModel = model }
     }
