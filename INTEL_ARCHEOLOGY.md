@@ -1096,3 +1096,73 @@ Build: clean rebuild from empty .build → 124.80s, 0 errors.
 ### M11 status
 
 ✅ 11.0 · ✅ 11.A (Group A 7/7, tagged) · ✅ 11.B (Group B 6/6) · ⏳ 11.C (Group C verification — already greyed) · ⏳ 11.D (closure + tag `m11-settings-complete`). **All 19 settings tabs now either restored (13) or gracefully disabled (6 Group C). M11 is one verification pass + a doc/tag away from done.**
+
+---
+
+## M12 — Intel Chat Completeness (PLANNED, scoped 2026-06-02)
+
+M11 restored all 19 settings tabs, but Renée's side-by-side comparison with the
+production Apple Silicon build surfaced three gaps in the **chat experience
+itself** — the actual product, not the settings. None are MLX-blocked.
+
+### Gap 1 — Agent picker in chat (HIGH priority)
+
+The agent pill (top-center selector: "Sunny (Complete)" with a dropdown to
+switch agents + "Manage Agents…") lives in `ChatToolbarDelegate`
+(`Managers/Chat/ChatWindowManager.swift`), which is inside the
+`#if !OSAURUS_INTEL` block. The Intel chat window (the `#else` block, ~line 910)
+is a stripped-down `NSWindow` with just `window.title = "Osaurus (Intel)"` — no
+NSToolbar, no agent pill. **Result: you cannot select an agent in chat.** Agents
+created in the (restored) Agents settings tab can't be used.
+
+Fix options: (a) give the Intel chat window the real NSToolbar + ChatToolbarDelegate
+(agent pill) — bigger, pulls the toolbar item views; (b) add an agent picker chip
+to `FloatingInputCard` next to the existing model picker — smaller, Intel-specific.
+`AgentManager.shared.agents` already has real persistence (M11.A.4.1), so the data
+is ready; this is purely the selection UI + wiring `windowState.agentId`.
+
+### Gap 2 — Folder / working-directory context (MEDIUM, coupled to Gap 3)
+
+`FloatingInputCard` already renders the Folder chip + calls
+`folderContextService.selectFolder()` (`FolderContextService.shared` exists on
+Intel). But the picker likely no-ops because `DirectoryPickerService` +
+`FolderToolManager` are excluded. A working folder for file/shell tools needs zero
+MLX. Check whether `Services/DirectoryPickerService.swift` +
+`Folder/FolderContextService.swift` are clean un-exclude candidates.
+
+### Gap 3 — Runtime tools (LARGE, the capability win)
+
+Production shows ~152 tools (file_edit, file_read, file_search, file_tree,
+file_write, shell_run, sandbox_*, plugin tools). On Intel `ToolRegistry` is an
+empty stub — `listTools()` returns `[]`. The REAL `Tools/ToolRegistry.swift` is
+excluded but **clean** (imports only Foundation + Combine, 0 MLX refs). BUT it
+registers ~40 tool types in `registerBuiltInTools()`, many genuinely amputated:
+the 20+ `DB*Tool` (agent-database) tools, sandbox tools, capability tools. The
+**Foundation/Process-based file + shell tools** (`file_read`, `file_edit`,
+`file_write`, `file_search`, `file_tree`, `shell_run`) live in
+`Tools/FolderToolManager.swift` (excluded) and are the un-MLX subset worth
+restoring.
+
+Strategy: un-exclude `ToolRegistry.swift` + `FolderToolManager.swift` (+ whatever
+clean tool files they need), and **selectively gate the amputated tool
+registrations** (`#if !OSAURUS_INTEL` around the DB/sandbox/capability tool
+registers) so the file/shell suite registers on Intel while the rest stays off.
+This makes the Intel agent loop actually able to read/write/search files + run
+shell commands in the folder context (Gap 2). Tools 2+3 land together.
+
+### Suggested M12 order
+
+1. **Gap 1 (agent picker)** — independent, highest user-visible value, unblocks
+   "use the agents you created."
+2. **Gap 3 (runtime tools)** — un-exclude ToolRegistry + FolderToolManager,
+   selectively gate. The capability win.
+3. **Gap 2 (folder context)** — falls out of Gap 3; wire DirectoryPickerService so
+   the Folder chip picks a real working dir for the restored tools.
+
+### State at M12 scoping
+
+M11 complete through Group B (6/6). Branch `intel-fork`, working tree clean.
+Latest commits: cb6c4670 (Plugins+Tools), 57208c08 (doc). Tags:
+`m11-group-a-complete`. M11.C (Group C visual verification) + M11.D
+(closure + tag `m11-settings-complete`) still pending — small, can fold into
+M12 or do first.
