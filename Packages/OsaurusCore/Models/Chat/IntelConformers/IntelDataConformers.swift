@@ -7,6 +7,7 @@
 
 #if OSAURUS_INTEL
 
+import Combine
 import Foundation
 import SwiftUI
 
@@ -1008,18 +1009,40 @@ final class ContextBudgetManager: @unchecked Sendable {
     static func estimateTokens(for item: Any?) -> Int { 0 }
 }
 
-struct ToolEnvelope: Sendable {
+// M12 Gap 3: the real `ToolEnvelope` (Tools/ToolEnvelope.swift) + the legacy
+// `ToolErrorEnvelope` (Tools/ToolErrorEnvelope.swift) are un-excluded so the
+// restored file/shell tools return their real structured result/error JSON.
+// The hollow mirror that used to live here is therefore removed.
+
+// M12 Gap 3: `shell_run` (FolderTools.swift) broadcasts its live output to the
+// chat terminal viewer through a `LiveExecSink`. The real sink
+// (Services/Sandbox/LiveExecSink.swift) implements `Containerization.Writer`
+// and is therefore amputated on Intel. `LiveExecRegistry` itself is clean
+// (Combine + Foundation, NOT excluded), so we keep the registration path live
+// and only stub the sink: the command still runs and its output is collected
+// for the model via `ShellRunOutputCollector` — only the optional live
+// mid-run UI streaming is inert (the chat shows the final result instead).
+final class LiveExecSink: @unchecked Sendable {
+    enum TerminationReason: Sendable, Equatable { case none, user }
     init() {}
-    static func isError(_ result: String) -> Bool { false }
-    static func fromError(_ error: Error, tool: String? = nil) -> String { "{\"ok\":false}" }
-    static func success(tool: String? = nil, text: String, warnings: [String]? = nil) -> String { "{\"ok\":true,\"result\":{\"text\":\"\(text)\"}}" }
-    static func success(tool: String? = nil, result: Any? = nil, warnings: [String]? = nil) -> String { "{\"ok\":true}" }
-    static func successPayload(_ result: String) -> Any? { nil }
-    static func failure(kind: Kind, message: String, field: String? = nil, expected: String? = nil, tool: String? = nil, retryable: Bool = false, metadata: [String: Any]? = nil) -> String {
-        "{\"ok\":false,\"kind\":\"\(kind.rawValue)\",\"message\":\"\(message)\"}"
+    var terminationReason: TerminationReason { .none }
+    var outputPublisher: AnyPublisher<Data, Never> { Empty().eraseToAnyPublisher() }
+    var statusPublisher: AnyPublisher<LiveExecRegistry.LiveExecStatus, Never> {
+        Empty().eraseToAnyPublisher()
     }
-    enum Kind: String, Sendable { case success, failure, invalidArgs, executionError, rejected, timeout, toolNotFound, unavailable, userDenied }
+    var currentStatus: LiveExecRegistry.LiveExecStatus { .running }
+    func bufferedSnapshot() async -> Data { Data() }
+    func write(_ data: Data) throws {}
+    func markExited(code: Int32) {}
+    func requestTerminate() {}
+    func close() throws {}
 }
+
+// M12 Gap 3: the real `diagnosticWarnings` lives in the excluded
+// `Tools/BuiltinSandboxTools.swift`. `shell_run` calls it to flag suspicious
+// empty output; on Intel we return no warnings (the command result itself is
+// unaffected).
+func diagnosticWarnings(command: String, exitCode: Int32, stdout: String, stderr: String) -> [String] { [] }
 
 final class SessionToolStateStore: @unchecked Sendable {
     static let shared = SessionToolStateStore()
@@ -1229,13 +1252,32 @@ final class SystemPromptComposer: @unchecked Sendable {
 }
 
 struct PromptManifest: Sendable { init() {} }
-struct IntelTool: Codable, Sendable {
-    struct ToolFunction: Codable, Sendable {
-        let name: String
-        let description: String?
+
+// M12 Gap 3: OpenAI-compatible tool spec carried in `ChatCompletionRequest.tools`.
+// `OsaurusTool.asOpenAITool()` builds
+// `Tool(type:, function: ToolFunction(name:description:parameters:))`, so the
+// function MUST carry a JSON-Schema `parameters` object — that's what the model
+// reads to call the tool with the right argument shape. The earlier mirror
+// dropped `parameters` (and split into two incompatible `ToolFunction` types),
+// which would have shipped schema-less tools the model couldn't invoke.
+struct ToolFunction: Codable, Sendable {
+    let name: String
+    let description: String?
+    let parameters: JSONValue?
+    init(name: String, description: String? = nil, parameters: JSONValue? = nil) {
+        self.name = name
+        self.description = description
+        self.parameters = parameters
     }
+}
+
+struct IntelTool: Codable, Sendable {
+    let type: String
     let function: ToolFunction
-    var type: String { "function" }
+    init(type: String = "function", function: ToolFunction) {
+        self.type = type
+        self.function = function
+    }
 }
 
 typealias Tool = IntelTool
@@ -1244,11 +1286,6 @@ enum ToolChoiceOption: Codable, Sendable {
     case auto
     case none
     case function(String)
-}
-
-struct ToolFunction: Codable, Sendable {
-    let name: String
-    let description: String?
 }
 
 struct ComposedContext: @unchecked Sendable {
