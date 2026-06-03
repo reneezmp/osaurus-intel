@@ -1105,7 +1105,7 @@ M11 restored all 19 settings tabs, but Renée's side-by-side comparison with the
 production Apple Silicon build surfaced three gaps in the **chat experience
 itself** — the actual product, not the settings. None are MLX-blocked.
 
-### Gap 1 — Agent picker in chat (HIGH priority)
+### Gap 1 — Agent picker in chat (HIGH priority) — ✅ DONE 2026-06-03 (commit `bfdbf63e`)
 
 The agent pill (top-center selector: "Sunny (Complete)" with a dropdown to
 switch agents + "Manage Agents…") lives in `ChatToolbarDelegate`
@@ -1166,3 +1166,95 @@ Latest commits: cb6c4670 (Plugins+Tools), 57208c08 (doc). Tags:
 `m11-group-a-complete`. M11.C (Group C visual verification) + M11.D
 (closure + tag `m11-settings-complete`) still pending — small, can fold into
 M12 or do first.
+
+---
+
+## M12 Gap 1 — Agent Picker (CLOSURE, 2026-06-03, commit `bfdbf63e`)
+
+Renée chose **PATH C — the faithful top toolbar pill** (matching the Apple
+Silicon screenshot) over the lighter input-card chip. Delivered in one commit
+after three click-through rounds.
+
+### What shipped
+
+**UI — faithful unified toolbar (centered agent pill):**
+
+- **`Views/Common/SharedHeaderComponents.swift` — un-body-swapped.** Removed the
+  outer `#if !OSAURUS_INTEL … #else AppleSiliconOnlyTab … #endif` so the upstream
+  `AgentPill` (+ `HeaderActionButton` / `SettingsButton` / `CloseButton` /
+  `PinButton` / `PopoverRow`) compiles natively on Intel. Added a **local
+  `fileprivate agentColorFor`** (the M11.A.4 pattern — the two existing copies in
+  `AgentsView.swift` / `ChatEmptyState.swift` are `fileprivate`, invisible to
+  other files). Extended the Intel `DiscoveredAgent` stub with `agentDescription`
+  (the only surface gap the build surfaced).
+- **`ChatWindowManager.swift` (Intel `#else`) — toolbar attached.** `createWindow`
+  now ties the window to the **real active agent** (`AgentManager.shared.activeAgentId`)
+  instead of a throwaway `UUID()`, switches the style mask to
+  `.fullSizeContentView` + transparent titlebar, and attaches a unified
+  `NSToolbar`. New **`IntelChatToolbarDelegate`** (+ `IntelToolbar{Sidebar,Agent,Action}View`)
+  mirrors the AS `ChatToolbarDelegate` layout — sidebar toggle (leading), centered
+  `AgentPill`, settings/new-chat (trailing) — **without** dragging in the heavy
+  AS `createChatPanel` / `windowWillClose` path (BackgroundTaskManager /
+  ModelRuntime / ServerConfigurationStore are amputated). Delegate retained
+  per-window in `toolbarDelegates` (NSToolbar holds its delegate weakly).
+- **`ChatWindowState.swift` (Intel `#else`) — agent data wired.** `agents` now
+  seeds from `AgentManager` and **live-observes `$agents`** (Combine cancellable)
+  so creates/deletes/renames in Settings → Agents reflect in the pill without a
+  relaunch. Added faithful **`switchAgent(to:)`** (stop TTS → save turns → repoint
+  agentId/theme/caches → `session.reset(for:)` → refresh). `cleanup()` cancels the
+  cancellable. Second init now seeds `agentId` from the active agent too. Added a
+  `TTSService.stop()` no-op to the Intel audio stub.
+
+**Behavior — selecting an agent actually drives the chat** (the bug Renée caught
+post-UI: the pill switched identity but conversations were unaffected):
+
+- **`AgentManager.effective{SystemPrompt,Model,Temperature,MaxTokens}`
+  (`IntelManagerConformers.swift`)** were hollow stubs (`""` / `nil` / ignored the
+  agent). Now **mirror upstream** (`Managers/AgentManager.swift`, excluded): custom
+  agents use their own `Agent` fields; the Default agent (and any unknown id) defers
+  to the global `ChatConfiguration` persisted by Settings → Configuration
+  (`ChatConfigurationStore`). New `resolvedAgent(_:)` helper encodes the
+  "custom-vs-Default" branch.
+- **`SystemPromptComposer.composeChatContext` (Intel stub,
+  `IntelDataConformers.swift`)** returned an **empty `ComposedContext()`** → the
+  send path's `var sys = context.prompt` was always `""`. Now returns the agent's
+  **effective system prompt** (`await MainActor.run { … }`). The full preflight /
+  memory / tool-resolution pipeline stays amputated; only the one thing that
+  matters here — the persona — is honored. (`composePreviewContext` deliberately
+  left as the empty stub: it only feeds the cosmetic context-budget popover and is
+  also called from the test target where main-actor isolation isn't guaranteed, so
+  `MainActor.assumeIsolated` would be a crash risk.)
+- **`ChatSessionsManager.sessions(for:)` (Intel stub)** ignored `agentId` and
+  returned every session. Now **filters by agent like upstream**: Default (or `nil`)
+  is the see-all lens; a custom agent returns only its own chats. This fixed the
+  sidebar showing a zoo of every agent's history while a custom agent was active.
+
+### Click-through results (Renée)
+
+- ✅ Centered pill shows the active agent (avatar + name), dropdown lists all
+  agents with a ✓ on the current one, gear + "Manage Agents…" open Settings → Agents.
+- ✅ Selecting a custom agent applies its **system prompt** — test agent "Uga Buga"
+  ("You strong caveman") replied *"Ugh! Me strong caveman! What you want?"* 🦖
+- ✅ Sidebar scopes to the active agent (custom = its chats; Default = all).
+- ✅ Live update: agents created in Settings appear in the pill without relaunch.
+
+### Lessons / notes
+
+- **Two filter layers in the chat sidebar, often conflated:** the **agent scope**
+  (`sessions(for: agentId)`, applied *upstream* of the sidebar) vs the **All/Chat
+  toggle** (a `SessionSource` *type* filter applied *inside* the sidebar). On Intel
+  every session is `.chat` (plugins/schedules/watchers amputated), so the All/Chat
+  toggle is near-cosmetic; the agent scope is the meaningful one.
+- **Orphaned old sessions:** chats created *before* this commit were tagged with the
+  old throwaway `agentId`, so they only surface under Default's see-all lens — not a
+  regression. A one-time re-tag-to-Default migration is possible but optional.
+- **Faithful-but-scoped wins again:** the AS toolbar *machinery* (delegate + item
+  views) was separable from the amputated AS *window-lifecycle* path. Mirroring just
+  the delegate into the Intel block (rather than un-body-swapping the whole AS
+  `createWindow`) kept the cascade to zero AS-code changes and ~3 surface gaps.
+
+### Remaining M12
+
+- **Gap 3 (runtime tools)** — next. Un-exclude `ToolRegistry` + `FolderToolManager`,
+  selectively gate the amputated `DB*Tool` / sandbox / capability registrations.
+- **Gap 2 (folder context)** — falls out of Gap 3; wire `DirectoryPickerService`.
