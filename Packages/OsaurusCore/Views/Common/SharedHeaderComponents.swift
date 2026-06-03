@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  SharedHeaderComponents.swift
 //  osaurus
@@ -6,8 +5,23 @@
 //  Shared header components used by chat windows.
 //  Ensures consistent styling and behavior across modes.
 //
+//  M12 Gap 1 (agent picker): un-body-swapped for Intel so the chat
+//  toolbar's centered `AgentPill` compiles natively. Every dependency
+//  (`AgentAvatarView`, `DiscoveredAgent`, `PairedRelayAgent`,
+//  `showManagementWindow(initialTab:deeplinkAgentId:)`) is Intel-ready.
+//
 
 import SwiftUI
+
+// `fileprivate` to avoid a module-scope redeclaration clash with the
+// `agentColorFor` copies in `AgentsView.swift` and `ChatEmptyState.swift`
+// (both also `fileprivate` for the same reason — see the comment in
+// AgentsView). Identical behavior, scoped per file so the Intel build,
+// which compiles all three into one module, doesn't collide.
+fileprivate func agentColorFor(_ name: String) -> Color {
+    let hue = Double(abs(name.hashValue % 360)) / 360.0
+    return Color(hue: hue, saturation: 0.6, brightness: 0.8)
+}
 
 // MARK: - Header Action Button
 
@@ -505,11 +519,3 @@ private struct PopoverRow<Content: View>: View {
         }
     }
 }
-#else
-import SwiftUI
-struct HeaderActionButton: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Shared Headers", symbol: "apple.logo")
-    }
-}
-#endif

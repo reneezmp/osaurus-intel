@@ -503,6 +503,7 @@ final class ChatWindowState: ObservableObject {
 #else
 // Intel fork: ChatWindowState stub matching original properties
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
@@ -542,6 +543,13 @@ final class ChatWindowState: ObservableObject {
     /// `ChatWindowState.observeAppConfigurationChanges()` (excluded on Intel).
     private var themeObserver: NSObjectProtocol?
 
+    /// M12 Gap 1 (agent picker): keeps `agents` mirrored to
+    /// `AgentManager.shared.$agents` so the toolbar's `AgentPill` dropdown
+    /// always reflects creates/deletes/renames made in Settings → Agents.
+    /// Mirrors the upstream `agentsCancellable` (the AS `ChatWindowState`
+    /// subscribes the same way; that path is excluded on Intel).
+    private var agentsCancellable: AnyCancellable?
+
     var activeAgent: Agent { cachedActiveAgent }
     var themeId: UUID? { nil }
 
@@ -557,15 +565,54 @@ final class ChatWindowState: ObservableObject {
             self?.refreshSessions()
         }
         observeThemeChanges()
+        observeAgents()
     }
 
     init(windowId: UUID, executionContext: Any? = nil) {
         self.windowId = windowId
-        self.agentId = UUID()
+        self.agentId = AgentManager.shared.activeAgentId
         self.session = ChatSession()
         self.theme = ThemeManager.shared.currentTheme
         self.filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
+        self.session.agentId = agentId
         observeThemeChanges()
+        observeAgents()
+    }
+
+    /// Seed `agents` from `AgentManager` and stay subscribed to its
+    /// `@Published` list. Also refreshes the per-agent caches the chat
+    /// header reads (`cachedActiveAgent`, `cachedAgentDisplayName`,
+    /// `cachedSystemPrompt`).
+    private func observeAgents() {
+        refreshAgents()
+        agentsCancellable = AgentManager.shared.$agents
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshAgents() }
+    }
+
+    /// Mirror the live agent list + recompute the active-agent caches.
+    private func refreshAgents() {
+        agents = AgentManager.shared.agents
+        cachedActiveAgent = agents.first { $0.id == agentId } ?? .default
+        cachedAgentDisplayName =
+            cachedActiveAgent.name.isEmpty ? "Assistant" : cachedActiveAgent.name
+        cachedSystemPrompt = AgentManager.shared.effectiveSystemPrompt(for: agentId)
+    }
+
+    /// Switch the window's active agent and start a fresh chat for it.
+    /// Mirrors the upstream `switchAgent(to:)` (AS path, excluded on Intel):
+    /// stop any speech, persist the current turns, repoint every per-agent
+    /// piece of window state, then reset the session under the new agent.
+    func switchAgent(to newAgentId: UUID) {
+        guard newAgentId != agentId else { return }
+        TTSService.shared.stop()
+        if !session.turns.isEmpty { session.save() }
+        agentId = newAgentId
+        AgentManager.shared.setActiveAgent(newAgentId)
+        refreshAgents()
+        refreshTheme()
+        session.reset(for: newAgentId)
+        refreshSessions()
     }
 
     /// Subscribe to `.globalThemeChanged` so theme picks in Settings
@@ -605,6 +652,8 @@ final class ChatWindowState: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
             themeObserver = nil
         }
+        agentsCancellable?.cancel()
+        agentsCancellable = nil
     }
     func startNewChat() {
         session.reset()

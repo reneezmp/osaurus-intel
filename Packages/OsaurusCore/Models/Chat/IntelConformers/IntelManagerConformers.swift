@@ -234,10 +234,48 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         if agentId == activeAgentId, let model { defaultModel = model }
     }
 
-    func effectiveModel(for agentId: UUID) -> String? { defaultModel }
-    func effectiveTemperature(for agentId: UUID) -> Double? { nil }
-    func effectiveMaxTokens(for agentId: UUID) -> Int? { nil }
-    func effectiveSystemPrompt(for agentId: UUID) -> String { "" }
+    // M12 Gap 1 follow-up (Renée 2026-06-03 click-through): the agent pill
+    // switched `agentId` correctly, but selecting an agent didn't change the
+    // conversation because every `effective*` method below was a hollow stub
+    // (system prompt `""`, temperature `nil`, model ignored the agent). They
+    // now mirror the real `AgentManager` (Managers/AgentManager.swift,
+    // excluded on Intel): custom agents use their own fields; the Default
+    // agent — and any unknown id — defers to the global `ChatConfiguration`
+    // the Settings → Configuration tab persists via `ChatConfigurationStore`.
+    private func resolvedAgent(_ agentId: UUID) -> Agent? {
+        guard let agent = agents.first(where: { $0.id == agentId }),
+            agent.id != Agent.defaultId
+        else { return nil }
+        return agent
+    }
+
+    func effectiveModel(for agentId: UUID) -> String? {
+        if let agent = resolvedAgent(agentId), let model = agent.defaultModel, !model.isEmpty {
+            return model
+        }
+        return ChatConfigurationStore.load().defaultModel ?? defaultModel
+    }
+
+    func effectiveTemperature(for agentId: UUID) -> Double? {
+        if let agent = resolvedAgent(agentId) {
+            return agent.temperature.map { Double($0) }
+        }
+        return ChatConfigurationStore.load().temperature.map { Double($0) }
+    }
+
+    func effectiveMaxTokens(for agentId: UUID) -> Int? {
+        if let agent = resolvedAgent(agentId) {
+            return agent.maxTokens
+        }
+        return ChatConfigurationStore.load().maxTokens
+    }
+
+    func effectiveSystemPrompt(for agentId: UUID) -> String {
+        if let agent = resolvedAgent(agentId) {
+            return agent.systemPrompt
+        }
+        return ChatConfigurationStore.load().systemPrompt
+    }
     func effectiveToolsDisabled(for agentId: UUID) -> Bool { false }
     func effectiveDBEnabled(for agentId: UUID) -> Bool { false }
     func effectiveMemoryDisabled(for agentId: UUID) -> Bool { true }
@@ -397,8 +435,19 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         return id
     }
 
+    /// Sessions filtered by agent, newest first. Mirrors the real
+    /// `ChatSessionsManager` (Managers/ChatSessionsManager.swift, excluded
+    /// on Intel): the Default agent (or `nil`) is the see-all lens and
+    /// returns every session; a custom agent returns only its own chats.
+    /// M12 Gap 1 follow-up (Renée 2026-06-03): the prior stub ignored
+    /// `agentId`, so the sidebar showed every agent's history even when a
+    /// custom agent like "Uga Buga" was active in the toolbar pill.
     func sessions(for agentId: UUID?) -> [ChatSessionData] {
-        Array(sessions.values).sorted { $0.updatedAt > $1.updatedAt }
+        let all = Array(sessions.values).sorted { $0.updatedAt > $1.updatedAt }
+        if agentId == nil || agentId == Agent.defaultId {
+            return all
+        }
+        return all.filter { $0.agentId == agentId }
     }
     func session(for id: UUID) -> ChatSessionData? { sessions[id] }
 }

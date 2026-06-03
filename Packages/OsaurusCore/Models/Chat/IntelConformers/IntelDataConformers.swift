@@ -956,6 +956,7 @@ struct DiscoveredAgent: Identifiable, Sendable {
     var providerId: UUID? { nil }
     var displayName: String { "" }
     var name: String { "" }
+    var agentDescription: String { "" }
     var host: String? { nil }
     var port: Int? { nil }
     var address: String? { nil }
@@ -1032,6 +1033,7 @@ final class SessionToolStateStore: @unchecked Sendable {
 
 final class TTSService: ObservableObject, @unchecked Sendable {
     func toggleSpeak(text: String, messageId: UUID, voiceOverride: Any? = nil) {}
+    func stop() {}
     var playingMessageId: UUID? { nil }
     var activeSpeakCallId: String? { nil }
     static let shared = TTSService()
@@ -1210,7 +1212,19 @@ enum StreamingReasoningHint: Sendable {
 final class SystemPromptComposer: @unchecked Sendable {
     static let shared = SystemPromptComposer()
     static func composePreviewContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil) -> ComposedContext { ComposedContext() }
-    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext { ComposedContext() }
+    // M12 Gap 1 follow-up: the real `SystemPromptComposer` is excluded on
+    // Intel (it pulls in preflight / memory / tool-resolution machinery that
+    // depends on amputated subsystems). Returning an empty `ComposedContext`
+    // meant `context.prompt` was always "" — so the chat ignored the selected
+    // agent entirely (Renée 2026-06-03). We can't run the full pipeline, but
+    // we CAN honor the one thing that matters here: the agent's effective
+    // system prompt (custom prompt for custom agents, global config prompt
+    // for Default). Memory/tools stay inert, matching the amputated build.
+    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext {
+        let id = (agentId as? UUID) ?? Agent.defaultId
+        let prompt = await MainActor.run { AgentManager.shared.effectiveSystemPrompt(for: id) }
+        return ComposedContext(prompt: prompt)
+    }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
 }
 

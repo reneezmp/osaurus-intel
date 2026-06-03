@@ -906,22 +906,47 @@ public final class ChatWindowManager: NSObject, ObservableObject {
 
     private var nsWindows: [UUID: NSWindow] = [:]
     private var windowStates: [UUID: ChatWindowState] = [:]
+    /// M12 Gap 1: retains each window's toolbar delegate (NSToolbar holds
+    /// its delegate weakly, so without this the centered agent pill would
+    /// vanish the moment `createWindow` returns).
+    private var toolbarDelegates: [UUID: IntelChatToolbarDelegate] = [:]
 
-    public func createWindow(agentId: UUID = UUID()) -> UUID {
-        let info = ChatWindowInfo(agentId: agentId)
+    public func createWindow(agentId: UUID? = nil) -> UUID {
+        // M12 Gap 1: default to the user's active agent instead of a
+        // throwaway UUID, so a freshly opened window is tied to a real
+        // agent (Default unless overridden) and the toolbar pill shows it.
+        let resolvedAgentId = agentId ?? AgentManager.shared.activeAgentId
+        let info = ChatWindowInfo(agentId: resolvedAgentId)
         windows[info.id] = info
         lastFocusedWindowId = info.id
 
-        let state = ChatWindowState(windowId: info.id)
+        let state = ChatWindowState(windowId: info.id, agentId: resolvedAgentId)
         windowStates[info.id] = state
 
         let window = NSWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
         window.title = "Osaurus (Intel)"
+        // Unified toolbar look that matches the Apple Silicon chat window:
+        // transparent titlebar + full-size content so the SwiftUI ChatView
+        // flows under the toolbar that hosts the centered agent pill.
+        window.titleVisibility = .hidden
+        window.titlebarAppearsTransparent = true
+        window.appearance = NSAppearance(named: state.theme.isDark ? .darkAqua : .aqua)
+
+        let toolbar = NSToolbar(identifier: "IntelChatToolbar")
+        toolbar.allowsUserCustomization = false
+        toolbar.autosavesConfiguration = false
+        toolbar.centeredItemIdentifier = IntelChatToolbarDelegate.agentItem
+        let toolbarDelegate = IntelChatToolbarDelegate(windowState: state)
+        toolbar.delegate = toolbarDelegate
+        toolbarDelegates[info.id] = toolbarDelegate
+        window.toolbar = toolbar
+        window.toolbarStyle = .unified
+
         let chatView = ChatView(windowState: state)
         window.contentView = NSHostingView(rootView: chatView)
         window.isReleasedWhenClosed = true
@@ -977,7 +1002,9 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         windows.removeValue(forKey: id)
         nsWindows[id]?.close()
         nsWindows.removeValue(forKey: id)
+        windowStates[id]?.cleanup()
         windowStates.removeValue(forKey: id)
+        toolbarDelegates.removeValue(forKey: id)
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
@@ -1000,9 +1027,142 @@ public final class ChatWindowManager: NSObject, ObservableObject {
     public func setWindowPinned(id: UUID, pinned: Bool) {}
 
     public func stopAllSessions() {
+        windowStates.values.forEach { $0.cleanup() }
         windows.removeAll()
         nsWindows.removeAll()
         windowStates.removeAll()
+        toolbarDelegates.removeAll()
+    }
+}
+
+// MARK: - Intel Chat Toolbar (M12 Gap 1 — agent picker)
+
+/// Hosts the centered agent pill (plus a leading sidebar toggle and a
+/// trailing settings/new-chat action) in the Intel chat window's unified
+/// toolbar. Mirrors the Apple Silicon `ChatToolbarDelegate` layout, scoped
+/// to the Intel build because the AS delegate lives inside this file's
+/// `#if !OSAURUS_INTEL` branch alongside the amputated window-lifecycle
+/// machinery (BackgroundTaskManager / ModelRuntime / ServerConfigurationStore).
+@MainActor
+final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
+    static let sidebarItem = NSToolbarItem.Identifier("IntelChatToolbar.sidebar")
+    static let agentItem = NSToolbarItem.Identifier("IntelChatToolbar.agent")
+    static let actionItem = NSToolbarItem.Identifier("IntelChatToolbar.action")
+
+    private static let ids: [NSToolbarItem.Identifier] = [
+        sidebarItem, .flexibleSpace, agentItem, .flexibleSpace, actionItem,
+    ]
+
+    private weak var windowState: ChatWindowState?
+
+    init(windowState: ChatWindowState) {
+        self.windowState = windowState
+        super.init()
+    }
+
+    func toolbarAllowedItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.ids
+    }
+
+    func toolbarDefaultItemIdentifiers(_ toolbar: NSToolbar) -> [NSToolbarItem.Identifier] {
+        Self.ids
+    }
+
+    func toolbar(
+        _ toolbar: NSToolbar,
+        itemForItemIdentifier itemIdentifier: NSToolbarItem.Identifier,
+        willBeInsertedIntoToolbar flag: Bool
+    ) -> NSToolbarItem? {
+        guard let windowState else { return nil }
+        switch itemIdentifier {
+        case Self.sidebarItem:
+            return host(itemIdentifier, IntelToolbarSidebarView(windowState: windowState))
+        case Self.agentItem:
+            return host(itemIdentifier, IntelToolbarAgentView(windowState: windowState))
+        case Self.actionItem:
+            return host(
+                itemIdentifier,
+                IntelToolbarActionView(windowState: windowState, session: windowState.session)
+            )
+        default:
+            return nil
+        }
+    }
+
+    private func host<Content: View>(
+        _ identifier: NSToolbarItem.Identifier,
+        _ rootView: Content
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        let hosting = NSHostingView(rootView: rootView)
+        hosting.frame = NSRect(origin: .zero, size: hosting.fittingSize)
+        item.view = hosting
+        item.isBordered = false
+        return item
+    }
+}
+
+// MARK: - Intel Toolbar Item Views
+
+private struct IntelToolbarSidebarView: View {
+    @ObservedObject var windowState: ChatWindowState
+
+    var body: some View {
+        HeaderActionButton(
+            icon: "sidebar.left",
+            help: windowState.showSidebar ? "Hide sidebar" : "Show sidebar",
+            action: {
+                withAnimation(.easeOut(duration: 0.2)) {
+                    windowState.showSidebar.toggle()
+                }
+            }
+        )
+        .environment(\.theme, windowState.theme)
+    }
+}
+
+/// Centered agent selector — the headline of M12 Gap 1. Reuses the
+/// upstream `AgentPill` (un-body-swapped for Intel in this same commit).
+private struct IntelToolbarAgentView: View {
+    @ObservedObject var windowState: ChatWindowState
+
+    var body: some View {
+        AgentPill(
+            agents: windowState.agents,
+            activeAgentId: windowState.agentId,
+            onSelectAgent: { windowState.switchAgent(to: $0) },
+            onOpenActiveAgentSettings: {
+                let active = windowState.agents.first { $0.id == windowState.agentId }
+                let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
+                AppDelegate.shared?.showManagementWindow(
+                    initialTab: .agents,
+                    deeplinkAgentId: deeplinkId
+                )
+            }
+        )
+        .environment(\.theme, windowState.theme)
+    }
+}
+
+private struct IntelToolbarActionView: View {
+    @ObservedObject var windowState: ChatWindowState
+    @ObservedObject var session: ChatSession
+
+    var body: some View {
+        Group {
+            if session.turns.isEmpty {
+                SettingsButton(action: {
+                    AppDelegate.shared?.showManagementWindow(initialTab: nil)
+                })
+            } else {
+                HeaderActionButton(
+                    icon: "plus",
+                    help: "New chat",
+                    action: { windowState.startNewChat() }
+                )
+            }
+        }
+        .environment(\.theme, windowState.theme)
     }
 }
 #endif
