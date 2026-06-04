@@ -193,6 +193,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
     }
 
+    /// Menu-bar popover "Ask AI" action: dismiss the popover, then focus or
+    /// open a chat window. (M12 follow-up — rich Intel status panel.)
+    ///
+    /// The window work is deferred to the next runloop tick: opening/creating
+    /// a chat window synchronously from inside the popover's own SwiftUI button
+    /// (while `performClose` is tearing the hosting view down) crashed the app.
+    public func openChatFromStatusPanel() {
+        popover?.performClose(nil)
+        DispatchQueue.main.async { [weak self] in
+            NSApp.activate(ignoringOtherApps: true)
+            self?.focusExistingChatWindowOrCreate()
+        }
+    }
+
+    /// Dismiss the menu-bar popover (used by its quick-action buttons before
+    /// opening Settings, etc.).
+    public func dismissStatusPopover() {
+        popover?.performClose(nil)
+    }
+
     // MARK: - Reopen
 
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
@@ -282,21 +302,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.animates = true
         popover.delegate = self
 
-        let content = VStack(alignment: .leading, spacing: 8) {
-            Text("Osaurus (Intel)")
-                .font(.headline)
-            Divider()
-            Text("Intel fork — cloud-only, MCP-rich")
-                .font(.caption)
-                .foregroundColor(.secondary)
-            Divider()
-            Button("Quit Osaurus") {
-                NSApp.terminate(nil)
-            }
-        }
-        .padding()
-
-        popover.contentViewController = NSHostingController(rootView: content)
+        popover.contentViewController = NSHostingController(rootView: IntelStatusPanelView())
         self.popover = popover
         popover.show(relativeTo: statusButton.bounds, of: statusButton, preferredEdge: .minY)
         NSApp.activate(ignoringOtherApps: true)
@@ -424,25 +430,182 @@ public final class IntelServerControllerSurface {
     }
 }
 
-// MARK: - Intel Status Dashboard
+// MARK: - Intel Status Panel (menu-bar popover)
+//
+// M12 follow-up (Renée 2026-06-03): the rich menu-bar card. The upstream
+// `StatusPanelView` is built for local-server lifecycle (start/stop/restart,
+// editable port, voice/VAD, model status) — none of which fits the Intel
+// always-on cloud server, so restoring it faithfully would mean gating half
+// the view. This is a self-contained Intel card mirroring the original's
+// visual: app icon, name + version + Intel badge + running dot, server URL
+// with copy, live CPU/RAM gauges (SystemMonitorService, NOT excluded), and
+// the Ask AI / Settings / Quit quick actions.
+struct IntelStatusPanelView: View {
+    @ObservedObject private var monitor = SystemMonitorService.shared
+    @ObservedObject private var themeManager = ThemeManager.shared
+    @State private var copied = false
 
-private struct FeatureRow: View {
-    let icon: String
-    let label: String
-    let status: String
-    let color: Color
+    private var theme: ThemeProtocol { themeManager.currentTheme }
+    private var appVersion: String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
+    }
+    private let serverURL = "http://127.0.0.1:1338"
 
     var body: some View {
-        HStack(spacing: 10) {
-            Image(systemName: icon)
-                .frame(width: 20)
-                .foregroundStyle(color)
-            Text(label)
-                .font(.system(size: 13))
-            Spacer()
-            Text(status)
-                .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+        ZStack {
+            theme.primaryBackground
+                .ignoresSafeArea()
+
+            VStack(alignment: .leading, spacing: 12) {
+                header
+                resourceCard
+                actionBar
+            }
+            .padding(16)
         }
+        .frame(width: 320, height: 184)
+        .environment(\.theme, theme)
+        .tint(theme.accentColor)
+    }
+
+    // MARK: Header
+    private var header: some View {
+        HStack(spacing: 10) {
+            Image(nsImage: NSApp.applicationIconImage)
+                .resizable()
+                .interpolation(.high)
+                .scaledToFit()
+                .frame(width: 40, height: 40)
+                .clipShape(RoundedRectangle(cornerRadius: 10, style: .continuous))
+                .onTapGesture {
+                    AppDelegate.shared?.dismissStatusPopover()
+                    AppDelegate.shared?.showManagementWindow(initialTab: .server)
+                }
+                .help("Open Server settings")
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 6) {
+                    Text("Osaurus")
+                        .font(.system(size: 17, weight: .bold, design: .rounded))
+                        .foregroundColor(theme.primaryText)
+                    Text("v\(appVersion)")
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
+                    Text("Intel")
+                        .font(.system(size: 9, weight: .semibold))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(theme.secondaryBackground))
+                        .foregroundColor(theme.secondaryText)
+                    Spacer()
+                    Circle()
+                        .fill(theme.successColor)
+                        .frame(width: 8, height: 8)
+                        .help("Server running")
+                }
+                HStack(spacing: 6) {
+                    Text(serverURL)
+                        .font(.system(size: 11, design: .monospaced))
+                        .foregroundColor(theme.secondaryText)
+                    Button {
+                        let pb = NSPasteboard.general
+                        pb.clearContents()
+                        pb.setString(serverURL, forType: .string)
+                        copied = true
+                        DispatchQueue.main.asyncAfter(deadline: .now() + 1.2) { copied = false }
+                    } label: {
+                        Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10))
+                            .foregroundColor(copied ? theme.successColor : theme.tertiaryText)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Copy server URL")
+                }
+            }
+        }
+    }
+
+    // MARK: Resource card
+    private var resourceCard: some View {
+        HStack(spacing: 16) {
+            gauge(icon: "cpu", label: "CPU", value: monitor.cpuUsage)
+            gauge(icon: "memorychip", label: "RAM", value: monitor.memoryUsage)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(theme.secondaryBackground.opacity(0.6))
+        )
+    }
+
+    private func gauge(icon: String, label: String, value: Double) -> some View {
+        VStack(alignment: .leading, spacing: 5) {
+            HStack(spacing: 5) {
+                Image(systemName: icon).font(.system(size: 11))
+                Text(label).font(.system(size: 11, weight: .semibold))
+                Spacer()
+                Text("\(Int(value.rounded()))%")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(value > 85 ? theme.warningColor : theme.successColor)
+            }
+            .foregroundColor(theme.secondaryText)
+            GeometryReader { geo in
+                ZStack(alignment: .leading) {
+                    Capsule().fill(theme.primaryText.opacity(0.1))
+                    Capsule()
+                        .fill(value > 85 ? theme.warningColor : theme.successColor)
+                        .frame(width: geo.size.width * CGFloat(min(max(value, 0), 100) / 100))
+                }
+            }
+            .frame(height: 5)
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: Action bar
+    private var actionBar: some View {
+        HStack(spacing: 8) {
+            askAIButton
+            Spacer()
+            CircularIconButton(systemName: "gearshape", help: "Settings") {
+                AppDelegate.shared?.dismissStatusPopover()
+                AppDelegate.shared?.showManagementWindow()
+            }
+            CircularIconButton(systemName: "questionmark.circle", help: "Documentation") {
+                if let url = URL(string: "https://docs.osaurus.ai/") {
+                    NSWorkspace.shared.open(url)
+                }
+            }
+            CircularIconButton(systemName: "power", help: "Quit") {
+                NSApp.terminate(nil)
+            }
+        }
+    }
+
+    private var askAIButton: some View {
+        Button {
+            AppDelegate.shared?.openChatFromStatusPanel()
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "sparkles").font(.system(size: 12, weight: .semibold))
+                Text("Ask AI").font(.system(size: 13, weight: .semibold))
+            }
+            .foregroundColor(.white)
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 8, style: .continuous)
+                    .fill(
+                        LinearGradient(
+                            colors: [theme.accentColor, theme.accentColor.opacity(0.85)],
+                            startPoint: .top,
+                            endPoint: .bottom
+                        )
+                    )
+            )
+        }
+        .buttonStyle(.plain)
+        .help("Open chat")
     }
 }

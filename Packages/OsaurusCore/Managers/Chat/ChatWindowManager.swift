@@ -895,7 +895,7 @@ public struct ChatWindowInfo: Identifiable, Sendable {
 }
 
 @MainActor
-public final class ChatWindowManager: NSObject, ObservableObject {
+public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelegate {
     public static let shared = ChatWindowManager()
 
     @Published public private(set) var windows: [UUID: ChatWindowInfo] = [:]
@@ -949,7 +949,17 @@ public final class ChatWindowManager: NSObject, ObservableObject {
 
         let chatView = ChatView(windowState: state)
         window.contentView = NSHostingView(rootView: chatView)
-        window.isReleasedWhenClosed = true
+        // M12 follow-up (Renée 2026-06-03 crashes): the manager owns each
+        // window's lifecycle. `isReleasedWhenClosed = false` is deliberate —
+        // with `true`, AppKit auto-released the window on close while our
+        // `nsWindows` dict still held it, so (a) a later `showWindow(id:)`
+        // (menu-bar "Ask AI") poked freed memory, and (b) once we added the
+        // delegate to purge bookkeeping, removing our strong ref on top of
+        // AppKit's release double-freed it mid-close. With `false`, our dict is
+        // the sole strong ref; `windowWillClose` removes it → ARC frees the
+        // window cleanly after the close stack unwinds.
+        window.isReleasedWhenClosed = false
+        window.delegate = self
         window.center()
         window.makeKeyAndOrderFront(nil)
         nsWindows[info.id] = window
@@ -1008,6 +1018,38 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
+    }
+
+    // MARK: - NSWindowDelegate (Intel chat windows)
+
+    private func windowId(for window: NSWindow) -> UUID? {
+        nsWindows.first(where: { $0.value === window })?.key
+    }
+
+    /// Purge a closed window's bookkeeping so nothing later references the
+    /// freed NSWindow. Does NOT call `window.close()` (AppKit is already
+    /// closing it) or rely on the entry still being present.
+    public func windowWillClose(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+            let id = windowId(for: window)
+        else { return }
+        windows.removeValue(forKey: id)
+        nsWindows.removeValue(forKey: id)
+        windowStates[id]?.cleanup()
+        windowStates.removeValue(forKey: id)
+        toolbarDelegates.removeValue(forKey: id)
+        if lastFocusedWindowId == id {
+            lastFocusedWindowId = windows.keys.first
+        }
+    }
+
+    /// Track the genuinely-focused window so "Ask AI" / dock reopen target the
+    /// right one (and never a stale id).
+    public func windowDidBecomeKey(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+            let id = windowId(for: window)
+        else { return }
+        lastFocusedWindowId = id
     }
 
     public func findWindows(byAgentId agentId: UUID) -> [(id: UUID, info: ChatWindowInfo)] {
