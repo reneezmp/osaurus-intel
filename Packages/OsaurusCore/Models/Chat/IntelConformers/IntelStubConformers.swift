@@ -440,8 +440,50 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let shared = ToolRegistry()
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
+
+    // M12 Gap 3: real tool storage + dispatch. The Intel chat already runs the
+    // full agent tool-loop (ChatView sends `toolSpecs` and calls
+    // `ToolRegistry.shared.execute`); it was inert only because this registry
+    // held nothing and `execute` returned canned text. Folder tools
+    // (file_read/write/edit/search/tree, shell_run, git_*) register here via
+    // FolderToolManager when a working folder is selected, and unregister when
+    // it's cleared. No sandbox/DB/capability built-ins (those are amputated) —
+    // the folder tool suite is the Intel-supported set.
+    private var toolsByName: [String: OsaurusTool] = [:]
+
+    /// Register (or overwrite) a tool by name. Used by FolderToolManager.
+    func register(_ tool: OsaurusTool) {
+        toolsByName[tool.name] = tool
+        objectWillChange.send()
+        NotificationCenter.default.post(name: .toolsListChanged, object: nil)
+    }
+
+    /// Remove tools by name. Used by FolderToolManager when the folder clears.
+    func unregister(names: [String]) {
+        guard !names.isEmpty else { return }
+        for name in names { toolsByName.removeValue(forKey: name) }
+        objectWillChange.send()
+        NotificationCenter.default.post(name: .toolsListChanged, object: nil)
+    }
+
+    /// OpenAI-compatible specs for the currently registered tools, fed into
+    /// `ComposedContext.tools` so the model sees them on the next send.
+    func openAISpecs() -> [Tool] {
+        toolsByName.values
+            .sorted { $0.name < $1.name }
+            .map { $0.asOpenAITool() }
+    }
+
     func execute(name: String, argumentsJSON: String) async throws -> String {
-        "Tool '\(name)' executed."
+        guard let tool = toolsByName[name] else {
+            return ToolEnvelope.failure(
+                kind: .toolNotFound,
+                message:
+                    "Tool '\(name)' is not registered. Pick a working folder to enable file/shell tools.",
+                tool: name
+            )
+        }
+        return try await tool.execute(argumentsJSON: argumentsJSON)
     }
 
     /// Per-tool allow/deny policy state for `ConfigurationView`'s tool
@@ -525,9 +567,20 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let systemPermissionStates: [SystemPermission: Bool]
     }
 
-    /// The cloud + MCP tools registered on Intel. Empty until the chat
-    /// engine registers built-ins; ToolsManagerView renders the list.
-    func listTools() -> [ToolEntry] { [] }
+    /// The tools registered on Intel — the folder tool suite once a working
+    /// folder is selected (M12 Gap 3). ToolsManagerView renders the list.
+    func listTools() -> [ToolEntry] {
+        toolsByName.values
+            .sorted { $0.name < $1.name }
+            .map {
+                ToolEntry(
+                    name: $0.name,
+                    description: $0.description,
+                    enabled: true,
+                    parameters: $0.parameters
+                )
+            }
+    }
 
     /// Toggle a tool on/off. No-op stub on Intel (tool enablement state
     /// isn't persisted in this surface yet).

@@ -61,37 +61,52 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         self.apiBase = "https://api.deepseek.com/v1/chat/completions"
     }
 
-    func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
-        guard let apiKey = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] else {
-            throw EngineError(message: "DEEPSEEK_API_KEY not set")
+    /// Accumulates one streamed tool call across DeepSeek's incremental
+    /// `delta.tool_calls` fragments (id + name arrive first, arguments stream
+    /// in pieces, keyed by `index`).
+    private struct PartialToolCall {
+        var id: String = ""
+        var name: String = ""
+        var arguments: String = ""
+    }
+
+    /// Serialize a ChatMessage into the OpenAI-compatible request shape,
+    /// INCLUDING `tool_calls` (assistant) and `tool_call_id` (tool results) —
+    /// the original Intel engine dropped both, so multi-turn tool context was
+    /// lost. (M12 Gap 3.)
+    private func encodeMessage(_ msg: ChatMessage) -> [String: Any] {
+        var m: [String: Any] = ["role": msg.role]
+        m["content"] = msg.content ?? ""
+        if let calls = msg.tool_calls, !calls.isEmpty {
+            m["tool_calls"] = calls.map { call -> [String: Any] in
+                [
+                    "id": call.id,
+                    "type": "function",
+                    "function": [
+                        "name": call.function.name,
+                        "arguments": call.function.arguments,
+                    ],
+                ]
+            }
         }
+        if let tcid = msg.tool_call_id { m["tool_call_id"] = tcid }
+        return m
+    }
 
-        NSLog("[CloudChatEngine] Starting streamChat — model=\(request.model ?? model), messages=\(request.messages.count)")
+    /// OpenAI-compatible `tools` array from the request's tool specs. The
+    /// JSON-Schema `parameters` come through `JSONValue.anyValue`.
+    private func encodeTools(_ tools: [Tool]?) -> [[String: Any]]? {
+        guard let tools, !tools.isEmpty else { return nil }
+        return tools.map { tool in
+            var fn: [String: Any] = ["name": tool.function.name]
+            if let desc = tool.function.description { fn["description"] = desc }
+            if let params = tool.function.parameters { fn["parameters"] = params.anyValue }
+            return ["type": "function", "function": fn]
+        }
+    }
 
-        var urlRequest = URLRequest(url: URL(string: apiBase)!)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.timeoutInterval = 300
-
-        var body: [String: Any] = [
-            "model": request.model ?? model,
-            "messages": request.messages.map { msg -> [String: Any] in
-                var m: [String: Any] = ["role": msg.role]
-                if let content = msg.content { m["content"] = content }
-                return m
-            },
-            "stream": true,
-        ]
-
-        // DSV4 reasoning-mode translation. The FloatingInputCard chip
-        // stores `reasoningEffort` ∈ {instruct, high, max} (see
-        // `DSV4ReasoningProfile`); the user-visible "Default" picks
-        // `instruct`. DeepSeek's public chat API only accepts
-        // `reasoning_effort` of `high`/`max` and toggles reasoning OFF
-        // via a separate `thinking: { type: "disabled" }` object, so
-        // we mirror the upstream `RemoteProviderService.dsv4RemoteEffort`
-        // translation.
+    private func applyReasoningMode(_ request: ChatCompletionRequest, into body: inout [String: Any]) {
+        // DSV4 reasoning-mode translation (see RemoteProviderService.dsv4RemoteEffort).
         let effort = request.modelOptions?["reasoningEffort"]?.stringValue?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
@@ -99,60 +114,163 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         case "instruct", "chat", "none", "no_think", "nothink", "off", "disabled", "false":
             body["thinking"] = ["type": "disabled"]
         case .some(let nonEmpty) where !nonEmpty.isEmpty:
-            // high / max / etc. — passed through verbatim
             body["reasoning_effort"] = nonEmpty
         case .some, .none:
-            // Empty string OR option not supplied: DSV4 default is
-            // `instruct`, so disable thinking explicitly to match the
-            // user's "Default" chip expectation.
             body["thinking"] = ["type": "disabled"]
         }
+    }
 
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
-        NSLog("[CloudChatEngine] Request body: model=\(request.model ?? model)")
-
-        let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-        if let httpResp = response as? HTTPURLResponse {
-            NSLog("[CloudChatEngine] HTTP status: \(httpResp.statusCode)")
-        } else {
-            NSLog("[CloudChatEngine] Response is not HTTP — type: \(type(of: response))")
+    func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
+        guard let apiKey = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] else {
+            throw EngineError(message: "DEEPSEEK_API_KEY not set")
         }
+
+        NSLog("[CloudChatEngine] Starting streamChat — model=\(request.model ?? model), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
+
+        let toolSpecs = encodeTools(request.tools)
+        let resolvedModel = request.model ?? model
 
         return AsyncThrowingStream { continuation in
             Task {
                 do {
-                    var chunkCount = 0
-                    for try await line in asyncBytes.lines {
-                        guard line.hasPrefix("data: "), !Task.isCancelled else { continue }
-                        let dataStr = String(line.dropFirst(6))
-                        if dataStr == "[DONE]" {
-                            NSLog("[CloudChatEngine] Received [DONE] after \(chunkCount) content chunks")
-                            break
+                    // Running conversation as wire dicts. We append the
+                    // assistant tool-call message + tool-result messages after
+                    // each tool round so the continuation request carries the
+                    // full context. (M12 Gap 3 — engine-side agent loop, since
+                    // the upstream RemoteProviderService tool path is amputated
+                    // on Intel.)
+                    var wireMessages = request.messages.map { self.encodeMessage($0) }
+                    let maxToolRounds = 12
+                    var round = 0
+                    var totalChunks = 0
+
+                    while round < maxToolRounds {
+                        round += 1
+
+                        var body: [String: Any] = [
+                            "model": resolvedModel,
+                            "messages": wireMessages,
+                            "stream": true,
+                        ]
+                        if let toolSpecs {
+                            body["tools"] = toolSpecs
+                            body["tool_choice"] = "auto"
+                        }
+                        self.applyReasoningMode(request, into: &body)
+
+                        var urlRequest = URLRequest(url: URL(string: self.apiBase)!)
+                        urlRequest.httpMethod = "POST"
+                        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                        urlRequest.timeoutInterval = 300
+                        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+                        NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
+
+                        let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
+                        if let httpResp = response as? HTTPURLResponse {
+                            NSLog("[CloudChatEngine] HTTP status: \(httpResp.statusCode)")
                         }
 
-                        guard let chunkData = dataStr.data(using: .utf8),
-                              let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any],
-                              let choices = json["choices"] as? [[String: Any]],
-                              let delta = choices.first?["delta"] as? [String: Any] else { continue }
+                        var assistantContent = ""
+                        var partials: [Int: PartialToolCall] = [:]
+                        var announcedNames: Set<Int> = []
 
-                        // DeepSeek's Max-reasoning mode (and other
-                        // OpenAI-compatible providers like Qwen / vLLM)
-                        // streams the thought process on a sibling
-                        // `reasoning_content` field. Wrap it in the
-                        // `StreamingReasoningHint` sentinel so the
-                        // `ChatView` decode site routes it into
-                        // `ChatTurn.thinking` (which `BlockMemoizer`
-                        // surfaces as the Think panel).
-                        if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
-                            chunkCount += 1
-                            continuation.yield(StreamingReasoningHint.encode(reasoning))
+                        for try await line in asyncBytes.lines {
+                            guard line.hasPrefix("data: "), !Task.isCancelled else { continue }
+                            let dataStr = String(line.dropFirst(6))
+                            if dataStr == "[DONE]" { break }
+
+                            guard let chunkData = dataStr.data(using: .utf8),
+                                let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any],
+                                let choices = json["choices"] as? [[String: Any]],
+                                let delta = choices.first?["delta"] as? [String: Any]
+                            else { continue }
+
+                            if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                                totalChunks += 1
+                                continuation.yield(StreamingReasoningHint.encode(reasoning))
+                            }
+                            if let content = delta["content"] as? String, !content.isEmpty {
+                                totalChunks += 1
+                                assistantContent += content
+                                continuation.yield(content)
+                            }
+                            // Accumulate streamed tool calls (M12 Gap 3).
+                            if let tcs = delta["tool_calls"] as? [[String: Any]] {
+                                for tc in tcs {
+                                    let idx = tc["index"] as? Int ?? 0
+                                    var partial = partials[idx] ?? PartialToolCall()
+                                    if let id = tc["id"] as? String, !id.isEmpty { partial.id = id }
+                                    if let fn = tc["function"] as? [String: Any] {
+                                        if let n = fn["name"] as? String, !n.isEmpty { partial.name += n }
+                                        if let a = fn["arguments"] as? String { partial.arguments += a }
+                                    }
+                                    partials[idx] = partial
+                                    // Surface the pending tool name once so the
+                                    // chat shows a "calling …" chip while args
+                                    // stream / the tool runs.
+                                    if !partial.name.isEmpty, !announcedNames.contains(idx) {
+                                        announcedNames.insert(idx)
+                                        continuation.yield(StreamingToolHint.encode(partial.name))
+                                    }
+                                }
+                            }
                         }
-                        if let content = delta["content"] as? String, !content.isEmpty {
-                            chunkCount += 1
-                            continuation.yield(content)
+
+                        // No tools requested this round → the assistant's final
+                        // answer has streamed; we're done.
+                        if partials.isEmpty {
+                            NSLog("[CloudChatEngine] Stream finished — \(totalChunks) chunks, \(round) round(s), no tool calls")
+                            continuation.finish()
+                            return
                         }
+
+                        // Echo the assistant's tool-call message into the
+                        // continuation context.
+                        let orderedCalls = partials.sorted { $0.key < $1.key }.map { $0.value }
+                        wireMessages.append([
+                            "role": "assistant",
+                            "content": assistantContent,
+                            "tool_calls": orderedCalls.map { call in
+                                [
+                                    "id": call.id,
+                                    "type": "function",
+                                    "function": ["name": call.name, "arguments": call.arguments],
+                                ]
+                            },
+                        ])
+
+                        // Execute each tool, surface the result card, and feed
+                        // the result back as a tool message.
+                        for call in orderedCalls {
+                            let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
+                            let result: String
+                            do {
+                                result = try await ToolRegistry.shared.execute(
+                                    name: call.name,
+                                    argumentsJSON: call.arguments
+                                )
+                            } catch {
+                                result = ToolEnvelope.fromError(error, tool: call.name)
+                            }
+                            continuation.yield(
+                                StreamingToolHint.encodeDone(
+                                    callId: callId,
+                                    name: call.name,
+                                    arguments: call.arguments,
+                                    result: result
+                                )
+                            )
+                            wireMessages.append([
+                                "role": "tool",
+                                "tool_call_id": callId,
+                                "content": result,
+                            ])
+                        }
+                        // Loop: send the continuation request with tool results.
                     }
-                    NSLog("[CloudChatEngine] Stream finished — \(chunkCount) chunks yielded")
+
+                    NSLog("[CloudChatEngine] Tool loop hit max rounds (\(maxToolRounds))")
                     continuation.finish()
                 } catch {
                     NSLog("[CloudChatEngine] Stream error: \(error.localizedDescription)")

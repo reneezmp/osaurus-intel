@@ -69,6 +69,20 @@ public final class FolderContextService: ObservableObject {
         // Stop accessing previous resource
         clearFolderInternal(unregisterTools: true)
 
+        #if OSAURUS_INTEL
+        // M12 Gap 2 fix (Renée 2026-06-03): the Intel build is NOT sandboxed
+        // (no `com.apple.security.app-sandbox` entitlement), so
+        // `url.bookmarkData(options: .withSecurityScope)` throws — which the
+        // `catch` below swallowed, silently dropping the chosen folder (the
+        // chip stayed empty and no tools registered). A non-sandboxed app
+        // already has full filesystem access, so we attach the folder
+        // directly: build context, publish it, register the folder tools.
+        let context = await buildContext(from: url)
+        currentContext = context
+        hasActiveFolder = true
+        FolderToolManager.shared.registerFolderTools(for: context)
+        return context
+        #else
         do {
             // Create security-scoped bookmark
             let bookmarkData = try url.bookmarkData(
@@ -97,6 +111,7 @@ public final class FolderContextService: ObservableObject {
         } catch {
             return nil
         }
+        #endif
     }
 
     /// Clear the current folder and unregister tools

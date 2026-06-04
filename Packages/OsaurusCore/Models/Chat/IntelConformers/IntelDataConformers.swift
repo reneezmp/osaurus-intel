@@ -420,23 +420,11 @@ struct SecretPromptState: Sendable {
 
 struct ClarifyTool: Sendable { init() {}; static func parse(argumentsJSON json: String) -> ClarifyPayload? { nil } }
 
-final class FolderContextService: ObservableObject, @unchecked Sendable {
-    static let shared = FolderContextService()
-    @Published var currentContext: FolderContext? = nil
-    /// Folder context is amputated on Intel (the directory-watcher
-    /// + indexing pipeline lives in excluded files), so the
-    /// "is there a working folder attached to the chat?" answer
-    /// is always no.
-    @Published var hasActiveFolder: Bool = false
-
-    /// Folder picker is amputated on Intel — sister to
-    /// `DirectoryPickerService`. No-op on Intel.
-    func selectFolder() async {}
-    func clearFolder() {}
-    /// Re-runs the directory scan on the active folder. Intel has no
-    /// active folder, so the refresh is trivially complete.
-    func refreshContext() async {}
-}
+// M12 Gap 2/3: the real `FolderContextService` (Folder/FolderContextService.swift)
+// is un-excluded — it drives the NSOpenPanel folder picker and registers the
+// folder tool suite via FolderToolManager. The amputated directory-watcher /
+// indexing pieces inside it are gated separately; the picker + tool wiring are
+// pure AppKit/Foundation. The old no-op Intel stub that lived here is removed.
 
 struct ImageFullScreenView: View { var image: Any? = nil; var altText: String = ""; var body: some View { EmptyView() } }
 
@@ -1047,6 +1035,7 @@ func diagnosticWarnings(command: String, exitCode: Int32, stdout: String, stderr
 final class SessionToolStateStore: @unchecked Sendable {
     static let shared = SessionToolStateStore()
     func invalidate(_ key: Any) async {}
+    func invalidateAll() async {}
     func invalidateIfFingerprintChanged(_ key: Any, liveFingerprint: Any) async {}
     func get(_ key: Any) async -> SessionToolState? { nil }
     func setInitial(_ key: Any, preflight: Any?, alwaysLoadedNames: Any?, fingerprint: String) async {}
@@ -1116,20 +1105,31 @@ final class BlockMemoizer: @unchecked Sendable {
     static let shared = BlockMemoizer()
     func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false) -> [ContentBlock] {
         var blocks: [ContentBlock] = []
-        var groupId: UUID?
-        for (i, turn) in turns.enumerated() {
-            let isUser = turn.role == .user
-            let isFirstInGroup = turn.id != groupId
-            if isFirstInGroup { groupId = turn.id }
+        // Track which "side" (user vs assistant) the previous rendered turn
+        // belonged to, so a header is emitted only when the side flips.
+        // Consecutive assistant + tool turns (a tool round) share one header.
+        var prevSideIsUser: Bool?
+        for turn in turns {
+            // M12 Gap 3: `.tool`-role turns exist ONLY to carry the tool result
+            // back to the API on the continuation request. Their content is the
+            // raw result envelope and must NOT render as a chat bubble — it's
+            // already shown inside the assistant turn's tool-call card (via
+            // `toolResults`). The simplified Intel builder used to fall through
+            // to the assistant-paragraph branch and dump that JSON into the
+            // stream (Renée 2026-06-03). Skip them.
+            if turn.role == .tool { continue }
 
-            // Header for first turn in group
-            if isFirstInGroup {
+            let isUser = turn.role == .user
+
+            // Header only when the conversation side flips (or at the very top).
+            if prevSideIsUser != isUser {
                 blocks.append(ContentBlock(
                     id: "header-\(turn.id.uuidString)",
                     turnId: turn.id,
-                    kind: .header(role: turn.role, agentName: agentName, isFirstInGroup: i == 0 || turns[i-1].role != turn.role)
+                    kind: .header(role: turn.role, agentName: agentName, isFirstInGroup: blocks.isEmpty)
                 ))
             }
+            prevSideIsUser = isUser
 
             // Thinking
             if !turn.thinking.isEmpty {
@@ -1149,7 +1149,9 @@ final class BlockMemoizer: @unchecked Sendable {
                 ))
             }
 
-            // Assistant message (paragraph with role)
+            // Assistant message (paragraph) — the pre-tool framing ("Sure
+            // thing! Let me peek…") streams before the tool call, so render it
+            // BEFORE the card.
             if !isUser && !turn.content.isEmpty {
                 blocks.append(ContentBlock(
                     id: "assistant-\(turn.id.uuidString)",
@@ -1162,6 +1164,20 @@ final class BlockMemoizer: @unchecked Sendable {
                     )
                 ))
             }
+
+            // Tool-call cards (M12 Gap 3): rendered via NativeToolCallGroupView.
+            // Each call pairs with its result from `turn.toolResults`, so the
+            // result shows inside the (expandable) card — not as a chat bubble.
+            if !isUser, let toolCalls = turn.toolCalls, !toolCalls.isEmpty {
+                let items = toolCalls.map {
+                    ToolCallItem(call: $0, result: turn.toolResults[$0.id])
+                }
+                blocks.append(ContentBlock(
+                    id: "toolgroup-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .toolCallGroup(calls: items)
+                ))
+            }
         }
         return blocks
     }
@@ -1170,14 +1186,49 @@ final class BlockMemoizer: @unchecked Sendable {
     func clear() {}
 }
 
+// M12 Gap 3: real sentinel protocol between `CloudChatEngine` (which runs the
+// DeepSeek tool loop) and `ChatView`'s stream-delta decoder. The engine yields
+// these tagged strings interleaved with normal content; ChatView routes them
+// (decodeDone → tool-call card + result turn; decode → pending tool name).
+// Prefixes use an ESC control char + bracket tag so they can't collide with
+// model-authored content. The hollow stub these replace meant tool calls were
+// never decoded even if the engine had emitted them.
 struct StreamingToolHint: Sendable {
-    static func encode(_ toolName: String) -> String { toolName }
-    static func encodeArgs(_ fragment: String) -> String { fragment }
-    static func encodeDone(callId: String, name: String, arguments: String, result: String) -> String { "" }
-    static func decodeDone(_ delta: String) -> ToolCallDone? { nil }
-    static func isSentinel(_ delta: String) -> Bool { false }
-    static func decode(_ delta: String) -> String? { nil }
-    static func decodeArgs(_ delta: String) -> String? { nil }
+    private static let donePrefix = "\u{1B}[[OSX_TOOL_DONE]]"
+    private static let namePrefix = "\u{1B}[[OSX_TOOL_NAME]]"
+    private static let argsPrefix = "\u{1B}[[OSX_TOOL_ARGS]]"
+
+    static func encode(_ toolName: String) -> String { namePrefix + toolName }
+    static func encodeArgs(_ fragment: String) -> String { argsPrefix + fragment }
+    static func encodeDone(callId: String, name: String, arguments: String, result: String) -> String {
+        let dict: [String: String] = [
+            "callId": callId, "name": name, "arguments": arguments, "result": result,
+        ]
+        let data = (try? JSONSerialization.data(withJSONObject: dict)) ?? Data()
+        return donePrefix + (String(data: data, encoding: .utf8) ?? "")
+    }
+    static func decodeDone(_ delta: String) -> ToolCallDone? {
+        guard delta.hasPrefix(donePrefix) else { return nil }
+        let json = String(delta.dropFirst(donePrefix.count))
+        guard let data = json.data(using: .utf8),
+            let d = try? JSONSerialization.jsonObject(with: data) as? [String: String]
+        else { return nil }
+        return ToolCallDone(
+            callId: d["callId"] ?? "",
+            name: d["name"] ?? "",
+            arguments: d["arguments"] ?? "",
+            result: d["result"] ?? ""
+        )
+    }
+    static func isSentinel(_ delta: String) -> Bool {
+        delta.hasPrefix(donePrefix) || delta.hasPrefix(namePrefix) || delta.hasPrefix(argsPrefix)
+    }
+    static func decode(_ delta: String) -> String? {
+        delta.hasPrefix(namePrefix) ? String(delta.dropFirst(namePrefix.count)) : nil
+    }
+    static func decodeArgs(_ delta: String) -> String? {
+        delta.hasPrefix(argsPrefix) ? String(delta.dropFirst(argsPrefix.count)) : nil
+    }
 }
 
 struct ToolCallDone: Sendable, Equatable {
@@ -1245,8 +1296,48 @@ final class SystemPromptComposer: @unchecked Sendable {
     // for Default). Memory/tools stay inert, matching the amputated build.
     static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
-        let prompt = await MainActor.run { AgentManager.shared.effectiveSystemPrompt(for: id) }
-        return ComposedContext(prompt: prompt)
+        let (basePrompt, folder) = await MainActor.run {
+            (
+                AgentManager.shared.effectiveSystemPrompt(for: id),
+                FolderContextService.shared.currentContext
+            )
+        }
+        // M12 Gap 3: when a working folder is mounted, append the real
+        // "## Working Directory" framing (SystemPromptTemplates.folderContext —
+        // NOT excluded). Without it the model just had bare tool specs and no
+        // context, so DeepSeek hallucinated tool output as plain text instead
+        // of emitting a real call (Renée 2026-06-03). The section carries the
+        // path, project type, root contents, git status, the path rule, and
+        // the per-tool dispatch guide that primes actual tool calls.
+        let folderSection = SystemPromptTemplates.folderContext(from: folder)
+        // M12 Gap 3: DeepSeek V4 Flash is an inconsistent tool-caller — with
+        // only the (descriptive) folder guide it sometimes role-plays tool use
+        // in prose and fabricates listings/contents/`ls` output instead of
+        // emitting real calls (Renée 2026-06-03). The base system-instruction
+        // tool directives that anchor this on Apple Silicon live in excluded
+        // files, so we add a firm, recency-positioned directive here.
+        let toolDirective: String
+        if folder != nil {
+            toolDirective = """
+
+                ## Tool Use (MANDATORY)
+                You have REAL tools that execute on the user's actual filesystem. \
+                To list, read, search, write, or edit files — or run shell commands — \
+                you MUST emit the matching tool call (`file_tree`, `file_read`, \
+                `file_search`, `file_write`, `file_edit`, `shell_run`) and use its \
+                returned result. The "Root contents" above is only a partial hint; \
+                for any real answer, CALL the tool. NEVER fabricate, guess, or \
+                simulate file names, file contents, or command output — if you have \
+                not called the tool this turn, you do not know the answer. Do not \
+                describe running a command in prose; actually call the tool.
+                """
+        } else {
+            toolDirective = ""
+        }
+        let prompt = basePrompt + folderSection + toolDirective
+        // Surface the registered folder tools so the model can call them.
+        let tools = toolsDisabled ? [] : ToolRegistry.shared.openAISpecs()
+        return ComposedContext(prompt: prompt, tools: tools)
     }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
 }

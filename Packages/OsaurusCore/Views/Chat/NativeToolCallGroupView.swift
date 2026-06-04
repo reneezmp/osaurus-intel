@@ -632,8 +632,15 @@ final class NativeToolCallRowView: NSView {
                 )
                 av.onHeightChanged = { [weak self] in self?.applyHeight() }
             }
-#if !OSAURUS_INTEL
+            // M12 Gap 3: render the tool RESULT section on Intel too. The
+            // markdown-result fallback inside `applyResultOrLiveState` is not
+            // amputated — only the live-terminal streaming (LiveExecRegistry
+            // subscription via `bindLiveOutputIfPresent`) is. Previously the
+            // whole call was gated, so Intel cards showed args but no result
+            // (and after we stopped dumping the raw result turn into the chat,
+            // the result vanished entirely — Renée 2026-06-03).
             applyResultOrLiveState(width: width, theme: theme)
+#if !OSAURUS_INTEL
             bindLiveOutputIfPresent(toolCallId: item.call.id, theme: theme)
 #endif
         }
