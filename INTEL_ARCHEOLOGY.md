@@ -1423,3 +1423,131 @@ closing a chat window — hit incidentally via the menu bar.)
 
 ✅ Card themed + correct compact shape · ✅ red close button (no crash) · ✅ Ask
 AI opens/focuses chat · ✅ dock reopen after close · ✅ Settings / Docs / Quit.
+
+---
+
+## M12 follow-up — Remote MCP providers (CLOSURE, 2026-06-03, commit `1a627cf9`)
+
+Tools → Remote showed "Apple Silicon only", but MCP runs on Intel (the bridge
+serves on :1338). Restored the real remote-MCP-provider subsystem.
+
+- Un-body-swapped `Views/Settings/ProvidersView.swift` (the MCP UI; AppKit+SwiftUI).
+- Un-excluded `Managers/MCPProviderManager.swift` + `Tools/MCPProviderTool.swift`
+  (both MCP SDK + Foundation). Removed the hollow Intel MCPProviderManager stub +
+  its duplicate `mcpProviderStatusChanged` mirror.
+- **Gated the stdio-via-sandbox transport** (`SandboxManager`/`SandboxStdioRunner`,
+  ~3 spots + the `sandboxStdioRunners` map) behind `#if !OSAURUS_INTEL`: HTTP
+  remote MCP works for real; a sandbox/stdio provider throws `.sandboxUnavailable`.
+- Added `ToolRegistry.registerMCPTool` to the Intel registry; `testConnection`
+  added to the Intel manager earlier (provider-edit follow-up) does the real
+  OpenAI-style `/models` probe.
+- **Verified (Renée): GitHub MCP connected (43 tools); agent called
+  `github_get_me` + `github_search_repositories` and used the results.**
+
+## M12 follow-up — Agent Capabilities tab + MCP auto-reconnect (CLOSURE, 2026-06-03, commit `2d6e5499`)
+
+The per-agent Capabilities sub-tab showed "Apple Silicon only" — but the agent
+genuinely uses tools on Intel. Full functional restore.
+
+- Un-body-swapped `AgentCapabilityManagerView`. Intel `AgentManager` got real
+  per-agent capability persistence: `effectiveToolSelectionMode` (now
+  non-optional, mirrors upstream), `effectiveEnabledTool/SkillNames`,
+  `seedEnabledCapabilitiesIfNeeded`, `updateEnabledTool/SkillNames`,
+  `updateToolSelectionMode`. Custom agents persist to disk; Default → global
+  ChatConfiguration.
+- Intel `ToolRegistry` got `builtInToolNames`/`runtimeManagedToolNames`/
+  `isMCPTool`/`isPluginTool`/`isSandboxTool`/`groupName` (MCP tools bucket by
+  `MCPProviderTool.providerName`). Added `.agentUpdated` notification.
+- **`composeChatContext` now HONORS the picker**: Manual mode restricts the
+  agent to its enabled allowlist; Auto sends everything registered.
+- **MCP auto-reconnect**: `AppDelegate` now calls
+  `MCPProviderManager.shared.connectEnabledProviders()` at startup (the prod app
+  does this; the wiring was missing on Intel — providers stayed disconnected
+  after relaunch so their tools never registered). This was the "GitHub tools
+  missing from the picker" fix.
+- **Data cleanup:** the orphaned seeded skills (`osaurus-fetch/search/time`,
+  `vectura`) in `~/.osaurus-intel/skills/` were copied from `~/.osaurus` during
+  the M11.A.2 seed; they reference amputated plugins. Removed them (kept
+  `writing-reviewer`, a pure-instruction skill). Production `~/.osaurus`
+  untouched. No code change.
+- **Verified (Renée): GitHub's 43 tools show in the picker, grouped under
+  "GitHub"; toggles persist; Manual mode bites.**
+
+---
+
+## M13 — Group C tabs (the 6 greyed tabs)
+
+### Survey (2026-06-03) — amputated vs restorable
+
+| Tab | Backing | Blocker | Verdict |
+|-----|---------|---------|---------|
+| **Insights** | `InsightsService` | none (Foundation+Combine) | ✅ restored |
+| **Memory** | `MemoryDatabase`+`MemoryService` | DB is SQLCipher (ok) but recall = MLX/VecturaKit embeddings; recording = `DistillationCoordinator` | 🟡 deferred (Renée uses vault + renee.rag; Osaurus memory stays off) |
+| **Schedules** | full background-task chain | none hardware — but DEEP (see scope below) | 🟡 scoped, not built |
+| **Models** | `ModelManager` | `import MLXLLM` (no local runtime) | 🔴 leave greyed |
+| **Voice** | `SpeechService`/`TTSService` | `import FluidAudio` | 🔴 leave greyed |
+| **Sandbox** | `SandboxManager` | `import Containerization` (macOS 26 + AS) | 🔴 leave greyed |
+
+**Key lesson:** "amputated" only ever meant the 4 hardware/OS-bound packages
+(MLX, FluidAudio, Containerization, VecturaKit). Foundation/Combine/SwiftUI/
+AppKit/SQLCipher are all available on Intel + macOS Sequoia (incl. under OCLP) —
+the running app proves it. A manager importing "only Foundation+Combine" is a
+green flag.
+
+### M13 Insights (CLOSURE, 2026-06-03, commit `1cf7fa5a`)
+
+- Un-body-swapped `Views/Insights/InsightsView.swift`; un-excluded
+  `Managers/InsightsService.swift` (brought `MethodFilter`).
+- **Instrumented `HTTPHandler.sendResponse`** to log every non-streaming request
+  (health/models/MCP/router/non-stream chat) to `InsightsService` with
+  method/path/status/duration (added `requestStartedAt` to `RequestState`). SSE
+  streaming chat bypasses this sink; in-app chat uses `CloudChatEngine` directly,
+  so Insights reflects external API/MCP clients hitting :1338 (correct
+  server-analytics semantics).
+- `ManagementTab.isAvailableOnIntel`: `.insights` → true (un-greyed). Memory +
+  Schedules remain gated.
+- **Verified (Renée): tab renders; `curl /health` + `/models` logged 200 + duration.**
+
+### Schedules — SCOPE (mapped 2026-06-03, NOT built — next-session to-do)
+
+**Verdict: fully restorable, zero hardware blockers, but the deepest Group C
+item — a multi-round restore of the background-task EXECUTION subsystem.** The
+agent fires headless via the existing cloud pipeline
+(`ScheduleManager → TaskDispatcher → BackgroundTaskManager.dispatchChat →
+ChatSession.send → composeChatContext → CloudChatEngine`).
+
+A trial un-exclude went 251 → 75 errors over two rounds (converging). The full
+dependency map:
+
+- **Un-exclude (clean, no amputated deps):** `Managers/ScheduleManager.swift`,
+  `Managers/TaskDispatcher.swift` (thin wrapper over BackgroundTaskManager),
+  `Managers/NextRunScheduler.swift` (cron timer), `Managers/BackgroundTaskManager.swift`
+  (Combine+Foundation+ChatSession — the "MLX" in it is a COMMENT only),
+  `Storage/SchedulerDatabase.swift` (SQLCipher), `Models/BackgroundTaskModels.swift`,
+  `Models/Chat/DispatchRequest.swift` (defines DispatchRequest/DispatchHandle/
+  DispatchResult), `Managers/ExecutionContext.swift` (clean). `Models/Schedule/
+  Schedule.swift` is already compiled.
+- **Remove colliding Intel stubs:** `ScheduleManager` + `SchedulerDatabase`
+  (IntelAgentConformers); also remove the Intel `schedulesChanged` notification
+  mirror (the real ScheduleManager redefines it).
+- **Stub (amputated host):** `PluginHostContext` — lives in MLX/Sandbox
+  `Services/Plugin/PluginHostAPI.swift`, can't un-exclude. BackgroundTaskManager
+  calls its `serialize{Started,Activity,Clarification,Completed,Cancelled,Draft}Event`
+  + `invalidatePreflightCache(sessionId:)`. Return `"{}"` / no-op (plugins
+  amputated → nothing consumes the events). A drafted stub exists in the reverted
+  attempt's notes (this file's git history / the chat transcript).
+- **Conformer surface gaps (the triage rounds):** Intel `ChatWindowManager` needs
+  headless hooks `findSession`, `loadSession`, `createWindowForContext`, `open`;
+  task-event surface `notifyTaskEvent` / `hasTaskEventHandler`; `TaskEventType`
+  (find its home — likely PluginHostAPI or a task-events file → stub or
+  un-exclude); `StorageMigrationCoordinator` (excluded → stub); a `.empty` static.
+- **Then:** un-body-swap `Views/Schedule/SchedulesView.swift` (+ `ScheduleEditorSheet`,
+  same file), wire `NextRunScheduler` startup at launch (like the MCP
+  auto-connect), un-grey `.schedules` in ManagementTab.
+- **Caveat to verify:** does a schedule actually FIRE and produce output (the
+  cron timer + headless ChatSession run end-to-end)? Needs real testing.
+- **Effort:** ~3-5 triage rounds. Bounded.
+
+### Today's tags
+`m11-settings-complete` (57208c08) · `m12-chat-complete` (913de45a) already laid.
+Consider `m13-insights` / `m13-group-c` later.
