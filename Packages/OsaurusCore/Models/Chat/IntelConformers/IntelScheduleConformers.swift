@@ -16,6 +16,7 @@
 //  `SessionToolStateStore` (which IS compiled on Intel).
 //
 
+import Combine
 import Foundation
 
 #if OSAURUS_INTEL
@@ -80,6 +81,47 @@ enum TaskEventType: Int32 {
 /// (un-excluded in this restore) calls it before its first query.
 enum StorageMigrationCoordinator {
     nonisolated static func blockingAwaitReady() {}
+}
+
+/// Drives the menu-bar status card's "task running / finished" row on Intel.
+///
+/// The upstream NotchView (the floating task indicator) is amputated, so this
+/// is the Intel surface for surfacing a background/scheduled run. A start
+/// replaces any prior entry; a finish flips its status in place; the entry
+/// persists until the user dismisses it or a new task starts. `BackgroundTaskManager`
+/// updates it (Intel-gated) and `IntelStatusPanelView` observes it.
+@MainActor
+final class IntelTaskBanner: ObservableObject {
+    static let shared = IntelTaskBanner()
+
+    enum Status: Equatable { case running, completed, failed }
+
+    struct Entry: Identifiable, Equatable {
+        let id: UUID
+        var title: String
+        var status: Status
+        let startedAt: Date
+    }
+
+    @Published var entry: Entry?
+
+    private init() {}
+
+    func started(id: UUID, title: String) {
+        entry = Entry(
+            id: id,
+            title: title.isEmpty ? "Task" : title,
+            status: .running,
+            startedAt: Date()
+        )
+    }
+
+    func finished(id: UUID, success: Bool) {
+        guard entry?.id == id else { return }
+        entry?.status = success ? .completed : .failed
+    }
+
+    func dismiss() { entry = nil }
 }
 
 #endif

@@ -466,6 +466,7 @@ public final class IntelServerControllerSurface {
 struct IntelStatusPanelView: View {
     @ObservedObject private var monitor = SystemMonitorService.shared
     @ObservedObject private var themeManager = ThemeManager.shared
+    @ObservedObject private var taskBanner = IntelTaskBanner.shared
     @State private var copied = false
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -481,14 +482,110 @@ struct IntelStatusPanelView: View {
 
             VStack(alignment: .leading, spacing: 12) {
                 header
+                if let entry = taskBanner.entry {
+                    taskRow(entry)
+                }
                 resourceCard
                 actionBar
             }
             .padding(16)
         }
-        .frame(width: 320, height: 184)
+        .frame(width: 320, height: taskBanner.entry == nil ? 184 : 234)
         .environment(\.theme, theme)
         .tint(theme.accentColor)
+    }
+
+    // MARK: Background-task row (M13 — Intel task indicator)
+
+    /// Persistent row tracking the most recent background/scheduled task. The
+    /// upstream NotchView indicator is amputated on Intel; this is its
+    /// replacement surface. Stays put after completion until the user dismisses
+    /// it (the × button) or a new task replaces it.
+    @ViewBuilder
+    private func taskRow(_ entry: IntelTaskBanner.Entry) -> some View {
+        HStack(spacing: 8) {
+            // Tapping the body opens the task's chat session, then clears the
+            // row. The dismiss × is a separate button so the two tap targets
+            // don't collide.
+            Button {
+                openTaskSession(entry)
+            } label: {
+                HStack(spacing: 8) {
+                    switch entry.status {
+                    case .running:
+                        ProgressView()
+                            .controlSize(.small)
+                            .frame(width: 16, height: 16)
+                    case .completed:
+                        Image(systemName: "checkmark.circle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.successColor)
+                    case .failed:
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.errorColor)
+                    }
+
+                    VStack(alignment: .leading, spacing: 1) {
+                        Text(entry.title)
+                            .font(.system(size: 12, weight: .medium))
+                            .foregroundColor(theme.primaryText)
+                            .lineLimit(1)
+                        Text(taskStatusText(entry.status))
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.tertiaryText)
+                    }
+
+                    Spacer(minLength: 4)
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help("Open this conversation")
+
+            Button {
+                IntelTaskBanner.shared.dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            .buttonStyle(.plain)
+            .help("Dismiss")
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.secondaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8, style: .continuous)
+                        .fill(Color.black.opacity(0.07))
+                )
+        )
+    }
+
+    /// Open the chat window for a task's session (loaded from the persisted
+    /// store), then clear the card row. Falls back to dismissing the popover
+    /// even if the session can't be found (e.g. an empty run).
+    private func openTaskSession(_ entry: IntelTaskBanner.Entry) {
+        AppDelegate.shared?.dismissStatusPopover()
+        if let data = ChatSessionsManager.shared.session(for: entry.id) {
+            _ = ChatWindowManager.shared.createWindow(
+                agentId: data.agentId,
+                sessionData: data
+            )
+            NSApp.activate(ignoringOtherApps: true)
+        }
+        IntelTaskBanner.shared.dismiss()
+    }
+
+    private func taskStatusText(_ status: IntelTaskBanner.Status) -> String {
+        switch status {
+        case .running: return "Running…"
+        case .completed: return "Finished"
+        case .failed: return "Failed"
+        }
     }
 
     // MARK: Header

@@ -554,6 +554,24 @@ public final class BackgroundTaskManager: ObservableObject {
         backgroundTasks[state.id] = state
         state.appendActivity(kind: .info, title: "Running in background")
         emitPluginEvent(state, type: .started, json: PluginHostContext.serializeStartedEvent(state: state))
+
+        #if OSAURUS_INTEL
+        // M13 follow-up (Renée 2026-06-04): surface non-interactive background
+        // runs (schedules, HTTP/watcher dispatches) since the upstream NotchView
+        // indicator is amputated. A toast announces the start; the menu-bar
+        // status-card row tracks it through completion. `.chat` is a detached
+        // interactive window the user already sees, so skip those.
+        if state.source != .chat {
+            IntelTaskBanner.shared.started(id: state.id, title: state.taskTitle)
+            let agentName = AgentManager.shared.agents.first { $0.id == state.agentId }?.name
+            let who = (agentName?.isEmpty == false) ? agentName! : "An agent"
+            _ = ToastManager.shared.info(
+                "\(who) started a task",
+                message: "\(state.taskTitle) — track it in the menu-bar card",
+                timeout: 8
+            )
+        }
+        #endif
     }
 
     #if DEBUG
@@ -631,6 +649,12 @@ public final class BackgroundTaskManager: ObservableObject {
         state.status = .completed(success: success, summary: summary)
         state.currentStep = nil
         state.executionContext?.chatSession.save()
+
+        #if OSAURUS_INTEL
+        // Flip the menu-bar card row to its terminal state (guards on a matching
+        // id, so it's a no-op for tasks that never raised a banner).
+        IntelTaskBanner.shared.finished(id: state.id, success: success)
+        #endif
         // Close out the scheduler `agent_runs` row, if one was opened
         // for this task. `recordRunEnd` is a single UPDATE so the cost
         // is negligible; failure to write only forfeits the audit
