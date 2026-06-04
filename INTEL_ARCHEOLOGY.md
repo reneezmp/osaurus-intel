@@ -1508,46 +1508,105 @@ green flag.
   Schedules remain gated.
 - **Verified (Renée): tab renders; `curl /health` + `/models` logged 200 + duration.**
 
-### Schedules — SCOPE (mapped 2026-06-03, NOT built — next-session to-do)
+### Schedules — BUILT ✅ (M13, Renée 2026-06-04, tag `m13-schedules` @ 0b3a5d2a)
 
-**Verdict: fully restorable, zero hardware blockers, but the deepest Group C
-item — a multi-round restore of the background-task EXECUTION subsystem.** The
-agent fires headless via the existing cloud pipeline
-(`ScheduleManager → TaskDispatcher → BackgroundTaskManager.dispatchChat →
-ChatSession.send → composeChatContext → CloudChatEngine`).
+**The deepest Group C item, restored end-to-end.** Scheduled agents fire
+headless through the existing cloud pipeline (`NextRunScheduler` cron loop →
+`ScheduleManager`/`SchedulerDatabase` → `TaskDispatcher` → `BackgroundTaskManager.dispatchChat`
+→ `ChatSession.send` → `composeChatContext` → `CloudChatEngine`). Verified by
+Renée on Rosy: schedules fire on time, multi-round tool-calling works (GitHub
+MCP, 43 tools, 6 rounds), folder-scoped runs list/read local files (Caldo Verde
+from `04_Cooking`).
 
-A trial un-exclude went 251 → 75 errors over two rounds (converging). The full
-dependency map:
+**The trial last session was 251 → 75; this time recon paid off: 69 → 0 in a
+SINGLE triage round.** Core restore (commit `919a4f54`):
 
-- **Un-exclude (clean, no amputated deps):** `Managers/ScheduleManager.swift`,
-  `Managers/TaskDispatcher.swift` (thin wrapper over BackgroundTaskManager),
-  `Managers/NextRunScheduler.swift` (cron timer), `Managers/BackgroundTaskManager.swift`
-  (Combine+Foundation+ChatSession — the "MLX" in it is a COMMENT only),
-  `Storage/SchedulerDatabase.swift` (SQLCipher), `Models/BackgroundTaskModels.swift`,
-  `Models/Chat/DispatchRequest.swift` (defines DispatchRequest/DispatchHandle/
-  DispatchResult), `Managers/ExecutionContext.swift` (clean). `Models/Schedule/
-  Schedule.swift` is already compiled.
-- **Remove colliding Intel stubs:** `ScheduleManager` + `SchedulerDatabase`
-  (IntelAgentConformers); also remove the Intel `schedulesChanged` notification
-  mirror (the real ScheduleManager redefines it).
-- **Stub (amputated host):** `PluginHostContext` — lives in MLX/Sandbox
-  `Services/Plugin/PluginHostAPI.swift`, can't un-exclude. BackgroundTaskManager
-  calls its `serialize{Started,Activity,Clarification,Completed,Cancelled,Draft}Event`
-  + `invalidatePreflightCache(sessionId:)`. Return `"{}"` / no-op (plugins
-  amputated → nothing consumes the events). A drafted stub exists in the reverted
-  attempt's notes (this file's git history / the chat transcript).
-- **Conformer surface gaps (the triage rounds):** Intel `ChatWindowManager` needs
-  headless hooks `findSession`, `loadSession`, `createWindowForContext`, `open`;
-  task-event surface `notifyTaskEvent` / `hasTaskEventHandler`; `TaskEventType`
-  (find its home — likely PluginHostAPI or a task-events file → stub or
-  un-exclude); `StorageMigrationCoordinator` (excluded → stub); a `.empty` static.
-- **Then:** un-body-swap `Views/Schedule/SchedulesView.swift` (+ `ScheduleEditorSheet`,
-  same file), wire `NextRunScheduler` startup at launch (like the MCP
-  auto-connect), un-grey `.schedules` in ManagementTab.
-- **Caveat to verify:** does a schedule actually FIRE and produce output (the
-  cron timer + headless ChatSession run end-to-end)? Needs real testing.
-- **Effort:** ~3-5 triage rounds. Bounded.
+- **Un-excluded the clean cluster** (`Package.swift`): `ScheduleManager`,
+  `TaskDispatcher`, `NextRunScheduler`, `BackgroundTaskManager`,
+  `SchedulerDatabase`, `BackgroundTaskModels`, `DispatchRequest`,
+  `ExecutionContext` — all pure Foundation/Combine/SQLCipher.
+- **New `IntelScheduleConformers.swift`:** `PluginHostContext` stub (event
+  serializers → `"{}"`, `invalidatePreflightCache` → `SessionToolStateStore`),
+  plus `TaskEventType` and `StorageMigrationCoordinator` stubs.
+- **Removed colliding Intel stubs** (IntelAgentConformers): `ScheduleManager`,
+  `SchedulerDatabase`, `ScheduleEditorSheet` + the `schedulesChanged` mirror;
+  extended the `ChatHistoryDatabase` conformer with session-reattach no-ops
+  (`open`/`findSession`/`loadSession` → nil — Intel has no persisted history DB).
+- **`SessionSource` + `ChatSessionData` made `public`** (un-excluded files expose
+  them in public API; upstream is public too).
+- **`BackgroundTaskManager` gated** the plugin-notify + plugin-tool-seeding blocks
+  (`#if !OSAURUS_INTEL` — plugins amputated, `PreflightResult.empty` unavailable).
+- **`ChatWindowManager.createWindowForContext`** (delegates to `createWindow`).
+- Un-body-swapped `SchedulesView` + `ScheduleEditorSheet`; started
+  `NextRunScheduler` at launch (AppDelegate, after MCP auto-connect); un-greyed
+  `.schedules`.
 
-### Today's tags
-`m11-settings-complete` (57208c08) · `m12-chat-complete` (913de45a) already laid.
-Consider `m13-insights` / `m13-group-c` later.
+**Where reality differed from the 2026-06-03 SCOPE:**
+- `TaskEventType` + `StorageMigrationCoordinator` DID need stubs (scope guessed
+  they might already exist) — their real homes (`ExternalPlugin.swift`,
+  `StorageMigrationOverlay.swift`) are *fully* `#if !OSAURUS_INTEL`, so only the
+  stub branches survive on Intel. Added both to `IntelScheduleConformers`.
+- `findSession`/`loadSession`/`open` live on **`ChatHistoryDatabase`** (not
+  `ChatWindowManager` as the scope guessed) — extended that conformer instead.
+- `.empty` was `PreflightResult.empty` in a plugin-only tool-seeding block →
+  gated out rather than stubbed.
+- One round, not 3–5. Bounded estimate held; recon made it cheap.
+
+**Follow-ups Renée surfaced while testing (all BUILT + verified):**
+- **Working-dir pass-through** (in `919a4f54` + ExecutionContext changes): the
+  schedule-editor folder picker used `.withSecurityScope` (throws on the
+  non-sandboxed Intel app — same M12 bug) → gated. Threaded `folderPath` through
+  `DispatchRequest → ExecutionContext`; on Intel it attaches the raw path
+  directly (folderBookmark is nil). Without it scheduled runs ignored their dir.
+- **Sidebar live-refresh** (`919a4f54`): the Intel `ChatWindowState` never called
+  `observeSessionsManager` (AS does) → background/scheduled saves only appeared
+  on agent-switch. Wired the `$sessions` subscription.
+- **Appear-at-start** (`919a4f54`): `send()` auto-saves a new row only when it
+  has to mint a `sessionId`, but dispatched sessions pre-assign one → the early
+  save was skipped. `ExecutionContext.start` now saves right after `send()`.
+- **Delete-conversation fix** (`672451e2`): (a) the confirmation presented
+  through `ThemedAlertCenter` keyed on `@Environment(\.themedAlertScope)` but the
+  chat window hosted no `ThemedAlertHost` → dialog never drew → "Delete" no-op'd.
+  Scoped each window `.chat(windowId)` + hosted a matching `ThemedAlertHost`.
+  (b) The row resurrected because the live session still held the id + turns and
+  re-persisted on next send / the synchronous `save()` in `reset()→stop()→
+  completeRunCleanup`. Now resets the window to a fresh chat first, deletes after.
+- **Toasts** (`bb4e8527`): the ENTIRE toast layer (`ToastContainerView` /
+  `ToastWindowController` / `ToastOverlayModifier`) was `#if !OSAURUS_INTEL` —
+  `ToastManager.show()` appended to a list nothing rendered. Un-body-swapped the
+  file (pure AppKit+SwiftUI) + called `ToastWindowController.shared.setup()` at
+  launch (the standalone status-level overlay panel — no WindowGroup needed,
+  which suits the minimal Intel AppKit entry).
+- **Session persistence across launches** (`d2ee63a2`): upstream persists via the
+  excluded `ChatHistoryDatabase` (SQLite); Intel had only an in-memory dict, so
+  every relaunch wiped conversations (settings stuck because they had a store).
+  Made Intel `ChatTurnData` + `ChatSessionData` `Codable` (hand-rolled
+  `ChatTurnData` to skip the transient `preflightCapabilities: Any?`);
+  `ChatSessionsManager` now loads on init + writes one JSON per chat to
+  `~/.osaurus-intel/sessions/<uuid>.json`, rewriting on mutation, deleting on
+  delete. ISO-8601 dates both ends. Scheduled chats persist too.
+- **Task-running indicator** (`0b3a5d2a`): NotchView is amputated, so new Intel
+  surface. `IntelTaskBanner` (@MainActor ObservableObject) holds the current/recent
+  task; `BackgroundTaskManager` (Intel-gated) raises it + an info toast titled
+  "<AgentName> started a task" (8s) on a non-`.chat` start, flips it to
+  Finished/Failed on completion. `IntelStatusPanelView` renders a persistent card
+  row (spinner → ✓/⚠), tappable to open that conversation (loaded from the
+  persisted store) + clear, or × to dismiss; card grows 184→234 when shown.
+
+**Known limitation (not built):** clicking a *running* task's row/sidebar entry
+opens the saved SNAPSHOT, not a live-streaming view — true live-view-while-running
+needs window↔task-session binding (the Intel `ChatWindowState.executionContext`
+init ignores the context). The run completes + fills the row regardless.
+
+### Group C — final state (2026-06-04)
+- ✅ **Insights** (`1cf7fa5a`) · ✅ **Schedules** (`m13-schedules`)
+- 🟡 **Memory** — deferred (Renée uses the vault + renee.rag; Osaurus memory
+  stays off). Only worth a cloud-distillation + dumb-recall build later.
+- 🔴 **Models / Voice / Sandbox** — stay amputated (hardware blockers: MLX /
+  FluidAudio / Containerization). Functionally, the Intel fork's tabs are now as
+  complete as they can be without the amputated subsystems.
+
+### Tags laid
+`m11-settings-complete` (57208c08) · `m12-chat-complete` (913de45a) ·
+`m13-schedules` (0b3a5d2a). (Insights shipped under M13 at `1cf7fa5a`, no separate
+tag.)
