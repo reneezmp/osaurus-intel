@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  RemoteProviderEditSheet.swift
 //  osaurus
@@ -6,6 +5,11 @@
 //  Sheet for adding/editing remote API providers.
 //  Add mode: stepped flow (pick provider -> API key -> test -> save).
 //  Edit mode: simplified form based on known vs custom provider.
+//
+//  M12 follow-up (Renée 2026-06-03): un-body-swapped for Intel — editing a
+//  provider's name / base URL / API key / model list needs no Apple Silicon
+//  (it's pure config + keychain), so the "Apple Silicon only" placeholder was
+//  an over-amputation. Any genuinely amputated sub-feature is gated inline.
 //
 
 import AppKit
@@ -2517,35 +2521,4 @@ private struct DeploymentNamesEditor: View {
         RemoteProviderEditSheet(provider: nil) { _, _, _ in }
             .environment(\.theme, DarkTheme())
     }
-#endif
-#else
-import SwiftUI
-
-/// Intel stub. The full add/edit flow depends on excluded provider-
-/// service + keychain glue; the sheet renders the standard
-/// "Apple Silicon only" placeholder. Init signature mirrors the
-/// upstream surface in `RemoteProviderEditSheet` at line ~34 of this
-/// file (only visible in the `#if !OSAURUS_INTEL` branch) so the
-/// call sites in `RemoteProvidersView` (un-body-swapped in M11
-/// Phase 11.A.2) type-check.
-struct RemoteProviderEditSheet: View {
-    let provider: RemoteProvider?
-    var initialPreset: ProviderPreset?
-    let onSave: (RemoteProvider, String?, RemoteProviderOAuthTokens?) -> Void
-
-    init(
-        provider: RemoteProvider?,
-        initialPreset: ProviderPreset? = nil,
-        onSave: @escaping (RemoteProvider, String?, RemoteProviderOAuthTokens?) -> Void
-    ) {
-        self.provider = provider
-        self.initialPreset = initialPreset
-        self.onSave = onSave
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Remote Provider Edit", symbol: "apple.logo")
-            .frame(minWidth: 520, minHeight: 420)
-    }
-}
 #endif

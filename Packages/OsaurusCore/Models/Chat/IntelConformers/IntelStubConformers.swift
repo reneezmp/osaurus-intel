@@ -320,6 +320,82 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// goes through `OsaurusServer` + the env-var key, not through a
     /// per-provider service object, so this returns nil.
     func findService(forModel model: String) -> Any? { nil }
+
+    /// M12 follow-up (Renée 2026-06-03): the RemoteProviderEditSheet "Test"
+    /// step probes the provider's `/models` endpoint. The upstream
+    /// `RemoteProviderManager.testConnection` (excluded) pulls in
+    /// `RemoteProviderService` + OAuth + Anthropic-specific helpers; this is a
+    /// pragmatic Intel mirror that does the OpenAI-compatible GET /models probe
+    /// (which covers DeepSeek and friends) so add/edit actually works. Returns
+    /// the discovered model ids.
+    func testConnection(
+        host: String,
+        providerProtocol: RemoteProviderProtocol,
+        port: Int?,
+        basePath: String,
+        authType: RemoteProviderAuthType,
+        providerType: RemoteProviderType = .openaiLegacy,
+        apiKey: String?,
+        headers: [String: String]
+    ) async throws -> [String] {
+        let tempProvider = RemoteProvider(
+            name: "Test",
+            host: host,
+            providerProtocol: providerProtocol,
+            port: port,
+            basePath: basePath,
+            customHeaders: headers,
+            authType: authType,
+            providerType: providerType,
+            enabled: true,
+            autoConnect: false,
+            timeout: 30
+        )
+
+        var testHeaders = headers
+        if authType == .apiKey, let apiKey, !apiKey.isEmpty {
+            switch providerType {
+            case .anthropic:
+                if testHeaders["x-api-key"] == nil { testHeaders["x-api-key"] = apiKey }
+                if testHeaders["anthropic-version"] == nil {
+                    testHeaders["anthropic-version"] = "2023-06-01"
+                }
+            case .gemini:
+                if testHeaders["x-goog-api-key"] == nil { testHeaders["x-goog-api-key"] = apiKey }
+            case .azureOpenAI:
+                if testHeaders["api-key"] == nil { testHeaders["api-key"] = apiKey }
+            default:
+                if testHeaders["Authorization"] == nil {
+                    testHeaders["Authorization"] = "Bearer \(apiKey)"
+                }
+            }
+        }
+
+        guard let url = tempProvider.url(for: "/models") else { throw URLError(.badURL) }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 30
+        for (k, v) in testHeaders { req.setValue(v, forHTTPHeaderField: k) }
+
+        let (data, response) = try await URLSession.shared.data(for: req)
+        if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            throw NSError(
+                domain: "RemoteProvider",
+                code: http.statusCode,
+                userInfo: [NSLocalizedDescriptionKey: "Test failed — HTTP \(http.statusCode)"]
+            )
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
+            return []
+        }
+        if let arr = json["data"] as? [[String: Any]] {
+            return arr.compactMap { $0["id"] as? String }.sorted()
+        }
+        if let arr = json["models"] as? [[String: Any]] {
+            return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
+        }
+        return []
+    }
 }
 
 // MARK: - PluginRepositoryService (Intel stub)
