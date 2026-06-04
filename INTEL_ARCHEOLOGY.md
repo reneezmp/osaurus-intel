@@ -1258,3 +1258,104 @@ post-UI: the pill switched identity but conversations were unaffected):
 - **Gap 3 (runtime tools)** — next. Un-exclude `ToolRegistry` + `FolderToolManager`,
   selectively gate the amputated `DB*Tool` / sandbox / capability registrations.
 - **Gap 2 (folder context)** — falls out of Gap 3; wire `DirectoryPickerService`.
+
+---
+
+## M12 Gap 2 + Gap 3 — Folder Picker + Runtime Tools (CLOSURE, 2026-06-03)
+
+Commits: `e6f63f9f` (part 1 — foundation), `ef05b435` (part 2 — wiring). The
+Intel chat now genuinely reads/writes/searches files and runs shell commands in
+a chosen working folder, with proper tool-call cards. **Gap 2 and Gap 3 are one
+feature** (folder tools are folder-scoped — they only exist once a folder is
+attached).
+
+### The headline finding (Renée's catch)
+
+The agent tool-loop in `ChatView` (send `toolSpecs` → execute
+`ToolRegistry.shared.execute` → loop) is **shared, un-stubbed code** — it always
+worked. What was missing was the **engine wiring**: the hand-rolled Intel DeepSeek
+client `CloudChatEngine` **never sent `tools` to DeepSeek** and the
+`StreamingToolHint` decoder was a hollow stub. So every "tool use" was the model
+*role-playing* from the prompt (it knew tool names from the folder guide but had
+no callable functions). Renée spotted this — "isn't it just copying the original +
+adjusting for Intel?" — which reframed the hunt from "why won't the model call
+tools" to "is the engine even offering them." It wasn't.
+
+### What shipped
+
+**Foundation (part 1):** un-excluded `Tools/OsaurusTool.swift`,
+`Tools/ToolEnvelope.swift`, `Tools/ToolErrorEnvelope.swift`,
+`Folder/FolderTools.swift` (the 6 file/shell + 3 git tools, Darwin+Foundation,
+clean). Reshaped the Intel `Tool`/`ToolFunction` model to carry JSON-Schema
+`parameters` (the mirror had dropped them → schema-less tools). Stubbed
+`LiveExecSink` (real one imports amputated Containerization) + `diagnosticWarnings`
+so `shell_run` runs and collects output, minus only the live mid-run terminal
+streaming.
+
+**Engine-side tool loop (part 2, the core fix) — `CloudChatEngine.streamChat`:**
+rewrote as a real agent loop — sends OpenAI `tools` + `tool_choice` (params via
+`JSONValue.anyValue`), parses streamed `delta.tool_calls`, executes each via
+`ToolRegistry`, yields a "done" sentinel for the card, appends assistant
+tool-call + tool-result messages, and continuation-loops until the final answer
+(max 12 rounds). Also fixed the message encoder to include `tool_calls` /
+`tool_call_id` (it was dropping both).
+
+**`StreamingToolHint`:** implemented the real encode/decode sentinel protocol
+(ESC-tagged prefixes) so `ChatView`'s `decodeDone`/`decode` paths turn the
+engine's tool events into cards + result turns.
+
+**Registry + context:** Intel `ToolRegistry` got real `register`/`unregister`/
+`execute` dispatch + `openAISpecs()` (was canned text + `[]`).
+`SystemPromptComposer.composeChatContext` (Intel) now emits the registered folder
+tools AND the real `## Working Directory` framing
+(`SystemPromptTemplates.folderContext`, NOT excluded) + a firm tool-use directive.
+
+**Folder picker (Gap 2):** un-excluded `FolderContextService` + `FolderToolManager`
++ `FolderPluginHints`. **The silent-failure bug:** `setFolder` minted a
+`.withSecurityScope` bookmark, which **throws without the App Sandbox entitlement**
+— and the Intel app isn't sandboxed — so the `catch` swallowed it and dropped the
+folder (chip stayed empty, no tools). Gated the bookmark path behind
+`#if !OSAURUS_INTEL`; the non-sandboxed app attaches the folder directly.
+
+**Rendering (Intel `BlockMemoizer` + tool-call card):** the simplified Intel block
+builder never produced `.toolCallGroup` blocks (no cards) and rendered `.tool`-role
+turns as paragraphs (raw result JSON dumped into the chat). Fixed: build tool-call
+blocks from `turn.toolCalls`, skip `.tool` turns, group consecutive assistant+tool
+turns under one header. And `NativeToolCallGroupView` had `applyResultOrLiveState`
+gated behind `#if !OSAURUS_INTEL`, so cards showed args but no result — un-gated it
+(only the `LiveExecRegistry` live-terminal subscription stays gated).
+
+### Click-through results (Renée, with "Uga Buga" caveman agent 🦖)
+
+- ✅ Folder chip → NSOpenPanel → folder attaches (chip shows `04_Cooking`)
+- ✅ `file_tree` / `file_read` / `shell_run` execute for real (byte-exact `ls -la`)
+- ✅ `file_write` actually creates `hello.md` / `uga.md` on disk
+- ✅ Tool-call cards render with ARGUMENTS **and** RESULT inside (expandable);
+  no raw JSON leaks into the chat
+- ✅ Settings → Tools "Available (0)" is **correct** — that tab is for
+  plugin/provider tools; folder tools are ephemeral and surface in-chat
+
+### Lessons
+
+- **DeepSeek V4 Flash is an inconsistent tool-caller** — but that was a red
+  herring masking the real bug (tools never sent). Once the engine offered real
+  function specs, Flash called them reliably.
+- **`.withSecurityScope` bookmarks require the sandbox entitlement** and throw
+  silently otherwise — a classic non-sandboxed-fork trap.
+- **The result lives in the card, not a chat bubble** — skipping `.tool`-role
+  turns in the block builder is the right call; the result rides on the
+  assistant turn's `toolResults` into the `ToolCallItem`.
+
+---
+
+## M12 follow-up — RemoteProviderEditSheet restored (CLOSURE, 2026-06-03, commit `83c1083a`)
+
+Renée found that Settings → Providers → edit (✏️) showed the "Apple Silicon only"
+placeholder. The entire 2500-line `RemoteProviderEditSheet` had been body-swapped
+during M11 — but editing a provider's name / base URL / API key / headers / model
+list needs **zero** Apple Silicon (pure config + keychain). Un-body-swapped it (it
+imports only AppKit + SwiftUI, no amputated refs). The one surface gap was
+`testConnection` — the upstream one pulls in `RemoteProviderService` + OAuth +
+Anthropic helpers, so added a pragmatic Intel mirror doing the OpenAI-compatible
+`GET /models` probe (covers DeepSeek), returning discovered model ids, so the
+sheet's Test → Save flow works. Verified: edit form opens, saves, Test probes.
