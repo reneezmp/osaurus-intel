@@ -1359,3 +1359,67 @@ imports only AppKit + SwiftUI, no amputated refs). The one surface gap was
 Anthropic helpers, so added a pragmatic Intel mirror doing the OpenAI-compatible
 `GET /models` probe (covers DeepSeek), returning discovered model ids, so the
 sheet's Test → Save flow works. Verified: edit form opens, saves, Test probes.
+
+---
+
+## M12 follow-up — Menu-bar status card + chat-window lifecycle (CLOSURE, 2026-06-03, commit `76b72a6a`)
+
+Renée noticed the Intel menu-bar popover was a bare "Osaurus (Intel) / Quit"
+card vs the production card (icon, version, server URL, CPU/RAM, Ask AI, quick
+actions). Restoring it surfaced — and fixed — two latent chat-window crashes.
+
+### The card — `IntelStatusPanelView` (AppDelegate.swift)
+
+A self-contained, theme-aware status panel mirroring the production card's look:
+app icon (→ Server settings), **Osaurus** + version + `Intel` badge + green
+running dot, server URL `127.0.0.1:1338` + copy, **live CPU/RAM gauges**
+(`SystemMonitorService`, NOT excluded), and **Ask AI / ⚙️ Settings / ❓ Docs /
+⏻ Quit**. Theme-driven (`ThemeManager.currentTheme`), reuses the real
+`CircularIconButton`, compact themed `Ask AI` accent pill.
+
+**Why not un-body-swap the upstream `StatusPanelView`?** It's built for
+local-server lifecycle (start/stop/restart, editable port, voice/VAD, model
+status) — un-body-swapping surfaced **47 errors** of inapplicable machinery
+(`server.lastErrorMessage` setter, settable `port`, `VADService`, `StatusBadge`,
+model status). Per the ">5-cascade → STOP" rule, built a focused Intel card
+instead. Skipped: voice/mic toggle (amputated), server start/stop (Intel server
+is always-on via env-var key).
+
+### Visual polish (Renée's round-2 feedback)
+
+- **Theme background** — the first cut used default chrome (looked transparent /
+  square). Now `theme.primaryBackground` + a bounded `frame(height: 184)` (the
+  background's `ignoresSafeArea()` was stretching the popover tall).
+- **Compact themed Ask AI** — was a giant blue `.borderedProminent`; now a small
+  `theme.accentColor` gradient pill like the upstream `AskAIButton`.
+- **Docs button** — added the `?` → `https://docs.osaurus.ai/`.
+
+### Two chat-window lifecycle crashes (from Renée's crash report)
+
+`EXC_BAD_ACCESS` in `ChatWindowManager.showWindow(id:)` via "Ask AI". Root cause
+chain:
+
+1. **Dangling window.** The Intel chat window had **no `NSWindowDelegate`**, so
+   closing it via the traffic-light released the `NSWindow`
+   (`isReleasedWhenClosed = true`) while `windows`/`nsWindows` kept stale
+   references → "Ask AI" / dock-reopen poked freed memory. **Fix:**
+   `ChatWindowManager` (Intel) is now the `NSWindowDelegate` —
+   `windowWillClose` purges bookkeeping, `windowDidBecomeKey` tracks
+   `lastFocusedWindowId`.
+2. **Double-free.** Adding the delegate then exposed a second crash: closing the
+   window with `isReleasedWhenClosed = true` released it AND our `windowWillClose`
+   dropped the dict's strong ref → double-free mid-close (red button crashed).
+   **Fix:** `isReleasedWhenClosed = false` — the manager's dict is the sole
+   strong owner; removing it in `windowWillClose` is the single safe release.
+3. **Popover teardown reentrancy.** `openChatFromStatusPanel` defers the window
+   work past `performClose` (a `DispatchQueue.main.async` tick) so it doesn't run
+   while the popover's SwiftUI host is tearing down.
+
+This trio makes Intel chat-window lifecycle solid — no dangling refs, no
+double-free, clean dock-reopen. (Bugs 1 + 2 also affected dock reopen after
+closing a chat window — hit incidentally via the menu bar.)
+
+### Verified (Renée)
+
+✅ Card themed + correct compact shape · ✅ red close button (no crash) · ✅ Ask
+AI opens/focuses chat · ✅ dock reopen after close · ✅ Settings / Docs / Quit.
