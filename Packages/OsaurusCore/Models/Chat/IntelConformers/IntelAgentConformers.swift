@@ -37,8 +37,8 @@ extension Notification.Name {
     static let openTTSSettingsRequested = Notification.Name("openTTSSettingsRequested")
     /// `schedulesChanged` now comes from the real ScheduleManager
     /// (Managers/ScheduleManager.swift), un-excluded in M13 Schedules restore.
-    /// Posted by the (amputated) WatcherManager when watchers change.
-    static let watchersChanged = Notification.Name("watchersChanged")
+    /// `watchersChanged` now comes from the real WatcherManager
+    /// (Managers/WatcherManager.swift), un-excluded in the M9 Watchers restore.
     // `mcpProviderStatusChanged` now comes from the real MCPProviderManager
     // (Managers/MCPProviderManager.swift), un-excluded in M12 follow-up.
 }
@@ -232,37 +232,9 @@ final class RelayTunnelManager: ObservableObject, @unchecked Sendable {
 // ScheduleManager is now the real one (Managers/ScheduleManager.swift),
 // un-excluded in the M13 Schedules restore.
 
-// MARK: - Watcher Manager (Intel stub)
-
-@MainActor
-final class WatcherManager: ObservableObject, @unchecked Sendable {
-    static let shared = WatcherManager()
-    @Published private(set) var watchers: [Watcher] = []
-    private init() {}
-    func refresh() {}
-    func watchers(for agentId: UUID) -> [Watcher] { [] }
-    func watcherCount(forAgentId agentId: UUID) -> Int { 0 }
-    /// Whether a watcher is actively firing. Always false on Intel
-    /// (the file-watch runtime is amputated).
-    func isRunning(_ id: UUID) -> Bool { false }
-    /// Manually trigger a watcher run. No-op on Intel.
-    func runNow(_ id: UUID) {}
-    @discardableResult
-    func create(
-        name: String,
-        instructions: String,
-        agentId: UUID?,
-        parameters: [String: String] = [:],
-        watchPath: String?,
-        watchBookmark: Data?,
-        isEnabled: Bool,
-        recursive: Bool,
-        responsiveness: Responsiveness
-    ) -> Watcher? { nil }
-    func update(_ watcher: Watcher) {}
-    func delete(id: UUID) {}
-    func setEnabled(_ id: UUID, enabled: Bool) {}
-}
+// WatcherManager is now the real one (Managers/WatcherManager.swift),
+// un-excluded in the M9 Watchers restore — FSEvents monitoring dispatches
+// through the (un-excluded) TaskDispatcher pipeline, same as Schedules.
 
 // MARK: - Remote Agent Manager (Intel stub)
 

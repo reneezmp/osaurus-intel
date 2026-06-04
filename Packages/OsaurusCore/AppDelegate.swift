@@ -130,6 +130,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // it polls the scheduler DB. Mirrors the Apple Silicon startup.
             NextRunScheduler.shared.start()
             NSLog("[Osaurus Intel] NextRunScheduler started")
+
+            // M9 Watchers restore (Renée 2026-06-04): instantiate WatcherManager
+            // so its FSEvents stream for all enabled watchers starts at launch
+            // (its init calls startAllEnabledWatchers). On change it dispatches
+            // through the same TaskDispatcher pipeline as Schedules. Without this
+            // touch, the manager wouldn't exist until the Watchers tab is opened.
+            _ = WatcherManager.shared
+            NSLog("[Osaurus Intel] WatcherManager started with \(WatcherManager.shared.watchers.count) watcher(s)")
         }
 
         Task { @MainActor in
