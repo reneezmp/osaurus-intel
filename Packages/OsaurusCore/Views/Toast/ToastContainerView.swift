@@ -1,10 +1,17 @@
-#if !OSAURUS_INTEL
 //
 //  ToastContainerView.swift
 //  osaurus
 //
 //  Container view that manages toast positioning, stacking, and animations.
 //  Add this as an overlay to windows that need toast support.
+//
+//  M13 follow-up (Renée 2026-06-04): un-body-swapped on Intel. The whole
+//  toast rendering layer (ToastContainerView / ToastOverlayModifier /
+//  ToastWindowController) is pure AppKit+SwiftUI driven by ToastManager —
+//  nothing hardware-bound — so it works on Intel. Previously the entire file
+//  was gated out and only a stub `ToastOverlayWindowContent` survived, so
+//  `ToastManager.show()` appended to its list but nothing ever rendered.
+//  `ToastWindowController.shared.setup()` is now called at launch.
 //
 
 import AppKit
@@ -309,12 +316,4 @@ struct ToastOverlayWindowContent: View {
             .frame(width: 800, height: 600)
         }
     }
-#endif
-#else
-import SwiftUI
-struct ToastOverlayWindowContent: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Toasts", symbol: "apple.logo")
-    }
-}
 #endif

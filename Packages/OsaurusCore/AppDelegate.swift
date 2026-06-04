@@ -83,6 +83,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         installStatusItem()
 
+        // M13 follow-up (Renée 2026-06-04): bring up the floating toast overlay
+        // panel. The whole toast rendering layer was un-body-swapped on Intel;
+        // without this `setup()` the panel that hosts `ToastContainerView` is
+        // never created, so `ToastManager.show()` appended toasts that had
+        // nowhere to render. ToastManager already loaded the persisted config
+        // (enabled by default) in its initializer.
+        ToastWindowController.shared.setup()
+
         #if DEBUG
             MainThreadWatchdog.shared.start()
         #endif
