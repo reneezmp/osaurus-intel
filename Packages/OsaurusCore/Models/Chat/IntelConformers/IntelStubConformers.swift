@@ -10,6 +10,7 @@
 #if OSAURUS_INTEL
 
 import Foundation
+import OsaurusRepository
 
 // MARK: - SpeechService (no-op on Intel)
 
@@ -428,12 +429,56 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
     /// compatibility but doesn't install), so uninstall is a no-op.
     func uninstall(pluginId: String) async {}
 
-    // PluginsView install/update/refresh affordances. All no-ops on
-    // Intel — the three-bucket UI shows compatibility, but the runtime
-    // that would install/upgrade plugins is amputated.
+    // PluginsView install/update affordances. Still no-ops on Intel until
+    // the execution host is restored (M9 Phase C) — Browse shows the registry
+    // + compatibility, but nothing installs yet.
     func install(pluginId: String) async throws {}
     func upgrade(pluginId: String) async throws {}
-    func refresh() async {}
+
+    /// M9 Phase A (Renée 2026-06-04): real registry browse on Intel. The git
+    /// registry fetcher (`CentralRepositoryManager`) lives in the
+    /// `OsaurusRepository` package, which is plain Foundation and already
+    /// linked — so Browse works on Intel even though the plugin EXECUTION host
+    /// is still amputated. Maps each `PluginSpec` to the Intel `PluginState`
+    /// shape (versions converted; capabilities skipped — display only). Nothing
+    /// is ever `installedVersion`, so every plugin lands in the Browse tab.
+    func refresh() async {
+        if isRefreshing { return }
+        await MainActor.run {
+            isRefreshing = true
+            lastError = nil
+        }
+        let reachable = await Task.detached(priority: .utility) {
+            CentralRepositoryManager.shared.refresh()
+        }.value
+        let specs = await Task.detached(priority: .utility) {
+            CentralRepositoryManager.shared.listAllSpecs()
+        }.value
+        let mapped: [PluginState] = specs.map { spec in
+            let latest = spec.versions.map(\.version).max()
+            return PluginState(
+                pluginId: spec.plugin_id,
+                name: spec.name,
+                pluginDescription: spec.description,
+                authors: spec.authors,
+                license: spec.license,
+                capabilities: nil,
+                installedVersion: nil,
+                latestVersion: latest.map {
+                    SemanticVersion(major: $0.major, minor: $0.minor, patch: $0.patch)
+                },
+                isInstalling: false,
+                loadError: nil
+            )
+        }
+        await MainActor.run {
+            if !reachable && mapped.isEmpty {
+                lastError = "Unable to reach the plugin repository"
+            }
+            plugins = mapped.sorted { ($0.name ?? $0.pluginId) < ($1.name ?? $1.pluginId) }
+            isRefreshing = false
+        }
+    }
 }
 
 /// Intel stub mirroring just the surface `SkillsView` reads off
