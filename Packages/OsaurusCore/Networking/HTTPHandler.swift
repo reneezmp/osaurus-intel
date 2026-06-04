@@ -184,6 +184,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         var isStreaming = false
         var streamingDone = false
         var contextBox: ChannelHandlerContext?
+        /// M13 (Insights): wall-clock when the request head arrived, so
+        /// `sendResponse` can report request duration to InsightsService.
+        var requestStartedAt: Date?
     }
     let stateRef: NIOLoopBound<RequestState>
 
@@ -218,6 +221,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         switch part {
         case .head(let head):
             stateRef.value.requestHead = head
+            stateRef.value.requestStartedAt = Date()
             stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: 0)
             stateRef.value.isStreaming = false
             stateRef.value.streamingDone = false
@@ -619,6 +623,23 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         buffer.writeString(body)
         context.write(wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
         context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
+
+        // M13 (Insights): record this request so the Insights tab shows real
+        // server traffic. Covers every non-streaming endpoint (health, models,
+        // MCP, router, non-stream chat); SSE streaming chat bypasses this sink.
+        // The in-app chat uses CloudChatEngine directly, so this reflects
+        // external API/MCP clients hitting the local server.
+        if let head = stateRef.value.requestHead {
+            let started = stateRef.value.requestStartedAt
+            let durationMs = started.map { Date().timeIntervalSince($0) * 1000 } ?? 0
+            InsightsService.logRequest(
+                source: .httpAPI,
+                method: head.method.rawValue,
+                path: Router.normalizeStatic(head.uri),
+                statusCode: Int(status.code),
+                durationMs: durationMs
+            )
+        }
     }
 
     private func sendSSEHeaders(context: ChannelHandlerContext) {

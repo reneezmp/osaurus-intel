@@ -93,17 +93,22 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
 
     /// Whether the tab's underlying subsystem is functional on Intel.
     ///
-    /// On the Intel fork, the tabs whose entire backing stack lives in
-    /// excluded subsystems (MLX local inference, FluidAudio voice,
-    /// Containerization sandbox, ScheduleManager, InsightsService /
-    /// embeddings-based memory) are visibly disabled in the sidebar via
-    /// `SidebarItemData.isDisabled` + a `.help()` tooltip — the row stays
-    /// listed so users can see what's coming on Apple Silicon, but
-    /// clicking it is a no-op. Apple Silicon always returns `true`.
+    /// On the Intel fork, the tabs whose backing stack lives entirely in
+    /// excluded hardware-bound subsystems (MLX local inference, FluidAudio
+    /// voice, Containerization sandbox) stay visibly disabled in the sidebar
+    /// via `SidebarItemData.isDisabled` + a `.help()` tooltip — listed so users
+    /// see what's Apple-Silicon-only, but clicking is a no-op.
+    ///
+    /// M13 (Group C, Renée 2026-06-03): `.insights` is now available —
+    /// `InsightsService` is Foundation+Combine only and the local HTTP server
+    /// it logs runs on Intel. (`.memory` / `.schedules` remain gated pending
+    /// their fuller restores.) Apple Silicon always returns `true`.
     public var isAvailableOnIntel: Bool {
         switch self {
-        case .models, .voice, .memory, .sandbox, .schedules, .insights:
+        case .models, .voice, .memory, .sandbox, .schedules:
             return false
+        case .insights:
+            return true
         default:
             return true
         }

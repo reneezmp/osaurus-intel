@@ -1,9 +1,13 @@
-#if !OSAURUS_INTEL
 //
 //  InsightsView.swift
 //  osaurus
 //
 //  Request/response logging view for debugging and analytics.
+//
+//  M13 (Group C, Renée 2026-06-03): un-body-swapped for Intel. InsightsService
+//  is Foundation + Combine only (no MLX/FluidAudio/Containerization/VecturaKit),
+//  and the HTTP server it logs runs on Intel — so the analytics view is fully
+//  functional, not "Apple Silicon only".
 //
 
 import SwiftUI
@@ -636,12 +640,4 @@ extension RequestSource {
         InsightsView()
             .frame(width: 900, height: 600)
     }
-#endif
-#else
-import SwiftUI
-struct InsightsView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Insights", symbol: "apple.logo")
-    }
-}
 #endif
