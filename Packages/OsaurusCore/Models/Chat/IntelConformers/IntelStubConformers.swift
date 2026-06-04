@@ -534,17 +534,52 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
-    /// Register a remote MCP provider's tool. M12 follow-up: the real
-    /// MCPProviderManager (un-excluded) registers each connected remote tool
-    /// here so the chat tool-loop + ToolsManagerView see them.
+    /// Names of remote MCP-provider tools (tracked so the capability picker can
+    /// bucket them under their provider). M12 follow-up.
+    private var mcpToolNames: Set<String> = []
+
+    /// Register a remote MCP provider's tool. The real MCPProviderManager
+    /// (un-excluded) registers each connected remote tool here so the chat
+    /// tool-loop + ToolsManagerView + capability picker see them.
     func registerMCPTool(_ tool: OsaurusTool) {
+        mcpToolNames.insert(tool.name)
         register(tool)
     }
 
-    /// Remove tools by name. Used by FolderToolManager when the folder clears.
+    // MARK: Tool source predicates (for AgentCapabilityManagerView grouping)
+
+    /// Always-loaded built-in tools. Intel has none (folder tools are
+    /// folder-scoped, not always-loaded built-ins), so this stays empty.
+    private(set) var builtInToolNames: Set<String> = []
+
+    /// Runtime-managed (dynamically loaded) tool names — none on Intel.
+    var runtimeManagedToolNames: Set<String> { [] }
+
+    func isMCPTool(_ name: String) -> Bool { mcpToolNames.contains(name) }
+
+    /// Native dylib plugins are amputated on Intel.
+    func isPluginTool(_ name: String) -> Bool { false }
+
+    /// Sandbox tools are amputated on Intel.
+    func isSandboxTool(_ name: String) -> Bool { false }
+
+    /// The provider/plugin group a tool belongs to. On Intel only MCP-provider
+    /// tools carry a group (their `providerName`); ExternalTool/SandboxPluginTool
+    /// are amputated. Mirrors the real ToolRegistry.groupName.
+    func groupName(for toolName: String) -> String? {
+        guard let tool = toolsByName[toolName] else { return nil }
+        if let mcp = tool as? MCPProviderTool { return mcp.providerName }
+        return nil
+    }
+
+    /// Remove tools by name. Used by FolderToolManager when the folder clears
+    /// and by MCPProviderManager on disconnect.
     func unregister(names: [String]) {
         guard !names.isEmpty else { return }
-        for name in names { toolsByName.removeValue(forKey: name) }
+        for name in names {
+            toolsByName.removeValue(forKey: name)
+            mcpToolNames.remove(name)
+        }
         objectWillChange.send()
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }

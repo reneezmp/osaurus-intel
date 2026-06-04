@@ -279,9 +279,113 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func effectiveToolsDisabled(for agentId: UUID) -> Bool { false }
     func effectiveDBEnabled(for agentId: UUID) -> Bool { false }
     func effectiveMemoryDisabled(for agentId: UUID) -> Bool { true }
-    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode? { nil }
-    func effectiveEnabledToolNames(for agentId: UUID) -> [String]? { nil }
-    func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? { nil }
+    // M12 follow-up (Renée 2026-06-03): real per-agent capability management,
+    // backing the un-body-swapped AgentCapabilityManagerView. Mirrors the real
+    // AgentManager (Managers/AgentManager.swift): custom agents persist to their
+    // own `manualToolNames`/`manualSkillNames`/`toolSelectionMode`; the Default
+    // (built-in) agent routes through the global ChatConfiguration. The chat
+    // send path (composeChatContext) honors these so Manual mode actually
+    // restricts the agent to its enabled tools.
+    func effectiveToolSelectionMode(for agentId: UUID) -> ToolSelectionMode {
+        guard let agent = agent(for: agentId) else { return .auto }
+        if agent.id == Agent.defaultId {
+            return (ChatConfigurationStore.load().defaultToolSelectionMode as? ToolSelectionMode) ?? .auto
+        }
+        return agent.toolSelectionMode ?? .auto
+    }
+
+    func effectiveEnabledToolNames(for agentId: UUID) -> [String]? {
+        guard let agent = agent(for: agentId) else { return nil }
+        if agent.id == Agent.defaultId {
+            return ChatConfigurationStore.load().defaultManualToolNames
+        }
+        return agent.manualToolNames
+    }
+
+    func effectiveEnabledSkillNames(for agentId: UUID) -> [String]? {
+        guard let agent = agent(for: agentId) else { return nil }
+        if agent.id == Agent.defaultId {
+            return ChatConfigurationStore.load().defaultManualSkillNames
+        }
+        return agent.manualSkillNames
+    }
+
+    /// Seed an agent's enabled set from the live registries the first time the
+    /// capability picker opens (idempotent — only writes when nil).
+    func seedEnabledCapabilitiesIfNeeded(
+        for agentId: UUID,
+        defaultToolNames: [String],
+        defaultSkillNames: [String]
+    ) {
+        guard let agent = agent(for: agentId) else { return }
+        if agent.id == Agent.defaultId {
+            let config = ChatConfigurationStore.load()
+            var changed = false
+            if config.defaultManualToolNames == nil {
+                config.defaultManualToolNames = defaultToolNames
+                changed = true
+            }
+            if config.defaultManualSkillNames == nil {
+                config.defaultManualSkillNames = defaultSkillNames
+                changed = true
+            }
+            if changed {
+                ChatConfigurationStore.save(config)
+                NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
+            }
+            return
+        }
+        var updated = agent
+        var changed = false
+        if updated.manualToolNames == nil {
+            updated.manualToolNames = defaultToolNames
+            changed = true
+        }
+        if updated.manualSkillNames == nil {
+            updated.manualSkillNames = defaultSkillNames
+            changed = true
+        }
+        if changed { update(updated) }
+    }
+
+    func updateEnabledToolNames(_ names: [String], for agentId: UUID) {
+        if agentId == Agent.defaultId {
+            let config = ChatConfigurationStore.load()
+            config.defaultManualToolNames = names
+            ChatConfigurationStore.save(config)
+            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
+            return
+        }
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        agent.manualToolNames = names
+        update(agent)
+    }
+
+    func updateEnabledSkillNames(_ names: [String], for agentId: UUID) {
+        if agentId == Agent.defaultId {
+            let config = ChatConfigurationStore.load()
+            config.defaultManualSkillNames = names
+            ChatConfigurationStore.save(config)
+            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
+            return
+        }
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        agent.manualSkillNames = names
+        update(agent)
+    }
+
+    func updateToolSelectionMode(_ mode: ToolSelectionMode, for agentId: UUID) {
+        if agentId == Agent.defaultId {
+            let config = ChatConfigurationStore.load()
+            config.defaultToolSelectionMode = mode
+            ChatConfigurationStore.save(config)
+            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
+            return
+        }
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        agent.toolSelectionMode = mode
+        update(agent)
+    }
     // AgentDetailView's sandbox section reads/writes
     // `AutonomousExecConfig` (the real type from Models/Agent/Agent.swift,
     // NOT excluded on Intel) — not the lightweight protocol

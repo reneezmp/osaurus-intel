@@ -1296,10 +1296,12 @@ final class SystemPromptComposer: @unchecked Sendable {
     // for Default). Memory/tools stay inert, matching the amputated build.
     static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
-        let (basePrompt, folder) = await MainActor.run {
+        let (basePrompt, folder, toolMode, enabledToolNames) = await MainActor.run {
             (
                 AgentManager.shared.effectiveSystemPrompt(for: id),
-                FolderContextService.shared.currentContext
+                FolderContextService.shared.currentContext,
+                AgentManager.shared.effectiveToolSelectionMode(for: id),
+                AgentManager.shared.effectiveEnabledToolNames(for: id)
             )
         }
         // M12 Gap 3: when a working folder is mounted, append the real
@@ -1335,8 +1337,21 @@ final class SystemPromptComposer: @unchecked Sendable {
             toolDirective = ""
         }
         let prompt = basePrompt + folderSection + toolDirective
-        // Surface the registered folder tools so the model can call them.
-        let tools = toolsDisabled ? [] : ToolRegistry.shared.openAISpecs()
+        // Surface the registered tools, honoring the agent's capability picker
+        // (M12 follow-up): in Manual mode, restrict to the agent's enabled
+        // allowlist; in Auto mode (or un-seeded), send everything registered.
+        let tools: [Tool]
+        if toolsDisabled {
+            tools = []
+        } else {
+            let allSpecs = ToolRegistry.shared.openAISpecs()
+            if toolMode == .manual, let enabled = enabledToolNames {
+                let allowed = Set(enabled)
+                tools = allSpecs.filter { allowed.contains($0.function.name) }
+            } else {
+                tools = allSpecs
+            }
+        }
         return ComposedContext(prompt: prompt, tools: tools)
     }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}

@@ -28,6 +28,9 @@ extension Notification.Name {
     /// view. Amputated on Intel (no deeplink routing for agents yet),
     /// but the name must exist for the observer in AgentsView.
     static let agentDetailDeeplink = Notification.Name("agentDetailDeeplink")
+    /// Posted by AgentManager when an agent's config changes (capability
+    /// picker writes). M12 follow-up — AgentCapabilityManagerView observes it.
+    static let agentUpdated = Notification.Name("agentUpdated")
     /// Posted by TTSService when a voice model needs configuring. The
     /// AgentDetailView voice section observes it to route the user to
     /// TTS settings (amputated on Intel, but the name must resolve).

@@ -107,6 +107,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             } catch {
                 NSLog("[Osaurus Intel] MCP start failed: \(error)")
             }
+
+            // M12 follow-up (Renée 2026-06-03): auto-reconnect enabled remote
+            // MCP providers on launch (the real app does this at startup; the
+            // wiring was missing on Intel). Without it, a provider stays
+            // disconnected after relaunch — its tools never register, so the
+            // chat + the agent capability picker can't see them.
+            await MCPProviderManager.shared.connectEnabledProviders()
+            NSLog("[Osaurus Intel] MCP providers reconnected")
         }
 
         Task { @MainActor in
