@@ -456,6 +456,13 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
         }.value
         let mapped: [PluginState] = specs.map { spec in
             let latest = spec.versions.map(\.version).max()
+            // Intel can only dlopen x86_64 Mach-O. The registry's artifacts are
+            // arm64 (the CPUArch enum doesn't even model x86_64), so this is
+            // true for every official plugin — they're flagged "Apple Silicon
+            // required" in the UI. A hand-built x86_64 plugin would flip false.
+            let hasX86 = spec.versions.contains { entry in
+                entry.artifacts.contains { $0.arch == "x86_64" }
+            }
             return PluginState(
                 pluginId: spec.plugin_id,
                 name: spec.name,
@@ -468,7 +475,8 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                     SemanticVersion(major: $0.major, minor: $0.minor, patch: $0.patch)
                 },
                 isInstalling: false,
-                loadError: nil
+                loadError: nil,
+                requiresAppleSilicon: !hasX86
             )
         }
         await MainActor.run {
@@ -502,6 +510,10 @@ struct PluginState: Identifiable, Equatable {
     var latestVersion: SemanticVersion?
     var isInstalling: Bool
     var loadError: String?
+    /// M9 Phase B (Intel): true when the registry has no x86_64 artifact for
+    /// this plugin (i.e. it's arm64-only and can't load on this Intel build).
+    /// Drives the "Apple Silicon required" badge + disabled Install in PluginsView.
+    var requiresAppleSilicon: Bool = false
 
     var displayName: String { name ?? pluginId }
     var hasUpdate: Bool {
@@ -521,7 +533,8 @@ struct PluginState: Identifiable, Equatable {
         installedVersion: SemanticVersion? = nil,
         latestVersion: SemanticVersion? = nil,
         isInstalling: Bool = false,
-        loadError: String? = nil
+        loadError: String? = nil,
+        requiresAppleSilicon: Bool = false
     ) {
         self.pluginId = pluginId
         self.name = name
@@ -533,6 +546,7 @@ struct PluginState: Identifiable, Equatable {
         self.latestVersion = latestVersion
         self.isInstalling = isInstalling
         self.loadError = loadError
+        self.requiresAppleSilicon = requiresAppleSilicon
     }
 }
 

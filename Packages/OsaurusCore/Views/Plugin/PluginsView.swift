@@ -577,6 +577,21 @@ private struct PluginCard: View {
                             }
 
                             statusBadge
+
+                            #if OSAURUS_INTEL
+                            if plugin.requiresAppleSilicon {
+                                HStack(spacing: 2) {
+                                    Image(systemName: "apple.logo").font(.system(size: 8))
+                                    Text("Apple Silicon", bundle: .module)
+                                        .font(.system(size: 9, weight: .medium))
+                                }
+                                .foregroundColor(theme.tertiaryText)
+                                .padding(.horizontal, 5)
+                                .padding(.vertical, 1)
+                                .background(Capsule().fill(theme.tertiaryBackground))
+                                .help("arm64-only build — can't run on the Intel fork")
+                            }
+                            #endif
                         }
                     }
 
@@ -1182,21 +1197,45 @@ private struct PluginDetailView: View {
                     }
                     .buttonStyle(PlainButtonStyle())
                 } else if !plugin.isInstalled {
-                    Button {
-                        Task {
-                            do { try await onInstall() } catch { handleInstallError(error) }
-                        }
-                    } label: {
+                    let blockedOnIntel: Bool = {
+                        #if OSAURUS_INTEL
+                        return plugin.requiresAppleSilicon
+                        #else
+                        return false
+                        #endif
+                    }()
+                    if blockedOnIntel {
+                        // M9 Phase B (Intel): arm64-only plugin — can't dlopen on
+                        // an x86_64 process. Show why instead of a dead Install.
                         HStack(spacing: 5) {
-                            Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
-                            Text("Install", bundle: .module).font(.system(size: 13, weight: .semibold))
+                            Image(systemName: "apple.logo").font(.system(size: 11))
+                            Text("Apple Silicon required", bundle: .module)
+                                .font(.system(size: 13, weight: .semibold))
                         }
-                        .foregroundColor(.white)
+                        .foregroundColor(theme.secondaryText)
                         .padding(.horizontal, 16)
                         .padding(.vertical, 8)
-                        .background(RoundedRectangle(cornerRadius: 8).fill(theme.accentColor))
+                        .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
+                        .help(
+                            "This plugin ships an arm64-only build, so it can't run on the Intel fork."
+                        )
+                    } else {
+                        Button {
+                            Task {
+                                do { try await onInstall() } catch { handleInstallError(error) }
+                            }
+                        } label: {
+                            HStack(spacing: 5) {
+                                Image(systemName: "arrow.down.circle.fill").font(.system(size: 12))
+                                Text("Install", bundle: .module).font(.system(size: 13, weight: .semibold))
+                            }
+                            .foregroundColor(.white)
+                            .padding(.horizontal, 16)
+                            .padding(.vertical, 8)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(theme.accentColor))
+                        }
+                        .buttonStyle(PlainButtonStyle())
                     }
-                    .buttonStyle(PlainButtonStyle())
                 }
 
                 if plugin.isInstalled && !plugin.hasLoadError,
