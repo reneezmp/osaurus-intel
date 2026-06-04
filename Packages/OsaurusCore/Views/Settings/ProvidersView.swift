@@ -1,9 +1,13 @@
-#if !OSAURUS_INTEL
 //
 //  ProvidersView.swift
 //  osaurus
 //
 //  UI for managing remote MCP providers.
+//
+//  M12 follow-up (Renée 2026-06-03): un-body-swapped for Intel. MCP runs on
+//  Intel (the MCP bridge serves on :1338), so Tools → Remote should manage
+//  remote providers, not show "Apple Silicon only". Amputated sub-bits gated
+//  inline.
 //
 
 import AppKit
@@ -2831,12 +2835,4 @@ private struct ToolPillsFlowLayout: Layout {
             .frame(width: 700, height: 500)
             .environment(\.theme, DarkTheme())
     }
-#endif
-#else
-import SwiftUI
-struct ProvidersView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Providers", symbol: "apple.logo")
-    }
-}
 #endif

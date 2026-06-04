@@ -534,6 +534,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
+    /// Register a remote MCP provider's tool. M12 follow-up: the real
+    /// MCPProviderManager (un-excluded) registers each connected remote tool
+    /// here so the chat tool-loop + ToolsManagerView see them.
+    func registerMCPTool(_ tool: OsaurusTool) {
+        register(tool)
+    }
+
     /// Remove tools by name. Used by FolderToolManager when the folder clears.
     func unregister(names: [String]) {
         guard !names.isEmpty else { return }

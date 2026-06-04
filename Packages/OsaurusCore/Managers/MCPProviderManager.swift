@@ -40,7 +40,12 @@ public final class MCPProviderManager: ObservableObject {
 
     /// Sandbox-resident stdio subprocess owners keyed by provider ID. Same
     /// lifecycle as `hostStdioRunners` but routed through the container.
-    private var sandboxStdioRunners: [UUID: SandboxStdioRunner] = [:]
+    /// M12 follow-up: the sandbox/container runtime is amputated on Intel, so
+    /// the sandbox stdio path (and this owner map) is gated out — HTTP remote
+    /// MCP providers work; stdio-via-sandbox surfaces `.sandboxUnavailable`.
+    #if !OSAURUS_INTEL
+        private var sandboxStdioRunners: [UUID: SandboxStdioRunner] = [:]
+    #endif
 
     private init() {
         self.configuration = MCPProviderConfigurationStore.load()
@@ -454,9 +459,11 @@ public final class MCPProviderManager: ObservableObject {
         if let runner = hostStdioRunners.removeValue(forKey: providerId) {
             Task { await runner.stop() }
         }
-        if let runner = sandboxStdioRunners.removeValue(forKey: providerId) {
-            Task { await runner.stop() }
-        }
+        #if !OSAURUS_INTEL
+            if let runner = sandboxStdioRunners.removeValue(forKey: providerId) {
+                Task { await runner.stop() }
+            }
+        #endif
     }
 
     /// Test connection to a provider without persisting
@@ -600,7 +607,7 @@ public final class MCPProviderManager: ObservableObject {
             hostStdioRunners[provider.id] = runner
             return runner.transport
         case .sandbox:
-            #if os(macOS)
+            #if os(macOS) && !OSAURUS_INTEL
                 let availability = await SandboxManager.shared.checkAvailability()
                 guard availability.isAvailable else {
                     // OS doesn't support the sandbox at all (macOS < 26).

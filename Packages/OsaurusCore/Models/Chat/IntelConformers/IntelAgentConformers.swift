@@ -36,9 +36,8 @@ extension Notification.Name {
     static let schedulesChanged = Notification.Name("schedulesChanged")
     /// Posted by the (amputated) WatcherManager when watchers change.
     static let watchersChanged = Notification.Name("watchersChanged")
-    /// Posted when an MCP provider connects/disconnects. ToolsManagerView
-    /// observes it; amputated on Intel, but the name must resolve.
-    static let mcpProviderStatusChanged = Notification.Name("mcpProviderStatusChanged")
+    // `mcpProviderStatusChanged` now comes from the real MCPProviderManager
+    // (Managers/MCPProviderManager.swift), un-excluded in M12 follow-up.
 }
 
 // MARK: - SemanticVersion + RegistryCapabilities (Intel stubs — M11 11.B.2)
@@ -102,21 +101,14 @@ public struct RegistryCapabilities: Sendable, Equatable {
     }
 }
 
-// MARK: - MCP Provider Manager (Intel stub)
+// MARK: - MCP Provider Manager
 //
-// `ToolsManagerView` reads `providerManager.configuration.providers`
-// + `.providerStates` + `.disconnect(providerId:)`. MCP *providers*
-// (the config model) are available on Intel
-// (`Models/Configuration/MCPProviderConfiguration.swift`), but the
-// manager runtime is amputated, so the configured list stays empty.
-@MainActor
-final class MCPProviderManager: ObservableObject, @unchecked Sendable {
-    static let shared = MCPProviderManager()
-    @Published private(set) var configuration = MCPProviderConfiguration()
-    @Published private(set) var providerStates: [UUID: MCPProviderState] = [:]
-    private init() {}
-    func disconnect(providerId: UUID) {}
-}
+// M12 follow-up (Renée 2026-06-03): the real `MCPProviderManager`
+// (Managers/MCPProviderManager.swift) is un-excluded so Tools → Remote manages
+// real remote MCP providers (MCP runs on Intel; the bridge serves on :1338).
+// The HTTP transport works as-is; the stdio transport — which runs MCP servers
+// inside the amputated sandbox — is gated `#if !OSAURUS_INTEL`. This hollow
+// stub is therefore removed.
 
 // MARK: - Sandbox Plugin Library (Intel stub)
 //
