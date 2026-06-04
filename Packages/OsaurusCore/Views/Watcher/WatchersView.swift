@@ -752,6 +752,19 @@ struct WatcherEditorSheet: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        #if OSAURUS_INTEL
+        // M13 follow-up (Renée 2026-06-04): the Intel app is not sandboxed, so
+        // `.withSecurityScope` bookmark creation throws (same bug fixed for the
+        // chat + schedule folder pickers). WatcherManager already watches by raw
+        // path (`resolveWatchPath` falls back to `watchPath` when the bookmark
+        // is nil; FSEvents uses `URL(fileURLWithPath:)`), and the on-change
+        // dispatch carries `folderPath` which ExecutionContext attaches directly
+        // on Intel — so a nil bookmark is fully functional here.
+        withAnimation(.easeOut(duration: 0.2)) {
+            selectedWatchPath = url.path
+            selectedWatchBookmark = nil
+        }
+        #else
         do {
             let bookmark = try url.bookmarkData(
                 options: .withSecurityScope,
@@ -765,6 +778,7 @@ struct WatcherEditorSheet: View {
         } catch {
             print("[WatcherEditor] Failed to create watch bookmark: \(error)")
         }
+        #endif
     }
 
     // MARK: - Instructions Section
