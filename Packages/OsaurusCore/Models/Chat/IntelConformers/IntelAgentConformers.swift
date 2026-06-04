@@ -35,8 +35,8 @@ extension Notification.Name {
     /// AgentDetailView voice section observes it to route the user to
     /// TTS settings (amputated on Intel, but the name must resolve).
     static let openTTSSettingsRequested = Notification.Name("openTTSSettingsRequested")
-    /// Posted by the (amputated) ScheduleManager when schedules change.
-    static let schedulesChanged = Notification.Name("schedulesChanged")
+    /// `schedulesChanged` now comes from the real ScheduleManager
+    /// (Managers/ScheduleManager.swift), un-excluded in M13 Schedules restore.
     /// Posted by the (amputated) WatcherManager when watchers change.
     static let watchersChanged = Notification.Name("watchersChanged")
     // `mcpProviderStatusChanged` now comes from the real MCPProviderManager
@@ -229,28 +229,8 @@ final class RelayTunnelManager: ObservableObject, @unchecked Sendable {
     func setTunnelEnabled(_ enabled: Bool, for agentId: UUID) {}
 }
 
-// MARK: - Schedule Manager (Intel stub)
-
-@MainActor
-final class ScheduleManager: ObservableObject, @unchecked Sendable {
-    static let shared = ScheduleManager()
-    @Published private(set) var schedules: [Schedule] = []
-    private init() {}
-    func refresh() {}
-    func schedules(for agentId: UUID) -> [Schedule] { [] }
-    func scheduleCount(forAgentId agentId: UUID) -> Int { 0 }
-    @discardableResult
-    func create(
-        name: String,
-        instructions: String,
-        agentId: UUID?,
-        frequency: ScheduleFrequency,
-        isEnabled: Bool
-    ) -> Schedule? { nil }
-    func update(_ schedule: Schedule) {}
-    func delete(id: UUID) {}
-    func setEnabled(_ enabled: Bool, for id: UUID) {}
-}
+// ScheduleManager is now the real one (Managers/ScheduleManager.swift),
+// un-excluded in the M13 Schedules restore.
 
 // MARK: - Watcher Manager (Intel stub)
 
@@ -382,15 +362,22 @@ final class ChatHistoryDatabase: @unchecked Sendable {
     /// Per-session turn counts for an agent's history list. Empty on
     /// Intel (chat history persistence is session-scoped in-memory).
     func turnCounts(forAgent agentId: UUID?) -> [UUID: Int] { [:] }
+
+    // MARK: - Session reattach (M13 Schedules restore)
+    //
+    // `BackgroundTaskManager.reattachSession` looks up a persisted session by
+    // `externalSessionKey` so repeated dispatches (e.g. the same scheduler
+    // run) accrete into one row. Intel has no persisted chat-history DB
+    // (sessions are in-memory), so these no-op: `findSession` returns nil →
+    // every scheduled dispatch starts a fresh session, which is correct here.
+    func open() throws {}
+    func findSession(source: SessionSource, externalKey: String, agentId: UUID?) -> ChatSessionData? { nil }
+    func findSession(pluginId: String, externalKey: String, agentId: UUID?) -> ChatSessionData? { nil }
+    func loadSession(id: UUID) -> ChatSessionData? { nil }
 }
 
-// MARK: - Scheduler Database (Intel stub)
-
-final class SchedulerDatabase: @unchecked Sendable {
-    static let shared = SchedulerDatabase()
-    private init() {}
-    func deleteAllForAgent(_ agentId: UUID) {}
-}
+// SchedulerDatabase is now the real one (Storage/SchedulerDatabase.swift),
+// un-excluded in the M13 Schedules restore.
 
 // MARK: - Local Agent Bridge (Intel stub)
 
@@ -555,35 +542,11 @@ struct EpisodeRow: View {
     var body: some View { AppleSiliconOnlyTab(tabName: "Episode", symbol: "clock.arrow.circlepath") }
 }
 
-struct ScheduleEditorSheet: View {
-    enum Mode { case create; case edit(Schedule) }
-    let mode: Mode
-    let onSave: (Schedule) -> Void
-    let onCancel: () -> Void
-    let initialAgentId: UUID?
-    init(
-        mode: Mode,
-        onSave: @escaping (Schedule) -> Void,
-        onCancel: @escaping () -> Void,
-        initialAgentId: UUID? = nil
-    ) {
-        self.mode = mode
-        self.onSave = onSave
-        self.onCancel = onCancel
-        self.initialAgentId = initialAgentId
-    }
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Schedule Editor", symbol: "calendar.badge.clock")
-            .frame(minWidth: 480, minHeight: 360)
-    }
-}
-
 // NOTE: `WatcherEditorSheet` is defined by `WatchersView.swift` (Group B,
 // un-body-swapped in M11 Phase 11.B.1) — its real upstream view, not a
-// stub. Removed the duplicate that used to live here to avoid a
-// redeclaration clash. `ScheduleEditorSheet` stays below because
-// `SchedulesView` is Group C (still body-swapped), so nothing else
-// provides it.
+// stub. `ScheduleEditorSheet` is now the real one from `SchedulesView.swift`
+// (un-body-swapped in the M13 Schedules restore); the Intel stub that used
+// to live here was removed to avoid a redeclaration clash.
 
 struct RemoteAgentDetailView: View {
     let remoteId: UUID

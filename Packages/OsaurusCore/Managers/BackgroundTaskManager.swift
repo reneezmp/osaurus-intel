@@ -326,6 +326,11 @@ public final class BackgroundTaskManager: ObservableObject {
         // turn 1. Reattach reuses `existing.id` as `context.id`, so
         // successive dispatches into the same conversation accumulate
         // via the store's underlying `Set`.
+        #if !OSAURUS_INTEL
+        // `requestedToolNames` is populated only for plugin-sourced dispatches
+        // (validated against the calling plugin's manifest). Plugins are
+        // amputated on Intel, so this is always empty there; gated out because
+        // `PreflightResult.empty` lives in the amputated preflight subsystem.
         if !request.requestedToolNames.isEmpty {
             await SessionToolStateStore.shared.appendLoadedTools(
                 context.id.uuidString,
@@ -334,6 +339,7 @@ public final class BackgroundTaskManager: ObservableObject {
                 fallbackAlwaysLoadedNames: nil
             )
         }
+        #endif
 
         // Register state before starting so awaitCompletion always finds the task
         let state = BackgroundTaskState(
@@ -565,6 +571,7 @@ public final class BackgroundTaskManager: ObservableObject {
             agentId: request.agentId ?? Agent.defaultId,
             title: request.title,
             folderBookmark: request.folderBookmark,
+            folderPath: request.folderPath,
             source: request.source,
             sourcePluginId: request.sourcePluginId,
             externalSessionKey: request.externalSessionKey
@@ -735,6 +742,7 @@ public final class BackgroundTaskManager: ObservableObject {
             return
         }
 
+        #if !OSAURUS_INTEL
         if let loaded = PluginManager.shared.loadedPlugin(for: pluginId),
             loaded.plugin.hasTaskEventHandler
         {
@@ -745,6 +753,12 @@ public final class BackgroundTaskManager: ObservableObject {
                 agentId: state.agentId
             )
         }
+        #else
+        // Plugins are amputated on Intel (PluginManager is fully gated out),
+        // so nothing consumes task events. `sourcePluginId` is always nil for
+        // Intel schedule/HTTP dispatches, so this path is unreached anyway.
+        _ = pluginId
+        #endif
     }
 
     // MARK: - Dispatch Event Gating

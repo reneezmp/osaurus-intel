@@ -28,6 +28,11 @@ public final class ExecutionContext: ObservableObject {
 
     let chatSession: ChatSession
     let folderBookmark: Data?
+    /// Raw folder path. On the non-sandboxed Intel build there's no
+    /// security-scoped bookmark (see the schedule editor's gated
+    /// `selectFolder`), so the working directory is carried as a plain path
+    /// and attached directly in `activateFolderContextIfNeeded`.
+    let folderPath: String?
 
     /// Whether execution is currently in progress
     public var isExecuting: Bool { chatSession.isStreaming }
@@ -39,6 +44,7 @@ public final class ExecutionContext: ObservableObject {
         agentId: UUID,
         title: String? = nil,
         folderBookmark: Data? = nil,
+        folderPath: String? = nil,
         source: SessionSource = .chat,
         sourcePluginId: String? = nil,
         externalSessionKey: String? = nil
@@ -47,6 +53,7 @@ public final class ExecutionContext: ObservableObject {
         self.agentId = agentId
         self.title = title
         self.folderBookmark = folderBookmark
+        self.folderPath = folderPath
 
         let session = ChatSession()
         session.agentId = agentId
@@ -80,6 +87,7 @@ public final class ExecutionContext: ObservableObject {
         self.agentId = existing.agentId ?? Agent.defaultId
         self.title = existing.title
         self.folderBookmark = folderBookmark
+        self.folderPath = nil
 
         let session = ChatSession()
         session.agentId = existing.agentId
@@ -108,6 +116,7 @@ public final class ExecutionContext: ObservableObject {
         self.agentId = session.agentId ?? Agent.defaultId
         self.title = session.title
         self.folderBookmark = folderBookmark
+        self.folderPath = nil
         self.chatSession = session
     }
 
@@ -129,10 +138,31 @@ public final class ExecutionContext: ObservableObject {
     public func start(prompt: String) async {
         await activateFolderContextIfNeeded()
         chatSession.send(prompt)
+        // M13 Schedules follow-up (Renée 2026-06-04): persist the row now so it
+        // appears in the chat sidebar the moment the run starts (the sidebar
+        // observes `ChatSessionsManager.$sessions`). `send` only auto-saves
+        // when it had to mint a sessionId, but dispatched sessions pre-assign
+        // one in `init`, so that early save is skipped — we do it here. The
+        // user turn is already appended synchronously by `send`, so `save`
+        // (which guards on a non-empty turn list) persists it. Completion
+        // re-saves with the full transcript.
+        chatSession.save()
     }
 
     /// Resolve the stored bookmark and set the work folder context before execution.
     private func activateFolderContextIfNeeded() async {
+        #if OSAURUS_INTEL
+        // Intel app is not sandboxed: no security-scoped bookmark exists
+        // (folderBookmark is always nil — see the schedule editor's gated
+        // selectFolder), so the working directory rides along as a raw path.
+        // FolderContextService is already Intel-gated to attach without a
+        // security scope. Without this, scheduled runs ignored their folder
+        // and the agent had no local working directory to list/read.
+        if let folderPath, !folderPath.isEmpty {
+            await FolderContextService.shared.setFolder(URL(fileURLWithPath: folderPath))
+        }
+        return
+        #else
         guard let bookmark = folderBookmark else { return }
         do {
             var isStale = false
@@ -150,6 +180,7 @@ public final class ExecutionContext: ObservableObject {
         } catch {
             print("[ExecutionContext] Failed to resolve folder bookmark: \(error)")
         }
+        #endif
     }
 
     /// Poll until execution completes or the task is cancelled.

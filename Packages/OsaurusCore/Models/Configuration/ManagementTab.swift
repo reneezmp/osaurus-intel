@@ -99,15 +99,17 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// via `SidebarItemData.isDisabled` + a `.help()` tooltip — listed so users
     /// see what's Apple-Silicon-only, but clicking is a no-op.
     ///
-    /// M13 (Group C, Renée 2026-06-03): `.insights` is now available —
-    /// `InsightsService` is Foundation+Combine only and the local HTTP server
-    /// it logs runs on Intel. (`.memory` / `.schedules` remain gated pending
-    /// their fuller restores.) Apple Silicon always returns `true`.
+    /// M13 (Group C, Renée 2026-06-03): `.insights` and `.schedules` are now
+    /// available. `InsightsService` is Foundation+Combine only; the Schedules
+    /// execution chain (ScheduleManager / SchedulerDatabase / NextRunScheduler
+    /// / BackgroundTaskManager) is pure Foundation/Combine/SQLCipher and fires
+    /// agents headless through the cloud pipeline. (`.memory` remains gated —
+    /// deferred to a cloud-distillation version.) Apple Silicon always `true`.
     public var isAvailableOnIntel: Bool {
         switch self {
-        case .models, .voice, .memory, .sandbox, .schedules:
+        case .models, .voice, .memory, .sandbox:
             return false
-        case .insights:
+        case .insights, .schedules:
             return true
         default:
             return true

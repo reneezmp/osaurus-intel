@@ -458,8 +458,11 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
 
 // MARK: - ChatSessionData
 
-struct ChatSessionData: Identifiable, @unchecked Sendable {
-    let id: UUID
+// M13 Schedules restore: made `public` so the un-excluded ExecutionContext's
+// `public init(reattaching: ChatSessionData)` compiles — the real upstream
+// model is public too. Members stay internal (same-module access only).
+public struct ChatSessionData: Identifiable, @unchecked Sendable {
+    public let id: UUID
     var title: String
     let createdAt: Date
     var updatedAt: Date

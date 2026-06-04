@@ -847,7 +847,10 @@ enum StreamingStatsHint: Sendable {
     static func decode(_ delta: String) -> (tokenCount: Int, tokensPerSecond: Double, unclosedReasoning: Bool, stopReason: String?)? { nil }
 }
 
-enum SessionSource: String, Codable, CaseIterable, Sendable {
+// M13 Schedules restore: made `public` so the un-excluded DispatchRequest /
+// ExecutionContext / BackgroundTaskModels (which expose `public let source:
+// SessionSource`) compile — the real upstream enum is public too.
+public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case chat, plugin, http, schedule, watcher, selfSchedule = "self_schedule"
 
     var iconName: String {

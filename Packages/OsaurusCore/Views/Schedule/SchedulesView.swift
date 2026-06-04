@@ -1,9 +1,14 @@
-#if !OSAURUS_INTEL
 //
 //  SchedulesView.swift
 //  osaurus
 //
 //  Management view for creating, editing, and viewing scheduled AI tasks.
+//
+//  M13 Schedules restore (Renée 2026-06-03): un-body-swapped on Intel. The
+//  whole schedule execution chain (ScheduleManager / SchedulerDatabase /
+//  NextRunScheduler / BackgroundTaskManager) is un-excluded — pure
+//  Foundation/Combine/SQLCipher — and scheduled agents fire headless through
+//  the cloud pipeline.
 //
 
 import AppKit
@@ -1906,6 +1911,18 @@ struct ScheduleEditorSheet: View {
 
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
+        #if OSAURUS_INTEL
+        // M13 Schedules restore: the Intel app is not sandboxed, so
+        // `.withSecurityScope` bookmark creation throws (same bug fixed for
+        // the chat folder picker in M12). Without a sandbox there's nothing to
+        // scope — attach the path directly and skip the bookmark. The headless
+        // run reads `folderPath` via `FolderContextService`, which is already
+        // Intel-gated to use the raw path.
+        withAnimation(.easeOut(duration: 0.2)) {
+            selectedFolderPath = url.path
+            selectedFolderBookmark = nil
+        }
+        #else
         do {
             let bookmark = try url.bookmarkData(
                 options: .withSecurityScope,
@@ -1919,6 +1936,7 @@ struct ScheduleEditorSheet: View {
         } catch {
             print("[ScheduleEditor] Failed to create bookmark: \(error)")
         }
+        #endif
     }
 
     // MARK: - Instructions Section
@@ -2684,12 +2702,4 @@ private struct ScheduleSecondaryButtonStyle: ButtonStyle {
     #Preview {
         SchedulesView()
     }
-#endif
-#else
-import SwiftUI
-struct SchedulesView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Schedules", symbol: "apple.logo")
-    }
-}
 #endif

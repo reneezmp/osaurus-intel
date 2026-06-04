@@ -115,6 +115,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // chat + the agent capability picker can't see them.
             await MCPProviderManager.shared.connectEnabledProviders()
             NSLog("[Osaurus Intel] MCP providers reconnected")
+
+            // M13 Schedules restore (Renée 2026-06-03): start the cron loop so
+            // scheduled agents fire headless. The first iteration does cold-start
+            // catch-up (any row whose scheduled_at already passed runs now), then
+            // it polls the scheduler DB. Mirrors the Apple Silicon startup.
+            NextRunScheduler.shared.start()
+            NSLog("[Osaurus Intel] NextRunScheduler started")
         }
 
         Task { @MainActor in

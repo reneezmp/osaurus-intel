@@ -967,6 +967,25 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         return info.id
     }
 
+    /// Open a window for a background/scheduled task's execution context.
+    ///
+    /// M13 Schedules restore: `BackgroundTaskManager.openTaskWindow` calls this
+    /// when the user clicks to view a running scheduled task. Scheduled runs
+    /// execute headless (no window), so this only backs the "view task"
+    /// affordance — it reuses the battle-tested `createWindow` builder seeded
+    /// with the task's agent. (Binding the window to the task's existing
+    /// session content is a follow-up; the headless run has already produced
+    /// its output.)
+    @discardableResult
+    public func createWindowForContext(
+        _ context: ExecutionContext,
+        showImmediately: Bool = true
+    ) -> UUID {
+        let id = createWindow(agentId: context.agentId)
+        if !showImmediately { nsWindows[id]?.orderOut(nil) }
+        return id
+    }
+
     /// Overload that opens a window pre-loaded with a stored session.
     /// Used by AgentDetailView's history rows (un-body-swapped in M11
     /// Phase 11.A.4) to reopen a past conversation. Mirrors the upstream

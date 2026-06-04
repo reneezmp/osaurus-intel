@@ -550,6 +550,14 @@ final class ChatWindowState: ObservableObject {
     /// subscribes the same way; that path is excluded on Intel).
     private var agentsCancellable: AnyCancellable?
 
+    /// M13 Schedules follow-up (Renée 2026-06-04): keeps the sidebar's session
+    /// list reactive to `ChatSessionsManager.shared.$sessions`. Mirrors the
+    /// upstream `sessionsCancellable` (the AS path subscribes the same way;
+    /// it was missing on Intel). Without it, sessions saved outside this
+    /// window — a headless scheduled run, a stream landing in a sibling
+    /// window — only appeared after a manual refresh (switching agents).
+    private var sessionsCancellable: AnyCancellable?
+
     var activeAgent: Agent { cachedActiveAgent }
     var themeId: UUID? { nil }
 
@@ -566,6 +574,7 @@ final class ChatWindowState: ObservableObject {
         }
         observeThemeChanges()
         observeAgents()
+        observeSessionsManager()
     }
 
     init(windowId: UUID, executionContext: Any? = nil) {
@@ -577,6 +586,18 @@ final class ChatWindowState: ObservableObject {
         self.session.agentId = agentId
         observeThemeChanges()
         observeAgents()
+        observeSessionsManager()
+    }
+
+    /// Stay subscribed to the sessions store so the sidebar refreshes when a
+    /// session is saved/deleted/renamed anywhere — including headless
+    /// scheduled runs. Mirrors the upstream observer (ChatWindowState.swift
+    /// AS branch); `dropFirst` skips the seed value we already read in `init`.
+    private func observeSessionsManager() {
+        sessionsCancellable = ChatSessionsManager.shared.$sessions
+            .dropFirst()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in self?.refreshSessions() }
     }
 
     /// Seed `agents` from `AgentManager` and stay subscribed to its
@@ -654,6 +675,8 @@ final class ChatWindowState: ObservableObject {
         }
         agentsCancellable?.cancel()
         agentsCancellable = nil
+        sessionsCancellable?.cancel()
+        sessionsCancellable = nil
     }
     func startNewChat() {
         session.reset()
