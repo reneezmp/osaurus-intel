@@ -56,8 +56,21 @@ struct ChatContentView: View {
                             onSelect: { [weak windowState] data in windowState?.loadSession(data) },
                             onNewChat: { [weak windowState] in windowState?.startNewChat() },
                             onDelete: { [weak windowState] id in
+                                guard let windowState else { return }
+                                // If the row being deleted is the session
+                                // currently loaded in this window, reset the
+                                // live session FIRST. Otherwise the live
+                                // session still holds that id + its turns and
+                                // re-persists itself on the next send() or via
+                                // the synchronous save() inside reset()→stop()→
+                                // completeRunCleanup — resurrecting the row we
+                                // just deleted. startNewChat may re-save it, so
+                                // delete AFTER to guarantee it's gone.
+                                if windowState.session.sessionId == id {
+                                    windowState.startNewChat()
+                                }
                                 ChatSessionsManager.shared.delete(id: id)
-                                windowState?.refreshSessions()
+                                windowState.refreshSessions()
                             },
                             onRename: { [weak windowState] id, title in
                                 ChatSessionsManager.shared.rename(id: id, title: title)

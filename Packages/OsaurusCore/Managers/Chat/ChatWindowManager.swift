@@ -947,7 +947,16 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         window.toolbar = toolbar
         window.toolbarStyle = .unified
 
+        // M13 follow-up (Renée 2026-06-04): host a ThemedAlertHost scoped to
+        // this chat window so themed confirmations raised from inside it
+        // actually render. The sidebar's delete-conversation dialog presents
+        // through `ThemedAlertCenter` keyed on `@Environment(\.themedAlertScope)`;
+        // without a matching host in the window's view tree the dialog had
+        // nowhere to draw, so "Delete" silently no-op'd. `.chat(info.id)`
+        // gives each window its own scope (no cross-window dialog bleed).
         let chatView = ChatView(windowState: state)
+            .themedAlertScope(.chat(info.id))
+            .overlay(ThemedAlertHost(scope: .chat(info.id)))
         window.contentView = NSHostingView(rootView: chatView)
         // M12 follow-up (Renée 2026-06-03 crashes): the manager owns each
         // window's lifecycle. `isReleasedWhenClosed = false` is deliberate —
