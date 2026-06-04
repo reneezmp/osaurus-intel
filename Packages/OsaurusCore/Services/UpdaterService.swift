@@ -12,11 +12,25 @@ import Sparkle
 final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
     nonisolated private static let betaUpdatesKey = "betaUpdatesEnabled"
 
+    // M13 follow-up (Renée 2026-06-04): on the Intel fork, never start the
+    // automatic update cycle. The official Osaurus appcast ships Apple-Silicon
+    // builds; once its version surpasses ours, an auto-check would offer to
+    // download and REPLACE this hand-built Intel app. `startingUpdater: false`
+    // means no background checks ever fire. (feedURLString also returns nil and
+    // the check methods no-op below — belt, suspenders, and a second belt.)
+    #if OSAURUS_INTEL
+    lazy var updaterController: SPUStandardUpdaterController = SPUStandardUpdaterController(
+        startingUpdater: false,
+        updaterDelegate: self,
+        userDriverDelegate: nil
+    )
+    #else
     lazy var updaterController: SPUStandardUpdaterController = SPUStandardUpdaterController(
         startingUpdater: true,
         updaterDelegate: self,
         userDriverDelegate: nil
     )
+    #endif
 
     // MARK: - Published State for Update Availability
     @Published var updateAvailable: Bool = false
@@ -25,8 +39,10 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
     @Published var isBetaChannel: Bool {
         didSet {
             UserDefaults.standard.set(isBetaChannel, forKey: Self.betaUpdatesKey)
+            #if !OSAURUS_INTEL
             updaterController.updater.resetUpdateCycle()
             NSLog("Sparkle: update channel changed to %@", isBetaChannel ? "beta" : "release")
+            #endif
         }
     }
 
@@ -43,6 +59,15 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
     /// checks. wait briefly for the in-flight session to settle so the
     /// click reliably surfaces the Sparkle dialog on the first try
     func checkForUpdates() {
+        #if OSAURUS_INTEL
+        // Pinned build: don't reach the official appcast (which serves Apple
+        // Silicon releases). Tell the user instead of silently doing nothing.
+        _ = ToastManager.shared.info(
+            "Updates are off on the Intel fork",
+            message: "This build is hand-pinned — auto-update is disabled to protect your custom Intel app."
+        )
+        return
+        #else
         let updater = updaterController.updater
         if updater.canCheckForUpdates {
             updaterController.checkForUpdates(nil)
@@ -59,11 +84,17 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
                 }
             }
         }
+        #endif
     }
 
     /// Silently checks for updates in the background without showing UI
     func checkForUpdatesInBackground() {
+        #if OSAURUS_INTEL
+        // No-op on the Intel fork (no automatic appcast checks — see above).
+        return
+        #else
         updaterController.updater.checkForUpdatesInBackground()
+        #endif
     }
 
     // MARK: - SPUUpdaterDelegate
@@ -74,7 +105,13 @@ final class UpdaterViewModel: NSObject, ObservableObject, SPUUpdaterDelegate {
     }
 
     nonisolated func feedURLString(for updater: SPUUpdater) -> String? {
+        #if OSAURUS_INTEL
+        // No appcast on the Intel fork: even if a check somehow fires, there's
+        // no feed to pull an (Apple Silicon) release from. Hard disconnect.
+        return nil
+        #else
         return "https://osaurus-ai.github.io/osaurus/appcast.xml"
+        #endif
     }
 
     // MARK: - Verbose Logging Hooks
