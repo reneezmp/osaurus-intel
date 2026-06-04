@@ -1610,3 +1610,108 @@ init ignores the context). The run completes + fills the row regardless.
 `m11-settings-complete` (57208c08) · `m12-chat-complete` (913de45a) ·
 `m13-schedules` (0b3a5d2a). (Insights shipped under M13 at `1cf7fa5a`, no separate
 tag.)
+
+---
+
+## Post-Schedules sweep — Watchers, Sparkle, Plugins (2026-06-04)
+
+Renée tested the freshly-built tabs and surfaced four gaps. Three fixed, the
+fourth (plugin execution) scoped + deferred.
+
+### Watchers — BUILT ✅ (`35147f96`, + folder-picker `1e1386e4`)
+
+Same shape as Schedules: the real `WatcherManager` was **excluded with a no-op
+Intel stub active**, so "Create Watcher" did nothing — never persisted, appeared,
+or fired. Two-part fix:
+- Folder picker (`1e1386e4`): `WatchersView.selectWatchFolder` used
+  `.withSecurityScope` (throws on the non-sandboxed Intel app) → gated, store raw
+  path + nil bookmark. (Necessary but not sufficient — see below.)
+- Manager (`35147f96`): un-exclude `Managers/WatcherManager.swift` (FSEvents-based,
+  pure CoreServices/Foundation — `Watcher`/`WatcherStore`/`TaskDispatcher`/
+  `DispatchRequest` all already compiled, **zero amputated deps**). Removed the
+  Intel stub + `watchersChanged` mirror. Instantiate `WatcherManager.shared` at
+  launch (init → `startAllEnabledWatchers`). `resolveWatchPath` falls back to the
+  raw path when the bookmark is nil, and the on-change dispatch carries
+  `folderPath` (attached by the M13 ExecutionContext fix), so it works end-to-end:
+  change → FSEvents → TaskDispatcher → agent run (+ task toast + menu-bar card).
+  **Verified (Renée): card appears; a file change fires file_tree/file_read.**
+
+### Sparkle auto-update — DISCONNECTED on Intel ✅ (`014d98da`)
+
+The official appcast ships Apple-Silicon builds; once its version surpasses the
+fork's, an auto-check could download + REPLACE the hand-built Intel app.
+`UpdaterService` made inert on Intel three ways: `startingUpdater: false` (no auto
+cycle), `feedURLString → nil` (no appcast), both check methods no-op (manual
+"Check for Updates" → an info toast saying updates are pinned off), beta-channel
+`resetUpdateCycle` gated out. **Verified (Renée): toast appears, no checks.**
+
+### Plugins — M9 capability-aware loading
+
+Found the M9 design doc (`Osaurus_Intel_Plugin_Capability_Loading.md`); **Phase 1
+already shipped** (`HostCapability` + `PluginCompatibility` exist, MLX/vector/voice
+gated `#if !OSAURUS_INTEL`). The hard reality, confirmed: **`OsaurusRepository`'s
+`CPUArch` enum only models `.arm64`** — the registry has zero x86_64 artifacts, so
+**no official plugin can ever run on Intel** (Rosetta only goes x86→ARM, never
+ARM→x86). Renée chose: ship Browse + honest gating now; defer execution to a fresh
+session.
+
+- **Phase A — Browse ✅** (`d5567d15`): the git registry fetcher
+  (`CentralRepositoryManager`) + `PluginSpec` live in the already-linked
+  `OsaurusRepository` package (plain Foundation), so Browse works without the
+  amputated execution host. Rewrote the Intel `PluginRepositoryService.refresh()`
+  stub to `CentralRepositoryManager.shared.refresh()` + `listAllSpecs()`, mapping
+  each spec → the Intel `PluginState` (version converted; capabilities skipped;
+  nothing ever installed → all land in Browse). **Verified: Browse(20) populates
+  with the real registry.**
+- **Phase B — honest gating ✅** (`808974ba`): `PluginState.requiresAppleSilicon`
+  computed in the mapping ("no x86_64 artifact" → true for all today, future-proof).
+  PluginsView: browse cards show an "Apple Silicon" capsule; detail view replaces
+  Install with a disabled "Apple Silicon required" pill + tooltip. Gated
+  `#if OSAURUS_INTEL` via a computed bool so the shared view compiles on AS.
+  **Verified (Renée): badges + disabled install render.**
+
+### Plugins Phase C/D — SCOPE (deferred, NOT built — next fresh session)
+
+**The execution host restore. Bigger than Schedules; its own milestone.** Goal:
+let a *natively x86_64-built* plugin actually load + run (no official plugin will
+— they're arm64). The M9 doc's Phases 2–4.
+
+- **Un-exclude:** `Services/Plugin/PluginHostAPI.swift` (**3,516 lines** — the C-ABI
+  host: config/db/http/log callbacks; imports only Foundation+os; ~9 amputated
+  touchpoints to gate: `EmbeddingService` ×3, `SandboxToolRegistrar` ×2, `MLX`/
+  `MLXService` ×3, `SandboxAgentProvisioner` ×1), `PluginHostAPI+SessionPersistence.swift`,
+  `PluginInstructionsResolver.swift`, `Storage/PluginDatabase.swift`,
+  `Services/Plugin/PluginRepositoryService.swift` (real — brings real `PluginState`
+  + install via `performInstall` → `PluginManager`).
+- **Un-gate (remove `#if !OSAURUS_INTEL`):** `Models/Plugin/ExternalPlugin.swift`
+  (dlopen wrapper + real `TaskEventType` + `PluginManifest`; clean, Foundation+os),
+  `Managers/Plugin/PluginManager.swift` (real body — clean; drop the `#else` stub).
+- **Remove colliding Intel stubs (CRITICAL — these are load-bearing now):**
+  - `PluginHostContext` (IntelScheduleConformers) — real one returns; BackgroundTaskManager
+    uses real serialize* (fine). Schedules still depends on it compiling.
+  - `TaskEventType` (IntelScheduleConformers) — real one in ExternalPlugin returns.
+  - `PluginRepositoryService` + `PluginState` + the Phase A/B mapping (IntelStubConformers)
+    — replaced by real ones. **Re-do Phase B gating against the real PluginState**
+    (or via the M9 `PluginCompatibilityChecker` + arch — the proper 3-bucket UI).
+  - `RegistryCapabilities` / `SemanticVersion` mirrors (IntelAgentConformers) — check
+    for collisions with the real types pulled in.
+- **Gate amputated bits:** the ~9 PluginHostAPI touchpoints + sandbox paths in
+  PluginManager with `#if !OSAURUS_INTEL`.
+- **Wire `PluginCompatibilityChecker`** into the load path (M9 Phase 2): skip dlopen
+  for incompatible, `@Published incompatiblePlugins` for the UI.
+- **Phase D:** build a tiny x86_64 "hello" plugin (`swift build -c release --arch
+  x86_64`, ad-hoc codesign), install to `~/.osaurus-intel/Tools/`, verify it loads
+  (Compatible bucket) + invokes via MCP `tools/call`. Proves Intel CAN run
+  natively-built plugins.
+- **Effort:** large, cascade-heavy, fresh-session work (the M9 doc itself advises
+  one phase per clean session). Payoff is narrow (only DIY x86_64 plugins), but it
+  makes the fork a first-class plugin host.
+
+### Group C / tab status — final (2026-06-04)
+✅ Insights · ✅ Schedules · ✅ Watchers · 🟡 Plugins (Browse + gating done;
+execution deferred) · 🟡 Memory (deferred by choice) · 🔴 Models/Voice/Sandbox
+(hardware). Sparkle pinned off. Folder pickers (chat/schedule/watcher) all gated.
+
+### Tags laid (updated)
+`m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a).
+Latest commit: `808974ba` (M9 Phase B). Consider `m9-plugins-browse` later.
