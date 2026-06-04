@@ -347,6 +347,91 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     func consolidateContent() {}
     func clearPendingToolArgs() {}
     func appendToolArgFragment(_ arg: String) {}
+
+    // M13 follow-up (Renée 2026-06-04): memberwise init so the Codable
+    // initializer below (and any in-place construction) can build a turn
+    // without going through `init(from: any ChatTurnProtocol)`.
+    init(
+        id: UUID,
+        role: MessageRole,
+        content: String,
+        attachments: [Attachment] = [],
+        toolCalls: [ToolCall]? = nil,
+        toolCallId: String? = nil,
+        toolResults: [String: String] = [:],
+        thinking: String = "",
+        createdAt: Date,
+        completedAt: Date? = nil,
+        generationTokenCount: Int? = nil,
+        timeToFirstToken: TimeInterval? = nil,
+        generationTokensPerSecond: Double? = nil
+    ) {
+        self.id = id
+        self.role = role
+        self.content = content
+        self.attachments = attachments
+        self.toolCalls = toolCalls
+        self.toolCallId = toolCallId
+        self.toolResults = toolResults
+        self.thinking = thinking
+        self.createdAt = createdAt
+        self.completedAt = completedAt
+        self.generationTokenCount = generationTokenCount
+        self.timeToFirstToken = timeToFirstToken
+        self.generationTokensPerSecond = generationTokensPerSecond
+    }
+}
+
+// MARK: - ChatTurnData Codable (M13 session persistence on Intel)
+//
+// Hand-rolled so the transient `preflightCapabilities: Any?` (live preflight
+// state, not persistable) and the streaming-only `pending*` / `unclosedReasoning`
+// scratch fields are skipped — they reconstruct to defaults on load. Everything
+// that defines the conversation (role, content, attachments, tool calls/results,
+// thinking, timing) round-trips.
+extension ChatTurnData: Codable {
+    private enum CodingKeys: String, CodingKey {
+        case id, role, content, attachments, toolCalls, toolCallId, toolResults
+        case thinking, createdAt, completedAt, generationTokenCount
+        case timeToFirstToken, generationTokensPerSecond
+    }
+
+    init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        self.init(
+            id: try c.decode(UUID.self, forKey: .id),
+            role: try c.decode(MessageRole.self, forKey: .role),
+            content: try c.decodeIfPresent(String.self, forKey: .content) ?? "",
+            attachments: try c.decodeIfPresent([Attachment].self, forKey: .attachments) ?? [],
+            toolCalls: try c.decodeIfPresent([ToolCall].self, forKey: .toolCalls),
+            toolCallId: try c.decodeIfPresent(String.self, forKey: .toolCallId),
+            toolResults: try c.decodeIfPresent([String: String].self, forKey: .toolResults) ?? [:],
+            thinking: try c.decodeIfPresent(String.self, forKey: .thinking) ?? "",
+            createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
+            completedAt: try c.decodeIfPresent(Date.self, forKey: .completedAt),
+            generationTokenCount: try c.decodeIfPresent(Int.self, forKey: .generationTokenCount),
+            timeToFirstToken: try c.decodeIfPresent(TimeInterval.self, forKey: .timeToFirstToken),
+            generationTokensPerSecond: try c.decodeIfPresent(
+                Double.self, forKey: .generationTokensPerSecond)
+        )
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var c = encoder.container(keyedBy: CodingKeys.self)
+        try c.encode(id, forKey: .id)
+        try c.encode(role, forKey: .role)
+        try c.encode(content, forKey: .content)
+        if !attachments.isEmpty { try c.encode(attachments, forKey: .attachments) }
+        try c.encodeIfPresent(toolCalls, forKey: .toolCalls)
+        try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
+        if !toolResults.isEmpty { try c.encode(toolResults, forKey: .toolResults) }
+        if !thinking.isEmpty { try c.encode(thinking, forKey: .thinking) }
+        try c.encode(createdAt, forKey: .createdAt)
+        try c.encodeIfPresent(completedAt, forKey: .completedAt)
+        try c.encodeIfPresent(generationTokenCount, forKey: .generationTokenCount)
+        try c.encodeIfPresent(timeToFirstToken, forKey: .timeToFirstToken)
+        try c.encodeIfPresent(generationTokensPerSecond, forKey: .generationTokensPerSecond)
+    }
 }
 
 // MARK: - Type aliases

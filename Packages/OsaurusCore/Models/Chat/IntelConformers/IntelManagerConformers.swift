@@ -461,7 +461,7 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
 // M13 Schedules restore: made `public` so the un-excluded ExecutionContext's
 // `public init(reattaching: ChatSessionData)` compiles — the real upstream
 // model is public too. Members stay internal (same-module access only).
-public struct ChatSessionData: Identifiable, @unchecked Sendable {
+public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
     public let id: UUID
     var title: String
     let createdAt: Date
@@ -520,21 +520,76 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     /// `internal` so observers can read it.
     @Published var sessions: [UUID: ChatSessionData] = [:]
 
-    func save(_ data: ChatSessionData) { sessions[data.id] = data }
-    func delete(id: UUID) { sessions.removeValue(forKey: id) }
+    // M13 follow-up (Renée 2026-06-04): persist chat sessions across launches.
+    // Upstream persists via the excluded ChatHistoryDatabase/ChatSessionStore
+    // (SQLite); Intel had only this in-memory dict, so every relaunch lost all
+    // conversations. We now mirror the legacy per-session JSON layout under
+    // `OsaurusPaths.sessions()` (~/.osaurus-intel/sessions/<uuid>.json) —
+    // small payloads, one file per chat, loaded on init and rewritten on each
+    // mutation. (`ChatSessionData`/`ChatTurnData` are Codable on Intel now.)
+    private init() {
+        loadFromDisk()
+    }
+
+    func save(_ data: ChatSessionData) {
+        sessions[data.id] = data
+        persist(data)
+    }
+    func delete(id: UUID) {
+        sessions.removeValue(forKey: id)
+        removeFromDisk(id: id)
+    }
     func rename(id: UUID, title: String) {
         if var s = sessions[id] {
             s.title = title
             sessions[id] = s
+            persist(s)
         }
     }
     func setArchived(id: UUID, archived: Bool) {
         if var s = sessions[id] {
             s.archived = archived
             sessions[id] = s
+            persist(s)
         }
     }
-    func refresh() {}
+    func refresh() { loadFromDisk() }
+
+    // MARK: - Disk persistence
+
+    private func loadFromDisk() {
+        let dir = OsaurusPaths.sessions()
+        guard
+            let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil)
+        else { return }
+        let decoder = JSONDecoder()
+        decoder.dateDecodingStrategy = .iso8601
+        var loaded: [UUID: ChatSessionData] = [:]
+        for file in files where file.pathExtension == "json" {
+            guard
+                let data = try? Data(contentsOf: file),
+                let session = try? decoder.decode(ChatSessionData.self, from: data)
+            else { continue }
+            loaded[session.id] = session
+        }
+        sessions = loaded
+        print("[Osaurus Intel] Loaded \(loaded.count) chat session(s) from disk")
+    }
+
+    private func persist(_ data: ChatSessionData) {
+        let dir = OsaurusPaths.sessions()
+        OsaurusPaths.ensureExistsSilent(dir)
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        guard let encoded = try? encoder.encode(data) else { return }
+        try? encoded.write(to: OsaurusPaths.sessionFile(for: data.id), options: .atomic)
+    }
+
+    private func removeFromDisk(id: UUID) {
+        try? FileManager.default.removeItem(at: OsaurusPaths.sessionFile(for: id))
+    }
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {
         let id = UUID()
