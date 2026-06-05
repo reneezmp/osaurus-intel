@@ -700,20 +700,27 @@ struct IntelStatusPanelView: View {
     }
 
     // MARK: Action bar
+    /// The chat user-bubble color (accent or custom bubble color at its
+    /// configured opacity) — used to tint the menu-card action buttons so they
+    /// match the conversation bubbles instead of the darker `buttonBackground`.
+    private var bubbleColor: Color {
+        (theme.userBubbleColor ?? theme.accentColor).opacity(theme.userBubbleOpacity)
+    }
+
     private var actionBar: some View {
         HStack(spacing: 8) {
             askAIButton
             Spacer()
-            CircularIconButton(systemName: "gearshape", help: "Settings") {
+            CircularIconButton(systemName: "gearshape", help: "Settings", fillColor: bubbleColor) {
                 AppDelegate.shared?.dismissStatusPopover()
                 AppDelegate.shared?.showManagementWindow()
             }
-            CircularIconButton(systemName: "questionmark.circle", help: "Documentation") {
+            CircularIconButton(systemName: "questionmark.circle", help: "Documentation", fillColor: bubbleColor) {
                 if let url = URL(string: "https://docs.osaurus.ai/") {
                     NSWorkspace.shared.open(url)
                 }
             }
-            CircularIconButton(systemName: "power", help: "Quit") {
+            CircularIconButton(systemName: "power", help: "Quit", fillColor: bubbleColor) {
                 NSApp.terminate(nil)
             }
         }

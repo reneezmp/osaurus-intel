@@ -11,13 +11,17 @@ struct CircularIconButton: View {
     @Environment(\.theme) private var theme
     let systemName: String
     let help: LocalizedStringKey?
+    /// Optional fill override (e.g. to match the chat bubble color). When nil,
+    /// uses the theme's `buttonBackground` (the default everywhere).
+    let fillColor: Color?
     let action: () -> Void
 
     @State private var isHovered = false
 
-    init(systemName: String, help: LocalizedStringKey? = nil, action: @escaping () -> Void) {
+    init(systemName: String, help: LocalizedStringKey? = nil, fillColor: Color? = nil, action: @escaping () -> Void) {
         self.systemName = systemName
         self.help = help
+        self.fillColor = fillColor
         self.action = action
     }
 
@@ -26,7 +30,7 @@ struct CircularIconButton: View {
             ZStack {
                 // Background
                 Circle()
-                    .fill(theme.buttonBackground.opacity(isHovered ? 0.95 : 0.8))
+                    .fill(fillColor ?? theme.buttonBackground.opacity(isHovered ? 0.95 : 0.8))
 
                 // Hover accent gradient
                 if isHovered {
