@@ -1696,6 +1696,34 @@ public final class PluginManager: ObservableObject {
                 ))
             }
         }
+
+        // Opt-in end-to-end proof: when OSAURUS_INTEL_PLUGIN_SELFTEST is set,
+        // invoke each live plugin's first tool and log the result. This is the
+        // Phase D verification path (visible in the terminal Renée launches from).
+        if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
+            runNativeSelfTest()
+        }
+    }
+
+    /// Invoke the first tool of every live native plugin and log the result.
+    /// Gated behind OSAURUS_INTEL_PLUGIN_SELFTEST (see loadAll).
+    private func runNativeSelfTest() {
+        guard !nativePlugins.isEmpty else {
+            NSLog("[Osaurus Intel] self-test: no native plugins loaded")
+            return
+        }
+        for (pid, plugin) in nativePlugins {
+            guard let tool = plugin.toolIds.first else {
+                NSLog("[Osaurus Intel] self-test: '\(pid)' exposes no tools")
+                continue
+            }
+            do {
+                let result = try plugin.invoke(type: "tool", id: tool, payload: "{}")
+                NSLog("[Osaurus Intel] self-test ✅ \(pid)/\(tool) → \(result)")
+            } catch {
+                NSLog("[Osaurus Intel] self-test ❌ \(pid)/\(tool): \(error.localizedDescription)")
+            }
+        }
     }
 
     /// dlopen + v2 ABI handshake for a capability-compatible plugin. Failures
@@ -1703,15 +1731,15 @@ public final class PluginManager: ObservableObject {
     /// (capability) bucket; it just won't be invocable.
     private func loadNative(pluginId: String, pluginDir: URL) {
         guard let dylib = IntelPluginLoader.findDylib(in: pluginDir) else {
-            print("[Osaurus Intel] plugin '\(pluginId)': no .dylib found in \(pluginDir.lastPathComponent) (browse-only)")
+            NSLog("[Osaurus Intel] plugin '\(pluginId)': no .dylib found in \(pluginDir.lastPathComponent) (browse-only)")
             return
         }
         switch IntelPluginLoader.load(dylibURL: dylib, pluginId: pluginId) {
         case .success(let loaded):
             nativePlugins[pluginId] = loaded
-            print("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
+            NSLog("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
         case .failure(let err):
-            print("[Osaurus Intel] plugin '\(pluginId)' dlopen failed: \(err.message)")
+            NSLog("[Osaurus Intel] plugin '\(pluginId)' dlopen failed: \(err.message)")
         }
     }
 

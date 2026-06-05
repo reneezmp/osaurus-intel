@@ -1,0 +1,11 @@
+{
+  "plugin_id": "hello-intel",
+  "name": "Hello Intel",
+  "version": "1.0.0",
+  "description": "A tiny native x86_64 plugin proving the Intel fork can dlopen + invoke plugins.",
+  "capabilities": {
+    "tools": [
+      { "id": "hello", "description": "Returns a friendly greeting." }
+    ]
+  }
+}

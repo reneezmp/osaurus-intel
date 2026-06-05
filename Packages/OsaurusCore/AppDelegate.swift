@@ -138,6 +138,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // touch, the manager wouldn't exist until the Watchers tab is opened.
             _ = WatcherManager.shared
             NSLog("[Osaurus Intel] WatcherManager started with \(WatcherManager.shared.watchers.count) watcher(s)")
+
+            // M9 Phase D self-test (Renée 2026-06-04): when
+            // OSAURUS_INTEL_PLUGIN_SELFTEST is set, scan ~/.osaurus-intel/Tools
+            // at launch so the native-plugin load + invoke proof runs headless
+            // (no need to open the Plugins tab). loadAll() itself fires the
+            // self-test invoke when the env var is present. No-op otherwise.
+            if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
+                await PluginManager.shared.loadAll()
+                NSLog("[Osaurus Intel] plugin self-test scan complete")
+            }
         }
 
         Task { @MainActor in

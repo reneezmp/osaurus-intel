@@ -1,0 +1,2 @@
+# Built plugin artifacts — rebuild with each plugin's build.sh
+*.dylib
