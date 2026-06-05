@@ -456,6 +456,20 @@ private func intelScopedConfigKey(_ key: String) -> String {
     "\(intelCurrentPluginId())\u{1}\(key)"
 }
 
+// Explicit-plugin config access (for the config UI / PluginManager — not the
+// thread-local trampoline path).
+func intelPluginConfigGet(pluginId: String, key: String) -> String? {
+    intelConfigLock.lock(); defer { intelConfigLock.unlock() }
+    return intelConfigStore["\(pluginId)\u{1}\(key)"]
+}
+
+func intelPluginConfigSet(pluginId: String, key: String, value: String) {
+    intelConfigLock.lock()
+    intelConfigStore["\(pluginId)\u{1}\(key)"] = value
+    IntelPluginConfigStore.persistLocked()
+    intelConfigLock.unlock()
+}
+
 private let intelHostConfigGet: osr_config_get_t = { keyPtr in
     guard let keyPtr else { return nil }
     let key = intelScopedConfigKey(String(cString: keyPtr))
@@ -655,13 +669,29 @@ struct IntelPluginToolSpec: Sendable {
     let parameters: JSONValue?
 }
 
+/// A user-settable config field, parsed from the manifest `secrets[]` (the
+/// natural home for API keys / per-plugin settings). Rendered by the Intel
+/// plugin config sheet; persisted via the scoped config store; `on_config_changed`
+/// notifies the plugin.
+public struct IntelPluginConfigField: Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let detail: String?
+    public let required: Bool
+    public let url: String?
+    public let isSecret: Bool
+}
+
 final class IntelLoadedPlugin: @unchecked Sendable {
     let pluginId: String
+    let displayName: String
     let toolSpecs: [IntelPluginToolSpec]
     let manifestJSON: String
     /// Top-level manifest `instructions`, appended to the system prompt when
     /// any of this plugin's tools are active in a chat (see PluginManager).
     let instructions: String?
+    /// User-settable config fields (from manifest `secrets[]`).
+    let configFields: [IntelPluginConfigField]
 
     /// Tool ids (the names registered into ToolRegistry / logged in self-test).
     var toolIds: [String] { toolSpecs.map(\.id) }
@@ -675,8 +705,10 @@ final class IntelLoadedPlugin: @unchecked Sendable {
 
     init(
         pluginId: String,
+        displayName: String,
         toolSpecs: [IntelPluginToolSpec],
         instructions: String?,
+        configFields: [IntelPluginConfigField],
         manifestJSON: String,
         handle: UnsafeMutableRawPointer,
         api: osr_plugin_api,
@@ -684,8 +716,10 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         hostAPIPtr: UnsafeMutablePointer<osr_host_api>
     ) {
         self.pluginId = pluginId
+        self.displayName = displayName
         self.toolSpecs = toolSpecs
         self.instructions = instructions
+        self.configFields = configFields
         self.manifestJSON = manifestJSON
         self.handle = handle
         self.api = api
@@ -737,6 +771,17 @@ final class IntelLoadedPlugin: @unchecked Sendable {
             hostAPIPtr.deinitialize(count: 1)
             hostAPIPtr.deallocate()
             dlclose(handle)
+        }
+    }
+
+    /// Notify the plugin that the user changed one of its config values
+    /// (host UI → plugin). No-op if the plugin doesn't implement the callback.
+    func notifyConfigChanged(key: String, value: String) {
+        queue.sync {
+            guard !isShutDown, let cb = api.on_config_changed else { return }
+            Thread.current.threadDictionary[intelPluginThreadKey] = pluginId
+            defer { Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey) }
+            key.withCString { k in value.withCString { v in cb(ctx, k, v) } }
         }
     }
 }
@@ -792,11 +837,15 @@ enum IntelPluginLoader {
 
         let toolSpecs = Self.parseToolSpecs(fromManifestJSON: manifestJSON)
         let instructions = Self.parseInstructions(fromManifestJSON: manifestJSON)
+        let displayName = Self.parseName(fromManifestJSON: manifestJSON) ?? pluginId
+        let configFields = Self.parseConfigFields(fromManifestJSON: manifestJSON)
 
         let loaded = IntelLoadedPlugin(
             pluginId: pluginId,
+            displayName: displayName,
             toolSpecs: toolSpecs,
             instructions: instructions,
+            configFields: configFields,
             manifestJSON: manifestJSON,
             handle: handle,
             api: api,
@@ -835,7 +884,8 @@ enum IntelPluginLoader {
         return nil
     }
 
-    /// Decodable shapes for pulling tool specs + instructions out of the manifest.
+    /// Decodable shapes for pulling tool specs + instructions + config out of
+    /// the manifest.
     private struct ManifestTools: Decodable {
         struct Caps: Decodable { let tools: [ToolDef]? }
         struct ToolDef: Decodable {
@@ -843,8 +893,42 @@ enum IntelPluginLoader {
             let description: String?
             let parameters: JSONValue?
         }
+        struct Secret: Decodable {
+            let id: String
+            let label: String?
+            let description: String?
+            let required: Bool?
+            let url: String?
+            let secret: Bool?
+        }
         let capabilities: Caps?
         let instructions: String?
+        let name: String?
+        let secrets: [Secret]?
+    }
+
+    static func parseName(fromManifestJSON json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ManifestTools.self, from: data)
+        else { return nil }
+        return decoded.name
+    }
+
+    static func parseConfigFields(fromManifestJSON json: String) -> [IntelPluginConfigField] {
+        guard let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ManifestTools.self, from: data),
+              let secrets = decoded.secrets
+        else { return [] }
+        return secrets.map {
+            IntelPluginConfigField(
+                id: $0.id,
+                label: $0.label ?? $0.id,
+                detail: $0.description,
+                required: $0.required ?? true,
+                url: $0.url,
+                isSecret: $0.secret ?? true
+            )
+        }
     }
 
     private static func parseToolSpecs(fromManifestJSON json: String) -> [IntelPluginToolSpec] {

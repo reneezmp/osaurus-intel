@@ -1710,6 +1710,17 @@ public final class PluginManager: ObservableObject {
             runNativeSelfTest()
         }
 
+        // Set a plugin config value through the real path (setConfig →
+        // on_config_changed). Format: "pluginId|key|value". Runs before the
+        // test call so config-dependent tools see it.
+        if let setconfig = ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SETCONFIG"] {
+            let parts = setconfig.split(separator: "|", maxSplits: 2, omittingEmptySubsequences: false)
+            if parts.count == 3 {
+                setConfig(pluginId: String(parts[0]), key: String(parts[1]), value: String(parts[2]))
+                NSLog("[Osaurus Intel] setconfig \(parts[0]).\(parts[1]) = \(parts[2])")
+            }
+        }
+
         // Targeted tool test through the REAL agent path (ToolRegistry.execute →
         // IntelPluginTool → plugin.invoke). Format: OSAURUS_INTEL_PLUGIN_TESTCALL
         // = "toolName|{json payload}". Lets fetch/search be verified with real
@@ -1797,6 +1808,34 @@ public final class PluginManager: ObservableObject {
             }
         }
         return result
+    }
+
+    // MARK: - Plugin config (Intel config UI)
+
+    /// A loaded native plugin that declares user-settable config fields.
+    public struct ConfigurablePlugin: Identifiable, Sendable {
+        public let id: String
+        public let name: String
+        public let fields: [IntelPluginConfigField]
+    }
+
+    /// Loaded native plugins that declare config fields, for the settings UI.
+    public func configurablePlugins() -> [ConfigurablePlugin] {
+        nativePlugins.values
+            .filter { !$0.configFields.isEmpty }
+            .map { ConfigurablePlugin(id: $0.pluginId, name: $0.displayName, fields: $0.configFields) }
+            .sorted { $0.name < $1.name }
+    }
+
+    /// Current stored value for a plugin config key ("" if unset).
+    public func configValue(pluginId: String, key: String) -> String {
+        intelPluginConfigGet(pluginId: pluginId, key: key) ?? ""
+    }
+
+    /// Persist a plugin config value and notify the plugin (on_config_changed).
+    public func setConfig(pluginId: String, key: String, value: String) {
+        intelPluginConfigSet(pluginId: pluginId, key: key, value: value)
+        nativePlugins[pluginId]?.notifyConfigChanged(key: key, value: value)
     }
 
     /// True when a plugin is dlopen'd and ready to invoke (not just bucketed).

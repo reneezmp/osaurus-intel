@@ -30,6 +30,9 @@ struct PluginsView: View {
     @State private var pluginsWithMissingPermissionsCount = 0
 
     @State private var showSecretsSheet: Bool = false
+    #if OSAURUS_INTEL
+    @State private var showIntelPluginConfig: Bool = false
+    #endif
     @State private var secretsSheetPluginId: String?
     @State private var secretsSheetPluginName: String?
     @State private var secretsSheetPluginVersion: String?
@@ -140,6 +143,11 @@ struct PluginsView: View {
                 )
             }
         }
+        #if OSAURUS_INTEL
+        .sheet(isPresented: $showIntelPluginConfig) {
+            IntelPluginConfigView()
+        }
+        #endif
     }
 
     /// Honor a pending `osaurus://plugins-install?tool=<id>` deeplink request.
@@ -220,6 +228,15 @@ struct PluginsView: View {
                     isRefreshButtonLoading = false
                 }
             }
+            #if OSAURUS_INTEL
+            // Settings for natively-loaded x86_64 plugins that declare config.
+            HeaderIconButton(
+                "gearshape",
+                help: "Native plugin settings"
+            ) {
+                showIntelPluginConfig = true
+            }
+            #endif
         } tabsRow: {
             HeaderTabsRow(
                 selection: $selectedTab,

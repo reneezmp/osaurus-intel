@@ -3,6 +3,9 @@
   "name": "Search",
   "version": "1.0.0",
   "description": "Web search via DuckDuckGo (no API key).",
+  "secrets": [
+    { "id": "region", "label": "Region (DuckDuckGo kl)", "description": "Optional region code, e.g. us-en, uk-en, br-pt. Blank = default.", "required": false, "secret": false, "url": "https://duckduckgo.com/duckduckgo-help-pages/settings/params/" }
+  ],
   "capabilities": {
     "tools": [
       {

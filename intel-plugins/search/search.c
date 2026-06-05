@@ -30,6 +30,9 @@ static const char *p_get_manifest(osr_plugin_ctx_t c) {
     static const char *m =
         "{\"plugin_id\":\"search-intel\",\"name\":\"Search\",\"version\":\"1.0.0\","
         "\"description\":\"Web search via DuckDuckGo (no API key).\","
+        "\"secrets\":[{\"id\":\"region\",\"label\":\"Region (DuckDuckGo kl)\","
+        "\"description\":\"Optional region code, e.g. us-en, uk-en, br-pt. Blank = default.\","
+        "\"required\":false,\"secret\":false,\"url\":\"https://duckduckgo.com/duckduckgo-help-pages/settings/params/\"}],"
         "\"capabilities\":{\"tools\":[{"
         "\"id\":\"web_search\","
         "\"description\":\"Search the web with DuckDuckGo and return the top results as a list "
@@ -61,8 +64,24 @@ static const char *p_invoke(osr_plugin_ctx_t c, const char *type, const char *id
     char enc[3072];
     osr_url_encode(query, enc, sizeof enc);
 
-    char url[3200];
-    snprintf(url, sizeof url, "https://lite.duckduckgo.com/lite/?q=%s", enc);
+    // Optional user-configured region (host config; set via Plugin Settings).
+    char region[64] = "";
+    if (g_host->config_get) {
+        const char *rv = g_host->config_get("region");
+        if (rv) {
+            strncpy(region, rv, sizeof region - 1);
+            if (g_host->free_string) g_host->free_string(rv);
+        }
+    }
+
+    char url[3300];
+    if (region[0] != '\0') {
+        char renc[128];
+        osr_url_encode(region, renc, sizeof renc);
+        snprintf(url, sizeof url, "https://lite.duckduckgo.com/lite/?q=%s&kl=%s", enc, renc);
+    } else {
+        snprintf(url, sizeof url, "https://lite.duckduckgo.com/lite/?q=%s", enc);
+    }
 
     char req[3600];
     snprintf(req, sizeof req,
@@ -89,9 +108,11 @@ static const char *p_invoke(osr_plugin_ctx_t c, const char *type, const char *id
     char qesc[2048];
     osr_json_escape(query, qesc, sizeof qesc);
 
+    char resc[128];
+    osr_json_escape(region, resc, sizeof resc);
     size_t oi = 0;
     oi += (size_t)snprintf(out + oi, SEARCH_OUT_CAP - oi,
-                           "{\"ok\":true,\"query\":\"%s\",\"results\":[", qesc);
+                           "{\"ok\":true,\"query\":\"%s\",\"region\":\"%s\",\"results\":[", qesc, resc);
 
     // Each result is an `<a ... href="URL" class='result-link'>TITLE</a>`.
     // The href is either a direct URL or a `//duckduckgo.com/l/?uddg=<ENC>`
