@@ -1613,12 +1613,27 @@ public final class PluginManager: ObservableObject {
         public var id: String { pluginId }
     }
 
+    /// M9 Phase C: live dlopen'd x86_64 plugins, keyed by plugin id. Only
+    /// compatible/degraded plugins that successfully complete the v2 ABI
+    /// handshake land here; this is what `invoke(pluginId:...)` runs against.
+    private var nativePlugins: [String: IntelLoadedPlugin] = [:]
+
     private init() {}
 
     /// Scans the plugin directory, checks capabilities, and loads compatible plugins.
     public func loadAll(forceReload: Bool = false) async {
-        let pluginsDir = FileManager.default.homeDirectoryForCurrentUser
-            .appendingPathComponent(".osaurus/Tools")
+        // Intel data isolation: scan `~/.osaurus-intel/Tools` (NOT the
+        // production `~/.osaurus/Tools`). OsaurusPaths.root() resolves the
+        // Intel split automatically.
+        let pluginsDir = OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
+
+        // Reset bucket state and tear down any live handles before re-scanning,
+        // so repeated calls don't duplicate entries or leak dlopen'd dylibs.
+        for (_, p) in nativePlugins { p.teardown() }
+        nativePlugins.removeAll()
+        loadedPlugins.removeAll()
+        incompatiblePlugins.removeAll()
+        degradedPluginIds.removeAll()
 
         guard FileManager.default.fileExists(atPath: pluginsDir.path) else { return }
 
@@ -1655,8 +1670,10 @@ public final class PluginManager: ObservableObject {
                     version: version,
                     toolNames: toolNames
                 ))
+                loadNative(pluginId: pluginId, pluginDir: pluginURL)
 
             case .degraded(let missing):
+                _ = missing
                 let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
                 let toolNames = tools.compactMap { $0["id"] as? String }
 
@@ -1668,6 +1685,7 @@ public final class PluginManager: ObservableObject {
                     toolNames: toolNames
                 ))
                 degradedPluginIds.insert(pluginId)
+                loadNative(pluginId: pluginId, pluginDir: pluginURL)
 
             case .incompatible(let missing):
                 incompatiblePlugins.append(IncompatiblePluginInfo(
@@ -1678,6 +1696,43 @@ public final class PluginManager: ObservableObject {
                 ))
             }
         }
+    }
+
+    /// dlopen + v2 ABI handshake for a capability-compatible plugin. Failures
+    /// are logged but don't abort the scan — the plugin still shows in the
+    /// (capability) bucket; it just won't be invocable.
+    private func loadNative(pluginId: String, pluginDir: URL) {
+        guard let dylib = IntelPluginLoader.findDylib(in: pluginDir) else {
+            print("[Osaurus Intel] plugin '\(pluginId)': no .dylib found in \(pluginDir.lastPathComponent) (browse-only)")
+            return
+        }
+        switch IntelPluginLoader.load(dylibURL: dylib, pluginId: pluginId) {
+        case .success(let loaded):
+            nativePlugins[pluginId] = loaded
+            print("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
+        case .failure(let err):
+            print("[Osaurus Intel] plugin '\(pluginId)' dlopen failed: \(err.message)")
+        }
+    }
+
+    /// True when a plugin is dlopen'd and ready to invoke (not just bucketed).
+    public func isNativelyLoaded(pluginId: String) -> Bool {
+        nativePlugins[pluginId] != nil
+    }
+
+    /// Tool ids exposed by a live plugin's manifest (empty if not loaded).
+    public func nativeToolIds(pluginId: String) -> [String] {
+        nativePlugins[pluginId]?.toolIds ?? []
+    }
+
+    /// Invoke a tool on a live native plugin. Throws if the plugin isn't
+    /// loaded or the invocation fails. `type` defaults to "tool".
+    public func invoke(pluginId: String, toolId: String, payload: String, type: String = "tool") throws -> String {
+        guard let plugin = nativePlugins[pluginId] else {
+            throw NSError(domain: "PluginManager", code: 404,
+                          userInfo: [NSLocalizedDescriptionKey: "Plugin '\(pluginId)' is not loaded on the Intel fork"])
+        }
+        return try plugin.invoke(type: type, id: toolId, payload: payload)
     }
 
     public func plugin(withId id: String) -> LoadedPluginInfo? {
