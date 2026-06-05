@@ -1772,6 +1772,23 @@ version, tool list, per-card gear → config sheet for plugins with settings), v
 live dylib handle). Verified through the AX tree: all 5 (time/fetch/search/memo/
 hello) render with their tools; the gear opens the config sheet.
 
+**Capability + Tools-tab surfacing (commit `d45e6d26`):** native plugin tools
+were registered in ToolRegistry but `source(forTool:)` classified them as
+`.builtIn`, which `AgentCapabilityManagerView` FILTERS OUT at row emission — so
+they never showed in the picker and (in Manual mode) were excluded from the
+model. Fixed: Intel ToolRegistry now classifies them as real plugin tools
+(`registerPluginTool(_:group:)` → `isPluginTool`/`groupName` return the plugin
+display name), so they render as selectable per-plugin groups (Memo, Search,
+Time, Fetch, Hello Intel). `loadNative` registers via `registerPluginTool`.
+Also: ToolsManagerView gained a "Plugin Tools (native)" section; the
+**Sandbox Plugin Creator** built-in skill is filtered out of `Skill.builtInSkills`
+on Intel (sandbox amputated → dead capability). Card polish (`4ec373a4`):
+`NativePluginCard` (accent outline, Loaded badge, tool count, `…` menu with View
+Details/Settings/Reveal in Finder, tap → `IntelNativePluginDetailView`).
+*NOTE:* for an agent that has customized its tool allowlist (Manual mode), the
+user must tick the new plugin groups in Capabilities to enable them; agents with
+an un-customized (nil) allowlist get them automatically.
+
 **Still optional (NOT done):** a UI "Run tool" button for ad-hoc invocation
 (tools are callable from chat via `openAISpecs()`); true MCP `tools/call`
 exposure for external MCP clients (the in-app agent path doesn't need it).
