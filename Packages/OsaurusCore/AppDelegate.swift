@@ -139,15 +139,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             _ = WatcherManager.shared
             NSLog("[Osaurus Intel] WatcherManager started with \(WatcherManager.shared.watchers.count) watcher(s)")
 
-            // M9 Phase D self-test (Renée 2026-06-04): when
-            // OSAURUS_INTEL_PLUGIN_SELFTEST is set, scan ~/.osaurus-intel/Tools
-            // at launch so the native-plugin load + invoke proof runs headless
-            // (no need to open the Plugins tab). loadAll() itself fires the
-            // self-test invoke when the env var is present. No-op otherwise.
-            if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
-                await PluginManager.shared.loadAll()
-                NSLog("[Osaurus Intel] plugin self-test scan complete")
-            }
+            // M9 Phase C–E (Renée 2026-06-04/05): scan ~/.osaurus-intel/Tools at
+            // launch so native plugins load and their tools register into the
+            // agent ToolRegistry immediately — available in chat without opening
+            // the Plugins tab. loadAll() also fires the self-test / test-call
+            // diagnostics when OSAURUS_INTEL_PLUGIN_SELFTEST / _TESTCALL are set.
+            await PluginManager.shared.loadAll()
+            NSLog("[Osaurus Intel] plugin scan complete (\(PluginManager.shared.loadedPlugins.count) loaded)")
         }
 
         Task { @MainActor in
