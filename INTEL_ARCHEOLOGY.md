@@ -1670,7 +1670,75 @@ session.
   `#if OSAURUS_INTEL` via a computed bool so the shared view compiles on AS.
   **Verified (Renée): badges + disabled install render.**
 
-### Plugins Phase C/D — SCOPE (deferred, NOT built — next fresh session)
+### Plugins Phase C/D — ✅ BUILT (2026-06-04, slim-host architecture)
+
+**Done — but NOT via the full restore scoped below.** When the cascade was
+measured honestly it came to **~41 amputated touchpoints** (PluginHostAPI:
+`ToolRegistry ×10`, `AgentManager ×7`, `EmbeddingService ×3`, `ChatEngine ×2`,
+`SandboxToolRegistrar ×2`, `MLX ×2`, …; real PluginManager: `AgentManager ×3`,
+`SkillManager ×4`, `ToolRegistry ×4`) **+ 4 type collisions + 3 more file
+un-exclusions** — 8× over the revert threshold, and most restored callbacks
+(embed/MLX/inference/sandbox) are dead on Intel anyway. So Renée chose the
+**slim self-contained Intel host** instead. The full-restore scope is kept
+below for the record but is **not the path taken**.
+
+**What shipped (commits `93c42cb0` Phase C, `aa46d50b` Phase D):**
+- **`Models/Chat/IntelConformers/IntelPluginExecution.swift`** (NEW, `#if
+  OSAURUS_INTEL`): a private ABI v6 mirror (`osr_host_api` / `osr_plugin_api` +
+  all typealiases — unique to the Intel build since `ExternalPlugin`'s copy is
+  `#if !OSAURUS_INTEL`); a slim host-API table with **real** callbacks
+  (log, log_structured, free_string, config_get/set/delete [file-backed under
+  `Tools/.intel-plugin-config.json`], file_read [base64], http_request [sync
+  URLSession, matches the production request/response contract]) and **honest
+  `not_supported` envelopes** for the amputated ones (db_exec/query, dispatch*,
+  complete*, embed, list_models, list_active_tasks, get_active_agent_id) + no-op
+  voids — every slot non-null so no plugin can null-deref. `buildIntelHostAPI()`
+  owns the host-table pointer for the plugin's lifetime. `IntelLoadedPlugin`
+  (handle+ctx+host-table, serialized `invoke` on a per-plugin queue, `teardown`).
+  `IntelPluginLoader.load` (dlopen `RTLD_NOW|RTLD_LOCAL` → `osaurus_plugin_entry_v2`
+  → init → get_manifest → parse `capabilities.tools[].id`) + `findDylib`.
+- **`Managers/Plugin/PluginManager.swift`** (Intel `#else` branch): `loadAll`
+  now scans **`~/.osaurus-intel/Tools`** via `OsaurusPaths.root()` (FIXED the
+  data-isolation bug — was hardcoded to production `~/.osaurus/Tools`),
+  resets+tears down live handles on every rescan (also fixed the pre-existing
+  append-duplication), and `loadNative()` dlopens compatible/degraded plugins
+  into `nativePlugins[id]`. Public API: `invoke(pluginId:toolId:payload:type:)`,
+  `isNativelyLoaded(pluginId:)`, `nativeToolIds(pluginId:)`. `runNativeSelfTest()`
+  invokes each live plugin's first tool, gated behind
+  `OSAURUS_INTEL_PLUGIN_SELFTEST`. All Phase C/D diagnostics use `NSLog` (flush
+  immediately; `print()` to a redirected file is buffered + lost on SIGTERM).
+- **`AppDelegate.swift`**: when `OSAURUS_INTEL_PLUGIN_SELFTEST` is set, runs
+  `loadAll()` at launch so the proof fires headless (no Plugins-tab open needed).
+- **`intel-plugins/hello/`** (NEW, outside the SwiftPM target so it isn't
+  compiled into the app): `hello.c` (exports `osaurus_plugin_entry_v2`,
+  implements the required API, calls `host->log`, returns a JSON greeting),
+  `manifest.json`, `build.sh` (`clang -arch x86_64 -dynamiclib` + ad-hoc
+  codesign + install to `~/.osaurus-intel/Tools/hello-intel/`). Built `.dylib`
+  gitignored.
+
+**Verified end-to-end (x86_64 build, Rosetta on the dev Mac):**
+```
+loaded native plugin 'hello-intel' — tools: ["hello"]
+self-test ✅ hello-intel/hello → {"ok":true,"tool":"hello","message":
+  "Hello from a native x86_64 plugin running on the Osaurus Intel fork!",
+  "payload_bytes":2}
+```
+`payload_bytes:2` confirms the `{}` arg arrived; the host `log` callback
+round-tripped. dlopen → entry_v2 → init → get_manifest → invoke all confirmed.
+
+**Reproduce:** `intel-plugins/hello/build.sh` then launch with
+`OSAURUS_INTEL_PLUGIN_SELFTEST=1` (watch Console/terminal), or open the Plugins
+tab (loadAll fires on appear). No official arm64 plugin can ever run (Rosetta is
+one-way x86→ARM) — only natively-built x86_64 plugins.
+
+**Optional follow-ups (NOT done):** a UI "Run tool" button for interactive
+invocation (locally-loaded plugins don't surface in `ToolsManagerView`, whose
+Intel `plugins` returns `[]`); MCP `tools/call` exposure so chat agents can call
+plugin tools (MCPServerManager is amputated-and-mirrored — separate integration).
+
+---
+
+#### Original full-restore SCOPE (NOT taken — kept for the record)
 
 **The execution host restore. Bigger than Schedules; its own milestone.** Goal:
 let a *natively x86_64-built* plugin actually load + run (no official plugin will
@@ -1708,10 +1776,12 @@ let a *natively x86_64-built* plugin actually load + run (no official plugin wil
   makes the fork a first-class plugin host.
 
 ### Group C / tab status — final (2026-06-04)
-✅ Insights · ✅ Schedules · ✅ Watchers · 🟡 Plugins (Browse + gating done;
-execution deferred) · 🟡 Memory (deferred by choice) · 🔴 Models/Voice/Sandbox
-(hardware). Sparkle pinned off. Folder pickers (chat/schedule/watcher) all gated.
+✅ Insights · ✅ Schedules · ✅ Watchers · ✅ Plugins (Browse + gating +
+**native x86_64 execution** — slim host, Phases A–D) · 🟡 Memory (deferred by
+choice) · 🔴 Models/Voice/Sandbox (hardware). Sparkle pinned off. Folder pickers
+(chat/schedule/watcher) all gated.
 
 ### Tags laid (updated)
 `m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a).
-Latest commit: `808974ba` (M9 Phase B). Consider `m9-plugins-browse` later.
+Latest commit: `aa46d50b` (M9 Phase D — native x86_64 plugin execution proven).
+Consider tag `m9-plugins-complete` at `aa46d50b`.
