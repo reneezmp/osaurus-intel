@@ -1328,23 +1328,15 @@ private struct NativeToolGroupCard: View {
 
             if isExpanded && !tools.isEmpty {
                 Divider().padding(.vertical, 4)
-                LazyVStack(spacing: 10) {
+                LazyVStack(spacing: 8) {
                     ForEach(tools) { entry in
-                        HStack(alignment: .top, spacing: 10) {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(entry.name)
-                                    .font(.subheadline.weight(.medium))
-                                    .foregroundColor(theme.primaryText)
-                                if !entry.description.isEmpty {
-                                    Text(entry.description)
-                                        .font(.caption).foregroundColor(theme.secondaryText)
-                                        .fixedSize(horizontal: false, vertical: true)
-                                }
-                            }
-                            Spacer()
-                            ToolEnableToggle(entry: entry, onChange: onChange)
-                        }
-                        .frame(maxWidth: .infinity, alignment: .leading)
+                        // Reuse the shared row: per-tool background + Auto/Ask/Deny
+                        // policy menu + enable toggle (same as the GitHub card).
+                        ToolEntryRow(
+                            entry: entry,
+                            policyInfo: ToolRegistry.shared.policyInfo(for: entry.name),
+                            onChange: onChange
+                        )
                     }
                 }
                 .transition(.opacity.combined(with: .move(edge: .top)))
