@@ -277,6 +277,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     ) {
         configuration.add(provider)
         RemoteProviderConfigurationStore.save(configuration)
+        persistCredentials(apiKey: apiKey, oauthTokens: oauthTokens, for: provider.id)
         if provider.enabled {
             var state = RemoteProviderState(providerId: provider.id)
             state.isConnected = true
@@ -291,12 +292,31 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     ) {
         configuration.update(provider)
         RemoteProviderConfigurationStore.save(configuration)
+        persistCredentials(apiKey: apiKey, oauthTokens: oauthTokens, for: provider.id)
     }
 
     func removeProvider(id: UUID) {
         configuration.remove(id: id)
         providerStates.removeValue(forKey: id)
         RemoteProviderConfigurationStore.save(configuration)
+        RemoteProviderKeychain.deleteAPIKey(for: id)
+        RemoteProviderKeychain.deleteOAuthTokens(for: id)
+    }
+
+    /// Persist the credential the user typed in Settings → Providers. The
+    /// original Intel mirror dropped the `apiKey` entirely (it assumed the
+    /// `DEEPSEEK_API_KEY` env var), so a double-clicked app — e.g. on Rosy with
+    /// no env var — never had a key. `nil` apiKey means "keep current" (the edit
+    /// dialog passes nil when the field is left blank), so only overwrite when a
+    /// non-empty key is provided.
+    private func persistCredentials(
+        apiKey: String?, oauthTokens: RemoteProviderOAuthTokens?, for providerId: UUID
+    ) {
+        if let apiKey, !apiKey.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            RemoteProviderKeychain.saveAPIKey(apiKey, for: providerId)
+        } else if let oauthTokens {
+            RemoteProviderKeychain.saveOAuthTokens(oauthTokens, for: providerId)
+        }
     }
 
     func setEnabled(_ enabled: Bool, for providerId: UUID) {
