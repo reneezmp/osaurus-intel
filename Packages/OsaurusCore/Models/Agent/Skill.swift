@@ -106,7 +106,7 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
 
     /// All built-in skills
     public static var builtInSkills: [Skill] {
-        [
+        let all: [Skill] = [
             // Research & Analysis
             Skill(
                 id: UUID(uuidString: "00000001-0000-0000-0000-000000000001")!,
@@ -386,7 +386,8 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
                 updatedAt: Date.distantPast
             ),
 
-            // Sandbox Plugin Self-Creation
+            // Sandbox Plugin Self-Creation. NOTE: filtered out on the Intel fork
+            // (sandbox is amputated) at the return site — see `builtInSkills`.
             Skill(
                 id: UUID(uuidString: "00000001-0000-0000-0000-000000000010")!,
                 name: "Sandbox Plugin Creator",
@@ -474,6 +475,15 @@ public struct Skill: Codable, Identifiable, Sendable, Equatable {
                 updatedAt: Date.distantPast
             ),
         ]
+        #if OSAURUS_INTEL
+        // Sandbox is amputated on the Intel fork — drop the Sandbox Plugin
+        // Creator so it doesn't show as a dead capability/skill.
+        return all.filter {
+            $0.id != UUID(uuidString: "00000001-0000-0000-0000-000000000010")
+        }
+        #else
+        return all
+        #endif
     }
 
     private static let sandboxPluginCreatorInstructions = """

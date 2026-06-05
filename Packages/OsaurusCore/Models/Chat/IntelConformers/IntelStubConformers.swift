@@ -605,6 +605,21 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         register(tool)
     }
 
+    /// Native (this-fork) plugin tools: toolName -> plugin display name. Lets
+    /// the capability picker bucket them under their plugin and the Tools tab
+    /// surface them, just like MCP-provider tools.
+    private var pluginToolGroups: [String: String] = [:]
+
+    /// Register a native plugin's tool, grouped under `group` (the plugin's
+    /// display name) so it shows as a selectable per-plugin capability.
+    func registerPluginTool(_ tool: OsaurusTool, group: String) {
+        pluginToolGroups[tool.name] = group
+        register(tool)
+    }
+
+    /// Tool names belonging to native plugins (for the Tools tab grouping).
+    var pluginToolNames: Set<String> { Set(pluginToolGroups.keys) }
+
     // MARK: Tool source predicates (for AgentCapabilityManagerView grouping)
 
     /// Always-loaded built-in tools. Intel has none (folder tools are
@@ -616,16 +631,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 
     func isMCPTool(_ name: String) -> Bool { mcpToolNames.contains(name) }
 
-    /// Native dylib plugins are amputated on Intel.
-    func isPluginTool(_ name: String) -> Bool { false }
+    /// Native x86_64 plugin tools (this fork). True for tools registered via
+    /// `registerPluginTool` so the picker buckets them under their plugin.
+    func isPluginTool(_ name: String) -> Bool { pluginToolGroups[name] != nil }
 
     /// Sandbox tools are amputated on Intel.
     func isSandboxTool(_ name: String) -> Bool { false }
 
-    /// The provider/plugin group a tool belongs to. On Intel only MCP-provider
-    /// tools carry a group (their `providerName`); ExternalTool/SandboxPluginTool
-    /// are amputated. Mirrors the real ToolRegistry.groupName.
+    /// The provider/plugin group a tool belongs to: MCP provider name for
+    /// remote tools, the plugin display name for native plugin tools.
     func groupName(for toolName: String) -> String? {
+        if let group = pluginToolGroups[toolName] { return group }
         guard let tool = toolsByName[toolName] else { return nil }
         if let mcp = tool as? MCPProviderTool { return mcp.providerName }
         return nil
@@ -638,6 +654,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         for name in names {
             toolsByName.removeValue(forKey: name)
             mcpToolNames.remove(name)
+            pluginToolGroups.removeValue(forKey: name)
         }
         objectWillChange.send()
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)

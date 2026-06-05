@@ -1780,9 +1780,13 @@ public final class PluginManager: ObservableObject {
         case .success(let loaded):
             nativePlugins[pluginId] = loaded
             // Bridge each tool into the agent ToolRegistry so chat agents can
-            // call it (openAISpecs() → model; execute() → plugin.invoke).
+            // call it (openAISpecs() → model; execute() → plugin.invoke), grouped
+            // under the plugin's display name so it shows as a selectable
+            // capability + in the Tools tab.
             for spec in loaded.toolSpecs {
-                ToolRegistry.shared.register(IntelPluginTool(pluginId: pluginId, spec: spec))
+                ToolRegistry.shared.registerPluginTool(
+                    IntelPluginTool(pluginId: pluginId, spec: spec),
+                    group: loaded.displayName)
             }
             NSLog("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
         case .failure(let err):

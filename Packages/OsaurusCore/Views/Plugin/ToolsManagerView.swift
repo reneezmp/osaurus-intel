@@ -112,6 +112,7 @@ struct ToolsManagerView: View {
             let availableShown =
                 installedPluginsWithTools.reduce(0) { $0 + $1.tools.count }
                 + remoteProviderTools.reduce(0) { $0 + $1.tools.count }
+                + nativeToolBadgeCount
             HeaderTabsRow(
                 selection: $selectedTab,
                 counts: [
@@ -137,8 +138,13 @@ struct ToolsManagerView: View {
 
                 let plugins = installedPluginsWithTools
                 let remoteTools = remoteProviderTools
+                #if OSAURUS_INTEL
+                let nativeGroups = nativePluginToolGroups
+                #else
+                let nativeGroups: [(group: String, tools: [ToolRegistry.ToolEntry])] = []
+                #endif
 
-                if plugins.isEmpty && remoteTools.isEmpty {
+                if plugins.isEmpty && remoteTools.isEmpty && nativeGroups.isEmpty {
                     emptyState(
                         icon: "wrench.and.screwdriver",
                         title: L("No tools available"),
@@ -150,6 +156,15 @@ struct ToolsManagerView: View {
                     if pluginsWithMissingPermissionsCount > 0 {
                         ToolPermissionBanner(count: pluginsWithMissingPermissionsCount)
                     }
+
+                    #if OSAURUS_INTEL
+                    if !nativeGroups.isEmpty {
+                        InstalledSectionHeader(title: "Plugin Tools (native)", icon: "puzzlepiece.extension")
+                        ForEach(nativeGroups, id: \.group) { item in
+                            nativeToolGroupCard(item.group, item.tools)
+                        }
+                    }
+                    #endif
 
                     if !plugins.isEmpty {
                         InstalledSectionHeader(title: "Plugin Tools", icon: "puzzlepiece.extension")
@@ -189,6 +204,60 @@ struct ToolsManagerView: View {
             .frame(maxWidth: .infinity)
         }
     }
+
+    /// Native plugin tool count for the Available-tab badge (0 off-Intel).
+    private var nativeToolBadgeCount: Int {
+        #if OSAURUS_INTEL
+        return nativePluginToolGroups.reduce(0) { $0 + $1.tools.count }
+        #else
+        return 0
+        #endif
+    }
+
+    #if OSAURUS_INTEL
+    // MARK: - Native (this-fork) plugin tools
+
+    /// Native plugin tools grouped by their plugin display name, from the
+    /// Intel ToolRegistry (registered via registerPluginTool). Honors search.
+    private var nativePluginToolGroups: [(group: String, tools: [ToolRegistry.ToolEntry])] {
+        let reg = ToolRegistry.shared
+        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        let entries = reg.listTools().filter { entry in
+            guard reg.isPluginTool(entry.name) else { return false }
+            guard !q.isEmpty else { return true }
+            return entry.name.lowercased().contains(q) || entry.description.lowercased().contains(q)
+        }
+        let grouped = Dictionary(grouping: entries) { reg.groupName(for: $0.name) ?? "Plugin" }
+        return grouped
+            .map { (group: $0.key, tools: $0.value.sorted { $0.name < $1.name }) }
+            .sorted { $0.group < $1.group }
+    }
+
+    private func nativeToolGroupCard(_ group: String, _ tools: [ToolRegistry.ToolEntry]) -> some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(spacing: 8) {
+                Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.tint)
+                Text(group).font(.headline)
+                Spacer()
+                Text("\(tools.count) tool\(tools.count == 1 ? "" : "s")")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            ForEach(tools) { t in
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(t.name).font(.subheadline.weight(.medium))
+                    if !t.description.isEmpty {
+                        Text(t.description).font(.caption).foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.045)))
+    }
+    #endif
 
     // MARK: - Empty / Loading States
 
