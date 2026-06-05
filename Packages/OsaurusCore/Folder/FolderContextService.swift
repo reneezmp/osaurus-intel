@@ -122,30 +122,56 @@ public final class FolderContextService: ObservableObject {
 
     /// Build context from a URL (assumes access is already granted)
     public func buildContext(from url: URL) async -> FolderContext {
-        let projectType = detectProjectType(url)
-        let options = FileTreeOptions(
-            ignorePatterns: projectType.ignorePatterns
-        )
-        let tree = buildFileTree(url, options: options)
-        let manifest = readManifest(url, projectType: projectType)
-        let isGitRepo = checkIsGitRepo(url)
-        let gitStatus = isGitRepo ? await getGitStatus(url) : nil
-        let contextFiles = readContextFiles(url)
-        let detectedExtensions = scanForKnownExtensions(
-            url,
-            ignorePatterns: projectType.ignorePatterns
-        )
+        // CRITICAL: this whole class is `@MainActor`, so without an explicit hop
+        // every synchronous filesystem call below runs on the MAIN THREAD. On a
+        // slow CPU (the 2017 Intel Air) and/or an iCloud-backed folder (an
+        // Obsidian vault, where `resourceValues`/reads can block while macOS
+        // materializes placeholder files), that recursive scan beachballs the UI
+        // until force-quit. We offload the heavy, self-contained scan to a
+        // background executor and only return to the main actor to publish.
+        // (The scan helpers are `nonisolated` + pure functions of `url`.)
+        let scan = await Task.detached(priority: .userInitiated) { [self] in
+            let projectType = detectProjectType(url)
+            let options = FileTreeOptions(ignorePatterns: projectType.ignorePatterns)
+            let tree = buildFileTree(url, options: options)
+            let manifest = readManifest(url, projectType: projectType)
+            let isGitRepo = checkIsGitRepo(url)
+            let contextFiles = readContextFiles(url)
+            let detectedExtensions = scanForKnownExtensions(
+                url, ignorePatterns: projectType.ignorePatterns)
+            return FolderScanResult(
+                projectType: projectType,
+                tree: tree,
+                manifest: manifest,
+                isGitRepo: isGitRepo,
+                contextFiles: contextFiles,
+                detectedExtensions: detectedExtensions
+            )
+        }.value
+
+        // Git status shells out (already suspends off the main thread).
+        let gitStatus = scan.isGitRepo ? await getGitStatus(url) : nil
 
         return FolderContext(
             rootPath: url,
-            projectType: projectType,
-            tree: tree,
-            manifest: manifest,
+            projectType: scan.projectType,
+            tree: scan.tree,
+            manifest: scan.manifest,
             gitStatus: gitStatus,
-            isGitRepo: isGitRepo,
-            contextFiles: contextFiles,
-            detectedFileExtensions: detectedExtensions
+            isGitRepo: scan.isGitRepo,
+            contextFiles: scan.contextFiles,
+            detectedFileExtensions: scan.detectedExtensions
         )
+    }
+
+    /// Sendable bundle of the off-main filesystem scan results.
+    private struct FolderScanResult: Sendable {
+        let projectType: ProjectType
+        let tree: String
+        let manifest: String?
+        let isGitRepo: Bool
+        let contextFiles: String?
+        let detectedExtensions: Set<String>
     }
 
     // MARK: - Extension Scanner
@@ -154,7 +180,7 @@ public final class FolderContextService: ObservableObject {
     /// inspect before giving up. Picked a folder like `~/Downloads` should
     /// not pay for tens of thousands of `resourceValues` calls when the
     /// answer is "we already saw an .xlsx in the first 200 files".
-    private static let extensionScanMaxEntries: Int = 5_000
+    nonisolated private static let extensionScanMaxEntries: Int = 5_000
 
     /// Walk under `url` looking for files whose extension is in
     /// `FolderPluginHints.watchedExtensions`. Returns the set of matched
@@ -167,7 +193,7 @@ public final class FolderContextService: ObservableObject {
     /// into `.git` / `node_modules` / `.build` looking for spreadsheets
     /// that the agent would never see anyway. Hidden files are skipped
     /// for the same reason.
-    private func scanForKnownExtensions(
+    nonisolated private func scanForKnownExtensions(
         _ url: URL,
         ignorePatterns: [String]
     ) -> Set<String> {
@@ -214,12 +240,12 @@ public final class FolderContextService: ObservableObject {
     /// Maximum total size for the loaded context block (~5K tokens). Big
     /// enough for a typical AGENTS.md / CLAUDE.md, small enough that it
     /// can't crowd out the rest of the system prompt.
-    private static let contextFileMaxChars = 20_000
+    nonisolated private static let contextFileMaxChars = 20_000
 
     /// Search order for the project-level context file. First found wins —
     /// loading multiple would either confuse the model with conflicting
     /// guidance or balloon the static prefix and hurt KV-cache reuse.
-    private static let contextFileCandidates: [String] = [
+    nonisolated private static let contextFileCandidates: [String] = [
         ".hermes.md", "HERMES.md",
         "AGENTS.md", "agents.md",
         "CLAUDE.md", "claude.md",
@@ -229,7 +255,7 @@ public final class FolderContextService: ObservableObject {
     /// Find and read the first present project-context file from `url`.
     /// Returns a pre-formatted `## <filename>\n\n<content>` block, truncated
     /// to `contextFileMaxChars`, or `nil` if no candidate exists.
-    private func readContextFiles(_ url: URL) -> String? {
+    nonisolated private func readContextFiles(_ url: URL) -> String? {
         for name in Self.contextFileCandidates {
             let candidate = url.appendingPathComponent(name)
             guard let raw = try? String(contentsOf: candidate, encoding: .utf8) else { continue }
@@ -244,7 +270,7 @@ public final class FolderContextService: ObservableObject {
     /// 70% head / 20% tail — the head usually contains the most important
     /// framing (project intro, conventions) while the tail catches
     /// sign-off / configuration that often appears at the bottom.
-    private static func truncateContextContent(_ content: String, label: String) -> String {
+    nonisolated private static func truncateContextContent(_ content: String, label: String) -> String {
         guard content.count > contextFileMaxChars else { return content }
         let headChars = Int(Double(contextFileMaxChars) * 0.7)
         let tailChars = Int(Double(contextFileMaxChars) * 0.2)
@@ -324,7 +350,7 @@ public final class FolderContextService: ObservableObject {
 
     // MARK: - Project Type Detection
 
-    private func detectProjectType(_ url: URL) -> ProjectType {
+    nonisolated private func detectProjectType(_ url: URL) -> ProjectType {
         let fm = FileManager.default
 
         // Check for manifest files in order of specificity
@@ -343,7 +369,7 @@ public final class FolderContextService: ObservableObject {
     // MARK: - File Tree Building
 
     /// Check if a filename matches any ignore pattern (wildcard or exact)
-    private func shouldIgnore(_ name: String, patterns: [String]) -> Bool {
+    nonisolated private func shouldIgnore(_ name: String, patterns: [String]) -> Bool {
         for pattern in patterns {
             if pattern.contains("*") {
                 let regex = pattern.replacingOccurrences(of: ".", with: "\\.")
@@ -358,7 +384,7 @@ public final class FolderContextService: ObservableObject {
         return false
     }
 
-    private func buildFileTree(_ url: URL, options: FileTreeOptions) -> String {
+    nonisolated private func buildFileTree(_ url: URL, options: FileTreeOptions) -> String {
         // Adaptive depth: inspect top-level item count to choose depth automatically.
         // This prevents bloated trees for broad directories like ~/Downloads (2000+ files)
         // while preserving full detail for well-structured projects (e.g., a Swift package).
@@ -480,7 +506,7 @@ public final class FolderContextService: ObservableObject {
     }
 
     /// Count visible (non-ignored) children of a directory
-    private func visibleChildCount(of url: URL, patterns: [String]) -> Int {
+    nonisolated private func visibleChildCount(of url: URL, patterns: [String]) -> Int {
         let subContents =
             (try? FileManager.default.contentsOfDirectory(
                 at: url,
@@ -494,7 +520,7 @@ public final class FolderContextService: ObservableObject {
     /// Well-structured projects (<=50 top-level items): depth 3 (full detail)
     /// Medium directories (51-200): depth 2
     /// Broad flat directories (>200, e.g. Downloads): depth 1 + extension grouping
-    private func computeAdaptiveDepth(_ url: URL, options: FileTreeOptions) -> Int {
+    nonisolated private func computeAdaptiveDepth(_ url: URL, options: FileTreeOptions) -> Int {
         let visibleCount = visibleChildCount(of: url, patterns: options.ignorePatterns)
 
         if visibleCount <= 50 {
@@ -507,7 +533,7 @@ public final class FolderContextService: ObservableObject {
     }
 
     /// Group files by extension for dense directory summaries
-    private func groupFilesByExtension(_ files: [URL]) -> [(ext: String, count: Int)] {
+    nonisolated private func groupFilesByExtension(_ files: [URL]) -> [(ext: String, count: Int)] {
         var groups: [String: Int] = [:]
         for file in files {
             let ext = file.pathExtension.lowercased()
@@ -517,7 +543,7 @@ public final class FolderContextService: ObservableObject {
         return groups.sorted { $0.value > $1.value }.map { (ext: $0.key, count: $0.value) }
     }
 
-    private func countContents(_ url: URL, patterns: [String]) -> (files: Int, dirs: Int) {
+    nonisolated private func countContents(_ url: URL, patterns: [String]) -> (files: Int, dirs: Int) {
         let fm = FileManager.default
         var files = 0
         var dirs = 0
@@ -557,7 +583,7 @@ public final class FolderContextService: ObservableObject {
 
     // MARK: - Manifest Reading
 
-    private func readManifest(_ url: URL, projectType: ProjectType) -> String? {
+    nonisolated private func readManifest(_ url: URL, projectType: ProjectType) -> String? {
         guard let manifestFile = projectType.primaryManifest else { return nil }
 
         let manifestURL = url.appendingPathComponent(manifestFile)
@@ -577,7 +603,7 @@ public final class FolderContextService: ObservableObject {
 
     // MARK: - Git Integration
 
-    private func checkIsGitRepo(_ url: URL) -> Bool {
+    nonisolated private func checkIsGitRepo(_ url: URL) -> Bool {
         let gitDir = url.appendingPathComponent(".git")
         var isDirectory: ObjCBool = false
         return FileManager.default.fileExists(atPath: gitDir.path, isDirectory: &isDirectory)
