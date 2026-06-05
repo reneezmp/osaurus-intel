@@ -46,6 +46,18 @@ public enum RemoteProviderKeychain {
     @discardableResult
     public static func saveAPIKey(_ apiKey: String, for providerId: UUID) -> Bool {
         let account = "\(providerId.uuidString).apiKey"
+
+        #if OSAURUS_INTEL
+        // Intel fork: the file-backed store is the ONLY store. We deliberately do
+        // NOT touch the shared "ai.osaurus.remote" Keychain service. On a dev box
+        // that also runs the official Apple-Silicon Osaurus, the migrated provider
+        // configs carry IDENTICAL UUIDs — so any Keychain write/delete here would
+        // collide with, and clobber, the official app's credentials. File-only =
+        // zero cross-app contamination, and it reads back reliably on ad-hoc /
+        // no-Secure-Enclave Macs (Rosy) where Keychain reads can silently fail.
+        intelWriteKeyFile(apiKey, account: account)
+        return true
+        #else
         guard let keyData = apiKey.data(using: .utf8) else { return false }
 
         // Delete any existing key first
@@ -60,13 +72,6 @@ public enum RemoteProviderKeychain {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
-        #if OSAURUS_INTEL
-        // Mirror to a file so it always reads back on ad-hoc / no-Secure-Enclave
-        // Macs (Rosy) where the Keychain read can silently fail. The file is the
-        // source of truth on Intel, so report success even if SecItemAdd didn't.
-        intelWriteKeyFile(apiKey, account: account)
-        return true
-        #else
         return status == errSecSuccess
         #endif
     }
@@ -76,11 +81,9 @@ public enum RemoteProviderKeychain {
         let account = "\(providerId.uuidString).apiKey"
 
         #if OSAURUS_INTEL
-        // Prefer the file-backed value (reliable on ad-hoc/no-Secure-Enclave
-        // builds); fall through to the Keychain for keys saved by older builds.
-        if let fileKey = intelReadKeyFile(account: account) { return fileKey }
-        #endif
-
+        // Intel fork: file-only. Never read the shared Keychain (see saveAPIKey).
+        return intelReadKeyFile(account: account)
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -101,6 +104,7 @@ public enum RemoteProviderKeychain {
         }
 
         return apiKey
+        #endif
     }
 
     /// Delete an API key for a provider ID
@@ -108,6 +112,13 @@ public enum RemoteProviderKeychain {
     public static func deleteAPIKey(for providerId: UUID) -> Bool {
         let account = "\(providerId.uuidString).apiKey"
 
+        #if OSAURUS_INTEL
+        // Intel fork: file-only. Never delete from the shared Keychain — that is
+        // the exact bug that wiped the official app's key (colliding provider
+        // UUIDs on the same login keychain). Only remove our own file.
+        intelDeleteKeyFile(account: account)
+        return true
+        #else
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -115,10 +126,8 @@ public enum RemoteProviderKeychain {
         ]
 
         let status = SecItemDelete(query as CFDictionary)
-        #if OSAURUS_INTEL
-        intelDeleteKeyFile(account: account)
-        #endif
         return status == errSecSuccess || status == errSecItemNotFound
+        #endif
     }
 
     #if OSAURUS_INTEL
@@ -222,6 +231,11 @@ public enum RemoteProviderKeychain {
 
     @discardableResult
     public static func deleteOAuthTokens(for providerId: UUID) -> Bool {
+        #if OSAURUS_INTEL
+        // Intel fork: never delete from the shared Keychain (colliding provider
+        // UUIDs would clobber the official app). Intel uses apiKey providers only.
+        return true
+        #else
         let account = "\(providerId.uuidString).oauth.tokens"
 
         let query: [String: Any] = [
@@ -232,6 +246,7 @@ public enum RemoteProviderKeychain {
 
         let status = SecItemDelete(query as CFDictionary)
         return status == errSecSuccess || status == errSecItemNotFound
+        #endif
     }
 
     public static func hasOAuthTokens(for providerId: UUID) -> Bool {
@@ -307,6 +322,13 @@ public enum RemoteProviderKeychain {
         deleteAPIKey(for: providerId)
         deleteOAuthTokens(for: providerId)
 
+        #if OSAURUS_INTEL
+        // Intel fork: stop here. The header-secret enumeration below queries the
+        // SHARED "ai.osaurus.remote" Keychain service and would delete the
+        // official app's items when provider UUIDs collide. deleteAPIKey already
+        // removed our file-backed key, which is all Intel ever stores.
+        return
+        #else
         // Delete all header secrets by querying with prefix
         let accountPrefix = "\(providerId.uuidString)."
 
@@ -338,5 +360,6 @@ public enum RemoteProviderKeychain {
                 SecItemDelete(deleteQuery as CFDictionary)
             }
         }
+        #endif
     }
 }

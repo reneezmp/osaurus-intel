@@ -1952,14 +1952,43 @@ real cause:
    `~/.osaurus` did nothing, and fixes #2/#3 were downstream of a key that was
    never written. Fix: `addProvider`/`updateProvider` now call
    `persistCredentials()` → `saveAPIKey` (→ file-backed store from #3);
-   `removeProvider` deletes it. **Built into `osaurus-app-v5.zip` — AWAITING ROSY
-   TEST (the session was compacted before confirmation).** If v5 still fails:
-   instrument `resolveAPIKey` + `getAPIKey` + provider-load with NSLog, run on
-   Rosy from Terminal, read the actual decision path. Also check GitHub MCP token
-   (MCPProviderKeychain) may need the same file-backed treatment.
+   `removeProvider` deletes it. **Built into `osaurus-app-v5.zip` →
+   ✅ CONFIRMED WORKING on Rosy (2026-06-05).** Cloud chat streams natively on the
+   2017 Intel Air. **M7 COMPLETE — Osaurus runs end-to-end on Intel.** 🎉
+
+**THE SHARED-KEYCHAIN CONTAMINATION (the nasty aftershock):** Right after v5
+worked on Rosy, the **official Apple-Silicon Osaurus on the M4 dev box** suddenly
+hit the "One more step — needs an AI" onboarding wall. Diagnosis (disk + Keychain
+forensics, NOT guessing):
+- `~/.osaurus/providers/remote.json` still had the DeepSeek provider (id
+  `3CF3D2A1…`, `enabled:true`); `config/chat.json` still pointed `coreModelProvider:
+  deepseek`. Config was fine.
+- `security find-generic-password -s ai.osaurus.remote` → **"item could not be
+  found."** The API key was GONE from the login Keychain.
+- **Root cause:** migration copied `remote.json` verbatim, so the Intel dev build's
+  provider (`~/.osaurus-intel`, name "DeepSeeky") carried the **IDENTICAL UUID**
+  `3CF3D2A1…`. `RemoteProviderKeychain` used the **shared** service string
+  `ai.osaurus.remote`. Every "delete provider / re-add / test" cycle while
+  debugging the Intel build on the M4 called `deleteAPIKey(for: 3CF3D2A1…)` →
+  `SecItemDelete` on the shared service → **deleted the OFFICIAL app's key.** Two
+  apps, one login keychain, colliding UUIDs.
+- **Immediate recovery:** re-paste the key in the official app's "Finish setup" →
+  Providers → Save (app re-writes the Keychain item with its own ACL).
+- **Permanent fix (this commit):** `RemoteProviderKeychain` is now **file-only
+  under `#if OSAURUS_INTEL`** — `saveAPIKey`/`getAPIKey`/`deleteAPIKey`/
+  `deleteOAuthTokens`/`deleteAllSecrets` never touch the shared Keychain on Intel.
+  The 0600 file under `~/.osaurus(-intel)/.secrets/` is the sole store. Zero
+  cross-app contamination possible. (Rosy unaffected: same file path, same
+  service string in the filename — its existing key file keeps working.)
+- **Lesson:** never let the Intel fork and the official app share a Keychain
+  service when migration can duplicate provider UUIDs. File-isolation > namespacing
+  because it also dodges the ad-hoc/no-Secure-Enclave read-failure (fix #2/#3).
+- TODO (deferred): GitHub MCP token (`MCPProviderKeychain`) likely needs the same
+  file-backed/isolated treatment if GitHub tools are used on Rosy.
 
 ### Tags laid (updated)
 `m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a) ·
-`m9-plugins-complete` (aa46d50b).
-Latest commit: `02c0871d` (M7 — Rosy deploy data-path decision + build_rosy.sh).
+`m9-plugins-complete` (aa46d50b) · **`m7-rosy` (M7 — Osaurus running natively on
+Rosy, cloud chat confirmed 2026-06-05).**
+Latest commit: keychain cross-app isolation (Intel file-only).
 Consider tag `m9-plugins-host` at `d349a25c`.
