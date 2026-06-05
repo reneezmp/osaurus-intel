@@ -38,6 +38,7 @@ struct PluginsView: View {
     @State private var showSecretsSheet: Bool = false
     #if OSAURUS_INTEL
     @State private var showIntelPluginConfig: Bool = false
+    @State private var selectedNativePlugin: PluginManager.LoadedPluginInfo?
     #endif
     @State private var secretsSheetPluginId: String?
     @State private var secretsSheetPluginName: String?
@@ -152,6 +153,15 @@ struct PluginsView: View {
         #if OSAURUS_INTEL
         .sheet(isPresented: $showIntelPluginConfig) {
             IntelPluginConfigView()
+        }
+        .sheet(item: $selectedNativePlugin) { plugin in
+            IntelNativePluginDetailView(
+                pluginId: plugin.pluginId,
+                onOpenSettings: {
+                    selectedNativePlugin = nil
+                    showIntelPluginConfig = true
+                }
+            )
         }
         #endif
     }
@@ -347,46 +357,15 @@ struct PluginsView: View {
                 spacing: 20
             ) {
                 ForEach(nativePlugins) { plugin in
-                    nativePluginCard(plugin)
+                    NativePluginCard(
+                        plugin: plugin,
+                        isConfigurable: configurablePluginIds.contains(plugin.pluginId),
+                        onOpenSettings: { showIntelPluginConfig = true },
+                        onSelect: { selectedNativePlugin = plugin }
+                    )
                 }
             }
         }
-    }
-
-    private func nativePluginCard(_ plugin: PluginManager.LoadedPluginInfo) -> some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "puzzlepiece.extension.fill")
-                    .foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(plugin.name).font(.headline)
-                    Text("v\(plugin.version) · native x86_64")
-                        .font(.caption).foregroundStyle(.secondary)
-                }
-                Spacer()
-                if configurablePluginIds.contains(plugin.pluginId) {
-                    Button {
-                        showIntelPluginConfig = true
-                    } label: {
-                        Image(systemName: "gearshape")
-                    }
-                    .buttonStyle(.borderless)
-                    .help("Plugin settings")
-                }
-            }
-            if !plugin.toolNames.isEmpty {
-                Text("Tools: " + plugin.toolNames.joined(separator: ", "))
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(Color.primary.opacity(0.045))
-        )
     }
     #endif
 

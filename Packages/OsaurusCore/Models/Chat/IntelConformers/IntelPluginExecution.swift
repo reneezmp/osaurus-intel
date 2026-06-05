@@ -663,7 +663,7 @@ private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
 /// A tool a plugin exposes, parsed from its manifest `capabilities.tools[]`.
 /// `parameters` is the OpenAI/JSON-Schema object the model reads to call the
 /// tool with the right argument shape.
-struct IntelPluginToolSpec: Sendable {
+struct IntelPluginToolSpec: Sendable, Identifiable {
     let id: String
     let description: String
     let parameters: JSONValue?
