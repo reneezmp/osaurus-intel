@@ -1424,7 +1424,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         } else {
             toolDirective = ""
         }
-        let prompt = basePrompt + folderSection + toolDirective
+        var prompt = basePrompt + folderSection + toolDirective
         // Surface the registered tools, honoring the agent's capability picker
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
         // allowlist; in Auto mode (or un-seeded), send everything registered.
@@ -1438,6 +1438,17 @@ final class SystemPromptComposer: @unchecked Sendable {
                 tools = allSpecs.filter { allowed.contains($0.function.name) }
             } else {
                 tools = allSpecs
+            }
+        }
+        // Append plugin-declared `instructions` for any plugin whose tools are
+        // active this turn, so a plugin can shape how the model wields it.
+        if !tools.isEmpty {
+            let activeNames = Set(tools.map { $0.function.name })
+            let pluginInstructions = await MainActor.run {
+                PluginManager.shared.instructions(forActiveToolNames: activeNames)
+            }
+            if !pluginInstructions.isEmpty {
+                prompt += "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
             }
         }
         return ComposedContext(prompt: prompt, tools: tools)

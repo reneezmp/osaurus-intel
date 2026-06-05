@@ -1785,6 +1785,20 @@ public final class PluginManager: ObservableObject {
         nativePlugins[pluginId]
     }
 
+    /// Manifest `instructions` for every loaded plugin that has at least one
+    /// tool in `activeToolNames`. The chat context composer appends these to
+    /// the system prompt so a plugin can shape how the model uses its tools.
+    func instructions(forActiveToolNames activeToolNames: Set<String>) -> [String] {
+        var result: [String] = []
+        for (_, plugin) in nativePlugins {
+            guard let instr = plugin.instructions else { continue }
+            if plugin.toolIds.contains(where: { activeToolNames.contains($0) }) {
+                result.append(instr)
+            }
+        }
+        return result
+    }
+
     /// True when a plugin is dlopen'd and ready to invoke (not just bucketed).
     public func isNativelyLoaded(pluginId: String) -> Bool {
         nativePlugins[pluginId] != nil

@@ -41,6 +41,7 @@
 
 import Foundation
 import os
+import OsaurusSQLCipher  // sqlite3_* C API (same module the Intel DBs use)
 
 // MARK: - C ABI Mirror (Intel-only; mirrors osaurus_plugin.h v6)
 
@@ -173,6 +174,125 @@ private func notSupportedEnvelope(_ name: String) -> String {
     #"{"error":"not_supported","message":"\#(name) is unavailable on the Osaurus Intel fork (amputated subsystem)."}"#
 }
 
+// --- Per-plugin scoping: which plugin is currently calling a host callback? --
+// Host trampolines are global (no plugin arg), so the active plugin id is
+// stashed in thread-local storage around each `invoke` (callbacks run
+// synchronously on that same thread). Used to scope config + the SQLite store.
+let intelPluginThreadKey = "osr.intel.currentPluginId"
+func intelCurrentPluginId() -> String {
+    (Thread.current.threadDictionary[intelPluginThreadKey] as? String) ?? "_shared"
+}
+
+// --- Per-plugin SQLite (db_exec / db_query). Plaintext file per plugin. ------
+private let intelDbLock = NSLock()
+private nonisolated(unsafe) var intelDbHandles: [String: OpaquePointer] = [:]
+private let intelSqliteTransient = unsafeBitCast(
+    OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
+
+/// Open (once) and return the per-plugin DB handle at
+/// `~/.osaurus-intel/Tools/<pluginId>/plugin.db`. Caller must NOT hold
+/// `intelDbLock` (this takes it).
+private func intelOpenPluginDB(_ pluginId: String) -> OpaquePointer? {
+    intelDbLock.lock(); defer { intelDbLock.unlock() }
+    if let h = intelDbHandles[pluginId] { return h }
+    let dir = OsaurusPaths.root()
+        .appendingPathComponent("Tools", isDirectory: true)
+        .appendingPathComponent(pluginId, isDirectory: true)
+    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+    let path = dir.appendingPathComponent("plugin.db").path
+    var db: OpaquePointer?
+    if sqlite3_open(path, &db) == SQLITE_OK, let db {
+        intelDbHandles[pluginId] = db
+        return db
+    }
+    if let db { sqlite3_close(db) }
+    return nil
+}
+
+private func intelBindValue(_ stmt: OpaquePointer, _ idx: Int32, _ v: Any) {
+    switch v {
+    case is NSNull:
+        sqlite3_bind_null(stmt, idx)
+    case let s as String:
+        sqlite3_bind_text(stmt, idx, s, -1, intelSqliteTransient)
+    case let num as NSNumber:
+        if CFNumberIsFloatType(num) { sqlite3_bind_double(stmt, idx, num.doubleValue) }
+        else { sqlite3_bind_int64(stmt, idx, num.int64Value) }
+    default:
+        sqlite3_bind_text(stmt, idx, "\(v)", -1, intelSqliteTransient)
+    }
+}
+
+/// Bind `params_json` (a JSON array for positional `?`, or an object for named
+/// `:name` / `@name` / `$name` placeholders) onto a prepared statement.
+private func intelBindParams(_ stmt: OpaquePointer, _ paramsJSON: String?) {
+    guard let paramsJSON, !paramsJSON.isEmpty,
+          let data = paramsJSON.data(using: .utf8),
+          let obj = try? JSONSerialization.jsonObject(with: data) else { return }
+    if let arr = obj as? [Any] {
+        for (i, v) in arr.enumerated() { intelBindValue(stmt, Int32(i + 1), v) }
+    } else if let dict = obj as? [String: Any] {
+        for (k, v) in dict {
+            for name in [":\(k)", "@\(k)", "$\(k)"] {
+                let idx = sqlite3_bind_parameter_index(stmt, name)
+                if idx > 0 { intelBindValue(stmt, idx, v); break }
+            }
+        }
+    }
+}
+
+private func intelDbExec(pluginId: String, sql: String, paramsJSON: String?) -> String {
+    guard let db = intelOpenPluginDB(pluginId) else {
+        return jsonStringSafe(["error": "db_open_failed", "message": "could not open plugin database"])
+    }
+    intelDbLock.lock(); defer { intelDbLock.unlock() }
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
+    }
+    defer { sqlite3_finalize(stmt) }
+    intelBindParams(stmt, paramsJSON)
+    let rc = sqlite3_step(stmt)
+    guard rc == SQLITE_DONE || rc == SQLITE_ROW else {
+        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
+    }
+    return jsonStringSafe([
+        "ok": true,
+        "rows_affected": Int(sqlite3_changes(db)),
+        "last_insert_rowid": Int(sqlite3_last_insert_rowid(db)),
+    ])
+}
+
+private func intelDbQuery(pluginId: String, sql: String, paramsJSON: String?) -> String {
+    guard let db = intelOpenPluginDB(pluginId) else {
+        return jsonStringSafe(["error": "db_open_failed", "message": "could not open plugin database"])
+    }
+    intelDbLock.lock(); defer { intelDbLock.unlock() }
+    var stmt: OpaquePointer?
+    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
+        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
+    }
+    defer { sqlite3_finalize(stmt) }
+    intelBindParams(stmt, paramsJSON)
+    let colCount = sqlite3_column_count(stmt)
+    var rows: [[String: Any]] = []
+    while sqlite3_step(stmt) == SQLITE_ROW {
+        var row: [String: Any] = [:]
+        for c in 0..<colCount {
+            let name = sqlite3_column_name(stmt, c).map { String(cString: $0) } ?? "col\(c)"
+            switch sqlite3_column_type(stmt, c) {
+            case SQLITE_INTEGER: row[name] = Int(sqlite3_column_int64(stmt, c))
+            case SQLITE_FLOAT: row[name] = sqlite3_column_double(stmt, c)
+            case SQLITE_NULL: row[name] = NSNull()
+            default: row[name] = sqlite3_column_text(stmt, c).map { String(cString: $0) } ?? ""
+            }
+        }
+        rows.append(row)
+        if rows.count >= 1000 { break }  // safety cap
+    }
+    return jsonStringSafe(["ok": true, "rows": rows])
+}
+
 // --- Config: a lock-guarded, file-backed key/value store. -------------------
 private let intelConfigLock = NSLock()
 private nonisolated(unsafe) var intelConfigStore: [String: String] = IntelPluginConfigStore.load()
@@ -202,6 +322,84 @@ private enum IntelPluginConfigStore {
     }
 }
 
+// --- Blocking bridge: run async / MainActor work from a sync C trampoline. ---
+// Safe because plugin callbacks run on a background thread (IntelPluginTool
+// invokes off the main actor), so the main actor stays free to finish the work.
+private final class IntelBox<T>: @unchecked Sendable { var value: T? }
+private func intelBlockingAsync<T: Sendable>(_ body: @escaping @Sendable () async -> T) -> T {
+    let sem = DispatchSemaphore(value: 0)
+    let box = IntelBox<T>()
+    Task.detached { box.value = await body(); sem.signal() }
+    sem.wait()
+    return box.value!
+}
+
+// --- dispatch / task_status → the Intel BackgroundTaskManager. ----------------
+private func intelDispatch(pluginId: String, requestJSON: String) -> String {
+    guard let data = requestJSON.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let prompt = json["prompt"] as? String, !prompt.isEmpty
+    else {
+        return jsonStringSafe(["error": "invalid_request", "message": "Missing required field 'prompt'"])
+    }
+    let title = json["title"] as? String
+    let folderPath = json["folder_path"] as? String
+    let sessionId = json["session_id"] as? String
+    return intelBlockingAsync {
+        // The dispatch gate requires plugin dispatches to name an agent
+        // (a nil agentId is refused). With no per-call active-agent context on
+        // Intel, run under the default agent — mirrors the real host's
+        // `activeAgent ?? Agent.defaultId`.
+        let request = DispatchRequest(
+            prompt: prompt,
+            agentId: Agent.defaultId,
+            title: title,
+            folderPath: folderPath,
+            showToast: true,
+            sourcePluginId: pluginId,
+            source: .plugin,
+            externalSessionKey: sessionId
+        )
+        guard let handle = await TaskDispatcher.shared.dispatch(request) else {
+            return jsonStringSafe(["error": "dispatch_rejected",
+                                   "message": "Dispatch rejected (task limit reached or unavailable)"])
+        }
+        return jsonStringSafe(["id": handle.id.uuidString, "status": "running"])
+    }
+}
+
+private func intelStatusString(_ status: BackgroundTaskStatus) -> String {
+    switch status {
+    case .running: return "running"
+    case .awaitingClarification: return "awaiting_clarification"
+    case .completed(let success, _): return success ? "completed" : "failed"
+    case .cancelled: return "cancelled"
+    }
+}
+
+private func intelTaskStatus(pluginId: String, taskIdString: String) -> String {
+    guard let uuid = UUID(uuidString: taskIdString) else {
+        return jsonStringSafe(["error": "invalid_task_id", "message": "Invalid UUID format"])
+    }
+    return intelBlockingAsync {
+        await MainActor.run { () -> String in
+            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
+                  state.sourcePluginId == pluginId
+            else {
+                return jsonStringSafe(["error": "not_found", "message": "Task not found"])
+            }
+            var dict: [String: Any] = [
+                "id": uuid.uuidString,
+                "status": intelStatusString(state.status),
+                "title": state.taskTitle,
+            ]
+            if let step = state.currentStep { dict["step"] = step }
+            if case .completed(_, let summary) = state.status { dict["summary"] = summary }
+            return jsonStringSafe(dict)
+        }
+    }
+}
+
 // MARK: - Trampolines (global @convention(c) closures)
 
 private let intelHostFreeString: osr_host_free_string_t = { ptr in
@@ -224,9 +422,15 @@ private let intelHostLogStructured: osr_log_structured_t = { level, msgPtr, fiel
     intelPluginLog.log(level: level >= 3 ? .error : .info, "\(msg, privacy: .public) \(fields, privacy: .public)")
 }
 
+/// Namespace a config key by the calling plugin so one plugin's config never
+/// collides with another's (mirrors the real host's per-plugin scoping).
+private func intelScopedConfigKey(_ key: String) -> String {
+    "\(intelCurrentPluginId())\u{1}\(key)"
+}
+
 private let intelHostConfigGet: osr_config_get_t = { keyPtr in
     guard let keyPtr else { return nil }
-    let key = String(cString: keyPtr)
+    let key = intelScopedConfigKey(String(cString: keyPtr))
     intelConfigLock.lock(); defer { intelConfigLock.unlock() }
     guard let value = intelConfigStore[key] else { return nil }
     return dupCString(value)
@@ -234,7 +438,7 @@ private let intelHostConfigGet: osr_config_get_t = { keyPtr in
 
 private let intelHostConfigSet: osr_config_set_t = { keyPtr, valuePtr in
     guard let keyPtr else { return }
-    let key = String(cString: keyPtr)
+    let key = intelScopedConfigKey(String(cString: keyPtr))
     let value = valuePtr.map { String(cString: $0) } ?? ""
     intelConfigLock.lock(); defer { intelConfigLock.unlock() }
     intelConfigStore[key] = value
@@ -243,7 +447,7 @@ private let intelHostConfigSet: osr_config_set_t = { keyPtr, valuePtr in
 
 private let intelHostConfigDelete: osr_config_delete_t = { keyPtr in
     guard let keyPtr else { return }
-    let key = String(cString: keyPtr)
+    let key = intelScopedConfigKey(String(cString: keyPtr))
     intelConfigLock.lock(); defer { intelConfigLock.unlock() }
     intelConfigStore[key] = nil
     IntelPluginConfigStore.persistLocked()
@@ -293,17 +497,17 @@ private let intelHostHttpRequest: osr_http_request_t = { reqPtr in
     }
 
     let semaphore = DispatchSemaphore(value: 0)
-    var resultJSON = #"{"error":"unknown"}"#
+    let resultBox = IntelBox<String>()
     let started = Date()
     let task = URLSession.shared.dataTask(with: request) { respData, response, error in
         defer { semaphore.signal() }
         let elapsed = Int(Date().timeIntervalSince(started) * 1000)
         if let error {
-            resultJSON = jsonStringSafe(["error": "request_failed", "message": error.localizedDescription, "elapsed_ms": elapsed])
+            resultBox.value = jsonStringSafe(["error": "request_failed", "message": error.localizedDescription, "elapsed_ms": elapsed])
             return
         }
         guard let http = response as? HTTPURLResponse else {
-            resultJSON = jsonStringSafe(["error": "invalid_response", "message": "Non-HTTP response", "elapsed_ms": elapsed])
+            resultBox.value = jsonStringSafe(["error": "invalid_response", "message": "Non-HTTP response", "elapsed_ms": elapsed])
             return
         }
         var headers: [String: String] = [:]
@@ -312,7 +516,7 @@ private let intelHostHttpRequest: osr_http_request_t = { reqPtr in
         }
         let bodyStr = respData.flatMap { String(data: $0, encoding: .utf8) }
             ?? respData?.base64EncodedString() ?? ""
-        resultJSON = jsonStringSafe([
+        resultBox.value = jsonStringSafe([
             "status": http.statusCode,
             "body": bodyStr,
             "headers": headers,
@@ -321,7 +525,7 @@ private let intelHostHttpRequest: osr_http_request_t = { reqPtr in
     }
     task.resume()
     semaphore.wait()
-    return dupCString(resultJSON)
+    return dupCString(resultBox.value ?? #"{"error":"unknown"}"#)
 }
 
 /// JSON-encode a `[String: Any]`; never throws (best-effort for trampolines).
@@ -333,10 +537,28 @@ private func jsonStringSafe(_ object: [String: Any]) -> String {
 }
 
 // --- Amputated subsystems: honest `not_supported`, never null. --------------
-private let intelHostDbExec: osr_db_exec_t = { _, _ in dupCString(notSupportedEnvelope("db_exec")) }
-private let intelHostDbQuery: osr_db_query_t = { _, _ in dupCString(notSupportedEnvelope("db_query")) }
-private let intelHostDispatch: osr_dispatch_t = { _ in dupCString(notSupportedEnvelope("dispatch")) }
-private let intelHostTaskStatus: osr_task_status_t = { _ in dupCString(notSupportedEnvelope("task_status")) }
+private let intelHostDbExec: osr_db_exec_t = { sqlPtr, paramsPtr in
+    let pid = intelCurrentPluginId()
+    let sql = sqlPtr.map { String(cString: $0) } ?? ""
+    let params = paramsPtr.map { String(cString: $0) }
+    return dupCString(intelDbExec(pluginId: pid, sql: sql, paramsJSON: params))
+}
+private let intelHostDbQuery: osr_db_query_t = { sqlPtr, paramsPtr in
+    let pid = intelCurrentPluginId()
+    let sql = sqlPtr.map { String(cString: $0) } ?? ""
+    let params = paramsPtr.map { String(cString: $0) }
+    return dupCString(intelDbQuery(pluginId: pid, sql: sql, paramsJSON: params))
+}
+private let intelHostDispatch: osr_dispatch_t = { reqPtr in
+    let pid = intelCurrentPluginId()
+    let req = reqPtr.map { String(cString: $0) } ?? "{}"
+    return dupCString(intelDispatch(pluginId: pid, requestJSON: req))
+}
+private let intelHostTaskStatus: osr_task_status_t = { idPtr in
+    let pid = intelCurrentPluginId()
+    let idStr = idPtr.map { String(cString: $0) } ?? ""
+    return dupCString(intelTaskStatus(pluginId: pid, taskIdString: idStr))
+}
 private let intelHostComplete: osr_complete_t = { _ in dupCString(notSupportedEnvelope("complete")) }
 private let intelHostCompleteStream: osr_complete_stream_t = { _, _, _ in dupCString(notSupportedEnvelope("complete_stream")) }
 private let intelHostEmbed: osr_embed_t = { _ in dupCString(notSupportedEnvelope("embed")) }
@@ -406,6 +628,9 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     let pluginId: String
     let toolSpecs: [IntelPluginToolSpec]
     let manifestJSON: String
+    /// Top-level manifest `instructions`, appended to the system prompt when
+    /// any of this plugin's tools are active in a chat (see PluginManager).
+    let instructions: String?
 
     /// Tool ids (the names registered into ToolRegistry / logged in self-test).
     var toolIds: [String] { toolSpecs.map(\.id) }
@@ -420,6 +645,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     init(
         pluginId: String,
         toolSpecs: [IntelPluginToolSpec],
+        instructions: String?,
         manifestJSON: String,
         handle: UnsafeMutableRawPointer,
         api: osr_plugin_api,
@@ -428,6 +654,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     ) {
         self.pluginId = pluginId
         self.toolSpecs = toolSpecs
+        self.instructions = instructions
         self.manifestJSON = manifestJSON
         self.handle = handle
         self.api = api
@@ -449,6 +676,11 @@ final class IntelLoadedPlugin: @unchecked Sendable {
                 throw NSError(domain: "IntelLoadedPlugin", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "Plugin does not implement invoke"])
             }
+            // Scope host callbacks (config, db, dispatch…) to this plugin. The
+            // callbacks run synchronously on this thread inside invokeFn, so a
+            // thread-local id is the cheapest correct scope.
+            Thread.current.threadDictionary[intelPluginThreadKey] = pluginId
+            defer { Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey) }
             let resPtr: UnsafePointer<CChar>? = type.withCString { t in
                 id.withCString { i in
                     payload.withCString { p in
@@ -528,10 +760,12 @@ enum IntelPluginLoader {
         api.free_string?(jsonPtr)
 
         let toolSpecs = Self.parseToolSpecs(fromManifestJSON: manifestJSON)
+        let instructions = Self.parseInstructions(fromManifestJSON: manifestJSON)
 
         let loaded = IntelLoadedPlugin(
             pluginId: pluginId,
             toolSpecs: toolSpecs,
+            instructions: instructions,
             manifestJSON: manifestJSON,
             handle: handle,
             api: api,
@@ -570,7 +804,7 @@ enum IntelPluginLoader {
         return nil
     }
 
-    /// Decodable shapes for pulling tool specs out of the manifest JSON.
+    /// Decodable shapes for pulling tool specs + instructions out of the manifest.
     private struct ManifestTools: Decodable {
         struct Caps: Decodable { let tools: [ToolDef]? }
         struct ToolDef: Decodable {
@@ -579,6 +813,7 @@ enum IntelPluginLoader {
             let parameters: JSONValue?
         }
         let capabilities: Caps?
+        let instructions: String?
     }
 
     private static func parseToolSpecs(fromManifestJSON json: String) -> [IntelPluginToolSpec] {
@@ -593,6 +828,15 @@ enum IntelPluginLoader {
                 parameters: $0.parameters
             )
         }
+    }
+
+    private static func parseInstructions(fromManifestJSON json: String) -> String? {
+        guard let data = json.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ManifestTools.self, from: data),
+              let instr = decoded.instructions,
+              !instr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        else { return nil }
+        return instr
     }
 }
 
