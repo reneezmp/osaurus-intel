@@ -1789,9 +1789,18 @@ Details/Settings/Reveal in Finder, tap → `IntelNativePluginDetailView`).
 user must tick the new plugin groups in Capabilities to enable them; agents with
 an un-customized (nil) allowlist get them automatically.
 
+**UI polish (commits `0a0cbdad`, `913ffbe6`):** the native card/detail/config/
+Tools-tab views were switched from system colors to `@Environment(\.theme)`
+tokens (were invisible under a light theme), and the card detail now renders
+**inline** (back button) instead of a dark `.sheet`. Tools tab: `NativeToolGroupCard`
+is collapsible with a real **per-tool on/off toggle** — the Intel ToolRegistry
+gained a `disabledToolNames` set (`setEnabled` was a no-op; now `openAISpecs()`
+filters disabled tools, so both native AND GitHub toggles actually work).
+
 **Still optional (NOT done):** a UI "Run tool" button for ad-hoc invocation
 (tools are callable from chat via `openAISpecs()`); true MCP `tools/call`
-exposure for external MCP clients (the in-app agent path doesn't need it).
+exposure for external MCP clients (the in-app agent path doesn't need it);
+persisting the disabled-tools set across launches (currently session-scoped).
 
 ### Plugins Phase F — ✅ host-callback upgrades (2026-06-05)
 
