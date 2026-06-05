@@ -42,7 +42,27 @@ public enum OsaurusPaths {
         // The Apple Silicon build keeps the pre-existing behavior:
         // legacy migration from `~/Library/Application Support/`,
         // then `~/.osaurus/` as the root.
-        if OsaurusBuild.isIntel {
+        //
+        // Rosy DEPLOY opt-out: the `-intel` isolation only exists to coexist
+        // with a production Osaurus on the dev machine. On Rosy the fork is the
+        // ONLY Osaurus, so the deploy `.app` carries `OsaurusCanonicalData = true`
+        // in its Info.plist and owns the canonical `~/.osaurus`. This is a
+        // baked-in bundle value (read at process start, no launch env, no compile
+        // flag), and the DEFAULT (no key) stays isolated — so the dev build can
+        // never accidentally clobber production data. See `scripts/` deploy step.
+        let wantsCanonical: Bool = {
+            switch Bundle.main.object(forInfoDictionaryKey: "OsaurusCanonicalData") {
+            case let b as Bool: return b
+            case let n as NSNumber: return n.boolValue
+            case let s as String: return ["1", "true", "yes"].contains(s.lowercased())
+            default: return false
+            }
+        }()
+        NSLog(
+            "[Osaurus] data root: isIntel=\(OsaurusBuild.isIntel) canonical=\(wantsCanonical) → "
+                + (OsaurusBuild.isIntel && !wantsCanonical ? "~/.osaurus-intel" : "~/.osaurus")
+        )
+        if OsaurusBuild.isIntel && !wantsCanonical {
             let intelRoot = fm.homeDirectoryForCurrentUser
                 .appendingPathComponent(".osaurus-intel", isDirectory: true)
             let productionRoot = fm.homeDirectoryForCurrentUser
