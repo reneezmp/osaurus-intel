@@ -1,0 +1,21 @@
+{
+  "plugin_id": "fetch-intel",
+  "name": "Fetch",
+  "version": "1.0.0",
+  "description": "Fetch the contents of a URL.",
+  "capabilities": {
+    "tools": [
+      {
+        "id": "fetch",
+        "description": "Fetch a web page or API endpoint over HTTP GET. Returns a JSON envelope with status, headers, and the response body (the page text/HTML or API response). Use this to read a specific known URL.",
+        "parameters": {
+          "type": "object",
+          "properties": {
+            "url": { "type": "string", "description": "The absolute URL to fetch (http/https)." }
+          },
+          "required": ["url"]
+        }
+      }
+    ]
+  }
+}

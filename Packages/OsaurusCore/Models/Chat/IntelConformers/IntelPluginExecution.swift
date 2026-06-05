@@ -393,10 +393,22 @@ private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
 /// A live, dlopen'd x86_64 plugin. Owns the dylib handle, the plugin's
 /// init'd context, and the host-API table. Invocation is serialized on a
 /// dedicated queue (the C plugin is not assumed thread-safe).
+/// A tool a plugin exposes, parsed from its manifest `capabilities.tools[]`.
+/// `parameters` is the OpenAI/JSON-Schema object the model reads to call the
+/// tool with the right argument shape.
+struct IntelPluginToolSpec: Sendable {
+    let id: String
+    let description: String
+    let parameters: JSONValue?
+}
+
 final class IntelLoadedPlugin: @unchecked Sendable {
     let pluginId: String
-    let toolIds: [String]
+    let toolSpecs: [IntelPluginToolSpec]
     let manifestJSON: String
+
+    /// Tool ids (the names registered into ToolRegistry / logged in self-test).
+    var toolIds: [String] { toolSpecs.map(\.id) }
 
     private let handle: UnsafeMutableRawPointer
     private let api: osr_plugin_api
@@ -407,7 +419,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
 
     init(
         pluginId: String,
-        toolIds: [String],
+        toolSpecs: [IntelPluginToolSpec],
         manifestJSON: String,
         handle: UnsafeMutableRawPointer,
         api: osr_plugin_api,
@@ -415,7 +427,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         hostAPIPtr: UnsafeMutablePointer<osr_host_api>
     ) {
         self.pluginId = pluginId
-        self.toolIds = toolIds
+        self.toolSpecs = toolSpecs
         self.manifestJSON = manifestJSON
         self.handle = handle
         self.api = api
@@ -515,11 +527,11 @@ enum IntelPluginLoader {
         let manifestJSON = String(cString: jsonPtr)
         api.free_string?(jsonPtr)
 
-        let toolIds = Self.parseToolIds(fromManifestJSON: manifestJSON)
+        let toolSpecs = Self.parseToolSpecs(fromManifestJSON: manifestJSON)
 
         let loaded = IntelLoadedPlugin(
             pluginId: pluginId,
-            toolIds: toolIds,
+            toolSpecs: toolSpecs,
             manifestJSON: manifestJSON,
             handle: handle,
             api: api,
@@ -558,13 +570,79 @@ enum IntelPluginLoader {
         return nil
     }
 
-    private static func parseToolIds(fromManifestJSON json: String) -> [String] {
+    /// Decodable shapes for pulling tool specs out of the manifest JSON.
+    private struct ManifestTools: Decodable {
+        struct Caps: Decodable { let tools: [ToolDef]? }
+        struct ToolDef: Decodable {
+            let id: String
+            let description: String?
+            let parameters: JSONValue?
+        }
+        let capabilities: Caps?
+    }
+
+    private static func parseToolSpecs(fromManifestJSON json: String) -> [IntelPluginToolSpec] {
         guard let data = json.data(using: .utf8),
-              let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-              let caps = obj["capabilities"] as? [String: Any],
-              let tools = caps["tools"] as? [[String: Any]]
+              let decoded = try? JSONDecoder().decode(ManifestTools.self, from: data),
+              let tools = decoded.capabilities?.tools
         else { return [] }
-        return tools.compactMap { $0["id"] as? String }
+        return tools.map {
+            IntelPluginToolSpec(
+                id: $0.id,
+                description: $0.description ?? $0.id,
+                parameters: $0.parameters
+            )
+        }
+    }
+}
+
+// MARK: - Agent tool bridge
+
+/// Bridges a native plugin tool into the agent tool-loop. Registered into the
+/// Intel `ToolRegistry`, so `openAISpecs()` advertises it to the model and
+/// `execute()` routes a tool call straight to the plugin's `invoke`. The
+/// invoke is a blocking C call, so it runs off the main actor (on the plugin's
+/// own serial queue inside `IntelLoadedPlugin.invoke`) to keep the UI live.
+struct IntelPluginTool: OsaurusTool {
+    let pluginId: String
+    let toolId: String
+    let name: String
+    let description: String
+    let parameters: JSONValue?
+
+    init(pluginId: String, spec: IntelPluginToolSpec) {
+        self.pluginId = pluginId
+        self.toolId = spec.id
+        self.name = spec.id
+        self.description = spec.description
+        self.parameters = spec.parameters
+    }
+
+    func execute(argumentsJSON: String) async throws -> String {
+        let pid = pluginId
+        let tid = toolId
+        let toolName = name
+        guard let handle = await PluginManager.shared.nativeHandle(for: pid) else {
+            return ToolEnvelope.failure(
+                kind: .toolNotFound,
+                message: "Plugin '\(pid)' is not loaded.",
+                tool: toolName
+            )
+        }
+        let payload = argumentsJSON.isEmpty ? "{}" : argumentsJSON
+        return try await withCheckedThrowingContinuation { cont in
+            DispatchQueue.global(qos: .userInitiated).async {
+                do {
+                    cont.resume(returning: try handle.invoke(type: "tool", id: tid, payload: payload))
+                } catch {
+                    cont.resume(returning: ToolEnvelope.failure(
+                        kind: .executionError,
+                        message: "Plugin '\(pid)' tool '\(tid)' failed: \(error.localizedDescription)",
+                        tool: toolName
+                    ))
+                }
+            }
+        }
     }
 }
 

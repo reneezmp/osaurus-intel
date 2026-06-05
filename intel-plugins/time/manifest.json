@@ -1,0 +1,15 @@
+{
+  "plugin_id": "time-intel",
+  "name": "Time",
+  "version": "1.0.0",
+  "description": "Current date and time.",
+  "capabilities": {
+    "tools": [
+      {
+        "id": "get_current_time",
+        "description": "Returns the current date and time: local and UTC in ISO-8601, the system timezone, and the Unix epoch. Takes no arguments.",
+        "parameters": { "type": "object", "properties": {}, "required": [] }
+      }
+    ]
+  }
+}

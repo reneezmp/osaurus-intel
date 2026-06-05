@@ -1629,6 +1629,12 @@ public final class PluginManager: ObservableObject {
 
         // Reset bucket state and tear down any live handles before re-scanning,
         // so repeated calls don't duplicate entries or leak dlopen'd dylibs.
+        // Unregister the previous run's plugin tools from the agent ToolRegistry
+        // first, then tear down the dylibs.
+        let priorToolNames = nativePlugins.values.flatMap { $0.toolIds }
+        if !priorToolNames.isEmpty {
+            ToolRegistry.shared.unregister(names: priorToolNames)
+        }
         for (_, p) in nativePlugins { p.teardown() }
         nativePlugins.removeAll()
         loadedPlugins.removeAll()
@@ -1703,6 +1709,31 @@ public final class PluginManager: ObservableObject {
         if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
             runNativeSelfTest()
         }
+
+        // Targeted tool test through the REAL agent path (ToolRegistry.execute →
+        // IntelPluginTool → plugin.invoke). Format: OSAURUS_INTEL_PLUGIN_TESTCALL
+        // = "toolName|{json payload}". Lets fetch/search be verified with real
+        // arguments (the self-test only sends "{}").
+        if let testcall = ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_TESTCALL"] {
+            await runToolTestCall(testcall)
+        }
+    }
+
+    /// Invoke a registered tool by name through ToolRegistry (the same path the
+    /// chat agent uses) and log the result. Gated by OSAURUS_INTEL_PLUGIN_TESTCALL.
+    private func runToolTestCall(_ spec: String) async {
+        guard let sep = spec.firstIndex(of: "|") else {
+            NSLog("[Osaurus Intel] testcall: bad format (want 'toolName|{json}')")
+            return
+        }
+        let name = String(spec[..<sep])
+        let payload = String(spec[spec.index(after: sep)...])
+        do {
+            let result = try await ToolRegistry.shared.execute(name: name, argumentsJSON: payload)
+            NSLog("[Osaurus Intel] testcall ✅ \(name)(\(payload)) → \(result)")
+        } catch {
+            NSLog("[Osaurus Intel] testcall ❌ \(name): \(error.localizedDescription)")
+        }
     }
 
     /// Invoke the first tool of every live native plugin and log the result.
@@ -1737,10 +1768,21 @@ public final class PluginManager: ObservableObject {
         switch IntelPluginLoader.load(dylibURL: dylib, pluginId: pluginId) {
         case .success(let loaded):
             nativePlugins[pluginId] = loaded
+            // Bridge each tool into the agent ToolRegistry so chat agents can
+            // call it (openAISpecs() → model; execute() → plugin.invoke).
+            for spec in loaded.toolSpecs {
+                ToolRegistry.shared.register(IntelPluginTool(pluginId: pluginId, spec: spec))
+            }
             NSLog("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
         case .failure(let err):
             NSLog("[Osaurus Intel] plugin '\(pluginId)' dlopen failed: \(err.message)")
         }
+    }
+
+    /// The live native plugin handle for `pluginId`, or nil if not loaded.
+    /// Used by `IntelPluginTool.execute` to route a tool call to the dylib.
+    func nativeHandle(for pluginId: String) -> IntelLoadedPlugin? {
+        nativePlugins[pluginId]
     }
 
     /// True when a plugin is dlopen'd and ready to invoke (not just bucketed).
