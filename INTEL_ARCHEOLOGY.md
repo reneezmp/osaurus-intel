@@ -1765,9 +1765,15 @@ the loader: `get_current_time` → real clock; `fetch(example.com)` → 200 + bo
 snippets. In chat: Auto mode sends them to the model automatically; Manual mode
 exposes them in the capability picker.
 
-**Still optional (NOT done):** a UI "Run tool" button (locally-loaded plugins
-still don't surface in `ToolsManagerView`, whose Intel `plugins` returns `[]` —
-but they ARE in `openAISpecs()`, so chat sees them); true MCP `tools/call`
+**Surfacing (added 2026-06-05, commit `749fe4a2`):** native plugins now show in
+the **Plugins → Installed** tab under a "Native — this fork" section (name,
+version, tool list, per-card gear → config sheet for plugins with settings), via
+`PluginManager.nativelyLoadedPlugins()` (loadedPlugins filtered to those with a
+live dylib handle). Verified through the AX tree: all 5 (time/fetch/search/memo/
+hello) render with their tools; the gear opens the config sheet.
+
+**Still optional (NOT done):** a UI "Run tool" button for ad-hoc invocation
+(tools are callable from chat via `openAISpecs()`); true MCP `tools/call`
 exposure for external MCP clients (the in-app agent path doesn't need it).
 
 ### Plugins Phase F — ✅ host-callback upgrades (2026-06-05)
