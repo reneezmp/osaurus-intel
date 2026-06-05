@@ -37,7 +37,9 @@ static const char *p_get_manifest(osr_plugin_ctx_t c) {
         "{\"id\":\"memo_clear\",\"description\":\"Delete all saved notes.\","
         "\"parameters\":{\"type\":\"object\",\"properties\":{},\"required\":[]}},"
         "{\"id\":\"run_background\",\"description\":\"Spawn a background agent task with the given prompt.\","
-        "\"parameters\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"What the background agent should do.\"}},\"required\":[\"prompt\"]}}"
+        "\"parameters\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"What the background agent should do.\"}},\"required\":[\"prompt\"]}},"
+        "{\"id\":\"ask_model\",\"description\":\"Ask the LLM a one-off question and return its answer.\","
+        "\"parameters\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"The question for the model.\"}},\"required\":[\"prompt\"]}}"
         "]}}";
     return strdup(m);
 }
@@ -105,6 +107,19 @@ static const char *p_invoke(osr_plugin_ctx_t c, const char *type, const char *id
         char req[4300];
         snprintf(req, sizeof req, "{\"prompt\":\"%s\",\"title\":\"Memo background task\"}", pesc);
         return take(g_host->dispatch(req));
+    }
+
+    if (strcmp(id, "ask_model") == 0) {
+        if (!g_host->complete) return fail("not_supported", "complete unavailable");
+        char prompt[2048];
+        if (!osr_json_get_string(payload ? payload : "", "prompt", prompt, sizeof prompt) || prompt[0] == '\0')
+            return fail("invalid_args", "Missing required argument 'prompt'.");
+        char pesc[4096];
+        osr_json_escape(prompt, pesc, sizeof pesc);
+        char req[4300];
+        snprintf(req, sizeof req,
+                 "{\"messages\":[{\"role\":\"user\",\"content\":\"%s\"}]}", pesc);
+        return take(g_host->complete(req));
     }
 
     return fail("tool_not_found", "unknown tool");

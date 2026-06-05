@@ -9,7 +9,8 @@
       { "id": "memo_save", "description": "Persist a note for later.", "parameters": { "type": "object", "properties": { "text": { "type": "string", "description": "The note to remember." } }, "required": ["text"] } },
       { "id": "memo_list", "description": "List saved notes (most recent first).", "parameters": { "type": "object", "properties": {}, "required": [] } },
       { "id": "memo_clear", "description": "Delete all saved notes.", "parameters": { "type": "object", "properties": {}, "required": [] } },
-      { "id": "run_background", "description": "Spawn a background agent task with the given prompt.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "What the background agent should do." } }, "required": ["prompt"] } }
+      { "id": "run_background", "description": "Spawn a background agent task with the given prompt.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "What the background agent should do." } }, "required": ["prompt"] } },
+      { "id": "ask_model", "description": "Ask the LLM a one-off question and return its answer.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "The question for the model." } }, "required": ["prompt"] } }
     ]
   }
 }

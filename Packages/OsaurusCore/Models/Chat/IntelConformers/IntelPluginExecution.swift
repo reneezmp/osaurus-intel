@@ -400,6 +400,34 @@ private func intelTaskStatus(pluginId: String, taskIdString: String) -> String {
     }
 }
 
+// --- complete → the Intel cloud chat engine (DeepSeek / remote). -------------
+private func intelComplete(requestJSON: String) -> String {
+    guard let data = requestJSON.data(using: .utf8),
+          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+          let rawMessages = json["messages"] as? [[String: Any]], !rawMessages.isEmpty
+    else {
+        return jsonStringSafe(["error": "invalid_request", "message": "Missing required field 'messages'"])
+    }
+    let messages: [ChatMessage] = rawMessages.map { m in
+        ChatMessage(role: (m["role"] as? String) ?? "user", content: m["content"] as? String)
+    }
+    let model = json["model"] as? String
+    let temperature = json["temperature"] as? Double
+    let maxTokens = json["max_tokens"] as? Int
+    return intelBlockingAsync {
+        let engine = ChatEngine(model: model ?? "deepseek-v4-pro")
+        let req = ChatCompletionRequest(
+            model: model, messages: messages, temperature: temperature, max_tokens: maxTokens)
+        do {
+            let resp = try await engine.completeChat(request: req)
+            let content = resp.choices.first?.message?.content ?? ""
+            return jsonStringSafe(["ok": true, "content": content])
+        } catch {
+            return jsonStringSafe(["error": "completion_failed", "message": "\(error)"])
+        }
+    }
+}
+
 // MARK: - Trampolines (global @convention(c) closures)
 
 private let intelHostFreeString: osr_host_free_string_t = { ptr in
@@ -559,7 +587,10 @@ private let intelHostTaskStatus: osr_task_status_t = { idPtr in
     let idStr = idPtr.map { String(cString: $0) } ?? ""
     return dupCString(intelTaskStatus(pluginId: pid, taskIdString: idStr))
 }
-private let intelHostComplete: osr_complete_t = { _ in dupCString(notSupportedEnvelope("complete")) }
+private let intelHostComplete: osr_complete_t = { reqPtr in
+    let req = reqPtr.map { String(cString: $0) } ?? "{}"
+    return dupCString(intelComplete(requestJSON: req))
+}
 private let intelHostCompleteStream: osr_complete_stream_t = { _, _, _ in dupCString(notSupportedEnvelope("complete_stream")) }
 private let intelHostEmbed: osr_embed_t = { _ in dupCString(notSupportedEnvelope("embed")) }
 private let intelHostListModels: osr_list_models_t = { dupCString(#"{"models":[]}"#) }
