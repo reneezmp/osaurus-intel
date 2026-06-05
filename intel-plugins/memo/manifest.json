@@ -3,13 +3,12 @@
   "name": "Memo",
   "version": "1.0.0",
   "description": "Persistent notes + background task runner.",
-  "instructions": "You can persist short notes for the user with the memo tools (memo_save/memo_list/memo_clear), which survive across sessions. When the user asks you to remember something, save it; when they ask what they told you to remember, list it. Use run_background to kick off a long task without blocking the chat.",
+  "instructions": "You can persist short notes for the user with the memo tools (memo_save/memo_list/memo_clear), which survive across sessions. When the user asks you to remember something, save it; when they ask what they told you to remember, list it. Use ask_model for a quick one-off LLM question.",
   "capabilities": {
     "tools": [
       { "id": "memo_save", "description": "Persist a note for later.", "parameters": { "type": "object", "properties": { "text": { "type": "string", "description": "The note to remember." } }, "required": ["text"] } },
       { "id": "memo_list", "description": "List saved notes (most recent first).", "parameters": { "type": "object", "properties": {}, "required": [] } },
       { "id": "memo_clear", "description": "Delete all saved notes.", "parameters": { "type": "object", "properties": {}, "required": [] } },
-      { "id": "run_background", "description": "Spawn a background agent task with the given prompt.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "What the background agent should do." } }, "required": ["prompt"] } },
       { "id": "ask_model", "description": "Ask the LLM a one-off question and return its answer.", "parameters": { "type": "object", "properties": { "prompt": { "type": "string", "description": "The question for the model." } }, "required": ["prompt"] } }
     ]
   }

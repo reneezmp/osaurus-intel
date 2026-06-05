@@ -364,6 +364,11 @@ private func intelDispatch(pluginId: String, requestJSON: String) -> String {
             return jsonStringSafe(["error": "dispatch_rejected",
                                    "message": "Dispatch rejected (task limit reached or unavailable)"])
         }
+        // Release the events held during the dispatch (BackgroundTaskManager
+        // buffers them from registerTask because sourcePluginId != nil). Without
+        // this they'd accumulate forever — on Intel nothing consumes them, so
+        // this just clears the buffer.
+        await MainActor.run { BackgroundTaskManager.shared.releaseEventsForDispatch(taskId: handle.id) }
         return jsonStringSafe(["id": handle.id.uuidString, "status": "running"])
     }
 }

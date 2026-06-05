@@ -28,7 +28,7 @@ static const char *p_get_manifest(osr_plugin_ctx_t c) {
         "\"instructions\":\"You can persist short notes for the user with the memo tools "
         "(memo_save/memo_list/memo_clear), which survive across sessions. When the user asks "
         "you to remember something, save it; when they ask what they told you to remember, "
-        "list it. Use run_background to kick off a long task without blocking the chat.\","
+        "list it. Use ask_model for a quick one-off LLM question.\","
         "\"capabilities\":{\"tools\":["
         "{\"id\":\"memo_save\",\"description\":\"Persist a note for later.\","
         "\"parameters\":{\"type\":\"object\",\"properties\":{\"text\":{\"type\":\"string\",\"description\":\"The note to remember.\"}},\"required\":[\"text\"]}},"
@@ -36,8 +36,6 @@ static const char *p_get_manifest(osr_plugin_ctx_t c) {
         "\"parameters\":{\"type\":\"object\",\"properties\":{},\"required\":[]}},"
         "{\"id\":\"memo_clear\",\"description\":\"Delete all saved notes.\","
         "\"parameters\":{\"type\":\"object\",\"properties\":{},\"required\":[]}},"
-        "{\"id\":\"run_background\",\"description\":\"Spawn a background agent task with the given prompt.\","
-        "\"parameters\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"What the background agent should do.\"}},\"required\":[\"prompt\"]}},"
         "{\"id\":\"ask_model\",\"description\":\"Ask the LLM a one-off question and return its answer.\","
         "\"parameters\":{\"type\":\"object\",\"properties\":{\"prompt\":{\"type\":\"string\",\"description\":\"The question for the model.\"}},\"required\":[\"prompt\"]}}"
         "]}}";
@@ -95,18 +93,6 @@ static const char *p_invoke(osr_plugin_ctx_t c, const char *type, const char *id
         if (!g_host->db_exec) return fail("not_supported", "db unavailable");
         ensure_table();
         return take(g_host->db_exec("DELETE FROM memos", NULL));
-    }
-
-    if (strcmp(id, "run_background") == 0) {
-        if (!g_host->dispatch) return fail("not_supported", "dispatch unavailable");
-        char prompt[2048];
-        if (!osr_json_get_string(payload ? payload : "", "prompt", prompt, sizeof prompt) || prompt[0] == '\0')
-            return fail("invalid_args", "Missing required argument 'prompt'.");
-        char pesc[4096];
-        osr_json_escape(prompt, pesc, sizeof pesc);
-        char req[4300];
-        snprintf(req, sizeof req, "{\"prompt\":\"%s\",\"title\":\"Memo background task\"}", pesc);
-        return take(g_host->dispatch(req));
     }
 
     if (strcmp(id, "ask_model") == 0) {
