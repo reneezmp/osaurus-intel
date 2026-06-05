@@ -1796,6 +1796,13 @@ public final class PluginManager: ObservableObject {
         nativePlugins[pluginId]
     }
 
+    /// Plugins that actually dlopen'd (have a live x86_64 handle) — the subset
+    /// of `loadedPlugins` backed by a real dylib, for the Installed-tab UI.
+    /// Excludes manifest-only dirs (e.g. cached arm64 registry plugins).
+    public func nativelyLoadedPlugins() -> [LoadedPluginInfo] {
+        loadedPlugins.filter { nativePlugins[$0.pluginId] != nil }
+    }
+
     /// Manifest `instructions` for every loaded plugin that has at least one
     /// tool in `activeToolNames`. The chat context composer appends these to
     /// the system prompt so a plugin can shape how the model uses its tools.

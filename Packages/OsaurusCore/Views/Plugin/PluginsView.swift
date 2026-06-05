@@ -28,6 +28,12 @@ struct PluginsView: View {
     @State private var filteredPlugins: [PluginState] = []
     @State private var installedPlugins: [PluginState] = []
     @State private var pluginsWithMissingPermissionsCount = 0
+    #if OSAURUS_INTEL
+    // Natively-loaded x86_64 plugins (this fork) — live in ~/.osaurus-intel/Tools,
+    // separate from the arm64 registry. Surfaced in the Installed tab.
+    @State private var nativePlugins: [PluginManager.LoadedPluginInfo] = []
+    @State private var configurablePluginIds: Set<String> = []
+    #endif
 
     @State private var showSecretsSheet: Bool = false
     #if OSAURUS_INTEL
@@ -210,6 +216,15 @@ struct PluginsView: View {
 
     // MARK: - Header Bar
 
+    /// Native (this-fork) plugin count — folded into the "Installed" tab badge.
+    private var nativeInstalledCount: Int {
+        #if OSAURUS_INTEL
+        return nativePlugins.count
+        #else
+        return 0
+        #endif
+    }
+
     private var headerBar: some View {
         ManagerHeaderWithTabs(
             title: L("Plugins"),
@@ -241,7 +256,7 @@ struct PluginsView: View {
             HeaderTabsRow(
                 selection: $selectedTab,
                 counts: [
-                    .installed: installedPlugins.count,
+                    .installed: installedPlugins.count + nativeInstalledCount,
                     .browse: filteredPlugins.count,
                 ],
                 badges: updatesAvailableCount > 0
@@ -257,7 +272,7 @@ struct PluginsView: View {
 
     private var installedTabContent: some View {
         Group {
-            if installedPlugins.isEmpty {
+            if installedPlugins.isEmpty && nativeInstalledCount == 0 {
                 emptyState(
                     icon: "puzzlepiece.extension",
                     title: L("No plugins installed"),
@@ -268,10 +283,17 @@ struct PluginsView: View {
             } else {
                 ScrollView {
                     VStack(alignment: .leading, spacing: 16) {
+                        #if OSAURUS_INTEL
+                        if !nativePlugins.isEmpty {
+                            nativePluginsSection
+                        }
+                        #endif
+
                         if pluginsWithMissingPermissionsCount > 0 {
                             ToolPermissionBanner(count: pluginsWithMissingPermissionsCount)
                         }
 
+                        if !installedPlugins.isEmpty {
                         LazyVGrid(
                             columns: [
                                 GridItem(.flexible(minimum: 300), spacing: 20),
@@ -299,12 +321,74 @@ struct PluginsView: View {
                                 )
                             }
                         }
+                        }  // if !installedPlugins.isEmpty
                     }
                     .padding(24)
                 }
             }
         }
     }
+
+    // MARK: - Native (this-fork) plugins
+
+    #if OSAURUS_INTEL
+    private var nativePluginsSection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            HStack(spacing: 6) {
+                Text("Native — this fork").font(.headline)
+                Text("\(nativePlugins.count)")
+                    .font(.caption).foregroundStyle(.secondary)
+            }
+            LazyVGrid(
+                columns: [
+                    GridItem(.flexible(minimum: 300), spacing: 20),
+                    GridItem(.flexible(minimum: 300), spacing: 20),
+                ],
+                spacing: 20
+            ) {
+                ForEach(nativePlugins) { plugin in
+                    nativePluginCard(plugin)
+                }
+            }
+        }
+    }
+
+    private func nativePluginCard(_ plugin: PluginManager.LoadedPluginInfo) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 10) {
+                Image(systemName: "puzzlepiece.extension.fill")
+                    .foregroundStyle(.tint)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(plugin.name).font(.headline)
+                    Text("v\(plugin.version) · native x86_64")
+                        .font(.caption).foregroundStyle(.secondary)
+                }
+                Spacer()
+                if configurablePluginIds.contains(plugin.pluginId) {
+                    Button {
+                        showIntelPluginConfig = true
+                    } label: {
+                        Image(systemName: "gearshape")
+                    }
+                    .buttonStyle(.borderless)
+                    .help("Plugin settings")
+                }
+            }
+            if !plugin.toolNames.isEmpty {
+                Text("Tools: " + plugin.toolNames.joined(separator: ", "))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(Color.primary.opacity(0.045))
+        )
+    }
+    #endif
 
     // MARK: - Browse Tab
 
@@ -479,6 +563,11 @@ struct PluginsView: View {
 
         filteredPlugins = browseResult
         installedPlugins = installedResult
+
+        #if OSAURUS_INTEL
+        nativePlugins = PluginManager.shared.nativelyLoadedPlugins()
+        configurablePluginIds = Set(PluginManager.shared.configurablePlugins().map { $0.id })
+        #endif
 
         var permissionCount = 0
         var missingPerms: [String: [SystemPermission]] = [:]
