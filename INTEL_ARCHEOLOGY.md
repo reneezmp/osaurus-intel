@@ -1820,6 +1820,17 @@ Commits `a7fcc442` (worth-it: db/dispatch/instructions), `c1c10303` (complete),
 - **dispatch / task_status → TaskDispatcher/BackgroundTaskManager.** A plugin
   spawns a background agent task (under `Agent.defaultId` — the gate refuses a nil
   agentId; that was the first-cut bug). Integrates with the M13 task indicator.
+  **⚠️ CAVEAT (2026-06-05, commit `6afb7176`):** `BackgroundTaskManager.dispatchChat`
+  runs the task as an unstructured `Task { @MainActor in … }` — i.e. on the SAME
+  main actor the live chat uses. A plugin dispatching **mid-chat** therefore
+  contends with and FREEZES the active conversation (Schedules/Watchers are fine —
+  they fire when idle). The Intel chat runtime is `@MainActor` end-to-end, so
+  there's no cheap off-main path. `run_background` was removed from the memo demo
+  for this reason; the dispatch callback stays wired but plugins should not call
+  it during an active chat. Also fixed a leak: `intelDispatch` now calls
+  `releaseEventsForDispatch` (held events were never flushed — `heldTaskEvents`
+  grew unbounded once Intel plugin dispatch started setting `sourcePluginId`).
+  A truly concurrent-safe background runtime would be its own milestone.
 - **complete → CloudChatEngine** (the `ChatEngine` actor, DeepSeek/remote, reads
   `DEEPSEEK_API_KEY`). A plugin does its own LLM step in one tool call.
 - **instructions:** manifest top-level `instructions` appended to the system
