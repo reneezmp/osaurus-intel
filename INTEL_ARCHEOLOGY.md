@@ -1731,10 +1731,44 @@ round-tripped. dlopen → entry_v2 → init → get_manifest → invoke all conf
 tab (loadAll fires on appear). No official arm64 plugin can ever run (Rosetta is
 one-way x86→ARM) — only natively-built x86_64 plugins.
 
-**Optional follow-ups (NOT done):** a UI "Run tool" button for interactive
-invocation (locally-loaded plugins don't surface in `ToolsManagerView`, whose
-Intel `plugins` returns `[]`); MCP `tools/call` exposure so chat agents can call
-plugin tools (MCPServerManager is amputated-and-mirrored — separate integration).
+### Plugins Phase E — ✅ agent tool bridge + 3 real plugins (2026-06-05)
+
+**Plugin tools are now callable from chat** — the "exposure gap" is closed,
+*without* MCP. The Intel `ToolRegistry` mirror (IntelStubConformers) is fully
+real: `register()` → `openAISpecs()` (sent to the model via `ComposedContext.tools`)
+→ `execute()` (dispatches the call). It already carries GitHub's MCP tools +
+folder tools into the agent loop, so plugin tools register the same way.
+
+**What shipped (commit `000bad85`):**
+- **`IntelPluginTool: OsaurusTool`** (IntelPluginExecution.swift): wraps a plugin
+  tool; `execute()` routes to `PluginManager.nativeHandle(for:).invoke` **off the
+  main actor** (DispatchQueue.global + continuation) so a network call doesn't
+  freeze the UI. `parseToolSpecs` decodes full `{id, description, parameters}`
+  (JSON-Schema) from the manifest so the model gets a real arg schema.
+- **PluginManager (Intel):** `loadNative` registers each tool into
+  `ToolRegistry.shared`; `loadAll` reset unregisters the prior run's tool names
+  first. `nativeHandle(for:)` accessor. `OSAURUS_INTEL_PLUGIN_TESTCALL='tool|{json}'`
+  invokes a tool through `ToolRegistry.execute` (the real agent path) for verification.
+- **Three native x86_64 plugins** (`intel-plugins/`, `build-all.sh` →
+  `~/.osaurus-intel/Tools/<id>/`, `.dylib` gitignored):
+  - **time** → `get_current_time` (local+UTC ISO-8601, tz, epoch; no host calls).
+  - **fetch** → `fetch(url)` (HTTP GET via `host->http_request`, returns
+    `{status,body,headers}`, 100 KB cap).
+  - **search** → `web_search(query)` (DuckDuckGo lite, **no API key**, parses top
+    results → `[{title,url,snippet}]`; handles direct + `uddg=` hrefs).
+  - **common/osr_jsonutil.h**: JSON get/escape, URL encode/decode, HTML strip +
+    entity decode + whitespace collapse.
+
+**Verified** end-to-end through `ToolRegistry.execute` (the agent path), not just
+the loader: `get_current_time` → real clock; `fetch(example.com)` → 200 + body;
+`web_search("weather paris today")` → real AccuWeather/easeWeather results with
+snippets. In chat: Auto mode sends them to the model automatically; Manual mode
+exposes them in the capability picker.
+
+**Still optional (NOT done):** a UI "Run tool" button (locally-loaded plugins
+still don't surface in `ToolsManagerView`, whose Intel `plugins` returns `[]` —
+but they ARE in `openAISpecs()`, so chat sees them); true MCP `tools/call`
+exposure for external MCP clients (the in-app agent path doesn't need it).
 
 ---
 
