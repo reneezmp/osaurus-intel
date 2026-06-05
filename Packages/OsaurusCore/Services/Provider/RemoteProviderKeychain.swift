@@ -60,12 +60,26 @@ public enum RemoteProviderKeychain {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
+        #if OSAURUS_INTEL
+        // Mirror to a file so it always reads back on ad-hoc / no-Secure-Enclave
+        // Macs (Rosy) where the Keychain read can silently fail. The file is the
+        // source of truth on Intel, so report success even if SecItemAdd didn't.
+        intelWriteKeyFile(apiKey, account: account)
+        return true
+        #else
         return status == errSecSuccess
+        #endif
     }
 
     /// Retrieve an API key for a provider ID
     public static func getAPIKey(for providerId: UUID) -> String? {
         let account = "\(providerId.uuidString).apiKey"
+
+        #if OSAURUS_INTEL
+        // Prefer the file-backed value (reliable on ad-hoc/no-Secure-Enclave
+        // builds); fall through to the Keychain for keys saved by older builds.
+        if let fileKey = intelReadKeyFile(account: account) { return fileKey }
+        #endif
 
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -73,7 +87,8 @@ public enum RemoteProviderKeychain {
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
             kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,        ]
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
+        ]
 
         var result: AnyObject?
         let status = SecItemCopyMatching(query as CFDictionary, &result)
@@ -100,8 +115,51 @@ public enum RemoteProviderKeychain {
         ]
 
         let status = SecItemDelete(query as CFDictionary)
+        #if OSAURUS_INTEL
+        intelDeleteKeyFile(account: account)
+        #endif
         return status == errSecSuccess || status == errSecItemNotFound
     }
+
+    #if OSAURUS_INTEL
+    // MARK: - File-backed fallback (Intel fork)
+    //
+    // On ad-hoc-signed builds running on Macs without a Secure Enclave (e.g.
+    // Rosy — the 2017 Intel Air on OCLP), Keychain reads of app-written items
+    // can fail silently, so a saved API key reads back as nil. We mirror the key
+    // to a 0600 file under ~/.osaurus/.secrets so it ALWAYS reads back. Plaintext
+    // on the user's own device — the local-first tradeoff for reliability.
+    private static func intelKeyFileURL(account: String) -> URL {
+        OsaurusPaths.root()
+            .appendingPathComponent(".secrets", isDirectory: true)
+            .appendingPathComponent("\(service).\(account)")
+    }
+
+    private static func intelWriteKeyFile(_ value: String, account: String) {
+        let url = intelKeyFileURL(account: account)
+        try? FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true,
+            attributes: [.posixPermissions: 0o700])
+        if let data = value.data(using: .utf8) {
+            try? data.write(to: url, options: .atomic)
+            try? FileManager.default.setAttributes(
+                [.posixPermissions: 0o600], ofItemAtPath: url.path)
+        }
+    }
+
+    private static func intelReadKeyFile(account: String) -> String? {
+        guard let data = try? Data(contentsOf: intelKeyFileURL(account: account)),
+            let s = String(data: data, encoding: .utf8)
+        else { return nil }
+        let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    private static func intelDeleteKeyFile(account: String) {
+        try? FileManager.default.removeItem(at: intelKeyFileURL(account: account))
+    }
+    #endif
 
     /// Check if an API key exists for a provider ID
     public static func hasAPIKey(for providerId: UUID) -> Bool {
