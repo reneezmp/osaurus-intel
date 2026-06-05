@@ -1917,6 +1917,47 @@ Verified: dev → `canonical=false → ~/.osaurus-intel`; deploy app plist
 `[Osaurus] data root: …` launch log). **Remaining M7:** transfer the .app to
 Rosy, clear quarantine, launch + confirm, real-world smoke test.
 
+**Rosy IS RUNNING (2026-06-05):** the app launches natively on the 2017 Intel
+Air, Sunny + migrated history/themes/automations all present. **Migration:** the
+official **Settings → Storage → Export plaintext backup** (compiled on Intel)
+decrypts everything; the migrator re-encrypts on the new Mac. Lighter route =
+copy the plaintext JSON dirs (agents/themes/config/providers/schedules/watchers/
+slash-commands/sessions). Secrets (API keys) are Keychain-only (NOT in the data
+dir) — must be re-entered. **The storage key is `ThisDeviceOnly` (StorageKeyManager,
+`com.osaurus.storage`) — does NOT sync via iCloud Keychain** (the Export-window
+footer implying otherwise is an upstream doc bug; the "not synced to iCloud" line
+is correct). Transfer `.app` as a **zip** (`ditto`), never raw through iCloud
+Drive (it breaks framework symlinks → 🚫 icon).
+
+**THE API-KEY-ON-ROSY SAGA (the hard one):** "No DeepSeek API key" on Rosy even
+after pasting it in Settings. Chased through THREE layers, only the last was the
+real cause:
+1. `7edad23b` — CloudChatEngine read the key ONLY from `DEEPSEEK_API_KEY` env;
+   added `resolveAPIKey()` → env, then the configured provider's key. *Needed,
+   not sufficient.*
+2. `fd0c7078` — provider/MCP/tool/agent Keychain READS attached
+   `LAContext(interactionNotAllowed:true)`, which fails silently on ad-hoc-signed
+   apps (the storage key works because it omits the LAContext). Removed from all
+   10 readers. *Needed, not sufficient.*
+3. `e66b3e3e` — file-backed fallback: `RemoteProviderKeychain` mirrors the apiKey
+   to a 0600 file at `~/.osaurus/.secrets/<service>.<id>.apiKey` (Keychain
+   unreliable on the no-Secure-Enclave / OCLP 2017 Air). Read-back verified on the
+   ad-hoc build. *Needed, not sufficient.*
+4. **`45c2f6ff` — THE ROOT CAUSE.** The Intel **RemoteProviderManager mirror**
+   (`IntelStubConformers.swift`) `addProvider`/`updateProvider` **silently dropped
+   the `apiKey` param** — it only saved the provider config, never calling
+   `RemoteProviderKeychain.saveAPIKey`. The mirror assumed the key always came
+   from the env var. So the key was NEVER persisted (keychain OR file) — which is
+   why Test worked (typed key, in-memory), chat + re-test failed, deleting
+   `~/.osaurus` did nothing, and fixes #2/#3 were downstream of a key that was
+   never written. Fix: `addProvider`/`updateProvider` now call
+   `persistCredentials()` → `saveAPIKey` (→ file-backed store from #3);
+   `removeProvider` deletes it. **Built into `osaurus-app-v5.zip` — AWAITING ROSY
+   TEST (the session was compacted before confirmation).** If v5 still fails:
+   instrument `resolveAPIKey` + `getAPIKey` + provider-load with NSLog, run on
+   Rosy from Terminal, read the actual decision path. Also check GitHub MCP token
+   (MCPProviderKeychain) may need the same file-backed treatment.
+
 ### Tags laid (updated)
 `m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a) ·
 `m9-plugins-complete` (aa46d50b).
