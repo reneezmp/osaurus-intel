@@ -236,17 +236,17 @@ struct ToolsManagerView: View {
     private func nativeToolGroupCard(_ group: String, _ tools: [ToolRegistry.ToolEntry]) -> some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Image(systemName: "puzzlepiece.extension.fill").foregroundStyle(.tint)
-                Text(group).font(.headline)
+                Image(systemName: "puzzlepiece.extension.fill").foregroundColor(theme.accentColor)
+                Text(group).font(.headline).foregroundColor(theme.primaryText)
                 Spacer()
                 Text("\(tools.count) tool\(tools.count == 1 ? "" : "s")")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(theme.secondaryText)
             }
             ForEach(tools) { t in
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(t.name).font(.subheadline.weight(.medium))
+                    Text(t.name).font(.subheadline.weight(.medium)).foregroundColor(theme.primaryText)
                     if !t.description.isEmpty {
-                        Text(t.description).font(.caption).foregroundStyle(.secondary)
+                        Text(t.description).font(.caption).foregroundColor(theme.secondaryText)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -255,7 +255,8 @@ struct ToolsManagerView: View {
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.045)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(theme.cardBackground))
+        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
     }
     #endif
 

@@ -2,9 +2,10 @@
 //  IntelNativePluginCard.swift
 //  OsaurusCore — Intel fork
 //
-//  Polished card + detail sheet for natively-loaded x86_64 plugins, shown in
-//  the Plugins → Installed tab. Mirrors the registry PluginCard's affordances
-//  (accent outline, loaded badge, tool count, options menu, tap → detail).
+//  Polished card + inline detail for natively-loaded x86_64 plugins, shown in
+//  the Plugins → Installed tab. Uses the app THEME colors (not system colors)
+//  so it reads correctly under any theme, and renders the detail INLINE in the
+//  settings content (not a sheet), matching the registry PluginDetailView.
 //
 
 #if OSAURUS_INTEL
@@ -18,6 +19,7 @@ struct NativePluginCard: View {
     let onOpenSettings: () -> Void
     let onSelect: () -> Void
 
+    @Environment(\.theme) private var theme
     @State private var isHovered = false
 
     var body: some View {
@@ -25,19 +27,19 @@ struct NativePluginCard: View {
             HStack(alignment: .top, spacing: 10) {
                 Image(systemName: "puzzlepiece.extension.fill")
                     .font(.title3)
-                    .foregroundStyle(.tint)
+                    .foregroundColor(theme.accentColor)
 
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
-                        Text(plugin.name).font(.headline)
+                        Text(plugin.name).font(.headline).foregroundColor(theme.primaryText)
                         HStack(spacing: 3) {
                             Image(systemName: "checkmark.circle.fill").font(.caption2)
                             Text("Loaded").font(.caption2.weight(.medium))
                         }
-                        .foregroundStyle(.green)
+                        .foregroundColor(theme.successColor)
                     }
                     Text("v\(plugin.version) · native x86_64")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundColor(theme.secondaryText)
                 }
 
                 Spacer()
@@ -51,7 +53,7 @@ struct NativePluginCard: View {
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(theme.secondaryText)
                         .frame(width: 28, height: 22)
                         .contentShape(Rectangle())
                 }
@@ -62,26 +64,27 @@ struct NativePluginCard: View {
 
             HStack(spacing: 14) {
                 Label("\(plugin.toolNames.count)", systemImage: "wrench.and.screwdriver")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(theme.secondaryText)
                 if isConfigurable {
                     Label("Settings", systemImage: "gearshape")
-                        .font(.caption).foregroundStyle(.secondary)
+                        .font(.caption).foregroundColor(theme.secondaryText)
                 }
             }
 
             if !plugin.toolNames.isEmpty {
                 Text(plugin.toolNames.joined(separator: ", "))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(theme.tertiaryText)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(Color.primary.opacity(0.045)))
+        .background(RoundedRectangle(cornerRadius: 12).fill(theme.cardBackground))
         .overlay(
             RoundedRectangle(cornerRadius: 12)
-                .stroke(Color.accentColor.opacity(isHovered ? 0.6 : 0.28), lineWidth: 1)
+                .stroke(isHovered ? theme.accentColor : theme.cardBorder,
+                        lineWidth: isHovered ? 1.5 : 1)
         )
         .contentShape(Rectangle())
         .onTapGesture { onSelect() }
@@ -96,11 +99,14 @@ struct NativePluginCard: View {
     }
 }
 
+/// Inline detail page (rendered in the settings content area, with a back
+/// button) — NOT a sheet, so it inherits the theme background + colors.
 struct IntelNativePluginDetailView: View {
     let pluginId: String
+    let onBack: () -> Void
     let onOpenSettings: () -> Void
 
-    @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
     @State private var name = ""
     @State private var version = ""
     @State private var detailText = ""
@@ -109,53 +115,77 @@ struct IntelNativePluginDetailView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
-            HStack(alignment: .top, spacing: 10) {
-                Image(systemName: "puzzlepiece.extension.fill")
-                    .font(.largeTitle).foregroundStyle(.tint)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(name.isEmpty ? pluginId : name).font(.title2.bold())
-                    Text("v\(version) · native x86_64").font(.caption).foregroundStyle(.secondary)
+            // Back header
+            HStack(spacing: 8) {
+                Button(action: onBack) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "chevron.left")
+                        Text("Plugins")
+                    }
+                    .foregroundColor(theme.accentColor)
                 }
+                .buttonStyle(.plain)
                 Spacer()
-                Button("Done") { dismiss() }.keyboardShortcut(.defaultAction)
             }
-            .padding()
-
-            Divider()
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+            .padding(.bottom, 12)
 
             ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    if !detailText.isEmpty {
-                        Text(detailText).foregroundStyle(.secondary)
-                            .fixedSize(horizontal: false, vertical: true)
+                VStack(alignment: .leading, spacing: 20) {
+                    HStack(alignment: .top, spacing: 14) {
+                        Image(systemName: "puzzlepiece.extension.fill")
+                            .font(.system(size: 40))
+                            .foregroundColor(theme.accentColor)
+                        VStack(alignment: .leading, spacing: 4) {
+                            Text(name.isEmpty ? pluginId : name)
+                                .font(.title.bold()).foregroundColor(theme.primaryText)
+                            Text("v\(version) · native x86_64")
+                                .font(.subheadline).foregroundColor(theme.secondaryText)
+                            if !detailText.isEmpty {
+                                Text(detailText)
+                                    .font(.body).foregroundColor(theme.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                                    .padding(.top, 2)
+                            }
+                        }
+                        Spacer()
                     }
 
-                    VStack(alignment: .leading, spacing: 10) {
-                        Text("Tools (\(tools.count))").font(.headline)
+                    // Tools
+                    VStack(alignment: .leading, spacing: 12) {
+                        Text("Tools (\(tools.count))")
+                            .font(.headline).foregroundColor(theme.primaryText)
                         ForEach(tools) { tool in
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(tool.id).font(.subheadline.weight(.medium))
+                            VStack(alignment: .leading, spacing: 3) {
+                                Text(tool.id)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(theme.primaryText)
                                 if !tool.description.isEmpty {
-                                    Text(tool.description).font(.caption).foregroundStyle(.secondary)
+                                    Text(tool.description)
+                                        .font(.caption).foregroundColor(theme.secondaryText)
                                         .fixedSize(horizontal: false, vertical: true)
                                 }
                             }
                             .frame(maxWidth: .infinity, alignment: .leading)
+                            .padding(12)
+                            .background(RoundedRectangle(cornerRadius: 8).fill(theme.cardBackground))
                         }
                     }
 
                     if !configFields.isEmpty {
-                        Button {
-                            onOpenSettings()
-                        } label: {
+                        Button(action: onOpenSettings) {
                             Label("Settings (\(configFields.count))", systemImage: "gearshape")
+                                .foregroundColor(theme.accentColor)
                         }
+                        .buttonStyle(.plain)
                     }
                 }
-                .padding()
+                .padding(24)
             }
         }
-        .frame(width: 480, height: 470)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
+        .background(theme.primaryBackground)
         .onAppear(perform: load)
     }
 

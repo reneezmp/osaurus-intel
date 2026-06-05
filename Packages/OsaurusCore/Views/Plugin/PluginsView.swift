@@ -53,12 +53,40 @@ struct PluginsView: View {
     // Success toast
     @State private var successMessage: String?
 
+    /// True when any detail page (registry or native) is showing — the grid
+    /// hides behind it.
+    private var isShowingDetail: Bool {
+        #if OSAURUS_INTEL
+        return selectedPlugin != nil || selectedNativePlugin != nil
+        #else
+        return selectedPlugin != nil
+        #endif
+    }
+
     var body: some View {
         ZStack {
-            if selectedPlugin == nil {
+            if !isShowingDetail {
                 gridContent
                     .transition(.opacity.combined(with: .move(edge: .leading)))
             }
+
+            #if OSAURUS_INTEL
+            if let np = selectedNativePlugin {
+                IntelNativePluginDetailView(
+                    pluginId: np.pluginId,
+                    onBack: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            selectedNativePlugin = nil
+                        }
+                    },
+                    onOpenSettings: {
+                        selectedNativePlugin = nil
+                        showIntelPluginConfig = true
+                    }
+                )
+                .transition(.opacity.combined(with: .move(edge: .trailing)))
+            }
+            #endif
 
             if let plugin = selectedPlugin {
                 PluginDetailView(
@@ -153,15 +181,7 @@ struct PluginsView: View {
         #if OSAURUS_INTEL
         .sheet(isPresented: $showIntelPluginConfig) {
             IntelPluginConfigView()
-        }
-        .sheet(item: $selectedNativePlugin) { plugin in
-            IntelNativePluginDetailView(
-                pluginId: plugin.pluginId,
-                onOpenSettings: {
-                    selectedNativePlugin = nil
-                    showIntelPluginConfig = true
-                }
-            )
+                .environment(\.theme, themeManager.currentTheme)
         }
         #endif
     }
@@ -345,9 +365,9 @@ struct PluginsView: View {
     private var nativePluginsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
-                Text("Native — this fork").font(.headline)
+                Text("Native — this fork").font(.headline).foregroundColor(theme.primaryText)
                 Text("\(nativePlugins.count)")
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundColor(theme.secondaryText)
             }
             LazyVGrid(
                 columns: [
@@ -361,7 +381,11 @@ struct PluginsView: View {
                         plugin: plugin,
                         isConfigurable: configurablePluginIds.contains(plugin.pluginId),
                         onOpenSettings: { showIntelPluginConfig = true },
-                        onSelect: { selectedNativePlugin = plugin }
+                        onSelect: {
+                            withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                                selectedNativePlugin = plugin
+                            }
+                        }
                     )
                 }
             }

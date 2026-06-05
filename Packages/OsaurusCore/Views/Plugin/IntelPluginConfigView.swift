@@ -13,6 +13,7 @@ import SwiftUI
 
 struct IntelPluginConfigView: View {
     @Environment(\.dismiss) private var dismiss
+    @Environment(\.theme) private var theme
 
     @State private var plugins: [PluginManager.ConfigurablePlugin] = []
     @State private var values: [String: String] = [:]
@@ -21,25 +22,25 @@ struct IntelPluginConfigView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             HStack {
-                Text("Plugin Settings").font(.headline)
+                Text("Plugin Settings").font(.headline).foregroundColor(theme.primaryText)
                 Spacer()
                 Button("Done") { dismiss() }
                     .keyboardShortcut(.defaultAction)
             }
             .padding()
 
-            Divider()
+            Divider().overlay(theme.primaryBorder)
 
             if plugins.isEmpty {
                 VStack(spacing: 10) {
                     Image(systemName: "slider.horizontal.3")
                         .font(.system(size: 32))
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(theme.secondaryText)
                     Text("No native plugins declare settings.")
-                        .foregroundStyle(.secondary)
+                        .foregroundColor(theme.secondaryText)
                     Text("A plugin advertises settings via `secrets` in its manifest.")
                         .font(.caption)
-                        .foregroundStyle(.tertiary)
+                        .foregroundColor(theme.tertiaryText)
                 }
                 .frame(maxWidth: .infinity, maxHeight: .infinity)
                 .padding()
@@ -48,15 +49,14 @@ struct IntelPluginConfigView: View {
                     VStack(alignment: .leading, spacing: 18) {
                         ForEach(plugins) { plugin in
                             VStack(alignment: .leading, spacing: 12) {
-                                Text(plugin.name).font(.headline)
+                                Text(plugin.name).font(.headline).foregroundColor(theme.primaryText)
                                 ForEach(plugin.fields) { field in
                                     fieldRow(plugin: plugin, field: field)
                                 }
                             }
                             .padding(14)
                             .background(
-                                RoundedRectangle(cornerRadius: 10)
-                                    .fill(Color.primary.opacity(0.05))
+                                RoundedRectangle(cornerRadius: 10).fill(theme.cardBackground)
                             )
                         }
                     }
@@ -65,6 +65,7 @@ struct IntelPluginConfigView: View {
             }
         }
         .frame(width: 480, height: 440)
+        .background(theme.primaryBackground)
         .onAppear(perform: load)
     }
 
@@ -73,13 +74,13 @@ struct IntelPluginConfigView: View {
         let key = storeKey(plugin.id, field.id)
         VStack(alignment: .leading, spacing: 4) {
             HStack(spacing: 3) {
-                Text(field.label).font(.subheadline.weight(.medium))
+                Text(field.label).font(.subheadline.weight(.medium)).foregroundColor(theme.primaryText)
                 if field.required {
-                    Text("*").foregroundStyle(.red)
+                    Text("*").foregroundColor(theme.errorColor)
                 }
             }
             if let detail = field.detail, !detail.isEmpty {
-                Text(detail).font(.caption).foregroundStyle(.secondary)
+                Text(detail).font(.caption).foregroundColor(theme.secondaryText)
             }
             HStack(spacing: 8) {
                 Group {
@@ -99,7 +100,8 @@ struct IntelPluginConfigView: View {
                 .disabled(savedKey == key)
             }
             if let urlString = field.url, let url = URL(string: urlString) {
-                Link("Where to get this →", destination: url).font(.caption)
+                Link("Where to get this →", destination: url)
+                    .font(.caption).foregroundColor(theme.accentColor)
             }
         }
     }
