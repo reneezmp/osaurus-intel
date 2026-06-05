@@ -161,7 +161,7 @@ struct ToolsManagerView: View {
                     if !nativeGroups.isEmpty {
                         InstalledSectionHeader(title: "Plugin Tools (native)", icon: "puzzlepiece.extension")
                         ForEach(nativeGroups, id: \.group) { item in
-                            nativeToolGroupCard(item.group, item.tools)
+                            NativeToolGroupCard(group: item.group, tools: item.tools, onChange: { reload() })
                         }
                     }
                     #endif
@@ -233,31 +233,6 @@ struct ToolsManagerView: View {
             .sorted { $0.group < $1.group }
     }
 
-    private func nativeToolGroupCard(_ group: String, _ tools: [ToolRegistry.ToolEntry]) -> some View {
-        VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                Image(systemName: "puzzlepiece.extension.fill").foregroundColor(theme.accentColor)
-                Text(group).font(.headline).foregroundColor(theme.primaryText)
-                Spacer()
-                Text("\(tools.count) tool\(tools.count == 1 ? "" : "s")")
-                    .font(.caption).foregroundColor(theme.secondaryText)
-            }
-            ForEach(tools) { t in
-                VStack(alignment: .leading, spacing: 2) {
-                    Text(t.name).font(.subheadline.weight(.medium)).foregroundColor(theme.primaryText)
-                    if !t.description.isEmpty {
-                        Text(t.description).font(.caption).foregroundColor(theme.secondaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                    }
-                }
-                .frame(maxWidth: .infinity, alignment: .leading)
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .background(RoundedRectangle(cornerRadius: 12).fill(theme.cardBackground))
-        .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
-    }
     #endif
 
     // MARK: - Empty / Loading States
@@ -1293,6 +1268,98 @@ private struct ToolPolicyMenu: View {
         .fixedSize()
     }
 }
+
+// MARK: - Native (this-fork) plugin tool group card
+
+#if OSAURUS_INTEL
+/// Collapsible card for a native plugin's tools, with a per-tool on/off toggle —
+/// mirrors RemoteProviderToolsCard's affordances.
+private struct NativeToolGroupCard: View {
+    @Environment(\.theme) private var theme
+    let group: String
+    let tools: [ToolRegistry.ToolEntry]
+    let onChange: () -> Void
+
+    @State private var isExpanded = false
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Button {
+                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
+            } label: {
+                HStack(spacing: 14) {
+                    ZStack {
+                        RoundedRectangle(cornerRadius: 10).fill(theme.accentColor.opacity(0.12))
+                        Image(systemName: "puzzlepiece.extension.fill")
+                            .font(.system(size: 18)).foregroundColor(theme.accentColor)
+                    }
+                    .frame(width: 44, height: 44)
+
+                    HStack(spacing: 8) {
+                        Text(group)
+                            .font(.system(size: 15, weight: .semibold, design: .rounded))
+                            .foregroundColor(theme.primaryText)
+                        Text("native")
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(theme.accentColor)
+                            .padding(.horizontal, 6).padding(.vertical, 2)
+                            .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+                    }
+
+                    Spacer()
+
+                    HStack(spacing: 4) {
+                        Image(systemName: "wrench.and.screwdriver").font(.system(size: 10))
+                        Text("\(tools.count) tool\(tools.count == 1 ? "" : "s")")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(theme.secondaryText)
+                    .padding(.horizontal, 8).padding(.vertical, 4)
+                    .background(Capsule().fill(theme.tertiaryBackground))
+
+                    Image(systemName: "chevron.right")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.tertiaryText)
+                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
+                }
+                .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+
+            if isExpanded && !tools.isEmpty {
+                Divider().padding(.vertical, 4)
+                LazyVStack(spacing: 10) {
+                    ForEach(tools) { entry in
+                        HStack(alignment: .top, spacing: 10) {
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(entry.name)
+                                    .font(.subheadline.weight(.medium))
+                                    .foregroundColor(theme.primaryText)
+                                if !entry.description.isEmpty {
+                                    Text(entry.description)
+                                        .font(.caption).foregroundColor(theme.secondaryText)
+                                        .fixedSize(horizontal: false, vertical: true)
+                                }
+                            }
+                            Spacer()
+                            ToolEnableToggle(entry: entry, onChange: onChange)
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+                .transition(.opacity.combined(with: .move(edge: .top)))
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.cardBackground)
+                .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
+        )
+    }
+}
+#endif
 
 // MARK: - Tool Enable Toggle
 

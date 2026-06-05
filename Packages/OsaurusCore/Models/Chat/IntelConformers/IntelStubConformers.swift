@@ -660,10 +660,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
+    /// Tool names the user has switched OFF in the Tools tab. Excluded from
+    /// `openAISpecs()` (the model never sees them) and reported by `listTools`.
+    /// Session-scoped; survives a tab reload (register doesn't clear it).
+    private var disabledToolNames: Set<String> = []
+
     /// OpenAI-compatible specs for the currently registered tools, fed into
     /// `ComposedContext.tools` so the model sees them on the next send.
+    /// Globally-disabled tools are filtered out.
     func openAISpecs() -> [Tool] {
         toolsByName.values
+            .filter { !disabledToolNames.contains($0.name) }
             .sorted { $0.name < $1.name }
             .map { $0.asOpenAITool() }
     }
@@ -770,15 +777,26 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 ToolEntry(
                     name: $0.name,
                     description: $0.description,
-                    enabled: true,
+                    enabled: !disabledToolNames.contains($0.name),
                     parameters: $0.parameters
                 )
             }
     }
 
-    /// Toggle a tool on/off. No-op stub on Intel (tool enablement state
-    /// isn't persisted in this surface yet).
-    func setEnabled(_ enabled: Bool, for name: String) {}
+    /// Toggle a tool on/off globally. Disabled tools are dropped from
+    /// `openAISpecs()` (the model never sees them). Republishes so the Tools
+    /// tab + capability picker reflect the change.
+    func setEnabled(_ enabled: Bool, for name: String) {
+        let changed: Bool
+        if enabled {
+            changed = disabledToolNames.remove(name) != nil
+        } else {
+            changed = disabledToolNames.insert(name).inserted
+        }
+        guard changed else { return }
+        objectWillChange.send()
+        NotificationCenter.default.post(name: .toolsListChanged, object: nil)
+    }
 
     /// Policy detail for a tool. Returns a default-`.auto` policy with
     /// no permission requirements on Intel (sandbox-gated tools are
