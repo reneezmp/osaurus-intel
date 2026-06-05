@@ -1901,8 +1901,24 @@ config** — slim host, Phases A–F) · 🟡 Memory (deferred by choice) · �
 Models/Voice/Sandbox (hardware). Sparkle pinned off. Folder pickers
 (chat/schedule/watcher) all gated.
 
+### M7 — Rosy deploy (started 2026-06-05, commit `02c0871d`)
+**Data path decision:** the Rosy deploy build owns the canonical **`~/.osaurus`**
+(not the dev-isolated `~/.osaurus-intel`). The `-intel` split only exists to
+coexist with a production Osaurus on the *dev* box; on Rosy the fork is the only
+Osaurus. Mechanism: `OsaurusPaths` reads an **Info.plist key
+`OsaurusCanonicalData`** (true → `~/.osaurus`; absent → isolated). Footgun-free —
+the safe default is isolation, so a dev build can't clobber production; the key
+is baked into the bundle (no launch env, no compile flag). Rejected:
+env-in-Package.swift (SwiftPM doesn't pass env to manifest eval) and xcodebuild
+build-setting overrides (replace per-target settings → break IkigaJSON/swift-system).
+Build with **`scripts/build/build_rosy.sh`** (x86_64, bakes the key, ad-hoc signs).
+Verified: dev → `canonical=false → ~/.osaurus-intel`; deploy app plist
+`canonical=true` (full `~/.osaurus` confirm happens on Rosy via the
+`[Osaurus] data root: …` launch log). **Remaining M7:** transfer the .app to
+Rosy, clear quarantine, launch + confirm, real-world smoke test.
+
 ### Tags laid (updated)
 `m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a) ·
 `m9-plugins-complete` (aa46d50b).
-Latest commit: `d349a25c` (Phase F — plugin host callback upgrades + config UI).
+Latest commit: `02c0871d` (M7 — Rosy deploy data-path decision + build_rosy.sh).
 Consider tag `m9-plugins-host` at `d349a25c`.
