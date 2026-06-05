@@ -1770,6 +1770,48 @@ still don't surface in `ToolsManagerView`, whose Intel `plugins` returns `[]` �
 but they ARE in `openAISpecs()`, so chat sees them); true MCP `tools/call`
 exposure for external MCP clients (the in-app agent path doesn't need it).
 
+### Plugins Phase F — ✅ host-callback upgrades (2026-06-05)
+
+Promoted five slim-host `not_supported` stubs to real Intel subsystems. **None
+via Path A's file restore** — each just wires a callback to a mirror that
+already compiles. The dead question per callback is "does its backing subsystem
+live on Intel?": BackgroundTaskManager ✅, CloudChatEngine ✅, sqlite ✅;
+EmbeddingService ❌ (MLX), HTTP server ❌ (so `embed` + `handle_route` stay dead).
+
+Commits `a7fcc442` (worth-it: db/dispatch/instructions), `c1c10303` (complete),
+`d349a25c` (config UI).
+
+- **db_exec / db_query → per-plugin SQLite** (`import OsaurusSQLCipher`). A
+  thread-local current-plugin-id, set around `invoke` (callbacks run sync on that
+  thread), scopes the DB file `~/.osaurus-intel/Tools/<id>/plugin.db` AND config
+  keys. Positional + named params; rows/rows_affected/last_insert_rowid JSON.
+- **dispatch / task_status → TaskDispatcher/BackgroundTaskManager.** A plugin
+  spawns a background agent task (under `Agent.defaultId` — the gate refuses a nil
+  agentId; that was the first-cut bug). Integrates with the M13 task indicator.
+- **complete → CloudChatEngine** (the `ChatEngine` actor, DeepSeek/remote, reads
+  `DEEPSEEK_API_KEY`). A plugin does its own LLM step in one tool call.
+- **instructions:** manifest top-level `instructions` appended to the system
+  prompt when any of the plugin's tools are active (`composeChatContext`).
+- **on_config_changed + config UI:** manifest `secrets[]` →
+  `IntelPluginConfigField`; `IntelPluginConfigView` (gear button in the Plugins
+  header, Intel-only) lists configurable native plugins with editable fields;
+  `setConfig` persists (scoped) + calls the plugin's `on_config_changed`.
+- **Blocking bridge** (`IntelBox` + semaphore) runs async/MainActor work from the
+  sync C trampolines — safe because plugin callbacks run off the main actor
+  (`IntelPluginTool` invokes on a background queue).
+- **Still `not_supported`/no-op:** embed (MLX gone), handle_route/web (no HTTP
+  server), complete_stream, list_active_tasks/send_draft/interrupt, registry
+  install (arm64 only).
+
+**memo plugin** (`intel-plugins/memo`) demonstrates db + dispatch + instructions
++ complete (memo_save/list/clear, run_background, ask_model). **search** gained a
+real `region` config consumer. Test hooks: `OSAURUS_INTEL_PLUGIN_TESTCALL`,
+`OSAURUS_INTEL_PLUGIN_SETCONFIG`.
+
+**Verified** (all through `ToolRegistry.execute`, the agent path): memo persisted
+across a relaunch; run_background → `{id,status:running}`; ask_model → `PONG`;
+setConfig(region=br-pt) → search returned pt-BR results.
+
 ---
 
 #### Original full-restore SCOPE (NOT taken — kept for the record)
@@ -1809,13 +1851,15 @@ let a *natively x86_64-built* plugin actually load + run (no official plugin wil
   one phase per clean session). Payoff is narrow (only DIY x86_64 plugins), but it
   makes the fork a first-class plugin host.
 
-### Group C / tab status — final (2026-06-04)
+### Group C / tab status — final (2026-06-05)
 ✅ Insights · ✅ Schedules · ✅ Watchers · ✅ Plugins (Browse + gating +
-**native x86_64 execution** — slim host, Phases A–D) · 🟡 Memory (deferred by
-choice) · 🔴 Models/Voice/Sandbox (hardware). Sparkle pinned off. Folder pickers
+**native x86_64 execution + host callbacks: db/dispatch/complete/instructions/
+config** — slim host, Phases A–F) · 🟡 Memory (deferred by choice) · 🔴
+Models/Voice/Sandbox (hardware). Sparkle pinned off. Folder pickers
 (chat/schedule/watcher) all gated.
 
 ### Tags laid (updated)
-`m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a).
-Latest commit: `aa46d50b` (M9 Phase D — native x86_64 plugin execution proven).
-Consider tag `m9-plugins-complete` at `aa46d50b`.
+`m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a) ·
+`m9-plugins-complete` (aa46d50b).
+Latest commit: `d349a25c` (Phase F — plugin host callback upgrades + config UI).
+Consider tag `m9-plugins-host` at `d349a25c`.
