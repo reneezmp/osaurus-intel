@@ -120,9 +120,40 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
+    /// Resolve the API key. Order: the `DEEPSEEK_API_KEY` env var (dev
+    /// convenience on the build machine), then the key the user saved in
+    /// Settings → Providers (stored in the Keychain via RemoteProviderKeychain).
+    /// The provider fallback is what lets a double-clicked app — e.g. on Rosy —
+    /// work without launching from a terminal with an env var.
+    private func resolveAPIKey() async -> String? {
+        if let env = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"],
+            !env.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            return env
+        }
+        return await MainActor.run {
+            let providers = RemoteProviderManager.shared.configuration.providers.filter { $0.enabled }
+            // Prefer a provider pointed at this engine's host (DeepSeek); fall
+            // back to any enabled provider that has a stored key.
+            let ordered = providers.sorted { a, b in
+                a.host.localizedCaseInsensitiveContains("deepseek")
+                    && !b.host.localizedCaseInsensitiveContains("deepseek")
+            }
+            for p in ordered {
+                if let key = RemoteProviderKeychain.getAPIKey(for: p.id),
+                    !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    return key
+                }
+            }
+            return nil
+        }
+    }
+
     func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
-        guard let apiKey = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] else {
-            throw EngineError(message: "DEEPSEEK_API_KEY not set")
+        guard let apiKey = await resolveAPIKey() else {
+            throw EngineError(
+                message:
+                    "No DeepSeek API key. Add it in Settings → Providers (or set the DEEPSEEK_API_KEY env var)."
+            )
         }
 
         NSLog("[CloudChatEngine] Starting streamChat — model=\(request.model ?? model), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
@@ -281,8 +312,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     }
 
     func completeChat(request: ChatCompletionRequest) async throws -> ChatCompletionResponse {
-        guard let apiKey = ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"] else {
-            throw EngineError(message: "DEEPSEEK_API_KEY not set")
+        guard let apiKey = await resolveAPIKey() else {
+            throw EngineError(
+                message:
+                    "No DeepSeek API key. Add it in Settings → Providers (or set the DEEPSEEK_API_KEY env var)."
+            )
         }
 
         var urlRequest = URLRequest(url: URL(string: apiBase)!)
