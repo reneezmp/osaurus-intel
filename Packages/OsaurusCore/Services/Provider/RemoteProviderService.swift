@@ -353,6 +353,7 @@ public actor RemoteProviderService: ToolCapableService {
         )
 
         try await refreshCodexOAuthIfNeeded()
+        try await refreshXAIOAuthIfNeeded()
         let (data, response) = try await session.data(for: try buildURLRequest(for: request))
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -442,6 +443,7 @@ public actor RemoteProviderService: ToolCapableService {
         }
 
         try await refreshCodexOAuthIfNeeded()
+        try await refreshXAIOAuthIfNeeded()
         let (data, response) = try await session.data(for: try buildURLRequest(for: request))
 
         guard let httpResponse = response as? HTTPURLResponse else {
@@ -1352,6 +1354,7 @@ public actor RemoteProviderService: ToolCapableService {
         if !stopSequences.isEmpty { request.stop = stopSequences }
 
         try await refreshCodexOAuthIfNeeded()
+        try await refreshXAIOAuthIfNeeded()
         let urlRequest = try buildURLRequest(for: request)
         let currentSession = self.session
         let providerType = Self.effectiveRequestProviderType(
@@ -1820,6 +1823,27 @@ public actor RemoteProviderService: ToolCapableService {
         ]
     }
 
+    private func refreshXAIOAuthIfNeeded() async throws {
+        guard provider.authType == .xaiOAuth else { return }
+        guard let tokens = cachedOAuthTokens else {
+            throw XAIOAuthError.missingSignInTokens
+        }
+        guard tokens.isExpired else { return }
+
+        let refreshed = try await XAIOAuthService.refresh(tokens)
+        cachedOAuthTokens = refreshed
+        await RemoteProviderKeychain.saveOAuthTokensOffMainActor(refreshed, for: provider.id)
+    }
+
+    private func xaiOAuthHeaders() throws -> [String: String] {
+        guard let tokens = cachedOAuthTokens else {
+            throw XAIOAuthError.missingSignInTokens
+        }
+        return [
+            "Authorization": "Bearer \(tokens.accessToken)"
+        ]
+    }
+
     /// Non-streaming `generateContent` fallback for Gemini image models (Nano Banana).
     /// Image models don't support `streamGenerateContent`, so this wraps the
     /// single-shot response in an `AsyncThrowingStream` for the streaming callers.
@@ -2014,6 +2038,10 @@ public actor RemoteProviderService: ToolCapableService {
         let headers: [String: String]
         if provider.authType == .openAICodexOAuth {
             headers = try codexOAuthHeaders()
+        } else if provider.authType == .xaiOAuth {
+            // Merge the refreshed Bearer over the cached headers so any
+            // user-supplied custom headers still apply.
+            headers = cachedHeaders.merging(try xaiOAuthHeaders()) { _, new in new }
         } else {
             // Headers are resolved once at service creation time (on @MainActor)
             // to avoid Keychain access issues from the actor's background executor.
@@ -3040,6 +3068,13 @@ extension RemoteProviderService {
                 tokens = refreshed
             }
             return await OpenAICodexOAuthService.availableModels(for: tokens)
+        }
+
+        // xAI (Grok) OAuth tokens are denied access to the `/models` endpoint
+        // (HTTP 403), so — like Codex — surface the built-in catalog instead of
+        // a live query. Chat completions still authorize with the Bearer token.
+        if provider.authType == .xaiOAuth {
+            return XAIOAuthService.supportedModels
         }
 
         if provider.providerType == .anthropic {
