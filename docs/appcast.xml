@@ -12,7 +12,7 @@
       <sparkle:version>2</sparkle:version>
       <sparkle:shortVersionString>1.0.1</sparkle:shortVersionString>
       <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
-      <enclosure url="https://github.com/reneezmp/osaurus/releases/download/1.0.1/Osaurus-Intel-1.0.1.zip" length="50310964" type="application/octet-stream" sparkle:edSignature="GVImJtHZVu0NAuoXUGr8iHpYJs9kt10iLteWmq13Q6FsHtWW5myvzgPYsge8qdJp4bSgG/UOxmSrSYXQkXrfAg=="/>
+      <enclosure url="https://github.com/reneezmp/osaurus/releases/download/1.0.1/Osaurus-Intel-1.0.1.zip" length="50312679" type="application/octet-stream" sparkle:edSignature="sdInHRehywz+xlVHEmvtihI/wfZ3aThJgmbqu3PJGVHxT2d3SLINAMbfb+ulZ4Mas/o3vabhFm/v+wmYAdfVAw=="/>
       <description sparkle:format="markdown"><![CDATA[
 ## Osaurus (Intel) 1.0.1
 
