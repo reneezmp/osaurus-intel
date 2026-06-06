@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.6</title>
+      <pubDate>Sat, 06 Jun 2026 19:25:57 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>7</sparkle:version>
+      <sparkle:shortVersionString>1.0.6</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.6/Osaurus-Intel-1.0.6.zip" length="50381546" type="application/octet-stream" sparkle:edSignature="jv5XjRU+E9UgzZevxs513AGjtIzIIdCb+g6YTPrTjVkMs02p/wc5/rwiB1Eq6tjYJoRCppdQVsBC2j3na5g6DA=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.6
+
+- 🌳 Configured providers now actually show their models. The app probes each enabled provider's /models endpoint (at launch, when you open the Providers tab, and after add/edit) and caches the result — so a local llama.cpp server (Bonsai), Ollama, or any OpenAI-compatible endpoint shows a real model count AND appears in the chat model picker. Fixes "0 models available" and the picker only ever listing DeepSeek.
+- 🚇 Selecting one of those models routes the request to that provider (its own URL + auth — no-auth local servers included), not DeepSeek.
+- 🔄 Auto-updater retargeted to the renamed repo (osaurus-intel).
+]]></description>
+    </item>
+    <item>
       <title>1.0.5</title>
       <pubDate>Sat, 06 Jun 2026 19:12:10 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
