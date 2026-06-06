@@ -891,6 +891,11 @@ struct ConfigurationView: View {
     private func saveConfiguration() {
         let previousServerCfg = ServerConfigurationStore.load() ?? ServerConfiguration.default
         let previousChatCfg = ChatConfigurationStore.load()
+        // Capture the old hotkey as a VALUE now. On Intel `ChatConfiguration` is
+        // a class and `load()` returns the shared singleton, so `save()` below
+        // mutates `previousChatCfg` in place — comparing it to `chatCfg` after
+        // the save would always read "unchanged" and skip re-registration.
+        let previousHotkey = previousChatCfg.hotkey
 
         var configuration = previousServerCfg
         configuration.startAtLogin = tempStartAtLogin
@@ -997,7 +1002,7 @@ struct ConfigurationView: View {
             MemoryConfigurationStore.save(memoryCfg)
         }
 
-        let hotkeyChanged = previousChatCfg.hotkey != chatCfg.hotkey
+        let hotkeyChanged = previousHotkey != chatCfg.hotkey
 
         if hotkeyChanged {
             AppDelegate.shared?.applyChatHotkey()

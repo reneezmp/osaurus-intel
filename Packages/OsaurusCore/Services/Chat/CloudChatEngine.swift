@@ -8,47 +8,7 @@
 
 #if OSAURUS_INTEL
 
-import AppKit
 import Foundation
-
-enum ToolApprovalDecision { case allow, deny, alwaysAllow }
-
-/// Native confirmation prompt for tools whose permission policy is "Ask".
-/// Upstream's `ToolPermissionPromptService` (a SwiftUI overlay) is amputated on
-/// Intel; a modal `NSAlert` is a dependency-free equivalent that carries the
-/// same info — tool name, description, formatted arguments — plus Allow / Deny /
-/// Always Allow. Runs on the main thread (the engine `await`s it), blocking the
-/// run until the user decides.
-enum ToolApprovalPrompt {
-    @MainActor
-    static func request(tool: String, description: String?, arguments: String) -> ToolApprovalDecision {
-        let alert = NSAlert()
-        alert.alertStyle = .warning
-        alert.messageText = "Allow “\(tool)” to run?"
-
-        var info = ""
-        if let description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-            info += String(description.prefix(400)) + "\n\n"
-        }
-        let args = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
-        info +=
-            args.isEmpty || args == "{}"
-            ? "No arguments."
-            : "Arguments:\n\(String(args.prefix(600)))"
-        alert.informativeText = info
-
-        alert.addButton(withTitle: "Allow")  // .alertFirstButtonReturn
-        alert.addButton(withTitle: "Deny")  // .alertSecondButtonReturn
-        let always = alert.addButton(withTitle: "Always Allow")  // .alertThirdButtonReturn
-        always.toolTip = "Run this tool automatically from now on (sets its policy to Auto)."
-
-        switch alert.runModal() {
-        case .alertFirstButtonReturn: return .allow
-        case .alertThirdButtonReturn: return .alwaysAllow
-        default: return .deny
-        }
-    }
-}
 
 // MARK: - Protocol (mirrors excluded ChatEngineProtocol.swift)
 
@@ -449,25 +409,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             case .auto:
                                 approved = true
                             case .ask:
+                                // Real upstream permission card (ToolPermissionView via
+                                // ToolPermissionPromptService) — Allow / Deny / Always Allow.
+                                // "Always Allow" persists the policy internally.
                                 let toolDescription =
                                     request.tools?
                                     .first(where: { $0.function.name == call.name })?
-                                    .function.description
-                                let decision = await ToolApprovalPrompt.request(
-                                    tool: call.name,
+                                    .function.description ?? ""
+                                approved = await ToolPermissionPromptService.requestApproval(
+                                    toolName: call.name,
                                     description: toolDescription,
-                                    arguments: call.arguments)
-                                switch decision {
-                                case .allow:
-                                    approved = true
-                                case .deny:
-                                    approved = false
-                                case .alwaysAllow:
-                                    approved = true
-                                    await MainActor.run {
-                                        ToolRegistry.shared.setPolicy(.auto, for: call.name)
-                                    }
-                                }
+                                    argumentsJSON: call.arguments)
                             }
 
                             if !approved {
