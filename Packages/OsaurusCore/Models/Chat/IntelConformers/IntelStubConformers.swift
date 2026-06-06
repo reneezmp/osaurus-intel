@@ -269,6 +269,15 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     func isEphemeral(id: UUID) -> Bool { false }
 
+    /// Tell the model picker to rebuild after the provider list changes, so a
+    /// newly added/edited provider's models appear in the chat picker without
+    /// an app relaunch. `ChatView` and the Intel `ModelPickerItemCache` both
+    /// observe this. (Upstream's RemoteProviderService posts it on connect;
+    /// Intel routes through env/saved keys, so we post it on config mutation.)
+    private func notifyModelsChanged() {
+        NotificationCenter.default.post(name: .remoteProviderModelsChanged, object: nil)
+    }
+
     func addProvider(
         _ provider: RemoteProvider,
         apiKey: String? = nil,
@@ -283,6 +292,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             state.isConnected = true
             providerStates[provider.id] = state
         }
+        notifyModelsChanged()
     }
 
     func updateProvider(
@@ -293,6 +303,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         configuration.update(provider)
         RemoteProviderConfigurationStore.save(configuration)
         persistCredentials(apiKey: apiKey, oauthTokens: oauthTokens, for: provider.id)
+        notifyModelsChanged()
     }
 
     func removeProvider(id: UUID) {
@@ -301,6 +312,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         RemoteProviderConfigurationStore.save(configuration)
         RemoteProviderKeychain.deleteAPIKey(for: id)
         RemoteProviderKeychain.deleteOAuthTokens(for: id)
+        notifyModelsChanged()
     }
 
     /// Persist the credential the user typed in Settings → Providers. The
@@ -329,6 +341,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         } else {
             providerStates.removeValue(forKey: providerId)
         }
+        notifyModelsChanged()
     }
 
     // Cloud-routing no-ops kept for compatibility with chat-side callers.

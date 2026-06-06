@@ -245,18 +245,78 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
+    /// The resolved HTTP target for a chat request: which URL to POST to and
+    /// the auth/extra headers to send.
+    private struct ResolvedEndpoint {
+        let url: String
+        let headers: [String: String]
+        let providerLabel: String
+    }
+
+    /// Resolve the endpoint + headers for `model`. On Intel a request can route
+    /// to EITHER the built-in DeepSeek path (hardcoded URL + `DEEPSEEK_API_KEY`
+    /// / saved key) OR any user-configured provider that lists `model` in its
+    /// `manualModelIds`. The latter is what lets a local llama.cpp server
+    /// (Bonsai) or any OpenAI-compatible endpoint actually receive the request
+    /// instead of it silently going to DeepSeek. Order:
+    ///   1. An enabled provider that declares `model` wins — its baseURL +
+    ///      per-`authType` headers. A no-auth local server is fine (no key).
+    ///   2. Otherwise the built-in DeepSeek fallback.
+    /// Returns nil only when neither a provider endpoint nor a DeepSeek key is
+    /// available, so the caller can surface a clear error.
+    private func resolveEndpoint(forModel model: String) async -> ResolvedEndpoint? {
+        let providerEndpoint: ResolvedEndpoint? = await MainActor.run {
+            let providers = RemoteProviderManager.shared.configuration.providers.filter { $0.enabled }
+            guard let owner = providers.first(where: { $0.manualModelIds.contains(model) }),
+                let url = owner.url(for: "/chat/completions")
+            else { return nil }
+
+            var headers: [String: String] = ["Content-Type": "application/json"]
+            for (k, v) in owner.customHeaders { headers[k] = v }
+            if owner.authType == .apiKey,
+                let key = RemoteProviderKeychain.getAPIKey(for: owner.id),
+                !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                switch owner.providerType {
+                case .anthropic:
+                    headers["x-api-key"] = key
+                    if headers["anthropic-version"] == nil { headers["anthropic-version"] = "2023-06-01" }
+                case .gemini:
+                    headers["x-goog-api-key"] = key
+                case .azureOpenAI:
+                    headers["api-key"] = key
+                default:
+                    headers["Authorization"] = "Bearer \(key)"
+                }
+            }
+            return ResolvedEndpoint(url: url.absoluteString, headers: headers, providerLabel: owner.name)
+        }
+        if let providerEndpoint {
+            NSLog(
+                "[CloudChatEngine] Routing model=\(model) → provider '\(providerEndpoint.providerLabel)' @ \(providerEndpoint.url)"
+            )
+            return providerEndpoint
+        }
+        // Built-in DeepSeek fallback.
+        guard let key = await resolveAPIKey() else { return nil }
+        return ResolvedEndpoint(
+            url: apiBase,
+            headers: ["Content-Type": "application/json", "Authorization": "Bearer \(key)"],
+            providerLabel: "DeepSeek"
+        )
+    }
+
     func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
-        guard let apiKey = await resolveAPIKey() else {
+        let toolSpecs = encodeTools(request.tools)
+        let resolvedModel = request.model ?? model
+
+        guard let endpoint = await resolveEndpoint(forModel: resolvedModel) else {
             throw EngineError(
                 message:
-                    "No DeepSeek API key. Add it in Settings → Providers (or set the DEEPSEEK_API_KEY env var)."
+                    "No endpoint for model \"\(resolvedModel)\". Add a provider (and key, if it needs one) in Settings → Providers, or set the DEEPSEEK_API_KEY env var."
             )
         }
 
-        NSLog("[CloudChatEngine] Starting streamChat — model=\(request.model ?? model), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
-
-        let toolSpecs = encodeTools(request.tools)
-        let resolvedModel = request.model ?? model
+        NSLog("[CloudChatEngine] Starting streamChat — model=\(resolvedModel), via=\(endpoint.providerLabel), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
 
         return AsyncThrowingStream { continuation in
             Task {
@@ -288,10 +348,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         self.applyReasoningMode(request, into: &body)
 
-                        var urlRequest = URLRequest(url: URL(string: self.apiBase)!)
+                        var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
                         urlRequest.httpMethod = "POST"
-                        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-                        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+                        for (k, v) in endpoint.headers { urlRequest.setValue(v, forHTTPHeaderField: k) }
                         urlRequest.timeoutInterval = 300
                         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
@@ -470,21 +529,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     }
 
     func completeChat(request: ChatCompletionRequest) async throws -> ChatCompletionResponse {
-        guard let apiKey = await resolveAPIKey() else {
+        let resolvedModel = request.model ?? model
+        guard let endpoint = await resolveEndpoint(forModel: resolvedModel) else {
             throw EngineError(
                 message:
-                    "No DeepSeek API key. Add it in Settings → Providers (or set the DEEPSEEK_API_KEY env var)."
+                    "No endpoint for model \"\(resolvedModel)\". Add a provider (and key, if it needs one) in Settings → Providers, or set the DEEPSEEK_API_KEY env var."
             )
         }
 
-        var urlRequest = URLRequest(url: URL(string: apiBase)!)
+        var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
         urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
+        for (k, v) in endpoint.headers { urlRequest.setValue(v, forHTTPHeaderField: k) }
         urlRequest.timeoutInterval = 300
 
         var body: [String: Any] = [
-            "model": request.model ?? model,
+            "model": resolvedModel,
             "messages": request.messages.map { msg -> [String: Any] in
                 var m: [String: Any] = ["role": msg.role]
                 if let content = msg.content { m["content"] = content }

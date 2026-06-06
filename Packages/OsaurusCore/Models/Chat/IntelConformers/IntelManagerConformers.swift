@@ -426,26 +426,53 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
     @Published private(set) var items: [ModelPickerItem] = []
 
     func buildModelPickerItems() async -> [ModelPickerItem] {
-        let provider: ModelPickerItem.Source = .remote(
-            providerName: "DeepSeek",
-            providerId: Self.deepSeekProviderId
-        )
-        let built: [ModelPickerItem] = [
-            ModelPickerItem(
-                id: "deepseek-v4-pro",
-                displayName: "DeepSeek V4 Pro",
-                source: provider,
-                isVLM: false,
-                description: "DeepSeek's flagship chat model"
-            ),
-            ModelPickerItem(
-                id: "deepseek-v4-flash",
-                displayName: "DeepSeek V4 Flash",
-                source: provider,
-                isVLM: false,
-                description: "DeepSeek's fast tier"
-            ),
-        ]
+        let built: [ModelPickerItem] = await MainActor.run {
+            var out: [ModelPickerItem] = []
+            var seen = Set<String>()
+
+            // 1) Built-in DeepSeek aliases. These map to the hardcoded engine
+            //    path (DeepSeek URL + `DEEPSEEK_API_KEY` / saved key) and are
+            //    always available even with no provider configured.
+            let deepseek: ModelPickerItem.Source = .remote(
+                providerName: "DeepSeek",
+                providerId: Self.deepSeekProviderId
+            )
+            for (id, name, desc) in [
+                ("deepseek-v4-pro", "DeepSeek V4 Pro", "DeepSeek's flagship chat model"),
+                ("deepseek-v4-flash", "DeepSeek V4 Flash", "DeepSeek's fast tier"),
+            ] {
+                out.append(
+                    ModelPickerItem(
+                        id: id, displayName: name, source: deepseek, isVLM: false, description: desc
+                    )
+                )
+                seen.insert(id)
+            }
+
+            // 2) Every model declared by an enabled, user-configured provider.
+            //    The model ids live in `manualModelIds` (the edit sheet requires
+            //    a non-empty list to save, and persists it). This is what makes
+            //    a local llama.cpp server (Bonsai) or any OpenAI-compatible
+            //    endpoint show up in the chat picker — and `CloudChatEngine`
+            //    routes the request to whichever provider owns the model.
+            let providers = RemoteProviderManager.shared.configuration.providers.filter { $0.enabled }
+            for provider in providers {
+                for modelId in provider.manualModelIds where !seen.contains(modelId) {
+                    seen.insert(modelId)
+                    out.append(
+                        ModelPickerItem(
+                            id: modelId,
+                            displayName: modelId,
+                            source: .remote(providerName: provider.name, providerId: provider.id),
+                            isVLM: false,
+                            description: provider.name
+                        )
+                    )
+                }
+            }
+            return out
+        }
+
         items = built
         isLoaded = true
         return built
