@@ -452,7 +452,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     // via `ChatWindowManager.toggleLastFocused`. A nil hotkey unregisters.
     @MainActor
     public func applyChatHotkey() {
-        HotKeyManager.shared.register(hotkey: ChatConfiguration.shared.hotkey) {
+        let hk = ChatConfiguration.shared.hotkey
+        NSLog("[Osaurus] applyChatHotkey: hotkey=\(hk?.displayString ?? "nil")")
+        HotKeyManager.shared.register(hotkey: hk) {
+            NSLog("[Osaurus] hotkey handler → toggleLastFocused")
             ChatWindowManager.shared.toggleLastFocused()
         }
     }

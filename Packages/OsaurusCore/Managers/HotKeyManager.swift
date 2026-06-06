@@ -31,7 +31,13 @@ final class HotKeyManager {
     // MARK: - Generic registration using Chat Hotkey model
     func register(hotkey: Hotkey?, handler: @escaping () -> Void) {
         unregister()
-        guard let hotkey else { return }
+        guard let hotkey else {
+            NSLog("[HotKeyManager] register called with nil hotkey — nothing registered")
+            return
+        }
+        NSLog(
+            "[HotKeyManager] registering hotkey '\(hotkey.displayString)' keyCode=\(hotkey.keyCode) modifiers=\(hotkey.carbonModifiers)"
+        )
         action = handler
 
         var hotKeyID = EventHotKeyID()
@@ -47,6 +53,7 @@ final class HotKeyManager {
             UInt32(0),
             &ref
         )
+        NSLog("[HotKeyManager] RegisterEventHotKey status=\(status) (0 = noErr)")
         if status == noErr { hotKeyRef = ref }
 
         var eventSpec = EventTypeSpec(
@@ -68,6 +75,7 @@ final class HotKeyManager {
                 &hkID
             )
             if err == noErr && hkID.signature == OSType(0x4F53_5553) {
+                NSLog("[HotKeyManager] hotkey event FIRED — invoking handler")
                 if let userData {
                     let manager = Unmanaged<HotKeyManager>.fromOpaque(userData).takeUnretainedValue()
                     Task { @MainActor in manager.action?() }
@@ -85,6 +93,7 @@ final class HotKeyManager {
             selfPtr,
             &refHandler
         )
+        NSLog("[HotKeyManager] InstallEventHandler status=\(installStatus) (0 = noErr)")
         if installStatus == noErr { eventHandlerRef = refHandler }
     }
 }
