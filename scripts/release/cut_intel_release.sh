@@ -26,7 +26,7 @@ if [[ -z "$SHORT_VERSION" ]]; then
 fi
 NOTES="${2:-Maintenance release.}"
 
-REPO="reneezmp/osaurus"
+REPO="reneezmp/osaurus-intel"
 BRANCH="intel-fork"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"

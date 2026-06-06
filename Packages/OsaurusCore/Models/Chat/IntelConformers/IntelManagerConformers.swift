@@ -449,15 +449,26 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                 seen.insert(id)
             }
 
-            // 2) Every model declared by an enabled, user-configured provider.
-            //    The model ids live in `manualModelIds` (the edit sheet requires
-            //    a non-empty list to save, and persists it). This is what makes
-            //    a local llama.cpp server (Bonsai) or any OpenAI-compatible
-            //    endpoint show up in the chat picker — and `CloudChatEngine`
-            //    routes the request to whichever provider owns the model.
-            let providers = RemoteProviderManager.shared.configuration.providers.filter { $0.enabled }
+            // 2) Every model from an enabled, user-configured provider. The
+            //    model ids come from `discoveredModels` (live `/models` probe,
+            //    cached by RemoteProviderManager) unioned with any
+            //    `manualModelIds` the user typed. This is what makes a local
+            //    llama.cpp server (Bonsai) or any OpenAI-compatible endpoint
+            //    show up in the chat picker — and `CloudChatEngine` routes the
+            //    request to whichever provider owns the model.
+            //
+            //    DeepSeek is skipped here: it's represented by the built-in
+            //    aliases above (deepseek-v4-pro/flash, the names the engine
+            //    actually sends), so enumerating its raw `/models` ids too would
+            //    just clutter the picker with duplicate-looking DeepSeek rows.
+            let manager = RemoteProviderManager.shared
+            let providers = manager.configuration.providers.filter { $0.enabled }
             for provider in providers {
-                for modelId in provider.manualModelIds where !seen.contains(modelId) {
+                if provider.host.localizedCaseInsensitiveContains("deepseek") { continue }
+                let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
+                var ids: [String] = []
+                for id in discovered + provider.manualModelIds where !ids.contains(id) { ids.append(id) }
+                for modelId in ids where !seen.contains(modelId) {
                     seen.insert(modelId)
                     out.append(
                         ModelPickerItem(

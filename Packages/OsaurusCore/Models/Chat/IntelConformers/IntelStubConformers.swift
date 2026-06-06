@@ -250,6 +250,9 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
         seedConnectedStates()
+        // Discover each enabled provider's models in the background so the
+        // chat picker + the "N models available" counter populate at launch.
+        Task { await refreshAllModels() }
     }
 
     /// Mark every enabled provider as "connected" so the Providers tab
@@ -278,6 +281,81 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .remoteProviderModelsChanged, object: nil)
     }
 
+    /// GET the provider's `/models` endpoint and return the discovered model
+    /// ids. This is the SAME OpenAI-compatible probe the "Test" button uses,
+    /// but driven from a saved provider (so it picks up the stored key + auth).
+    /// Returns [] on any failure (server down, 401, unreachable) — a no-auth
+    /// local server like llama.cpp/Bonsai works with an empty header set.
+    private func probeModels(for provider: RemoteProvider) async -> [String] {
+        var headers = provider.customHeaders
+        if provider.authType == .apiKey,
+            let key = RemoteProviderKeychain.getAPIKey(for: provider.id),
+            !key.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            switch provider.providerType {
+            case .anthropic:
+                headers["x-api-key"] = key
+                if headers["anthropic-version"] == nil { headers["anthropic-version"] = "2023-06-01" }
+            case .gemini:
+                headers["x-goog-api-key"] = key
+            case .azureOpenAI:
+                headers["api-key"] = key
+            default:
+                headers["Authorization"] = "Bearer \(key)"
+            }
+        }
+        guard let url = provider.url(for: "/models") else { return [] }
+        var req = URLRequest(url: url)
+        req.httpMethod = "GET"
+        req.timeoutInterval = 20
+        for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
+        guard let (data, response) = try? await URLSession.shared.data(for: req),
+            let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        if let arr = json["data"] as? [[String: Any]] {
+            return arr.compactMap { $0["id"] as? String }.sorted()
+        }
+        if let arr = json["models"] as? [[String: Any]] {
+            return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
+        }
+        return []
+    }
+
+    /// Probe one enabled provider and cache its models into
+    /// `providerStates[id].discoveredModels` (which feeds the "N models
+    /// available" counter, the chat picker, and `CloudChatEngine` routing),
+    /// then notify observers.
+    func refreshModels(for providerId: UUID) async {
+        guard let provider = configuration.providers.first(where: { $0.id == providerId }),
+            provider.enabled
+        else { return }
+        let models = await probeModels(for: provider)
+        var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
+        state.isConnected = true
+        state.discoveredModels = models
+        state.lastConnectedAt = Date()
+        providerStates[providerId] = state
+        NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
+        notifyModelsChanged()
+    }
+
+    /// Probe every enabled provider. Called at launch, when the Providers tab
+    /// appears (so a late-started local server is picked up), and after any
+    /// provider mutation.
+    func refreshAllModels() async {
+        let enabled = configuration.providers.filter { $0.enabled }
+        for provider in enabled {
+            let models = await probeModels(for: provider)
+            var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
+            state.isConnected = true
+            state.discoveredModels = models
+            state.lastConnectedAt = Date()
+            providerStates[provider.id] = state
+            NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
+        }
+        notifyModelsChanged()
+    }
+
     func addProvider(
         _ provider: RemoteProvider,
         apiKey: String? = nil,
@@ -293,6 +371,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             providerStates[provider.id] = state
         }
         notifyModelsChanged()
+        Task { await refreshModels(for: provider.id) }
     }
 
     func updateProvider(
@@ -304,6 +383,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         RemoteProviderConfigurationStore.save(configuration)
         persistCredentials(apiKey: apiKey, oauthTokens: oauthTokens, for: provider.id)
         notifyModelsChanged()
+        Task { await refreshModels(for: provider.id) }
     }
 
     func removeProvider(id: UUID) {
@@ -338,10 +418,12 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             var state = RemoteProviderState(providerId: providerId)
             state.isConnected = true
             providerStates[providerId] = state
+            notifyModelsChanged()
+            Task { await refreshModels(for: providerId) }
         } else {
             providerStates.removeValue(forKey: providerId)
+            notifyModelsChanged()
         }
-        notifyModelsChanged()
     }
 
     // Cloud-routing no-ops kept for compatibility with chat-side callers.

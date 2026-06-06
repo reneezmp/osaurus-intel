@@ -266,10 +266,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// available, so the caller can surface a clear error.
     private func resolveEndpoint(forModel model: String) async -> ResolvedEndpoint? {
         let providerEndpoint: ResolvedEndpoint? = await MainActor.run {
-            let providers = RemoteProviderManager.shared.configuration.providers.filter { $0.enabled }
-            guard let owner = providers.first(where: { $0.manualModelIds.contains(model) }),
-                let url = owner.url(for: "/chat/completions")
-            else { return nil }
+            let manager = RemoteProviderManager.shared
+            let providers = manager.configuration.providers.filter { $0.enabled }
+            // Match the selected model against each provider's known ids:
+            // live-discovered (`/models` probe) ∪ user-typed `manualModelIds`.
+            let owner = providers.first { provider in
+                let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
+                return discovered.contains(model) || provider.manualModelIds.contains(model)
+            }
+            guard let owner, let url = owner.url(for: "/chat/completions") else { return nil }
 
             var headers: [String: String] = ["Content-Type": "application/json"]
             for (k, v) in owner.customHeaders { headers[k] = v }

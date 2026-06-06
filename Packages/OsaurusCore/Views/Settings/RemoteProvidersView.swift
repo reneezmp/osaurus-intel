@@ -64,6 +64,12 @@ struct RemoteProvidersView: View {
             withAnimation(.easeOut(duration: 0.25).delay(0.05)) {
                 hasAppeared = true
             }
+            #if OSAURUS_INTEL
+            // Re-probe each provider's /models when the tab opens, so a local
+            // server (e.g. Bonsai) started AFTER the app launched is picked up
+            // and its model count + picker rows refresh.
+            Task { await manager.refreshAllModels() }
+            #endif
         }
         .sheet(item: $addSheetConfig) { config in
             RemoteProviderEditSheet(provider: nil, initialPreset: config.preset) { provider, apiKey, oauthTokens in
