@@ -83,6 +83,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         installStatusItem()
 
+        // Register the global chat hotkey (Carbon-based HotKeyManager, works on
+        // Intel) from the persisted ChatConfiguration, so the saved chord
+        // summons/toggles the chat window from anywhere. No-op if unset.
+        applyChatHotkey()
+
         // M13 follow-up (Renée 2026-06-04): bring up the floating toast overlay
         // panel. The whole toast rendering layer was un-body-swapped on Intel;
         // without this `setup()` the panel that hosts `ToastContainerView` is
@@ -440,16 +445,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     // MARK: - Configuration View Surface
     //
-    // Called from `ConfigurationView`'s hotkey picker (un-body-swapped
-    // in M11 Phase 11.A.3.1) after a new key chord is captured. Intel
-    // doesn't currently wire `HotKeyManager` (excluded), so this is a
-    // no-op surface. The chord is still persisted in
-    // `ChatConfiguration.hotkey` so when the global hotkey
-    // infrastructure eventually lands on Intel the value will round-
-    // trip.
+    // Called from `ConfigurationView`'s hotkey picker after a new key chord is
+    // captured, and once at launch. Registers the global hotkey via the
+    // (un-excluded) Carbon-based `HotKeyManager` — architecture-independent, so
+    // it works on Intel. The handler toggles the chat window (show/hide/create)
+    // via `ChatWindowManager.toggleLastFocused`. A nil hotkey unregisters.
     @MainActor
     public func applyChatHotkey() {
-        // No-op until Intel grows a HotKeyManager equivalent.
+        HotKeyManager.shared.register(hotkey: ChatConfiguration.shared.hotkey) {
+            ChatWindowManager.shared.toggleLastFocused()
+        }
     }
 }
 
