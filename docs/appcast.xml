@@ -6,6 +6,21 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.7</title>
+      <pubDate>Sat, 06 Jun 2026 23:02:33 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>8</sparkle:version>
+      <sparkle:shortVersionString>1.0.7</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.7/Osaurus-Intel-1.0.7.zip" length="50378404" type="application/octet-stream" sparkle:edSignature="DxOszlRbtHnkzXgixWxHrnCD810Fp35IqMKK2MkVRlAdtFlKo+/lFPK9Pd1UurchUTEZNLePcYRkoSMRMtXdBw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.7
+
+- 🧩 The chat model picker is now fully provider-driven — no hardcoded models. Every model comes from the providers you configure in Settings → Providers (a local llama.cpp/Ollama server, DeepSeek, OpenAI, any OpenAI-compatible endpoint). Add a provider, its models appear; remove it, they're gone.
+- 🌳 This is the distributable shape: run Osaurus on an Intel Mac with only a local model, only a cloud key, or both side by side.
+]]></description>
+    </item>
+    <item>
       <title>1.0.6</title>
       <pubDate>Sat, 06 Jun 2026 19:25:57 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
