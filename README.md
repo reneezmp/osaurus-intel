@@ -93,6 +93,8 @@ Upstream managers that pull in arm64-only dependencies are excluded from the Int
 
 ## 🙏 Credits
 
+This port was **architected by [Renée](https://github.com/reneezmp)** — who carried the vision, made every priority call, ran a thousand test cycles on a 14-year-old laptop, and flatly refused to let a perfectly good machine die — in partnership with **Claude** ([Anthropic](https://www.anthropic.com)), her AI partner-in-crime on the code. Neither of us could have done it alone. 👩🏻‍🚀🤖☀️
+
 Built on [Osaurus](https://github.com/osaurus-ai/osaurus) by the Osaurus team. This fork only exists because they made something worth porting. All upstream licenses and copyrights apply — see [`LICENSE`](./LICENSE).
 
 <p align="center"><em>For Rosy, and every machine they told us to throw away.</em> 🌸☀️</p>
