@@ -1481,7 +1481,21 @@ final class SystemPromptComposer: @unchecked Sendable {
                 prompt += "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
             }
         }
-        return ComposedContext(prompt: prompt, tools: tools)
+        // Estimate the token cost of the tool schema (name + description +
+        // serialized JSON-Schema parameters) so the context-budget popover can
+        // surface a real "Tools" rail instead of 0.
+        var toolTokens = 0
+        for t in tools {
+            toolTokens += ContextBudgetManager.estimateTokens(for: t.function.name)
+            toolTokens += ContextBudgetManager.estimateTokens(for: t.function.description ?? "")
+            if let params = t.function.parameters,
+                let data = try? JSONSerialization.data(withJSONObject: params.anyValue),
+                let json = String(data: data, encoding: .utf8)
+            {
+                toolTokens += ContextBudgetManager.estimateTokens(for: json)
+            }
+        }
+        return ComposedContext(prompt: prompt, toolTokens: toolTokens, tools: tools)
     }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
 }
@@ -1616,21 +1630,31 @@ struct ContextBreakdown: Sendable {
         inputTokens: Int = 0,
         outputTokens: Int = 0
     ) -> ContextBreakdown {
-        // Intel can't see into upstream's `ComposedContext` (the system-prompt
-        // composer is excluded), so we emit just the rails the
-        // FloatingInputCard popover actually surfaces from a remote-only
-        // session: conversation history (assistant + user turns), pending
-        // input, and active output. Empty-token rails are skipped so the
-        // popover stays compact.
+        // The Intel `ComposedContext` DOES carry the real system prompt and a
+        // tool-token estimate (see `SystemPromptComposer.composeChatContext`),
+        // so surface them as proper rails. `context` = the static prefix
+        // (System Prompt + Tools); `messages` = the dynamic part (Conversation
+        // + Input + Output), rendered below a divider — matching upstream's
+        // popover layout. Empty rails are skipped to keep it compact.
         var bd = ContextBreakdown()
+
+        let promptTokens =
+            composed.prompt.isEmpty ? 0 : ContextBudgetManager.estimateTokens(for: composed.prompt)
+        if promptTokens > 0 {
+            bd.context.append(Entry(id: "persona", label: "System Prompt", tokens: promptTokens, tint: .purple))
+        }
+        if composed.toolTokens > 0 {
+            bd.context.append(Entry(id: "tools", label: "Tools", tokens: composed.toolTokens, tint: .orange))
+        }
+
         if conversationTokens > 0 {
-            bd.context.append(Entry(id: "conversation", label: "Conversation", tokens: conversationTokens, tint: .blue))
+            bd.messages.append(Entry(id: "conversation", label: "Conversation", tokens: conversationTokens, tint: .blue))
         }
         if inputTokens > 0 {
             bd.messages.append(Entry(id: "input", label: "Input", tokens: inputTokens, tint: .cyan))
         }
         if outputTokens > 0 {
-            bd.messages.append(Entry(id: "output", label: "Output", tokens: outputTokens, tint: .purple))
+            bd.messages.append(Entry(id: "output", label: "Output", tokens: outputTokens, tint: .green))
         }
         return bd
     }
