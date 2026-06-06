@@ -11,24 +11,42 @@
 import AppKit
 import Foundation
 
+enum ToolApprovalDecision { case allow, deny, alwaysAllow }
+
 /// Native confirmation prompt for tools whose permission policy is "Ask".
 /// Upstream's `ToolPermissionPromptService` (a SwiftUI overlay) is amputated on
-/// Intel; a modal `NSAlert` is a dependency-free equivalent. Runs on the main
-/// thread (the engine `await`s it), blocking the run until the user decides.
+/// Intel; a modal `NSAlert` is a dependency-free equivalent that carries the
+/// same info — tool name, description, formatted arguments — plus Allow / Deny /
+/// Always Allow. Runs on the main thread (the engine `await`s it), blocking the
+/// run until the user decides.
 enum ToolApprovalPrompt {
     @MainActor
-    static func request(tool: String, arguments: String) -> Bool {
+    static func request(tool: String, description: String?, arguments: String) -> ToolApprovalDecision {
         let alert = NSAlert()
         alert.alertStyle = .warning
         alert.messageText = "Allow “\(tool)” to run?"
+
+        var info = ""
+        if let description, !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+            info += String(description.prefix(400)) + "\n\n"
+        }
         let args = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
-        alert.informativeText =
+        info +=
             args.isEmpty || args == "{}"
-            ? "The assistant requested this tool. It is set to “Ask” in your tool permissions."
+            ? "No arguments."
             : "Arguments:\n\(String(args.prefix(600)))"
-        alert.addButton(withTitle: "Allow")
-        alert.addButton(withTitle: "Deny")
-        return alert.runModal() == .alertFirstButtonReturn
+        alert.informativeText = info
+
+        alert.addButton(withTitle: "Allow")  // .alertFirstButtonReturn
+        alert.addButton(withTitle: "Deny")  // .alertSecondButtonReturn
+        let always = alert.addButton(withTitle: "Always Allow")  // .alertThirdButtonReturn
+        always.toolTip = "Run this tool automatically from now on (sets its policy to Auto)."
+
+        switch alert.runModal() {
+        case .alertFirstButtonReturn: return .allow
+        case .alertThirdButtonReturn: return .alwaysAllow
+        default: return .deny
+        }
     }
 }
 
@@ -426,11 +444,30 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
                             let approved: Bool
                             switch policy {
-                            case .deny: approved = false
+                            case .deny:
+                                approved = false
+                            case .auto:
+                                approved = true
                             case .ask:
-                                approved = await ToolApprovalPrompt.request(
-                                    tool: call.name, arguments: call.arguments)
-                            case .auto: approved = true
+                                let toolDescription =
+                                    request.tools?
+                                    .first(where: { $0.function.name == call.name })?
+                                    .function.description
+                                let decision = await ToolApprovalPrompt.request(
+                                    tool: call.name,
+                                    description: toolDescription,
+                                    arguments: call.arguments)
+                                switch decision {
+                                case .allow:
+                                    approved = true
+                                case .deny:
+                                    approved = false
+                                case .alwaysAllow:
+                                    approved = true
+                                    await MainActor.run {
+                                        ToolRegistry.shared.setPolicy(.auto, for: call.name)
+                                    }
+                                }
                             }
 
                             if !approved {
