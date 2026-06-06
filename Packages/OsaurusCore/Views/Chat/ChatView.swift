@@ -777,6 +777,12 @@ final class ChatSession: ObservableObject {
     }
 
     func stop() {
+        #if OSAURUS_INTEL
+        print(
+            "[ChatSession] stop() called — isStreaming=\(isStreaming) "
+                + "activeRunId=\(String(describing: activeRunId)) sessionId=\(String(describing: sessionId))"
+        )
+        #endif
         stopRequested = true
         let task = currentTask
         task?.cancel()
@@ -1819,7 +1825,16 @@ final class ChatSession: ObservableObject {
         let hasContent = !trimmed.isEmpty || !attachments.isEmpty
         let isRegeneration = !hasContent && !turns.isEmpty
         guard hasContent || isRegeneration else { return }
-        guard activeRunId == nil, !isStreaming else { return }
+        guard activeRunId == nil, !isStreaming else {
+            #if OSAURUS_INTEL
+            print(
+                "[ChatSession] send BLOCKED by gate: activeRunId="
+                    + "\(String(describing: activeRunId)) isStreaming=\(isStreaming) "
+                    + "sessionId=\(String(describing: sessionId))"
+            )
+            #endif
+            return
+        }
 
         // Fresh run: a previous stop() may have left the flag true. The
         // auto-flush in completeRunCleanup keys off this, so clear it
@@ -1881,7 +1896,16 @@ final class ChatSession: ObservableObject {
 
         currentTask = Task { @MainActor [weak self] in
             guard let self else { return }
-            guard self.isRunActive(runId) else { return }
+            guard self.isRunActive(runId) else {
+                #if OSAURUS_INTEL
+                print(
+                    "[ChatSession] run \(runId) went INACTIVE before start "
+                        + "(activeRunId=\(String(describing: self.activeRunId)) "
+                        + "cancelled=\(Task.isCancelled)) — aborting, no reply"
+                )
+                #endif
+                return
+            }
             debugLog("send: task started runId=\(runId) model=\(self.selectedModel ?? "nil")")
             lastStreamError = nil
             isStreaming = true

@@ -351,11 +351,40 @@ final class ChatWindowState: ObservableObject {
         agents = latest
 
         guard let newActive = latest.first(where: { $0.id == agentId }) else {
+            #if OSAURUS_INTEL
+            // SESSION-DEATH GUARD (Intel): a transient/partial `$agents`
+            // emission must NEVER tear down the live session. The Intel
+            // AgentManager rebuilds `agents` by re-decoding every custom-agent
+            // JSON from disk on each reload; if the active agent's file is
+            // momentarily unreadable (mid-write / transient I/O), it drops out
+            // of `latest` for one emission. The old code reacted by calling
+            // `switchAgent(.default)` -> `session.reset()`, wiping the
+            // conversation and killing any in-flight run ("name flashes, then
+            // poof"). Only fall back to Default when we're CONFIDENT the agent
+            // is genuinely gone: list non-empty, not mid-stream, and the
+            // agent's JSON truly no longer exists on disk.
+            let agentFile = OsaurusPaths.agents()
+                .appendingPathComponent("\(agentId.uuidString).json")
+            let fileStillExists = FileManager.default.fileExists(atPath: agentFile.path)
+            let trulyGone = !latest.isEmpty && !session.isStreaming && !fileStillExists
+            if trulyGone {
+                print("[ChatWindowState] active agent \(agentId) genuinely removed → fallback to Default")
+                switchAgent(to: Agent.defaultId)
+            } else {
+                print(
+                    "[ChatWindowState] IGNORING transient agents emission missing active agent "
+                        + "\(agentId) (count=\(latest.count) streaming=\(session.isStreaming) "
+                        + "fileExists=\(fileStillExists)) — keeping session alive"
+                )
+            }
+            return
+            #else
             // `switchAgent` updates theme/sessions/config and persists the
             // selection. `agents` was just swapped above, so any re-read
             // inside `switchAgent` sees the fresh list.
             switchAgent(to: Agent.defaultId)
             return
+            #endif
         }
 
         cachedActiveAgent = newActive
