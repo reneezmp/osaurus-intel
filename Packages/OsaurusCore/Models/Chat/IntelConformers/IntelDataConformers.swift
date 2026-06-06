@@ -459,14 +459,12 @@ struct AppChatConfigStub: Sendable {
 
 final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
 
-/// Intel stub for ChatConfigurationStore. Upstream persists the
-/// config to disk (`Models/Chat/ChatConfigurationStore.swift`,
-/// excluded on Intel); the Intel build keeps the config in-memory
-/// only — `ChatConfiguration` is a shared singleton, so view-driven
-/// mutations stick for the duration of the process but don't survive
-/// app restart. Restoring disk persistence on Intel is M11 follow-up
-/// work; for the M11.A.3 surface restoration what matters is that
-/// the save call no-ops cleanly (no crash, no log noise).
+/// Intel ChatConfigurationStore. Folds the passed instance into the shared
+/// singleton AND persists it to `~/.osaurus/config/chat.json` via
+/// `ChatConfiguration.persistToDisk()` — so Settings (core model, temperature,
+/// max tokens, context length, …) now survive app restart. The singleton loads
+/// the same file on first access (`ChatConfiguration.shared`). Keys match
+/// upstream's format so a migrated/Apple-Silicon file round-trips.
 final class ChatConfigurationStore: @unchecked Sendable {
     static func load() -> ChatConfiguration { ChatConfiguration.shared }
 
@@ -482,6 +480,8 @@ final class ChatConfigurationStore: @unchecked Sendable {
         if config !== ChatConfiguration.shared {
             ChatConfiguration.shared.adopt(config)
         }
+        // Persist to ~/.osaurus/config/chat.json so Settings survive restart.
+        ChatConfiguration.shared.persistToDisk()
     }
 }
 

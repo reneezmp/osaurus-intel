@@ -694,7 +694,14 @@ public enum PreflightSearchMode: String, Codable, CaseIterable, Sendable {
 // (config doesn't survive Intel app restarts yet).
 
 final class ChatConfiguration: @unchecked Sendable {
-    static let shared = ChatConfiguration()
+    // Load persisted settings from ~/.osaurus/config/chat.json the first time
+    // the singleton is touched, so Settings survive app restart (M11 follow-up
+    // that previously left the Intel config in-memory only).
+    static let shared: ChatConfiguration = {
+        let c = ChatConfiguration()
+        c.loadFromDiskIfPresent()
+        return c
+    }()
 
     // Tool / generation behaviour
     var disableTools: Bool = false
@@ -834,6 +841,101 @@ final class ChatConfiguration: @unchecked Sendable {
     /// returns the shared singleton so call-site identity checks
     /// (`config == .default`) hold for the duration of a process.
     static var `default`: ChatConfiguration { shared }
+
+    // MARK: - Disk persistence (Intel restore)
+    //
+    // Codable snapshot of the JSON-friendly fields. Keys match upstream's
+    // `config/chat.json` so a file written by the Apple-Silicon app (or a
+    // migrated one) round-trips. `defaultToolSelectionMode` (`Any?`) is the
+    // only field intentionally excluded — it is not Codable and is re-derived
+    // from `defaultManualToolNames` at the call site.
+    private struct DiskSnapshot: Codable {
+        var disableTools: Bool? = nil
+        var maxToolAttempts: Int? = nil
+        var topPOverride: Double? = nil
+        var hotkey: Hotkey? = nil
+        var systemPrompt: String? = nil
+        var temperature: Float? = nil
+        var maxTokens: Int? = nil
+        var contextLength: Int? = nil
+        var defaultModel: String? = nil
+        var generativeGreetingsEnabled: Bool? = nil
+        var greetingPersona: String? = nil
+        var enableClipboardMonitoring: Bool? = nil
+        var defaultManualToolNames: [String]? = nil
+        var defaultManualSkillNames: [String]? = nil
+        var coreModelProvider: String? = nil
+        var coreModelName: String? = nil
+        var workTemperature: Float? = nil
+        var workMaxTokens: Int? = nil
+        var workTopPOverride: Float? = nil
+        var workMaxIterations: Int? = nil
+        var preflightSearchMode: PreflightSearchMode? = nil
+    }
+
+    /// Apply any persisted values from `config/chat.json`. Only non-nil keys
+    /// overwrite defaults, so a partial file (or an upstream file with extra
+    /// keys we ignore) is safe.
+    func loadFromDiskIfPresent() {
+        guard let data = try? Data(contentsOf: OsaurusPaths.chatConfigFile()),
+            let s = try? JSONDecoder().decode(DiskSnapshot.self, from: data)
+        else { return }
+        if let v = s.disableTools { disableTools = v }
+        if let v = s.maxToolAttempts { maxToolAttempts = v }
+        if let v = s.topPOverride { topPOverride = v }
+        if let v = s.hotkey { hotkey = v }
+        if let v = s.systemPrompt { systemPrompt = v }
+        if let v = s.temperature { temperature = v }
+        if let v = s.maxTokens { maxTokens = v }
+        if let v = s.contextLength { contextLength = v }
+        if let v = s.defaultModel { defaultModel = v }
+        if let v = s.generativeGreetingsEnabled { generativeGreetingsEnabled = v }
+        if let v = s.greetingPersona { greetingPersona = v }
+        if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
+        if let v = s.defaultManualToolNames { defaultManualToolNames = v }
+        if let v = s.defaultManualSkillNames { defaultManualSkillNames = v }
+        if let v = s.coreModelProvider { coreModelProvider = v }
+        if let v = s.coreModelName { coreModelName = v }
+        if let v = s.workTemperature { workTemperature = v }
+        if let v = s.workMaxTokens { workMaxTokens = v }
+        if let v = s.workTopPOverride { workTopPOverride = v }
+        if let v = s.workMaxIterations { workMaxIterations = v }
+        if let v = s.preflightSearchMode { preflightSearchMode = v }
+    }
+
+    /// Write the current settings to `config/chat.json` atomically.
+    func persistToDisk() {
+        var s = DiskSnapshot()
+        s.disableTools = disableTools
+        s.maxToolAttempts = maxToolAttempts
+        s.topPOverride = topPOverride
+        s.hotkey = hotkey
+        s.systemPrompt = systemPrompt
+        s.temperature = temperature
+        s.maxTokens = maxTokens
+        s.contextLength = contextLength
+        s.defaultModel = defaultModel
+        s.generativeGreetingsEnabled = generativeGreetingsEnabled
+        s.greetingPersona = greetingPersona
+        s.enableClipboardMonitoring = enableClipboardMonitoring
+        s.defaultManualToolNames = defaultManualToolNames
+        s.defaultManualSkillNames = defaultManualSkillNames
+        s.coreModelProvider = coreModelProvider
+        s.coreModelName = coreModelName
+        s.workTemperature = workTemperature
+        s.workMaxTokens = workMaxTokens
+        s.workTopPOverride = workTopPOverride
+        s.workMaxIterations = workMaxIterations
+        s.preflightSearchMode = preflightSearchMode
+
+        let url = OsaurusPaths.chatConfigFile()
+        OsaurusPaths.ensureExistsSilent(url.deletingLastPathComponent())
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(s) {
+            try? data.write(to: url, options: [.atomic])
+        }
+    }
 }
 
 // MARK: - ManagementBadgeStore (Intel stub — M11)
