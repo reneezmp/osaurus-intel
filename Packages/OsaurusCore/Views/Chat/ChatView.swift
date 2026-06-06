@@ -249,6 +249,9 @@ final class ChatSession: ObservableObject {
     /// run was cancelled by the user (or by `sendNowInterrupting`) and must
     /// not auto-flush a queued send. Reset to false at the top of `send(...)`.
     private var stopRequested: Bool = false
+    /// Guards one-shot LLM title generation (Intel). Set true once we attempt
+    /// a model-generated title for a session so we don't regenerate each turn.
+    private var llmTitleAttempted: Bool = false
     var chatEngineFactory: @MainActor () -> ChatEngineProtocol = {
         ChatEngine(source: .chatUI)
     }
@@ -767,6 +770,73 @@ final class ChatSession: ObservableObject {
         }
     }
 
+    #if OSAURUS_INTEL
+    /// Ask the configured core model (falling back to the active chat model)
+    /// for a short title summarizing the first exchange, then apply it. Runs
+    /// off the send path; any failure leaves the first-line fallback title.
+    private func generateLLMTitle(userText: String, assistantText: String, sessionId: UUID) {
+        let titleModel =
+            ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-v4-flash"
+        let engine = chatEngineFactory()
+        let sys = ChatMessage(
+            role: "system",
+            content:
+                "You write very short chat titles. Reply with ONLY a 3–6 word title in Title "
+                + "Case — no quotes, no trailing punctuation, no preamble.")
+        let usr = ChatMessage(
+            role: "user",
+            content:
+                "First user message:\n\(userText)\n\nAssistant reply:\n"
+                + "\(String(assistantText.prefix(800)))\n\nTitle:")
+        let req = ChatCompletionRequest(
+            model: titleModel,
+            messages: [sys, usr],
+            temperature: 0.3,
+            max_tokens: 24,
+            stream: false,
+            top_p: nil,
+            frequency_penalty: nil,
+            presence_penalty: nil,
+            stop: nil,
+            n: nil,
+            tools: nil,
+            tool_choice: nil,
+            session_id: nil
+        )
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let resp = try await engine.completeChat(request: req)
+                let cleaned = Self.cleanTitle(resp.choices.first?.message?.content ?? "")
+                // Only apply if we're still on the same session and got a title.
+                guard !cleaned.isEmpty, self.sessionId == sessionId else { return }
+                self.title = cleaned
+                self.save()
+                self.onSessionChanged?()
+            } catch {
+                print("[ChatSession] LLM title generation failed: \(error.localizedDescription)")
+            }
+        }
+    }
+
+    /// Normalize a model-returned title: strip quotes/newlines, trim, cap length.
+    static func cleanTitle(_ raw: String) -> String {
+        var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+        t = t.components(separatedBy: .newlines).first ?? t
+        t = t.replacingOccurrences(of: "\"", with: "")
+            .replacingOccurrences(of: "“", with: "")
+            .replacingOccurrences(of: "”", with: "")
+            .replacingOccurrences(of: "`", with: "")
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        // Drop a leading "Title:" the model sometimes echoes.
+        if t.lowercased().hasPrefix("title:") {
+            t = String(t.dropFirst(6)).trimmingCharacters(in: .whitespaces)
+        }
+        if t.count > 60 { t = String(t.prefix(57)) + "..." }
+        return t
+    }
+    #endif
+
     func sendCurrent() {
         guard !isStreaming else { return }
         let text = input
@@ -867,6 +937,7 @@ final class ChatSession: ObservableObject {
         }
         sessionId = nil
         title = "New Chat"
+        llmTitleAttempted = false
         createdAt = Date()
         updatedAt = Date()
         source = .chat
@@ -1103,6 +1174,8 @@ final class ChatSession: ObservableObject {
         stop()
         sessionId = data.id
         title = data.title
+        // Existing session already has a title — don't regenerate one.
+        llmTitleAttempted = true
         createdAt = data.createdAt
         updatedAt = data.updatedAt
         agentId = data.agentId
@@ -1492,6 +1565,21 @@ final class ChatSession: ObservableObject {
         }
 
         let assistantContent = turns.last(where: { $0.role == .assistant })?.content
+
+        #if OSAURUS_INTEL
+        // Smart title from the core model after the first exchange. Upstream
+        // never had model-generated titles (first-line only); this adds them
+        // on Intel. One-shot, async, non-blocking; first-line title stays as
+        // the fallback if the model call fails.
+        if let sid = sessionId, !llmTitleAttempted,
+            turns.filter({ $0.role == .user }).count == 1,
+            let assistant = assistantContent, !assistant.isEmpty
+        {
+            llmTitleAttempted = true
+            generateLLMTitle(
+                userText: context.userContent, assistantText: assistant, sessionId: sid)
+        }
+        #endif
 
         let agentUUID = UUID(uuidString: context.memoryAgentId) ?? Agent.defaultId
         let memoryOff = AgentManager.shared.effectiveMemoryDisabled(for: agentUUID)
