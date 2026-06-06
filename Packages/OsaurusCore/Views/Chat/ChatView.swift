@@ -821,16 +821,20 @@ final class ChatSession: ObservableObject {
             tool_choice: nil,
             session_id: nil
         )
+        print("[ChatSession] generating title via core model '\(titleModel)' for session \(sessionId)")
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
                 let resp = try await engine.completeChat(request: req)
-                let cleaned = Self.cleanTitle(resp.choices.first?.message?.content ?? "")
+                let raw = resp.choices.first?.message?.content ?? ""
+                let cleaned = Self.cleanTitle(raw)
+                print("[ChatSession] title raw='\(raw.prefix(60))' cleaned='\(cleaned)'")
                 // Only apply if we're still on the same session and got a title.
                 guard !cleaned.isEmpty, self.sessionId == sessionId else { return }
                 self.title = cleaned
                 self.save()
                 self.onSessionChanged?()
+                print("[ChatSession] title applied: '\(cleaned)'")
             } catch {
                 print("[ChatSession] LLM title generation failed: \(error.localizedDescription)")
             }

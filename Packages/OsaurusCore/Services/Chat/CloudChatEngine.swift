@@ -448,7 +448,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
         urlRequest.timeoutInterval = 300
 
-        let body: [String: Any] = [
+        var body: [String: Any] = [
             "model": request.model ?? model,
             "messages": request.messages.map { msg -> [String: Any] in
                 var m: [String: Any] = ["role": msg.role]
@@ -457,6 +457,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             },
             "stream": false,
         ]
+        // Honor max_tokens + temperature, and apply reasoning control. Without
+        // this a reasoning core model could spend the whole budget on
+        // reasoning_content and return empty content — which is exactly why
+        // model-generated chat titles came back blank. With no modelOptions,
+        // applyReasoningMode disables thinking (fast, deterministic for titles).
+        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
+        if let temperature = request.temperature { body["temperature"] = temperature }
+        applyReasoningMode(request, into: &body)
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
