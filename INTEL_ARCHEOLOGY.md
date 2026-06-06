@@ -1986,9 +1986,92 @@ forensics, NOT guessing):
 - TODO (deferred): GitHub MCP token (`MCPProviderKeychain`) likely needs the same
   file-backed/isolated treatment if GitHub tools are used on Rosy.
 
-### Tags laid (updated)
+---
+
+## M14 — Public, self-updating, USABLE (2026-06-06)
+
+Rosy runs the real thing daily. Everything Renée flagged in the gauntlet is
+fixed, the fork is published, and it **updates itself**. This is the usable
+version.
+
+### Chat-runtime bug fixes (all Intel-mirror gaps)
+- **Session death (the big one)** — restored conversations had `tool`-role
+  messages missing `tool_call_id` (dropped on persistence); DeepSeek 400s the
+  WHOLE request → every send in that session died silently. Two fixes:
+  `CloudChatEngine` now surfaces non-2xx HTTP errors (was swallowing them into an
+  empty "poof" turn), and `sanitizeToolSequence()` repairs the message sequence
+  at send time (pairs each tool result to its call id, backfills missing ones) —
+  healing already-corrupted on-disk sessions.
+- **Live reasoning stream** — `StreamingDeltaProcessor.receiveReasoning` appended
+  thinking but never called `onChange()`, so the Think panel only appeared at
+  end-of-stream (an 8k-char thought looked like a multi-second freeze). One line.
+- **Live tool-call cards** — the block builder only rendered cards from completed
+  `turn.toolCalls` (which carry the result); it never emitted a `.pendingToolCall`
+  block for `pendingToolName`. The engine also wasn't streaming the args. Now the
+  card appears the moment the model emits the call, with the query building live.
+- **Smart titles** — `completeChat` dropped `max_tokens` and never applied
+  reasoning control, so a reasoning core model burned its budget thinking and
+  returned empty content → blank title. Plus `generateLLMTitle` (Intel) calls the
+  core model after the first exchange (upstream never had model titles at all).
+- **Context-budget popover** — `cachedContext` is only set on send, so restored
+  sessions fell to `from(manifest:)` which returned empty AND discarded its token
+  args. Now the nil path builds a preview (agent prompt + registered tool specs)
+  and reuses `from(context:)`; shows System Prompt + Tools + Conversation + Output.
+  (The extra upstream rows — Platform / Model Family Guidance / Grounding /
+  Capability Discovery — are amputated subsystems; our breakdown is honest.)
+- **Settings persistence** — `ChatConfiguration` (Intel class) was in-memory only;
+  now persists to `config/chat.json` (core model, temperature, hotkey, …).
+- **Tool permissions — persist + enforce** — `_policies`/`disabledToolNames` were
+  in-memory only AND advisory only. Now persisted to `config/tool-policies.json`,
+  and `CloudChatEngine` enforces the effective policy before running a tool: Deny
+  blocks it, Ask shows the **real upstream permission card**
+  (`ToolPermissionPromptService` + `ToolPermissionView` — un-excluded, every dep
+  exists on Intel; was excluded purely defensively).
+- **Global hotkey** — un-excluded the pure-Carbon `HotKeyManager` + un-gated the
+  real `HotkeyRecorder`; handler toggles the chat window. Two follow-up fixes:
+  (a) the Intel `ChatWindowManager.toggleLastFocused/showWindow` never activated
+  the app or set `.moveToActiveSpace`, so a press from another app (full-screen
+  Safari) landed the window on a hidden Space → new `bringToFront()` activates +
+  moves to the active Space; (b) re-registration was silently skipped because
+  Intel `ChatConfigurationStore.load()` returns the shared singleton, so the
+  "hotkey changed?" check compared it to itself after `save()` — capture the old
+  value first.
+
+### Release + self-update pipeline
+- **Sparkle reroute** — `SUFeedURL` → `raw.githubusercontent.com/reneezmp/osaurus/
+  intel-fork/docs/appcast.xml`; generated the fork's OWN EdDSA key pair
+  (`SUPublicEDKey` = `7Nh8jSxFmE2DGw3BGQ9YdIpM115AU743EXUuMA9fN3c=`; **private key
+  in Renée's login Keychain + backed up at `~/Desktop/sparkle_private_key.txt` —
+  KEEP SECRET, never commit**). Re-enabled the Intel updater (it was hard-disabled
+  to avoid pulling upstream's arm64 builds — safe now that the feed is ours).
+- **`scripts/release/cut_intel_release.sh <ver> "notes"`** — one command: builds,
+  auto-increments `CFBundleVersion` from the appcast, ad-hoc signs, Sparkle-signs
+  the zip, prepends the appcast item, `gh release create`, pushes the feed. Refuses
+  a dirty tree / existing version.
+- **Published:** 1.0.1 (baseline) → 1.0.2 (budget/title/permissions) → 1.0.3
+  (hotkey activation + richer prompt) → 1.0.4 (real permission card + hotkey
+  re-register). Rosy confirmed it **auto-updated** 1.0.2 → 1.0.3 → 1.0.4 on its own.
+- **README** rewritten as the fork's own story (anti-e-waste, what works vs
+  amputated, install/build), crediting Renée (architect) + Claude (code).
+
+### Roadmap (planning after Renée's rest — NOT started)
+1. **`osaurus-intel-plugins` repo** — separate repo hosting x86_64 plugin dylibs +
+   a plugin INDEX the app fetches (restore upstream's `PluginRepositoryService`
+   for Intel). Easiest win — do first.
+2. **Upstream→Intel sync pipeline** (~200 commits behind). We CANNOT `git merge`
+   (too divergent: custom `exclude:` + mirrors) — it's selective cherry-pick /
+   re-implement. Core = a triage rubric per upstream commit: touches an amputated
+   subsystem (MLX/voice/sandbox/vectura) or Tahoe-only API → SKIP; touches shared
+   code → cherry-pick; touches a file we `exclude:` → re-implement in the mirror.
+   Prioritize security + bugfixes in shared code; don't chase feature parity.
+   Add a monthly cadence so we never hit 200-behind again.
+3. **Compatibility ledger** (`UPSTREAM_SYNC.md`) — the pipeline's output: every
+   upstream commit tracked as ported / skipped+reason / pending. (Plans 2/3 = one
+   effort; the pipeline produces the catalogue.)
+
+### Tags laid
 `m11-settings-complete` · `m12-chat-complete` · `m13-schedules` (0b3a5d2a) ·
-`m9-plugins-complete` (aa46d50b) · **`m7-rosy` (M7 — Osaurus running natively on
-Rosy, cloud chat confirmed 2026-06-05).**
-Latest commit: keychain cross-app isolation (Intel file-only).
-Consider tag `m9-plugins-host` at `d349a25c`.
+`m9-plugins-complete` (aa46d50b) · `m9-plugins-host` (d349a25c) ·
+`m7-rosy` (Osaurus native on Rosy, 2026-06-05).
+Releases: `1.0.1`–`1.0.4`. Latest: 1.0.4 (build 5), commit `075255d6`.
+Consider tag `m14-usable` at `075255d6`.
