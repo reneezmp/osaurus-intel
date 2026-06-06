@@ -395,12 +395,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         for call in orderedCalls {
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
                             let result: String
+                            let toolStart = Date()
+                            NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
                             do {
                                 result = try await ToolRegistry.shared.execute(
                                     name: call.name,
                                     argumentsJSON: call.arguments
                                 )
+                                NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                             } catch {
+                                NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
                                 result = ToolEnvelope.fromError(error, tool: call.name)
                             }
                             continuation.yield(
