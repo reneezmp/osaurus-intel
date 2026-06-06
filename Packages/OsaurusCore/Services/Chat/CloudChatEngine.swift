@@ -128,6 +128,68 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return m
     }
 
+    /// Repair a (possibly restored) wire-message sequence so it satisfies
+    /// DeepSeek's strict tool-call schema. Sessions persisted by earlier Intel
+    /// builds could drop `tool_call_id` on tool-result turns; DeepSeek then
+    /// rejects the ENTIRE request with `400 … messages[N]: missing field
+    /// tool_call_id`, permanently bricking that conversation. We rebuild a
+    /// valid sequence:
+    ///   • each `assistant.tool_calls` entry is guaranteed a non-empty id;
+    ///   • each following `tool` message is matched, in order, to a pending
+    ///     call id (preserving an already-valid id, backfilling a missing one);
+    ///   • a `tool` message with no pending call is demoted to plain user text
+    ///     so its content survives without breaking the schema;
+    ///   • an `assistant.tool_calls` left unanswered gets synthetic empty tool
+    ///     results so it isn't a dangling call.
+    static func sanitizeToolSequence(_ input: [[String: Any]]) -> [[String: Any]] {
+        var out: [[String: Any]] = []
+        var pending: [String] = []  // call ids awaiting a tool result, in order
+
+        func flushPending() {
+            for id in pending {
+                out.append(["role": "tool", "tool_call_id": id, "content": "(no result)"])
+            }
+            pending.removeAll()
+        }
+
+        for var msg in input {
+            switch msg["role"] as? String {
+            case "assistant":
+                flushPending()
+                if var calls = msg["tool_calls"] as? [[String: Any]], !calls.isEmpty {
+                    var ids: [String] = []
+                    for i in calls.indices {
+                        var id = (calls[i]["id"] as? String) ?? ""
+                        if id.isEmpty { id = "call_\(UUID().uuidString.prefix(20))" }
+                        calls[i]["id"] = id
+                        ids.append(id)
+                    }
+                    msg["tool_calls"] = calls
+                    pending = ids
+                }
+                out.append(msg)
+            case "tool":
+                let existing = (msg["tool_call_id"] as? String) ?? ""
+                if !existing.isEmpty, let idx = pending.firstIndex(of: existing) {
+                    pending.remove(at: idx)
+                    out.append(msg)  // already valid
+                } else if !pending.isEmpty {
+                    msg["tool_call_id"] = pending.removeFirst()
+                    out.append(msg)  // backfilled
+                } else {
+                    // Orphan tool result — preserve content as user text.
+                    let content = (msg["content"] as? String) ?? ""
+                    out.append(["role": "user", "content": content.isEmpty ? "(tool result)" : content])
+                }
+            default:
+                flushPending()
+                out.append(msg)
+            }
+        }
+        flushPending()
+        return out
+    }
+
     /// OpenAI-compatible `tools` array from the request's tool specs. The
     /// JSON-Schema `parameters` come through `JSONValue.anyValue`.
     private func encodeTools(_ tools: [Tool]?) -> [[String: Any]]? {
@@ -205,7 +267,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // full context. (M12 Gap 3 — engine-side agent loop, since
                     // the upstream RemoteProviderService tool path is amputated
                     // on Intel.)
-                    var wireMessages = request.messages.map { self.encodeMessage($0) }
+                    var wireMessages = Self.sanitizeToolSequence(
+                        request.messages.map { self.encodeMessage($0) }
+                    )
                     let maxToolRounds = 12
                     var round = 0
                     var totalChunks = 0
