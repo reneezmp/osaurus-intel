@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  OnboardingConfigureAIView.swift
 //  osaurus
@@ -20,7 +19,6 @@
 //     per-path substate body that slides direction-aware between picker
 //     and drilled-in forms.
 //   - `ConfigureAICTA`: the footer primary action, dispatched per substate.
-//   - `ConfigureAISecondary`: the footer secondary text-link slot.
 //
 
 import SwiftUI
@@ -55,6 +53,9 @@ enum LocalSubstate: Equatable {
 
 enum APISubstate: Equatable {
     case picker
+    /// "Use an API key" drill-in: grouped list of API-key vendors, the local
+    /// Ollama option, and the custom OpenAI-compatible escape hatch.
+    case apiKeyPicker
     case keyForm(ProviderPreset)
     case customForm
 }
@@ -65,19 +66,6 @@ enum APITestResult: Equatable {
 }
 
 // MARK: - Auth choice protocol
-
-/// Bridges the OpenAI and OpenRouter credential-mode enums so the
-/// auth-choice card UI doesn't need a copy-pasted row factory per
-/// provider. Each conforming type just exposes the human-readable
-/// title / subtitle / SF Symbol it should render with.
-private protocol AuthChoiceMode {
-    var title: String { get }
-    var subtitle: String { get }
-    var icon: String { get }
-}
-
-extension OpenAIProviderCredentialMode: AuthChoiceMode {}
-extension OpenRouterCredentialMode: AuthChoiceMode {}
 
 // MARK: - Resolved provider config
 
@@ -134,24 +122,15 @@ struct CustomProviderForm {
 
 @MainActor
 final class ConfigureAIState: ObservableObject {
-    /// Provider order inside the Cloud tab. Curation reasoning:
-    ///   1. OAuth-capable providers lead — they're the lowest-friction
-    ///      onboarding path (one browser round-trip, no API-key paste).
-    ///   2. Ollama follows, badged as "Local", so users who already run
-    ///      a local server discover it without scrolling.
-    ///   3. The rest of the paste-an-API-key providers follow.
-    ///   4. The "Custom / OpenAI-compatible" escape hatch lives at the
-    ///      tail end.
-    static let onboardingPresets: [ProviderPreset] = [
-        .openai, .openrouter,
-        .ollama,
-        .anthropic, .google, .deepseek, .xai, .venice,
-        .custom,
-    ]
-
     @Published var selectedPath: ConfigurePath = .local
     @Published var localSubstate: LocalSubstate = .picker
     @Published var apiSubstate: APISubstate = .picker
+
+    /// Guards `applyDefaultPathIfNeeded(totalMemoryGB:)` so the RAM-based
+    /// default path is only ever applied once. Without it a user who manually
+    /// switched back to Local would be bounced to Cloud again on the next
+    /// `onAppear`.
+    private var didApplyDefaultPath = false
 
     /// Direction the next substate transition should travel. Mirrors the
     /// global step `OnboardingDirection` so the substate slide reads as a
@@ -160,31 +139,55 @@ final class ConfigureAIState: ObservableObject {
 
     // Local
     @Published var selectedModel: MLXModel? = nil
+    /// Whether the local picker has expanded past the single opinionated
+    /// default to reveal the remaining eligible models. Lives on the state
+    /// (not the body view) so the choice survives step slide transitions.
+    @Published var showAllLocalModels = false
 
     // API
     @Published var apiKey: String = ""
-    @Published var openAIAuthMode: OpenAIProviderCredentialMode = .chatGPTSubscription
-    @Published var openRouterAuthMode: OpenRouterCredentialMode = .oauthSignIn
+    /// The connection method pinned for the selected provider, set from the
+    /// catalog at selection time (OAuth for top-level rows, `.apiKey` for the
+    /// "Use an API key" sub-list). There is no in-form fork; this drives the
+    /// CTA, key field, save/test branches, and back-routing.
+    @Published var selectedAuthMethod: ProviderPickerAuthMethod = .apiKey
     @Published var oauthTokens: RemoteProviderOAuthTokens? = nil
+
+    /// The OAuth flavor of the current selection, if any.
+    var selectedOAuthKind: ProviderOAuthKind? {
+        if case .oauth(let kind) = selectedAuthMethod { return kind }
+        return nil
+    }
     @Published var customForm = CustomProviderForm()
     @Published var isTesting = false
     @Published var isSaving = false
     @Published var testResult: APITestResult? = nil
+    /// One-shot latch so the auto-advance-on-green and a manual CTA press can't
+    /// both finalize. Reset whenever credentials are cleared (back / reselect).
+    var hasFinalizedAPI = false
 
-    /// Two-tab layout: a curated download (Local) and a provider picker
-    /// (Cloud / locally-hosted via Ollama). Apple Intelligence was
-    /// retired from onboarding; it lives in Settings for the small
-    /// audience that wants it.
-    var availablePaths: [ConfigurePath] {
-        [.local, .apiProvider]
+    /// Whether the Local tab should be offered at all on this Mac. Under the
+    /// `cloudDefaultMemoryCeilingGB` threshold the curated local picks are too
+    /// heavy to run well, so we hide Local entirely and steer the user to a
+    /// hosted provider. `totalMemoryGB <= 0` (monitor not reported yet) fails
+    /// open so we never wrongly hide Local on a capable machine.
+    static func isLocalTabAvailable(totalMemoryGB: Double) -> Bool {
+        totalMemoryGB <= 0 || totalMemoryGB >= cloudDefaultMemoryCeilingGB
     }
 
-    var footerCaption: LocalizedStringKey {
-        switch selectedPath {
-        case .local: return "Stays on your Mac. Nothing sent anywhere."
-        case .apiProvider: return "Your key stays on your Mac, locked in the Keychain."
-        }
+    /// Paths offered on this Mac: both tabs normally, Cloud-only when the
+    /// machine can't comfortably run a local brain.
+    func availablePaths(totalMemoryGB: Double) -> [ConfigurePath] {
+        Self.isLocalTabAvailable(totalMemoryGB: totalMemoryGB)
+            ? [.local, .apiProvider]
+            : [.apiProvider]
     }
+
+    // No footer caption on either tab. The reassurance copy crowded the footer,
+    // and — more importantly — a caption on one tab but not the other makes the
+    // footer (and thus the centered left-column dino) jump in height when the
+    // user switches tabs. Keeping both captionless holds the layout steady.
+    var footerCaption: LocalizedStringKey? { nil }
 
     func selectPath(_ path: ConfigurePath) {
         // Path changes are lateral, but we treat them as forward motion so
@@ -250,17 +253,68 @@ final class ConfigureAIState: ObservableObject {
         }
     }
 
-    /// Picks the first `isTopSuggestion` model that this Mac can run, so
-    /// onboarding never auto-selects a disabled row that would dead-end
-    /// the CTA. When every candidate is `.tooLarge` `selectedModel`
-    /// stays nil and the picker shows the empty-state redirect instead.
-    /// `.unknown` (no param info / monitor not yet populated) falls
-    /// through as eligible.
+    /// At or below this much unified memory, onboarding defaults to the Cloud
+    /// tab: the curated local picks are compute-intensive, so a small machine
+    /// is more likely to have a good first run with a hosted provider.
+    private static let cloudDefaultMemoryCeilingGB: Double = 24
+
+    /// Picks the lowest-friction default tab for this Mac on first appearance
+    /// (see `cloudDefaultMemoryCeilingGB`). Applied at most once (see
+    /// `didApplyDefaultPath`) so it never overrides a path the user chose by
+    /// hand.
+    func applyDefaultPathIfNeeded(totalMemoryGB: Double) {
+        guard !didApplyDefaultPath else { return }
+        // `totalMemoryGB == 0` means the monitor hasn't reported yet; wait for
+        // a real value before committing to a default.
+        guard totalMemoryGB > 0 else { return }
+        didApplyDefaultPath = true
+        if totalMemoryGB <= Self.cloudDefaultMemoryCeilingGB {
+            selectedPath = .apiProvider
+        }
+    }
+
+    /// Auto-selects the recommended local pick — the best model this Mac can
+    /// run — so the picker lands on a sensible default the user can just
+    /// accept. The rule is deliberately simple and hardware-deterministic:
+    ///
+    ///   1. If a curated top pick is already on disk, keep it. The user
+    ///      downloaded (and presumably ran) it before, so the compat
+    ///      heuristic shouldn't lock them out.
+    ///   2. Otherwise pick the *largest* top pick this Mac can comfortably
+    ///      run (`.compatible`), falling back to the largest that merely fits
+    ///      when nothing lands in the comfortable band. Bigger ≈ higher
+    ///      quality, so "the best the machine can handle" is the best
+    ///      first-run experience.
+    ///
+    /// Stays nil when nothing is downloaded and every curated candidate is
+    /// `.tooLarge`, so the picker shows the empty-state redirect instead.
+    /// `.unknown` (no param info / monitor not yet populated) fails open.
     func ensureLocalSelection(totalMemoryGB: Double) {
         guard selectedModel == nil else { return }
-        selectedModel = ModelManager.shared.suggestedModels.first(where: {
-            $0.isTopSuggestion && $0.compatibility(totalMemoryGB: totalMemoryGB) != .tooLarge
-        })
+        let fits: (MLXModel) -> Bool = {
+            $0.compatibility(totalMemoryGB: totalMemoryGB) != .tooLarge
+        }
+
+        // 1. A curated top pick already on disk wins. Onboarding only shows
+        // top picks, so we don't fall back to ad-hoc downloaded models that
+        // wouldn't appear in the list anyway.
+        let downloaded = ModelManager.shared.deduplicatedModels().filter(\.isDownloaded)
+        if let topDownloaded = downloaded.first(where: \.isTopSuggestion) {
+            selectedModel = topDownloaded
+            return
+        }
+
+        // 2. The largest top pick the Mac can comfortably run.
+        let candidates = ModelManager.shared.suggestedModels.filter {
+            $0.isTopSuggestion && fits($0)
+        }
+        let comfortable = candidates.filter {
+            $0.compatibility(totalMemoryGB: totalMemoryGB) == .compatible
+        }
+        let pool = comfortable.isEmpty ? candidates : comfortable
+        selectedModel =
+            pool.max(by: { ($0.estimatedMemoryGB ?? 0) < ($1.estimatedMemoryGB ?? 0) })
+            ?? candidates.first
     }
 
     func startLocalDownloadOrContinue(onComplete: () -> Void) {
@@ -305,7 +359,7 @@ final class ConfigureAIState: ObservableObject {
         switch apiSubstate {
         case .keyForm(let p): return p
         case .customForm: return .custom
-        case .picker: return nil
+        case .picker, .apiKeyPicker: return nil
         }
     }
 
@@ -317,10 +371,9 @@ final class ConfigureAIState: ObservableObject {
             // press Connect with an empty key (Ollama, LM Studio, etc.).
             return customForm.isLocalhost || apiKey.count > 5
         }
-        if provider == .openai && openAIAuthMode == .chatGPTSubscription {
-            return true
-        }
-        if provider == .openrouter && openRouterAuthMode == .oauthSignIn {
+        // A browser sign-in is connectable as soon as the provider is picked —
+        // the OAuth flow itself collects the credential.
+        if selectedAuthMethod.isOAuth {
             return true
         }
         // Presets that don't require auth (e.g. Ollama) are connectable as soon
@@ -352,19 +405,63 @@ final class ConfigureAIState: ObservableObject {
     func resetAPIState(direction: OnboardingDirection = .backward) {
         substateDirection = direction
         apiSubstate = .picker
+        clearAPICredentials()
+    }
+
+    /// Clear entered credentials, auth-mode selections, and the last test
+    /// result. Shared by every "back out of a form" path so stale secrets
+    /// never leak across provider selections.
+    private func clearAPICredentials() {
         apiKey = ""
-        openAIAuthMode = .chatGPTSubscription
-        openRouterAuthMode = .oauthSignIn
+        selectedAuthMethod = .apiKey
         oauthTokens = nil
         customForm.reset()
         testResult = nil
+        hasFinalizedAPI = false
+    }
+
+    /// Top-level "Use an API key" drill-in (OAuth-first picker → grouped
+    /// API-key sub-list).
+    func showAPIKeyPicker() {
+        substateDirection = .forward
+        apiSubstate = .apiKeyPicker
+    }
+
+    /// Back out of the API-key sub-list to the OAuth-first top level.
+    func popAPIKeyPickerToTop() {
+        substateDirection = .backward
+        apiSubstate = .picker
+    }
+
+    /// Back out of a provider form. A form entered via the OAuth-first top level
+    /// returns there; everything reached through the "Use an API key" sub-list
+    /// (key vendors including the dual-mode OAuth presets, Ollama, Custom)
+    /// returns to that sub-list. Routing is read from the pinned auth mode
+    /// *before* `clearAPICredentials()` resets it to the OAuth defaults.
+    func popFormToPicker(for preset: ProviderPreset) {
+        substateDirection = .backward
+        // A form reached via OAuth lives at the top level; everything else
+        // (pasted-key vendors, dual-mode presets in api-key mode, Ollama,
+        // Custom) was reached through the "Use an API key" sub-list. Read the
+        // pinned method before `clearAPICredentials()` resets it.
+        let returnToTop = selectedAuthMethod.isOAuth
+        clearAPICredentials()
+        apiSubstate = returnToTop ? .picker : .apiKeyPicker
     }
 
     /// Picker → form drill-in. Tapping a provider card immediately advances
     /// to its key form (or the custom-provider form), no "Continue" press
     /// required.
-    func selectAPIPreset(_ preset: ProviderPreset) {
+    ///
+    /// The connection method for dual-mode providers (OpenAI, OpenRouter, xAI)
+    /// is decided by where the card lives: the OAuth-first top level uses OAuth,
+    /// the "Use an API key" sub-list (`preferAPIKey`) uses the pasted key. There
+    /// is no in-form fork, so we pin the auth mode here at selection time.
+    func selectAPIPreset(_ preset: ProviderPreset, preferAPIKey: Bool = false) {
         substateDirection = .forward
+        if let entry = ProviderCatalog.entry(for: preset) {
+            selectedAuthMethod = preferAPIKey ? .apiKey : (entry.authMethods.first ?? .apiKey)
+        }
         if preset == .custom {
             apiSubstate = .customForm
         } else {
@@ -404,16 +501,22 @@ final class ConfigureAIState: ObservableObject {
             guard let self = self else { return }
             let result: APITestResult
             do {
-                if self.currentAPIProvider == .openai && self.openAIAuthMode == .chatGPTSubscription {
+                switch self.selectedAuthMethod {
+                case .oauth(.openAICodex):
                     let tokens = try await OpenAICodexOAuthService.signIn()
                     self.oauthTokens = tokens
-                } else if self.currentAPIProvider == .openrouter && self.openRouterAuthMode == .oauthSignIn {
+                case .oauth(.openRouter):
                     // The browser sign-in IS the test: it returns a freshly minted
                     // OpenRouter API key, which we stash in `apiKey` for the save
                     // step to persist via the standard apiKey path.
                     let key = try await OpenRouterOAuthService.signIn()
                     self.apiKey = key
-                } else {
+                case .oauth(.xai):
+                    // Grok sign-in returns access/refresh tokens stashed for the
+                    // save step to persist via the `.xaiOAuth` path.
+                    let tokens = try await XAIOAuthService.signIn()
+                    self.oauthTokens = tokens
+                case .apiKey, .none:
                     _ = try await RemoteProviderManager.shared.testConnection(
                         host: config.host,
                         providerProtocol: config.providerProtocol,
@@ -435,11 +538,27 @@ final class ConfigureAIState: ObservableObject {
     }
 
     func saveProviderAndContinue(onComplete: () -> Void) {
+        // One-shot: a successful test auto-advances, but the CTA is also still
+        // tappable during the brief green window, so both routes funnel through
+        // this latch to avoid adding the provider (and advancing) twice.
+        guard !hasFinalizedAPI else { return }
         guard let config = resolvedAPIConfig() else { return }
+        hasFinalizedAPI = true
         isSaving = true
 
-        if currentAPIProvider == .openai && openAIAuthMode == .chatGPTSubscription {
+        // OpenAI Codex and xAI persist OAuth tokens via a service-provided
+        // provider config; OpenRouter's OAuth mints a plain key handled by the
+        // standard apiKey path below.
+        if selectedOAuthKind == .openAICodex {
             let provider = OpenAICodexOAuthService.makeProvider()
+            RemoteProviderManager.shared.addProvider(provider, apiKey: nil, oauthTokens: oauthTokens)
+            isSaving = false
+            onComplete()
+            return
+        }
+
+        if selectedOAuthKind == .xai {
+            let provider = XAIOAuthService.makeProvider()
             RemoteProviderManager.shared.addProvider(provider, apiKey: nil, oauthTokens: oauthTokens)
             isSaving = false
             onComplete()
@@ -486,14 +605,16 @@ struct ConfigureAIBody: View {
             illustrationAsset: "osaurus-brain",
             leftHeadline: "Pick a brain",
             leftBody:
-                "Run a brain on your Mac, or plug in one you already pay for. You can swap brains any time — chats come along.",
+                "Run a brain on your Mac, or plug in one you already pay for. You can swap brains any time, and your chats come along.",
             subtitle: pathSubtitle,
             // We manage our own inner scroll: the segmented control stays
             // pinned at the top while the substate body scrolls beneath it.
             useScrollView: false
         ) {
             VStack(alignment: .leading, spacing: 14) {
-                pathSegmentedControl
+                if showsModeToggle {
+                    pathSegmentedControl
+                }
 
                 // Substate envelope. Clipped horizontally so the slide
                 // transition never bleeds into the left column, but
@@ -511,15 +632,19 @@ struct ConfigureAIBody: View {
             }
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .onAppear { state.ensureLocalSelection(totalMemoryGB: systemMonitor.totalMemoryGB) }
+        .onAppear {
+            state.applyDefaultPathIfNeeded(totalMemoryGB: systemMonitor.totalMemoryGB)
+            state.ensureLocalSelection(totalMemoryGB: systemMonitor.totalMemoryGB)
+        }
     }
 
     // MARK: - Path subtitle
 
     private var pathSubtitle: LocalizedStringKey {
         switch state.selectedPath {
-        case .local: return "Lives on your Mac. Works offline."
-        case .apiProvider: return "Plug in a brain you already pay for, or run one locally with Ollama."
+        case .local: return "Runs right on your Mac. Private, and works offline."
+        case .apiProvider:
+            return "Already have a favorite AI? Connect it in a tap."
         }
     }
 
@@ -536,10 +661,29 @@ struct ConfigureAIBody: View {
         )
     }
 
+    /// Paths offered on this Mac, gated by available memory (Cloud-only on
+    /// sub-24GB machines). Computed from the live monitor reading rather than
+    /// `state` so the first frame is already correct — no Local-tab flash.
+    private var availablePaths: [ConfigurePath] {
+        state.availablePaths(totalMemoryGB: systemMonitor.totalMemoryGB)
+    }
+
+    /// The mode toggle is the single top-level nav: show it only on the two
+    /// top-level pickers, and only when there's actually a choice to make.
+    /// Once the user drills into the API-key hub / a form / a download, the
+    /// in-section "Back" row owns navigation instead.
+    private var showsModeToggle: Bool {
+        guard availablePaths.count > 1 else { return false }
+        switch state.selectedPath {
+        case .local: return state.localSubstate == .picker
+        case .apiProvider: return state.apiSubstate == .picker
+        }
+    }
+
     private var pathSegmentedControl: some View {
         OnboardingSegmentedControl(
             selection: pathBinding,
-            items: state.availablePaths.map {
+            items: availablePaths.map {
                 OnboardingSegmentItem(tag: $0, title: $0.title, icon: $0.icon)
             }
         )
@@ -557,6 +701,7 @@ struct ConfigureAIBody: View {
         case .apiProvider:
             switch state.apiSubstate {
             case .picker: return "api-picker"
+            case .apiKeyPicker: return "api-key-picker"
             case .keyForm(let p): return "api-key-\(p.rawValue)"
             case .customForm: return "api-custom"
             }
@@ -594,10 +739,7 @@ struct ConfigureAIBody: View {
         case .picker:
             OnboardingScrollContainer { localPickerView }
         case .downloading:
-            substateWithBackBar(
-                title: state.selectedModel?.name ?? L("Downloading"),
-                onBack: { state.popLocalToPicker() }
-            ) {
+            substateWithBackBar(onBack: { state.popLocalToPicker() }) {
                 localDownloadingView
             }
         }
@@ -608,18 +750,16 @@ struct ConfigureAIBody: View {
         switch state.apiSubstate {
         case .picker:
             OnboardingScrollContainer { apiPickerView }
+        case .apiKeyPicker:
+            substateWithBackBar(onBack: { state.popAPIKeyPickerToTop() }) {
+                apiKeyPickerView
+            }
         case .keyForm(let provider):
-            substateWithBackBar(
-                title: provider == .openai ? L("Connect OpenAI") : "Connect \(provider.name)",
-                onBack: { state.resetAPIState() }
-            ) {
+            substateWithBackBar(onBack: { state.popFormToPicker(for: provider) }) {
                 apiKeyFormView
             }
         case .customForm:
-            substateWithBackBar(
-                title: L("Custom provider"),
-                onBack: { state.resetAPIState() }
-            ) {
+            substateWithBackBar(onBack: { state.popFormToPicker(for: .custom) }) {
                 apiCustomFormView
             }
         }
@@ -630,22 +770,23 @@ struct ConfigureAIBody: View {
     /// scroll container for any overflow (key forms, custom-provider
     /// form, etc.).
     private func substateWithBackBar<C: View>(
-        title: String,
         onBack: @escaping () -> Void,
         @ViewBuilder content: () -> C
     ) -> some View {
         VStack(alignment: .leading, spacing: 10) {
-            substateBackRow(title: title, onBack: onBack)
+            substateBackRow(onBack: onBack)
             OnboardingScrollContainer { content() }
         }
     }
 
-    private func substateBackRow(title: String, onBack: @escaping () -> Void) -> some View {
+    private func substateBackRow(onBack: @escaping () -> Void) -> some View {
+        // Always a plain "Back" — the section title was redundant breadcrumb
+        // noise (and truncated awkwardly, e.g. "Use an API k…").
         Button(action: onBack) {
             HStack(spacing: 6) {
                 Image(systemName: "chevron.left")
                     .font(.system(size: 11, weight: .semibold))
-                Text(title)
+                Text("Back", bundle: .module)
                     .font(theme.font(size: 13, weight: .semibold))
                     .lineLimit(1)
                 Spacer(minLength: 0)
@@ -672,46 +813,111 @@ struct ConfigureAIBody: View {
             .map { ($0, $0.compatibility(totalMemoryGB: totalMemoryGB)) }
     }
 
+    /// What the local picker renders: the curated top suggestions only.
+    ///
+    /// Onboarding is intentionally opinionated — it surfaces only our curated
+    /// top picks (downloaded ones still appear, badged "Downloaded"), so the
+    /// first-run list never balloons with ad-hoc / auto-fetched models the
+    /// user happens to have on disk. The full catalog lives in the Models tab.
+    private var localPickerModels: [(model: MLXModel, compatibility: ModelCompatibility)] {
+        topSuggestionsWithCompatibility
+    }
+
     @ViewBuilder
     private var localPickerView: some View {
-        let pairs = topSuggestionsWithCompatibility
-        let hasAnyRunnable = pairs.contains(where: { $0.compatibility != .tooLarge })
+        let pairs = localPickerModels
+        // A model already on disk is always selectable — the user
+        // downloaded (and presumably ran) it before, so the compat
+        // heuristic shouldn't lock them out. Only not-yet-downloaded
+        // curated picks are gated on fit.
+        let hasAnyRunnable = pairs.contains { $0.model.isDownloaded || $0.compatibility != .tooLarge }
 
-        // When nothing fits (or there are no top suggestions at all),
-        // redirecting to the Cloud / Ollama tab beats a dead-end list
-        // of disabled rows.
+        // When nothing fits (no models on disk and no runnable curated
+        // pick), redirecting to the Cloud / Ollama tab beats a dead-end
+        // list of disabled rows.
         if !hasAnyRunnable {
             localNoCompatibleModelsView
         } else {
+            // Be opinionated: surface a single recommended pick (the model
+            // `ensureLocalSelection` chose) and tuck everything else behind a
+            // disclosure, so first-run isn't a wall of model choices.
+            let featuredId = state.selectedModel?.id
+            let featured = pairs.first(where: { $0.model.id == featuredId }) ?? pairs.first
+            let rest = pairs.filter { $0.model.id != featured?.model.id }
+
             VStack(spacing: OnboardingMetrics.cardSpacing) {
                 computeIntensiveCallout
-                ForEach(pairs, id: \.model.id) { pair in
-                    let model = pair.model
-                    OnboardingRowCard(
-                        icon: .symbol(model.isVLM ? "eye" : "cpu"),
-                        title: model.name,
-                        subtitle: model.description,
-                        secondaryLine: model.formattedReleaseMonth.map { L("Released \($0)") },
-                        badges: localBadges(for: model, compatibility: pair.compatibility),
-                        // Local model rows ship up to four badges
-                        // (use case · size · modality · compat verdict);
-                        // inline next to the title they truncated the
-                        // model name to "Gemm…". Bump them to their own
-                        // row so the full name is always readable.
-                        badgesBelowTitle: true,
-                        accessory: .radio(isSelected: state.selectedModel?.id == model.id),
-                        isSelected: state.selectedModel?.id == model.id,
-                        isDisabled: pair.compatibility == .tooLarge
-                    ) {
-                        // No `withAnimation` — selecting a model otherwise
-                        // morphs the CTA between "Continue" and
-                        // "Download & Install" as a side-effect of the
-                        // shared transaction.
-                        state.selectedModel = model
+                if let featured {
+                    localModelCard(for: featured)
+                }
+                if !rest.isEmpty {
+                    localMoreOptionsDisclosure(count: rest.count)
+                    if state.showAllLocalModels {
+                        ForEach(rest, id: \.model.id) { pair in
+                            localModelCard(for: pair)
+                        }
                     }
                 }
             }
         }
+    }
+
+    /// One selectable local-model row. Shared by the featured default and the
+    /// disclosure-revealed remainder so both read identically.
+    private func localModelCard(
+        for pair: (model: MLXModel, compatibility: ModelCompatibility)
+    ) -> some View {
+        let model = pair.model
+        return OnboardingRowCard(
+            icon: .symbol(model.isVLM ? "eye" : "cpu"),
+            title: model.name,
+            subtitle: model.description,
+            secondaryLine: model.formattedReleaseMonth.map { L("Released \($0)") },
+            badges: localBadges(for: model, compatibility: pair.compatibility),
+            // Local model rows ship up to four badges
+            // (use case · size · modality · compat verdict);
+            // inline next to the title they truncated the
+            // model name to "Gemm…". Bump them to their own
+            // row so the full name is always readable.
+            badgesBelowTitle: true,
+            accessory: .radio(isSelected: state.selectedModel?.id == model.id),
+            isSelected: state.selectedModel?.id == model.id,
+            isDisabled: pair.compatibility == .tooLarge && !model.isDownloaded
+        ) {
+            // No `withAnimation` — selecting a model otherwise
+            // morphs the CTA between "Continue" and
+            // "Download & Install" as a side-effect of the
+            // shared transaction.
+            state.selectedModel = model
+        }
+    }
+
+    /// Expand / collapse control for the non-featured local models.
+    private func localMoreOptionsDisclosure(count: Int) -> some View {
+        Button {
+            withAnimation(.spring(response: 0.4, dampingFraction: 0.85)) {
+                state.showAllLocalModels.toggle()
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 11, weight: .semibold))
+                    .rotationEffect(.degrees(state.showAllLocalModels ? 180 : 0))
+                Text(
+                    state.showAllLocalModels
+                        ? L("Hide other options")
+                        : L("See other options (\(count))")
+                )
+                .font(theme.font(size: 13, weight: .semibold))
+                Spacer(minLength: 0)
+            }
+            .foregroundColor(theme.accentColor)
+            .padding(.vertical, 6)
+            .padding(.horizontal, 2)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .localizedHelp("See other options")
     }
 
     /// Inline explainer rendered above the curated list — first-time
@@ -1044,27 +1250,65 @@ struct ConfigureAIBody: View {
 
     // MARK: - API picker
 
+    /// OAuth-first top level: one-click sign-in providers as first-class rows,
+    /// then a single "Use an API key" drill-in that holds every paste-a-key
+    /// vendor, the local Ollama option, and the custom escape hatch.
     private var apiPickerView: some View {
         VStack(spacing: OnboardingMetrics.cardSpacing) {
-            ForEach(ConfigureAIState.onboardingPresets, id: \.id) { preset in
+            ForEach(ProviderPreset.oauthProviders, id: \.id) { preset in
                 apiPresetCard(preset)
+            }
+            useAPIKeyCard
+        }
+    }
+
+    /// Drill-in entry to the grouped API-key sub-list. Titled "Use an API key"
+    /// even though it also houses Ollama (local) and Custom, because API-key
+    /// vendors are the dominant case; the sub-list section headers disambiguate.
+    private var useAPIKeyCard: some View {
+        OnboardingRowCard(
+            icon: .symbol("key.fill"),
+            title: L("Use an API key"),
+            subtitle: L("Anthropic, Google, Ollama, and more — paste a key to connect"),
+            accessory: .chevron
+        ) {
+            state.showAPIKeyPicker()
+        }
+    }
+
+    /// Grouped API-key sub-list (key vendors / Local / Custom). Azure OpenAI is
+    /// omitted in onboarding (it needs extra endpoint + deployment fields).
+    private var apiKeyPickerView: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            ForEach(ProviderPreset.apiKeyPickerGroups(includeAzure: false)) { section in
+                VStack(alignment: .leading, spacing: OnboardingMetrics.cardSpacing) {
+                    Text(LocalizedStringKey(section.title), bundle: .module)
+                        .font(theme.font(size: 11, weight: .semibold))
+                        .foregroundColor(theme.tertiaryText)
+                        .textCase(.uppercase)
+                    ForEach(section.presets, id: \.id) { preset in
+                        apiPresetCard(preset, preferAPIKey: true)
+                    }
+                }
             }
         }
     }
 
-    private func apiPresetCard(_ preset: ProviderPreset) -> some View {
+    /// `preferAPIKey` distinguishes the "Use an API key" sub-list rows (pasted
+    /// key) from the OAuth-first top-level rows for the dual-mode presets.
+    private func apiPresetCard(_ preset: ProviderPreset, preferAPIKey: Bool = false) -> some View {
         OnboardingRowCard(
             icon: .custom {
                 ProviderIcon(preset: preset, size: 18, color: theme.secondaryText)
             },
             title: presetTitle(for: preset),
-            subtitle: presetSubtitle(for: preset),
+            subtitle: presetSubtitle(for: preset, preferAPIKey: preferAPIKey),
             badges: presetBadges(for: preset),
             accessory: .chevron
         ) {
             // Drill-in: tapping a card commits the choice and advances
             // straight to the matching key form. No "Continue" press needed.
-            state.selectAPIPreset(preset)
+            state.selectAPIPreset(preset, preferAPIKey: preferAPIKey)
         }
     }
 
@@ -1073,14 +1317,15 @@ struct ConfigureAIBody: View {
     }
 
     /// Onboarding-specific subtitle. Diverges from the generic
-    /// `preset.description` for OpenAI (call out OAuth + key options) and
-    /// for the custom card (concrete example providers).
-    private func presetSubtitle(for preset: ProviderPreset) -> String {
-        switch preset {
-        case .custom: return L("Together AI, LM Studio, and more")
-        case .openai: return L("ChatGPT, Codex, or Platform API")
-        default: return preset.description
-        }
+    /// `preset.description` for the custom card (concrete example providers) and
+    /// for the dual-mode presets, whose subtitle reflects the entry point: the
+    /// OAuth-first top level describes the browser sign-in, the "Use an API key"
+    /// sub-list (`preferAPIKey`) describes the pasted key.
+    private func presetSubtitle(for preset: ProviderPreset, preferAPIKey: Bool = false) -> String {
+        // Returns localization *keys*; the row card localizes via
+        // `LocalizedStringKey(subtitle)`, so don't pre-localize here.
+        ProviderCatalog.entry(for: preset)?.pickerSubtitle(preferAPIKey: preferAPIKey)
+            ?? preset.description
     }
 
     /// Lift selected provider badges to a richer style so the cloud
@@ -1110,14 +1355,13 @@ struct ConfigureAIBody: View {
         let isNoAuth = provider.configuration.authType == .none
 
         return VStack(spacing: 14) {
-            switch provider {
-            case .openai: openAIAuthChoiceSection
-            case .openrouter: openRouterAuthChoiceSection
-            default: EmptyView()
-            }
-
             if isNoAuth {
                 noAuthEndpointBanner(for: provider)
+            } else if let kind = state.selectedOAuthKind {
+                // Dual-mode preset reached via the OAuth-first top level: the
+                // browser sign-in IS the action (footer CTA), so the body just
+                // explains what's about to happen.
+                oauthInfoBanner(for: kind)
             }
             if showsKeyField {
                 apiKeyField(provider: provider)
@@ -1125,6 +1369,27 @@ struct ConfigureAIBody: View {
             if showsKeyField || isNoAuth {
                 helpSection(for: provider)
             }
+        }
+    }
+
+    /// Body shown for the OAuth-first entry of a dual-mode preset. There's no
+    /// key field — the footer button starts the browser flow — so this banner
+    /// carries the short "here's how this works" context the auth-choice card
+    /// used to provide.
+    private func oauthInfoBanner(for kind: ProviderOAuthKind) -> some View {
+        OnboardingGlassCard {
+            HStack(spacing: 10) {
+                Image(systemName: kind.icon)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.accentColor)
+                Text(LocalizedStringKey(kind.subtitle), bundle: .module)
+                    .font(theme.font(size: 13))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+            }
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(14)
         }
     }
 
@@ -1165,14 +1430,12 @@ struct ConfigureAIBody: View {
     /// section. Both OpenAI and OpenRouter offer an OAuth alternative, and
     /// the field is only relevant when the user picks the paste-key mode.
     private func shouldShowKeyField(for provider: ProviderPreset) -> Bool {
-        switch provider {
-        case .openai:
-            return state.openAIAuthMode == .platformAPIKey
-        case .openrouter:
-            return state.openRouterAuthMode == .apiKey
-        default:
-            return provider.configuration.authType == .apiKey
+        // Dual-mode providers only show the raw key field in api-key mode;
+        // everything else falls back to whether the preset uses an API key.
+        if let entry = ProviderCatalog.entry(for: provider), entry.primaryOAuthKind != nil {
+            return state.selectedAuthMethod == .apiKey
         }
+        return provider.configuration.authType == .apiKey
     }
 
     private var apiCustomFormView: some View {
@@ -1266,105 +1529,6 @@ struct ConfigureAIBody: View {
         .onChange(of: state.apiKey) { _, _ in state.testResult = nil }
     }
 
-    private var openAIAuthChoiceSection: some View {
-        authChoiceCard(
-            headline: "Choose your OpenAI access",
-            rows: [
-                authChoiceRowSpec(
-                    mode: OpenAIProviderCredentialMode.chatGPTSubscription,
-                    isSelected: state.openAIAuthMode == .chatGPTSubscription,
-                    action: { selectOpenAIMode(.chatGPTSubscription) }
-                ),
-                authChoiceRowSpec(
-                    mode: OpenAIProviderCredentialMode.platformAPIKey,
-                    isSelected: state.openAIAuthMode == .platformAPIKey,
-                    action: { selectOpenAIMode(.platformAPIKey) }
-                ),
-            ]
-        )
-    }
-
-    private var openRouterAuthChoiceSection: some View {
-        authChoiceCard(
-            headline: "Choose your OpenRouter access",
-            rows: [
-                authChoiceRowSpec(
-                    mode: OpenRouterCredentialMode.oauthSignIn,
-                    isSelected: state.openRouterAuthMode == .oauthSignIn,
-                    action: { selectOpenRouterMode(.oauthSignIn) }
-                ),
-                authChoiceRowSpec(
-                    mode: OpenRouterCredentialMode.apiKey,
-                    isSelected: state.openRouterAuthMode == .apiKey,
-                    action: { selectOpenRouterMode(.apiKey) }
-                ),
-            ]
-        )
-    }
-
-    /// State mutation stays unwrapped (no `withAnimation`) so it doesn't
-    /// propagate a transaction to observers like the footer CTA.
-    private func selectOpenAIMode(_ mode: OpenAIProviderCredentialMode) {
-        state.openAIAuthMode = mode
-        state.oauthTokens = nil
-        state.testResult = nil
-    }
-
-    private func selectOpenRouterMode(_ mode: OpenRouterCredentialMode) {
-        state.openRouterAuthMode = mode
-        // Clear any previously-minted key so the field doesn't read as
-        // "already provided" when the user flips back to paste.
-        state.apiKey = ""
-        state.testResult = nil
-    }
-
-    private struct AuthChoiceRowSpec {
-        let title: LocalizedStringKey
-        let subtitle: LocalizedStringKey
-        let icon: String
-        let isSelected: Bool
-        let action: () -> Void
-    }
-
-    /// Shared shape of OpenAI and OpenRouter credential-mode enums so the
-    /// auth-choice card factory only needs one row constructor.
-    private func authChoiceRowSpec<Mode: AuthChoiceMode>(
-        mode: Mode,
-        isSelected: Bool,
-        action: @escaping () -> Void
-    ) -> AuthChoiceRowSpec {
-        AuthChoiceRowSpec(
-            title: LocalizedStringKey(mode.title),
-            subtitle: LocalizedStringKey(mode.subtitle),
-            icon: mode.icon,
-            isSelected: isSelected,
-            action: action
-        )
-    }
-
-    private func authChoiceCard(
-        headline: LocalizedStringKey,
-        rows: [AuthChoiceRowSpec]
-    ) -> some View {
-        OnboardingGlassCard {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(headline, bundle: .module)
-                    .font(theme.font(size: 13, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-                ForEach(Array(rows.enumerated()), id: \.offset) { _, row in
-                    OnboardingSelectableRow(
-                        icon: row.icon,
-                        title: row.title,
-                        subtitle: row.subtitle,
-                        isSelected: row.isSelected,
-                        action: row.action
-                    )
-                }
-            }
-            .padding(14)
-        }
-    }
-
     private var endpointPreview: some View {
         HStack(spacing: 8) {
             Image(systemName: "link")
@@ -1415,13 +1579,18 @@ struct ConfigureAIBody: View {
 
 // MARK: - CTA
 
-/// Primary CTA for the Configure AI step. Always rendered (never hidden) —
-/// disabled until the active substate has a valid action. The picker
-/// substates use a `Continue` button that's disabled until a selection is
-/// made; the form substates use the stateful Connect/Test/Continue button.
+/// Primary CTA for the Configure AI step, dispatched per substate:
+///   - Local picker: Download/Continue, enabled once a model is selected.
+///   - Local downloading: a single adaptive "Continue in Background" →
+///     "Continue" button (plus "Try Again" on failure).
+///   - Cloud picker / API-key hub: cards drill in on tap, so a quiet hint
+///     stands in for the (absent) Continue button.
+///   - Cloud forms: the stateful Connect/Test/Continue button.
 struct ConfigureAICTA: View {
     @ObservedObject var state: ConfigureAIState
     let onComplete: () -> Void
+
+    @Environment(\.theme) private var theme
 
     /// Observed-but-not-read: the CTA's `isLocalCompleted` / `isLocalFailed`
     /// reads bounce through `ConfigureAIState`, but those computed
@@ -1438,6 +1607,24 @@ struct ConfigureAICTA: View {
                     onComplete()
                 }
             }
+            .onChange(of: state.isAPISuccess) { _, success in
+                // Auto-advance once connected (green): a successful test/sign-in
+                // is the confirmation, so move to the next onboarding step
+                // without a second "Continue" press. The brief pause lets the
+                // green success state register first.
+                guard success else { return }
+                switch state.apiSubstate {
+                case .keyForm, .customForm:
+                    Task {
+                        try? await Task.sleep(nanoseconds: 400_000_000)
+                        await MainActor.run {
+                            state.saveProviderAndContinue(onComplete: onComplete)
+                        }
+                    }
+                case .picker, .apiKeyPicker:
+                    break
+                }
+            }
     }
 
     @ViewBuilder
@@ -1451,28 +1638,32 @@ struct ConfigureAICTA: View {
                     action: { state.startLocalDownloadOrContinue(onComplete: onComplete) },
                     isEnabled: state.selectedModel != nil
                 )
-                .frame(width: OnboardingMetrics.ctaWidthCompact)
+                .fixedSize(horizontal: true, vertical: false)
             case .downloading:
                 localDownloadingCTA
             }
 
         case .apiProvider:
             switch state.apiSubstate {
-            case .picker:
+            case .picker, .apiKeyPicker:
                 // Provider cards drill in on tap — no Continue press
-                // required. The button stays visible and disabled so the
-                // footer chrome doesn't blank out, and the layout doesn't
-                // reflow when the user navigates into a key form.
-                OnboardingBrandButton(
-                    title: "Continue",
-                    action: {},
-                    isEnabled: false
-                )
-                .frame(width: OnboardingMetrics.ctaWidthCompact)
+                // required. A subtle hint replaces the dead disabled button so
+                // the footer reads as guidance, not a broken control.
+                providerPickerHint
             case .keyForm, .customForm:
                 apiActionButton
             }
         }
+    }
+
+    /// Footer text shown on the Cloud provider list / API-key hub, where the
+    /// cards themselves are the action. A quiet hint reads better than a dead
+    /// disabled "Continue".
+    private var providerPickerHint: some View {
+        Text("Pick a provider to continue", bundle: .module)
+            .font(theme.font(size: OnboardingMetrics.captionSize))
+            .foregroundColor(theme.tertiaryText)
+            .frame(height: OnboardingMetrics.buttonHeight)
     }
 
     /// CTA for the local downloading screen. Mirrors the inline state-driven
@@ -1487,27 +1678,26 @@ struct ConfigureAICTA: View {
                 title: "Try Again",
                 action: { state.startLocalDownload() }
             )
-            .frame(width: OnboardingMetrics.ctaWidthCompact)
+            .fixedSize(horizontal: true, vertical: false)
         } else {
+            // Single CTA: the user can always proceed. While the download is
+            // still running it reads "Continue in Background" (onboarding moves
+            // on, the download keeps going); once finished it becomes a plain
+            // "Continue". This replaces the old disabled-CTA + separate
+            // text-link pairing.
             OnboardingBrandButton(
-                title: "Continue",
-                action: onComplete,
-                isEnabled: state.isLocalCompleted
+                title: state.isLocalCompleted ? "Continue" : "Continue in Background",
+                action: onComplete
             )
-            .frame(width: OnboardingMetrics.ctaWidthCompact)
+            .fixedSize(horizontal: true, vertical: false)
         }
     }
 
     private var apiActionButton: some View {
-        let provider = state.currentAPIProvider
-        let isOpenAIChatGPT = provider == .openai && state.openAIAuthMode == .chatGPTSubscription
-        let isOpenRouterOAuth = provider == .openrouter && state.openRouterAuthMode == .oauthSignIn
-        let isBrowserSignIn = isOpenAIChatGPT || isOpenRouterOAuth
-        let idleTitle: LocalizedStringKey = {
-            if isOpenAIChatGPT { return "Sign in with ChatGPT" }
-            if isOpenRouterOAuth { return "Sign in with OpenRouter" }
-            return "Connect"
-        }()
+        let oauthKind = state.selectedOAuthKind
+        let isBrowserSignIn = oauthKind != nil
+        let idleTitle: LocalizedStringKey =
+            oauthKind.map { LocalizedStringKey($0.ctaTitle) } ?? "Connect"
         return OnboardingStatefulButton(
             state: state.apiButtonState,
             idleTitle: idleTitle,
@@ -1523,47 +1713,7 @@ struct ConfigureAICTA: View {
             },
             isEnabled: state.canTestAPI
         )
-        .frame(width: OnboardingMetrics.ctaWidthCompact)
-    }
-}
-
-// MARK: - Secondary
-
-/// Secondary action (text-link, leading edge of the footer) for Configure AI.
-/// Only the local-downloading substate currently has one ("Download later").
-struct ConfigureAISecondary: View {
-    @ObservedObject var state: ConfigureAIState
-    let onComplete: () -> Void
-
-    var body: some View {
-        switch state.selectedPath {
-        case .local:
-            switch state.localSubstate {
-            case .downloading:
-                // Always offer a soft escape so the user can finish
-                // onboarding even mid-download. The inline failure card
-                // already exposes Retry + Choose-another-model, so when
-                // failed we just show "Skip for now" rather than a
-                // duplicate retry affordance.
-                OnboardingTextButton(
-                    title: secondaryDownloadingTitle,
-                    action: onComplete
-                )
-            case .picker:
-                EmptyView()
-            }
-        case .apiProvider:
-            EmptyView()
-        }
-    }
-
-    private var secondaryDownloadingTitle: String {
-        switch state.localDownloadState {
-        case .failed: return L("Skip for now")
-        case .paused: return L("Finish later")
-        case .downloading: return L("Continue in background")
-        case .completed, .notStarted: return L("Download later")
-        }
+        .fixedSize(horizontal: true, vertical: false)
     }
 }
 
@@ -1597,7 +1747,6 @@ private struct HelpStepRow: View {
             return VStack {
                 ConfigureAIBody(state: state).frame(height: 460)
                 HStack {
-                    ConfigureAISecondary(state: state, onComplete: {})
                     Spacer()
                     ConfigureAICTA(state: state, onComplete: {})
                 }
@@ -1605,12 +1754,4 @@ private struct HelpStepRow: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 660)
         }
     }
-#endif
-#else
-import SwiftUI
-struct ResolvedProviderConfig: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Configure AI", symbol: "apple.logo")
-    }
-}
 #endif
