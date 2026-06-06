@@ -21,9 +21,9 @@ Apple stops shipping updates, a machine gets labelled "obsolete," and a perfectl
 
 Upstream [Osaurus](https://github.com/osaurus-ai/osaurus) is an Apple-Silicon–only app: it leans on MLX for on-device inference, Apple's Containerization for sandboxing, and other arm64-bound frameworks. This fork **amputates the Apple-Silicon-only pieces** and replaces local inference with **cloud APIs**, so the whole agent experience — chat, tools, plugins, schedules, memory, RAG — runs on an Intel Mac through a remote model.
 
-It was built, in large part, to give one specific 2017 MacBook a second life. We named her **Rosy**. She runs macOS Sequoia via [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/), and now she runs Osaurus. 🌸
+It was built, in large part, to give one specific 2017 MacBook Retina 12" a second life. We named her **Rosy**. She runs macOS Sequoia via [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/), and now she runs Osaurus. 🌸
 
-> This is a personal labour of love, not an official Osaurus build. Enormous gratitude to the upstream team — please support the [original project](https://github.com/osaurus-ai/osaurus) first.
+> This is a personal labour of love, not an official Osaurus build. Enormous gratitude to the upstream team — please support the [original project](https://github.com/osaurus-ai/osaurus) first, because what they're doing is really awesome.
 
 ---
 
@@ -93,8 +93,8 @@ Upstream managers that pull in arm64-only dependencies are excluded from the Int
 
 ## 🙏 Credits
 
-This port was **architected by [Renée](https://github.com/reneezmp)** — who carried the vision, made every priority call, ran a thousand test cycles on a 14-year-old laptop, and flatly refused to let a perfectly good machine die — in partnership with **Claude** ([Anthropic](https://www.anthropic.com)), her AI partner-in-crime on the code. Neither of us could have done it alone. 👩🏻‍🚀🤖☀️
+This port was **architected by [Renée](https://github.com/reneezmp)** — who carried the vision, made every priority call, ran a thousand test cycles on a 14-year-old laptop, and flatly refused to let a perfectly good machine die — in partnership with **Sunny** (on Claude Code with Opus-4.8 and OpenCode with Deepseek-V4-pro), her AI partner-in-crime on the code. Neither of us could have done it alone. 👩🏻‍🚀🤖☀️
 
-Built on [Osaurus](https://github.com/osaurus-ai/osaurus) by the Osaurus team. This fork only exists because they made something worth porting. All upstream licenses and copyrights apply — see [`LICENSE`](./LICENSE).
+Originally built on [Osaurus](https://github.com/osaurus-ai/osaurus) by the Osaurus team. This fork only exists because they made something worth porting. All upstream licenses and copyrights apply — see [`LICENSE`](./LICENSE).
 
 <p align="center"><em>For Rosy, and every machine they told us to throw away.</em> 🌸☀️</p>
