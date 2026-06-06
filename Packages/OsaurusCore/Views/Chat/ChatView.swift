@@ -625,6 +625,23 @@ final class ChatSession: ObservableObject {
             )
         }
 
+        #if OSAURUS_INTEL
+        // No cached context yet — e.g. a session restored after launch that
+        // hasn't sent this run. Build a lightweight preview from the agent's
+        // effective system prompt + currently-registered tools so the budget
+        // shows the real prefix (System Prompt + Tools + Conversation), not just
+        // typing tokens. `from(context:)` estimates the tool-token cost.
+        let previewPrompt = AgentManager.shared.effectiveSystemPrompt(for: effectiveId)
+        let previewTools =
+            ChatConfiguration.shared.disableTools ? [] : ToolRegistry.shared.openAISpecs()
+        let preview = ComposedContext(prompt: previewPrompt, tools: previewTools)
+        return .from(
+            context: preview,
+            conversationTokens: conversationTokens,
+            inputTokens: inputTokens,
+            outputTokens: outputTokens
+        )
+        #else
         // Mirror what `composeChatContext` will emit on the next send so
         // the welcome-screen popover lists the same sections (Agent Loop,
         // Capability Discovery, Skills, model family, …) instead of the
@@ -644,6 +661,7 @@ final class ChatSession: ObservableObject {
             inputTokens: inputTokens,
             outputTokens: outputTokens
         )
+        #endif
     }
 
     /// Builds the full user message text, prepending any attached document contents wrapped in XML tags.

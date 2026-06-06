@@ -1087,6 +1087,24 @@ final class ContextBudgetManager: @unchecked Sendable {
         return estimateTokens(for: last.content) + estimateTokens(for: last.thinking)
     }
 
+    /// Estimate the wire-token cost of a tool schema (name + description +
+    /// serialized JSON-Schema parameters). Shared by `composeChatContext`
+    /// (the real send) and the restored-session budget preview so both agree.
+    static func estimateToolTokens(_ tools: [IntelTool]) -> Int {
+        var total = 0
+        for t in tools {
+            total += estimateTokens(for: t.function.name)
+            total += estimateTokens(for: t.function.description ?? "")
+            if let params = t.function.parameters,
+                let data = try? JSONSerialization.data(withJSONObject: params.anyValue),
+                let json = String(data: data, encoding: .utf8)
+            {
+                total += estimateTokens(for: json)
+            }
+        }
+        return total
+    }
+
     static func estimateTokens(for item: Any?) -> Int { 0 }
 }
 
@@ -1481,20 +1499,9 @@ final class SystemPromptComposer: @unchecked Sendable {
                 prompt += "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
             }
         }
-        // Estimate the token cost of the tool schema (name + description +
-        // serialized JSON-Schema parameters) so the context-budget popover can
-        // surface a real "Tools" rail instead of 0.
-        var toolTokens = 0
-        for t in tools {
-            toolTokens += ContextBudgetManager.estimateTokens(for: t.function.name)
-            toolTokens += ContextBudgetManager.estimateTokens(for: t.function.description ?? "")
-            if let params = t.function.parameters,
-                let data = try? JSONSerialization.data(withJSONObject: params.anyValue),
-                let json = String(data: data, encoding: .utf8)
-            {
-                toolTokens += ContextBudgetManager.estimateTokens(for: json)
-            }
-        }
+        // Estimate the tool-schema token cost so the budget popover shows a real
+        // "Tools" rail instead of 0.
+        let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
         return ComposedContext(prompt: prompt, toolTokens: toolTokens, tools: tools)
     }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
@@ -1643,8 +1650,14 @@ struct ContextBreakdown: Sendable {
         if promptTokens > 0 {
             bd.context.append(Entry(id: "persona", label: "System Prompt", tokens: promptTokens, tint: .purple))
         }
-        if composed.toolTokens > 0 {
-            bd.context.append(Entry(id: "tools", label: "Tools", tokens: composed.toolTokens, tint: .orange))
+        // Prefer the precomputed count; fall back to estimating from the tool
+        // specs so the restored-session preview (which doesn't precompute) still
+        // shows a real Tools rail.
+        let toolTokens =
+            composed.toolTokens > 0
+            ? composed.toolTokens : ContextBudgetManager.estimateToolTokens(composed.tools)
+        if toolTokens > 0 {
+            bd.context.append(Entry(id: "tools", label: "Tools", tokens: toolTokens, tint: .orange))
         }
 
         if conversationTokens > 0 {
