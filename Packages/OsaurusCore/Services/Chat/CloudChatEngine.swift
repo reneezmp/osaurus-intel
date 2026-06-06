@@ -8,7 +8,29 @@
 
 #if OSAURUS_INTEL
 
+import AppKit
 import Foundation
+
+/// Native confirmation prompt for tools whose permission policy is "Ask".
+/// Upstream's `ToolPermissionPromptService` (a SwiftUI overlay) is amputated on
+/// Intel; a modal `NSAlert` is a dependency-free equivalent. Runs on the main
+/// thread (the engine `await`s it), blocking the run until the user decides.
+enum ToolApprovalPrompt {
+    @MainActor
+    static func request(tool: String, arguments: String) -> Bool {
+        let alert = NSAlert()
+        alert.alertStyle = .warning
+        alert.messageText = "Allow “\(tool)” to run?"
+        let args = arguments.trimmingCharacters(in: .whitespacesAndNewlines)
+        alert.informativeText =
+            args.isEmpty || args == "{}"
+            ? "The assistant requested this tool. It is set to “Ask” in your tool permissions."
+            : "Arguments:\n\(String(args.prefix(600)))"
+        alert.addButton(withTitle: "Allow")
+        alert.addButton(withTitle: "Deny")
+        return alert.runModal() == .alertFirstButtonReturn
+    }
+}
 
 // MARK: - Protocol (mirrors excluded ChatEngineProtocol.swift)
 
@@ -396,16 +418,40 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
                             let result: String
                             let toolStart = Date()
-                            NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
-                            do {
-                                result = try await ToolRegistry.shared.execute(
-                                    name: call.name,
-                                    argumentsJSON: call.arguments
-                                )
-                                NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
-                            } catch {
-                                NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
-                                result = ToolEnvelope.fromError(error, tool: call.name)
+
+                            // Enforce the user's per-tool permission policy
+                            // (Tools / Permissions tab). Deny blocks the tool;
+                            // Ask shows a confirmation before running; Auto runs.
+                            let policy =
+                                ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
+                            let approved: Bool
+                            switch policy {
+                            case .deny: approved = false
+                            case .ask:
+                                approved = await ToolApprovalPrompt.request(
+                                    tool: call.name, arguments: call.arguments)
+                            case .auto: approved = true
+                            }
+
+                            if !approved {
+                                let reason =
+                                    policy == .deny
+                                    ? "blocked by your tool permissions (Deny)"
+                                    : "you declined to run it this time"
+                                NSLog("[CloudChatEngine] tool '\(call.name)' not run — \(reason)")
+                                result = "⛔️ “\(call.name)” was not run — \(reason)."
+                            } else {
+                                NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
+                                do {
+                                    result = try await ToolRegistry.shared.execute(
+                                        name: call.name,
+                                        argumentsJSON: call.arguments
+                                    )
+                                    NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
+                                } catch {
+                                    NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
+                                    result = ToolEnvelope.fromError(error, tool: call.name)
+                                }
                             }
                             continuation.yield(
                                 StreamingToolHint.encodeDone(

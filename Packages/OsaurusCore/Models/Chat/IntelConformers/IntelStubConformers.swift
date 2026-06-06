@@ -594,6 +594,10 @@ public struct ClaudePluginInstallReport: Sendable {
 final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let shared = ToolRegistry()
 
+    init() {
+        loadPersistedPolicies()
+    }
+
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
 
     // M12 Gap 3: real tool storage + dispatch. The Intel chat already runs the
@@ -741,6 +745,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func setPolicy(_ policy: ToolPermissionPolicy, for toolName: String) {
         objectWillChange.send()
         _policies[toolName] = policy
+        persistPolicies()
     }
 
     /// Used by `ConfigurationView`'s per-tool permission rows to clear
@@ -748,6 +753,43 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func clearPolicy(for toolName: String) {
         objectWillChange.send()
         _policies.removeValue(forKey: toolName)
+        persistPolicies()
+    }
+
+    // MARK: - Policy persistence (Intel)
+    //
+    // Upstream persists tool policies + enabled flags to disk and reloads them.
+    // The Intel mirror previously kept both in memory only, so choices in the
+    // Tools / Permissions tabs were lost on restart. Persist to
+    // ~/.osaurus/config/tool-policies.json and load on init.
+    private struct PolicyDisk: Codable {
+        var disabled: [String] = []
+        var policies: [String: ToolPermissionPolicy] = [:]
+    }
+
+    private static func policiesFileURL() -> URL {
+        OsaurusPaths.config().appendingPathComponent("tool-policies.json")
+    }
+
+    private func loadPersistedPolicies() {
+        guard let data = try? Data(contentsOf: Self.policiesFileURL()),
+            let disk = try? JSONDecoder().decode(PolicyDisk.self, from: data)
+        else { return }
+        disabledToolNames = Set(disk.disabled)
+        _policies = disk.policies
+    }
+
+    private func persistPolicies() {
+        var disk = PolicyDisk()
+        disk.disabled = Array(disabledToolNames).sorted()
+        disk.policies = _policies
+        let url = Self.policiesFileURL()
+        OsaurusPaths.ensureExistsSilent(url.deletingLastPathComponent())
+        let enc = JSONEncoder()
+        enc.outputFormatting = [.prettyPrinted, .sortedKeys]
+        if let data = try? enc.encode(disk) {
+            try? data.write(to: url, options: .atomic)
+        }
     }
 
     /// AgentDetailView lists per-agent dynamic (plugin-registered) tools
@@ -815,6 +857,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         }
         guard changed else { return }
         objectWillChange.send()
+        persistPolicies()
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
