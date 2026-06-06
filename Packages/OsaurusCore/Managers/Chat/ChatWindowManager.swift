@@ -970,8 +970,9 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         window.isReleasedWhenClosed = false
         window.delegate = self
         window.center()
-        window.makeKeyAndOrderFront(nil)
         nsWindows[info.id] = window
+        // Activate + front (works when summoned via hotkey from another app).
+        bringToFront(window)
 
         return info.id
     }
@@ -1025,15 +1026,48 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     func setCloseCallback(for windowId: UUID, callback: @escaping () -> Void) {}
 
     public func toggleLastFocused() {
+        // Toggle closed only if our chat is genuinely the frontmost window
+        // right now (app active + window key). Otherwise summon it.
+        if NSApp.isActive,
+            let id = lastFocusedWindowId,
+            let window = nsWindows[id],
+            window.isKeyWindow
+        {
+            NSLog("[ChatWindowManager] toggleLastFocused → hide (frontmost)")
+            window.orderOut(nil)
+            return
+        }
         if let id = lastFocusedWindowId, let window = nsWindows[id] {
-            window.makeKeyAndOrderFront(nil)
+            NSLog("[ChatWindowManager] toggleLastFocused → summon lastFocused")
+            bringToFront(window)
+        } else if let window = nsWindows.values.first {
+            NSLog("[ChatWindowManager] toggleLastFocused → summon first window (count=\(nsWindows.count))")
+            bringToFront(window)
         } else {
+            NSLog("[ChatWindowManager] toggleLastFocused → no windows, creating one")
             _ = createWindow()
         }
     }
 
     public func showWindow(id: UUID) {
-        nsWindows[id]?.makeKeyAndOrderFront(nil)
+        guard let window = nsWindows[id] else {
+            NSLog("[ChatWindowManager] showWindow: no window for id \(id)")
+            return
+        }
+        bringToFront(window)
+    }
+
+    /// Bring a window (and the app) reliably to the front from anywhere —
+    /// including from another app or over a full-screen Space. Activating the
+    /// app is what makes a global-hotkey summon work from the background;
+    /// `.moveToActiveSpace` makes the window follow to the current Space instead
+    /// of appearing on its original (possibly hidden) one.
+    private func bringToFront(_ window: NSWindow) {
+        NSApp.activate(ignoringOtherApps: true)
+        window.collectionBehavior.insert(.moveToActiveSpace)
+        if window.isMiniaturized { window.deminiaturize(nil) }
+        window.makeKeyAndOrderFront(nil)
+        window.orderFrontRegardless()
     }
 
     public func closeWindow(id: UUID) {
