@@ -506,7 +506,19 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         self.capabilities = capabilities
     }
 
-    static func generateTitle(from turnData: [ChatTurnData]) -> String { "Chat" }
+    /// Derive a chat title from the first user message — mirrors the upstream
+    /// `ChatSessionData.generateTitle` (excluded on Intel). The old stub always
+    /// returned "Chat", which is why every Intel conversation was named "Chat".
+    static func generateTitle(from turnData: [ChatTurnData]) -> String {
+        guard let firstUserTurn = turnData.first(where: { $0.role == .user }) else {
+            return "New Chat"
+        }
+        let content = firstUserTurn.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if content.isEmpty { return "New Chat" }
+        let firstLine = content.components(separatedBy: .newlines).first ?? content
+        if firstLine.count <= 50 { return firstLine }
+        return String(firstLine.prefix(47)) + "..."
+    }
 }
 
 // MARK: - ChatSessionsManager
