@@ -122,6 +122,11 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     func appendToolArgFragment(_ fragment: String) {
         pendingToolArgSize += fragment.utf8.count
         pendingToolArgFragmentCount += 1
+        // Accumulate a bounded preview so the in-flight tool card can show the
+        // query (args) building up live, not just the bare tool name.
+        if (pendingToolArgPreview?.count ?? 0) < 600 {
+            pendingToolArgPreview = (pendingToolArgPreview ?? "") + fragment
+        }
     }
 
     func trimTrailingFunctionCallLeakage(toolName: String) {}
@@ -1249,6 +1254,24 @@ final class BlockMemoizer: @unchecked Sendable {
                         text: turn.content,
                         isStreaming: turn.id == streamingTurnId,
                         role: .assistant
+                    )
+                ))
+            }
+
+            // In-flight tool call: render the card the MOMENT the model emits
+            // the call (pendingToolName set by the engine's StreamingToolHint),
+            // BEFORE/while the tool executes — so the user sees "calling X …"
+            // with the query, and the result fills in on completion. Cleared by
+            // ChatView on `decodeDone`, when the completed `toolCalls` block
+            // below takes over (the two are mutually exclusive per call).
+            if !isUser, let pendingName = turn.pendingToolName, !pendingName.isEmpty {
+                blocks.append(ContentBlock(
+                    id: "pendingtool-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .pendingToolCall(
+                        toolName: pendingName,
+                        argPreview: turn.pendingToolArgPreview,
+                        argSize: turn.pendingToolArgSize
                     )
                 ))
             }
