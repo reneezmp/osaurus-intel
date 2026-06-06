@@ -1170,9 +1170,27 @@ final class NativeToolCallRowView: NSView {
         contentBottomToArgs?.isActive = true
     }
 
+    /// Memoized `ToolEnvelope.isError` verdict. The sniff scans the whole result
+    /// string, which gets expensive for large tool results, and the status color is
+    /// recomputed on every cell (re)configure tick while a response streams. Results
+    /// are write-once per call, so the verdict is keyed by (call id, byte length).
+    private var cachedErrorVerdict: (callId: String, resultBytes: Int, isError: Bool)?
+
+    private func isErrorResult(_ result: String, callId: String) -> Bool {
+        let bytes = result.utf8.count
+        if let cached = cachedErrorVerdict,
+            cached.callId == callId, cached.resultBytes == bytes
+        {
+            return cached.isError
+        }
+        let verdict = ToolEnvelope.isError(result)
+        cachedErrorVerdict = (callId, bytes, verdict)
+        return verdict
+    }
+
     private func statusInfo(item: ToolCallItem, theme: any ThemeProtocol) -> (String, NSColor) {
         if item.result == nil { return ("circle.dotted", NSColor(theme.accentColor)) }
-        if let r = item.result, ToolEnvelope.isError(r) {
+        if let r = item.result, isErrorResult(r, callId: item.call.id) {
             return ("xmark.circle.fill", NSColor(theme.errorColor))
         }
         return ("checkmark.circle.fill", NSColor(theme.successColor))
