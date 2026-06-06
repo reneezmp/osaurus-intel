@@ -345,16 +345,24 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     if let id = tc["id"] as? String, !id.isEmpty { partial.id = id }
                                     if let fn = tc["function"] as? [String: Any] {
                                         if let n = fn["name"] as? String, !n.isEmpty { partial.name += n }
-                                        if let a = fn["arguments"] as? String { partial.arguments += a }
+                                        // Surface the tool name once, BEFORE
+                                        // streaming args, so the call card
+                                        // appears immediately and the query
+                                        // fills into it live (mirrors upstream:
+                                        // card-with-query first, result later).
+                                        if !partial.name.isEmpty, !announcedNames.contains(idx) {
+                                            announcedNames.insert(idx)
+                                            continuation.yield(StreamingToolHint.encode(partial.name))
+                                        }
+                                        if let a = fn["arguments"] as? String, !a.isEmpty {
+                                            partial.arguments += a
+                                            // Stream the args into the pending
+                                            // card so the user sees the query
+                                            // build up — not just a bare name.
+                                            continuation.yield(StreamingToolHint.encodeArgs(a))
+                                        }
                                     }
                                     partials[idx] = partial
-                                    // Surface the pending tool name once so the
-                                    // chat shows a "calling …" chip while args
-                                    // stream / the tool runs.
-                                    if !partial.name.isEmpty, !announcedNames.contains(idx) {
-                                        announcedNames.insert(idx)
-                                        continuation.yield(StreamingToolHint.encode(partial.name))
-                                    }
                                 }
                             }
                         }
