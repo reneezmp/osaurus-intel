@@ -47,6 +47,41 @@ struct ChatCompletionResponse: Codable, Sendable {
     }
 }
 
+// MARK: - Errors
+
+/// Surfaced when the provider returns a non-2xx HTTP status. Previously the
+/// streaming path logged the status but then fell into the SSE parse loop,
+/// found no `data:` lines in the JSON error body, reported "0 chunks", and
+/// finished silently — the user saw an empty "poof" turn with no explanation.
+enum CloudChatError: LocalizedError {
+    case httpError(status: Int, message: String)
+
+    var errorDescription: String? {
+        switch self {
+        case let .httpError(status, message):
+            let detail = message.isEmpty ? "no details returned" : message
+            return "DeepSeek API error \(status): \(detail)"
+        }
+    }
+}
+
+/// Pull a human-readable message out of an OpenAI-style error body
+/// (`{"error":{"message":"…"}}`), falling back to the raw text.
+private func extractAPIErrorMessage(_ body: String) -> String {
+    let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
+    if let data = trimmed.data(using: .utf8),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+    {
+        if let err = json["error"] as? [String: Any],
+            let msg = err["message"] as? String, !msg.isEmpty
+        {
+            return msg
+        }
+        if let msg = json["message"] as? String, !msg.isEmpty { return msg }
+    }
+    return trimmed
+}
+
 // MARK: - Cloud Chat Engine
 
 actor ChatEngine: Sendable, ChatEngineProtocol {
@@ -198,8 +233,20 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
 
                         let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-                        if let httpResp = response as? HTTPURLResponse {
-                            NSLog("[CloudChatEngine] HTTP status: \(httpResp.statusCode)")
+                        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                        NSLog("[CloudChatEngine] HTTP status: \(statusCode)")
+                        if !(200...299).contains(statusCode) {
+                            // Non-2xx: the body is a JSON error, not an SSE
+                            // stream. Drain it, log it, and surface it so the
+                            // user sees WHY instead of a silent empty turn.
+                            var errorBody = ""
+                            for try await line in asyncBytes.lines { errorBody += line }
+                            let message = extractAPIErrorMessage(errorBody)
+                            NSLog("[CloudChatEngine] HTTP \(statusCode) error body: \(message)")
+                            continuation.finish(
+                                throwing: CloudChatError.httpError(status: statusCode, message: message)
+                            )
+                            return
                         }
 
                         var assistantContent = ""
@@ -337,7 +384,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
 
-        let (data, _) = try await URLSession.shared.data(for: urlRequest)
+        let (data, response) = try await URLSession.shared.data(for: urlRequest)
+        let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+        if !(200...299).contains(statusCode) {
+            let message = extractAPIErrorMessage(String(data: data, encoding: .utf8) ?? "")
+            NSLog("[CloudChatEngine] completeChat HTTP \(statusCode) error body: \(message)")
+            throw CloudChatError.httpError(status: statusCode, message: message)
+        }
         return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
     }
 
