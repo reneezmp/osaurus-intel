@@ -1343,6 +1343,13 @@ final class StreamingDeltaProcessor: @unchecked Sendable {
     func receiveReasoning(_ text: String) {
         guard !text.isEmpty else { return }
         turn.appendThinking(text)
+        // Refresh the UI per chunk so the Think panel streams LIVE, exactly
+        // like content (receiveDelta). Without this the thinking accumulated
+        // silently and only appeared when finalize() fired at end-of-stream —
+        // so a long (8k+ char) thought looked like a multi-second blank stall.
+        // Painting cadence is paced by the ~12/sec runloop yield in
+        // processStreamDeltas, same as content deltas.
+        onChange()
     }
 
     func receiveDelta(_ delta: Any) {
