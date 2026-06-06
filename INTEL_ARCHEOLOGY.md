@@ -2075,3 +2075,69 @@ version.
 `m7-rosy` (Osaurus native on Rosy, 2026-06-05).
 Releases: `1.0.1`–`1.0.4`. Latest: 1.0.4 (build 5), commit `075255d6`.
 Consider tag `m14-usable` at `075255d6`.
+
+---
+
+## M15 — Local inference + a distributable, provider-driven picker (2026-06-06)
+
+The day Rosy ran a language model **on her own CPU**. Renée installed
+[PrismML's Bonsai](https://prismml.com) — a **1-bit 1.7B GGUF** — via a
+[llama.cpp](https://github.com/ggml-org/llama.cpp) server (CPU-only, no GPU,
+~9–13 tok/s, 248 MB, ~4 GB RAM) and pointed an Osaurus provider at
+`http://localhost:8080/v1`. The premise the fork was built on ("Intel can't run
+a model locally → cloud only") turned out to be **false**: MLX is the
+Apple-Silicon path to local inference, but llama.cpp's CPU backend is a *second*
+road we'd never closed. Local sovereignty, on the machine they said to throw away.
+
+### The model-picker saga (why a "configured" provider showed no models)
+Bonsai connected + tested green, but the chat picker only ever listed two
+hardcoded DeepSeek aliases, and Settings → Providers read **"0 models available."**
+
+- **Round 1 (1.0.5) — picker reads providers.** Replaced the Intel
+  `ModelPickerItemCache.buildModelPickerItems()` hardcoded `[deepseek-v4-pro,
+  deepseek-v4-flash]` with an enumeration of each enabled provider's
+  `manualModelIds`, and added `CloudChatEngine.resolveEndpoint(forModel:)` so a
+  request routes to the provider that owns the selected model (its `baseURL` +
+  per-`authType` headers; **no-auth supported** for local servers) instead of the
+  hardcoded DeepSeek URL. **Whiffed** — assumed the add flow populated
+  `manualModelIds`; it doesn't.
+- **Round 2 (1.0.6) — discover models for real.** Root cause: the Intel
+  `RemoteProviderManager` mirror marked providers "connected" but **never probed
+  them**, so `RemoteProviderState.discoveredModels` (which feeds the counter, the
+  picker, *and* engine routing) stayed empty. Added `probeModels(for:)` (the same
+  `/models` GET the Test button uses, driven from the saved key/auth) +
+  `refreshModels(for:)` / `refreshAllModels()`, cached into `discoveredModels`.
+  Probe at launch, on the Providers-tab `onAppear` (catches a local server
+  started *after* the app), and after every add/update/enable. Picker + engine
+  now read `discoveredModels ∪ manualModelIds`. **Bonsai appeared on Rosy and a
+  chat went through to localhost. It worked.** 🦕
+- **Round 3 (1.0.7) — de-hardcode for distribution.** Removed the built-in
+  DeepSeek picker rows + the deepseek-host skip entirely. The picker is now
+  **purely provider-driven** — zero hardcoded models — so the build is shippable
+  to other Intel users who may run only a local model, only DeepSeek, only
+  Ollama, whatever. DeepSeek is just another provider (ships as a preset). The
+  engine keeps a DeepSeek fallback for backward-compat (old sessions / the
+  `DEEPSEEK_API_KEY` dev env), invisible to new users.
+
+### Repo rename
+`reneezmp/osaurus` → **`reneezmp/osaurus-intel`** (so it's visibly distinct from
+the swarm of forks named `osaurus`). GitHub redirects covered both the raw
+appcast and release-asset downloads, so in-flight updaters kept working. Updated
+the local `origin`, `Info.plist` `SUFeedURL`, and the release script `REPO` to
+the new name. From 1.0.6's build onward, installed copies poll the new feed URL.
+
+### README
+Rewritten from "cloud-only, no local model" to the true, better story: **cloud
+*or* local** (any OpenAI-compatible endpoint, including a local llama.cpp/Ollama
+server), with Rosy's 1-bit local chat called out as the headline.
+
+### Released
+1.0.5 (build 6) · 1.0.6 (build 7, provider model discovery + rename) · 1.0.7
+(build 8, provider-driven picker). Latest: **1.0.7**. Tag `m14-usable` was laid
+at `b0e2f772`.
+
+### Next (unchanged from the M14 roadmap, still pre-rest)
+Plugin repo first, then the upstream→Intel sync pipeline + `UPSTREAM_SYNC.md`
+ledger. Plus a fresh distribution thread now that local inference works:
+document the Bonsai-on-Rosy setup (see `02_Projects/Bonsai_on_Rosy_Tutorial.md`)
+as a first-class "local mode" path for other Intel users.

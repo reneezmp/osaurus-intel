@@ -2,12 +2,12 @@
 
 <p align="center">
   <strong>The AI agent harness for the Macs everyone else gave up on.</strong><br>
-  A fork of <a href="https://github.com/osaurus-ai/osaurus">Osaurus</a> that runs natively on <strong>Intel Macs</strong> — cloud-powered, fully native x86_64, no Rosetta.
+  A fork of <a href="https://github.com/osaurus-ai/osaurus">Osaurus</a> that runs natively on <strong>Intel Macs</strong> — fully native x86_64, no Rosetta. Talk to a cloud model <em>or</em> a model running locally on the same old laptop.
 </p>
 
 <p align="center">
   <img src="https://img.shields.io/badge/Platform-macOS%20(Intel%20x86__64)-black?logo=apple" alt="Platform">
-  <img src="https://img.shields.io/badge/Inference-Cloud%20(DeepSeek%20%2F%20OpenAI--compatible)-brightgreen" alt="Inference">
+  <img src="https://img.shields.io/badge/Inference-Cloud%20or%20Local%20(llama.cpp)-brightgreen" alt="Inference">
   <img src="https://img.shields.io/badge/Built%20with-Swift-orange?logo=swift" alt="Swift">
 </p>
 
@@ -17,11 +17,11 @@
 
 Old tech shouldn't be trash.
 
-Apple stops shipping updates, a machine gets labelled "obsolete," and a perfectly good computer is quietly pushed toward landfill. But a 2017 Intel MacBook is still a *lovely* machine — and there's no reason it can't be **AI-ready**, even if it can't run a language model locally.
+Apple stops shipping updates, a machine gets labelled "obsolete," and a perfectly good computer is quietly pushed toward landfill. But a 2017 Intel MacBook is still a *lovely* machine — and there's no reason it can't be **AI-ready**.
 
-Upstream [Osaurus](https://github.com/osaurus-ai/osaurus) is an Apple-Silicon–only app: it leans on MLX for on-device inference, Apple's Containerization for sandboxing, and other arm64-bound frameworks. This fork **amputates the Apple-Silicon-only pieces** and replaces local inference with **cloud APIs**, so the whole agent experience — chat, tools, plugins, schedules, memory, RAG — runs on an Intel Mac through a remote model.
+Upstream [Osaurus](https://github.com/osaurus-ai/osaurus) is an Apple-Silicon–only app: it leans on MLX for on-device inference, Apple's Containerization for sandboxing, and other arm64-bound frameworks. This fork **amputates the Apple-Silicon-only pieces** and points inference at any **OpenAI-compatible endpoint instead** — so the whole agent experience (chat, tools, plugins, schedules, memory, RAG) runs on an Intel Mac. That endpoint can be a **cloud API** (DeepSeek, OpenAI, …) *or* a **local server on the same machine** — a [llama.cpp](https://github.com/ggml-org/llama.cpp) server runs a quantized model on a GPU-less Intel CPU just fine.
 
-It was built, in large part, to give one specific 2017 MacBook Retina 12" a second life. We named her **Rosy**. She runs macOS Sequoia via [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/), and now she runs Osaurus. 🌸
+It was built, in large part, to give one specific 2017 MacBook Retina 12" a second life. We named her **Rosy**. She runs macOS Sequoia via [OpenCore Legacy Patcher](https://dortania.github.io/OpenCore-Legacy-Patcher/), and now she runs Osaurus — and has even held a conversation with a **1-bit language model running entirely on her own CPU**, no cloud, no API key. 🌸
 
 > This is a personal labour of love, not an official Osaurus build. Enormous gratitude to the upstream team — please support the [original project](https://github.com/osaurus-ai/osaurus) first, because what they're doing is really awesome.
 
@@ -29,7 +29,7 @@ It was built, in large part, to give one specific 2017 MacBook Retina 12" a seco
 
 ## ✅ What works on Intel
 
-- 💬 **Cloud chat** — DeepSeek and any OpenAI-compatible provider, configured in Settings → Providers
+- 💬 **Cloud *or* local chat** — DeepSeek, OpenAI, or **any OpenAI-compatible endpoint** (including a local llama.cpp / Ollama server), configured in Settings → Providers. Every model your providers expose shows up in the chat picker; pick one and the request routes to the provider that owns it.
 - 🧠 **Live reasoning** — watch the model think in real time
 - 🔧 **Tool calling** — built-in tools + an agentic loop, with live "calling…" cards
 - 🧩 **Native x86_64 plugins** — the slim plugin host `dlopen`s real x86_64 dylibs (search, fetch, time, custom RAG, …)
@@ -42,7 +42,7 @@ It was built, in large part, to give one specific 2017 MacBook Retina 12" a seco
 
 These depend on arm64-only frameworks and are disabled on Intel:
 
-- **Local model inference** (MLX) — replaced by cloud providers
+- **MLX on-device inference** (Apple's arm64 ML stack) — replaced by any OpenAI-compatible endpoint, cloud or a local llama.cpp/Ollama server
 - **Voice / transcription** (FluidAudio)
 - **Sandbox / containerization** (Apple Containerization) — tools run un-sandboxed (a non-sandboxed app already has full filesystem access)
 - **Local vector index** (VecturaKit) — bring your own embeddings via a plugin
@@ -51,16 +51,18 @@ These depend on arm64-only frameworks and are disabled on Intel:
 
 ## 📦 Install (Intel Mac)
 
-1. Download the latest `.app` from [Releases](https://github.com/reneezmp/osaurus/releases).
+1. Download the latest `.app` from [Releases](https://github.com/reneezmp/osaurus-intel/releases).
 2. **Transfer it as a ZIP** (the build's frameworks use symlinks that iCloud Drive will mangle — always move it zipped).
 3. Unzip, drag `osaurus.app` to `/Applications`.
 4. Clear the quarantine flag:
    ```bash
    xattr -dr com.apple.quarantine /Applications/osaurus.app
    ```
-5. Launch, then open **Settings → Providers** and add your API key (e.g. DeepSeek).
+5. Launch, then open **Settings → Providers** and add a provider:
+   - **Cloud** — e.g. DeepSeek or OpenAI: paste your API key.
+   - **Local** — run a [llama.cpp](https://github.com/ggml-org/llama.cpp) server (or Ollama) and point a provider at `http://localhost:8080/v1` with no key. Its models appear in the chat picker automatically.
 
-Requires an Intel Mac running a recent macOS (Sequoia tested via OCLP). Cloud inference needs an API key — there is no local model.
+Requires an Intel Mac running a recent macOS (Sequoia tested via OCLP). Use a cloud key, a local server, or both side by side.
 
 ---
 
@@ -87,7 +89,7 @@ The Intel fork is gated behind the `OSAURUS_INTEL` compilation flag. Amputated s
 
 ## 🏗️ How the port works
 
-Upstream managers that pull in arm64-only dependencies are excluded from the Intel build and replaced by lean "Intel mirror" implementations (`IntelConformers/*.swift`). Local inference is swapped for `CloudChatEngine`, which speaks the OpenAI-compatible streaming API and runs the tool/agent loop engine-side. Plugins are native x86_64 dylibs loaded through a frozen C ABI. The full archaeology — every excluded subsystem, every mirror, every fix — lives in [`INTEL_ARCHEOLOGY.md`](./INTEL_ARCHEOLOGY.md).
+Upstream managers that pull in arm64-only dependencies are excluded from the Intel build and replaced by lean "Intel mirror" implementations (`IntelConformers/*.swift`). MLX inference is swapped for `CloudChatEngine`, which speaks the OpenAI-compatible streaming API to whichever provider owns the selected model — cloud or a local llama.cpp server on `localhost` — and runs the tool/agent loop engine-side. Plugins are native x86_64 dylibs loaded through a frozen C ABI. The full archaeology — every excluded subsystem, every mirror, every fix — lives in [`INTEL_ARCHEOLOGY.md`](./INTEL_ARCHEOLOGY.md).
 
 ---
 

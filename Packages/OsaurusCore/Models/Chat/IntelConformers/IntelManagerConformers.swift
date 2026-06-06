@@ -409,62 +409,29 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 // Phase 11.A.3.1, gated visually to AppleSiliconOnlyOverlay)
 // observes `$items`, which requires `ObservableObject` + `@Published`
 // surface. Mirrored here. The cache stays Intel-functional for
-// `FloatingInputCard`'s model selector — that's where the DeepSeek
-// rows actually surface, and the Configuration picker is gated.
+// `FloatingInputCard`'s model selector — that's where the provider
+// models surface, and the Configuration picker is gated.
 final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
     static let shared = ModelPickerItemCache()
-
-    /// Stable synthetic UUID for the built-in DeepSeek provider. The Intel
-    /// build's `RemoteProviderManager` doesn't configure user-facing
-    /// providers (the API key is read from `DEEPSEEK_API_KEY` and the URL
-    /// is hard-coded in `CloudChatEngine`), but `ModelPickerItem.Source`
-    /// still wants a UUID and `ChatView`'s `source.remoteProviderId`
-    /// filter still compares against it — so we pin a stable value here.
-    static let deepSeekProviderId = UUID(uuidString: "00000000-0000-0000-0000-DEEDEEDEEDEE")!
 
     var isLoaded: Bool = false
     @Published private(set) var items: [ModelPickerItem] = []
 
     func buildModelPickerItems() async -> [ModelPickerItem] {
+        // Purely provider-driven: every model comes from a user-configured,
+        // enabled provider — its live `discoveredModels` (cached `/models`
+        // probe) unioned with any `manualModelIds` the user typed. There are
+        // NO hardcoded models. DeepSeek is just another provider now (it ships
+        // as a preset), which is what makes this build distributable to other
+        // Intel users who may run only a local llama.cpp server (Bonsai),
+        // Ollama, or some other OpenAI-compatible endpoint. `CloudChatEngine`
+        // routes each request to whichever provider owns the selected model.
         let built: [ModelPickerItem] = await MainActor.run {
             var out: [ModelPickerItem] = []
             var seen = Set<String>()
-
-            // 1) Built-in DeepSeek aliases. These map to the hardcoded engine
-            //    path (DeepSeek URL + `DEEPSEEK_API_KEY` / saved key) and are
-            //    always available even with no provider configured.
-            let deepseek: ModelPickerItem.Source = .remote(
-                providerName: "DeepSeek",
-                providerId: Self.deepSeekProviderId
-            )
-            for (id, name, desc) in [
-                ("deepseek-v4-pro", "DeepSeek V4 Pro", "DeepSeek's flagship chat model"),
-                ("deepseek-v4-flash", "DeepSeek V4 Flash", "DeepSeek's fast tier"),
-            ] {
-                out.append(
-                    ModelPickerItem(
-                        id: id, displayName: name, source: deepseek, isVLM: false, description: desc
-                    )
-                )
-                seen.insert(id)
-            }
-
-            // 2) Every model from an enabled, user-configured provider. The
-            //    model ids come from `discoveredModels` (live `/models` probe,
-            //    cached by RemoteProviderManager) unioned with any
-            //    `manualModelIds` the user typed. This is what makes a local
-            //    llama.cpp server (Bonsai) or any OpenAI-compatible endpoint
-            //    show up in the chat picker — and `CloudChatEngine` routes the
-            //    request to whichever provider owns the model.
-            //
-            //    DeepSeek is skipped here: it's represented by the built-in
-            //    aliases above (deepseek-v4-pro/flash, the names the engine
-            //    actually sends), so enumerating its raw `/models` ids too would
-            //    just clutter the picker with duplicate-looking DeepSeek rows.
             let manager = RemoteProviderManager.shared
             let providers = manager.configuration.providers.filter { $0.enabled }
             for provider in providers {
-                if provider.host.localizedCaseInsensitiveContains("deepseek") { continue }
                 let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
                 var ids: [String] = []
                 for id in discovered + provider.manualModelIds where !ids.contains(id) { ids.append(id) }
