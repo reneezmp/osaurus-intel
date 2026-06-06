@@ -879,7 +879,11 @@ final class ChatConfiguration: @unchecked Sendable {
     func loadFromDiskIfPresent() {
         guard let data = try? Data(contentsOf: OsaurusPaths.chatConfigFile()),
             let s = try? JSONDecoder().decode(DiskSnapshot.self, from: data)
-        else { return }
+        else {
+            print("[ChatConfiguration] loadFromDisk: no file at \(OsaurusPaths.chatConfigFile().path)")
+            return
+        }
+        print("[ChatConfiguration] loadFromDisk: coreModel=\(s.coreModelProvider ?? "nil")/\(s.coreModelName ?? "nil") maxToolAttempts=\(String(describing: s.maxToolAttempts))")
         if let v = s.disableTools { disableTools = v }
         if let v = s.maxToolAttempts { maxToolAttempts = v }
         if let v = s.topPOverride { topPOverride = v }
@@ -934,6 +938,9 @@ final class ChatConfiguration: @unchecked Sendable {
         enc.outputFormatting = [.prettyPrinted, .sortedKeys]
         if let data = try? enc.encode(s) {
             try? data.write(to: url, options: [.atomic])
+            print("[ChatConfiguration] persistToDisk: wrote coreModel=\(s.coreModelProvider ?? "nil")/\(s.coreModelName ?? "nil") → \(url.path)")
+        } else {
+            print("[ChatConfiguration] persistToDisk: ENCODE FAILED")
         }
     }
 }
