@@ -29,7 +29,6 @@ struct RemoteProvidersView: View {
 
     @State private var addSheetConfig: AddSheetConfig?
     @State private var editingProvider: RemoteProvider?
-    @State private var showReorderSheet = false
     @State private var hasAppeared = false
 
     private struct AddSheetConfig: Identifiable {
@@ -82,9 +81,6 @@ struct RemoteProvidersView: View {
                 manager.updateProvider(updatedProvider, apiKey: apiKey, oauthTokens: oauthTokens)
             }
         }
-        .sheet(isPresented: $showReorderSheet) {
-            RemoteProviderReorderSheet()
-        }
     }
 
     // MARK: - Header
@@ -94,11 +90,6 @@ struct RemoteProvidersView: View {
             title: L("Providers"),
             subtitle: subtitleText
         ) {
-            if manager.configuration.providers.count > 1 {
-                HeaderIconButton("list.bullet.indent", help: "Reorder providers") {
-                    showReorderSheet = true
-                }
-            }
             HeaderPrimaryButton("Add Provider", icon: "plus") {
                 addSheetConfig = AddSheetConfig(preset: nil)
             }

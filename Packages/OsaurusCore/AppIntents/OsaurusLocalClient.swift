@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OsaurusLocalClient.swift
 //  osaurus
@@ -221,3 +222,5 @@ public final class OsaurusLocalClient: Sendable {
         let error: Detail?
     }
 }
+
+#endif

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ExternalModelsSettingsView.swift
 //  osaurus
@@ -141,3 +142,5 @@ struct ExternalModelsSettingsView: View {
         return "\(name): \(item.reason.title)"
     }
 }
+
+#endif

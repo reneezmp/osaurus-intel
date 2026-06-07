@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ModelCompatibilityDiagnostics.swift
 //  osaurus
@@ -390,3 +391,5 @@ enum ModelCompatibilityDiagnostics {
         return trimmed.isEmpty ? nil : trimmed
     }
 }
+
+#endif

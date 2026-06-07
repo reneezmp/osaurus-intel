@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  RemoteProviderReorderSheet.swift
 //  osaurus
@@ -152,3 +153,5 @@ struct RemoteProviderReorderSheet: View {
         hasPendingReorder = false
     }
 }
+
+#endif

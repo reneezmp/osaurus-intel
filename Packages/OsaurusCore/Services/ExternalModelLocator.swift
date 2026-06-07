@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ExternalModelLocator.swift
 //  osaurus
@@ -682,3 +683,5 @@ enum ExternalModelLocator {
         lock.unlock()
     }
 }
+
+#endif
