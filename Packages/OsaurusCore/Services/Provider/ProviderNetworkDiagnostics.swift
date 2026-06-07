@@ -140,51 +140,51 @@ public enum ProviderNetworkDiagnostics {
         guard provider.enabled else {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Disabled"),
+                title: "Connection",
+                value: "Disabled",
                 severity: .warning,
-                detail: L("Osaurus will not auto-connect this provider while the row toggle is off."),
-                action: L("Enable the provider before testing or selecting its models.")
+                detail: "Osaurus will not auto-connect this provider while the row toggle is off.",
+                action: "Enable the provider before testing or selecting its models."
             )
         }
 
         if state?.isConnecting == true {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Connecting"),
+                title: "Connection",
+                value: "Connecting",
                 severity: .info,
-                detail: L("A bounded model-discovery request is in flight.")
+                detail: "A bounded model-discovery request is in flight."
             )
         }
 
         if state?.isConnected == true {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Connected"),
+                title: "Connection",
+                value: "Connected",
                 severity: .ok,
-                detail: L("\(state?.modelCount ?? 0) model(s) currently available.")
+                detail: "\(state?.modelCount ?? 0) model(s) currently available."
             )
         }
 
         if let error = state?.lastError, !error.isEmpty {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Failed"),
+                title: "Connection",
+                value: "Failed",
                 severity: .blocked,
                 detail: safeDiagnostic(error),
-                action: L("Use the Test button or copy diagnostics when reporting the issue.")
+                action: "Use the Test button or copy diagnostics when reporting the issue."
             )
         }
 
         return ProviderDiagnosticRow(
             id: "connection",
-            title: L("Connection"),
-            value: L("Not connected"),
+            title: "Connection",
+            value: "Not connected",
             severity: .info,
-            detail: L("The provider is configured but has not completed model discovery yet.")
+            detail: "The provider is configured but has not completed model discovery yet."
         )
     }
 
@@ -198,75 +198,75 @@ public enum ProviderNetworkDiagnostics {
         case .none:
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("None"),
+                title: "Authentication",
+                value: "None",
                 severity: .info,
-                detail: L("No Authorization header is added by Osaurus.")
+                detail: "No Authorization header is added by Osaurus."
             )
         case .apiKey:
             if apiKeyPresent {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("API key in Keychain"),
+                    title: "Authentication",
+                    value: "API key in Keychain",
                     severity: .ok,
-                    detail: L("The saved key is injected using the provider-specific header.")
+                    detail: "The saved key is injected using the provider-specific header."
                 )
             }
             if hasCredentialHeader(provider) {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("Credential header configured"),
+                    title: "Authentication",
+                    value: "Credential header configured",
                     severity: .ok,
-                    detail: L("A regular or secret credential header is configured for this provider.")
+                    detail: "A regular or secret credential header is configured for this provider."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("Missing API key"),
+                title: "Authentication",
+                value: "Missing API key",
                 severity: .blocked,
                 detail: state?.lastError.map(safeDiagnostic),
-                action: L("Edit the provider and save an API key or secret Authorization header.")
+                action: "Edit the provider and save an API key or secret Authorization header."
             )
         case .openAICodexOAuth:
             if oauthTokensPresent {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("ChatGPT signed in"),
+                    title: "Authentication",
+                    value: "ChatGPT signed in",
                     severity: .ok,
-                    detail: L("Codex OAuth tokens are present and refreshed before model discovery.")
+                    detail: "Codex OAuth tokens are present and refreshed before model discovery."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("ChatGPT sign-in required"),
+                title: "Authentication",
+                value: "ChatGPT sign-in required",
                 severity: .blocked,
                 detail: state?.lastError.map(safeDiagnostic)
-                    ?? L("No Codex OAuth tokens are saved for this provider."),
-                action: L("Sign in with the ChatGPT account that has Codex access.")
+                    ?? "No Codex OAuth tokens are saved for this provider.",
+                action: "Sign in with the ChatGPT account that has Codex access."
             )
         case .xaiOAuth:
             if oauthTokensPresent {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("xAI signed in"),
+                    title: "Authentication",
+                    value: "xAI signed in",
                     severity: .ok,
-                    detail: L("xAI OAuth tokens are present and refreshed before model discovery.")
+                    detail: "xAI OAuth tokens are present and refreshed before model discovery."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("xAI sign-in required"),
+                title: "Authentication",
+                value: "xAI sign-in required",
                 severity: .blocked,
                 detail: state?.lastError.map(safeDiagnostic)
-                    ?? L("No xAI OAuth tokens are saved for this provider."),
-                action: L("Sign in with the xAI account that has Grok API access.")
+                    ?? "No xAI OAuth tokens are saved for this provider.",
+                action: "Sign in with the xAI account that has Grok API access."
             )
         }
     }
@@ -275,11 +275,11 @@ public enum ProviderNetworkDiagnostics {
         guard let modelsURL = provider.url(for: provider.providerType.modelsEndpoint) else {
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: L("Invalid URL"),
+                title: "Model discovery",
+                value: "Invalid URL",
                 severity: .blocked,
-                detail: L("Host, port, or base path could not be converted into a /models URL."),
-                action: L("Edit the endpoint fields and test again.")
+                detail: "Host, port, or base path could not be converted into a /models URL.",
+                action: "Edit the endpoint fields and test again."
             )
         }
 
@@ -287,62 +287,60 @@ public enum ProviderNetworkDiagnostics {
         case .openAICodex:
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: L("ChatGPT/Codex catalog"),
+                title: "Model discovery",
+                value: "ChatGPT/Codex catalog",
                 severity: .info,
                 detail:
-                    L(
-                        "Uses the live ChatGPT model catalog after sign-in, with the static Codex fallback before sign-in."
-                    )
+                    "Uses the live ChatGPT model catalog after sign-in, with the static Codex fallback before sign-in."
             )
         case .azureOpenAI:
             let hasManual = !provider.mergedModelIds(discovered: []).isEmpty
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: hasManual ? L("Manual deployments") : L("/models probe"),
+                title: "Model discovery",
+                value: hasManual ? "Manual deployments" : "/models probe",
                 severity: hasManual ? .ok : .warning,
                 detail: hasManual
-                    ? L("Azure deployment IDs are configured, so connect can proceed even when /models is unavailable.")
-                    : L("Azure often requires manual deployment IDs because /models may be unavailable."),
-                action: hasManual ? nil : L("Add at least one deployment/model ID in Advanced.")
+                    ? "Azure deployment IDs are configured, so connect can proceed even when /models is unavailable."
+                    : "Azure often requires manual deployment IDs because /models may be unavailable.",
+                action: hasManual ? nil : "Add at least one deployment/model ID in Advanced."
             )
         case .openaiLegacy, .openResponses:
             let manual = provider.mergedModelIds(discovered: [])
             let detail =
                 manual.isEmpty
-                ? L("Requires \(modelsURL.absoluteString) to return an OpenAI-shaped model list.")
-                : L("Manual IDs are used if /models is missing or returns a non-OpenAI schema.")
+                ? "Requires \(modelsURL.absoluteString) to return an OpenAI-shaped model list."
+                : "Manual IDs are used if /models is missing or returns a non-OpenAI schema."
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: manual.isEmpty ? L("/models required") : L("Fallback available"),
+                title: "Model discovery",
+                value: manual.isEmpty ? "/models required" : "Fallback available",
                 severity: manual.isEmpty ? .info : .ok,
                 detail: detail
             )
         case .anthropic:
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
+                title: "Model discovery",
                 value: "Anthropic /models",
                 severity: .info,
-                detail: L("Uses Anthropic's paginated model catalog endpoint.")
+                detail: "Uses Anthropic's paginated model catalog endpoint."
             )
         case .gemini:
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: L("Gemini model list"),
+                title: "Model discovery",
+                value: "Gemini model list",
                 severity: .info,
-                detail: L("Filters the Gemini catalog to models that support generateContent.")
+                detail: "Filters the Gemini catalog to models that support generateContent."
             )
         case .osaurus:
             return ProviderDiagnosticRow(
                 id: "models",
-                title: L("Model discovery"),
-                value: L("Remote Osaurus"),
+                title: "Model discovery",
+                value: "Remote Osaurus",
                 severity: .info,
-                detail: L("Tries the remote /models endpoint, then falls back to the agent default model.")
+                detail: "Tries the remote /models endpoint, then falls back to the agent default model."
             )
         }
     }
@@ -350,13 +348,11 @@ public enum ProviderNetworkDiagnostics {
     private static func remoteRequestFormatRow(provider: RemoteProvider) -> ProviderDiagnosticRow {
         ProviderDiagnosticRow(
             id: "format",
-            title: L("Request format"),
-            value: L("\(provider.providerType.displayName) \(provider.providerType.chatEndpoint)"),
+            title: "Request format",
+            value: "\(provider.providerType.displayName) \(provider.providerType.chatEndpoint)",
             severity: .info,
             detail:
-                L(
-                    "Local OpenAI-compatible validation returns typed 400 errors for unsupported sampler fields such as n > 1 or response_format=json_schema."
-                )
+                "Local OpenAI-compatible validation returns typed 400 errors for unsupported sampler fields such as n > 1 or response_format=json_schema."
         )
     }
 
@@ -366,56 +362,56 @@ public enum ProviderNetworkDiagnostics {
         guard provider.enabled else {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Disabled"),
+                title: "Connection",
+                value: "Disabled",
                 severity: .warning,
-                detail: L("Osaurus will not auto-connect this MCP provider while the row toggle is off.")
+                detail: "Osaurus will not auto-connect this MCP provider while the row toggle is off."
             )
         }
         if state?.isConnecting == true {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Connecting"),
+                title: "Connection",
+                value: "Connecting",
                 severity: .info,
-                detail: L("Tool discovery is running with a \(Int(provider.discoveryTimeout))s timeout.")
+                detail: "Tool discovery is running with a \(Int(provider.discoveryTimeout))s timeout."
             )
         }
         if state?.isConnected == true {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Connected"),
+                title: "Connection",
+                value: "Connected",
                 severity: .ok,
-                detail: L("\(state?.discoveredToolCount ?? 0) tool(s) discovered.")
+                detail: "\(state?.discoveredToolCount ?? 0) tool(s) discovered."
             )
         }
         if state?.requiresAuth == true {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Auth required"),
+                title: "Connection",
+                value: "Auth required",
                 severity: .blocked,
                 detail: state?.lastError.map(safeDiagnostic),
-                action: L("Use the inline Sign In or token prompt.")
+                action: "Use the inline Sign In or token prompt."
             )
         }
         if let error = state?.lastError, !error.isEmpty {
             return ProviderDiagnosticRow(
                 id: "connection",
-                title: L("Connection"),
-                value: L("Failed"),
+                title: "Connection",
+                value: "Failed",
                 severity: .blocked,
                 detail: safeDiagnostic(error),
-                action: L("Use the Test button in Edit to reproduce the failure.")
+                action: "Use the Test button in Edit to reproduce the failure."
             )
         }
         return ProviderDiagnosticRow(
             id: "connection",
-            title: L("Connection"),
-            value: L("Not connected"),
+            title: "Connection",
+            value: "Not connected",
             severity: .info,
-            detail: L("The provider is configured but no tools are registered yet.")
+            detail: "The provider is configured but no tools are registered yet."
         )
     }
 
@@ -429,47 +425,47 @@ public enum ProviderNetworkDiagnostics {
         case .none:
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("None"),
+                title: "Authentication",
+                value: "None",
                 severity: .info,
-                detail: L("No Authorization header is added by Osaurus.")
+                detail: "No Authorization header is added by Osaurus."
             )
         case .bearerToken:
             if bearerTokenPresent || hasMCPHeaderCredential(provider) {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("Bearer credential configured"),
+                    title: "Authentication",
+                    value: "Bearer credential configured",
                     severity: .ok,
-                    detail: L("The token or secret header is stored outside plain provider config.")
+                    detail: "The token or secret header is stored outside plain provider config."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: state?.requiresAuth == true ? L("Token required") : L("No token saved"),
+                title: "Authentication",
+                value: state?.requiresAuth == true ? "Token required" : "No token saved",
                 severity: state?.requiresAuth == true ? .blocked : .warning,
                 detail: state?.lastError.map(safeDiagnostic),
-                action: L("Paste an API token in the inline prompt or edit the provider.")
+                action: "Paste an API token in the inline prompt or edit the provider."
             )
         case .oauth:
             if oauthTokensPresent {
                 return ProviderDiagnosticRow(
                     id: "auth",
-                    title: L("Authentication"),
-                    value: L("OAuth tokens saved"),
+                    title: "Authentication",
+                    value: "OAuth tokens saved",
                     severity: .ok,
-                    detail: L("Tokens are refreshed before HTTP MCP discovery.")
+                    detail: "Tokens are refreshed before HTTP MCP discovery."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "auth",
-                title: L("Authentication"),
-                value: L("OAuth sign-in required"),
+                title: "Authentication",
+                value: "OAuth sign-in required",
                 severity: state?.requiresAuth == true ? .blocked : .warning,
                 detail: state?.lastError.map(safeDiagnostic)
-                    ?? L("No OAuth tokens are saved for this provider."),
-                action: L("Sign in from the provider row.")
+                    ?? "No OAuth tokens are saved for this provider.",
+                action: "Sign in from the provider row."
             )
         }
     }
@@ -479,31 +475,31 @@ public enum ProviderNetworkDiagnostics {
         case .http:
             return ProviderDiagnosticRow(
                 id: "transport",
-                title: L("Transport"),
+                title: "Transport",
                 value: provider.streamingEnabled ? "HTTP/SSE" : "HTTP",
                 severity: .info,
-                detail: L("Discovery and tool calls use URLSession with the global proxy policy applied.")
+                detail: "Discovery and tool calls use URLSession with the global proxy policy applied."
             )
         case .stdio:
             let command = provider.command.trimmingCharacters(in: .whitespacesAndNewlines)
             if command.isEmpty {
                 return ProviderDiagnosticRow(
                     id: "transport",
-                    title: L("Transport"),
-                    value: L("Stdio command missing"),
+                    title: "Transport",
+                    value: "Stdio command missing",
                     severity: .blocked,
-                    detail: L("A stdio MCP provider needs a command before it can launch."),
-                    action: L("Edit the provider and enter the executable.")
+                    detail: "A stdio MCP provider needs a command before it can launch.",
+                    action: "Edit the provider and enter the executable."
                 )
             }
             return ProviderDiagnosticRow(
                 id: "transport",
-                title: L("Transport"),
-                value: L("Stdio \(provider.executionHost.rawValue)"),
+                title: "Transport",
+                value: "Stdio \(provider.executionHost.rawValue)",
                 severity: provider.executionHost == .host ? .warning : .ok,
                 detail: provider.executionHost == .host
-                    ? L("Runs directly on the macOS host. Prefer full executable paths for GUI-launched apps.")
-                    : L("Runs inside the Osaurus sandbox and is torn down on disconnect.")
+                    ? "Runs directly on the macOS host. Prefer full executable paths for GUI-launched apps."
+                    : "Runs inside the Osaurus sandbox and is torn down on disconnect."
             )
         }
     }
@@ -518,12 +514,10 @@ public enum ProviderNetworkDiagnostics {
         case .stdio:
             return ProviderDiagnosticRow(
                 id: "proxy",
-                title: L("Global proxy"),
-                value: L("Not used for stdio"),
+                title: "Global proxy",
+                value: "Not used for stdio",
                 severity: .info,
-                detail: L(
-                    "Stdio providers launch a local subprocess instead of sending HTTP traffic through URLSession."
-                )
+                detail: "Stdio providers launch a local subprocess instead of sending HTTP traffic through URLSession."
             )
         }
     }
@@ -536,30 +530,30 @@ public enum ProviderNetworkDiagnostics {
             let commandMissing = MCPStdioTransportError.isCommandNotFoundMessage(error)
             return ProviderDiagnosticRow(
                 id: "repro",
-                title: L("Repro path"),
-                value: commandMissing ? L("PATH issue") : L("Copyable error"),
+                title: "Repro path",
+                value: commandMissing ? "PATH issue" : "Copyable error",
                 severity: .warning,
                 detail: safeDiagnostic(error),
                 action: commandMissing
-                    ? L("Use a full path such as /opt/homebrew/bin/npx or switch execution host.")
-                    : L("Open Edit and press Test to reproduce discovery without saving.")
+                    ? "Use a full path such as /opt/homebrew/bin/npx or switch execution host."
+                    : "Open Edit and press Test to reproduce discovery without saving."
             )
         }
         if provider.transport == .stdio {
             return ProviderDiagnosticRow(
                 id: "repro",
-                title: L("Repro path"),
-                value: L("Short-lived stdio probe"),
+                title: "Repro path",
+                value: "Short-lived stdio probe",
                 severity: .info,
-                detail: L("The Test button launches the subprocess, runs initialize/listTools, and tears it down.")
+                detail: "The Test button launches the subprocess, runs initialize/listTools, and tears it down."
             )
         }
         return ProviderDiagnosticRow(
             id: "repro",
-            title: L("Repro path"),
-            value: L("HTTP discovery probe"),
+            title: "Repro path",
+            value: "HTTP discovery probe",
             severity: .info,
-            detail: L("401 challenges surface as inline sign-in or token prompts with the last error preserved.")
+            detail: "401 challenges surface as inline sign-in or token prompts with the last error preserved."
         )
     }
 
@@ -570,27 +564,27 @@ public enum ProviderNetworkDiagnostics {
         case .disabled:
             return ProviderDiagnosticRow(
                 id: "proxy",
-                title: L("Global proxy"),
-                value: L("Off"),
+                title: "Global proxy",
+                value: "Off",
                 severity: .info,
-                detail: L("\(appliesTo) use direct networking.")
+                detail: "\(appliesTo) use direct networking."
             )
         case .active(let description):
             return ProviderDiagnosticRow(
                 id: "proxy",
-                title: L("Global proxy"),
+                title: "Global proxy",
                 value: description,
                 severity: .ok,
-                detail: L("\(appliesTo) use this validated proxy endpoint.")
+                detail: "\(appliesTo) use this validated proxy endpoint."
             )
         case .invalid(let reason):
             return ProviderDiagnosticRow(
                 id: "proxy",
-                title: L("Global proxy"),
-                value: L("Ignored"),
+                title: "Global proxy",
+                value: "Ignored",
                 severity: .warning,
                 detail: reason,
-                action: L("Fix or clear the proxy URL in Server settings.")
+                action: "Fix or clear the proxy URL in Server settings."
             )
         }
     }
