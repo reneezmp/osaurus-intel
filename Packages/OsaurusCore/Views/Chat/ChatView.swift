@@ -183,7 +183,7 @@ final class ChatSession: ObservableObject {
     private var cachedMemoryTokens: Int = 0
     private let budgetTracker = ContextBudgetTracker()
 
-    /// Per-session preflight + capabilities_load tool kit lives in the
+    /// Per-session always-loaded + capabilities_load tool kit lives in the
     /// process-wide `SessionToolStateStore` so chat sessions and the
     /// HTTP/plugin path share one cache. Keyed by `sessionId.uuidString`.
     private var sessionStateKey: (UUID) -> String { { $0.uuidString } }

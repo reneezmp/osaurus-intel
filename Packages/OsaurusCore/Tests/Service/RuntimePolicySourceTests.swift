@@ -222,11 +222,8 @@ struct RuntimePolicySourceTests {
         let source = try Self.source("Services/Plugin/PluginHostAPI.swift")
 
         #expect(source.contains("let memorySection: String?"))
-        #expect(source.contains("allowPreflight: options.wantsPreflight"))
-        #expect(source.contains("allowPreflight: Bool = true"))
-        #expect(source.contains("query: extractPreflightQuery(from: messages)"))
+        #expect(source.contains("query: extractLatestUserQuery(from: messages)"))
         #expect(source.contains("messages: messages"))
-        #expect(source.contains("cachedPreflight: allowPreflight ? nil : .empty"))
         #expect(source.contains("memorySection: composed.memorySection"))
         #expect(source.contains("SystemPromptComposer.injectMemoryPrefix(ctx.memorySection, into: &messages)"))
     }
@@ -852,24 +849,6 @@ struct RuntimePolicySourceTests {
         #expect(
             preflight.contains("modelOptions: [\"reasoningEffort\": .string(\"no_think\")]"),
             "PreflightCapabilitySearch.defaultLLM must force no_think so Hy3/ZAYA/Qwen-style reasoning templates do not spend the tool-ranking timeout generating long reasoning traces"
-        )
-    }
-
-    @Test("Preflight logs do not publish raw prompt payloads")
-    func preflightLogsDoNotPublishRawPromptPayloads() throws {
-        let preflight = try Self.source("Services/Context/PreflightCapabilitySearch.swift")
-
-        #expect(
-            !preflight.contains("query, privacy: .public"),
-            "Preflight diagnostics must not publish the raw user query because it can contain prompt text, secrets, or document excerpts"
-        )
-        #expect(
-            preflight.contains("query, privacy: .private(mask: .hash)"),
-            "Preflight can still correlate fallback paths with a private hash instead of logging raw prompt text"
-        )
-        #expect(
-            preflight.contains("trimmed, privacy: .private(mask: .hash)"),
-            "The background LLM response can include prompt-adjacent content and should stay private in logs"
         )
     }
 

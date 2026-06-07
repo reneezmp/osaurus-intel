@@ -654,13 +654,11 @@ final class PluginHostContext: @unchecked Sendable {
     private struct InferenceOptions {
         let maxIterations: Int
         let wantsAgentTools: Bool
-        let wantsPreflight: Bool
 
         init(from json: [String: Any]) {
             let raw = json["max_iterations"] as? Int ?? defaultMaxIterations
             self.maxIterations = max(1, min(raw, maxIterationsCap))
             self.wantsAgentTools = json["tools"] as? Bool == true
-            self.wantsPreflight = json["preflight"] as? Bool == true
         }
     }
 
@@ -696,7 +694,6 @@ final class PluginHostContext: @unchecked Sendable {
         clean.removeValue(forKey: "agent_address")
         clean.removeValue(forKey: "agent_id")
         clean.removeValue(forKey: "max_iterations")
-        clean.removeValue(forKey: "preflight")
         if json["tools"] is Bool { clean.removeValue(forKey: "tools") }
 
         guard let cleanData = try? JSONSerialization.data(withJSONObject: clean, options: .osaurusCanonical)
@@ -720,8 +717,7 @@ final class PluginHostContext: @unchecked Sendable {
         let options = InferenceOptions(from: rawJSON)
         let agentCtx = await resolveAgentContext(
             agentId: activeAgentId,
-            messages: request.messages,
-            allowPreflight: options.wantsPreflight
+            messages: request.messages
         )
         let execMode = agentCtx?.executionMode ?? .none
         var enriched = enrichRequest(request, context: agentCtx, options: options)
@@ -777,8 +773,7 @@ final class PluginHostContext: @unchecked Sendable {
     /// Internal (not private) so unit tests can pin the resolution surface.
     static func resolveAgentContext(
         agentId: UUID?,
-        messages: [ChatMessage] = [],
-        allowPreflight: Bool = true
+        messages: [ChatMessage] = []
     ) async -> AgentContext? {
         guard let agentId else { return nil }
 
@@ -804,7 +799,7 @@ final class PluginHostContext: @unchecked Sendable {
                 autonomousEnabled: resolved.autonomousEnabled
             )
             // Snapshot the agent's effective model so it can ride along to
-            // `composeChatContext` as the preflight chat-model fallback
+            // `composeChatContext` as the chat-model fallback
             // (GitHub issue #823).
             let model = AgentManager.shared.effectiveModel(for: agentId)
             return (mode, model)
@@ -813,9 +808,8 @@ final class PluginHostContext: @unchecked Sendable {
             agentId: agentId,
             executionMode: execMode,
             model: agentModel,
-            query: extractPreflightQuery(from: messages),
-            messages: messages,
-            cachedPreflight: allowPreflight ? nil : .empty
+            query: extractLatestUserQuery(from: messages),
+            messages: messages
         )
         return await MainActor.run {
             let mgr = AgentManager.shared
@@ -912,26 +906,25 @@ final class PluginHostContext: @unchecked Sendable {
         return request
     }
 
-    // MARK: Preflight Capability Search
+    // MARK: Session Tool Cache
 
-    /// Session-scoped preflight cache lives in the shared
+    /// Session-scoped tool-state cache lives in the shared
     /// `SessionToolStateStore` so HTTP/plugin and chat windows hit the same
-    /// snapshot. Once a preflight result is computed for a session it is
-    /// reused for all subsequent turns; any change to the tool list causes
+    /// snapshot. Once the always-loaded baseline is captured for a session it
+    /// is frozen for all subsequent turns; any change to the tool list causes
     /// prompt divergence before token ~1000 and forces a full re-prefill,
     /// so stability matters more than freshness here.
 
-    /// Call when a session ends (e.g. chat window closes) to release the memoized result.
-    static func invalidatePreflightCache(sessionId: String) {
+    /// Call when a session ends (e.g. chat window closes) to release the cached state.
+    static func invalidateSessionToolCache(sessionId: String) {
         Task { await SessionToolStateStore.shared.invalidate(sessionId) }
     }
 
     /// Persist newly loaded tool names (from `capabilities_load`) onto a
-    /// session's preflight cache entry so subsequent requests with the same
-    /// `session_id` re-include them via `additionalToolNames` instead of
-    /// losing them when preflight is reused. No-op when the session has
-    /// no entry yet (load before first compose) — the next preflight will
-    /// rediscover what the model needs.
+    /// session's tool-state entry so subsequent requests with the same
+    /// `session_id` re-include them via `additionalToolNames`. No-op when the
+    /// session has no entry yet (load before first compose) — the next compose
+    /// captures the baseline.
     private static func recordSessionLoadedTools(sessionId: String, names: [String]) {
         guard !names.isEmpty else { return }
         Task {
@@ -939,17 +932,22 @@ final class PluginHostContext: @unchecked Sendable {
             await SessionToolStateStore.shared.appendLoadedTools(
                 sessionId,
                 names: names,
-                fallbackPreflight: .empty,
                 fallbackAlwaysLoadedNames: nil
             )
         }
     }
 
-    private static func extractPreflightQuery(from messages: [ChatMessage]) -> String {
+    private static func extractLatestUserQuery(from messages: [ChatMessage]) -> String {
         messages.last(where: { $0.role == "user" })?.content ?? ""
     }
 
-    private static func applyPreflightSearch(
+    /// Resolve the agent's tool schema for a plugin-HTTP inference, mirroring
+    /// chat Design C: the always-loaded hot set plus the agent's manual picks
+    /// (manual mode) or any session-loaded `capabilities_load` tools (auto
+    /// mode). There is no per-turn LLM picker — capability breadth is grounded
+    /// in the enabled-capabilities manifest and pulled in at runtime via
+    /// `capabilities_discover` / `capabilities_load`.
+    private static func applyAgentTools(
         to inference: EnrichedInference,
         executionMode: ExecutionMode = .none,
         agentId: UUID = Agent.defaultId
@@ -959,8 +957,7 @@ final class PluginHostContext: @unchecked Sendable {
         }
         let isManualTools = toolMode == .manual
 
-        // Manual mode mirrors the pragmatic chat-side rule (always-loaded
-        // baseline + user picks), just without the LLM-driven preflight.
+        // Manual mode: always-loaded baseline + the user's explicit picks.
         // Same shape across chat / plugin so the agent's schema doesn't
         // change with entry point. See SystemPromptComposer.resolveTools.
         if isManualTools {
@@ -974,7 +971,7 @@ final class PluginHostContext: @unchecked Sendable {
             return applyPreflightResult(empty, to: inference, builtInTools: builtInTools)
         }
 
-        // Auto mode: RAG-based preflight
+        // Auto mode (Design C): always-loaded hot set + session-loaded tools.
         if let sid = inference.request.session_id {
             // Drop the cache if the (mode, toolMode) signature changed
             // since last turn — same rule as the chat send path.
@@ -1008,29 +1005,14 @@ final class PluginHostContext: @unchecked Sendable {
             }
         }
 
-        let query = extractPreflightQuery(from: inference.request.messages)
-        guard !query.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return inference }
-
-        let (preflightMode, builtInTools) = await MainActor.run {
-            let mode = ChatConfigurationStore.load().preflightSearchMode ?? .balanced
-            let tools = ToolRegistry.shared.alwaysLoadedSpecs(mode: executionMode)
-            return (mode, tools)
+        // First turn for this session: inject the always-loaded baseline and
+        // snapshot its names so subsequent turns freeze against them. Stamp
+        // the (mode, toolMode) fingerprint so a flip on a later turn
+        // invalidates the cache (mirrors `ChatView`'s behaviour).
+        let builtInTools = await MainActor.run {
+            ToolRegistry.shared.alwaysLoadedSpecs(mode: executionMode)
         }
-
-        // Forward `request.model` as the preflight chat-model fallback —
-        // see `PreflightCapabilitySearch.search(...)` and GitHub issue #823.
-        let preflight = await PreflightCapabilitySearch.search(
-            query: query,
-            mode: preflightMode,
-            agentId: agentId,
-            model: inference.request.model
-        )
-
         if let sid = inference.request.session_id {
-            // Snapshot the always-loaded names this turn so subsequent
-            // turns freeze against them. Stamp the (mode, toolMode)
-            // fingerprint so a flip on a later turn invalidates the
-            // cache (mirrors `ChatView`'s behaviour).
             let builtInNames = Set(builtInTools.map { $0.function.name })
             let fp = SessionToolState.fingerprint(
                 executionMode: executionMode,
@@ -1038,7 +1020,6 @@ final class PluginHostContext: @unchecked Sendable {
             )
             await SessionToolStateStore.shared.setInitial(
                 sid,
-                preflight: preflight,
                 alwaysLoadedNames: builtInNames,
                 fingerprint: fp
             )
@@ -1056,7 +1037,7 @@ final class PluginHostContext: @unchecked Sendable {
         additionalToolSpecs: [Tool] = []
     ) -> EnrichedInference {
         var tools = inference.tools ?? []
-        for spec in builtInTools + preflight.toolSpecs + additionalToolSpecs {
+        for spec in specs {
             if let index = tools.firstIndex(where: { $0.function.name == spec.function.name }) {
                 tools[index] = spec
             } else {

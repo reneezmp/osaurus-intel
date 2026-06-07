@@ -21,7 +21,7 @@ struct ChatViewSandboxTests {
         await withRegisteredSandboxBuiltins {
             let specs = ToolRegistry.shared.alwaysLoadedSpecs(mode: .sandbox)
 
-            #expect(specs.contains(where: { $0.function.name == "capabilities_search" }))
+            #expect(specs.contains(where: { $0.function.name == "capabilities_discover" }))
             #expect(specs.contains(where: { $0.function.name == "capabilities_load" }))
         }
     }
@@ -98,7 +98,7 @@ struct ChatViewSandboxTests {
     func alwaysLoadedSpecs_includesCapabilityTools() {
         let specs = ToolRegistry.shared.alwaysLoadedSpecs(mode: .none)
 
-        #expect(specs.contains(where: { $0.function.name == "capabilities_search" }))
+        #expect(specs.contains(where: { $0.function.name == "capabilities_discover" }))
         #expect(specs.contains(where: { $0.function.name == "capabilities_load" }))
     }
 

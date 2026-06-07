@@ -128,8 +128,11 @@ enum ModelFamilyGuidance {
 
         - **Only call tools that exist in your schema.** Do not enumerate, list, \
         or describe your available tools in your reply. If you don't see a tool \
-        you'd want, work around it or ask the user — never call or mention a \
-        name that isn't in your schema.
+        you'd want, check the Enabled-capabilities manifest and run \
+        `capabilities_discover` first; only after a discover comes back empty \
+        may you work around it or tell the user it is unavailable — never deny a \
+        capability just because it is absent from your current schema, and never \
+        call or mention a name that isn't in your schema.
         - **Verify before you act.** Read the file or list the directory first \
         when a path is involved; never guess at file contents.
         - **Be concise.** Brief plain-language answers — a few sentences, not \
@@ -152,8 +155,10 @@ enum ModelFamilyGuidance {
     static let glmQwenGuidance = """
         # Reminders
 
-        - Only call tools that exist in your schema. If a capability is \
-        missing, work around it or tell the user.
+        - Only call tools that exist in your schema. If a capability seems \
+        missing: discover it first; only after a `capabilities_discover` comes \
+        back empty may you work around it or tell the user it is unavailable. \
+        Never deny a capability that appears in the Enabled-capabilities manifest.
         - Prefer one rich shell invocation over many small calls when the \
         steps are mechanical.
         - Keep going until the task is done. After a tool returns, take \
@@ -182,7 +187,9 @@ enum ModelFamilyGuidance {
         more evidence is needed. Only answer in prose once the requested work \
         is actually grounded or complete.
         - Use only tools present in the schema for this request. If the needed \
-        capability is missing, use the listed discovery path or tell the user \
-        exactly what is unavailable.
+        capability seems missing, check the Enabled-capabilities manifest and \
+        run `capabilities_discover` first; only after a discover comes back \
+        empty may you tell the user exactly what is unavailable. Schema absence \
+        alone is not grounds to deny a capability.
         """
 }

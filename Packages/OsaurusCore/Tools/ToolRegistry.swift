@@ -175,7 +175,7 @@ final class ToolRegistry: ObservableObject {
             // the user (file_write / sandbox writes do not show in chat).
             ShareArtifactTool(),
             // Capability discovery (search -> load) for mid-session growth.
-            CapabilitiesSearchTool(),
+            CapabilitiesDiscoverTool(),
             CapabilitiesLoadTool(),
             // Persistent memory recall — one tool, dispatched by `scope`.
             SearchMemoryTool(),
@@ -997,13 +997,13 @@ final class ToolRegistry: ObservableObject {
     }
 
     static let capabilityToolNames: Set<String> = [
-        "capabilities_search", "capabilities_load",
+        "capabilities_discover", "capabilities_load",
     ]
 
     /// Always-loaded tool specs: built-in + runtime-managed tools.
     /// These are always included when registered — mode exclusions handle
     /// which runtime tools are relevant. Plugin/MCP/sandbox-plugin tools
-    /// load on demand via capabilities_search / capabilities_load.
+    /// load on demand via capabilities_discover / capabilities_load.
     ///
     /// When `excludeCapabilityTools` is true (manual tool selection mode),
     /// dynamic discovery tools are stripped so the model only sees

@@ -9,8 +9,5 @@
     "capability_search.method-multi-match": { "minMatches": 2 },
     "capability_search.skill-direct-name": { "minMatches": 1 },
     "capability_search.skill-keyword-only": { "minMatches": 1 }
-  },
-  "preflight": {
-    "preflight.browser.natural": { "minMatches": 1 }
   }
 }

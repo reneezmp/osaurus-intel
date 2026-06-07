@@ -23,10 +23,11 @@
 //    6. riskAware                 static, gated on file-mutation tools
 //    7. agentLoopGuidance         static, gated on prior loop-tool use
 //    8. sandbox / folderContext   static, mode-specific
-//    9. capabilityNudge           static, gated on capabilities_search
-//   10. sandboxUnavailable        dynamic
-//   11. pluginCompanions          dynamic
-//   12. skillSuggestions          dynamic
+//    9. capabilityNudge           static, gated on capabilities_discover
+//   10. enabledManifest           static, frozen (all enabled tools +
+//                                  plugin skills + standalone skills)
+//   11. skillsGovern              static (paired with enabledManifest)
+//   12. sandboxUnavailable        dynamic
 //   13. pluginCreator             dynamic
 //
 
@@ -101,8 +102,7 @@ struct PromptSectionOrderingTests {
             let ctx = await SystemPromptComposer.composeChatContext(
                 agentId: agentId,
                 executionMode: .none,
-                model: "google/gemma-3-12b-it",
-                cachedPreflight: .empty
+                model: "google/gemma-3-12b-it"
             )
             assertOrderedPrefix(
                 [
@@ -193,8 +193,7 @@ struct PromptSectionOrderingTests {
             let ctx = await SystemPromptComposer.composeChatContext(
                 agentId: agent.id,
                 executionMode: .hostFolder(folderCtx),
-                model: "gpt-5",
-                cachedPreflight: .empty
+                model: "gpt-5"
             )
             assertOrderedPrefix(
                 [
@@ -237,8 +236,7 @@ struct PromptSectionOrderingTests {
                 agentId: agentId,
                 executionMode: .none,
                 model: "google/gemma-3-12b-it",
-                messages: messages,
-                cachedPreflight: .empty
+                messages: messages
             )
             assertOrderedPrefix(
                 [
@@ -264,8 +262,7 @@ struct PromptSectionOrderingTests {
             let ctx = await SystemPromptComposer.composeChatContext(
                 agentId: agentId,
                 executionMode: .none,
-                model: "google/gemma-3-12b-it",
-                cachedPreflight: .empty
+                model: "google/gemma-3-12b-it"
             )
             var seenDynamic = false
             for section in ctx.manifest.sections {
@@ -291,8 +288,7 @@ struct PromptSectionOrderingTests {
         await withAgent(toolSelectionMode: .auto) { agentId in
             let ctx = await SystemPromptComposer.composeChatContext(
                 agentId: agentId,
-                executionMode: .none,
-                cachedPreflight: .empty
+                executionMode: .none
             )
             let ids = sectionIds(ctx)
             #expect(ids.contains("codeStyle") == false)

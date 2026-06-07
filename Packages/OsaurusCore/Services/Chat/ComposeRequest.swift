@@ -21,7 +21,6 @@ struct ComposeRequest: Sendable {
     let query: String
     let messages: [ChatMessage]
     let toolsDisabled: Bool
-    let cachedPreflight: PreflightResult?
     let additionalToolNames: LoadedTools
     let frozenAlwaysLoadedNames: LoadedTools?
     let trace: TTFTTrace?
@@ -33,7 +32,6 @@ struct ComposeRequest: Sendable {
         query: String = "",
         messages: [ChatMessage] = [],
         toolsDisabled: Bool = false,
-        cachedPreflight: PreflightResult? = nil,
         additionalToolNames: LoadedTools = [],
         frozenAlwaysLoadedNames: LoadedTools? = nil,
         trace: TTFTTrace? = nil
@@ -44,7 +42,6 @@ struct ComposeRequest: Sendable {
         self.query = query
         self.messages = messages
         self.toolsDisabled = toolsDisabled
-        self.cachedPreflight = cachedPreflight
         self.additionalToolNames = additionalToolNames
         self.frozenAlwaysLoadedNames = frozenAlwaysLoadedNames
         self.trace = trace

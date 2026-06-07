@@ -57,9 +57,8 @@ public struct ChatConfiguration: Codable, Equatable, Sendable {
     public var coreModelProvider: String?
     /// Name of the shared core model. Defaults to `"foundation"`
     /// (Apple's on-device Language Model on macOS 26+) so that
-    /// memory consolidation, preflight tool selection, and the
-    /// transcription cleanup path all work out of the box without
-    /// the user needing to configure an API key.
+    /// memory consolidation and the transcription cleanup path all work
+    /// out of the box without the user needing to configure an API key.
     public var coreModelName: String?
 
     /// Full model identifier for routing, or nil when no core model is configured.
@@ -88,7 +87,7 @@ public struct ChatConfiguration: Codable, Equatable, Sendable {
     public var preflightSearchMode: PreflightSearchMode?
 
     // MARK: - Tool Settings
-    /// When true, no tools or preflight context are passed to the model. The raw message is sent
+    /// When true, no tools are passed to the model. The raw message is sent
     /// directly, keeping the prompt stable across turns for maximum KV-cache reuse. Recommended
     /// when osaurus is acting as a plain LLM backend for an external agent.
     public var disableTools: Bool
