@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingConfigureAIView.swift
 //  osaurus
@@ -1654,4 +1655,5 @@ private struct HelpStepRow: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 660)
         }
     }
+#endif
 #endif

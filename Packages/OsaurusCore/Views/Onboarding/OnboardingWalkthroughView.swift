@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingWalkthroughView.swift
 //  osaurus
@@ -323,4 +324,5 @@ struct WalkthroughCTA: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 620)
         }
     }
+#endif
 #endif

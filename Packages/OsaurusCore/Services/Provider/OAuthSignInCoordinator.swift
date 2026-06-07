@@ -22,7 +22,7 @@ import Foundation
 /// Outcome of a vendor OAuth flow, normalized across providers. The
 /// caller turns this into a `RemoteProvider` + Keychain write through
 /// `RemoteProviderManager.addProvider(_:apiKey:oauthTokens:)`.
-public enum OAuthSignInOutcome: Sendable {
+enum OAuthSignInOutcome: Sendable {
     /// ChatGPT / Codex-style flow that returns access + refresh tokens.
     case tokens(RemoteProviderOAuthTokens)
     /// OpenRouter-style flow that exchanges PKCE for a long-lived API key.
@@ -34,11 +34,11 @@ public enum OAuthSignInOutcome: Sendable {
 /// being the OAuth one) collapse into the same `RemoteProviderType`, so
 /// using preset here lets us route OpenRouter to its dedicated service
 /// without growing per-call branches.
-public enum OAuthSignInCoordinator {
+enum OAuthSignInCoordinator {
     /// True when `preset` supports OAuth sign-in via this coordinator.
     /// Used by `ProviderCredentialPromptSheet` to decide between
     /// rendering an "API key" field and a "Sign in with …" button.
-    public static func supportsOAuth(_ preset: ProviderPreset) -> Bool {
+    static func supportsOAuth(_ preset: ProviderPreset) -> Bool {
         switch preset {
         case .openrouter, .xai: return true
         default: return false
@@ -49,7 +49,7 @@ public enum OAuthSignInCoordinator {
     /// `RemoteProviderType` (rotate-credentials on an existing provider,
     /// older tests). Only `.openAICodex` is supported through this path
     /// because OpenRouter requires the preset to disambiguate.
-    public static func supportsOAuth(_ providerType: RemoteProviderType) -> Bool {
+    static func supportsOAuth(_ providerType: RemoteProviderType) -> Bool {
         providerType == .openAICodex
     }
 
@@ -57,7 +57,7 @@ public enum OAuthSignInCoordinator {
     /// outcome. Must be called on the main actor because each service
     /// drives an `NSWorkspace` browser open + a local callback listener.
     @MainActor
-    public static func signIn(preset: ProviderPreset) async throws -> OAuthSignInOutcome {
+    static func signIn(preset: ProviderPreset) async throws -> OAuthSignInOutcome {
         switch preset {
         case .openrouter:
             let key = try await OpenRouterOAuthService.signIn()
@@ -74,7 +74,7 @@ public enum OAuthSignInCoordinator {
     /// lives behind the `.openAICodex` type rather than a preset case
     /// (the `.openai` preset is API-key only).
     @MainActor
-    public static func signIn(providerType: RemoteProviderType) async throws -> OAuthSignInOutcome {
+    static func signIn(providerType: RemoteProviderType) async throws -> OAuthSignInOutcome {
         switch providerType {
         case .openAICodex:
             let tokens = try await OpenAICodexOAuthService.signIn()
@@ -87,16 +87,16 @@ public enum OAuthSignInCoordinator {
     /// OpenRouter-specific entry point kept for back-compat with Settings
     /// (which calls it directly, predating the preset coordinator).
     @MainActor
-    public static func openRouterSignIn() async throws -> OAuthSignInOutcome {
+    static func openRouterSignIn() async throws -> OAuthSignInOutcome {
         try await signIn(preset: .openrouter)
     }
 }
 
-public enum OAuthSignInCoordinatorError: LocalizedError, Sendable, Equatable {
+enum OAuthSignInCoordinatorError: LocalizedError, Sendable, Equatable {
     case unsupportedProvider(providerType: RemoteProviderType)
     case unsupportedPreset(preset: ProviderPreset)
 
-    public var errorDescription: String? {
+    var errorDescription: String? {
         switch self {
         case .unsupportedProvider(let providerType):
             return String(

@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingView.swift
 //  osaurus
@@ -505,4 +506,5 @@ public struct OnboardingView: View {
                 .frame(width: OnboardingMetrics.windowWidth, height: OnboardingMetrics.windowHeight)
         }
     }
+#endif
 #endif

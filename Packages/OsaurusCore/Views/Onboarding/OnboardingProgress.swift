@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingProgress.swift
 //  osaurus
@@ -83,3 +84,4 @@ struct OnboardingShimmerBar: View {
         .clipped()
     }
 }
+#endif
