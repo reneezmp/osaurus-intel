@@ -56,6 +56,8 @@ For each upstream commit:
 | 103 | `d9fd0db1` | PORT | cherry-pick (skip RemoteProviderService, xcstrings) | ProviderPresets.swift, ProviderCredentialInstructions.swift, +5 files | ✅ MiniMax provider preset — pre-req for Grok OAuth |
 | 104 | `806de1a0` | PORT | created XAIOAuthService.swift + cherry-pick (discard excluded/guarded files) | ProviderPresets, RemoteProviderConfiguration, OAuthLoopbackServer, OAuthSignInCoordinator, ProviderCredentialInstructions, RemoteProviderEditSheet (reverted), XAIOAuthService | ✅ Core shared files ported; RemoteProviderEditSheet kept Intel version; RemoteProviderService/RemoteProviderManager changes discarded (excluded/irrelevant) |
 
+| 104 | xcstrings sync | SYNC | `git checkout upstream/main` — full-file replacement | Localizable.xcstrings (38 commits worth of changes) | ✅ 2761 strings; both Intel strings already present upstream |
+
 ### Intel-Specific Fixups (commit `8f86d6d5`)
 
 | Fix | Reason |
@@ -71,5 +73,5 @@ For each upstream commit:
 ## Stats
 
 - **Total upstream commits since fork:** 153
-- **Processed:** 104 | **Ported:** 6 | **Skipped:** 97 | **Deferred:** 1 | **Pending:** 49
-- **Sessions:** 1 (2026-06-07)
+- **Processed:** 143 | **Ported:** 6 | **Skipped:** 97 | **Synced (xcstrings):** 38 | **Deferred:** 1 | **Pending:** 11
+- **Sessions:** 2 (2026-06-07) | **Last sync:** 2026-06-07
