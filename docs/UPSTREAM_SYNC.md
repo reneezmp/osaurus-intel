@@ -46,18 +46,30 @@ For each upstream commit:
 > Commits #98→ are the substantive upstream changes.
 
 | # | Upstream Hash | Class | Intel Action | Files | Result |
-|---|---|---|---|---|---|
+|---|---|---|---|---|---|---|
 | 1–97 | vMLX pins | SKIP | — | Package.resolved, Package.swift | vMLX version pins; irrelevant to Intel (uses IntelStubs) |
-| 98 | `61245f1a` | PORT | cherry-pick | IdentityView.swift | ⏳ pending |
-| 99 | `5a9207c1` | PORT | cherry-pick | RemoteProviderEditSheet.swift | ⏳ pending |
-| 100 | `4fc80157` | PORT | cherry-pick | AgentStarterTemplate.swift, AgentAvatarView.swift, OnboardingProgress.swift, +6 guarded files | ⏳ pending |
-| 101 | `95ad4ef3` | PORT | cherry-pick (skip ModelManager.swift, OnboardingConsentView.swift, xcstrings) | +11 guarded onboarding files | ⏳ pending |
-| 102 | `806de1a0` | PORT | create XAIOAuthService.swift + cherry-pick (discard excluded) | ProviderPresets, RemoteProviderConfiguration, OAuthLoopbackServer, OAuthSignInCoordinator, ProviderCredentialInstructions, RemoteProviderEditSheet, XAIOAuthService | ⏳ pending |
+| 98 | `61245f1a` | PORT | cherry-pick | IdentityView.swift | ✅ Clean — auto-merged |
+| 99 | `5a9207c1` | PORT | deferred | RemoteProviderEditSheet.swift | ⚠️ Deferred — upstream file diverged too far; Intel version kept. URL-split feature to be manually ported later. |
+| 100 | `4fc80157` | PORT | cherry-pick (skip xcstrings, keep test deleted) | AgentStarterTemplate.swift, AgentAvatarView.swift, OnboardingProgress.swift, +6 guarded files | ✅ Conflicts resolved; guards re-added |
+| 101 | `95ad4ef3` | PORT | cherry-pick (skip ModelManager, OnboardingConsent, xcstrings) | +11 guarded onboarding files | ✅ Conflicts resolved; guards re-added |
+| 102 | `a0ebae22` | PORT | cherry-pick (skip test file, keep guarded file) | ProviderPresets.swift, ProviderCredentialInstructions.swift, OnboardingConfigureAIView.swift | ✅ AtlasCloud provider preset — pre-req for Grok OAuth |
+| 103 | `d9fd0db1` | PORT | cherry-pick (skip RemoteProviderService, xcstrings) | ProviderPresets.swift, ProviderCredentialInstructions.swift, +5 files | ✅ MiniMax provider preset — pre-req for Grok OAuth |
+| 104 | `806de1a0` | PORT | created XAIOAuthService.swift + cherry-pick (discard excluded/guarded files) | ProviderPresets, RemoteProviderConfiguration, OAuthLoopbackServer, OAuthSignInCoordinator, ProviderCredentialInstructions, RemoteProviderEditSheet (reverted), XAIOAuthService | ✅ Core shared files ported; RemoteProviderEditSheet kept Intel version; RemoteProviderService/RemoteProviderManager changes discarded (excluded/irrelevant) |
+
+### Intel-Specific Fixups (commit `8f86d6d5`)
+
+| Fix | Reason |
+|---|---|
+| RemoteProviderEditSheet.swift reverted to Intel version | Upstream file depends on unported types (ProviderTextField, ProviderSecureField, OpenAICodexOAuthService, disableTimeout) |
+| Package.swift: exclude RemoteReasoningPolicy.swift | Depends on excluded ThinkingConfig / RemoteProviderService |
+| Stripped `public` from OAuthSignInCoordinator + ProviderCredentialInstructions | Intel module is internal; upstream uses library visibility |
+| Re-added `#if !OSAURUS_INTEL` guards to 5 onboarding files | Lost during `--theirs` conflict resolution |
+| Removed duplicate ProviderInputFields.swift | Intel defines ProviderTextField/ProviderSecureField inline in RemoteProviderEditSheet |
 
 ---
 
 ## Stats
 
 - **Total upstream commits since fork:** 153
-- **Processed:** 102 | **Ported:** 0 | **Skipped:** 97 | **Mirrored:** 0 | **Pending:** 51
-- **Sessions:** 1 (2026-06-07, in progress)
+- **Processed:** 104 | **Ported:** 6 | **Skipped:** 97 | **Deferred:** 1 | **Pending:** 49
+- **Sessions:** 1 (2026-06-07)
