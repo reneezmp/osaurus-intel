@@ -369,6 +369,7 @@ public enum SystemPromptTemplates {
     /// secret mid-session stays fresh without rewriting the cached KV prefix.
     /// Returns `""` when nothing is installed or configured so the composer
     /// drops the section entirely.
+    #if !OSAURUS_INTEL
     public static func sandboxState(
         secretNames: [String] = [],
         installedPackages: SandboxPackageManifest.Installed = .init()
@@ -383,6 +384,7 @@ public enum SystemPromptTemplates {
         // logical blocks on their own lines without a runaway blank run.
         return parts.joined(separator: "\n")
     }
+    #endif
 
     // MARK: - Sandbox Building Blocks
 
@@ -485,6 +487,7 @@ public enum SystemPromptTemplates {
     /// (via `sandboxState(...)`) so it reflects live manifest state without
     /// busting the cached prefix. Returns `""` when nothing is recorded so
     /// the composer can append unconditionally.
+    #if !OSAURUS_INTEL
     static func installedPackagesPromptBlock(_ installed: SandboxPackageManifest.Installed) -> String {
         guard !installed.isEmpty else { return "" }
 
@@ -509,6 +512,7 @@ public enum SystemPromptTemplates {
 
             """
     }
+    #endif
 
     private static func secretsPromptBlock(_ names: [String]) -> String {
         guard !names.isEmpty else { return "" }
