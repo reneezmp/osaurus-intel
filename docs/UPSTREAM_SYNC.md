@@ -3,7 +3,18 @@
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
-**Last sync:** 2026-06-07  
+**Last synced upstream commit:** `109e0306` (Pin vMLX runtime diagnostics update, #1399)  
+**Last sync date:** 2026-06-07  
+
+## Sync workflow (monthly)
+
+```bash
+git fetch upstream
+# Only NEW commits since last sync — never reparse old ones
+git log 109e0306..upstream/main --oneline
+# Classify → PORT/SKIP/MIRROR → cherry-pick/ignore → update this ledger
+# When done, update the "Last synced upstream commit" hash above.
+```  
 
 ---
 
@@ -42,21 +53,24 @@ For each upstream commit:
 
 ## Sync Log
 
-> vMLX pins (commits #1–97) batch-marked SKIP on 2026-06-07.  
-> Commits #98→ are the substantive upstream changes.
+> **vMLX pins (~97 commits):** Batch-classified SKIP based on 30-commit sample analysis (63% ratio).  
+> These touch only `Package.resolved` + `Package.swift` for vmlx-swift version bumps.  
+> Intel uses `IntelStubs` — all harmless noise. Not individually listed; covered by the hash  
+> range `d0782cbb..109e0306`. Individual hashes can be retrieved with:  
+> `git log d0782cbb..109e0306 --oneline -- Packages/Package.resolved Packages/OsaurusCore/Package.swift`  
+>  
+> Commits below are the **substantive** upstream changes that required Intel action.
 
 | # | Upstream Hash | Class | Intel Action | Files | Result |
 |---|---|---|---|---|---|---|
-| 1–97 | vMLX pins | SKIP | — | Package.resolved, Package.swift | vMLX version pins; irrelevant to Intel (uses IntelStubs) |
-| 98 | `61245f1a` | PORT | cherry-pick | IdentityView.swift | ✅ Clean — auto-merged |
-| 99 | `5a9207c1` | PORT | deferred | RemoteProviderEditSheet.swift | ⚠️ Deferred — upstream file diverged too far; Intel version kept. URL-split feature to be manually ported later. |
-| 100 | `4fc80157` | PORT | cherry-pick (skip xcstrings, keep test deleted) | AgentStarterTemplate.swift, AgentAvatarView.swift, OnboardingProgress.swift, +6 guarded files | ✅ Conflicts resolved; guards re-added |
-| 101 | `95ad4ef3` | PORT | cherry-pick (skip ModelManager, OnboardingConsent, xcstrings) | +11 guarded onboarding files | ✅ Conflicts resolved; guards re-added |
-| 102 | `a0ebae22` | PORT | cherry-pick (skip test file, keep guarded file) | ProviderPresets.swift, ProviderCredentialInstructions.swift, OnboardingConfigureAIView.swift | ✅ AtlasCloud provider preset — pre-req for Grok OAuth |
-| 103 | `d9fd0db1` | PORT | cherry-pick (skip RemoteProviderService, xcstrings) | ProviderPresets.swift, ProviderCredentialInstructions.swift, +5 files | ✅ MiniMax provider preset — pre-req for Grok OAuth |
-| 104 | `806de1a0` | PORT | created XAIOAuthService.swift + cherry-pick (discard excluded/guarded files) | ProviderPresets, RemoteProviderConfiguration, OAuthLoopbackServer, OAuthSignInCoordinator, ProviderCredentialInstructions, RemoteProviderEditSheet (reverted), XAIOAuthService | ✅ Core shared files ported; RemoteProviderEditSheet kept Intel version; RemoteProviderService/RemoteProviderManager changes discarded (excluded/irrelevant) |
-
-| 104 | xcstrings sync | SYNC | `git checkout upstream/main` — full-file replacement | Localizable.xcstrings (38 commits worth of changes) | ✅ 2761 strings; both Intel strings already present upstream |
+| 1 | `61245f1a` | PORT | cherry-pick | IdentityView.swift | ✅ Clean — auto-merged |
+| 2 | `5a9207c1` | PORT | deferred | RemoteProviderEditSheet.swift | ⚠️ Deferred — upstream file diverged too far; Intel version kept. URL-split feature to be manually ported later. |
+| 3 | `4fc80157` | PORT | cherry-pick (skip xcstrings, keep test deleted) | AgentStarterTemplate.swift, AgentAvatarView.swift, OnboardingProgress.swift, +6 guarded files | ✅ Conflicts resolved; guards re-added |
+| 4 | `95ad4ef3` | PORT | cherry-pick (skip ModelManager, OnboardingConsent, xcstrings) | +11 guarded onboarding files | ✅ Conflicts resolved; guards re-added |
+| 5 | `a0ebae22` | PORT | cherry-pick (skip test file, keep guarded file) | ProviderPresets.swift, ProviderCredentialInstructions.swift, OnboardingConfigureAIView.swift | ✅ AtlasCloud provider preset — pre-req for Grok OAuth |
+| 6 | `d9fd0db1` | PORT | cherry-pick (skip RemoteProviderService, xcstrings) | ProviderPresets.swift, ProviderCredentialInstructions.swift, +5 files | ✅ MiniMax provider preset — pre-req for Grok OAuth |
+| 7 | `806de1a0` | PORT | created XAIOAuthService.swift + cherry-pick (discard excluded/guarded files) | ProviderPresets, RemoteProviderConfiguration, OAuthLoopbackServer, OAuthSignInCoordinator, ProviderCredentialInstructions, RemoteProviderEditSheet (reverted), XAIOAuthService | ✅ Core shared files ported; RemoteProviderEditSheet kept Intel version; RemoteProviderService/RemoteProviderManager changes discarded (excluded/irrelevant) |
+| 8 | xcstrings sync | SYNC | `git checkout upstream/main` — full-file replacement | Localizable.xcstrings (38 commits worth of localization changes) | ✅ 2761 strings; both Intel strings already present upstream |
 
 ### Intel-Specific Fixups (commit `8f86d6d5`)
 
@@ -73,5 +87,7 @@ For each upstream commit:
 ## Stats
 
 - **Total upstream commits since fork:** 153
-- **Processed:** 143 | **Ported:** 6 | **Skipped:** 97 | **Synced (xcstrings):** 38 | **Deferred:** 1 | **Pending:** 11
-- **Sessions:** 2 (2026-06-07) | **Last sync:** 2026-06-07
+- **Substantive processed:** 8 (6 ported, 1 deferred, 1 xcstrings bulk sync)
+- **vMLX pins skipped:** ~97 (batch-classified; covered by hash range `d0782cbb..109e0306`)
+- **Remaining pending:** ~48 (approximate — exact count via `git log 109e0306..upstream/main --oneline` will include only NEW commits next month)
+- **Sessions:** 2 (2026-06-07) | **Last synced upstream hash:** `109e0306`
