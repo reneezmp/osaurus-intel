@@ -17,10 +17,11 @@ Canonical reference for all Osaurus features, their status, and documentation.
 | Structured Document IO           | Foundation | "Tools & Plugins"  | (in README)                   | Services/Documents/, Models/Documents/, Managers/Documents/DocumentAdaptersBootstrap.swift |
 | Tools & Plugins                  | Stable    | "Tools & Plugins"  | plugins/README.md             | Tools/, Managers/Plugin/PluginManager.swift, Services/Plugin/PluginHostAPI.swift, Storage/PluginDatabase.swift, Models/Plugin/PluginHTTP.swift, Views/Plugin/PluginConfigView.swift |
 | Skills                           | Stable    | "Skills"           | SKILLS.md                     | Managers/SkillManager.swift, Views/Skill/SkillsView.swift, Services/Skill/SkillSearchService.swift |
-| Claude Plugin Import             | Stable    | "Skills"           | CLAUDE_PLUGINS.md             | Services/GitHubSkillService.swift, Services/Skill/ClaudePluginInstaller.swift, Views/Skill/GitHubImportSheet.swift, Views/Skill/InstalledPluginsSection.swift |
+| Claude Plugin Import             | Stable    | "Plugins"          | CLAUDE_PLUGINS.md             | Services/GitHubSkillService.swift, Services/Skill/ClaudePluginInstaller.swift, Services/Skill/ClaudePluginManifestStore.swift, Services/Skill/ClaudePluginVariableExpander.swift, Services/Plugin/InstalledClaudePluginsAggregator.swift, Views/Plugin/GitHubImportSheet.swift, Views/Plugin/ClaudePluginCard.swift, Views/Plugin/ClaudePluginDetailView.swift, Views/Plugin/ClaudePluginUserConfigSheet.swift |
 | Methods                          | Stable    | "Skills & Methods" | SKILLS.md                     | Models/Method/Method.swift, Services/Method/MethodService.swift, Services/Method/MethodSearchService.swift, Storage/MethodDatabase.swift |
 | Context Management               | Stable    | -                  | SKILLS.md                     | Services/Context/PreflightCapabilitySearch.swift, Tools/CapabilityTools.swift, Services/Tool/ToolSearchService.swift, Services/Tool/ToolIndexService.swift |
 | Memory                           | Stable    | "Key Features"     | MEMORY.md                     | Services/Memory/MemoryService.swift, Services/Memory/MemorySearchService.swift, Services/Memory/MemoryContextAssembler.swift |
+| Privacy Filter                   | Experimental | "Key Features"  | PRIVACY_FILTER.md             | PrivacyFilter/Core/PrivacyFilterPipeline.swift, PrivacyFilter/Core/PrivacyFilterEngine.swift, PrivacyFilter/Core/RegexEntityDetector.swift, PrivacyFilter/Store/PrivacyFilterStore.swift, PrivacyFilter/Views/PrivacyView.swift, PrivacyFilter/Views/RedactionReviewSheet.swift, Services/Provider/WireTransportProbe.swift, Views/Chat/RedactionHighlighter.swift, Views/Chat/RedactionHoverController.swift |
 | Agents                         | Stable    | "Agents"         | (in README)                   | Managers/AgentManager.swift, Models/Agent/Agent.swift, Views/Agent/AgentsView.swift         |
 | Agent DB & Self-Scheduling       | Stable    | "Agents"           | AGENT_DB.md                   | Storage/AgentDatabase.swift, Storage/SchedulerDatabase.swift, Managers/NextRunScheduler.swift, Tools/Database/, Views/Agent/AgentDBTabViews.swift, Views/Agent/NextRunPanelView.swift |
 | Schedules                        | Stable    | "Schedules"        | (in README)                   | Managers/ScheduleManager.swift, Models/Schedule/Schedule.swift, Views/Schedule/SchedulesView.swift      |
@@ -42,7 +43,7 @@ Canonical reference for all Osaurus features, their status, and documentation.
 | VAD Mode                         | Stable    | "Voice Input"      | VOICE_INPUT.md                | Services/Voice/VADService.swift, Views/ContentView.swift (VAD controls)                     |
 | Transcription Mode               | Stable    | "Voice Input"      | VOICE_INPUT.md                | Services/Voice/TranscriptionModeService.swift, Views/Voice/TranscriptionOverlayView.swift         |
 | Sandbox                          | macOS 26+ | "Sandbox"          | SANDBOX.md                    | Services/Sandbox/SandboxManager.swift, Tools/BuiltinSandboxTools.swift, Managers/Plugin/SandboxPluginManager.swift, Views/Sandbox/SandboxView.swift |
-| Storage Encryption               | Stable    | -                  | STORAGE.md                    | Identity/StorageKeyManager.swift, Storage/StorageMigrator.swift, Storage/EncryptedSQLiteOpener.swift, Storage/EncryptedFileStore.swift, Storage/AttachmentBlobStore.swift, Storage/StorageMaintenance.swift, Views/Storage/StorageMigrationOverlay.swift, Views/Settings/StorageSettingsView.swift, SQLCipher/ |
+| Storage Encryption               | Stable    | -                  | STORAGE.md                    | Identity/StorageKeyManager.swift, Storage/EncryptedSQLiteOpener.swift, Storage/StorageDatabaseCatalog.swift, Storage/StorageMutationGate.swift, Storage/StorageExportService.swift, Storage/EncryptedFileStore.swift, Storage/AttachmentBlobStore.swift, Storage/StorageMaintenance.swift, Views/Settings/StorageSettingsView.swift, SQLCipher/ |
 | CLI                              | Stable    | "CLI Reference"    | (in README)                   | Packages/OsaurusCLI/                                                                  |
 
 ---
@@ -71,6 +72,7 @@ Canonical reference for all Osaurus features, their status, and documentation.
 │  │   ├── InsightsView (Developer: Insights)                              │
 │  │   ├── ServerView (Developer: Server Explorer)                         │
 │  │   ├── VoiceView (Voice Input & VAD Settings)                          │
+│  │   ├── PrivacyView (Privacy Filter: install + 4 sub-tabs)              │
 │  │   └── ConfigurationView (Settings)                                    │
 ├─────────────────────────────────────────────────────────────────────────┤
 │  Services Layer                                                          │
@@ -138,6 +140,17 @@ Canonical reference for all Osaurus features, their status, and documentation.
 │  │   ├── MemorySearchService (Hybrid BM25 + vector search)               │
 │  │   ├── MemoryContextAssembler (Gate + planner facade)                  │
 │  │   └── MemoryDatabase (SQLite storage with migrations)                 │
+│  ├── Privacy Filter                                                      │
+│  │   ├── PrivacyFilterPipeline (Outbound scrub + inbound unscrub)        │
+│  │   ├── PrivacyFilterEngine (Regex + classifier detection ensemble)     │
+│  │   ├── RegexEntityDetector (Built-in + preset + custom patterns)       │
+│  │   ├── RedactionMap (Per-conversation original ↔ placeholder intern)   │
+│  │   ├── SessionRedactionStore (Per-session RedactionMap + auto-approve) │
+│  │   ├── PrivacyReviewService (Modal review presenter registry)          │
+│  │   ├── StreamingUnscrubber (Splices inbound stream + rewrites tokens)  │
+│  │   ├── PrivacyFilterModelDownloader (HF bundle install + verify)       │
+│  │   ├── PrivacyFilterStore (Synchronous JSON config persistence)        │
+│  │   └── WireTransportProbe (Captures post-scrub bytes for Insights)     │
 │  └── Utilities                                                           │
 │      ├── InsightsService (Request logging)                               │
 │      ├── HuggingFaceService (Model downloads)                            │
@@ -252,7 +265,8 @@ Research notes for the next local-runtime compatibility wave live in
 
 - Provider catalog with search/filter for quick discovery
 - One-tap OAuth 2.1 sign-in via PKCE + Dynamic Client Registration (no client ID/secret to configure)
-- API-key templates for vendors without DCR (GitHub, Atlassian, HubSpot, Zapier)
+- Manual-credentials OAuth 2.1 + PKCE for confidential-client vendors that don't publish DCR (HubSpot's MCP Auth Apps), with a fixed-port loopback redirect URI and Keychain-stored client secret
+- API-key templates for vendors without DCR (GitHub, Atlassian, Zapier)
 - Self-hosting templates (Google Workspace) that deeplink to setup docs
 - Custom Server fallback for any URL not in the catalog
 - HTTP/SSE transport for remote providers; no third-party stdio command launching
@@ -303,14 +317,13 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 - `Managers/Documents/DocumentAdaptersBootstrap.swift` — registers built-in document adapters.
 - `Models/Documents/Workbook.swift` — typed workbook, sheet, row, and cell representation.
 - `Models/Documents/PDFDocumentRepresentation.swift` — typed PDF pages and heuristic table detections with source anchors.
-- `Models/Documents/PresentationDocument.swift` — typed deck, slide, note, and relationship representation.
+- `Models/Documents/PresentationDocument.swift` — typed deck, slide, note, table, and relationship representation.
 - `Models/Documents/RichDocumentRepresentation.swift` — sections, headings, links, and metadata for rich text sources.
 - `Services/Documents/CSVAdapter.swift` — CSV and TSV table parsing with bounded input handling.
 - `Services/Documents/XLSXAdapter.swift` — XLSX workbook parsing from Office Open XML packages.
 - `Services/Documents/XLSXEmitter.swift` — XLSX workbook emission for round-trip workflows.
 - `Services/Documents/PPTXAdapter.swift` — PPTX/POTX deck parsing from Office Open XML packages.
 - `Services/Documents/PDFAdapter.swift` — PDF extraction with page-level anchors and layout-aware text-layer table detection.
-- `Services/Documents/PDFPPTXWorkflowService.swift` — bounded PDF/PPTX previews plus structured creation availability diagnostics.
 - `Services/Documents/RichDocumentAdapter.swift` — DOCX/RTF/HTML-style rich document structure extraction.
 - `Services/Documents/ExternalOfficeRuntimeDetector.swift` — optional LibreOffice/OpenOffice discovery for future conversion flows; detection reads version metadata only and does not send document bytes to a runtime.
 
@@ -318,9 +331,8 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 
 - CSV and TSV tables preserve headers, rows, delimiters, and source metadata.
 - XLSX workbooks preserve sheets, cells, shared strings, relationships, and can emit a minimal valid `.xlsx` package.
-- PPTX/POTX decks preserve slide grouping, text runs, notes, and relationships.
+- PPTX/POTX decks preserve slide grouping, text runs, notes, slide tables, and relationships.
 - PDFs preserve page boundaries, anchors, and simple text-layer tables so citations can point back to pages and detected table cells.
-- PDF/PPTX workflow previews expose page/slide/table/notes metadata and report missing structured emitters instead of treating text writes as valid binary output.
 - Rich documents preserve section boundaries, headings, links, and metadata.
 
 ---
@@ -450,10 +462,24 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 
 - **Custom System Prompts** — Define unique instructions for each agent
 - **Automated Capabilities** — Tools, skills, and methods are automatically selected via RAG search based on the task
+- **Per-Agent Feature Gates** — Configure → Features groups every capability by purpose and keeps extra ones off by default to keep the tool list lean (see below)
 - **Visual Themes** — Assign a custom theme that activates with the agent
 - **Generation Settings** — Configure default model, temperature, and max tokens
 - **Import/Export** — Share agents as JSON files for backup or sharing
 - **Live Switching** — Click to activate a agent, theme updates automatically
+
+**Feature Gates (Configure → Features):** stored on `Agent.settings`; [`SystemPromptComposer.resolveTools`](../Packages/OsaurusCore/Services/Chat/SystemPromptComposer.swift) strips the matching tools when a gate is off (auto mode). Capabilities are grouped by purpose; extra ones default **off** to reduce token cost.
+
+| Group | Setting | Toggle | Default | Gates |
+|---|---|---|---|---|
+| Model Access | `disableTools` (inverted) | Tools | on | All tool use |
+| Model Access | `disableMemory` (inverted) | Memory | on | Passive memory injection + recording |
+| Output | `renderChartEnabled` | Charts | off | `render_chart` |
+| Output | `speakEnabled` | Voice | off | `speak` |
+| Memory & Recall | `searchMemoryEnabled` | Memory Recall | off | `search_memory` |
+| Autonomy | `selfSchedulingEnabled` | Self-scheduling | off | `schedule_next_run` / `cancel_next_run` / `notify` + scheduling UI |
+| Data | `dbEnabled` | Database | off | `db_*` tools + DB tabs |
+| Code Execution | sandbox settings | Autonomous Execution / Plugin Creation / Sandbox Network / Read Secret Files | off | Sandbox capabilities (visible but disabled when the container isn't running) |
 
 **Agent Properties:**
 | Property | Description |
@@ -594,7 +620,7 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 - `Folder/FolderContextService.swift` — `NSOpenPanel`, security-scoped bookmark persistence, MainActor service
 - `Folder/FolderTools.swift` — File / shell / git tool implementations + `FolderToolFactory`
 - `Folder/ChatExecutionContext.swift` — TaskLocal session/agent/batch IDs read by tools at execution time
-- `Folder/ExecutionMode.swift` — First-class `.hostFolder | .sandbox | .none` enum
+- `Folder/ExecutionMode.swift` — First-class `.hostFolder | .sandbox(hostRead:) | .none` enum (the sandbox case carries an optional read-only host folder for combined mode)
 - `Folder/FileOperation.swift`, `Folder/FileOperationLog.swift` — Per-op log used for undo
 - `Models/Chat/AgentTodo.swift`, `Models/Chat/AgentTodoStore.swift` — Markdown checklist parser + per-session store
 - `Models/Chat/SharedArtifact.swift` — Artifact model surfaced via `share_artifact`
@@ -606,7 +632,7 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 - **Single mode resolver** — `ToolRegistry.resolveExecutionMode(folderContext:autonomousEnabled:)` decides sandbox > host folder > none for chat, plugin, and HTTP entry points
 - **Working folder picker** — Per-chat folder via `FolderContextService`, with security-scoped bookmark persistence
 - **Project-aware tools** — Core file tools + `shell_run` registered for every folder mount; git tools layered on when the folder is a git repo. Project type only changes the file-tree ignore patterns (and prompt metadata), not the tool surface.
-- **Sandbox toggle** — Mutually exclusive with the working-folder backend; selecting a folder disables sandbox autonomous exec and vice versa
+- **Sandbox toggle** — Composes with the working-folder backend. Sandbox-only keeps current behavior; **combined mode** (sandbox on + folder selected → `.sandbox(hostRead: ctx)`) exposes the host workspace **read-only** (`file_read` / `file_search`, scoped to the folder root, secret files refused; `file_read` also lists directories) while all execution stays in the sandbox VM, which has no mount of the host workspace. Host write/edit/shell/git stay hidden in combined mode. Residual risks (the trusted agent is the read→exec bridge, prompt injection from read content, in-scope secrets) are mitigated by scope enforcement + secret refusal; v1 keeps sandbox network-on, so document the exfiltration residual rather than relying on isolation.
 - **`share_artifact`** — Only path for the user to see files the agent produced
 **Loop Tools (engine-intercepted):**
 
@@ -620,17 +646,17 @@ This command bridge is for external clients connecting to Osaurus. It is separat
 
 | Tool              | Category | Description                                                       |
 | ----------------- | -------- | ----------------------------------------------------------------- |
-| `file_tree`       | Core     | Directory structure with project-aware ignore patterns            |
-| `file_read`       | Core     | Read with line ranges or tail mode                                |
-| `file_write`      | Core     | Create or overwrite                                               |
-| `file_edit`       | Core     | Surgical exact-string replacement                                 |
-| `file_search`     | Core     | ripgrep-style search                                              |
+| `file_read`       | Core     | Read a file (text ranges, `tail_lines`/`max_chars`, bounded XLSX sheet previews) **or** list a directory (with `max_depth`, project-aware ignore patterns) — the path decides. A directory returns a structured `kind: "listing"` with `entries[]` (each a ready-to-use `path`), not an ASCII tree |
+| `file_write`      | Core     | Create or overwrite UTF-8 text files with `dry_run` diff/risk previews; refuses `.xlsx`, `.pdf`, and `.pptx`-family structured targets so package output goes through a structured writer |
+| `file_edit`       | Core     | Surgical exact-string replacement with optional `dry_run` diff preview |
+| `file_operation_history` | Core | Recent applied file writes/edits for the current chat session |
+| `file_search`     | Core     | ripgrep-style content search, or `target="files"` filename-glob find |
 | `shell_run`       | Core     | Run a shell command (requires approval). Reserve for `mv`/`cp`/`rm`/`mkdir`, builds, tests, git, installs. |
 | `git_status`      | Git      | Repository status. Registered when `.git` present.                |
 | `git_diff`        | Git      | Show diffs                                                        |
 | `git_commit`      | Git      | Stage + commit (requires approval)                                |
 
-The previously-discrete `file_move`, `file_copy`, `file_delete`, `dir_create`, and `batch` tools were dropped — the same operations go through `shell_run` (`mv`, `cp`, `rm`, `mkdir`) so the model has fewer near-identical tool names to differentiate.
+The previously-discrete `file_move`, `file_copy`, `file_delete`, `dir_create`, and `batch` tools were dropped — the same operations go through `shell_run` (`mv`, `cp`, `rm`, `mkdir`) so the model has fewer near-identical tool names to differentiate. The standalone `file_tree` listing tool was likewise folded into `file_read`: pass a directory path and `file_read` returns a listing (the path carries the file-vs-directory decision, so there is no separate tool for the model to mis-select). That listing is a **structured `entries[]` object**, not a prose tree — the model descends by copying an entry's `path` field, and the agent loop's [`AgentTaskState`](../Packages/OsaurusCore/Services/Chat/AgentTaskState.swift) harness classifies the result to de-dupe re-reads and, only if the model is observed wandering (two listings without a read), reactively nudge the next step — so capable models are never backseat-driven. See [Agent Loop — Harness Task State](AGENT_LOOP.md#harness-task-state-agenttaskstate).
 
 **Workflow:**
 
@@ -703,19 +729,15 @@ See [AGENT_LOOP.md](AGENT_LOOP.md) for the full guide.
 |------|----------|-------------|
 | `sandbox_read_file` | Read-only | Read file contents (supports line ranges and log tails). Use instead of `cat`/`head`/`tail`. |
 | `sandbox_search_files` | Read-only | Search file contents (`target="content"`, ripgrep) **or** find files by name (`target="files"`, glob). Replaces the old `sandbox_search_files` + `sandbox_find_files` + `sandbox_list_directory` trio. |
-| `sandbox_write_file` | Write | Write content to a file (creates parent directories). Use instead of `echo`/`cat` heredoc. |
-| `sandbox_edit_file` | Write | Edit a file by exact string replacement (old_string/new_string). Use instead of `sed`/`awk`. |
+| `sandbox_write_file` | Write | Write a whole file (`content`, creates parent directories) **or** edit it in place (`old_string`+`new_string`, exact match) — the presence of `old_string` selects the edit path. Use instead of `echo`/`cat` heredoc / `sed` / `awk`. |
 | `sandbox_exec` | Exec | Run shell command. Foreground (default) or `background:true` for servers/long jobs. |
 | `sandbox_process` | Exec | Manage background jobs from `sandbox_exec(background:true)` — `poll` / `wait` / `kill`. |
-| `sandbox_execute_code` | Exec | Run a Python script that imports sandbox tools as helpers (`from osaurus_tools import …`). Use for ≥3 tool calls with logic between them. |
-| `sandbox_install` | Package | Install via apk (root) |
-| `sandbox_pip_install` | Package | Install via pip |
-| `sandbox_npm_install` | Package | Install via npm |
+| `sandbox_install` | Package | Install packages — one tool, `manager` selects `apk` (system, root), `pip` (Python venv), or `npm` (Node workspace). Replaces the old `sandbox_pip_install` + `sandbox_npm_install`. |
 | `sandbox_secret_check` | Secret | Check whether a secret exists (never reveals value) |
 | `sandbox_secret_set` | Secret | Store a secret directly or prompt the user |
 | `sandbox_plugin_register` | Plugin | Register an agent-created plugin (requires `pluginCreate`) |
 
-The previously-discrete `sandbox_list_directory`, `sandbox_find_files`, `sandbox_move`, `sandbox_delete`, `sandbox_exec_background`, and `sandbox_run_script` tools were dropped. Their behaviour now comes from a flag (`background:true` on `sandbox_exec`, `target` on `sandbox_search_files`) or a direct shell invocation (`mv` / `rm` in `sandbox_exec`). `sandbox_run_script`'s use case — multi-step Python orchestration — moved to `sandbox_execute_code`.
+The previously-discrete `sandbox_list_directory`, `sandbox_find_files`, `sandbox_move`, `sandbox_delete`, `sandbox_exec_background`, `sandbox_run_script`, `sandbox_edit_file`, and `sandbox_execute_code` tools were dropped. Their behaviour now comes from a flag (`background:true` on `sandbox_exec`, `target` on `sandbox_search_files`), an argument (`old_string`+`new_string` on `sandbox_write_file` for in-place edits), or a direct shell invocation (`mv` / `rm` in `sandbox_exec`). `sandbox_run_script` and `sandbox_execute_code`'s use case — multi-step scripts/orchestration — is now `sandbox_write_file` the script then `sandbox_exec` to run it (e.g. `python3 script.py`). The `sandbox_pip_install` / `sandbox_npm_install` tools were folded into `sandbox_install` (pick the manager with `manager:"pip"` / `"npm"`); a failed bare `apk add` / `pip install` / `npm install` in `sandbox_exec` surfaces a self-heal hint pointing at `sandbox_install`.
 
 `share_artifact` is a global built-in (registered in `ToolRegistry`, available in plain chat / folder / sandbox alike) so it does not appear in this sandbox-specific table.
 
@@ -869,22 +891,30 @@ See [docs/plugins/README.md](plugins/README.md) for the full reference.
 
 ### Claude Plugin Import
 
-**Purpose:** Import full Claude plugins from GitHub — skills, scheduled agents, slash commands, MCP providers, and shared `CLAUDE.md` context — as a single managed bundle.
+**Purpose:** Import full Claude plugins from GitHub — skills, scheduled agents, slash commands, MCP providers, and shared `CLAUDE.md` context — as a single managed bundle, surfaced as cards in the **Plugins** tab alongside native Osaurus plugins.
 
 **Components:**
 
-- `Services/GitHubSkillService.swift` — Repository discovery, `marketplace.json` parsing, directory-based artifact probing, GitHub rate-limit detection
-- `Services/Skill/ClaudePluginInstaller.swift` — Per-plugin install/uninstall orchestrator, idempotent re-install, MCP placeholder-token detection, cron inference
-- `Views/Skill/GitHubImportSheet.swift` — Import UI with concurrent fetch progress and deep-linkable install summary
-- `Views/Skill/InstalledPluginsSection.swift` — Aggregator + management surface for installed plugin bundles
+- `Services/GitHubSkillService.swift` — Repository discovery, `marketplace.json` parsing, directory-based artifact probing, `.claude-plugin/plugin.json` decoding, version resolver, GitHub rate-limit detection
+- `Services/Skill/ClaudePluginInstaller.swift` — Per-plugin install/uninstall orchestrator, idempotent re-install, MCP placeholder-token detection, cron inference, manifest snapshot write + userConfig hookup, `${CLAUDE_PLUGIN_*}` substitution into MCP entries and skill bodies
+- `Services/Skill/ClaudePluginManifestStore.swift` — Per-plugin manifest + userConfig persistence under `~/.osaurus/claude-plugins/`; per-plugin data dir lifecycle
+- `Services/Skill/ClaudePluginVariableExpander.swift` — `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` / `${user_config.KEY}` / allow-listed `${ENV}` substitution; `CLAUDE_PLUGIN_OPTION_*` subprocess env overlay
+- `Services/Plugin/InstalledClaudePluginsAggregator.swift` — Card-friendly aggregator that joins manifest snapshots with live manager counts and runs the update probe
+- `Views/Plugin/PluginsView.swift` — Plugins tab hosting both native and Claude plugin cards in a single Installed grid
+- `Views/Plugin/GitHubImportSheet.swift` — Import UI with concurrent fetch progress and deep-linkable install summary
+- `Views/Plugin/ClaudePluginCard.swift`, `Views/Plugin/ClaudePluginDetailView.swift`, `Views/Plugin/ClaudePluginUserConfigSheet.swift` — Claude-specific UI surfaces (Imported badge, Update affordance, Configure sheet, CHANGELOG section)
 - `Managers/ManagementStateManager.swift` — Deep-link state for opening a schedule editor from the install summary
 
 **Features:**
 
-- **Two marketplace shapes** — Directory-based Claude plugin layout *and* legacy flat `skills: [String]` arrays
+- **Unified Plugins tab** — Claude plugins render as cards mixed into the same `Installed` grid as native `PluginCard`s, distinguished by an `Imported` badge; **Skills** tab is now only for user-authored and built-in skills
+- **Marketplace + per-plugin manifest** — Reads both `.claude-plugin/marketplace.json` (legacy flat skill arrays, directory-based, external `url` / `git-subdir` shapes) and `<source>/.claude-plugin/plugin.json` (displayName, version, author, homepage, repository, license, keywords, userConfig)
 - **Five artifact families** — `SKILL.md`, `agents/*.md`, `commands/*.md`, `CLAUDE.md`, `.mcp.json` (HTTP/SSE)
-- **Plugin id grouping** — Every artifact is tagged `github:<owner>/<repo>/<plugin>` so the bundle can be reinstalled or uninstalled atomically
-- **Idempotent re-install** — Non-skill artifacts are replaced on re-import; skills dedupe by `(pluginId, name)`
+- **Plugin id grouping** — Every artifact tagged `github:<owner>/<repo>/<plugin>` so the bundle reinstalls / uninstalls atomically; manifest snapshot persisted at `~/.osaurus/claude-plugins/manifests/<safe-id>.json`
+- **Idempotent re-install + Update flow** — Card and detail view both show an Update capsule when the source's `plugin.json.version` (or marketplace / source SHA) is newer than what's installed; clicking Update calls `ClaudePluginInstaller.install(replaceExisting: true)` to re-fetch and replace the artifact set
+- **`userConfig` prompt sheet** — When `plugin.json` declares `userConfig`, an in-app sheet collects values at install. Non-sensitive values land in `~/.osaurus/claude-plugins/userconfig/<safe-id>.json`; sensitive values go to the macOS Keychain (skipped under `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`)
+- **Variable substitution** — `${CLAUDE_PLUGIN_ROOT}` / `${CLAUDE_PLUGIN_DATA}` / `${user_config.KEY}` / allow-listed `${ENV}` resolve in MCP command/args/cwd/env and in skill bodies (sensitive values are env-only per spec)
+- **Persistent data dir** — `~/.osaurus/claude-plugins/data/<safe-id>/` is created lazily on first `${CLAUDE_PLUGIN_DATA}` reference and removed on uninstall
 - **Parallel discovery & fetch** — `withThrowingTaskGroup` + `async let` across plugins and artifact probes
 - **Cron inference** — Natural-language frequency text in agent frontmatter is mapped to cron; unmatched schedules land disabled with a deep-link to the editor
 - **Placeholder token handling** — MCP env references like `${VAR}`, `$VAR`, `<token>` are detected and the provider is created without a token (surfaced in the install summary)
@@ -896,7 +926,9 @@ See [docs/plugins/README.md](plugins/README.md) for the full reference.
 github:<owner>/<repo>/<plugin-name>
 ```
 
-Stored on each artifact as `Skill.pluginId`, `Schedule.parameters["pluginId"]`, `SlashCommand.pluginId`, and `MCPProvider.pluginId`.
+Stored on each artifact as `Skill.pluginId`, `Schedule.parameters["pluginId"]`, `SlashCommand.pluginId`, and `MCPProvider.pluginId`. Snapshot persisted under the same id (sanitised via `OsaurusPaths.claudePluginSafeId`).
+
+**Not yet honored:** hooks, lspServers, outputStyles, themes/monitors (experimental), channels, bin/ PATH exports, install scopes. The detail view surfaces a "declared but not yet honored" notice so plugin authors aren't blindsided.
 
 **Reference repository:** [`anthropics/claude-for-legal`](https://github.com/anthropics/claude-for-legal)
 
@@ -1227,6 +1259,80 @@ Eight settings total, down from v1's 18. The per-section budget knobs, MMR tunin
 
 ---
 
+### Privacy Filter
+
+**Purpose:** Scrub sensitive content from cloud-bound requests on the way out and unscrub the placeholders on the way back. Detection runs entirely on-device via OpenAI's `openai/privacy-filter` (Apache-2.0, 1.5B / 50M-active sparse-MoE token classifier), served through the MLX conversion `mlx-community/openai-privacy-filter-bf16` (~2.8 GB). Fail-closed on every write path — model unavailable, no substitutions applied, or post-scrub leak detected all block the send with a typed error instead of silently sending the original. See [PRIVACY_FILTER.md](PRIVACY_FILTER.md) for the full architecture.
+
+**Components:**
+
+- `PrivacyFilter/Core/PrivacyFilterPipeline.swift` — `applyOutbound` / `wrapInboundStream` / `unscrubInbound` orchestration with typed `PrivacyFilterPipelineError`
+- `PrivacyFilter/Core/PrivacyFilterEngine.swift` — Ensemble of regex + classifier detection over a message history
+- `PrivacyFilter/Core/RegexEntityDetector.swift` — Built-in + preset + custom regex detection, with `safeCompile` validation
+- `PrivacyFilter/Core/PrivacyRulePresets.swift` — Ship-list of opt-in preset rules (driver's license, passport, IBAN, AWS keys, GitHub tokens)
+- `PrivacyFilter/Core/Placeholder.swift` — `EntityCategory` enum + `[CATEGORY_N]` wire format
+- `PrivacyFilter/Core/RedactionMap.swift` — Per-conversation `original ↔ placeholder` intern
+- `PrivacyFilter/Core/CodeBlockMasker.swift` — Skip-code-blocks pass for the `skipCodeBlocks` config
+- `PrivacyFilter/Core/StreamingUnscrubber.swift` — Splices into the inbound byte stream and rewrites placeholders on the fly
+- `PrivacyFilter/Store/SessionRedactionStore.swift` — Actor holding one `RedactionMap` per `sessionId` + auto-approve session set
+- `PrivacyFilter/Core/PrivacyReviewService.swift` — Modal review presenter registry + `withTaskCancellationHandler` continuation contract
+- `PrivacyFilter/Vendor/PrivacyFilterKit/` — Vendored detection kit (BIOES decoder, Viterbi calibration, label vocabulary)
+- `PrivacyFilter/Model/PrivacyFilterModelBundle.swift` — On-disk layout + SHA-256 verifier
+- `PrivacyFilter/Model/PrivacyFilterModelDownloader.swift` — Hugging Face streaming download + manifest synthesis
+- `PrivacyFilter/Store/PrivacyFilterConfiguration.swift` — Persisted user settings (Codable, hand-rolled decoder for forward-compat defaults)
+- `PrivacyFilter/Store/PrivacyFilterStore.swift` — JSON-on-disk persistence + lock-protected in-memory snapshot (synchronous `save`)
+- `PrivacyFilter/Views/PrivacyView.swift` — Settings UI: install hero (pre-install) + 4 sub-tabs (Overview / Rules / Providers / Model) post-install
+- `PrivacyFilter/Views/RedactionReviewSheet.swift` — Modal review with scrubbed preview + hover-reveal
+- `PrivacyFilter/Views/RedactionPreviewBuilder.swift` — Pure helper that scrubs text and builds the highlight map for the preview pane
+- `PrivacyFilter/Views/RedactionPreviewTextView.swift` — `NSViewRepresentable` that reuses the chat highlighter inside the review sheet
+- `PrivacyFilter/Views/PrivacyCustomRuleEditor.swift` — Custom-rule editor sheet with regex validation
+- `Views/Chat/RedactionHighlighter.swift` — Walks `NSTextStorage` and applies underline + accent to placeholder ranges (chat bubbles + preview)
+- `Views/Chat/RedactionHoverController.swift` — Hover-tracked `NSPopover` tooltip with direction-aware copy (outbound / inbound / preview)
+- `Services/Provider/WireTransportProbe.swift` — Captures the post-scrub HTTP body + pre-unscrub inbound stream for the Insights surface
+
+**Detection layers (run sequentially, union by `(category, range)`):**
+
+| Layer | Source | Default |
+|-------|--------|---------|
+| Built-in regex | `RegexEntityDetector` | Phone / email / URL / account number — all on, toggled per-category |
+| Preset rules | `PrivacyRulePresets.all` | Driver's license, passport, IBAN, AWS keys, GitHub tokens — all opt-in |
+| Custom rules | `PrivacyFilterConfiguration.customRules` | User-defined; validated through `safeCompile` before save |
+| On-device classifier | `PrivacyFilterKit` over OpenAI's `openai/privacy-filter` (MLX BF16 conversion) | BIOES decoder + Viterbi calibration; emits 8 categories (`person`, `email`, `phone`, `url`, `address`, `date`, `accountNumber`, `secret`) |
+
+**Placeholder wire format:** `[PERSON_1]`, `[EMAIL_2]`, `[PHONE_1]`, `[URL_1]`, `[ADDR_1]`, `[ACCT_1]`, `[DATE_1]`, `[SECRET_1]`. Per-category, per-conversation indexing. `RedactionMap` interns by original so the same value across turns reuses one placeholder.
+
+**Fail-closed errors:**
+
+| Case | When it fires |
+|------|---------------|
+| `.reviewCanceled` | User dismissed the review sheet (or task cancelled while suspended on it) |
+| `.engineUnavailable(detail)` | Master toggle on, model bundle missing / failed to load |
+| `.scrubNoOp(approvedCount)` | Approved entities produced zero substitutions (almost certainly a wiring bug) |
+| `.scrubLeaked(categoryCounts)` | Post-scrub re-scan found PII the substitution missed; send is blocked |
+
+The post-scrub invariant only re-scans categories whose built-in regex toggle is enabled — same source of truth as detection, so turning a category off in settings turns off both halves.
+
+**Configuration:**
+
+| Setting | Default | Description |
+|---------|---------|-------------|
+| `enabled` | false | Master toggle (synchronous persistence; survives Cmd-Q) |
+| `skipCodeBlocks` | true | Skip fenced + inline code spans |
+| `alwaysApproveByDefault` | false | Skip the review sheet per-session |
+| `confidenceThreshold` | 0.5 | Reserved for the classifier; persisted for future kit versions |
+| `builtinPatternEnabled` | all on | Per-category regex toggle (controls detection + leak check) |
+| `presetRules` | `{}` | Opt-in preset rule map |
+| `customRules` | `[]` | User-defined `PrivacyRule` array |
+| `providerOverrides` | `{}` | Per-`RemoteProvider.id` enable map; missing keys → true |
+
+**Storage:**
+
+- `~/.osaurus/config/privacy-filter.json` — User configuration (plaintext, atomic write)
+- `~/.osaurus/aux-models/openai-privacy-filter-bf16-v1/` — Model bundle + locally-generated `osaurus-manifest.json` for SHA-256 re-verify
+
+**Verification surface:** Open **Insights** (`⌘ Shift I`) → pick a request → **Request** / **Response** tabs. The **Server Request** / **Server Response** sub-sections show the exact bytes captured by `WireTransportProbe` (post-scrub on the way out, pre-unscrub on the way in) so users can confirm at a glance that placeholders actually made it onto the wire.
+
+---
+
 ## Documentation Index
 
 | Document                                                       | Purpose                                           |
@@ -1243,6 +1349,7 @@ Eight settings total, down from v1's 18. The per-section budget knobs, MMR tunin
 | [SKILLS.md](SKILLS.md)                                         | Skills, methods, and context management guide    |
 | [CLAUDE_PLUGINS.md](CLAUDE_PLUGINS.md)                         | Importing Claude plugins from GitHub             |
 | [MEMORY.md](MEMORY.md)                                         | Memory system and configuration guide            |
+| [PRIVACY_FILTER.md](PRIVACY_FILTER.md)                         | Privacy Filter architecture, detection layers, settings, and verification |
 | [SANDBOX.md](SANDBOX.md)                                       | Sandbox VM and plugin guide                       |
 | [plugins/README.md](plugins/README.md)                         | Creating custom plugins                           |
 | [OpenAI_API_GUIDE.md](OpenAI_API_GUIDE.md)                     | API usage, tool calling, streaming                |
