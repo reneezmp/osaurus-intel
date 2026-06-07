@@ -9,6 +9,7 @@
 
 #if OSAURUS_INTEL
 
+import CryptoKit
 import Foundation
 import OsaurusRepository
 
@@ -520,61 +521,124 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 // `Services/Plugin/PluginRepositoryService.swift`) tracks installed
 // + repository-known plugins and is referenced by `SkillsView` (un-
 // body-swapped in M11 Phase 11.A.2) when rendering "From: <plugin>"
-// breadcrumbs on plugin-attached skills. The Intel stub returns an
-// empty plugin list because plugin installation is amputated; the
-// `Skill.pluginId` field can still be populated by manually-
-// installed skills, but the breadcrumb just falls through to the
-// generic "Plugin" label.
+// breadcrumbs on plugin-attached skills.
+//
+// On Intel this stub does double duty:
+//   PATH A (current): fetches the plugin index from the osaurus-intel-plugins
+//     repo via URLSession, merges Intel-native entries into Browse.
+//   Upstream Browse: continues to fetch the arm64 registry via
+//     CentralRepositoryManager (M9 Phase A).
+//
+// PATH B (future): replace the URLSession index fetch with a second
+// CentralRepositoryManager instance pointed at the Intel plugin repo's
+// plugins/*.json PluginSpec files. The CPUArch enum needs .x86_64 added,
+// and PluginInstallManager needs a targetArch parameter.
 @MainActor
 final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
     static let shared = PluginRepositoryService()
 
+    /// PATH A: the lightweight plugins.json index served by the Intel plugin repo.
+    /// PATH B: replace usage of this with CentralRepositoryManager pointed at the
+    /// same repo's plugins/ directory.
+    private static let intelPluginIndexURL = URL(
+        string: "https://raw.githubusercontent.com/reneezmp/osaurus-intel-plugins/main/plugins.json"
+    )!
+
     @Published private(set) var plugins: [PluginState] = []
     @Published private(set) var isRefreshing: Bool = false
-    // PluginsView observes these (M11 Phase 11.B.2). All inert on Intel:
-    // no plugins install, so nothing updates / errors / needs secrets.
     @Published var updatesAvailableCount: Int = 0
     @Published var lastError: String? = nil
     @Published var pendingSecretsPlugin: String? = nil
 
+    /// PATH A index cache. Re-fetched on every refresh().
+    private var intelIndexEntries: [IntelPluginIndexEntry] = []
+
     private init() {}
 
-    /// AgentDetailView offers an "uninstall plugin" affordance. Plugin
-    /// installation is amputated on Intel (the three-bucket M9 UI shows
-    /// compatibility but doesn't install), so uninstall is a no-op.
-    func uninstall(pluginId: String) async {}
+    // MARK: - Install / Uninstall / Upgrade
 
-    // PluginsView install/update affordances. Still no-ops on Intel until
-    // the execution host is restored (M9 Phase C) — Browse shows the registry
-    // + compatibility, but nothing installs yet.
-    func install(pluginId: String) async throws {}
-    func upgrade(pluginId: String) async throws {}
+    /// Uninstall a plugin: delete its directory under Tools/ and reload.
+    func uninstall(pluginId: String) async {
+        let dir = OsaurusPaths.pluginDirectory(for: pluginId)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: dir.path) {
+            try? fm.removeItem(at: dir)
+        }
+        await PluginManager.shared.loadAll()
+        await refreshLocalState()
+    }
 
-    /// M9 Phase A (Renée 2026-06-04): real registry browse on Intel. The git
-    /// registry fetcher (`CentralRepositoryManager`) lives in the
-    /// `OsaurusRepository` package, which is plain Foundation and already
-    /// linked — so Browse works on Intel even though the plugin EXECUTION host
-    /// is still amputated. Maps each `PluginSpec` to the Intel `PluginState`
-    /// shape (versions converted; capabilities skipped — display only). Nothing
-    /// is ever `installedVersion`, so every plugin lands in the Browse tab.
+    /// Install an Intel-native plugin: download dylib + manifest, verify SHA256,
+    /// place in Tools/<pluginId>/, reload.
+    func install(pluginId: String) async throws {
+        guard let entry = intelIndexEntries.first(where: { $0.id == pluginId }),
+              let stateIdx = plugins.firstIndex(where: { $0.pluginId == pluginId })
+        else { return }
+
+        await MainActor.run { plugins[stateIdx].isInstalling = true }
+
+        do {
+            let dir = OsaurusPaths.pluginDirectory(for: pluginId)
+            let fm = FileManager.default
+            try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+
+            // Download dylib
+            let dylibURL = dir.appendingPathComponent("plugin.dylib")
+            let (dylibData, _) = try await URLSession.shared.data(from: URL(string: entry.download_url)!)
+
+            // Verify SHA256
+            let actualSHA = dylibData.sha256()
+            guard actualSHA == entry.sha256 else {
+                throw PluginInstallError.sha256Mismatch(expected: entry.sha256, actual: actualSHA)
+            }
+            try dylibData.write(to: dylibURL)
+
+            // Download manifest
+            let manifestURL = dir.appendingPathComponent("manifest.json")
+            let (manifestData, _) = try await URLSession.shared.data(
+                from: URL(string: entry.manifest_url)!
+            )
+            try manifestData.write(to: manifestURL)
+
+            // Load the plugin
+            await PluginManager.shared.loadAll()
+            await refreshLocalState()
+
+            await MainActor.run { plugins[stateIdx].isInstalling = false }
+        } catch {
+            await MainActor.run {
+                plugins[stateIdx].isInstalling = false
+                plugins[stateIdx].loadError = error.localizedDescription
+            }
+            throw error
+        }
+    }
+
+    /// Upgrade: same as install (overwrite existing dylib + manifest).
+    func upgrade(pluginId: String) async throws {
+        try await install(pluginId: pluginId)
+    }
+
+    // MARK: - Refresh (upstream arm64 + Intel index)
+
+    /// Refresh the plugin list from both the upstream arm64 registry (CentralRepositoryManager)
+    /// and the Intel-native plugin index (plugins.json). Merges both into `plugins`.
     func refresh() async {
         if isRefreshing { return }
         await MainActor.run {
             isRefreshing = true
             lastError = nil
         }
+
+        // --- Upstream arm64 registry (Browse-only) ---
         let reachable = await Task.detached(priority: .utility) {
             CentralRepositoryManager.shared.refresh()
         }.value
         let specs = await Task.detached(priority: .utility) {
             CentralRepositoryManager.shared.listAllSpecs()
         }.value
-        let mapped: [PluginState] = specs.map { spec in
+        let upstreamMapped: [PluginState] = specs.map { spec in
             let latest = spec.versions.map(\.version).max()
-            // Intel can only dlopen x86_64 Mach-O. The registry's artifacts are
-            // arm64 (the CPUArch enum doesn't even model x86_64), so this is
-            // true for every official plugin — they're flagged "Apple Silicon
-            // required" in the UI. A hand-built x86_64 plugin would flip false.
             let hasX86 = spec.versions.contains { entry in
                 entry.artifacts.contains { $0.arch == "x86_64" }
             }
@@ -594,12 +658,94 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                 requiresAppleSilicon: !hasX86
             )
         }
+
+        // --- Intel-native plugin index (PATH A: URLSession) ---
+        // PATH B (future): replace this block with a second CentralRepositoryManager
+        // fetch against the Intel repo's plugins/*.json. The entries carry
+        // x86_64 artifacts; PluginInstallManager would need targetArch
+        // plumbing. The index types above (IntelPluginIndexEntry) would be
+        // replaced by PluginSpec mapping.
+        var intelMapped: [PluginState] = []
+        do {
+            let (data, _) = try await URLSession.shared.data(from: Self.intelPluginIndexURL)
+            let index = try JSONDecoder().decode(IntelPluginIndex.self, from: data)
+            intelIndexEntries = index.plugins
+            intelMapped = index.plugins.map { entry in
+                let semver = parseSemver(entry.version)
+                // Check if this plugin is already installed locally
+                let installed = PluginManager.shared.isNativelyLoaded(pluginId: entry.id)
+                return PluginState(
+                    pluginId: entry.id,
+                    name: entry.name,
+                    pluginDescription: entry.description,
+                    authors: entry.authors,
+                    license: nil,
+                    capabilities: nil,
+                    installedVersion: installed ? semver : nil,
+                    latestVersion: semver,
+                    isInstalling: false,
+                    loadError: nil,
+                    requiresAppleSilicon: false,
+                    downloadURL: entry.download_url,
+                    manifestURL: entry.manifest_url,
+                    expectedSHA256: entry.sha256
+                )
+            }
+        } catch {
+            // Non-fatal: upstream Browse still works even if the Intel index is down.
+            // PATH B note: CentralRepositoryManager has its own caching; a failed
+            // fetch would similarly leave the Intel list empty without killing upstream.
+            NSLog("[Osaurus Intel] plugin index fetch failed: \(error.localizedDescription)")
+        }
+
         await MainActor.run {
-            if !reachable && mapped.isEmpty {
+            if !reachable && upstreamMapped.isEmpty && intelMapped.isEmpty {
                 lastError = "Unable to reach the plugin repository"
             }
-            plugins = mapped.sorted { ($0.name ?? $0.pluginId) < ($1.name ?? $1.pluginId) }
+            // Merge: upstream arm64 + Intel-native, sorted by display name
+            let merged = (upstreamMapped + intelMapped).sorted {
+                ($0.name ?? $0.pluginId) < ($1.name ?? $1.pluginId)
+            }
+            plugins = merged
             isRefreshing = false
+        }
+    }
+
+    // MARK: - Helpers
+
+    /// Refresh installedVersion / loadError in the local state after a loadAll().
+    private func refreshLocalState() async {
+        await MainActor.run {
+            for i in plugins.indices {
+                let pid = plugins[i].pluginId
+                if PluginManager.shared.isNativelyLoaded(pluginId: pid) {
+                    plugins[i].installedVersion = plugins[i].latestVersion
+                    plugins[i].loadError = nil
+                } else {
+                    plugins[i].installedVersion = nil
+                }
+            }
+        }
+    }
+}
+
+private func parseSemver(_ s: String) -> SemanticVersion? {
+    let parts = s.split(separator: ".").compactMap { Int($0) }
+    guard parts.count >= 2 else { return nil }
+    return SemanticVersion(
+        major: parts[0],
+        minor: parts[1],
+        patch: parts.count > 2 ? parts[2] : 0
+    )
+}
+
+private enum PluginInstallError: Error, LocalizedError {
+    case sha256Mismatch(expected: String, actual: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .sha256Mismatch(let expected, let actual):
+            return "Download verification failed. Expected SHA256 \(expected.prefix(16))…, got \(actual.prefix(16))…"
         }
     }
 }
@@ -629,6 +775,13 @@ struct PluginState: Identifiable, Equatable {
     /// this plugin (i.e. it's arm64-only and can't load on this Intel build).
     /// Drives the "Apple Silicon required" badge + disabled Install in PluginsView.
     var requiresAppleSilicon: Bool = false
+    /// Intel plugin repo: download URL for the pre-built x86_64 dylib. Nil for
+    /// upstream arm64 plugins and for Intel plugins that haven't been fetched yet.
+    var downloadURL: String?
+    /// Intel plugin repo: manifest.json URL (runtime manifest, not PluginSpec).
+    var manifestURL: String?
+    /// Intel plugin repo: expected SHA256 of the dylib at downloadURL.
+    var expectedSHA256: String?
 
     var displayName: String { name ?? pluginId }
     var hasUpdate: Bool {
@@ -649,7 +802,10 @@ struct PluginState: Identifiable, Equatable {
         latestVersion: SemanticVersion? = nil,
         isInstalling: Bool = false,
         loadError: String? = nil,
-        requiresAppleSilicon: Bool = false
+        requiresAppleSilicon: Bool = false,
+        downloadURL: String? = nil,
+        manifestURL: String? = nil,
+        expectedSHA256: String? = nil
     ) {
         self.pluginId = pluginId
         self.name = name
@@ -662,7 +818,54 @@ struct PluginState: Identifiable, Equatable {
         self.isInstalling = isInstalling
         self.loadError = loadError
         self.requiresAppleSilicon = requiresAppleSilicon
+        self.downloadURL = downloadURL
+        self.manifestURL = manifestURL
+        self.expectedSHA256 = expectedSHA256
     }
+}
+
+// MARK: - Intel Plugin Index (Path A fetch types)
+//
+// The osaurus-intel-plugins repo serves a plugins.json index that the app
+// fetches in one HTTP request. These types decode that index.
+//
+// PATH B (future): when the plugin count justifies it, replace this with a
+// second CentralRepositoryManager instance pointed at the same repo's
+// plugins/*.json PluginSpec files. The repo already carries those files;
+// the index is a denormalized cache for the lightweight Path A fetch.
+
+private struct IntelPluginIndex: Codable {
+    let version: Int
+    let plugins: [IntelPluginIndexEntry]
+}
+
+private struct IntelPluginIndexEntry: Codable {
+    let id: String
+    let name: String
+    let version: String
+    let description: String
+    let authors: [String]?
+    let tools: [IntelPluginToolEntry]
+    let download_url: String
+    let manifest_url: String
+    let sha256: String
+    let size: Int?
+    let instructions: String?
+    let secrets: [IntelPluginSecretEntry]?
+}
+
+private struct IntelPluginToolEntry: Codable {
+    let id: String
+    let description: String
+}
+
+private struct IntelPluginSecretEntry: Codable {
+    let id: String
+    let label: String
+    let description: String?
+    let required: Bool
+    let secret: Bool
+    let url: String?
 }
 
 // MARK: - ClaudePluginInstallReport (Intel stub)
@@ -1096,6 +1299,14 @@ struct SharedArtifact: Identifiable, Sendable, Equatable {
         sandboxAgentName: String? = nil
     ) -> Result<ProcessingResult, ResolutionFailure> {
         .success(ProcessingResult(enrichedToolResult: text))
+    }
+}
+
+// MARK: - Data + SHA256
+
+private extension Data {
+    func sha256() -> String {
+        SHA256.hash(data: self).compactMap { String(format: "%02x", $0) }.joined()
     }
 }
 

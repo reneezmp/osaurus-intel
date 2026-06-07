@@ -1,4 +1,7 @@
 #!/bin/bash
+# Dev-only; M4 isolation. Rosy users install plugins via the plugin repo
+# (github.com/reneezmp/osaurus-intel-plugins).
+#
 # Build every single-file C plugin under intel-plugins/ as a native x86_64
 # dylib and install it into the Intel fork's isolated Tools dir
 # (~/.osaurus-intel/Tools/<plugin_id>/). Re-run after editing any plugin.
