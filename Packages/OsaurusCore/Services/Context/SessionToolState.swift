@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  SessionToolState.swift
 //  osaurus
@@ -69,3 +70,5 @@ struct SessionToolState: Sendable {
         return "\(modeTag)/\(toolMode.rawValue)"
     }
 }
+
+#endif

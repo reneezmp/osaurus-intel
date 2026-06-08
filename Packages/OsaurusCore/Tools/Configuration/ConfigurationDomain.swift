@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ConfigurationDomain.swift
 //  osaurus
@@ -135,3 +136,5 @@ final class ConfigurationDomainRegistry: ObservableObject {
         generation &+= 1
     }
 }
+
+#endif

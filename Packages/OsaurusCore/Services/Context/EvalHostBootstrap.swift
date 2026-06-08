@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  EvalHostBootstrap.swift
 //  osaurus
@@ -68,3 +69,5 @@ public enum EvalHostBootstrap {
         await SkillSearchService.shared.rebuildIndex()
     }
 }
+
+#endif

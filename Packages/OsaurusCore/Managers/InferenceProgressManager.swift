@@ -14,6 +14,7 @@ import Foundation
 /// SwiftUI bindings are updated correctly.  Call sites that are NOT on the
 /// MainActor use the fire-and-forget `*Async` variants.
 final class InferenceProgressManager: ObservableObject, @unchecked Sendable {
+    @Published var isPreflighting: Bool = false
     static let shared = InferenceProgressManager()
 
     /// Refcount of in-flight model loads. Incremented by

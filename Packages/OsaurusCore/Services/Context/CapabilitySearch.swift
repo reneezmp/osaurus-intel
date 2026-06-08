@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  CapabilitySearch.swift
 //  osaurus
@@ -272,3 +273,5 @@ fileprivate func formatHybridHits(_ hits: [ToolSearchHybridDiagnostic.Hit]) -> S
 fileprivate func formatNames(_ names: [String]) -> String {
     names.isEmpty ? "[]" : "[\(names.joined(separator: ","))]"
 }
+
+#endif

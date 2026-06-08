@@ -34,6 +34,7 @@ struct ConfigurationView: View {
     @State private var tempChatContextLength: String = ""
     @State private var tempChatTopP: String = ""
     @State private var tempChatMaxToolAttempts: String = ""
+    @State private var tempPreflightSearchMode: PreflightSearchMode = .balanced
     @State private var tempDisableTools: Bool = true
     @State private var tempMemoryEnabled: Bool = false
     @State private var tempCoreModelProvider: String = ""
@@ -149,7 +150,7 @@ struct ConfigurationView: View {
                                         VStack(alignment: .leading, spacing: 8) {
                                             coreModelPicker
                                             Text(
-                                                "Lightweight model used for memory consolidation and transcription cleanup. If unset, your active chat model is used as a fallback. Note: tools must also be enabled on the active agent — check Agent → Capabilities.",
+                                                "Lightweight model used for memory consolidation and preflight tool selection. If unset, your active chat model is used as a fallback. Note: tools must also be enabled on the active agent — check Agent → Capabilities.",
                                                 bundle: .module
                                             )
                                             .font(.system(size: 11))
@@ -246,6 +247,8 @@ struct ConfigurationView: View {
                             "Top P",
                             "Max Tool Attempts",
                             "Generation",
+                            "Preflight",
+                            "Capability Search",
                             "Memory",
                             "Tools"
                         ) {
@@ -837,6 +840,7 @@ struct ConfigurationView: View {
         tempChatContextLength = ""
         tempChatTopP = ""
         tempChatMaxToolAttempts = ""
+        tempPreflightSearchMode = .balanced
         tempDisableTools = true
         tempMemoryEnabled = false
         tempCoreModelProvider = chatDefaults.coreModelProvider ?? ""

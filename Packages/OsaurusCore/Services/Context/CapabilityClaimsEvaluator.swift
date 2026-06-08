@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  CapabilityClaimsEvaluator.swift
 //  osaurus
@@ -405,3 +406,5 @@ public enum CapabilityClaimsEvaluator {
         return nil
     }
 }
+
+#endif

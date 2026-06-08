@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  DefaultAgentSystemPromptBuilder.swift
 //  osaurus
@@ -100,3 +101,5 @@ public enum DefaultAgentSystemPromptBuilder {
         return lines.joined(separator: "\n")
     }
 }
+
+#endif
