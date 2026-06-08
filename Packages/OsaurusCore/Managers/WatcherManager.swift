@@ -469,6 +469,7 @@ public final class WatcherManager {
         // Watchers MUST target an explicit custom agent. nil and built-in
         // agentIds were previously coerced to `Agent.defaultId`, anonymously
         // routing filesystem-watch dispatches onto the Default agent.
+        #if !OSAURUS_INTEL
         if let rejection = Agent.rejectBuiltInForExternalSurface(
             watcher.agentId,
             source: "watcher/processCurrentState"
@@ -477,6 +478,7 @@ public final class WatcherManager {
             phases[watcher.id] = .idle
             return
         }
+        #endif
 
         let currentPhase = phases[watcher.id] ?? .idle
 
