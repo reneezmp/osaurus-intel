@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ClaudePluginCard.swift
 //  osaurus
@@ -310,3 +311,5 @@ struct ClaudePluginCard: View {
             .animation(.easeOut(duration: 0.15), value: isHovered)
     }
 }
+
+#endif

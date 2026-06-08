@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ClaudePluginDetailView.swift
 //  osaurus
@@ -1528,3 +1529,5 @@ private struct PreviewMeta: View {
 
 // Keyword chips are arranged via the shared `FlowLayout` defined in
 // `Views/Common/FlowLayout.swift` — no per-view redeclaration needed.
+
+#endif

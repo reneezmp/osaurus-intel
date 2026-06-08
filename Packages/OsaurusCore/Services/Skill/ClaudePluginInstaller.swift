@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ClaudePluginInstaller.swift
 //  osaurus
@@ -1829,3 +1830,5 @@ enum MCPJSONParser {
         return false
     }
 }
+
+#endif

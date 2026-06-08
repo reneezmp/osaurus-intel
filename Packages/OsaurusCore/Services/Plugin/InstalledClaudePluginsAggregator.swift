@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  InstalledClaudePluginsAggregator.swift
 //  osaurus
@@ -749,3 +750,5 @@ public final class InstalledClaudePluginsAggregator: ObservableObject {
         refresh()
     }
 }
+
+#endif
