@@ -2778,7 +2778,7 @@ extension FloatingInputCard {
     }
 
     /// Placeholder text for the input field.
-    private var placeholderText: String { "Message or attach files..." }
+    private var placeholderText: String { L("Message or attach files...") }
 
     private var textInputArea: some View {
         EditableTextView(
