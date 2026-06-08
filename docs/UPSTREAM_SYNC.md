@@ -3,15 +3,16 @@
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
-**Last synced upstream commit:** `21123c9a` (fixed main thread hangs, #1418)  
+**Last synced upstream commit:** `d132b728` (Pin Nemotron vMLX runtime fixes)  
 **Last sync date:** 2026-06-08  
+**Status:** 🟢 Fully caught up — 0 pending substantive commits  
 
 ## Sync workflow (monthly)
 
 ```bash
 git fetch upstream
 # Only NEW commits since last sync — never reparse old ones
-git log 21123c9a..upstream/main --oneline
+git log d132b728..upstream/main --oneline
 # Classify → PORT/SKIP/MIRROR → cherry-pick/ignore → update this ledger
 # When done, update the "Last synced upstream commit" hash above.
 ```  
@@ -85,7 +86,7 @@ For each upstream commit:
 | 20 | `396abe4f` | PORT | cherry-pick (gated new codex file) | PDFPPTXWorkflowService (NEW) | ✅ Gated behind #if !OSAURUS_INTEL. |
 | 21 | `5145c37a` | PORT | cherry-pick (reverted FolderTools) | WorkspaceWriteSafety (NEW) | ✅ New file kept; FolderTools reverted (sandbox deps). |
 | 22 | `8d94f864` | PORT | cherry-pick (reverted ProvidersView/RemoteProvidersView, gated diagnostics) | ProviderNetworkDiagnostics (NEW), ProviderDiagnosticsRowsView (NEW) | ✅ New files gated; Intel views preserved. |
-| 23 | `21123c9a` | PORT | cherry-pick (clean auto-merge) | ManagementBadgeStore, ServerView | ✅ Main thread hang fix — key gen off main actor. |
+| 23 | `d132b728` | PORT | cherry-pick (clean auto-merge) | ManagementBadgeStore, ServerView | ✅ Main thread hang fix — key gen off main actor. |
 | 24 | `63bf3a3c` | PORT | cherry-pick (resolved: took upstream OAuth) | RelayTunnelManager, MCPOAuthService, XAIOAuthService, OpenAICodexOAuthService, NativeBlockViews, NSWorkspaceAsyncOpen (NEW) | ✅ Streaming/OAuth/relay hang fixes. |
 | 25 | `dfca2325` | PORT | cherry-pick (gated WatcherManager, kept Intel ModelDownloadService) | WatcherManager, FloatingInputCard, DirectoryFingerprint, CustomTheme | ✅ Unresolved app hangs fix; Agent.rejectBuiltInForExternalSurface gated. |
 | 26 | `bfa4aa01` | PORT | cherry-pick (clean auto-merge into AS branch) | PluginManager.swift | ✅ Keychain reads off main thread; Intel branch unaffected. |
