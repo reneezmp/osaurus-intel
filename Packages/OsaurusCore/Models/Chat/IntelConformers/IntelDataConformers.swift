@@ -1541,6 +1541,7 @@ typealias Tool = IntelTool
 enum ToolChoiceOption: Codable, Sendable {
     case auto
     case none
+    case required
     case function(String)
 }
 

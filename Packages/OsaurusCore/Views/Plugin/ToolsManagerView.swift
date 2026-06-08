@@ -25,6 +25,8 @@ struct ToolsManagerView: View {
 
     // Snapshot values from services (updated via .onReceive / reload)
     @State private var toolEntries: [ToolRegistry.ToolEntry] = []
+    @State private var runtimeManagedToolEntries: [ToolRegistry.ToolEntry] = []
+    @State private var builtInSandboxToolEntries: [ToolRegistry.ToolEntry] = []
     @State private var remoteProviderCount: Int = 0
     @State private var policyInfoCache: [String: ToolRegistry.ToolPolicyInfo] = [:]
 
@@ -47,7 +49,11 @@ struct ToolsManagerView: View {
                 case .remote:
                     ProvidersView()
                 case .sandbox:
-                    SandboxPluginsTabContent()
+                    SandboxPluginsTabContent(
+                        builtInTools: builtInSandboxToolEntries,
+                        policyInfoCache: policyInfoCache,
+                        onChange: { reload() }
+                    )
                 }
             }
             .opacity(hasAppeared ? 1 : 0)
@@ -103,22 +109,20 @@ struct ToolsManagerView: View {
                 }
             }
         } tabsRow: {
-            // count only what the Available tab actually renders plugin Tools +
-            // remote tools). using `filteredEntries.count` (the full registry)
-            // leaks builtin / sandbox / folder conflicting tools into the
-            // badge — none of which have a visible row — so the badge drifts
-            // from the per-section sum and varies across machines depending on
-            // whether the sandbox container has provisioned its builtin tools
+            // Count only rows this view actually renders. Runtime-managed
+            // folder/sandbox tools are visible as read-only operational
+            // tools below, so they must be counted here too; otherwise chat
+            // can have tools while Settings says every tool tab has zero.
+            let runtimeShown = runtimeManagedToolEntries.count
             let availableShown =
                 installedPluginsWithTools.reduce(0) { $0 + $1.tools.count }
                 + remoteProviderTools.reduce(0) { $0 + $1.tools.count }
-                + nativeToolBadgeCount
             HeaderTabsRow(
                 selection: $selectedTab,
                 counts: [
-                    .available: availableShown,
+                    .available: availableShown + runtimeShown,
                     .remote: remoteProviderCount,
-                    .sandbox: SandboxPluginLibrary.shared.plugins.count,
+                    .sandbox: SandboxPluginLibrary.shared.plugins.count + builtInSandboxToolEntries.count,
                 ],
                 searchText: $searchText,
                 searchPlaceholder: "Search tools"
@@ -138,18 +142,14 @@ struct ToolsManagerView: View {
 
                 let plugins = installedPluginsWithTools
                 let remoteTools = remoteProviderTools
-                #if OSAURUS_INTEL
-                let nativeGroups = nativePluginToolGroups
-                #else
-                let nativeGroups: [(group: String, tools: [ToolRegistry.ToolEntry])] = []
-                #endif
+                let runtimeTools = runtimeManagedToolEntries
 
-                if plugins.isEmpty && remoteTools.isEmpty && nativeGroups.isEmpty {
+                if runtimeTools.isEmpty && plugins.isEmpty && remoteTools.isEmpty {
                     emptyState(
                         icon: "wrench.and.screwdriver",
                         title: L("No tools available"),
                         subtitle: searchText.isEmpty
-                            ? "Install plugins or connect to remote providers to add tools"
+                            ? "Enable a working folder, sandbox, plugin, or remote provider to add tools"
                             : "Try a different search term"
                     )
                 } else {
@@ -157,14 +157,20 @@ struct ToolsManagerView: View {
                         ToolPermissionBanner(count: pluginsWithMissingPermissionsCount)
                     }
 
-                    #if OSAURUS_INTEL
-                    if !nativeGroups.isEmpty {
-                        InstalledSectionHeader(title: "Plugin Tools (native)", icon: "puzzlepiece.extension")
-                        ForEach(nativeGroups, id: \.group) { item in
-                            NativeToolGroupCard(group: item.group, tools: item.tools, onChange: { reload() })
+                    if !runtimeTools.isEmpty {
+                        InstalledSectionHeader(title: "Runtime Tools", icon: "terminal")
+
+                        LazyVStack(spacing: 8) {
+                            ForEach(runtimeTools) { entry in
+                                RuntimeManagedToolEntryRow(
+                                    entry: entry,
+                                    badge: runtimeBadge(for: entry),
+                                    policyInfo: policyInfoCache[entry.name],
+                                    onChange: { reload() }
+                                )
+                            }
                         }
                     }
-                    #endif
 
                     if !plugins.isEmpty {
                         InstalledSectionHeader(title: "Plugin Tools", icon: "puzzlepiece.extension")
@@ -205,36 +211,6 @@ struct ToolsManagerView: View {
         }
     }
 
-    /// Native plugin tool count for the Available-tab badge (0 off-Intel).
-    private var nativeToolBadgeCount: Int {
-        #if OSAURUS_INTEL
-        return nativePluginToolGroups.reduce(0) { $0 + $1.tools.count }
-        #else
-        return 0
-        #endif
-    }
-
-    #if OSAURUS_INTEL
-    // MARK: - Native (this-fork) plugin tools
-
-    /// Native plugin tools grouped by their plugin display name, from the
-    /// Intel ToolRegistry (registered via registerPluginTool). Honors search.
-    private var nativePluginToolGroups: [(group: String, tools: [ToolRegistry.ToolEntry])] {
-        let reg = ToolRegistry.shared
-        let q = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
-        let entries = reg.listTools().filter { entry in
-            guard reg.isPluginTool(entry.name) else { return false }
-            guard !q.isEmpty else { return true }
-            return entry.name.lowercased().contains(q) || entry.description.lowercased().contains(q)
-        }
-        let grouped = Dictionary(grouping: entries) { reg.groupName(for: $0.name) ?? "Plugin" }
-        return grouped
-            .map { (group: $0.key, tools: $0.value.sorted { $0.name < $1.name }) }
-            .sorted { $0.group < $1.group }
-    }
-
-    #endif
-
     // MARK: - Empty / Loading States
 
     private func emptyState(icon: String, title: String, subtitle: String?) -> some View {
@@ -263,12 +239,20 @@ struct ToolsManagerView: View {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
         let queryLower = query.lowercased()
         let currentToolEntries = toolEntries
+        let runtimeManagedNames = ToolRegistry.shared.runtimeManagedToolNames
+        let builtInSandboxNames = ToolRegistry.shared.builtInSandboxToolNamesSnapshot
         let currentPlugins = repoService.plugins
         let currentProviders = providerManager.configuration.providers
         let currentProviderStates = providerManager.providerStates
 
-        let (installedPluginsResult, remoteToolsResult) =
+        let (installedPluginsResult, remoteToolsResult, runtimeToolsResult, builtInSandboxToolsResult) =
             await Task.detached(priority: .userInitiated) {
+
+                func matchesToolSearch(_ tool: ToolRegistry.ToolEntry) -> Bool {
+                    query.isEmpty
+                        || SearchService.matches(query: query, in: tool.name)
+                        || SearchService.matches(query: query, in: tool.description)
+                }
 
                 // 1. Installed Plugins with Tools (for Available tab)
                 let installedPlugins =
@@ -340,13 +324,29 @@ struct ToolsManagerView: View {
                     }
                     .sorted { $0.provider.name < $1.provider.name }
 
-                return (installedPlugins, remoteTools)
+                // 3. Runtime-managed tools (folder and built-in sandbox).
+                // These are not plugin catalog entries, but they are exactly
+                // the tools chat can send to local models when folder or
+                // sandbox mode is active. Settings must reflect them.
+                let runtimeTools =
+                    currentToolEntries
+                    .filter { runtimeManagedNames.contains($0.name) }
+                    .filter(matchesToolSearch)
+
+                let builtInSandboxTools =
+                    currentToolEntries
+                    .filter { builtInSandboxNames.contains($0.name) }
+                    .filter(matchesToolSearch)
+
+                return (installedPlugins, remoteTools, runtimeTools, builtInSandboxTools)
             }.value
 
         guard !Task.isCancelled else { return }
 
         installedPluginsWithTools = installedPluginsResult
         remoteProviderTools = remoteToolsResult
+        runtimeManagedToolEntries = runtimeToolsResult
+        builtInSandboxToolEntries = builtInSandboxToolsResult
 
         // Build policy info cache once for all tools
         var cache: [String: ToolRegistry.ToolPolicyInfo] = [:]
@@ -370,6 +370,16 @@ struct ToolsManagerView: View {
             }
         }
         pluginsWithMissingPermissionsCount = permissionCount
+    }
+
+    private func runtimeBadge(for entry: ToolRegistry.ToolEntry) -> String {
+        if ToolRegistry.shared.builtInSandboxToolNamesSnapshot.contains(entry.name) {
+            return "Sandbox"
+        }
+        if ToolRegistry.folderToolNames.contains(entry.name) {
+            return "Folder"
+        }
+        return "Runtime"
     }
 
     private func reload() {
@@ -397,6 +407,10 @@ private struct SandboxPluginsTabContent: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var pluginLibrary = SandboxPluginLibrary.shared
 
+    let builtInTools: [ToolRegistry.ToolEntry]
+    let policyInfoCache: [String: ToolRegistry.ToolPolicyInfo]
+    let onChange: () -> Void
+
     @State private var showCreatePlugin = false
     @State private var editingPlugin: SandboxPlugin?
     @State private var pluginToDelete: SandboxPlugin?
@@ -409,7 +423,7 @@ private struct SandboxPluginsTabContent: View {
                 SectionHeader(
                     title: L("Sandbox Tools"),
                     description:
-                        "JSON-defined tools that run inside the sandbox container. Auto-provisioned when any agent uses them. Distinct from native dylib plugins, which appear under \"Available Tools\"."
+                        "Built-in sandbox execution tools and JSON-defined plugin tools that run inside the sandbox container."
                 )
 
                 HStack {
@@ -451,7 +465,22 @@ private struct SandboxPluginsTabContent: View {
                     .buttonStyle(PlainButtonStyle())
                 }
 
-                if pluginLibrary.plugins.isEmpty {
+                if !builtInTools.isEmpty {
+                    InstalledSectionHeader(title: "Built-in Sandbox Tools", icon: "terminal")
+
+                    LazyVStack(spacing: 8) {
+                        ForEach(builtInTools) { entry in
+                            RuntimeManagedToolEntryRow(
+                                entry: entry,
+                                badge: "Sandbox",
+                                policyInfo: policyInfoCache[entry.name],
+                                onChange: onChange
+                            )
+                        }
+                    }
+                }
+
+                if pluginLibrary.plugins.isEmpty && builtInTools.isEmpty {
                     sandboxPluginEmptyState
                 } else {
                     ForEach(pluginLibrary.plugins) { plugin in
@@ -1269,90 +1298,6 @@ private struct ToolPolicyMenu: View {
     }
 }
 
-// MARK: - Native (this-fork) plugin tool group card
-
-#if OSAURUS_INTEL
-/// Collapsible card for a native plugin's tools, with a per-tool on/off toggle —
-/// mirrors RemoteProviderToolsCard's affordances.
-private struct NativeToolGroupCard: View {
-    @Environment(\.theme) private var theme
-    let group: String
-    let tools: [ToolRegistry.ToolEntry]
-    let onChange: () -> Void
-
-    @State private var isExpanded = false
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            Button {
-                withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) { isExpanded.toggle() }
-            } label: {
-                HStack(spacing: 14) {
-                    ZStack {
-                        RoundedRectangle(cornerRadius: 10).fill(theme.accentColor.opacity(0.12))
-                        Image(systemName: "puzzlepiece.extension.fill")
-                            .font(.system(size: 18)).foregroundColor(theme.accentColor)
-                    }
-                    .frame(width: 44, height: 44)
-
-                    HStack(spacing: 8) {
-                        Text(group)
-                            .font(.system(size: 15, weight: .semibold, design: .rounded))
-                            .foregroundColor(theme.primaryText)
-                        Text("native")
-                            .font(.system(size: 10, weight: .medium))
-                            .foregroundColor(theme.accentColor)
-                            .padding(.horizontal, 6).padding(.vertical, 2)
-                            .background(Capsule().fill(theme.accentColor.opacity(0.12)))
-                    }
-
-                    Spacer()
-
-                    HStack(spacing: 4) {
-                        Image(systemName: "wrench.and.screwdriver").font(.system(size: 10))
-                        Text("\(tools.count) tool\(tools.count == 1 ? "" : "s")")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(theme.secondaryText)
-                    .padding(.horizontal, 8).padding(.vertical, 4)
-                    .background(Capsule().fill(theme.tertiaryBackground))
-
-                    Image(systemName: "chevron.right")
-                        .font(.system(size: 11, weight: .semibold))
-                        .foregroundColor(theme.tertiaryText)
-                        .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                }
-                .contentShape(Rectangle())
-            }
-            .buttonStyle(.plain)
-
-            if isExpanded && !tools.isEmpty {
-                Divider().padding(.vertical, 4)
-                LazyVStack(spacing: 8) {
-                    ForEach(tools) { entry in
-                        // Reuse the shared row: per-tool background + Auto/Ask/Deny
-                        // policy menu + enable toggle (same as the GitHub card).
-                        ToolEntryRow(
-                            entry: entry,
-                            policyInfo: ToolRegistry.shared.policyInfo(for: entry.name),
-                            onChange: onChange
-                        )
-                    }
-                }
-                .transition(.opacity.combined(with: .move(edge: .top)))
-            }
-        }
-        .padding(16)
-        .frame(maxWidth: .infinity)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(theme.cardBackground)
-                .overlay(RoundedRectangle(cornerRadius: 12).stroke(theme.cardBorder, lineWidth: 1))
-        )
-    }
-}
-#endif
-
 // MARK: - Tool Enable Toggle
 
 /// Reusable toggle for enabling/disabling a tool.
@@ -1374,6 +1319,88 @@ private struct ToolEnableToggle: View {
         .toggleStyle(SwitchToggleStyle())
         .labelsHidden()
         .scaleEffect(0.85)
+    }
+}
+
+// MARK: - Runtime Managed Tool Entry Row
+
+private struct RuntimeManagedToolEntryRow: View {
+    @Environment(\.theme) private var theme
+    let entry: ToolRegistry.ToolEntry
+    let badge: String
+    let policyInfo: ToolRegistry.ToolPolicyInfo?
+    let onChange: () -> Void
+
+    private var hasMissingSystemPermissions: Bool {
+        guard let info = policyInfo else { return false }
+        return info.systemPermissionStates.values.contains(false)
+    }
+
+    var body: some View {
+        HStack(spacing: 10) {
+            toolIcon
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 4) {
+                    Text(entry.name)
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(theme.primaryText)
+
+                    if hasMissingSystemPermissions {
+                        Image(systemName: "exclamationmark.triangle.fill")
+                            .font(.system(size: 9))
+                            .foregroundColor(theme.warningColor)
+                    }
+                }
+
+                Text(entry.description)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Text(badge)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(theme.secondaryText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(theme.tertiaryBackground))
+
+            if let info = policyInfo {
+                ToolPolicyMenu(
+                    toolName: entry.name,
+                    info: info,
+                    onChange: onChange
+                )
+            }
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.tertiaryBackground.opacity(0.5))
+        )
+    }
+
+    private var toolIcon: some View {
+        ZStack {
+            RoundedRectangle(cornerRadius: 6)
+                .fill(
+                    hasMissingSystemPermissions
+                        ? theme.warningColor.opacity(0.1) : theme.accentColor.opacity(0.08)
+                )
+            Image(systemName: "terminal")
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(hasMissingSystemPermissions ? theme.warningColor : theme.accentColor)
+
+            if hasMissingSystemPermissions {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 8))
+                    .foregroundColor(theme.warningColor)
+                    .offset(x: 10, y: -10)
+            }
+        }
+        .frame(width: 28, height: 28)
     }
 }
 

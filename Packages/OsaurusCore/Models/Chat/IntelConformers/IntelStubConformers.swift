@@ -948,8 +948,25 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// folder-scoped, not always-loaded built-ins), so this stays empty.
     private(set) var builtInToolNames: Set<String> = []
 
-    /// Runtime-managed (dynamically loaded) tool names — none on Intel.
-    var runtimeManagedToolNames: Set<String> { [] }
+    /// Built-in sandbox tool names. Amputated on Intel — always empty.
+    var builtInSandboxToolNames: Set<String> { [] }
+
+    /// Read-only snapshot of built-in sandbox tool names (mirrors upstream).
+    var builtInSandboxToolNamesSnapshot: Set<String> { builtInSandboxToolNames }
+
+    /// Folder-scoped tools provided by FolderToolManager (file_read, file_write,
+    /// shell_run, etc.). FolderToolManager is un-excluded on Intel.
+    static var folderToolNames: Set<String> {
+        MainActor.assumeIsolated {
+            Set(FolderToolManager.shared.folderToolNames)
+        }
+    }
+
+    /// Runtime-managed tools = folder tools + built-in sandbox tools.
+    /// Mirrors upstream: `folderToolNames.union(builtInSandboxToolNames)`.
+    var runtimeManagedToolNames: Set<String> {
+        Self.folderToolNames.union(builtInSandboxToolNames)
+    }
 
     func isMCPTool(_ name: String) -> Bool { mcpToolNames.contains(name) }
 
@@ -1007,6 +1024,33 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             )
         }
         return try await tool.execute(argumentsJSON: argumentsJSON)
+    }
+
+    /// Mirror of upstream's `invalidToolArgumentsEnvelope`. When the model
+    /// hallucinates tool arguments (detected by the caller via `_error:
+    /// "invalid_tool_arguments"` in the result JSON), this returns a
+    /// `ToolEnvelope.failure()` with diagnostic metadata so the agent loop
+    /// can retry rather than treating the hallucination as a real tool error.
+    static func invalidToolArgumentsEnvelope(
+        _ argumentsJSON: String,
+        toolName: String
+    ) -> String? {
+        guard let data = argumentsJSON.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            object["_error"] as? String == "invalid_tool_arguments"
+        else { return nil }
+
+        let message = object["_message"] as? String ?? "invalid tool arguments"
+        let field = object["_field"] as? String
+        let expected = object["_expected"] as? String
+        return ToolEnvelope.failure(
+            kind: .invalidArgs,
+            message: message,
+            field: field,
+            expected: expected,
+            tool: toolName,
+            retryable: true
+        )
     }
 
     /// Per-tool allow/deny policy state for `ConfigurationView`'s tool

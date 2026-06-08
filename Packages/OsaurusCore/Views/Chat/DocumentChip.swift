@@ -16,6 +16,7 @@ struct DocumentChip: View {
     var onRemove: (() -> Void)? = nil
     var onTap: (() -> Void)? = nil
     var onEdit: (() -> Void)? = nil
+    var onInline: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @State private var isHovered = false

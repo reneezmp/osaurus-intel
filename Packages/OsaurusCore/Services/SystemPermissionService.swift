@@ -705,7 +705,11 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
                 self.setPermission(.microphone, isGranted: granted)
                 if granted {
                     // Refresh audio devices now that we have permission
+#if !OSAURUS_INTEL
+#if !OSAURUS_INTEL
                     AudioInputManager.shared.refreshDevices()
+#endif
+#endif
                 }
             }
         }

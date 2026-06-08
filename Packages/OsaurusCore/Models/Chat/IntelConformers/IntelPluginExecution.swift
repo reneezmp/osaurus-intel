@@ -422,7 +422,7 @@ private func intelComplete(requestJSON: String) -> String {
     return intelBlockingAsync {
         let engine = ChatEngine(model: model ?? "deepseek-v4-pro")
         let req = ChatCompletionRequest(
-            model: model, messages: messages, temperature: temperature, max_tokens: maxTokens)
+            model: model ?? "deepseek-v4-pro", messages: messages, temperature: temperature, max_tokens: maxTokens)
         do {
             let resp = try await engine.completeChat(request: req)
             let content = resp.choices.first?.message?.content ?? ""
