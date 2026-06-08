@@ -66,7 +66,27 @@ public enum SystemPromptTemplates {
         - `todo(markdown)` — write or replace the user-visible task list. Use it when the request has 3+ obvious steps; skip for trivial work. Each call replaces the whole list, so to mark items done re-send the full list with the new boxes.
         - `complete(summary)` — call once at the very end (never alongside other tools) with WHAT you did + HOW you verified it. Vague placeholders ("done", "looks good") are rejected; partial work should be reported honestly.
         - `clarify(question)` — pause and ask exactly one concrete question only when guessing wrong would change the result. For minor preferences pick a sensible default and proceed.
-        - `share_artifact(...)` — the only way the user sees a generated image, chart, report, code blob, or any file. **The file MUST exist before this call.** Sandbox: save under your home dir (default cwd) — files in `/tmp` won't be findable. If unsure where you wrote it, verify with `sandbox_search_files(target="files", pattern="<name>")` first. For inline text/markdown, use `content`+`filename` mode and skip the file write entirely. **When using `sandbox_execute_code`, call `share_artifact` from the model layer AFTER the script returns — the helper module does not expose it because in-script calls would silently fail to render the artifact card.**
+        - `share_artifact(...)` — the only way the user sees a generated image, chart, report, code blob, or any file. **The file MUST exist before this call.** Sandbox: save under your home dir (default cwd) — files in `/tmp` won't be findable. If unsure where you wrote it, verify with `sandbox_search_files(target="files", pattern="<name>")` first. For inline text/markdown, use `content`+`filename` mode and skip the file write entirely.
+        """
+
+    // MARK: - Grounding
+
+    /// Anti-fabrication directive injected whenever tools are present
+    /// (gated on `!effectiveToolsOff` + a non-empty schema in the
+    /// composer). Both conditions are session-constant → KV-cache safe.
+    /// Deliberately tool-name-free: this section can be emitted when
+    /// `capabilities_discover` is NOT in the schema (e.g. manual mode), and
+    /// naming a tool that isn't in the request is the recitation-loop trap
+    /// `defaultPersona` documents. The capability-discovery nudge (when
+    /// present) supplies the "how to find a tool" half; this supplies the
+    /// "don't fabricate when none fits" half.
+    public static let groundingDirective = """
+        ## Grounding
+
+        - Ground factual and live-data claims — weather, prices, web content, file contents, command output, current state — in a tool result rather than answering from memory.
+        - You can almost always get there: a shell or network tool fetches live/external data, and `capabilities_discover` finds tools you don't have yet. Attempt that before deciding you can't — the absence of a purpose-built tool is not a dead end. Say what you can't do only after genuinely trying, and never invent a tool name or fabricate a value to fill a gap.
+        - A claim about your own capabilities is a factual claim. "I don't have a tool for X" or "I can't do X" must be backed by either the Enabled-capabilities manifest or a `capabilities_discover` call that came back empty. Never by X being absent from your current tool schema. Your loaded tools are a fixed subset, not the full enabled set.
+        - When the user asks whether you have a tool, whether you can do something, or what you can do: check the manifest first, then `capabilities_discover` if the manifest does not settle it, then answer.
         """
 
     // MARK: - Capability Discovery Nudge
@@ -79,20 +99,17 @@ public enum SystemPromptTemplates {
     public static let capabilityDiscoveryNudge = """
         ## Discovering more tools
 
-        Your current tool list is the relevant subset for this task. If you \
-        need a capability that is not listed, grow the list in two steps:
+        Your current tool list is a fixed starting set, not an exhaustive \
+        one. The Enabled-capabilities list below names more you can pull in on \
+        demand and shows exactly how to load by id with capabilities_load. \
+        When a capability seems missing and is NOT named there, \
+        `capabilities_discover({"query": "<what you need>"})` searches beyond \
+        the listed set and returns IDs like `tool/sandbox_exec` or \
+        `skill/plot-data` that you load the same way.
 
-        1. Check the Enabled-capabilities list — if it is named there, skip \
-        straight to step 3 with that ID.
-        2. `capabilities_discover({"query": "<what you need>"})` — searches \
-        beyond the listed set and returns IDs like `tool/sandbox_exec` or \
-        `skill/plot-data`.
-        3. `capabilities_load({"ids": ["tool/sandbox_exec"]})` — adds those \
-        tools to your schema for the rest of this session.
-
+        Do not invent tool names — use IDs from the list or from discovery. \
         Only after a `capabilities_discover` call comes back empty may you \
-        work around the gap or tell the user the capability is unavailable. \
-        Do not invent tool names — use IDs from the list or from discovery.
+        work around the gap or tell the user the capability is unavailable.
         """
 
     // MARK: - Enabled Capabilities Manifest
@@ -240,10 +257,12 @@ public enum SystemPromptTemplates {
 
     // MARK: - Cross-cutting Engineering Discipline
 
-    /// General code-style discipline. Injected into the system prompt
-    /// whenever any file-mutation tool (sandbox or folder) is in the
-    /// resolved schema. Not sandbox-specific — folder-mode agents doing
-    /// real edits get the same guardrails.
+    /// General code-style discipline. Injected when a file-authoring tool
+    /// (`sandbox_write_file` / `file_write` / `file_edit`, see
+    /// `SystemPromptComposer.codeEditToolNames`) is in the resolved schema —
+    /// not for shell-/install-only chats, which don't edit code. Not
+    /// sandbox-specific — folder-mode agents doing real edits get the same
+    /// guardrails.
     public static let codeStyleGuidance = """
         ## Code style
 
@@ -254,14 +273,16 @@ public enum SystemPromptTemplates {
         - Do not add docstrings, comments, or type annotations to code you did not modify.
         """
 
-    /// Risk-aware action discipline. Same gate as `codeStyleGuidance` —
-    /// fires whenever the schema includes a tool that can mutate the
-    /// user's filesystem or run arbitrary code (sandbox or folder).
+    /// Risk-aware action discipline. Fires on the broader
+    /// `SystemPromptComposer.mutationToolNames` gate (any tool that can
+    /// mutate the filesystem OR run arbitrary code / install deps) — wider
+    /// than `codeStyleGuidance` because destructive risk applies to
+    /// exec/install, not just file edits.
     public static let riskAwareGuidance = """
         ## Risk-aware actions
 
-        - Local, reversible actions (editing a file, running a test) — proceed without hesitation.
-        - Destructive or hard-to-undo actions (deleting files, `rm -rf`, dropping data) — confirm with the user first.
+        - Default to acting. Local, reversible work — reading, editing a file, running a command or test, installing into the sandbox — just do it; you do not need to ask permission first.
+        - Only pause to confirm for genuinely destructive or hard-to-undo actions: deleting the user's files, `rm -rf`, dropping data, force-pushing. The test is reversibility — if it's reversible, proceed.
         - When encountering unexpected state (unfamiliar files, unknown processes), investigate before removing anything.
         """
 
@@ -281,46 +302,86 @@ public enum SystemPromptTemplates {
     /// renderer pure means PR2's bootstrap seed and PR3's advert can
     /// reuse `soulSection` without dragging in I/O.
     public static func soulSection(_ content: String) -> String {
-        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        let trimmed = stripLeadingSoulHeading(content.trimmingCharacters(in: .whitespacesAndNewlines))
         guard !trimmed.isEmpty else { return "" }
         return """
             ## SOUL
 
             The agent has recorded the following stable preferences and patterns \
             across prior sessions. These are the agent's own notes; the user's \
-            instructions in earlier sections take precedence.
+            instructions in earlier sections take precedence. Any plugin or tool \
+            named in these notes is NOT automatically callable — bring it into \
+            your schema with `capabilities_discover` / `capabilities_load` before \
+            invoking it.
 
             \(trimmed)
             """
     }
 
+    /// The seeded `~/SOUL.md` (and many hand-edited ones) begin with their own
+    /// `# SOUL` title. Since `soulSection` already emits a `## SOUL` heading,
+    /// keeping the file's title would render the heading twice. Strip a single
+    /// leading markdown heading whose text is exactly "SOUL" (any `#` depth).
+    private static func stripLeadingSoulHeading(_ content: String) -> String {
+        var lines = content.components(separatedBy: "\n")
+        guard let first = lines.first, first.hasPrefix("#") else { return content }
+        let headingText = first.drop { $0 == "#" }.trimmingCharacters(in: .whitespaces)
+        guard headingText.caseInsensitiveCompare("SOUL") == .orderedSame else { return content }
+        lines.removeFirst()
+        return lines.joined(separator: "\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
     // MARK: - Sandbox
 
-    /// Renders the sandbox section. Code style + risk-aware actions are
-    /// NOT included here — they live as top-level sections gated on
-    /// file-mutation tools being in the schema, so folder-mode agents
-    /// doing real edits get the same discipline.
-    public static func sandbox(secretNames: [String] = []) -> String {
-        var section = """
+    /// Static sandbox framing — heading, environment block, tool-dispatch
+    /// guide, and runtime hints. Every input is session-constant (the home
+    /// path, combined-mode flag, and background flag don't change
+    /// mid-session), so this section lives in the cached static prefix.
+    ///
+    /// Code style + risk-aware actions are NOT included here — they live as
+    /// top-level sections gated on file-mutation tools being in the schema,
+    /// so folder-mode agents doing real edits get the same discipline.
+    ///
+    /// The mid-session-mutable bits (installed packages + configured
+    /// secrets) are rendered separately by `sandboxState(...)` and injected
+    /// as a DYNAMIC section, so a `sandbox_install` or a freshly-added
+    /// secret mid-session no longer rewrites the cached prefix.
+    public static func sandbox(
+        home: String = "",
+        hostReadCombined: Bool = false,
+        backgroundEnabled: Bool = false
+    ) -> String {
+        """
 
-            \(sandboxSectionHeading)
+        \(sandboxSectionHeading)
 
-            \(sandboxEnvironmentBlock)
-            Files persist across messages.
+        \(sandboxEnvironmentBlock(home: home))
 
-            \(sandboxToolGuide)
+        \(hostReadCombined ? sandboxToolGuideCombined(backgroundEnabled: backgroundEnabled) : sandboxToolGuide(backgroundEnabled: backgroundEnabled))
 
-            \(sandboxRuntimeHints)
+        \(sandboxRuntimeHints(hostReadCombined: hostReadCombined))
+        """
+    }
 
-            """
-        // The runtime hints block ends with a single `\n`; the secrets
-        // block is its own logical subsection, so prepend a blank-line
-        // separator instead of having it run on as a sixth bullet.
+    /// Mid-session-mutable sandbox state: the installed-package summary and
+    /// the configured-secret list. Relocated OUT of the static `sandbox`
+    /// framing into a DYNAMIC prompt section so a `sandbox_install` or a new
+    /// secret mid-session stays fresh without rewriting the cached KV prefix.
+    /// Returns `""` when nothing is installed or configured so the composer
+    /// drops the section entirely.
+    public static func sandboxState(
+        secretNames: [String] = [],
+        installedPackages: SandboxPackageManifest.Installed = .init()
+    ) -> String {
+        var parts: [String] = []
+        let installed = installedPackagesPromptBlock(installedPackages)
+        if !installed.isEmpty { parts.append(installed) }
         let secrets = secretsPromptBlock(secretNames)
-        if !secrets.isEmpty {
-            section += "\n" + secrets
-        }
-        return section
+        if !secrets.isEmpty { parts.append(secrets) }
+        // Each block is self-contained and trailing-newline terminated; the
+        // composer trims the section, so a single `\n` join keeps the two
+        // logical blocks on their own lines without a runaway blank run.
+        return parts.joined(separator: "\n")
     }
 
     // MARK: - Sandbox Building Blocks
@@ -329,33 +390,125 @@ public enum SystemPromptTemplates {
     static let sandboxReadFileHint =
         "`sandbox_read_file` with `start_line`/`line_count`/`tail_lines`"
 
-    private static let sandboxEnvironmentBlock = """
-        You have an isolated Alpine Linux ARM64 sandbox. Your home directory \
-        is the workspace; files persist across messages.
+    /// Combined-mode log-read hint: `sandbox_read_file` is hidden in
+    /// combined mode (the unified `file_read` reaches `/workspace/...`),
+    /// so point the model at `file_read` with `tail_lines` instead of a
+    /// tool it can't call.
+    static let sandboxReadFileHintCombined =
+        "`file_read` with `tail_lines` (works on `/workspace/...` sandbox paths too)"
 
-        Internet access is available. Use `curl`, `wget`, Python `requests`, \
-        or Node `fetch` for live data; prefer fetched data over placeholders.
+    /// Environment framing for the sandbox section. When `home` is supplied
+    /// (the live composer always passes it), the opening line states the
+    /// agent's ABSOLUTE home path and that commands run there by default —
+    /// without this, models reliably guess the Linux convention `/root` for
+    /// `cwd` on the first turn and eat a rejection. Falls back to the generic
+    /// `~` wording when `home` is empty (callers that don't know it).
+    private static func sandboxEnvironmentBlock(home: String) -> String {
+        let homeLine =
+            home.isEmpty
+            ? "Your home directory (`~`) is your sandbox home; files persist across messages."
+            : "Your home directory is `\(home)` (also `~` / `$HOME`); commands run there by "
+                + "default — you don't need to pass `cwd` unless you want a different directory. "
+                + "Files persist across messages."
+        return """
+            You have an isolated Alpine Linux ARM64 sandbox. \(homeLine)
 
-        Installed: bash, python3, node, git, curl, wget, jq, rg, sqlite3, \
-        build-base, cmake, vim, tree, and standard POSIX utilities.
-        """
+            Internet access is available — fetch live or external data (weather, \
+            web pages, APIs) directly with `curl`, `wget`, Python `requests`, or \
+            Node `fetch`; you don't need a dedicated tool for it.
 
-    private static let sandboxToolGuide = """
-        Tool dispatch:
-        - File IO: `sandbox_read_file`, `sandbox_write_file`, `sandbox_edit_file`.
-        - Search: `sandbox_search_files` with `target="content"` or `target="files"`.
-        - Shell: `sandbox_exec`; use `background:true` for servers and `sandbox_process` to inspect them.
-        - Multi-step Python: `sandbox_execute_code` with `osaurus_tools` helpers (`read_file`, `write_file`, `edit_file`, `search_files`, `terminal`).
-        - Run independent calls in parallel; chain dependent shell steps with `&&`.
-        """
+            Installed: bash, python3, node, git, curl, wget, jq, rg, sqlite3, \
+            build-base, cmake, vim, tree, and standard POSIX utilities.
+            """
+    }
 
-    private static let sandboxRuntimeHints = """
-        Runtime hints:
-        - Install Python, Node, or system deps with `sandbox_pip_install`, `sandbox_npm_install`, or `sandbox_install`.
-        - Use \(sandboxReadFileHint) to inspect large logs.
-        - The sandbox is disposable; experiment freely.
-        - Your `SOUL.md` at `~/SOUL.md` records stable preferences across sessions. Edit it with `sandbox_edit_file` or `sandbox_write_file` when you observe a durable pattern; edits apply on the next session.
-        """
+    /// The Shell-dispatch bullet, shared by both guides. Names
+    /// `background:true` + `sandbox_process` only when the agent has opted
+    /// into background jobs; otherwise it stays a plain single-line-shell
+    /// line so the model isn't pointed at tools it doesn't have.
+    private static func sandboxShellBullet(backgroundEnabled: Bool) -> String {
+        backgroundEnabled
+            ? "- Shell: `sandbox_exec` for single-line shell; use `background:true` for servers and `sandbox_process` to inspect them."
+            : "- Shell: `sandbox_exec` for single-line shell."
+    }
+
+    private static func sandboxToolGuide(backgroundEnabled: Bool) -> String {
+        let shellBullet = sandboxShellBullet(backgroundEnabled: backgroundEnabled)
+        return """
+            Tool dispatch:
+            - Files: `sandbox_read_file` (read/list); `sandbox_write_file` (`content` whole-file, or `old_string`+`new_string` to edit).
+            - Search: `sandbox_search_files` with `target="content"` or `target="files"`.
+            \(shellBullet)
+            - Multi-line code/scripts: `sandbox_write_file` the script, then `sandbox_exec` to run it (e.g. `python3 script.py`). NEVER embed multi-line code in `python3 -c` / `node -e`: the JSON→shell→code escaping breaks.
+            - Run independent calls in parallel; chain dependent shell steps with `&&`.
+            """
+    }
+
+    /// Combined-mode (`.sandbox(hostRead:)`) variant: the host `file_*`
+    /// tools are the single, path-routed read family, so reads/lists/searches
+    /// are NOT done with `sandbox_read_file` / `sandbox_search_files` (hidden
+    /// in this mode). The `## Files` block spells out the path routing.
+    private static func sandboxToolGuideCombined(backgroundEnabled: Bool) -> String {
+        let shellBullet = sandboxShellBullet(backgroundEnabled: backgroundEnabled)
+        return """
+            Tool dispatch:
+            - Read files / list dirs / search: `file_read` (reads a file or lists a directory — the path decides), `file_search` (they reach both your workspace and `/workspace/...` sandbox paths — see `## Files`).
+            - Sandbox writes: `sandbox_write_file` (pass `content` to write the whole file, or `old_string`+`new_string` to edit one match — your workspace is read-only).
+            \(shellBullet)
+            - Multi-line code/scripts: `sandbox_write_file` the script, then `sandbox_exec` to run it (e.g. `python3 script.py`). NEVER embed multi-line code in `python3 -c` / `node -e`: the JSON→shell→code escaping breaks.
+            - Run independent calls in parallel; chain dependent shell steps with `&&`.
+            """
+    }
+
+    /// Runtime hints block. In combined mode the log-read hint points at
+    /// `file_read` (the unified read tool) rather than the hidden
+    /// `sandbox_read_file`, so the model is never steered toward a tool
+    /// it can't see in this mode.
+    private static func sandboxRuntimeHints(hostReadCombined: Bool) -> String {
+        let logReadHint = hostReadCombined ? sandboxReadFileHintCombined : sandboxReadFileHint
+        return """
+            Runtime hints:
+            - Install Python, Node, or system deps with `sandbox_install` (`manager`: `pip` / `npm` / `apk`).
+            - Use \(logReadHint) to inspect large logs.
+            - The sandbox is disposable; experiment freely.
+            - Your `SOUL.md` at `~/SOUL.md` records stable preferences across sessions. Edit it with `sandbox_write_file` when you observe a durable pattern; edits apply on the next session.
+            """
+    }
+
+    /// Per-manager cap on how many package names are listed before
+    /// collapsing into a `+N more` tail. Keeps the always-on prefix bounded
+    /// even for an agent that has installed dozens of packages.
+    static let installedPackagesPromptCap = 12
+
+    /// Compact, capped summary of what's already installed in the sandbox,
+    /// grouped by manager. Rendered into the DYNAMIC `sandboxState` section
+    /// (via `sandboxState(...)`) so it reflects live manifest state without
+    /// busting the cached prefix. Returns `""` when nothing is recorded so
+    /// the composer can append unconditionally.
+    static func installedPackagesPromptBlock(_ installed: SandboxPackageManifest.Installed) -> String {
+        guard !installed.isEmpty else { return "" }
+
+        func line(_ label: String, _ names: [String]) -> String? {
+            guard !names.isEmpty else { return nil }
+            let shown = names.prefix(installedPackagesPromptCap)
+            var joined = shown.joined(separator: ", ")
+            let overflow = names.count - shown.count
+            if overflow > 0 { joined += ", +\(overflow) more" }
+            return "- \(label): \(joined)"
+        }
+
+        let lines = [
+            line("System (apk)", installed.apk),
+            line("Python (pip)", installed.pip),
+            line("Node (npm)", installed.npm),
+        ].compactMap { $0 }
+
+        return """
+            Already installed (don't reinstall — call directly):
+            \(lines.joined(separator: "\n"))
+
+            """
+    }
 
     private static func secretsPromptBlock(_ names: [String]) -> String {
         guard !names.isEmpty else { return "" }
@@ -434,7 +587,7 @@ public enum SystemPromptTemplates {
     /// so the rule is anchored once at the top of the section instead of
     /// repeated in every dispatch bullet.
     static let folderPathRule =
-        "Tool paths are relative to the working directory; absolute paths are rejected."
+        "Use paths relative to the working directory; an absolute path is accepted only if it is inside the working directory (paths outside it are rejected)."
 
     /// Positive dispatch table for the folder-mode tools. Mirror of
     /// `sandboxToolGuide` — discipline ("instead of cat / sed / awk")
@@ -442,9 +595,9 @@ public enum SystemPromptTemplates {
     static let folderToolGuide = """
         Tool dispatch (each tool's description has full detail and the \
         shell pattern it replaces):
-        - Layout: `file_tree` to list directory structure.
-        - Search: `file_search` for content (case-insensitive substring match).
-        - Read: `file_read` to inspect a file (optional line range).
+        - Read / list: `file_read` to read a file or list a directory — the path decides (optional line range, or `max_depth` for a directory).
+        - Search: `file_search` for content (case-insensitive substring), or `target:"files"` to find files by name (case-insensitive substring, e.g. `q4`).
+        - Find a file by name: use `file_search` with `target:"files"` and a short distinctive token from the name (not the whole phrase).
         - Edit: `file_edit` for targeted in-place edits, `file_write` for new files or full rewrites.
         - Shell: `shell_run` for `mv` / `cp` / `rm` / `mkdir` (write/exec ops are logged and undoable).
         """
@@ -455,6 +608,89 @@ public enum SystemPromptTemplates {
     static let folderArtifactReminder = """
         **Files land in the working folder, not in chat.** When you create or edit a file with `file_write` / `file_edit`, the user can see it on disk and in the operations log. If the user needs the deliverable to appear in the chat thread (an image, chart, generated text, report, code blob), additionally call `share_artifact` — it's the only thing that surfaces an artifact card.
         """
+
+    // MARK: - Combined Sandbox + Host-Read
+
+    /// Read-only host-workspace framing for combined mode
+    /// (`ExecutionMode.sandbox(hostRead: ctx)`). Rendered AFTER the
+    /// sandbox section so the agent reads the sandbox framing first,
+    /// then learns the host workspace is a separate, read-only
+    /// filesystem. Unlike `folderContext` this marks the workspace
+    /// read-only, lists only the read tools, and appends the
+    /// two-filesystem block. Returns "" when no host-read folder is
+    /// attached so the composer can append unconditionally.
+    public static func combinedHostRead(
+        from folderContext: FolderContext?,
+        allowSecretReads: Bool = false
+    ) -> String {
+        guard let folder = folderContext else { return "" }
+
+        var lines: [String] = ["## Host Workspace (read-only)"]
+        lines.append("**Path:** \(folder.rootPath.path)")
+        if folder.projectType != .unknown {
+            lines.append("**Project Type:** \(folder.projectType.displayName)")
+        }
+        let topLevel = buildTopLevelSummary(from: folder.tree)
+        if !topLevel.isEmpty {
+            lines.append("**Root contents:** \(topLevel)")
+        }
+        var section = "\n" + lines.joined(separator: "\n") + "\n"
+
+        if let status = folder.gitStatus {
+            let trimmed = String(status.prefix(300))
+            if !trimmed.isEmpty {
+                section += "\n**Git status (uncommitted changes):**\n```\n\(trimmed)\n```\n"
+            }
+        }
+
+        section += """
+
+            \(unifiedFilesBlock(allowSecretReads: allowSecretReads))
+
+            """
+
+        // Same project-context file the folder section surfaces, loaded
+        // once at folder-mount time so it lives in the static prefix.
+        if let contextFiles = folder.contextFiles, !contextFiles.isEmpty {
+            section += """
+
+                ## Project Context
+
+                The following project context file has been loaded and should be followed:
+
+                \(contextFiles)
+
+                """
+        }
+
+        return section
+    }
+
+    /// The load-bearing mental model for combined mode under the unified,
+    /// path-routed file tools: ONE reader (`file_read`, which also lists
+    /// directories) and ONE search tool (`file_search`) reach two storage
+    /// areas by path — the read-only workspace (default) and the
+    /// `/workspace/...` sandbox scratch area; one writer
+    /// (`sandbox_write_file`, which also edits) targets the sandbox. This
+    /// replaces the older `## Two filesystems` framing that asked the model
+    /// to pick between `file_*` and `sandbox_*` read families (the
+    /// disambiguation weak models kept getting wrong). The final sentence
+    /// reflects the per-agent secret-read setting.
+    static func unifiedFilesBlock(allowSecretReads: Bool) -> String {
+        let secretLine =
+            allowSecretReads
+            ? "Workspace secret files (`.env`, keys, credentials) are readable because you enabled secret reads — handle them carefully and never copy them into the sandbox or off-host."
+            : "Workspace secret files (`.env`, keys, credentials) are refused."
+        return """
+            ## Files
+
+            One reader and one search tool reach two storage areas by path:
+            - **Workspace** (your read-only host folder) — the default. For "what's in my workspace / on my Desktop", use `file_read` (it reads a file or lists a directory) and `file_search`. Relative paths and `/Users/...` paths are the workspace.
+            - **Sandbox** scratch area — pass a `/workspace/...` path to the SAME `file_read` / `file_search`.
+
+            The workspace is read-only: create or change files with `sandbox_write_file` (pass `content` to write the whole file, or `old_string`+`new_string` to edit one match — it writes the sandbox), and run commands with `sandbox_exec` (it runs in the sandbox, which has no copy of the workspace — `file_read` a workspace file and pass its content in if a command needs it). Surface results with `share_artifact`. \(secretLine)
+            """
+    }
 
     private static func buildTopLevelSummary(from tree: String) -> String {
         let lines = tree.components(separatedBy: .newlines)

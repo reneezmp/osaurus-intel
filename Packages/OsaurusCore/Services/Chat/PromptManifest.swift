@@ -96,8 +96,9 @@ public struct PromptManifest: Sendable {
         return parts.joined(separator: "\n\n")
     }
 
-    /// Legacy hash of static prefix content + tool names.
-    public func staticPrefixHash(toolNames: [String]) -> String {
+    /// Legacy hash of static prefix content + tool names. Internal: the only
+    /// caller is the empty-array `prefixHash` debug accessor above.
+    func staticPrefixHash(toolNames: [String]) -> String {
         PromptPrefixHasher.hash(systemContent: staticPrefixContent, toolNames: toolNames)
     }
 
@@ -180,4 +181,17 @@ struct ComposedContext: Sendable {
     /// fired" (normal-class model). Callers surface this through
     /// `ContextBreakdown.disable` so the popover can render a notice.
     let contextDisable: ContextDisableInfo?
+    /// Rendered enabled-capabilities manifest this compose resolved (or nil
+    /// when gated off / empty). Callers stash this on
+    /// `SessionToolState.frozenManifest` on first compose so turn 2+ can echo
+    /// it back via `ComposeRequest.frozenManifest`, keeping the static
+    /// system-prompt prefix byte-identical for KV-cache reuse.
+    var enabledManifest: String? = nil
+    /// Rendered SOUL.md content this compose resolved (or nil outside sandbox
+    /// mode / when the file is missing or empty). Callers stash this on
+    /// `SessionToolState.frozenSoul` on first compose so turn 2+ can echo it
+    /// back via `ComposeRequest.frozenSoul`, so a mid-session SOUL edit can't
+    /// rewrite the static prefix (the file's contract: edits apply next
+    /// session).
+    var soul: String? = nil
 }

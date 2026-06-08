@@ -50,12 +50,16 @@ actor SessionToolStateStore {
     func setInitial(
         _ sessionId: String,
         alwaysLoadedNames: LoadedTools?,
-        fingerprint: String? = nil
+        fingerprint: String? = nil,
+        manifest: String? = nil,
+        soul: String? = nil
     ) {
         guard states[sessionId] == nil else { return }
         states[sessionId] = SessionToolState(
             initialAlwaysLoadedNames: alwaysLoadedNames,
-            sessionFingerprint: fingerprint
+            sessionFingerprint: fingerprint,
+            frozenManifest: manifest,
+            frozenSoul: soul
         )
     }
 
