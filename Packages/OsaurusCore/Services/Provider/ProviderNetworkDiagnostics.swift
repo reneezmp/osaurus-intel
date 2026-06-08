@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ProviderNetworkDiagnostics.swift
 //  osaurus
@@ -623,3 +624,5 @@ public enum ProviderNetworkDiagnostics {
         OpenAICodexOAuthService.safeDiagnosticFragment(raw, maxLength: 280)
     }
 }
+
+#endif

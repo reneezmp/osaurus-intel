@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  PDFPPTXWorkflowService.swift
 //  osaurus
@@ -416,3 +417,5 @@ public enum PDFPPTXCreationReasonCode: String, Equatable, Sendable {
 public enum PDFPPTXWorkflowError: Error, Equatable, Sendable {
     case unsupportedRepresentation(formatId: String)
 }
+
+#endif

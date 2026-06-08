@@ -227,12 +227,14 @@ enum WorkspaceWriteSafety {
         if pathComponents(path).contains(where: { $0.hasPrefix(".") }) {
             warnings.append("This targets a hidden or configuration path.")
         }
+        #if !OSAURUS_INTEL
         if FolderToolHelpers.isSecretPath(fileURL: fileURL) {
             warnings.append(
                 "This path looks like secret or credential material; avoid writing real secrets unless the user explicitly requested it."
             )
-        }
-        return warnings
+            }
+            #endif
+            return warnings
     }
 
     private static func pathComponents(_ path: String) -> [String] {

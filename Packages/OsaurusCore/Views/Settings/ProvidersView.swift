@@ -208,8 +208,6 @@ private struct ProviderCard: View {
     @State private var showDeleteConfirm = false
     /// Inline secure-field text for the bearer-token 401 banner. Cleared on submit.
     @State private var inlineBearerToken: String = ""
-    @State private var bearerTokenPresent = false
-    @State private var oauthTokensPresent = false
 
     private var isConnected: Bool {
         state?.isConnected ?? false
@@ -221,29 +219,6 @@ private struct ProviderCard: View {
 
     private var requiresAuth: Bool {
         state?.requiresAuth ?? false
-    }
-
-    private var diagnosticsReport: ProviderDiagnosticReport {
-        ProviderNetworkDiagnostics.mcpProviderReport(
-            provider: provider,
-            state: state,
-            proxy: GlobalProxySettings.currentDiagnostic(),
-            bearerTokenPresent: bearerTokenPresent,
-            oauthTokensPresent: oauthTokensPresent
-        )
-    }
-
-    @MainActor
-    private func refreshCredentialState() async {
-        let providerID = provider.id
-        let credentials = await Task.detached(priority: .utility) {
-            (
-                MCPProviderKeychain.hasToken(for: providerID),
-                MCPProviderKeychain.hasOAuthTokens(for: providerID)
-            )
-        }.value
-        bearerTokenPresent = credentials.0
-        oauthTokensPresent = credentials.1
     }
 
     var body: some View {
@@ -450,12 +425,6 @@ private struct ProviderCard: View {
         .background(cardBackground)
         .animation(.easeOut(duration: 0.15), value: isHovering)
         .onHover { hovering in isHovering = hovering }
-        .task(id: provider.id) {
-            await refreshCredentialState()
-        }
-        .onChange(of: provider.authType) { _, _ in
-            Task { await refreshCredentialState() }
-        }
         .opacity(hasAppeared ? 1 : 0)
         .onAppear {
             let delay = Double(animationIndex) * 0.03
@@ -464,11 +433,11 @@ private struct ProviderCard: View {
             }
         }
         .themedAlert(
-            L("Delete Provider?"),
+            "Delete Provider?",
             isPresented: $showDeleteConfirm,
-            message: L("This will remove the provider and all its tools. This cannot be undone."),
-            primaryButton: .destructive(L("Delete")) { onDelete() },
-            secondaryButton: .cancel(L("Cancel"))
+            message: "This will remove the provider and all its tools. This cannot be undone.",
+            primaryButton: .destructive("Delete") { onDelete() },
+            secondaryButton: .cancel("Cancel")
         )
     }
 
@@ -510,7 +479,7 @@ private struct ProviderCard: View {
             return provider.url
         case .stdio:
             if provider.command.isEmpty {
-                return L("stdio (command not set)")
+                return "stdio (command not set)"
             }
             let args = ShellArgs.join(provider.args)
             return args.isEmpty ? provider.command : "\(provider.command) \(args)"
@@ -722,20 +691,17 @@ private struct ProviderCard: View {
                 if provider.transport == .http {
                     settingItem(
                         icon: "bolt.fill",
-                        label: L("Streaming"),
-                        value: provider.streamingEnabled ? L("On") : L("Off")
+                        label: "Streaming",
+                        value: provider.streamingEnabled ? "On" : "Off"
                     )
                 }
-                settingItem(icon: "clock", label: L("Timeout"), value: L("\(Int(provider.toolCallTimeout))s"))
+                settingItem(icon: "clock", label: "Timeout", value: "\(Int(provider.toolCallTimeout))s")
                 settingItem(
                     icon: "arrow.clockwise",
-                    label: L("Auto-connect"),
-                    value: provider.autoConnect ? L("Yes") : L("No")
+                    label: "Auto-connect",
+                    value: provider.autoConnect ? "Yes" : "No"
                 )
             }
-
-            ProviderDiagnosticsRowsView(report: diagnosticsReport, maxRows: nil)
-                .padding(.horizontal, -16)
 
             // Custom headers summary
             if !provider.customHeaders.isEmpty || !provider.secretHeaderKeys.isEmpty {
@@ -1823,7 +1789,7 @@ private struct ProviderEditSheet: View {
                     }
                 }) {
                     HStack {
-                        Text(showAdvanced ? L("Hide advanced settings") : L("Show advanced settings"))
+                        Text(showAdvanced ? "Hide advanced settings" : "Show advanced settings")
                             .font(.system(size: 13))
                             .foregroundColor(themeManager.currentTheme.accentColor)
                         Spacer()

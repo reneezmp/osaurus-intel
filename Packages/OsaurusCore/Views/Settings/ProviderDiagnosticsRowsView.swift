@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  ProviderDiagnosticsRowsView.swift
 //  osaurus
@@ -126,3 +127,5 @@ struct ProviderDiagnosticsRowsView: View {
         }
     }
 }
+
+#endif

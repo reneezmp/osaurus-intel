@@ -1,3 +1,4 @@
+#if !OSAURUS_INTEL
 //
 //  OnboardingCreateAgentView.swift
 //  osaurus
@@ -565,4 +566,5 @@ struct CreateAgentCTA: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 660)
         }
     }
+#endif
 #endif
