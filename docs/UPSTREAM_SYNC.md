@@ -90,6 +90,14 @@ For each upstream commit:
 | 25 | `dfca2325` | PORT | cherry-pick (gated WatcherManager, kept Intel ModelDownloadService) | WatcherManager, FloatingInputCard, DirectoryFingerprint, CustomTheme | ✅ Unresolved app hangs fix; Agent.rejectBuiltInForExternalSurface gated. |
 | 26 | `bfa4aa01` | PORT | cherry-pick (clean auto-merge into AS branch) | PluginManager.swift | ✅ Keychain reads off main thread; Intel branch unaffected. |
 | 27–36 | vMLX pins (4) + CI/appcast (6) | SKIP/IGNORE | — | Package.resolved, Package.swift, CI workflows, appcast XML | ⏭ Batch-skipped. |
+| 37 | `0c494229` | PORT | cherry-pick -X ours + gating | 90 files, ChatView kept Intel | ✅ Capabilities refactor; 6 new files gated, 3 shared views reverted. |
+| 38 | `6df10354` | PORT | cherry-pick (kept Intel ChatView) | 14 files | ✅ Capabilities persistence fix. |
+| 39 | `5737790a` | PORT | cherry-pick (gated RemoteProviderReorderSheet) | RemoteProviderManager, RemoteProvidersView, RemoteProviderReorderSheet | ✅ Provider reorder; new sheet gated. |
+| 40 | `f694bbaa` | PORT | cherry-pick (took ours for shared views, gated 3 files) | ExternalModelLocator, ModelCompatibilityDiagnostics, ExternalModelsSettingsView, ModelDetailView | ✅ Model diagnostics; 3 files gated, ModelDetailView reverted. |
+| 41 | `522b8a69` | PORT | cherry-pick (removed App/AppIntents — no OSAURUS_INTEL in App target) | AppDelegate (ours), HTTPHandler (ours), ServerController, App/AppIntents | ✅ App Intents removed from Intel App target. |
+| 42 | `2f7ff107` | PORT | cherry-pick (resolved test conflicts) | DocumentFormatRegistry, BusinessDocumentSummary (NEW) | ✅ Business document attachment summaries. |
+| 43 | `e361e78b` | PORT | cherry-pick (kept Intel PluginsView, gated Claude files) | ClaudePlugin* (NEW, gated), PluginsView (ours) | ✅ Claude plugin marketplace; 7 files gated. |
+| 44 | `62c66db5` | SKIP | MLX infrastructure | RuntimeProofValidation, tests | ⏭ ModelRuntime subsystem. |
 
 ### Intel-Specific Fixups (commit `8f86d6d5`)
 
@@ -105,9 +113,5 @@ For each upstream commit:
 
 ## Stats
 
-- **Total upstream commits since fork:** 153
-- **Substantive processed:** 26 (21 ported, 1 deferred, 1 xcstrings bulk sync)
-- **New (109e0306→21123c9a):** 30 commits (10 PORT + 2 deferred + 8 SKIP + 10 vMLX/CI SKIP)
-- **vMLX pins skipped:** ~97 (batch)
-- **Remaining pending:** 0 — caught up to upstream/main ✅
-- **Sessions:** 4 (2026-06-07/2026-06-08) | **Last synced upstream hash:** `21123c9a`
+- **Total upstream commits processed:** 44 substantive + ~97 vMLX pins + ~38 xcstrings
+- **Sessions:** 5 (2026-06-07/2026-06-08) | **Fully caught up to upstream/main** ✅
