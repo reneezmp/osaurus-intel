@@ -184,15 +184,10 @@ class SystemMonitorService: ObservableObject {
     }
 
     private func getStorageUsage() -> (availableGB: Double, totalGB: Double) {
-        // Bug #964: previously used `attributesOfFileSystem(.systemFreeSize)`
-        // which returns 0 for sandboxed-container paths on modern macOS —
-        // the dashboard reported `Available: 0 GB` even when Finder showed
-        // tens of GB free. `OsaurusPaths.volumeFreeBytes` uses the modern
-        // URL-keyed `.volumeAvailableCapacityForImportantUsageKey` first
-        // (the value Finder shows) and falls back to the legacy API only
-        // when the modern query is unavailable. Same helper as
-        // `ModelDownloadService.freeBytesOnVolume` so the two read-outs
-        // can never silently drift.
+        // `OsaurusPaths.volumeFreeBytes` prefers the cheap filesystem free-space
+        // query and falls back to the URL-keyed important-usage capacity only when
+        // needed. This avoids CacheDelete stalls on external model volumes while
+        // still covering sandbox/container zero-free-space reports from bug #964.
         let gb = 1024.0 * 1024.0 * 1024.0
         let freeBytes = OsaurusPaths.volumeFreeBytes(forPath: storagePath) ?? 0
         let totalBytes = OsaurusPaths.volumeTotalBytes(forPath: storagePath) ?? 0
