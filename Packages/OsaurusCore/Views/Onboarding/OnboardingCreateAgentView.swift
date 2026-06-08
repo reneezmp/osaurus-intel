@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  OnboardingCreateAgentView.swift
 //  osaurus
@@ -66,6 +65,24 @@ final class CreateAgentState: ObservableObject {
         }
     }
 
+    /// Curated pool of playful names for the "randomize" affordance on the
+    /// name badge. These are proper nouns, so they're set directly into
+    /// `name` and never run through `LocalizedStringKey`.
+    static let funNames = [
+        "Rexford", "Spike", "Nibbles", "Pebbles", "Tito",
+        "Stompy", "Pip", "Biscuit", "Magnus", "Coco",
+        "Dino", "Bruno", "Sunny", "Fern", "Bramble", "Ziggy",
+    ]
+
+    /// Picks a fun name distinct from the current one. Marks the name as
+    /// user-edited so a later archetype switch doesn't clobber it (mirrors
+    /// the guard in `selectArchetype`).
+    func randomizeName() {
+        let pool = Self.funNames.filter { $0 != trimmedName }
+        name = pool.randomElement() ?? Self.funNames[0]
+        nameUserEdited = true
+    }
+
     /// Persists the agent and returns whether save succeeded. The caller is
     /// responsible for advancing the flow afterwards.
     ///
@@ -104,7 +121,22 @@ struct CreateAgentBody: View {
     @ObservedObject var state: CreateAgentState
 
     @Environment(\.theme) private var theme
+    /// Honors the system "Reduce Motion" preference: the playful spin, name
+    /// pop, and hero wiggle all collapse to the plain swap when this is on.
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
     @FocusState private var nameFocused: Bool
+    /// Width the name field is pinned to, measured from a hidden copy of the
+    /// displayed text. Pinning the field stops AppKit's field editor from
+    /// nudging the intrinsic width when focus toggles, which (combined with
+    /// the badge-wide focus animation) read as a small jiggle.
+    @State private var nameFieldWidth: CGFloat = 0
+    /// Monotonic count of "roll a name" taps. Drives the accumulating icon
+    /// spin so it always rolls forward a full turn and never unwinds backward.
+    @State private var randomizeSpins: Int = 0
+    /// Raised for a single frame burst on each roll and relaxed shortly after
+    /// by `rollName`. One flag drives the icon pop, the name bounce, and the
+    /// hero wiggle together so the whole badge reacts as one beat.
+    @State private var isRolling: Bool = false
 
     /// The selected dino's signature color — themes the hero glow, avatar
     /// tints, and selection rings so the whole screen reacts in color.
@@ -125,10 +157,32 @@ struct CreateAgentBody: View {
         static let swatchCell: CGFloat = 66
         static let swatchSpacing: CGFloat = 12
 
+        /// Slack added to the measured name width so the caret at the end of
+        /// the text isn't clipped while the field stays focus-stable.
+        static let nameCaretAllowance: CGFloat = 4
+
         // Vertical rhythm between the centered content groups.
         static let heroToBadge: CGFloat = 16
         static let badgeToTagline: CGFloat = 10
         static let sectionGap: CGFloat = 22
+    }
+
+    /// Tuning for the "roll a name" delight, grouped so the motion reads as a
+    /// single coordinated beat and stays easy to retune together.
+    private enum RollMotion {
+        /// Full-turn icon spin; springy so it overshoots and settles.
+        static let spin = Animation.spring(response: 0.5, dampingFraction: 0.55)
+        /// Pop used for the icon and name bounce.
+        static let pop = Animation.spring(response: 0.32, dampingFraction: 0.5)
+        /// Looser spring so the hero tilt wobbles back to center.
+        static let wiggle = Animation.spring(response: 0.4, dampingFraction: 0.35)
+
+        static let iconScale: CGFloat = 1.22
+        static let nameScale: CGFloat = 1.16
+        static let heroTilt: Double = 7
+
+        /// How long the pop is held before it relaxes back to rest.
+        static let crest: TimeInterval = 0.16
     }
 
     /// Non-scrolling, vertically-centered layout. The step is intentionally
@@ -163,6 +217,8 @@ struct CreateAgentBody: View {
         .padding(.horizontal, OnboardingMetrics.rightColumnHorizontalPadding)
         .padding(.vertical, 6)
         .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .contentShape(Rectangle())
+        .onTapGesture { nameFocused = false }
     }
 
     // MARK: - Hero dino
@@ -196,6 +252,10 @@ struct CreateAgentBody: View {
             )
             .id(state.selectedAvatar)
             .transition(.scale.combined(with: .opacity))
+            // Springy tilt that wobbles back to center, so rolling a name
+            // makes the dino feel like it's reacting to its new identity.
+            .rotationEffect(.degrees(isRolling ? RollMotion.heroTilt : 0))
+            .animation(RollMotion.wiggle, value: isRolling)
         }
         .frame(height: diameter + 12)
         .animation(.spring(response: 0.42, dampingFraction: 0.62), value: state.selectedAvatar)
@@ -204,31 +264,52 @@ struct CreateAgentBody: View {
     // MARK: - Editable name badge
 
     /// The name, surfaced as the prominent capsule badge under the hero. The
-    /// archetype icon on the leading edge keeps the role glanceable while the
-    /// text stays editable; a faint pencil hints that it's tappable.
+    /// archetype icon on the leading edge doubles as a "randomize" button that
+    /// rolls a fun dino name; the text stays editable and a faint pencil hints
+    /// at that.
     private var nameBadge: some View {
         HStack(spacing: 8) {
-            Image(systemName: state.selectedTemplate.icon)
-                .font(.system(size: 15, weight: .semibold))
-                .foregroundColor(selectedColor)
+            Button {
+                rollName()
+            } label: {
+                Image(systemName: state.selectedTemplate.icon)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(selectedColor)
+                    // Each tap adds a full clockwise turn; the value only ever
+                    // grows, so the spring rolls forward and never rewinds.
+                    .rotationEffect(.degrees(Double(randomizeSpins) * 360))
+                    .animation(RollMotion.spin, value: randomizeSpins)
+                    // A quick squash-and-pop on press reads as "roll the dice".
+                    .scaleEffect(isRolling ? RollMotion.iconScale : 1)
+                    .animation(RollMotion.pop, value: isRolling)
+                    .contentShape(Circle())
+            }
+            .buttonStyle(.plain)
+            .help(Text("Pick a random name", bundle: .module))
 
-            TextField(
-                text: $state.name,
-                prompt: Text(LocalizedStringKey(state.selectedTemplate.defaultName), bundle: .module)
-            ) {
-                Text(LocalizedStringKey(state.selectedTemplate.defaultName), bundle: .module)
+            ZStack {
+                nameWidthDriver.hidden()
+
+                TextField(text: $state.name, prompt: defaultNameText) { defaultNameText }
+                    .textFieldStyle(.plain)
+                    .font(theme.font(size: 19, weight: .bold))
+                    .foregroundColor(theme.primaryText)
+                    .multilineTextAlignment(.center)
+                    // Pin to the measured text width (+ caret room) so focusing
+                    // never changes the field's footprint.
+                    .frame(width: nameFieldWidth + Layout.nameCaretAllowance)
+                    // Bounce the rolled name in. `scaleEffect` doesn't affect
+                    // layout, so the pinned field width stays stable.
+                    .scaleEffect(isRolling ? RollMotion.nameScale : 1)
+                    .animation(RollMotion.pop, value: isRolling)
+                    .focused($nameFocused)
+                    .onChange(of: state.name) { _, newValue in
+                        if newValue != state.selectedTemplate.defaultName {
+                            state.nameUserEdited = true
+                        }
+                    }
             }
-            .textFieldStyle(.plain)
-            .font(theme.font(size: 19, weight: .bold))
-            .foregroundColor(theme.primaryText)
-            .multilineTextAlignment(.center)
-            .fixedSize()
-            .focused($nameFocused)
-            .onChange(of: state.name) { _, newValue in
-                if newValue != state.selectedTemplate.defaultName {
-                    state.nameUserEdited = true
-                }
-            }
+            .onPreferenceChange(NameWidthKey.self) { nameFieldWidth = $0 }
 
             Image(systemName: "pencil")
                 .font(.system(size: 12, weight: .semibold))
@@ -250,6 +331,43 @@ struct CreateAgentBody: View {
         .animation(theme.animationQuick(), value: selectedColor)
         .contentShape(Capsule())
         .onTapGesture { nameFocused = true }
+    }
+
+    /// Rolls a fresh fun name and fires the coordinated delight: the icon
+    /// spins a full turn and pops, the new name bounces in, and the hero gives
+    /// a little wiggle (all driven by the `.animation(_:value:)` modifiers on
+    /// those views). Under Reduce Motion this collapses to the plain swap.
+    private func rollName() {
+        state.randomizeName()
+        guard !reduceMotion else { return }
+
+        randomizeSpins += 1
+        isRolling = true
+        // Release the pop so the icon, name, and hero settle back to rest.
+        DispatchQueue.main.asyncAfter(deadline: .now() + RollMotion.crest) {
+            isRolling = false
+        }
+    }
+
+    /// The archetype's localized default name. Shared by the field's prompt
+    /// and the width driver so the empty field is sized to the hint it shows.
+    private var defaultNameText: Text {
+        Text(LocalizedStringKey(state.selectedTemplate.defaultName), bundle: .module)
+    }
+
+    /// Invisible mirror of the field's displayed text, styled identically, used
+    /// purely to measure the width the editable field should be pinned to. When
+    /// the user has typed a name we measure that; otherwise we measure the
+    /// archetype's default (the prompt) so the empty field matches its hint.
+    private var nameWidthDriver: some View {
+        (state.trimmedName.isEmpty ? defaultNameText : Text(state.name))
+            .font(theme.font(size: 19, weight: .bold))
+            .fixedSize()
+            .background(
+                GeometryReader { proxy in
+                    Color.clear.preference(key: NameWidthKey.self, value: proxy.size.width)
+                }
+            )
     }
 
     // MARK: - Role description preview
@@ -327,7 +445,12 @@ struct CreateAgentBody: View {
             .frame(width: cellSize, height: cellSize)
             .scaleEffect(isSelected ? 1.0 : 0.9)
             .opacity(isSelected ? 1.0 : 0.78)
-            .animation(.spring(response: 0.35, dampingFraction: 0.6), value: isSelected)
+            // Lower damping gives the newly-picked swatch a celebratory
+            // overshoot; Reduce Motion settles it without the bounce.
+            .animation(
+                .spring(response: 0.35, dampingFraction: reduceMotion ? 0.85 : 0.45),
+                value: isSelected
+            )
         }
         .buttonStyle(.plain)
         .help(Text(mascot.displayName))
@@ -378,6 +501,13 @@ struct CreateAgentBody: View {
                             )
                     )
             )
+            // A small overshooting pop on the freshly-picked role keeps the
+            // chip selection feeling alive and in step with the swatches.
+            .scaleEffect(isSelected ? 1.05 : 1)
+            .animation(
+                .spring(response: 0.32, dampingFraction: reduceMotion ? 0.85 : 0.5),
+                value: isSelected
+            )
         }
         .buttonStyle(.plain)
     }
@@ -387,6 +517,17 @@ struct CreateAgentBody: View {
         Text(LocalizedStringKey(key), bundle: .module)
             .font(theme.font(size: 12, weight: .semibold))
             .foregroundColor(theme.tertiaryText)
+    }
+}
+
+// MARK: - Name Field Width Measurement
+
+/// Carries the measured width of the hidden name mirror up to `CreateAgentBody`
+/// so the editable field can be pinned to a focus-stable width.
+private struct NameWidthKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
 
@@ -493,5 +634,4 @@ struct CreateAgentCTA: View {
             .frame(width: OnboardingMetrics.windowWidth, height: 660)
         }
     }
-#endif
 #endif
