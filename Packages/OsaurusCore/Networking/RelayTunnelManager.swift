@@ -99,7 +99,7 @@ public final class RelayTunnelManager: ObservableObject {
         if enabled {
             agentStatuses[agentId] = .connecting
             if isConnected {
-                addAgentToTunnel(agentId: agentId)
+                Task { await addAgentToTunnel(agentId: agentId) }
             } else {
                 Task { await connect() }
             }
@@ -179,10 +179,13 @@ public final class RelayTunnelManager: ObservableObject {
             return
         }
 
-        guard let masterKey = obtainMasterKey() else {
+        guard let masterKey = await obtainMasterKey() else {
             for agent in agents { agentStatuses[agent.id] = .error("No identity") }
             return
         }
+
+        // Re-check after the suspension: another connect may have won the race
+        guard webSocketTask == nil || !isConnected else { return }
 
         let session = URLSession(configuration: .default)
         let task = session.webSocketTask(with: Self.relayURL)
@@ -521,7 +524,7 @@ public final class RelayTunnelManager: ObservableObject {
 
     // MARK: - Mid-Session Agent Management
 
-    private func addAgentToTunnel(agentId: UUID) {
+    private func addAgentToTunnel(agentId: UUID) async {
         ensureAgentIdentity(agentId)
 
         guard let agent = AgentManager.shared.agent(for: agentId),
@@ -532,7 +535,7 @@ public final class RelayTunnelManager: ObservableObject {
             return
         }
 
-        guard let masterKey = obtainMasterKey() else {
+        guard let masterKey = await obtainMasterKey() else {
             agentStatuses[agentId] = .error("No identity")
             return
         }
@@ -618,10 +621,15 @@ public final class RelayTunnelManager: ObservableObject {
 
     // MARK: - Helpers
 
-    private func obtainMasterKey() -> Data? {
-        guard OsaurusIdentity.exists() else { return nil }
-        let context = OsaurusIdentityContext.biometric()
-        return try? MasterKey.getPrivateKey(context: context)
+    /// Fetch the master key off the main actor. The keychain lookups behind
+    /// this round-trip to securityd over blocking XPC, which can stall the
+    /// main thread for seconds when the daemon is busy.
+    private func obtainMasterKey() async -> Data? {
+        await Task.detached(priority: .userInitiated) {
+            guard OsaurusIdentity.exists() else { return nil }
+            let context = OsaurusIdentityContext.biometric()
+            return try? MasterKey.getPrivateKey(context: context)
+        }.value
     }
 
     private static func signAgentAuth(
