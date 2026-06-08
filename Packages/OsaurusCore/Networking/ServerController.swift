@@ -51,6 +51,12 @@ final class ServerController: ObservableObject {
     private var serverActor: OsaurusServer?
     private var agentsCancellable: AnyCancellable?
 
+    /// Flipped once `applicationDidFinishLaunching` finishes its server
+    /// wiring. The Bonjour-expose Combine sink consults this so it never
+    /// triggers a `restartServer()` while the launch sequence is still
+    /// bringing the server up (mid-launch server churn — see hang audit).
+    private var isLaunchComplete = false
+
     // Singleton holder to allow async access to the current controller instance when injected as EnvironmentObject
     @MainActor
     private struct ServerControllerHolder {
@@ -77,6 +83,25 @@ final class ServerController: ObservableObject {
     }
 
     // MARK: - Public Methods
+
+    /// Marks launch as complete. Called by the AppDelegate at the end of
+    /// `applicationDidFinishLaunching` so the Bonjour-expose Combine sink may
+    /// begin honoring live config changes with a restart.
+    func markLaunchComplete() {
+        isLaunchComplete = true
+    }
+
+    /// Brings the embedded HTTP server up on the live controller instance if it
+    /// is not already running. Used by the App Intents surface to provide a
+    /// fast, headless server-up path before issuing a localhost request. No-op
+    /// when no controller has been wired (e.g. the app has not finished
+    /// launching), in which case callers fall back to retry-with-backoff.
+    static func ensureRunning() async {
+        guard let controller = ServerControllerHolder.shared.controller else { return }
+        if !controller.isRunning {
+            await controller.startServer()
+        }
+    }
 
     /// Starts the server with current configuration
     func startServer() async {
@@ -110,6 +135,7 @@ final class ServerController: ObservableObject {
             isRunning = true
             serverHealth = .running
             lastErrorMessage = nil
+            FeatureTelemetry.serverStarted()
             print("[Osaurus] NIO server started successfully on port \(configuration.port)")
 
             if configuration.exposeToNetwork {
@@ -165,12 +191,29 @@ final class ServerController: ObservableObject {
 
         print("[Osaurus] Ensuring NIO server shutdown before app termination")
         RelayTunnelManager.shared.disconnectAll()
+        // Stop mDNS on the quit path too — `stopServer` does this, but
+        // `ensureShutdown` is the only teardown the AppDelegate calls, so
+        // without this an advertised service could linger past quit.
+        BonjourAdvertiser.shared.stopAdvertising()
         isRunning = false
         serverHealth = .stopping
 
         if let server = serverActor {
-            await server.stop(gracefully: true)
-            serverActor = nil
+            // Termination path: use the bounded (`gracefully: false`) shutdown
+            // so a lingering SSE child channel can't stall quit.
+            let completed = await server.stop(gracefully: false)
+            // Only drop our reference when the EventLoopGroup actually shut
+            // down. On timeout the group is still running; releasing the actor
+            // here would let it (and its group) deinit mid-shutdown and trip
+            // NIO's `EventLoopGroup is still running` precondition (issue
+            // #860). Keep it rooted — the process is exiting anyway.
+            if completed {
+                serverActor = nil
+            } else {
+                print(
+                    "[Osaurus] NIO group still draining at quit; keeping serverActor rooted to avoid mid-shutdown dealloc"
+                )
+            }
         }
 
         localNetworkAddress = "127.0.0.1"
@@ -187,25 +230,33 @@ final class ServerController: ObservableObject {
         }
         // Read-only load. The legacy → vmlx migration (which writes to
         // `~/.osaurus/config/`) is intentionally deferred to
-        // `bootstrapRuntimeSettings()` so a fresh install stays
-        // pristine until after the storage migrator's gate runs.
+        // `bootstrapRuntimeSettings()` so a fresh install stays pristine
+        // until the AppDelegate explicitly runs it during launch.
         if let existing = ServerRuntimeSettingsStore.load() {
             self.runtimeSettings = existing
         }
-        // Keep exposeToNetwork in sync with Bonjour-enabled agents
+        // Keep exposeToNetwork in sync with Bonjour-enabled agents.
+        // Only turn ON when a Bonjour agent requires it — never force
+        // it OFF, so the user's manual "expose to local network" setting
+        // is preserved across launches.
         agentsCancellable = AgentManager.shared.$agents
             .sink { agents in
                 Task { @MainActor [weak self] in
                     guard let self else { return }
                     let shouldExpose = agents.contains { $0.bonjourEnabled }
-                    guard self.configuration.exposeToNetwork != shouldExpose else { return }
-                    self.configuration.exposeToNetwork = shouldExpose
-                    // Mirror into vmlx runtime settings so the
-                    // Settings panel reflects the override.
-                    self.runtimeSettings.network.host = shouldExpose ? "0.0.0.0" : "127.0.0.1"
+                    // Only act when an agent is forcing exposure ON.
+                    // If no agent requires it, leave the user's setting alone.
+                    guard shouldExpose, !self.configuration.exposeToNetwork else { return }
+                    self.configuration.exposeToNetwork = true
+                    self.runtimeSettings.network.host = "0.0.0.0"
                     self.saveConfiguration()
                     ServerRuntimeSettingsStore.save(self.runtimeSettings)
-                    if self.isRunning {
+                    // Only restart for a live config change *after* launch has
+                    // settled. During launch the initial auto-start already
+                    // reads the updated config, so restarting here would be
+                    // redundant server churn racing the launch sequence — the
+                    // mid-launch restart the hang audit flagged.
+                    if self.isRunning && self.isLaunchComplete {
                         await self.restartServer()
                     }
                 }
@@ -217,16 +268,13 @@ final class ServerController: ObservableObject {
     /// `loadOrMigrate()` just returns the on-disk value without
     /// writing.
     ///
-    /// Must be invoked from the AppDelegate immediately after
-    /// `StorageMigrationCoordinator.blockingAwaitReady()` returns.
-    /// `init()` skips this because `ServerController` is constructed
-    /// as a stored property of the AppDelegate (i.e. before
-    /// `applicationDidFinishLaunching`), and the migration's first-run
-    /// `save()` would otherwise create `config/server-runtime.json`
-    /// in `~/.osaurus/` *before* the storage migrator's
-    /// `isPristineInstall()` check, flipping a true fresh install
-    /// out of the pristine fast path and painting the "Securing your
-    /// data" overlay over onboarding.
+    /// Invoked from the AppDelegate during
+    /// `applicationDidFinishLaunching`. `init()` skips this because
+    /// `ServerController` is constructed as a stored property of the
+    /// AppDelegate (i.e. before launch), and the migration's
+    /// first-run `save()` would otherwise create
+    /// `config/server-runtime.json` in `~/.osaurus/` before the app
+    /// is fully up.
     func bootstrapRuntimeSettings() {
         self.runtimeSettings = ServerRuntimeSettingsStore.loadOrMigrate()
     }
@@ -257,9 +305,9 @@ final class ServerController: ObservableObject {
     ///
     /// Fields that require a NIO restart: port, host (expose toggle),
     /// CORS origins.
-    /// Fields that only need a generation-config invalidate: `genTopP`
-    /// changes (consumed by `RuntimeConfig.snapshot()` on the next
-    /// request).
+    /// Fields that only need a runtime-config invalidate: generation and
+    /// concurrency defaults consumed by `RuntimeConfig.snapshot()` on the next
+    /// request.
     func saveRuntimeSettings(_ settings: VMLXServerRuntimeSettings) async {
         let previousRuntimeSettings = runtimeSettings
         let previousConfig = configuration
@@ -280,7 +328,12 @@ final class ServerController: ObservableObject {
             previousConfig.port != projected.port
             || previousConfig.exposeToNetwork != projected.exposeToNetwork
             || previousConfig.allowedOrigins != projected.allowedOrigins
-        let runtimeConfigChanged = previousConfig.genTopP != projected.genTopP
+        let runtimeConfigChanged =
+            Self.runtimeConfigInputsRequireInvalidate(
+                previous: previousRuntimeSettings,
+                next: settings
+            )
+            || previousConfig.genTopP != projected.genTopP
 
         if configChanged {
             configuration = projected
@@ -308,6 +361,16 @@ final class ServerController: ObservableObject {
         previous.cache != next.cache
             || previous.multimodal != next.multimodal
             || previous.mtp != next.mtp
+    }
+
+    /// Settings captured by `RuntimeConfig.snapshot()` but not by a loaded
+    /// model container must be re-read on the next request after saving.
+    nonisolated static func runtimeConfigInputsRequireInvalidate(
+        previous: VMLXServerRuntimeSettings,
+        next: VMLXServerRuntimeSettings
+    ) -> Bool {
+        previous.generation != next.generation
+            || previous.concurrency != next.concurrency
     }
 
     // MARK: - Private Helpers
