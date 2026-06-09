@@ -822,6 +822,7 @@ extension MessageTableRepresentable {
                 newStreamingBlockId: newStreamingBlockId,
                 lastAssistantTurnId: lastAssistantTurnId,
                 autoScrollEnabled: autoScrollEnabled,
+                isStreaming: isStreaming,
                 streamingJustEnded: streamingJustEnded,
                 previousStreamingBlockId: previousStreamingBlockId
             )
@@ -888,6 +889,7 @@ extension MessageTableRepresentable {
             newStreamingBlockId: String?,
             lastAssistantTurnId: UUID?,
             autoScrollEnabled: Bool,
+            isStreaming: Bool,
             streamingJustEnded: Bool = false,
             previousStreamingBlockId: String? = nil
         ) {
@@ -946,7 +948,8 @@ extension MessageTableRepresentable {
                 self.handlePostSnapshotScroll(
                     lastAssistantTurnId: lastAssistantTurnId,
                     autoScrollEnabled: autoScrollEnabled,
-                    wasPinnedToBottom: wasPinnedToBottom
+                    wasPinnedToBottom: wasPinnedToBottom,
+                    isStreaming: isStreaming
                 )
 
                 // When streaming ends, the last throttled height measurement
@@ -974,16 +977,27 @@ extension MessageTableRepresentable {
         ///     scrolled up reading earlier content).
         ///
         /// `wasPinnedToBottom` must be captured before `apply()` since the
-        /// snapshot may shift bounds first. The new-turn id is recorded
-        /// regardless of pinned state so we don't re-scroll on subsequent
-        /// snapshots within the same turn.
+        /// snapshot may shift bounds first.
+        ///
+        /// The header homing is gated on `isStreaming`: we only auto-scroll
+        /// to a turn's header while a response is actively generating. At
+        /// completion, `completeRunCleanup` trims a trailing empty assistant
+        /// turn, which shifts `lastAssistantTurnId` back to an earlier turn
+        /// whose header still exists. Without the gate that identity change
+        /// re-fires the homing and yanks the viewport up to that header
+        /// (dragging the minimap's active marker with it) every time a
+        /// tool/agent response finishes — visible as a jump while the user
+        /// has scrolled away. When not streaming we preserve the user's
+        /// position (pinned → bottom, otherwise → restore anchor).
         private func handlePostSnapshotScroll(
             lastAssistantTurnId: UUID?,
             autoScrollEnabled: Bool,
-            wasPinnedToBottom: Bool
+            wasPinnedToBottom: Bool,
+            isStreaming: Bool
         ) {
             let isNewTurn =
                 autoScrollEnabled
+                && isStreaming
                 && lastAssistantTurnId != nil
                 && lastAssistantTurnId != lastScrolledToTurnId
 
