@@ -167,6 +167,17 @@ private struct TopStatusHeader: View {
                         .font(.system(size: 12, weight: .regular))
                         .foregroundColor(theme.tertiaryText)
 
+                    #if OSAURUS_INTEL
+                    // The fork keeps its own version line; show the upstream
+                    // sync era as metadata, not as the version number.
+                    Text(verbatim: "· upstream \(IntelBuildInfo.upstreamBase)")
+                        .font(.system(size: 12, weight: .regular))
+                        .foregroundColor(theme.tertiaryText)
+                        .help(
+                            "Intel fork — synced to upstream Osaurus \(IntelBuildInfo.upstreamBase) (commit \(IntelBuildInfo.upstreamCommit)). See UPSTREAM_SYNC.md."
+                        )
+                    #endif
+
                     Spacer()
 
                     // Show status indicator

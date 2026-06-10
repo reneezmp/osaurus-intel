@@ -4,8 +4,16 @@
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
 **Last synced upstream commit:** `d132b728` (Pin Nemotron vMLX runtime fixes)  
+**Upstream version era:** `0.19.15`  
 **Last sync date:** 2026-06-08  
 **Status:** 🟢 Fully caught up — 0 pending substantive commits  
+
+> **Versioning note:** the fork keeps its **own** version line (`1.0.x`) — we do
+> NOT peg it to upstream's number (the fork amputates whole subsystems, so a
+> pegged number would imply false parity). The upstream correspondence is shown
+> as *metadata* in the About panel + release notes, sourced from a single
+> constant: `IntelBuildInfo.upstreamBase` / `upstreamCommit`. Keep that constant
+> in lockstep with the two values above.
 
 ## Sync workflow (monthly)
 
@@ -14,7 +22,10 @@ git fetch upstream
 # Only NEW commits since last sync — never reparse old ones
 git log d132b728..upstream/main --oneline
 # Classify → PORT/SKIP/MIRROR → cherry-pick/ignore → update this ledger
-# When done, update the "Last synced upstream commit" hash above.
+# When done:
+#   1. update the "Last synced upstream commit" hash + "Upstream version era" above
+#   2. update IntelBuildInfo.swift (upstreamBase + upstreamCommit) to match
+#      — that constant feeds the About panel and the release-notes footer.
 ```  
 
 ---

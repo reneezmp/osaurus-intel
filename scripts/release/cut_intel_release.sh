@@ -31,6 +31,18 @@ BRANCH="intel-fork"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
+# Stamp the upstream-sync era into the release notes. Single source of truth:
+# IntelBuildInfo.swift (the same constant the About panel shows) — so the
+# in-app metadata and the release notes can never drift.
+UPSTREAM_BASE="$(grep -oE 'upstreamBase = "[^"]+"' \
+  Packages/OsaurusCore/Models/Chat/IntelConformers/IntelBuildInfo.swift 2>/dev/null \
+  | head -1 | sed -E 's/.*"([^"]+)".*/\1/')"
+if [ -n "$UPSTREAM_BASE" ]; then
+  NOTES="${NOTES}
+
+_Intel fork · synced to upstream Osaurus ${UPSTREAM_BASE} — see UPSTREAM_SYNC.md._"
+fi
+
 APP="build/rosy-deploy/Build/Products/Debug/osaurus.app"
 APPCAST="docs/appcast.xml"
 ZIP="$HOME/Desktop/Osaurus-Intel-${SHORT_VERSION}.zip"
