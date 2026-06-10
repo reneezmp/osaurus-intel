@@ -767,6 +767,10 @@ private struct ChatToolbarAgentView: View {
     @ObservedObject var windowState: ChatWindowState
     @ObservedObject var session: ChatSession
 
+    /// Incremented by the `/agent` slash command notification to pop the
+    /// agent picker open from the input card.
+    @State private var openPickerTrigger: Int = 0
+
     var body: some View {
         AgentPill(
             agents: windowState.agents,
@@ -799,15 +803,25 @@ private struct ChatToolbarAgentView: View {
                     initialTab: .agents,
                     deeplinkAgentId: deeplinkId
                 )
-            }
+            },
+            openPickerTrigger: openPickerTrigger
         )
         .environment(\.theme, windowState.theme)
+        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
+                targetWindowId == windowState.windowId
+            else { return }
+            openPickerTrigger &+= 1
+        }
     }
 }
 
 extension Notification.Name {
     static let chatToolbarSelectDiscoveredAgent = Notification.Name("chatToolbarSelectDiscoveredAgent")
     static let chatToolbarSelectRelayAgent = Notification.Name("chatToolbarSelectRelayAgent")
+    /// Posted by the `/agent` slash command to pop open the toolbar's agent
+    /// picker for the window identified in `userInfo["windowId"]`.
+    static let chatToolbarOpenAgentPicker = Notification.Name("chatToolbarOpenAgentPicker")
 }
 
 /// Contextual action button: settings (empty state) or new-chat plus.
@@ -1225,6 +1239,7 @@ private struct IntelToolbarSidebarView: View {
 /// upstream `AgentPill` (un-body-swapped for Intel in this same commit).
 private struct IntelToolbarAgentView: View {
     @ObservedObject var windowState: ChatWindowState
+    @State private var openPickerTrigger: Int = 0
 
     var body: some View {
         AgentPill(
@@ -1238,9 +1253,19 @@ private struct IntelToolbarAgentView: View {
                     initialTab: .agents,
                     deeplinkAgentId: deeplinkId
                 )
-            }
+            },
+            openPickerTrigger: openPickerTrigger
         )
         .environment(\.theme, windowState.theme)
+        // Bridge the `/agent` slash command into the Intel toolbar's agent
+        // picker — mirrors the non-Intel branch's listener (line ~810).
+        // (Renée, 2026-06-14.)
+        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
+                targetWindowId == windowState.windowId
+            else { return }
+            openPickerTrigger &+= 1
+        }
     }
 }
 

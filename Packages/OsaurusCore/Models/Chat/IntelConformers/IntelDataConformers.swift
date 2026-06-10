@@ -1854,6 +1854,9 @@ extension NSNotification.Name {
     static let chatOverlayActivated = NSNotification.Name("chatOverlayActivated")
     static let chatToolbarSelectDiscoveredAgent = NSNotification.Name("chatToolbarSelectDiscoveredAgent")
     static let chatToolbarSelectRelayAgent = NSNotification.Name("chatToolbarSelectRelayAgent")
+    /// Posted by the `/agent` slash command to pop open the toolbar's agent
+    /// picker for the window identified in `userInfo["windowId"]`.
+    static let chatToolbarOpenAgentPicker = NSNotification.Name("chatToolbarOpenAgentPicker")
     static let vadStartNewSession = NSNotification.Name("vadStartNewSession")
     static let chatViewClosed = NSNotification.Name("chatViewClosed")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
