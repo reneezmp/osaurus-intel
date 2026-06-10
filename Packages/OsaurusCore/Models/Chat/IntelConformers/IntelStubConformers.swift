@@ -684,7 +684,15 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                     pluginDescription: entry.description,
                     authors: entry.authors,
                     license: nil,
-                    capabilities: nil,
+                    // Carry the index's declared tools through so the Tools tab's
+                    // "Plugin Tools" section (which reads capabilities?.tools) can
+                    // surface them and let the user set per-tool policies. Without
+                    // this the tools work in chat but never appear in the UI.
+                    capabilities: RegistryCapabilities(
+                        tools: entry.tools.map {
+                            RegistryCapabilities.ToolSummary(name: $0.id, description: $0.description)
+                        }
+                    ),
                     installedVersion: installed ? semver : nil,
                     latestVersion: semver,
                     isInstalling: false,
