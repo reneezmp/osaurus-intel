@@ -568,7 +568,15 @@ struct PluginsView: View {
         installedPlugins = installedResult
 
         #if OSAURUS_INTEL
+        // Dedup: a plugin installed from the Intel index is ALSO natively
+        // loaded by PluginManager, so it would otherwise render twice — once
+        // as an "Installed" card (with uninstall) and once in the "Native —
+        // this fork" section (no uninstall). The repo service is its canonical
+        // home, so drop index-known ids from the native section; only true
+        // orphans (loaded but not in the index) remain there.
+        let repoKnownIds = Set(currentPlugins.map { $0.pluginId })
         nativePlugins = PluginManager.shared.nativelyLoadedPlugins()
+            .filter { !repoKnownIds.contains($0.pluginId) }
         configurablePluginIds = Set(PluginManager.shared.configurablePlugins().map { $0.id })
         #endif
 
@@ -843,6 +851,18 @@ private struct PluginCard: View {
 
     // MARK: - Card Menu
 
+    /// Whether the three-dots menu should offer "Install". On Intel we cannot
+    /// load an arm64-only plugin, so suppress the action for those (the Apple
+    /// Silicon build still installs them normally).
+    private var canInstall: Bool {
+        guard !plugin.isInstalled else { return false }
+        #if OSAURUS_INTEL
+        return !plugin.requiresAppleSilicon
+        #else
+        return true
+        #endif
+    }
+
     @ViewBuilder
     private var cardMenu: some View {
         if plugin.isInstalling {
@@ -881,7 +901,7 @@ private struct PluginCard: View {
                         )
                     }
                 }
-                if !plugin.isInstalled, let onInstall {
+                if canInstall, let onInstall {
                     Button {
                         Task {
                             do { try await onInstall() } catch { handleInstallError(error) }
