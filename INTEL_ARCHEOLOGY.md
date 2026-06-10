@@ -2052,7 +2052,7 @@ version.
   (hotkey activation + richer prompt) → 1.0.4 (real permission card + hotkey
   re-register). Rosy confirmed it **auto-updated** 1.0.2 → 1.0.3 → 1.0.4 on its own.
 - **README** rewritten as the fork's own story (anti-e-waste, what works vs
-  amputated, install/build), crediting Renée (architect) + Claude (code).
+  amputated, install/build), crediting Renée (architect) + Sunny (code).
 
 ### Roadmap (planning after Renée's rest — NOT started)
 1. **`osaurus-intel-plugins` repo** — separate repo hosting x86_64 plugin dylibs +

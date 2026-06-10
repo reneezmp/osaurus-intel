@@ -583,21 +583,25 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
 
             // Download dylib
+            guard let dylibRemote = URL(string: entry.download_url) else {
+                throw PluginInstallError.badURL(entry.download_url)
+            }
             let dylibURL = dir.appendingPathComponent("plugin.dylib")
-            let (dylibData, _) = try await URLSession.shared.data(from: URL(string: entry.download_url)!)
+            let (dylibData, _) = try await URLSession.shared.data(from: dylibRemote)
 
-            // Verify SHA256
+            // Verify SHA256 BEFORE writing anything executable to disk.
             let actualSHA = dylibData.sha256()
-            guard actualSHA == entry.sha256 else {
+            guard actualSHA.caseInsensitiveCompare(entry.sha256) == .orderedSame else {
                 throw PluginInstallError.sha256Mismatch(expected: entry.sha256, actual: actualSHA)
             }
             try dylibData.write(to: dylibURL)
 
             // Download manifest
+            guard let manifestRemote = URL(string: entry.manifest_url) else {
+                throw PluginInstallError.badURL(entry.manifest_url)
+            }
             let manifestURL = dir.appendingPathComponent("manifest.json")
-            let (manifestData, _) = try await URLSession.shared.data(
-                from: URL(string: entry.manifest_url)!
-            )
+            let (manifestData, _) = try await URLSession.shared.data(from: manifestRemote)
             try manifestData.write(to: manifestURL)
 
             // Load the plugin
@@ -741,11 +745,14 @@ private func parseSemver(_ s: String) -> SemanticVersion? {
 
 private enum PluginInstallError: Error, LocalizedError {
     case sha256Mismatch(expected: String, actual: String)
+    case badURL(String)
 
     var errorDescription: String? {
         switch self {
         case .sha256Mismatch(let expected, let actual):
             return "Download verification failed. Expected SHA256 \(expected.prefix(16))…, got \(actual.prefix(16))…"
+        case .badURL(let url):
+            return "The plugin index contained an invalid URL: \(url)"
         }
     }
 }
