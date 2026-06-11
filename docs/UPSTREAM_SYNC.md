@@ -142,3 +142,37 @@ For each upstream commit:
   **Decision (Renée, 2026-06-11): do NOT reinvent it.** If a future upstream
   sync brings the redesign as a real commit, port it then. Otherwise leave the
   card style as-is.
+
+---
+
+## ⚠️ Intel-owned files & post-sync verification (GUARDRAIL)
+
+The `9b79161b` / App-Intents syncs silently **reverted** Intel customizations by
+taking "theirs" on cherry-picks (found + fixed in 1.0.15): the README was
+replaced with upstream's, and `RemoteProviderKeychain` lost its Intel isolation.
+These compile fine reverted, so they slip through. **After EVERY sync, verify
+these Intel-owned customizations survived:**
+
+| File | Must contain (Intel) | Not (upstream) |
+|---|---|---|
+| `README.md` | `🦕 Osaurus (Intel)` header, "Run a model locally" | `Own your AI`, `brew install --cask osaurus` |
+| `RemoteProviderKeychain.swift` | `ai.osaurus.remote.intel` (`#if OSAURUS_INTEL`) | bare `ai.osaurus.remote` only |
+| `MCPProviderKeychain.swift` | `ai.osaurus.mcp.intel` | bare `ai.osaurus.mcp` only |
+| `App/osaurus/Info.plist` | `SUFeedURL` → `reneezmp/osaurus-intel`, `SUPublicEDKey` `7Nh8jSxF…` | `osaurus-ai` / missing |
+| `scripts/release/cut_intel_release.sh` | `REPO="reneezmp/osaurus-intel"` | upstream repo |
+| `scripts/build/build_rosy.sh` | bakes `OsaurusCanonicalData` | — |
+| `MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
+
+**Revert-detector** (run after each sync — lists Swift files that lost ALL their
+Intel guards vs the last known-good tag):
+
+```bash
+comm -23 \
+  <(git grep -l OSAURUS_INTEL <good-tag> -- '*.swift' | sed 's/^[^:]*://' | sort -u) \
+  <(git grep -l OSAURUS_INTEL HEAD       -- '*.swift' | sed 's/^[^:]*://' | sort -u)
+```
+
+**Rule:** the README, the two provider/MCP keychain service names, the updater
+config (Info.plist), and the release/build scripts are Intel-owned — on a
+cherry-pick conflict, ALWAYS keep ours. The Master Key (`com.osaurus.account`)
+is the opposite: shared + iCloud-synced identity, never give it an Intel variant.
