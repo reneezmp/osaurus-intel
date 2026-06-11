@@ -6,6 +6,30 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.8</title>
+      <pubDate>Thu, 11 Jun 2026 00:06:37 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>9</sparkle:version>
+      <sparkle:shortVersionString>1.0.8</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.8/Osaurus-Intel-1.0.8.zip" length="50683758" type="application/octet-stream" sparkle:edSignature="kxMAVYbzDMizi0KdWldqusqDc89hzRdmzMvEqjgE1UuANOqHGLGUOUhEEeCLRG1ZF/ZpgE7j19pxX8eYojRdBw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.8
+
+**Plugins**
+- 🔌 Fixed installed plugins appearing twice (a "Loaded" card *and* an "Installed" card). Each installed plugin now shows once, with an uninstall option.
+- 🚫 Apple-Silicon-only plugins can no longer be "installed" on Intel (the three-dots menu correctly hides Install — Intel can't load an arm64 dylib).
+
+**Tools**
+- 🔧 An installed plugin's tools now appear in Tools → Available, so you can set per-tool Ask / Deny / Auto policies. (Previously the tools worked in chat but the tab was empty.)
+
+**About**
+- 🏷️ The status panel now shows the build's upstream-sync era — e.g. "v1.0.8 · upstream 0.19.15" — with the exact synced commit in the tooltip.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.7</title>
       <pubDate>Sat, 06 Jun 2026 23:02:33 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
