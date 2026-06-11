@@ -427,6 +427,15 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         }
     }
 
+    /// Persist a new provider order (drag-to-reorder sheet). The order is
+    /// reflected in the provider list AND the chat model picker, which both
+    /// iterate `configuration.providers`.
+    func reorder(orderedIds: [UUID]) {
+        configuration.reorder(orderedIds: orderedIds)
+        RemoteProviderConfigurationStore.save(configuration)
+        notifyModelsChanged()
+    }
+
     // Cloud-routing no-ops kept for compatibility with chat-side callers.
     func connect(providerId: UUID) async throws {}
     func disconnect(providerId: UUID) {}

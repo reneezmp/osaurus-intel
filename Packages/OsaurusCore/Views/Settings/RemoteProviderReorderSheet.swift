@@ -1,9 +1,10 @@
-#if !OSAURUS_INTEL
 //
 //  RemoteProviderReorderSheet.swift
 //  osaurus
 //
 //  Drag-to-reorder remote API providers. Commits once on dismiss.
+//  Works on Intel too — the Intel RemoteProviderManager mirror implements
+//  `reorder(orderedIds:)`, and order flows into the chat model picker.
 //
 
 import SwiftUI
@@ -153,5 +154,3 @@ struct RemoteProviderReorderSheet: View {
         hasPendingReorder = false
     }
 }
-
-#endif
