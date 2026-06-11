@@ -2141,3 +2141,39 @@ Plugin repo first, then the upstream→Intel sync pipeline + `UPSTREAM_SYNC.md`
 ledger. Plus a fresh distribution thread now that local inference works:
 document the Bonsai-on-Rosy setup (see `02_Projects/Bonsai_on_Rosy_Tutorial.md`)
 as a first-class "local mode" path for other Intel users.
+
+---
+
+## Keychain on Intel: what's isolated vs what's shared (2026-06-11)
+
+Two philosophically different kinds of secret, deliberately stored apart. When
+adding any new Keychain-backed secret on Intel, decide which bucket it's in.
+
+### Isolated per-install (fork-private service name on Intel)
+- **Provider API keys** — `RemoteProviderKeychain`: `ai.osaurus.remote` → `ai.osaurus.remote.intel`
+- **MCP / GitHub tokens** — `MCPProviderKeychain`: `ai.osaurus.mcp` → `ai.osaurus.mcp.intel`
+
+**Why:** a co-installed *production* Osaurus on the same Mac (e.g. the dev box)
+uses the base service. Sharing it means this build's save/delete can clobber the
+official app's keys — the bug that wiped a production key (2026-06, "I want to
+cry"). These are third-party, disposable, **re-enterable** credentials, so
+per-install isolation is correct. (The earlier isolation was reverted by the
+`9b79161b` upstream sync and restored in 1.0.15; Rosy Keychain reliability is
+handled by upstream's non-interactive access, so we keep the Keychain — just
+under a private service name. Existing keys live under the old name, so users
+re-enter a cloud key once after the 1.0.15 update.)
+
+### Shared + iCloud-synced (NOT isolated — left untouched on purpose)
+- **Master Key / Master Address** (the identity root) — `MasterKey` +
+  `MasterMnemonicStore`: service `com.osaurus.account`, `kSecAttrSynchronizable
+  = true`.
+
+**Why:** identity is **sovereign and portable** — it should follow you across
+every device (iCloud Keychain sync) and every build (same service name), so both
+Osaurus apps on a Mac AND Rosy share one Master Address. Isolating it would
+fracture "same Sunny everywhere." Agent addresses + osk-v1 access keys are
+*derived* from this master key, so they ride along.
+
+**Principle:** sovereign identity is **shared**; rented third-party credentials
+are **isolated**. Isolating provider keys does NOT affect identity sharing —
+they live in different Keychain services.
