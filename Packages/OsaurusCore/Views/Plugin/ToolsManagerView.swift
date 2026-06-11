@@ -246,8 +246,8 @@ struct ToolsManagerView: View {
         let currentProviderStates = providerManager.providerStates
         // Natively-loaded (this-fork) plugins live outside repoService.plugins
         // (they're surfaced via the "Native — this fork" section), so capture
-        // them separately or the Available tab would omit their tools — e.g.
-        // ReneeRAG and its 14 tools.
+        // them separately or the Available tab would omit a user's own
+        // locally-installed native plugins and their tools.
         let currentNativePlugins = PluginManager.shared.nativelyLoadedPlugins()
 
         let (installedPluginsResult, remoteToolsResult, runtimeToolsResult, builtInSandboxToolsResult) =

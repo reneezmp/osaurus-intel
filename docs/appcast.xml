@@ -16,7 +16,7 @@
       <description sparkle:format="markdown"><![CDATA[
 ## Osaurus (Intel) 1.0.9
 
-- 🔧 Tools tab now lists native "this-fork" plugins too — your ReneeRAG and its tools show up under Available, so you can set Ask / Deny / Auto on them.
+- 🔧 Tools tab now also lists your locally-installed native plugins and their tools under Available, so you can set Ask / Deny / Auto on them.
 - 🏷️ Plugins: the Installed tab now reads "Loaded" consistently (it's loaded + active); "Installed" appears in Browse to mark plugins you already have.
 - ℹ️ About panel now shows the upstream-sync era in the version line — e.g. "1.0.9 · upstream 0.19.15".
 - 🎨 Fixed the app icon's black corners — the squircle now has proper transparent corners.
