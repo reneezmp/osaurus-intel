@@ -28,7 +28,18 @@ public struct RemoteProviderOAuthTokens: Codable, Sendable, Equatable {
 
 /// Keychain wrapper for secure remote provider credential storage
 public enum RemoteProviderKeychain {
+    // Fork-private Keychain service on Intel. A co-installed production Osaurus
+    // on the same Mac (e.g. the dev box) uses "ai.osaurus.remote"; sharing it
+    // means this build's save/delete could clobber the official app's keys —
+    // exactly the bug that wiped a production key before. (The earlier Intel
+    // isolation was reverted by the 9b79161b upstream sync; this restores it.
+    // Reliability on Rosy is handled by upstream's non-interactive Keychain
+    // access, so we keep using the Keychain, just under a private service.)
+    #if OSAURUS_INTEL
+    private static let service = "ai.osaurus.remote.intel"
+    #else
     private static let service = "ai.osaurus.remote"
+    #endif
 
     public static func runOffCooperativeExecutor<T: Sendable>(
         _ operation: @escaping @Sendable () -> T

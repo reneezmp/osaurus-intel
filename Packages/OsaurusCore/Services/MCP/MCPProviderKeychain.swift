@@ -44,7 +44,14 @@ public struct MCPOAuthTokens: Codable, Sendable, Equatable {
 
 /// Keychain wrapper for secure MCP provider token storage.
 public enum MCPProviderKeychain {
+    // Fork-private Keychain service on Intel — isolate MCP/GitHub tokens from a
+    // co-installed production Osaurus on the same Mac (same rationale as
+    // RemoteProviderKeychain). Production uses "ai.osaurus.mcp".
+    #if OSAURUS_INTEL
+    private static let service = "ai.osaurus.mcp.intel"
+    #else
     private static let service = "ai.osaurus.mcp"
+    #endif
 
     // MARK: - Static token (legacy / explicit bearer)
 
