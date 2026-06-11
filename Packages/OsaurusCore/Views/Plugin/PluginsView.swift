@@ -82,6 +82,13 @@ struct PluginsView: View {
                     onOpenSettings: {
                         selectedNativePlugin = nil
                         showIntelPluginConfig = true
+                    },
+                    onUninstall: {
+                        let pid = np.pluginId
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            selectedNativePlugin = nil
+                        }
+                        Task { try? await repoService.uninstall(pluginId: pid); reload() }
                     }
                 )
                 .transition(.opacity.combined(with: .move(edge: .trailing)))
@@ -385,6 +392,10 @@ struct PluginsView: View {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 selectedNativePlugin = plugin
                             }
+                        },
+                        onUninstall: {
+                            let pid = plugin.pluginId
+                            Task { try? await repoService.uninstall(pluginId: pid); reload() }
                         }
                     )
                 }
@@ -1100,6 +1111,10 @@ private struct PluginDetailView: View {
 
                     capabilitiesSection
 
+                    #if OSAURUS_INTEL
+                    intelToolDetailsSection
+                    #endif
+
                     if plugin.isInstalled && !plugin.hasLoadError {
                         routesSection
                     }
@@ -1640,6 +1655,36 @@ private struct PluginDetailView: View {
             }
         }
     }
+
+    #if OSAURUS_INTEL
+    /// Rich per-tool descriptions for an installed native plugin, read from its
+    /// on-disk manifest (the same source the "Native — this fork" detail uses),
+    /// so the registry detail page is as informative as the native one.
+    @ViewBuilder
+    private var intelToolDetailsSection: some View {
+        if let handle = PluginManager.shared.nativeHandle(for: plugin.pluginId),
+            !handle.toolSpecs.isEmpty {
+            detailSection(title: "Tools (\(handle.toolSpecs.count))", icon: "wrench.and.screwdriver") {
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(handle.toolSpecs) { tool in
+                        VStack(alignment: .leading, spacing: 3) {
+                            Text(tool.id)
+                                .font(.subheadline.weight(.medium))
+                                .foregroundColor(theme.primaryText)
+                            if !tool.description.isEmpty {
+                                Text(tool.description)
+                                    .font(.caption)
+                                    .foregroundColor(theme.secondaryText)
+                                    .fixedSize(horizontal: false, vertical: true)
+                            }
+                        }
+                        .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
+            }
+        }
+    }
+    #endif
 
     // MARK: - Routes Section
 

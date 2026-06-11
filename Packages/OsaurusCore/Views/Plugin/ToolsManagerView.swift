@@ -1109,7 +1109,9 @@ private struct ToolPluginCard: View {
                 x: 0,
                 y: theme.cardShadowY
             )
-            .drawingGroup()
+            // NOTE: no `.drawingGroup()` here — flattening a shadowed card into
+            // a Metal layer inside a LazyVStack mis-sizes the row and leaves
+            // large blank gaps between cards on the Tools tab.
     }
 }
 

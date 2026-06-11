@@ -18,6 +18,7 @@ struct NativePluginCard: View {
     let isConfigurable: Bool
     let onOpenSettings: () -> Void
     let onSelect: () -> Void
+    var onUninstall: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @State private var isHovered = false
@@ -50,6 +51,12 @@ struct NativePluginCard: View {
                         Button { onOpenSettings() } label: { Label("Settings", systemImage: "gearshape") }
                     }
                     Button { revealInFinder() } label: { Label("Reveal in Finder", systemImage: "folder") }
+                    if let onUninstall {
+                        Divider()
+                        Button(role: .destructive) {
+                            onUninstall()
+                        } label: { Label("Uninstall", systemImage: "trash") }
+                    }
                 } label: {
                     Image(systemName: "ellipsis")
                         .font(.body)
@@ -105,6 +112,7 @@ struct IntelNativePluginDetailView: View {
     let pluginId: String
     let onBack: () -> Void
     let onOpenSettings: () -> Void
+    var onUninstall: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @State private var name = ""
@@ -126,6 +134,14 @@ struct IntelNativePluginDetailView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
+                if let onUninstall {
+                    Button(action: onUninstall) {
+                        Image(systemName: "trash")
+                            .foregroundColor(.red)
+                    }
+                    .buttonStyle(.plain)
+                    .help("Uninstall plugin")
+                }
             }
             .padding(.horizontal, 24)
             .padding(.top, 20)
