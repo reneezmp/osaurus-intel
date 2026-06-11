@@ -387,11 +387,6 @@ struct PluginsView: View {
     #if OSAURUS_INTEL
     private var nativePluginsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Text("Native — this fork").font(.headline).foregroundColor(theme.primaryText)
-                Text("\(nativePlugins.count)")
-                    .font(.caption).foregroundColor(theme.secondaryText)
-            }
             LazyVGrid(
                 columns: [
                     GridItem(.flexible(minimum: 300), spacing: 20),

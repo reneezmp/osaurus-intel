@@ -319,7 +319,19 @@ struct ToolsManagerView: View {
                         return (state, matchedTools)
                     }
 
-                let installedAndNative = (installedPlugins + nativeInstalled)
+                // Merge repo-installed + natively-loaded, deduped by plugin id:
+                // an index plugin (e.g. Fetch) is BOTH repo-installed and
+                // natively loaded, so it would otherwise render twice (and
+                // share expand state). Keep whichever entry resolved more tools.
+                var byId: [String: (plugin: PluginState, tools: [ToolRegistry.ToolEntry])] = [:]
+                for item in installedPlugins + nativeInstalled {
+                    if let existing = byId[item.plugin.id] {
+                        if item.tools.count > existing.tools.count { byId[item.plugin.id] = item }
+                    } else {
+                        byId[item.plugin.id] = item
+                    }
+                }
+                let installedAndNative = byId.values
                     .sorted { $0.plugin.displayName < $1.plugin.displayName }
 
                 // 2. Remote Provider Tools (for Available tab)
