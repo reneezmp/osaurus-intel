@@ -262,6 +262,17 @@ struct PluginsView: View {
         #endif
     }
 
+    /// Count for the "Installed" tab badge. On Intel every installed plugin is
+    /// rendered by the native section, so the badge is just that count (not
+    /// native + registry, which would double-count the index plugins).
+    private var installedTabCount: Int {
+        #if OSAURUS_INTEL
+        return nativePlugins.count
+        #else
+        return installedPlugins.count
+        #endif
+    }
+
     private var headerBar: some View {
         ManagerHeaderWithTabs(
             title: L("Plugins"),
@@ -293,7 +304,7 @@ struct PluginsView: View {
             HeaderTabsRow(
                 selection: $selectedTab,
                 counts: [
-                    .installed: installedPlugins.count + nativeInstalledCount,
+                    .installed: installedTabCount,
                     .browse: filteredPlugins.count,
                 ],
                 badges: updatesAvailableCount > 0
@@ -330,6 +341,10 @@ struct PluginsView: View {
                             ToolPermissionBanner(count: pluginsWithMissingPermissionsCount)
                         }
 
+                        // On Intel, every installed plugin is rendered by the
+                        // native section above (one consistent card). The
+                        // registry-card grid is Apple-Silicon only.
+                        #if !OSAURUS_INTEL
                         if !installedPlugins.isEmpty {
                         LazyVGrid(
                             columns: [
@@ -359,6 +374,7 @@ struct PluginsView: View {
                             }
                         }
                         }  // if !installedPlugins.isEmpty
+                        #endif
                     }
                     .padding(24)
                 }
@@ -580,15 +596,13 @@ struct PluginsView: View {
         installedPlugins = installedResult
 
         #if OSAURUS_INTEL
-        // Dedup: a plugin installed from the Intel index is ALSO natively
-        // loaded by PluginManager, so it would otherwise render twice — once
-        // as an "Installed" card (with uninstall) and once in the "Native —
-        // this fork" section (no uninstall). The repo service is its canonical
-        // home, so drop index-known ids from the native section; only true
-        // orphans (loaded but not in the index) remain there.
-        let repoKnownIds = Set(currentPlugins.map { $0.pluginId })
+        // On Intel, the Installed tab renders EVERY natively-loaded x86_64
+        // plugin with the same native card (see installedTabContent, where the
+        // registry PluginCard grid is gated out). Registry-installed plugins
+        // are also natively loaded, so they appear here too — one consistent
+        // card + detail, and no first-paint flicker (this list comes straight
+        // from PluginManager and doesn't wait on the repo refresh).
         nativePlugins = PluginManager.shared.nativelyLoadedPlugins()
-            .filter { !repoKnownIds.contains($0.pluginId) }
         configurablePluginIds = Set(PluginManager.shared.configurablePlugins().map { $0.id })
         #endif
 

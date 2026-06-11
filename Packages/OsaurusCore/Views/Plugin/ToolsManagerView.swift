@@ -134,7 +134,11 @@ struct ToolsManagerView: View {
 
     private var availableToolsTabContent: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
+            // VStack (not LazyVStack): the tool/plugin cards have dynamic,
+            // collapsible heights. LazyVStack re-estimates row heights when the
+            // tab re-appears and leaves large blank gaps between cards; with a
+            // handful of cards, eager layout is correct and cheap.
+            VStack(spacing: 16) {
                 SectionHeader(
                     title: L("Available Tools"),
                     description: "Tools from installed plugins and connected providers"
@@ -160,7 +164,7 @@ struct ToolsManagerView: View {
                     if !runtimeTools.isEmpty {
                         InstalledSectionHeader(title: "Runtime Tools", icon: "terminal")
 
-                        LazyVStack(spacing: 8) {
+                        VStack(spacing: 8) {
                             ForEach(runtimeTools) { entry in
                                 RuntimeManagedToolEntryRow(
                                     entry: entry,
@@ -498,7 +502,7 @@ private struct SandboxPluginsTabContent: View {
                 if !builtInTools.isEmpty {
                     InstalledSectionHeader(title: "Built-in Sandbox Tools", icon: "terminal")
 
-                    LazyVStack(spacing: 8) {
+                    VStack(spacing: 8) {
                         ForEach(builtInTools) { entry in
                             RuntimeManagedToolEntryRow(
                                 entry: entry,
@@ -767,7 +771,7 @@ private struct SandboxPluginToolCard: View {
                     .padding(.vertical, 4)
 
                 if let tools = plugin.tools, !tools.isEmpty {
-                    LazyVStack(spacing: 8) {
+                    VStack(spacing: 8) {
                         ForEach(tools, id: \.id) { spec in
                             let toolName = "\(plugin.id)_\(spec.id)"
                             let entry = ToolRegistry.shared.listTools().first { $0.name == toolName }
@@ -1077,7 +1081,7 @@ private struct ToolPluginCard: View {
                 Divider()
                     .padding(.vertical, 4)
 
-                LazyVStack(spacing: 8) {
+                VStack(spacing: 8) {
                     ForEach(tools, id: \.id) { entry in
                         ToolEntryRow(entry: entry, policyInfo: policyInfoCache[entry.name], onChange: onChange)
                     }
@@ -1220,7 +1224,7 @@ private struct RemoteProviderToolsCard: View {
                 Divider()
                     .padding(.vertical, 4)
 
-                LazyVStack(spacing: 8) {
+                VStack(spacing: 8) {
                     ForEach(tools, id: \.id) { entry in
                         RemoteToolRow(
                             entry: entry,
