@@ -6,6 +6,23 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.11</title>
+      <pubDate>Thu, 11 Jun 2026 11:34:09 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>12</sparkle:version>
+      <sparkle:shortVersionString>1.0.11</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.11/Osaurus-Intel-1.0.11.zip" length="50666608" type="application/octet-stream" sparkle:edSignature="c4iH+aJAslITjbwkzaVQSRGs6gKm+2QiVY6oyqms4XFI2shcbs6VzUlebZzkbJBvDi4+IsOy2THJvZA5lD8XBg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.11
+
+- 🧩 Plugins → Installed: every plugin now uses one consistent card design (and opens the same rich detail page with per-tool descriptions). Fixes the first-load flicker where cards changed style after a second.
+- 🧹 Tools tab: the blank gaps between cards no longer come back after you switch tabs and return.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.10</title>
       <pubDate>Thu, 11 Jun 2026 04:00:37 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
