@@ -6,6 +6,23 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.15</title>
+      <pubDate>Thu, 11 Jun 2026 13:25:13 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>16</sparkle:version>
+      <sparkle:shortVersionString>1.0.15</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.15/Osaurus-Intel-1.0.15.zip" length="50724866" type="application/octet-stream" sparkle:edSignature="OUWQv0pbcAxYOtpUd5buuPp/yCsNw2JUlylQPskfEBaiJg/nLGCfwkjLiMewhHrOiVToDGCRajpvHpBFkY3zDw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.15
+
+- 🔒 Security: provider API keys and MCP/GitHub tokens are now stored under a fork-private Keychain entry, so the Intel build can never clobber the keys of a co-installed official Osaurus on the same Mac. **After updating, re-enter your cloud API key once** (Settings → Providers → edit → paste key) — it's moving to the isolated entry.
+- 📖 Restored the Intel README (an upstream sync had overwritten it) and added a "Run a model locally" guide for llama.cpp / Bonsai.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.14</title>
       <pubDate>Thu, 11 Jun 2026 13:03:30 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
