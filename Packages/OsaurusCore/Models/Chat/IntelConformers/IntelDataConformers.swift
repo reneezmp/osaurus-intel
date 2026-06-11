@@ -1473,6 +1473,18 @@ final class SystemPromptComposer: @unchecked Sendable {
             toolDirective = ""
         }
         var prompt = basePrompt + folderSection + toolDirective
+        // Track each slice of the prompt so the budget popover can show them as
+        // distinct rails (Persona / Grounding / Agent Loop / …).
+        var sections: [PromptSection] = []
+        if !basePrompt.isEmpty {
+            sections.append(PromptSection(id: "persona", label: "Persona", text: basePrompt, tint: .purple))
+        }
+        if !folderSection.isEmpty {
+            sections.append(PromptSection(id: "grounding", label: "Grounding", text: folderSection, tint: .teal))
+        }
+        if !toolDirective.isEmpty {
+            sections.append(PromptSection(id: "agentLoop", label: "Agent Loop", text: toolDirective, tint: .indigo))
+        }
         // Surface the registered tools, honoring the agent's capability picker
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
         // allowlist; in Auto mode (or un-seeded), send everything registered.
@@ -1496,13 +1508,18 @@ final class SystemPromptComposer: @unchecked Sendable {
                 PluginManager.shared.instructions(forActiveToolNames: activeNames)
             }
             if !pluginInstructions.isEmpty {
-                prompt += "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
+                let block = "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")
+                prompt += block
+                sections.append(
+                    PromptSection(
+                        id: "pluginInstructions", label: "Plugin Instructions", text: block, tint: .cyan)
+                )
             }
         }
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.
         let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
-        return ComposedContext(prompt: prompt, toolTokens: toolTokens, tools: tools)
+        return ComposedContext(prompt: prompt, toolTokens: toolTokens, tools: tools, promptSections: sections)
     }
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
 }
@@ -1545,6 +1562,17 @@ enum ToolChoiceOption: Codable, Sendable {
     case function(String)
 }
 
+/// A named, individually-measurable slice of the Intel system prompt, so the
+/// context-budget popover can show Persona / Grounding / Agent Loop / Plugin
+/// Instructions as distinct rails — matching the granularity of upstream's
+/// PromptManifest sections (minus the local-model-only ones the fork amputates).
+struct PromptSection: Sendable {
+    let id: String
+    let label: String
+    let text: String
+    let tint: ContextBreakdown.Tint
+}
+
 struct ComposedContext: @unchecked Sendable {
     let prompt: String
     let manifest: PromptManifest
@@ -1555,7 +1583,11 @@ struct ComposedContext: @unchecked Sendable {
     var preflightItems: [Any]
     var memorySection: String?
     var cacheHint: Any?
-    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0, tools: [IntelTool] = [], preflight: Any? = nil, alwaysLoadedNames: Any? = nil, preflightItems: [Any] = [], memorySection: String? = nil, cacheHint: Any? = nil) {
+    /// Named slices of `prompt`, in order, for the budget breakdown. Empty for
+    /// the lightweight restored-session preview (which falls back to a single
+    /// "System Prompt" rail).
+    var promptSections: [PromptSection]
+    init(prompt: String = "", manifest: PromptManifest = PromptManifest(), toolTokens: Int = 0, tools: [IntelTool] = [], preflight: Any? = nil, alwaysLoadedNames: Any? = nil, preflightItems: [Any] = [], memorySection: String? = nil, cacheHint: Any? = nil, promptSections: [PromptSection] = []) {
         self.prompt = prompt
         self.manifest = manifest
         self.toolTokens = toolTokens
@@ -1565,6 +1597,7 @@ struct ComposedContext: @unchecked Sendable {
         self.preflightItems = preflightItems
         self.memorySection = memorySection
         self.cacheHint = cacheHint
+        self.promptSections = promptSections
     }
 }
 /// Auto-disable hints flowed from the context budget composer to the
@@ -1646,10 +1679,23 @@ struct ContextBreakdown: Sendable {
         // popover layout. Empty rails are skipped to keep it compact.
         var bd = ContextBreakdown()
 
-        let promptTokens =
-            composed.prompt.isEmpty ? 0 : ContextBudgetManager.estimateTokens(for: composed.prompt)
-        if promptTokens > 0 {
-            bd.context.append(Entry(id: "persona", label: "System Prompt", tokens: promptTokens, tint: .purple))
+        // Per-section prompt rails (Persona / Grounding / Agent Loop / Plugin
+        // Instructions) when the composer provided them; otherwise fall back to
+        // a single "System Prompt" rail (e.g. the restored-session preview,
+        // which only has the agent persona).
+        if !composed.promptSections.isEmpty {
+            for section in composed.promptSections {
+                let t = ContextBudgetManager.estimateTokens(for: section.text)
+                if t > 0 {
+                    bd.context.append(Entry(id: section.id, label: section.label, tokens: t, tint: section.tint))
+                }
+            }
+        } else {
+            let promptTokens =
+                composed.prompt.isEmpty ? 0 : ContextBudgetManager.estimateTokens(for: composed.prompt)
+            if promptTokens > 0 {
+                bd.context.append(Entry(id: "persona", label: "System Prompt", tokens: promptTokens, tint: .purple))
+            }
         }
         // Prefer the precomputed count; fall back to estimating from the tool
         // specs so the restored-session preview (which doesn't precompute) still

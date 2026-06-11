@@ -634,7 +634,24 @@ final class ChatSession: ObservableObject {
         let previewPrompt = AgentManager.shared.effectiveSystemPrompt(for: effectiveId)
         let previewTools =
             ChatConfiguration.shared.disableTools ? [] : ToolRegistry.shared.openAISpecs()
-        let preview = ComposedContext(prompt: previewPrompt, tools: previewTools)
+        // Mirror the section split that `composeChatContext` emits on send, so
+        // the preview popover lists the same rails (Persona, and Grounding when
+        // a working folder is mounted) rather than a single "System Prompt".
+        var previewSections: [PromptSection] = []
+        if !previewPrompt.isEmpty {
+            previewSections.append(
+                PromptSection(id: "persona", label: "Persona", text: previewPrompt, tint: .purple))
+        }
+        let previewFolderSection = SystemPromptTemplates.folderContext(
+            from: FolderContextService.shared.currentContext)
+        if !previewFolderSection.isEmpty {
+            previewSections.append(
+                PromptSection(id: "grounding", label: "Grounding", text: previewFolderSection, tint: .teal))
+        }
+        let preview = ComposedContext(
+            prompt: previewPrompt + previewFolderSection,
+            tools: previewTools,
+            promptSections: previewSections)
         return .from(
             context: preview,
             conversationTokens: conversationTokens,
