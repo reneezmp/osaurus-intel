@@ -2177,3 +2177,69 @@ fracture "same Sunny everywhere." Agent addresses + osk-v1 access keys are
 **Principle:** sovereign identity is **shared**; rented third-party credentials
 are **isolated**. Isolating provider keys does NOT affect identity sharing —
 they live in different Keychain services.
+
+---
+
+## M16 — Sync absorption, polish marathon, "quietly excellent" (2026-06-08 → 06-11)
+
+DeepSeek-Sunny (via OpenCode) ran the upstream→Intel **sync pipeline** while Renée
+rested: 44 substantive upstream commits processed, caught up to **0.19.15**
+(`d132b728`), with `docs/UPSTREAM_SYNC.md` as the ledger. This session reviewed
+that work and shipped the post-sync polish.
+
+### Releases 1.0.8 → 1.0.15 (build 9 → 16)
+- **1.0.8** — plugins: fixed Loaded/Installed double-cards; AS plugins can't be
+  "installed" on Intel; installed-plugin tools surface in Tools → Available;
+  About panel shows the upstream-sync era.
+- **1.0.9** — native "this-fork" plugins' tools reach the Tools tab; Installed
+  reads "Loaded" / Browse reads "Installed"; About version line; **app icon
+  corners made transparent** (were opaque black).
+- **1.0.10** — Tools-tab blank-gap fix (drop `.drawingGroup()`); rich per-tool
+  descriptions on the registry detail page; native plugins get Uninstall.
+- **1.0.11** — unified the Installed tab on ONE native card design (kills the
+  first-paint flicker); registry PluginCard grid is now AS-only. `LazyVStack →
+  VStack` on the Tools tab (gaps were returning on re-appear).
+- **1.0.12** — dedupe Tools-tab plugin cards (an index plugin is repo-installed
+  AND natively loaded → appeared twice); drop redundant "Native — this fork"
+  header.
+- **1.0.13** — **context-budget parity**: split the single "System Prompt" rail
+  into Persona / Grounding / Agent Loop / Plugin Instructions (the real slices
+  of the Intel prompt; the AS-only Model-Family-Guidance / Capability-Discovery
+  rails are amputated and intentionally absent).
+- **1.0.14** — **provider drag-to-reorder** (un-gated the sheet + added
+  `reorder()` to the Intel manager mirror; order flows into the model picker).
+- **1.0.15** — **two sync regressions fixed** (see below) + Keychain isolation.
+
+### Two silent sync regressions (found + fixed in 1.0.15)
+The cherry-picks took "theirs" on Intel-customized files that compile fine
+reverted, so they slipped through:
+1. **Keychain isolation** — `RemoteProviderKeychain` was back on the shared
+   `ai.osaurus.remote` service (the dev build could clobber a co-installed
+   production Osaurus's keys — the original "want to cry" bug). Restored via a
+   fork-private service name (`ai.osaurus.remote.intel`); same for
+   `MCPProviderKeychain`. The **identity** master key (`com.osaurus.account`,
+   iCloud-synced) is deliberately NOT isolated — sovereign identity is shared,
+   rented credentials are isolated.
+2. **README** — the App Intents cherry-pick (`d00cb1d1`) replaced our Intel
+   README with upstream's. Restored + added a "Run a model locally" section.
+
+### "Quietly excellent" readiness layer
+- **Regression audit** — revert-detector (Swift files that lost ALL Intel guards
+  vs `m14-usable`) → clean beyond the two above.
+- **License** — upstream MIT `LICENSE` + attribution intact.
+- **Guardrail** — `docs/UPSTREAM_SYNC.md` now has an "Intel-owned files, verify
+  after every sync" table + the revert-detector command, so syncs stop
+  clobbering our work.
+
+### The validation 🌸
+Renée posted the port on the official Osaurus Discord. The maintainers loved it
+("porting to Intel is not easy work! incredible") — one owns the same 2017
+MacBook — and asked to feature it on their socials. Distribution = handed to the
+people best placed to spread the story. We stay quietly excellent.
+
+### Current state / next
+- **Latest release:** 1.0.15 (build 16). Branch `intel-fork`, clean, pushed.
+- **Synced to upstream:** `d132b728` (0.19.15). **41 upstream commits pending**
+  the next sync (run the monthly workflow in `docs/UPSTREAM_SYNC.md`).
+- **Deferred:** chat-bubble rendering (watch-list); native 1-bit/ternary local
+  backend (when the ecosystem matures); louder distribution (by choice).
