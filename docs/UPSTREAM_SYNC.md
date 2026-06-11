@@ -127,3 +127,18 @@ For each upstream commit:
 
 - **Total upstream commits processed:** 44 substantive + ~97 vMLX pins + ~38 xcstrings
 - **Sessions:** 5 (2026-06-07/2026-06-08) | **Fully caught up to upstream/main** ✅
+
+---
+
+## Deferred / watch-list
+
+- **Chat "bubble" rendering for thoughts + tool-calls.** The Apple-Silicon
+  Osaurus renders reasoning/tool-call blocks in a newer "bubble" style; Intel
+  renders the 0.19.15 "card" style. The `Native*` chat views
+  (`NativeThinkingView`, `NativeToolCallGroupView`, `NativeMessageCellView`,
+  `NativeBlockViews` — ~5.3k lines of hand-tuned AppKit) are SHARED, not
+  Intel-divergent, so this is **not** an Intel reimplementation — it's a newer
+  upstream redesign. It is NOT in the 41 commits after `d132b728` (by subject).
+  **Decision (Renée, 2026-06-11): do NOT reinvent it.** If a future upstream
+  sync brings the redesign as a real commit, port it then. Otherwise leave the
+  card style as-is.
