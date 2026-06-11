@@ -13,15 +13,41 @@
 //  sandbox, Vectura) and skips amputated/Tahoe-only commits — so a pegged
 //  number would imply a parity we don't have.
 //
-//  ⚠️ SINGLE SOURCE OF TRUTH. Update these two values whenever you run an
+//  ⚠️ SINGLE SOURCE OF TRUTH. Update `IntelBuildInfo` below whenever you run an
 //  upstream sync, in lockstep with `docs/UPSTREAM_SYNC.md`. The release script
 //  (`scripts/release/cut_intel_release.sh`) greps `upstreamBase` from this file
 //  to stamp the release notes, so this is the only place the number lives.
 //
 
-#if OSAURUS_INTEL
 import Foundation
 
+/// Always-present, public accessor for the upstream-sync metadata. Lives
+/// OUTSIDE the `#if OSAURUS_INTEL` guard so the App target (which does NOT
+/// define the flag) can read it for the macOS About panel. Returns nil on the
+/// Apple-Silicon build.
+public enum OsaurusBuildInfo {
+    /// Short label for the About-panel version line, e.g. "upstream 0.19.15".
+    public static var upstreamShortLabel: String? {
+        #if OSAURUS_INTEL
+        return "upstream \(IntelBuildInfo.upstreamBase)"
+        #else
+        return nil
+        #endif
+    }
+
+    /// Full one-line credit, e.g. "Intel fork · synced to upstream Osaurus
+    /// 0.19.15 (d132b728)".
+    public static var upstreamFullCredit: String? {
+        #if OSAURUS_INTEL
+        return
+            "Intel fork · synced to upstream Osaurus \(IntelBuildInfo.upstreamBase) (\(IntelBuildInfo.upstreamCommit))"
+        #else
+        return nil
+        #endif
+    }
+}
+
+#if OSAURUS_INTEL
 enum IntelBuildInfo {
     /// The upstream Osaurus version era this build is synced to (display only).
     static let upstreamBase = "0.19.15"

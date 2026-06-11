@@ -244,6 +244,11 @@ struct ToolsManagerView: View {
         let currentPlugins = repoService.plugins
         let currentProviders = providerManager.configuration.providers
         let currentProviderStates = providerManager.providerStates
+        // Natively-loaded (this-fork) plugins live outside repoService.plugins
+        // (they're surfaced via the "Native — this fork" section), so capture
+        // them separately or the Available tab would omit their tools — e.g.
+        // ReneeRAG and its 14 tools.
+        let currentNativePlugins = PluginManager.shared.nativelyLoadedPlugins()
 
         let (installedPluginsResult, remoteToolsResult, runtimeToolsResult, builtInSandboxToolsResult) =
             await Task.detached(priority: .userInitiated) {
@@ -284,9 +289,34 @@ struct ToolsManagerView: View {
 
                         return (plugin, matchedTools)
                     }
-                    .sorted {
-                        $0.plugin.displayName < $1.plugin.displayName
+                // 1b. Native (this-fork) plugins — their tools are registered
+                // in ToolRegistry but the plugins aren't in repoService.plugins,
+                // so build entries from PluginManager directly.
+                let nativeInstalled: [(plugin: PluginState, tools: [ToolRegistry.ToolEntry])] =
+                    currentNativePlugins.compactMap { info in
+                        let names = Set(info.toolNames)
+                        var matchedTools = currentToolEntries.filter { names.contains($0.name) }
+                        if !query.isEmpty {
+                            let pluginMatches = [info.pluginId.lowercased(), info.name.lowercased()]
+                                .contains { SearchService.fuzzyMatch(query: queryLower, in: $0) }
+                            if !pluginMatches {
+                                matchedTools = matchedTools.filter { tool in
+                                    [tool.name.lowercased(), tool.description.lowercased()]
+                                        .contains { SearchService.fuzzyMatch(query: queryLower, in: $0) }
+                                }
+                            }
+                        }
+                        if matchedTools.isEmpty { return nil }
+                        let state = PluginState(
+                            pluginId: info.pluginId,
+                            name: info.name,
+                            installedVersion: SemanticVersion(major: 0, minor: 0, patch: 0)
+                        )
+                        return (state, matchedTools)
                     }
+
+                let installedAndNative = (installedPlugins + nativeInstalled)
+                    .sorted { $0.plugin.displayName < $1.plugin.displayName }
 
                 // 2. Remote Provider Tools (for Available tab)
                 let remoteTools =
@@ -338,7 +368,7 @@ struct ToolsManagerView: View {
                     .filter { builtInSandboxNames.contains($0.name) }
                     .filter(matchesToolSearch)
 
-                return (installedPlugins, remoteTools, runtimeTools, builtInSandboxTools)
+                return (installedAndNative, remoteTools, runtimeTools, builtInSandboxTools)
             }.value
 
         guard !Task.isCancelled else { return }

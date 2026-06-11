@@ -430,6 +430,7 @@ struct PluginsView: View {
                 ForEach(Array(filteredPlugins.enumerated()), id: \.element.id) { index, plugin in
                     PluginCard(
                         plugin: plugin,
+                        isBrowseContext: true,
                         missingPermissions: [],
                         animationDelay: Double(index) * 0.05,
                         hasAppeared: hasAppeared,
@@ -618,6 +619,10 @@ struct PluginsView: View {
 private struct PluginCard: View {
     @Environment(\.theme) private var theme
     let plugin: PluginState
+    /// In the Browse tab an already-installed plugin reads "Installed"; in the
+    /// Installed tab it reads "Loaded" (it's loaded + active), matching the
+    /// native-plugin cards there.
+    var isBrowseContext: Bool = false
     let missingPermissions: [SystemPermission]
     let animationDelay: Double
     let hasAppeared: Bool
@@ -845,7 +850,11 @@ private struct PluginCard: View {
         } else if plugin.hasUpdate {
             StatusCapsuleBadge(icon: "arrow.up.circle.fill", text: "Update", color: .orange)
         } else if plugin.isInstalled {
-            StatusCapsuleBadge(icon: "checkmark.circle.fill", text: "Installed", color: .green)
+            StatusCapsuleBadge(
+                icon: "checkmark.circle.fill",
+                text: isBrowseContext ? "Installed" : "Loaded",
+                color: .green
+            )
         }
     }
 

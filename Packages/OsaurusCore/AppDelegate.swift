@@ -285,9 +285,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     @objc private func dockAbout() {
+        let shortVersion = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+        let versionLine =
+            OsaurusBuildInfo.upstreamShortLabel.map { "\(shortVersion) · \($0)" } ?? shortVersion
         NSApp.orderFrontStandardAboutPanel(options: [
             .applicationName: "Osaurus",
-            .applicationVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0",
+            .applicationVersion: versionLine,
             .version: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1",
         ])
     }

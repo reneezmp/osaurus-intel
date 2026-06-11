@@ -44,10 +44,13 @@ private extension osaurusApp {
     var aboutCommand: some Commands {
         CommandGroup(replacing: .appInfo) {
             Button {
+                let shortVersion =
+                    Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0"
+                let versionLine =
+                    OsaurusBuildInfo.upstreamShortLabel.map { "\(shortVersion) · \($0)" } ?? shortVersion
                 NSApp.orderFrontStandardAboutPanel(options: [
-                    .applicationName: "Osaurus",
-                    .applicationVersion: Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String
-                        ?? "1.0",
+                    .applicationName: "Osaurus (Intel)",
+                    .applicationVersion: versionLine,
                     .version: Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "1",
                 ])
             } label: {
