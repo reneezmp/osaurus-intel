@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.14</title>
+      <pubDate>Thu, 11 Jun 2026 13:03:30 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>15</sparkle:version>
+      <sparkle:shortVersionString>1.0.14</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.14/Osaurus-Intel-1.0.14.zip" length="50724858" type="application/octet-stream" sparkle:edSignature="1iq4e4PkK1KWevVpcj5JvO0JVg6kE8vPCddKqmOKONEFyBCk8dT0pMOmSUz6LJC4tOLoInT2lYGjlETk3dUMDw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.14
+
+- 🔀 Settings → Providers: you can now reorder providers. With more than one provider, a reorder button appears in the header — drag to set the order, which is reflected in the list and the chat model picker.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.13</title>
       <pubDate>Thu, 11 Jun 2026 12:50:25 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
