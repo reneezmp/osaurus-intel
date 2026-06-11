@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.13</title>
+      <pubDate>Thu, 11 Jun 2026 12:50:25 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>14</sparkle:version>
+      <sparkle:shortVersionString>1.0.13</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.13/Osaurus-Intel-1.0.13.zip" length="50664547" type="application/octet-stream" sparkle:edSignature="c6wRITaHjQ3w3zdfxu4d8bQmXSfNurTaVBRxnDzrOUY3Nr73N40SSWULMN89iMqltuaSRKAVOS+MUIhE6AGPCQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.13
+
+- 📊 The context-budget popover now breaks the system prompt into named rails — Persona, Grounding (working folder), Agent Loop, Plugin Instructions — alongside Tools / Conversation / Output, instead of a single "System Prompt" line. More detail, matching the Apple-Silicon build's granularity.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.12</title>
       <pubDate>Thu, 11 Jun 2026 12:35:34 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
