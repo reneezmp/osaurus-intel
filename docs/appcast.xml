@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.16</title>
+      <pubDate>Fri, 12 Jun 2026 12:24:12 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>17</sparkle:version>
+      <sparkle:shortVersionString>1.0.16</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.16/Osaurus-Intel-1.0.16.zip" length="50726854" type="application/octet-stream" sparkle:edSignature="8L7/okKl4pdYQNxhGYkzqHWWnYzNRPNld5HLGOf0OHnx6E7CGYzBETqCqU4WEVGlx4hULn9h0euWu8xDdEhbDQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.16
+
+Plugin updates are now detected: when an installed plugin has a newer version in the plugin repository, the Plugins tab shows an Upgrade button and an update-count badge — and upgrading clears it. (The Search plugin just shipped 1.1.0 with a resilient multi-engine cascade — open Plugins → Installed to upgrade.)
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.15</title>
       <pubDate>Thu, 11 Jun 2026 13:25:13 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
