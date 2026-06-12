@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "IntelStubs",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "MLX", targets: ["MLX"]),
         .library(name: "MLXRandom", targets: ["MLXRandom"]),

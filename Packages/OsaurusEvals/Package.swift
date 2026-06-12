@@ -16,7 +16,7 @@ import PackageDescription
 
 let package = Package(
     name: "OsaurusEvals",
-    platforms: [.macOS(.v15)],
+    platforms: [.macOS(.v14)],
     products: [
         .library(name: "OsaurusEvalsKit", targets: ["OsaurusEvalsKit"]),
         .executable(name: "osaurus-evals", targets: ["OsaurusEvalsCLI"]),

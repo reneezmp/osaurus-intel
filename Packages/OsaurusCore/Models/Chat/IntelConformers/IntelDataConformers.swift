@@ -520,6 +520,9 @@ struct ImageFullScreenView: View { var image: Any? = nil; var altText: String = 
 
 extension View {
     func imageFullScreenSheetPresentation() -> some View {
+        // NOTE: macOS 15's `.presentationSizing(.fitted)` was dropped for
+        // Ventura/Sonoma compatibility; the ideal frame below sizes the sheet
+        // sensibly on all supported OSes.
         frame(
             minWidth: 320,
             idealWidth: 960,
@@ -528,7 +531,6 @@ extension View {
             idealHeight: 720,
             maxHeight: .infinity
         )
-        .presentationSizing(.fitted)
     }
 }
 

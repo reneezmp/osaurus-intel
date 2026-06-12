@@ -28,6 +28,11 @@ NOTES="${2:-Maintenance release.}"
 
 REPO="reneezmp/osaurus-intel"
 BRANCH="intel-fork"
+# Minimum macOS the build supports (Sparkle won't offer the update below this).
+# Keep in lockstep with the deployment target in the Package.swift files +
+# project.pbxproj. macOS 14 (Sonoma) as of the Ventura-compat work; → 13.0 once
+# Phase B lands.
+MIN_SYS="14.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 
@@ -116,7 +121,7 @@ ITEM=$(cat <<EOF
       <sparkle:channel>release</sparkle:channel>
       <sparkle:version>${BUILD}</sparkle:version>
       <sparkle:shortVersionString>${SHORT_VERSION}</sparkle:shortVersionString>
-      <sparkle:minimumSystemVersion>15.0</sparkle:minimumSystemVersion>
+      <sparkle:minimumSystemVersion>${MIN_SYS}</sparkle:minimumSystemVersion>
       <enclosure url="${DL_URL}" length="${LENGTH}" type="application/octet-stream" sparkle:edSignature="${EDSIG}"/>
       <description sparkle:format="markdown"><![CDATA[
 ## Osaurus (Intel) ${SHORT_VERSION}

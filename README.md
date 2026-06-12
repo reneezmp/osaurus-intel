@@ -62,7 +62,7 @@ These depend on arm64-only frameworks and are disabled on Intel:
    - **Cloud** — e.g. DeepSeek or OpenAI: paste your API key.
    - **Local** — run a [llama.cpp](https://github.com/ggml-org/llama.cpp) server (or Ollama) and point a provider at `http://localhost:8080/v1` with no key. Its models appear in the chat picker automatically.
 
-Requires an Intel Mac running a recent macOS (Sequoia tested via OCLP). Use a cloud key, a local server, or both side by side.
+Requires an Intel Mac running **macOS 14 (Sonoma) or later** (Sequoia tested via OCLP; native Ventura support is in progress). Use a cloud key, a local server, or both side by side.
 
 ---
 

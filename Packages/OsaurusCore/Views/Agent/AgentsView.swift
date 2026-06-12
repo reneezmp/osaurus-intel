@@ -872,6 +872,17 @@ private struct TabBarViewportWidthKey: PreferenceKey {
     }
 }
 
+/// Reports how far the tab strip has been scrolled horizontally (>= 0). A
+/// macOS 13/14/15-compatible replacement for `onScrollGeometryChange` (15+):
+/// the content's leading edge, measured in the ScrollView's named coordinate
+/// space, goes negative as you scroll right — so the offset is `-minX`.
+private struct TabBarScrollOffsetKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = nextValue()
+    }
+}
+
 // MARK: - Agent Detail View
 
 struct AgentDetailView: View {
@@ -1779,13 +1790,19 @@ struct AgentDetailView: View {
                 .padding(.horizontal, 4)
                 .background(
                     GeometryReader { inner in
-                        Color.clear.preference(
-                            key: TabBarContentWidthKey.self,
-                            value: inner.size.width
-                        )
+                        Color.clear
+                            .preference(
+                                key: TabBarContentWidthKey.self,
+                                value: inner.size.width
+                            )
+                            .preference(
+                                key: TabBarScrollOffsetKey.self,
+                                value: -inner.frame(in: .named("tabBarScroll")).minX
+                            )
                     }
                 )
             }
+            .coordinateSpace(name: "tabBarScroll")
             .background(
                 GeometryReader { outer in
                     Color.clear.preference(
@@ -1796,15 +1813,11 @@ struct AgentDetailView: View {
             )
             .onPreferenceChange(TabBarContentWidthKey.self) { tabBarContentWidth = $0 }
             .onPreferenceChange(TabBarViewportWidthKey.self) { tabBarViewportWidth = $0 }
-            // `onScrollGeometryChange` is the canonical macOS 15+ way to
-            // observe scroll offset; the older GeometryReader-in-named-
-            // coordinate-space pattern is flaky on horizontal AppKit-backed
-            // scroll views and was leaving the trailing indicator stuck on.
-            .onScrollGeometryChange(for: CGFloat.self) { geometry in
-                geometry.contentOffset.x
-            } action: { _, newOffset in
-                tabBarScrollOffset = max(0, newOffset)
-            }
+            // macOS 13/14/15-compatible scroll-offset tracking (replaces the
+            // macOS-15-only `onScrollGeometryChange`): the content's leading
+            // edge in the "tabBarScroll" coordinate space goes negative as the
+            // strip scrolls right, so TabBarScrollOffsetKey reports `-minX`.
+            .onPreferenceChange(TabBarScrollOffsetKey.self) { tabBarScrollOffset = max(0, $0) }
             // Edge fades on whichever side has off-screen content. `mask`
             // runs before any overlay, so the chevrons sit ON TOP of the
             // fades rather than being faded themselves.
