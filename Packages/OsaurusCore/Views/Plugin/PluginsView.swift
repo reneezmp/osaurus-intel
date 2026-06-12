@@ -33,6 +33,10 @@ struct PluginsView: View {
     // separate from the arm64 registry. Surfaced in the Installed tab.
     @State private var nativePlugins: [PluginManager.LoadedPluginInfo] = []
     @State private var configurablePluginIds: Set<String> = []
+    /// Plugin ids the repo index has a newer version for — drives the "Update"
+    /// badge + action on the Installed-tab native cards (the registry list isn't
+    /// observed here, so this is snapshotted into @State on each refresh).
+    @State private var nativeUpdatablePluginIds: Set<String> = []
     #endif
 
     @State private var showSecretsSheet: Bool = false
@@ -398,11 +402,16 @@ struct PluginsView: View {
                     NativePluginCard(
                         plugin: plugin,
                         isConfigurable: configurablePluginIds.contains(plugin.pluginId),
+                        hasUpdate: nativeUpdatablePluginIds.contains(plugin.pluginId),
                         onOpenSettings: { showIntelPluginConfig = true },
                         onSelect: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 selectedNativePlugin = plugin
                             }
+                        },
+                        onUpgrade: {
+                            try await repoService.upgrade(pluginId: plugin.pluginId)
+                            reload()
                         },
                         onUninstall: {
                             let pid = plugin.pluginId
@@ -599,6 +608,7 @@ struct PluginsView: View {
         // from PluginManager and doesn't wait on the repo refresh).
         nativePlugins = PluginManager.shared.nativelyLoadedPlugins()
         configurablePluginIds = Set(PluginManager.shared.configurablePlugins().map { $0.id })
+        nativeUpdatablePluginIds = Set(currentPlugins.filter { $0.hasUpdate }.map { $0.pluginId })
         #endif
 
         var permissionCount = 0

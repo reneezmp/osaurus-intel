@@ -16,8 +16,11 @@ import AppKit
 struct NativePluginCard: View {
     let plugin: PluginManager.LoadedPluginInfo
     let isConfigurable: Bool
+    /// True when the repo index has a newer version than the installed one.
+    var hasUpdate: Bool = false
     let onOpenSettings: () -> Void
     let onSelect: () -> Void
+    var onUpgrade: (() async throws -> Void)? = nil
     var onUninstall: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
@@ -33,11 +36,19 @@ struct NativePluginCard: View {
                 VStack(alignment: .leading, spacing: 3) {
                     HStack(spacing: 6) {
                         Text(plugin.name).font(.headline).foregroundColor(theme.primaryText)
-                        HStack(spacing: 3) {
-                            Image(systemName: "checkmark.circle.fill").font(.caption2)
-                            Text("Loaded").font(.caption2.weight(.medium))
+                        if hasUpdate {
+                            HStack(spacing: 3) {
+                                Image(systemName: "arrow.up.circle.fill").font(.caption2)
+                                Text("Update").font(.caption2.weight(.medium))
+                            }
+                            .foregroundColor(.orange)
+                        } else {
+                            HStack(spacing: 3) {
+                                Image(systemName: "checkmark.circle.fill").font(.caption2)
+                                Text("Loaded").font(.caption2.weight(.medium))
+                            }
+                            .foregroundColor(theme.successColor)
                         }
-                        .foregroundColor(theme.successColor)
                     }
                     Text("v\(plugin.version) · native x86_64")
                         .font(.caption).foregroundColor(theme.secondaryText)
@@ -47,6 +58,11 @@ struct NativePluginCard: View {
 
                 Menu {
                     Button { onSelect() } label: { Label("View Details", systemImage: "info.circle") }
+                    if hasUpdate, let onUpgrade {
+                        Button {
+                            Task { try? await onUpgrade() }
+                        } label: { Label("Update", systemImage: "arrow.up.circle.fill") }
+                    }
                     if isConfigurable {
                         Button { onOpenSettings() } label: { Label("Settings", systemImage: "gearshape") }
                     }
