@@ -1434,12 +1434,13 @@ final class SystemPromptComposer: @unchecked Sendable {
     // for Default). Memory/tools stay inert, matching the amputated build.
     static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
-        let (basePrompt, folder, toolMode, enabledToolNames) = await MainActor.run {
+        let (basePrompt, folder, toolMode, enabledToolNames, folderToolNames) = await MainActor.run {
             (
                 AgentManager.shared.effectiveSystemPrompt(for: id),
                 FolderContextService.shared.currentContext,
                 AgentManager.shared.effectiveToolSelectionMode(for: id),
-                AgentManager.shared.effectiveEnabledToolNames(for: id)
+                AgentManager.shared.effectiveEnabledToolNames(for: id),
+                Set(FolderToolManager.shared.folderToolNames)
             )
         }
         // M12 Gap 3: when a working folder is mounted, append the real
@@ -1496,7 +1497,16 @@ final class SystemPromptComposer: @unchecked Sendable {
         } else {
             let allSpecs = ToolRegistry.shared.openAISpecs()
             if toolMode == .manual, let enabled = enabledToolNames {
-                let allowed = Set(enabled)
+                // Folder/runtime tools (file_read, file_write, file_edit,
+                // file_search, file_tree, shell_run, git_*) are auto-mounted with
+                // the working directory and must BYPASS the manual capability
+                // allowlist — mirrors upstream, where runtime-managed tools form the
+                // always-loaded baseline and the manual picker only ADDS discretionary
+                // tools on top. Without this, selecting a folder gave a Manual-mode
+                // agent the "## Working Directory" prompt but none of the actual
+                // file/shell tool specs, so it couldn't call them (Renée, native
+                // Ventura, 2026-06-12).
+                let allowed = Set(enabled).union(folderToolNames)
                 tools = allSpecs.filter { allowed.contains($0.function.name) }
             } else {
                 tools = allSpecs
