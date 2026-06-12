@@ -136,11 +136,11 @@ struct OptionalIntField: View {
             initialized = true
             text = Self.stringValue(value)
         }
-        .onChange(of: value) { _, newValue in
+        .onChange(of: value) { newValue in
             let desired = Self.stringValue(newValue)
             if text != desired { text = desired }
         }
-        .onChange(of: text) { _, _ in commit() }
+        .onChange(of: text) { _ in commit() }
     }
 
     private static func stringValue(_ value: Int?) -> String {
@@ -190,11 +190,11 @@ struct OptionalDoubleField: View {
             initialized = true
             text = stringValue(value)
         }
-        .onChange(of: value) { _, newValue in
+        .onChange(of: value) { newValue in
             let desired = stringValue(newValue)
             if text != desired { text = desired }
         }
-        .onChange(of: text) { _, _ in commit() }
+        .onChange(of: text) { _ in commit() }
     }
 
     private func stringValue(_ value: Double?) -> String {
@@ -241,11 +241,11 @@ struct OptionalStringField: View {
             initialized = true
             text = value ?? ""
         }
-        .onChange(of: value) { _, newValue in
+        .onChange(of: value) { newValue in
             let desired = newValue ?? ""
             if text != desired { text = desired }
         }
-        .onChange(of: text) { _, _ in
+        .onChange(of: text) { _ in
             let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
             let normalized: String? = trimmed.isEmpty ? nil : trimmed
             if value != normalized { value = normalized }

@@ -263,7 +263,7 @@ struct CreateAgentBody: View {
                     // never changes the field's footprint.
                     .frame(width: nameFieldWidth + Layout.nameCaretAllowance)
                     .focused($nameFocused)
-                    .onChange(of: state.name) { _, newValue in
+                    .onChange(of: state.name) { newValue in
                         if newValue != state.selectedTemplate.defaultName {
                             state.nameUserEdited = true
                         }

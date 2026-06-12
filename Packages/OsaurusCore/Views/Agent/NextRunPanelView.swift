@@ -85,7 +85,7 @@ public struct NextRunPanelView: View {
         .task { await reload() }
         .onAppear { startTicker() }
         .onDisappear { refreshTask?.cancel() }
-        .onChange(of: agentId) { _, _ in Task { await reload() } }
+        .onChange(of: agentId) { _ in Task { await reload() } }
         .sheet(isPresented: $showEditInstructions) { editInstructionsSheet }
         .sheet(isPresented: $showCustomPause) { customPauseSheet }
     }

@@ -90,14 +90,14 @@ struct ManagementView: View {
                     .environment(\.theme, themeManager.currentTheme)
             )
             .onAppear(perform: handleAppear)
-            .onChange(of: stateManager.selectedTab) { handleTabChange(to: $1) }
-            .onChange(of: searchText) { handleSearchChange(to: $1) }
+            .onChange(of: stateManager.selectedTab) { newTab in handleTabChange(to: newTab) }
+            .onChange(of: searchText) { newText in handleSearchChange(to: newText) }
             // The pairing deeplink router publishes an invite here when an
             // `osaurus://...?pair=...` URL is opened. Forwarding it through
             // a local @State (`presentingInvite`) gives the sheet a stable
             // identity to bind to even after the coordinator nils out, and
             // lets us route the user to the Agents tab on success.
-            .onChange(of: pairCoordinator.pendingInvite) { _, newValue in
+            .onChange(of: pairCoordinator.pendingInvite) { newValue in
                 if let invite = newValue {
                     presentingInvite = invite
                 }

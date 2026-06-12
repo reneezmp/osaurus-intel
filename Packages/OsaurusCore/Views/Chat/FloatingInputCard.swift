@@ -183,6 +183,7 @@ struct FloatingInputCard: View {
     // Pause detection state
     @State private var lastSpeechTime: Date = .distantFuture
     @State private var hasDetectedSpeechThisTurn: Bool = false
+    @State private var wasStreaming = false
 
     @State private var showMicPermissionAlert: Bool = false
 
@@ -436,7 +437,8 @@ struct FloatingInputCard: View {
                     }
                 }
             }
-            .onChange(of: isStreaming) { wasStreaming, nowStreaming in
+            .onChange(of: isStreaming) { nowStreaming in
+                defer { wasStreaming = nowStreaming }
                 // Safety net: if focus was lost during streaming (e.g.
                 // the user clicked elsewhere or dismissed a dialog),
                 // re-claim it once the agent finishes so the user can
@@ -476,17 +478,17 @@ struct FloatingInputCard: View {
                     showVoiceOverlay = false
                 }
             }
-            .onChange(of: text) { _, newValue in
+            .onChange(of: text) { newValue in
                 // Sync from binding when it changes externally (e.g., quick actions)
                 if newValue != localText {
                     localText = newValue
                 }
             }
-            .onChange(of: localText) { _, _ in
+            .onChange(of: localText) { _ in
                 // Reset popup selection whenever the typed query changes
                 slashSelectedIndex = 0
             }
-            .onChange(of: showSlashPopup) { _, isVisible in
+            .onChange(of: showSlashPopup) { isVisible in
                 // Keep registry in sync so the global key monitor can suppress
                 // Escape from closing the window while the popup is open.
                 SlashCommandRegistry.shared.isPopupVisible = isVisible
@@ -494,10 +496,10 @@ struct FloatingInputCard: View {
             .onDisappear {
                 SlashCommandRegistry.shared.isPopupVisible = false
             }
-            .onChange(of: focusTrigger) { _, _ in
+            .onChange(of: focusTrigger) { _ in
                 isFocused = true
             }
-            .onChange(of: speechService.isRecording) { _, isRecording in
+            .onChange(of: speechService.isRecording) { isRecording in
                 print(
                     "[FloatingInputCard] isRecording changed to: \(isRecording). voiceInputState: \(voiceInputState), showVoiceOverlay: \(showVoiceOverlay)"
                 )
@@ -523,13 +525,13 @@ struct FloatingInputCard: View {
                     }
                 }
             }
-            .onChange(of: speechService.isSpeechDetected) { _, detected in
+            .onChange(of: speechService.isSpeechDetected) { detected in
                 if detected && voiceInputState == .recording {
                     hasDetectedSpeechThisTurn = true
                     lastSpeechTime = Date()
                 }
             }
-            .onChange(of: speechService.currentTranscription) { _, newValue in
+            .onChange(of: speechService.currentTranscription) { newValue in
                 // When new transcription arrives, user is speaking
                 // Only reset silence timer if there is also active audio detection or meaningful level
                 if voiceInputState == .recording && !newValue.isEmpty {
@@ -539,7 +541,7 @@ struct FloatingInputCard: View {
                     }
                 }
             }
-            .onChange(of: speechService.confirmedTranscription) { _, newValue in
+            .onChange(of: speechService.confirmedTranscription) { newValue in
                 // When confirmed transcription changes, user was speaking
                 if voiceInputState == .recording && !newValue.isEmpty {
                     if speechService.isSpeechDetected || speechService.audioLevel > 0.05 {
@@ -548,12 +550,12 @@ struct FloatingInputCard: View {
                     }
                 }
             }
-            .onChange(of: voiceInputState) { _, newState in
+            .onChange(of: voiceInputState) { newState in
                 if newState == .recording {
                     resetPauseDetectionForRecording()
                 }
             }
-            .onChange(of: showVoiceOverlay) { _, isShowing in
+            .onChange(of: showVoiceOverlay) { isShowing in
                 if isShowing {
                     pauseTimerCancellable = Timer.publish(every: 0.1, on: .main, in: .common)
                         .autoconnect()
@@ -658,7 +660,7 @@ private struct VoiceDebugObservers: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: speechService.microphonePermissionGranted) { _, granted in
+            .onChange(of: speechService.microphonePermissionGranted) { granted in
                 print("[VoiceDebug] microphonePermissionGranted → \(granted)")
                 voiceDebugLog(
                     trigger: "micPermission",
@@ -669,7 +671,7 @@ private struct VoiceDebugObservers: ViewModifier {
                     isLoaded: speechService.isModelLoaded
                 )
             }
-            .onChange(of: speechService.isModelLoaded) { _, loaded in
+            .onChange(of: speechService.isModelLoaded) { loaded in
                 print("[VoiceDebug] isModelLoaded → \(loaded)")
                 voiceDebugLog(
                     trigger: "isModelLoaded",
@@ -680,10 +682,10 @@ private struct VoiceDebugObservers: ViewModifier {
                     isLoaded: loaded
                 )
             }
-            .onChange(of: speechService.isLoadingModel) { _, loading in
+            .onChange(of: speechService.isLoadingModel) { loading in
                 print("[VoiceDebug] isLoadingModel → \(loading)")
             }
-            .onChange(of: speechModelManager.downloadedModelsCount) { _, count in
+            .onChange(of: speechModelManager.downloadedModelsCount) { count in
                 print("[VoiceDebug] downloadedModelsCount → \(count)")
                 voiceDebugLog(
                     trigger: "downloadedModelsCount",
@@ -1599,13 +1601,13 @@ extension FloatingInputCard {
                 onDismiss: dismissModelPicker
             )
         }
-        .onChange(of: showModelPicker) { _, isShowing in
+        .onChange(of: showModelPicker) { isShowing in
             if isShowing {
                 // Snapshot options when popover opens to prevent refresh during streaming
                 cachedPickerItems = pickerItems
             }
         }
-        .onChange(of: pickerItems) { _, newItems in
+        .onChange(of: pickerItems) { newItems in
             // mirror upstream changes while open so picker triggered refreshes are visible
             if showModelPicker {
                 cachedPickerItems = newItems
@@ -1631,7 +1633,7 @@ extension FloatingInputCard {
                     Image(systemName: isEnabled ? "checkmark.square.fill" : "square")
                         .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .semibold))
                         .foregroundColor(isEnabled ? theme.accentColor : theme.tertiaryText)
-                        .contentTransition(.symbolEffect(.replace))
+                        .contentTransition(.opacity)
 
                     Text("Thinking", bundle: .module)
                         .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
@@ -1655,7 +1657,7 @@ extension FloatingInputCard {
                 Image(systemName: autoSpeakAssistant ? "checkmark.square.fill" : "square")
                     .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .semibold))
                     .foregroundColor(autoSpeakAssistant ? theme.accentColor : theme.tertiaryText)
-                    .contentTransition(.symbolEffect(.replace))
+                    .contentTransition(.opacity)
 
                 Text("Auto-speak", bundle: .module)
                     .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
@@ -2187,7 +2189,7 @@ extension FloatingInputCard {
                 triggerPulse()
             }
         }
-        .onChange(of: clipboardService.hasNewContent) { _, newValue in
+        .onChange(of: clipboardService.hasNewContent) { newValue in
             if newValue {
                 triggerPulse()
             }

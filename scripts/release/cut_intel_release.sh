@@ -32,7 +32,7 @@ BRANCH="intel-fork"
 # Keep in lockstep with the deployment target in the Package.swift files +
 # project.pbxproj. macOS 14 (Sonoma) as of the Ventura-compat work; → 13.0 once
 # Phase B lands.
-MIN_SYS="14.0"
+MIN_SYS="13.0"
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
 cd "$ROOT"
 

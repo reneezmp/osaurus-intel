@@ -117,7 +117,7 @@ struct VoiceInputSettingsTab: View {
                 Toggle("", isOn: $voiceInputEnabled)
                     .toggleStyle(SwitchToggleStyle(tint: theme.successColor))
                     .labelsHidden()
-                    .onChange(of: voiceInputEnabled) { _, _ in
+                    .onChange(of: voiceInputEnabled) { _ in
                         saveSettings()
                     }
             }
@@ -196,7 +196,7 @@ struct VoiceInputSettingsTab: View {
                     tabs: TranscriptionStopMode.allCases.map { ($0, $0.displayName) }
                 )
                 .frame(maxWidth: .infinity)
-                .onChange(of: transcriptionStopMode) { _, _ in
+                .onChange(of: transcriptionStopMode) { _ in
                     saveSettings()
                 }
 
@@ -230,7 +230,7 @@ struct VoiceInputSettingsTab: View {
                     .tint(theme.accentColor)
                     .disabled(transcriptionStopMode == .manual)
                     .opacity(transcriptionStopMode == .manual ? 0.5 : 1)
-                    .onChange(of: pauseDuration) { _, _ in
+                    .onChange(of: pauseDuration) { _ in
                         saveSettings()
                     }
 
@@ -270,7 +270,7 @@ struct VoiceInputSettingsTab: View {
                     .tint(theme.accentColor)
                     .disabled(transcriptionStopMode == .manual || pauseDuration == 0)
                     .opacity(transcriptionStopMode == .manual || pauseDuration == 0 ? 0.5 : 1)
-                    .onChange(of: confirmationDelay) { _, _ in
+                    .onChange(of: confirmationDelay) { _ in
                         saveSettings()
                     }
 
@@ -298,7 +298,7 @@ struct VoiceInputSettingsTab: View {
 
                 Slider(value: $silenceTimeoutSeconds, in: 10 ... 120, step: 5)
                     .tint(theme.accentColor)
-                    .onChange(of: silenceTimeoutSeconds) { _, _ in
+                    .onChange(of: silenceTimeoutSeconds) { _ in
                         saveSettings()
                     }
 

@@ -207,11 +207,7 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         }
 
         // Activate app and bring this specific window forward
-        if #available(macOS 14.0, *) {
-            _ = NSRunningApplication.current.activate(options: .activateAllWindows)
-        } else {
-            _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
-        }
+        _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
         NSApp.activate(ignoringOtherApps: true)
 
         window.orderFrontRegardless()
@@ -352,7 +348,7 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         guard !windows.isEmpty else { return }
 
         NSApp.unhide(nil)
-        _ = NSRunningApplication.current.activate(options: [.activateAllWindows])
+        _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
 
         // Bring all windows to front without churn on key window state
         for (_, window) in nsWindows {

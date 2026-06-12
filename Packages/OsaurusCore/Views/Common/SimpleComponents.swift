@@ -678,7 +678,7 @@ struct SystemResourceMonitor: View {
         .onAppear {
             Task { await refreshModelCount() }
         }
-        .onChange(of: showResourcePopover) { _, isShowing in
+        .onChange(of: showResourcePopover) { isShowing in
             if !isShowing {
                 // Refresh count when popover closes
                 Task { await refreshModelCount() }

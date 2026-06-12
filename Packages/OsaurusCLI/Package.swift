@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "OsaurusCLI",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .executable(name: "osaurus-cli", targets: ["OsaurusCLI"]),
         .library(name: "OsaurusCLICore", targets: ["OsaurusCLICore"]),

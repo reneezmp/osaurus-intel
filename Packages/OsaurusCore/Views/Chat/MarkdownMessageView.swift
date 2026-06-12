@@ -105,12 +105,12 @@ private struct MemoizedMarkdownView: View {
                 scheduleBackgroundParse(for: text, oldText: "", debounce: false)
             }
         }
-        .onChange(of: text) { oldText, newText in
+        .onChange(of: text) { newText in
             if lastParsedText != newText {
-                scheduleBackgroundParse(for: newText, oldText: oldText, debounce: true)
+                scheduleBackgroundParse(for: newText, oldText: "", debounce: true)
             }
         }
-        .onChange(of: isStreaming) { _, newValue in
+        .onChange(of: isStreaming) { newValue in
             // When streaming ends, parse synchronously so the segments
             // are up-to-date before the table re-measures row height.
             // Background parsing would race with noteHeightOfRows.

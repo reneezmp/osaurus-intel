@@ -173,7 +173,7 @@ struct ChatSessionSidebar: View {
         // sidebar's loadSession) is a context change — wipe per-window
         // filter state so the new agent starts on "All" with an empty
         // search instead of inheriting the previous agent's lens.
-        .onChange(of: agentId) { _, _ in
+        .onChange(of: agentId) { _ in
             sourceFilter = .all
             searchQuery = ""
             hoveredFilter = nil
@@ -829,7 +829,7 @@ private struct SessionRow: View {
             onBufferChange?(session.title)
             isTextFieldFocused = true
         }
-        .onChange(of: editBuffer) { _, newValue in
+        .onChange(of: editBuffer) { newValue in
             onBufferChange?(newValue)
         }
     }

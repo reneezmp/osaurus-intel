@@ -19,7 +19,7 @@ import SwiftUI
 struct SchedulesView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var managementState = ManagementStateManager.shared
-    private var scheduleManager = ScheduleManager.shared
+    @ObservedObject private var scheduleManager = ScheduleManager.shared
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
@@ -158,7 +158,7 @@ struct SchedulesView: View {
             }
             consumePendingScheduleEditRequest()
         }
-        .onChange(of: managementState.pendingScheduleEditId) { _, _ in
+        .onChange(of: managementState.pendingScheduleEditId) { _ in
             consumePendingScheduleEditRequest()
         }
     }
@@ -638,17 +638,17 @@ private struct ScheduleTimePicker: View {
                 .onAppear {
                     hourText = "\(displayHour)"
                 }
-                .onChange(of: hour) { _, _ in
+                .onChange(of: hour) { _ in
                     if !hourFocused {
                         hourText = "\(displayHour)"
                     }
                 }
                 .onSubmit { validateHour() }
-                .onChange(of: hourFocused) { _, focused in
+                .onChange(of: hourFocused) { focused in
                     isFocused = focused || minuteFocused
                     if !focused { validateHour() }
                 }
-                .onChange(of: hourText) { _, _ in
+                .onChange(of: hourText) { _ in
                     if hourFocused { commitHourLive() }
                 }
 
@@ -666,17 +666,17 @@ private struct ScheduleTimePicker: View {
                 .onAppear {
                     minuteText = String(format: "%02d", minute)
                 }
-                .onChange(of: minute) { _, newValue in
+                .onChange(of: minute) { newValue in
                     if !minuteFocused {
                         minuteText = String(format: "%02d", newValue)
                     }
                 }
                 .onSubmit { validateMinute() }
-                .onChange(of: minuteFocused) { _, focused in
+                .onChange(of: minuteFocused) { focused in
                     isFocused = hourFocused || focused
                     if !focused { validateMinute() }
                 }
-                .onChange(of: minuteText) { _, _ in
+                .onChange(of: minuteText) { _ in
                     if minuteFocused { commitMinuteLive() }
                 }
 
@@ -786,20 +786,20 @@ private struct HourlyMinutePicker: View {
                 .onAppear {
                     minuteText = String(format: "%02d", minute)
                 }
-                .onChange(of: minute) { _, newValue in
+                .onChange(of: minute) { newValue in
                     if !textFieldFocused {
                         minuteText = String(format: "%02d", newValue)
                     }
                 }
                 .onSubmit { validateMinute() }
-                .onChange(of: textFieldFocused) { _, focused in
+                .onChange(of: textFieldFocused) { focused in
                     isFocused = focused
                     if !focused { validateMinute() }
                 }
                 // See `ScheduleTimePicker` — commit live so previews and
                 // an immediate Save reflect the typed value without
                 // requiring focus loss first.
-                .onChange(of: minuteText) { _, _ in
+                .onChange(of: minuteText) { _ in
                     if textFieldFocused { commitMinuteLive() }
                 }
 
@@ -1049,17 +1049,17 @@ private struct OnceTimePicker: View {
                 .onAppear {
                     hourText = "\(displayHour)"
                 }
-                .onChange(of: hour) { _, _ in
+                .onChange(of: hour) { _ in
                     if !hourFocused {
                         hourText = "\(displayHour)"
                     }
                 }
                 .onSubmit { validateHour() }
-                .onChange(of: hourFocused) { _, focused in
+                .onChange(of: hourFocused) { focused in
                     isFocused = focused || minuteFocused
                     if !focused { validateHour() }
                 }
-                .onChange(of: hourText) { _, _ in
+                .onChange(of: hourText) { _ in
                     if hourFocused { commitHourLive() }
                 }
 
@@ -1077,17 +1077,17 @@ private struct OnceTimePicker: View {
                 .onAppear {
                     minuteText = String(format: "%02d", minute)
                 }
-                .onChange(of: minute) { _, newValue in
+                .onChange(of: minute) { newValue in
                     if !minuteFocused {
                         minuteText = String(format: "%02d", newValue)
                     }
                 }
                 .onSubmit { validateMinute() }
-                .onChange(of: minuteFocused) { _, focused in
+                .onChange(of: minuteFocused) { focused in
                     isFocused = hourFocused || focused
                     if !focused { validateMinute() }
                 }
-                .onChange(of: minuteText) { _, _ in
+                .onChange(of: minuteText) { _ in
                     if minuteFocused { commitMinuteLive() }
                 }
 
@@ -1304,12 +1304,12 @@ private struct DayOfMonthPicker: View {
                 .onAppear {
                     dayText = "\(selectedDay)"
                 }
-                .onChange(of: selectedDay) { _, newValue in
+                .onChange(of: selectedDay) { newValue in
                     if !textFieldFocused {
                         dayText = "\(newValue)"
                     }
                 }
-                .onChange(of: dayText) { _, newValue in
+                .onChange(of: dayText) { newValue in
                     if let value = Int(newValue), value >= 1, value <= 31 {
                         selectedDay = value
                     }
@@ -1317,7 +1317,7 @@ private struct DayOfMonthPicker: View {
                 .onSubmit {
                     validateAndUpdateDay()
                 }
-                .onChange(of: textFieldFocused) { _, focused in
+                .onChange(of: textFieldFocused) { focused in
                     isFocused = focused
                     if !focused {
                         validateAndUpdateDay()

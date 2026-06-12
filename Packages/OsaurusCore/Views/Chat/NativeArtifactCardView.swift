@@ -265,11 +265,11 @@ final class NativeArtifactCardView: NSView {
         let inset: CGFloat = 0.5
         let rect = CGRect(x: inset, y: inset, width: b.width - inset * 2, height: b.height - inset * 2)
         let r = max(10 - inset, 0)
-        borderStrokeLayer?.path = NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).cgPath
+        borderStrokeLayer?.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
 
         hoverOverlayLayer?.frame = b
         let mask = CAShapeLayer()
-        mask.path = NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).cgPath
+        mask.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
         hoverOverlayLayer?.mask = mask
 
         let ib = iconBg.bounds

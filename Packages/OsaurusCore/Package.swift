@@ -4,7 +4,7 @@ import PackageDescription
 let package = Package(
     name: "OsaurusCore",
     defaultLocalization: "en",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "OsaurusCore", targets: ["OsaurusCore"])
     ],

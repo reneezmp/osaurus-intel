@@ -55,6 +55,7 @@ private struct ShimmerFadeIn: ViewModifier {
     /// Fade-in opacity, snapped to 1 at rest so the static path renders
     /// the underlying view unchanged.
     @State private var opacity: Double = 1
+    @State private var previousTrigger: String = ""
 
     func body(content: Content) -> some View {
         content
@@ -69,8 +70,9 @@ private struct ShimmerFadeIn: ViewModifier {
                 .allowsHitTesting(false)
             )
             .mask(content)
-            .onChange(of: trigger ?? "") { oldValue, newValue in
-                guard !newValue.isEmpty, oldValue != newValue else { return }
+            .onChange(of: trigger ?? "") { newValue in
+                guard !newValue.isEmpty, previousTrigger != newValue else { previousTrigger = newValue; return }
+                previousTrigger = newValue
                 run()
             }
     }

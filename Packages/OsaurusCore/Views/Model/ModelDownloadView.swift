@@ -175,17 +175,17 @@ struct ModelDownloadView: View {
             gridListsRefreshTask?.cancel()
             gridListsRefreshTask = nil
         }
-        .onChange(of: selectedTab) { _, _ in refreshGridLists() }
-        .onChange(of: sortOption) { _, _ in refreshGridLists() }
-        .onChange(of: filterState) { _, _ in refreshGridLists() }
-        .onChange(of: debouncedSearchText) { _, _ in refreshGridLists() }
+        .onChange(of: selectedTab) { _ in refreshGridLists() }
+        .onChange(of: sortOption) { _ in refreshGridLists() }
+        .onChange(of: filterState) { _ in refreshGridLists() }
+        .onChange(of: debouncedSearchText) { _ in refreshGridLists() }
         .onReceive(
             modelManager.objectWillChange
                 .throttle(for: .milliseconds(200), scheduler: DispatchQueue.main, latest: true)
         ) { _ in
             scheduleGridListsRefresh()
         }
-        .onChange(of: searchText) { _, newValue in
+        .onChange(of: searchText) { newValue in
             // If input looks like a Hugging Face repo, switch to All so it's visible
             if ModelManager.parseHuggingFaceRepoId(from: newValue) != nil, selectedTab != .all {
                 selectedTab = .all

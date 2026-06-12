@@ -105,8 +105,8 @@ struct ExternalModelsSettingsView: View {
             }
         }
         .onAppear { refreshCounts() }
-        .onChange(of: importHFCache) { _, _ in rescan() }
-        .onChange(of: importLMStudio) { _, _ in rescan() }
+        .onChange(of: importHFCache) { _ in rescan() }
+        .onChange(of: importLMStudio) { _ in rescan() }
         .onReceive(NotificationCenter.default.publisher(for: .localModelsChanged)) { _ in
             refreshCounts()
         }

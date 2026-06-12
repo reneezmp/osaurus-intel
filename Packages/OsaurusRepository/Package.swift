@@ -3,7 +3,7 @@ import PackageDescription
 
 let package = Package(
     name: "OsaurusRepository",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "OsaurusRepository", targets: ["OsaurusRepository"])
     ],

@@ -181,7 +181,7 @@ private extension SidebarNavigation {
                 .padding(.bottom, 8)
             }
             .scrollIndicators(.hidden)
-            .onChange(of: selection) { _, newValue in
+            .onChange(of: selection) { newValue in
                 withAnimation(.spring(response: 0.35, dampingFraction: 0.8)) {
                     proxy.scrollTo(newValue, anchor: .center)
                 }

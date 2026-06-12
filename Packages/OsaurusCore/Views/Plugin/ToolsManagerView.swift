@@ -68,7 +68,7 @@ struct ToolsManagerView: View {
             }
             applyPendingSubTabRequest()
         }
-        .onChange(of: managementState.pendingToolsSubTab) { _, _ in
+        .onChange(of: managementState.pendingToolsSubTab) { _ in
             applyPendingSubTabRequest()
         }
         .task(id: searchText) {

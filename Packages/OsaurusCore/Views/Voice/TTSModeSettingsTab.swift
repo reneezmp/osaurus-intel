@@ -114,7 +114,7 @@ struct TTSModeSettingsTab: View {
                 Toggle("", isOn: $config.enabled)
                     .toggleStyle(SwitchToggleStyle(tint: theme.successColor))
                     .labelsHidden()
-                    .onChange(of: config.enabled) { _, _ in saveSettings() }
+                    .onChange(of: config.enabled) { _ in saveSettings() }
             }
 
             HStack(alignment: .top, spacing: 8) {
@@ -288,7 +288,7 @@ struct TTSModeSettingsTab: View {
                 .labelsHidden()
                 .pickerStyle(MenuPickerStyle())
                 .frame(maxWidth: 180)
-                .onChange(of: config.voice) { _, _ in saveSettings() }
+                .onChange(of: config.voice) { _ in saveSettings() }
             }
 
             VStack(alignment: .leading, spacing: 6) {

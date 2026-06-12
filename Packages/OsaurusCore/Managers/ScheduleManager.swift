@@ -7,7 +7,6 @@
 //
 
 import Foundation
-import Observation
 
 /// Notification posted when schedules change
 extension Notification.Name {
@@ -16,35 +15,32 @@ extension Notification.Name {
 }
 
 /// Manages scheduled AI tasks with precise timer-based execution
-@Observable
 @MainActor
-public final class ScheduleManager {
+public final class ScheduleManager: ObservableObject {
     public static let shared = ScheduleManager()
 
     // MARK: - Observable State
 
     /// All schedules
-    public private(set) var schedules: [Schedule] = []
+    @Published public private(set) var schedules: [Schedule] = []
 
     /// Per-agent schedule counts, kept in sync with `schedules`.
     /// Lets `AgentCard` look up its count in O(1) instead of
     /// re-filtering the array on every render.
-    public private(set) var scheduleCountsByAgent: [UUID: Int] = [:]
+    @Published public private(set) var scheduleCountsByAgent: [UUID: Int] = [:]
 
     /// Currently running tasks (schedule ID -> run info)
-    public private(set) var runningTasks: [UUID: ScheduleRunInfo] = [:]
+    @Published public private(set) var runningTasks: [UUID: ScheduleRunInfo] = [:]
 
     // MARK: - Private State
 
     /// The task that waits for the next scheduled execution
-    @ObservationIgnored
     private nonisolated(unsafe) var timerTask: Task<Void, Never>?
 
     /// Active execution tasks
     private var executionTasks: [UUID: Task<Void, Never>] = [:]
 
     /// Observer for timezone changes
-    @ObservationIgnored
     private nonisolated(unsafe) var timezoneObserver: NSObjectProtocol?
 
     // MARK: - Initialization

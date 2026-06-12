@@ -303,7 +303,7 @@ private struct WaveformMinimal: View {
                 isPulsing = true
             }
         }
-        .onChange(of: isActive) { _, active in
+        .onChange(of: isActive) { active in
             if active {
                 withAnimation(.easeOut(duration: 1.0).repeatForever(autoreverses: false)) {
                     isPulsing = true
@@ -469,7 +469,7 @@ public struct VoiceStatusIndicator: View {
                 Image(systemName: state.iconName)
                     .font(.system(size: compact ? 14 : 12, weight: .medium))
                     .foregroundColor(stateColor)
-                    .symbolEffect(.pulse, isActive: state == .processing)
+                // symbolEffect(.pulse) is macOS 14+; removed for Ventura compat
             }
             .frame(width: 20, height: 20)
 

@@ -97,7 +97,7 @@ struct ProvidersView: View {
             }
             applyPendingEditRequest()
         }
-        .onChange(of: managementState.pendingMCPProviderEditId) { _, _ in
+        .onChange(of: managementState.pendingMCPProviderEditId) { _ in
             applyPendingEditRequest()
         }
         .sheet(isPresented: $showAddSheet) {

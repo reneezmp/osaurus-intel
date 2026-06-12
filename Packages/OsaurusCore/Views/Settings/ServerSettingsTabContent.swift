@@ -110,10 +110,10 @@ struct ServerSettingsTabContent: View {
             draft = server.runtimeSettings
             draftLegacy = server.configuration
         }
-        .onChange(of: server.runtimeSettings) { _, newValue in
+        .onChange(of: server.runtimeSettings) { newValue in
             if !hasUnsavedChanges { draft = newValue }
         }
-        .onChange(of: server.configuration) { _, newValue in
+        .onChange(of: server.configuration) { newValue in
             if !hasUnsavedChanges { draftLegacy = newValue }
         }
     }
@@ -178,7 +178,7 @@ struct ServerSettingsTabContent: View {
             .safeAreaInset(edge: .top, spacing: 0) {
                 Color.clear.frame(height: 12)
             }
-            .onChange(of: activeSection) { _, new in
+            .onChange(of: activeSection) { new in
                 withAnimation(.smooth(duration: 0.45)) {
                     proxy.scrollTo(new, anchor: .top)
                 }

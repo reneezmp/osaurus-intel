@@ -114,7 +114,7 @@ struct ShareAgentSheet: View {
                 relayManager.setTunnelEnabled(true, for: agent.id)
             }
         }
-        .onChange(of: relayStatus) { _, newValue in
+        .onChange(of: relayStatus) { newValue in
             if case .connected = newValue, generatedInvite == nil {
                 Task { await generateInvite() }
             }

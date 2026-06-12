@@ -296,7 +296,7 @@ struct SlashCommandEditorSheet: View {
                                             )
                                     )
                             )
-                            .onChange(of: name) { _, newValue in
+                            .onChange(of: name) { newValue in
                                 // Strip spaces and leading slash
                                 let cleaned =
                                     newValue

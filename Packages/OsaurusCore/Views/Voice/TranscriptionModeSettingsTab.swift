@@ -122,7 +122,7 @@ struct TranscriptionModeSettingsTab: View {
                     .labelsHidden()
                     .disabled(!canEnableTranscription)
                     .opacity(canEnableTranscription ? 1 : 0.5)
-                    .onChange(of: transcriptionEnabled) { _, _ in
+                    .onChange(of: transcriptionEnabled) { _ in
                         saveSettings()
                     }
             }
@@ -267,7 +267,7 @@ struct TranscriptionModeSettingsTab: View {
                     .foregroundColor(theme.secondaryText)
 
                 HotkeyRecorder(value: $hotkey)
-                    .onChange(of: hotkey) { _, _ in
+                    .onChange(of: hotkey) { _ in
                         saveSettings()
                     }
 

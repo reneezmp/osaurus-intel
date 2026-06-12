@@ -213,7 +213,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     private func showChatWindow() {
         NSApp.unhide(nil)
-        _ = NSRunningApplication.current.activate(options: .activateAllWindows)
+        _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
         focusExistingChatWindowOrCreate()
     }
 
@@ -268,7 +268,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // or create one.
             if flag {
                 NSApp.unhide(nil)
-                _ = NSRunningApplication.current.activate(options: .activateAllWindows)
+                _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
             } else {
                 showChatWindow()
             }
@@ -361,7 +361,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         deeplinkAgentId: UUID? = nil
     ) {
         NSApp.unhide(nil)
-        _ = NSRunningApplication.current.activate(options: .activateAllWindows)
+        _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
 
         // Re-use the existing window if we already opened one this
         // session — Cmd+, on a window that's already open should bring

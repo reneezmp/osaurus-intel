@@ -11,7 +11,6 @@
 
 import CoreServices
 import Foundation
-import Observation
 
 /// Notification posted when watchers change
 extension Notification.Name {
@@ -20,26 +19,25 @@ extension Notification.Name {
 }
 
 /// Manages file system watchers with FSEvents-based monitoring and fingerprint convergence
-@Observable
 @MainActor
-public final class WatcherManager {
+public final class WatcherManager: ObservableObject {
     public static let shared = WatcherManager()
 
     // MARK: - Observable State
 
     /// All watchers
-    public private(set) var watchers: [Watcher] = []
+    @Published public private(set) var watchers: [Watcher] = []
 
     /// Per-agent watcher counts, kept in sync with `watchers`.
     /// Mirrors `ScheduleManager.scheduleCountsByAgent` so `AgentCard`
     /// can look up its count in O(1) instead of re-filtering.
-    public private(set) var watcherCountsByAgent: [UUID: Int] = [:]
+    @Published public private(set) var watcherCountsByAgent: [UUID: Int] = [:]
 
     /// Currently running tasks (watcher ID -> run info)
-    public private(set) var runningTasks: [UUID: WatcherRunInfo] = [:]
+    @Published public private(set) var runningTasks: [UUID: WatcherRunInfo] = [:]
 
     /// Current phase per watcher (for UI display)
-    public private(set) var phases: [UUID: WatcherPhase] = [:]
+    @Published public private(set) var phases: [UUID: WatcherPhase] = [:]
 
     // MARK: - Private State
 
@@ -47,7 +45,6 @@ public final class WatcherManager {
     private var executionTasks: [UUID: Task<Void, Never>] = [:]
 
     /// FSEvent stream reference (nonisolated so deinit can clean it up)
-    @ObservationIgnored
     private nonisolated(unsafe) var eventStream: FSEventStreamRef?
 
     /// Per-watcher debounce tasks

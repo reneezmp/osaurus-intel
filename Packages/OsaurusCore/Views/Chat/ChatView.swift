@@ -62,8 +62,8 @@ private struct GenerativeGreetingTrigger: ViewModifier {
     func body(content: Content) -> some View {
         content
             .onAppear { trigger() }
-            .onChange(of: session.selectedModel) { _, _ in trigger() }
-            .onChange(of: windowState.agentId) { _, _ in trigger() }
+            .onChange(of: session.selectedModel) { _ in trigger() }
+            .onChange(of: windowState.agentId) { _ in trigger() }
     }
 
     private func trigger() {

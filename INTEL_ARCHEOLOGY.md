@@ -2238,8 +2238,13 @@ MacBook — and asked to feature it on their socials. Distribution = handed to t
 people best placed to spread the story. We stay quietly excellent.
 
 ### Current state / next
-- **Latest release:** 1.0.15 (build 16). Branch `intel-fork`, clean, pushed.
+- **Latest release:** 1.0.17 (build 18). Branch `intel-fork`, clean, pushed.
 - **Synced to upstream:** `d132b728` (0.19.15). **41 upstream commits pending**
   the next sync (run the monthly workflow in `docs/UPSTREAM_SYNC.md`).
+- **Ventura (macOS 13) backport:** Phase B completed 2026-06-12 — deployment
+  target lowered from 14 to 13, `@Observable`→`ObservableObject` (3 managers),
+  159 `onChange` sites down-levelled to single-param, decorative 14+ APIs removed
+  (`symbolEffect`, `activateAllWindows`). Builds clean on x86_64 at target 13.
+  **Release held** pending Rosy native-Ventura smoke test.
 - **Deferred:** chat-bubble rendering (watch-list); native 1-bit/ternary local
   backend (when the ecosystem matures); louder distribution (by choice).

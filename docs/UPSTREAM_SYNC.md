@@ -176,3 +176,26 @@ comm -23 \
 config (Info.plist), and the release/build scripts are Intel-owned — on a
 cherry-pick conflict, ALWAYS keep ours. The Master Key (`com.osaurus.account`)
 is the opposite: shared + iCloud-synced identity, never give it an Intel variant.
+
+---
+
+## ⚠️ Ventura (macOS 13) backport maintenance (Phase B, 2026-06-12)
+
+The deployment target is **macOS 13**, enforced by the compiler. After every
+upstream sync, the build will fail on any new API that requires 14+. Recurring
+categories to watch for:
+
+| Pattern | Fix |
+|---|---|
+| `@Observable` macro | Convert to `ObservableObject` + `@Published` |
+| `.onChange(of:){ _, v in }` | Down-level to `{ v in }` (bulk Perl regex available) |
+| `.onChange(of:){ named, v in }` | Manual: `@State` prev-value var |
+| `.symbolEffect` | Remove or `.contentTransition(.opacity)` |
+| `.activateAllWindows` | Use `.activateIgnoringOtherApps` |
+| new 14+ decorative APIs | Plain 13-compatible replacement (no `#available` gates) |
+
+**Post-sync Ventura build check:**
+```bash
+cd Packages/OsaurusCore && swift build --arch x86_64
+```
+Fix every "only available in macOS 14/15" error, rebuild, repeat until clean.

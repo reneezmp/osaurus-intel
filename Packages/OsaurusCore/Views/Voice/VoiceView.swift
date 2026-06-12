@@ -108,7 +108,7 @@ struct VoiceView: View {
                 hasAppeared = true
             }
         }
-        .onChange(of: managementState.voiceSubTabRequest) { _, newValue in
+        .onChange(of: managementState.voiceSubTabRequest) { newValue in
             guard let requested = newValue, let tab = VoiceTab(rawValue: requested) else { return }
             selectedTab = tab
             managementState.voiceSubTabRequest = nil

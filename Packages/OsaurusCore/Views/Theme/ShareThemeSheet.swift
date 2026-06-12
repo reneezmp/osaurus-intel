@@ -458,7 +458,7 @@ private struct ThemeQRCardView: View {
             }
         }
         .onAppear { qrImage = Self.renderQR(text) }
-        .onChange(of: text) { _, newValue in
+        .onChange(of: text) { newValue in
             qrImage = Self.renderQR(newValue)
         }
     }

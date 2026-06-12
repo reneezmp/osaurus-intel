@@ -1313,7 +1313,7 @@ struct ConfigureAIBody: View {
             text: $state.apiKey,
             label: provider == .openai ? "OpenAI Platform API Key" : "API Key"
         )
-        .onChange(of: state.apiKey) { _, _ in state.testResult = nil }
+        .onChange(of: state.apiKey) { _ in state.testResult = nil }
     }
 
     private var openAIAuthChoiceSection: some View {
@@ -1483,7 +1483,7 @@ struct ConfigureAICTA: View {
 
     var body: some View {
         primaryButton
-            .onChange(of: state.isLocalCompleted) { _, completed in
+            .onChange(of: state.isLocalCompleted) { completed in
                 if completed && state.localSubstate == .downloading {
                     onComplete()
                 }

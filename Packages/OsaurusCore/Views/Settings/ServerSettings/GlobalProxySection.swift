@@ -31,7 +31,7 @@ struct GlobalProxySection: View {
                 help:
                     "Supports http, https, socks, and socks5 URLs with an explicit host and port. Credentials are not accepted here."
             )
-            .onChange(of: proxyText) { _, _ in commitProxy() }
+            .onChange(of: proxyText) { _ in commitProxy() }
 
             if let validationMessage {
                 Text(LocalizedStringKey(validationMessage), bundle: .module)
@@ -45,7 +45,7 @@ struct GlobalProxySection: View {
             initialized = true
             proxyText = draft.globalProxyURL ?? ""
         }
-        .onChange(of: draft.globalProxyURL) { _, newValue in
+        .onChange(of: draft.globalProxyURL) { newValue in
             let desired = newValue ?? ""
             if proxyText != desired { proxyText = desired }
         }

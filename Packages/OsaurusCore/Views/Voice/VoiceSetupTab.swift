@@ -91,12 +91,12 @@ struct VoiceSetupTab: View {
                 hasAppeared = true
             }
         }
-        .onChange(of: speechService.currentTranscription) { _, newValue in
+        .onChange(of: speechService.currentTranscription) { newValue in
             if isTestingVoice {
                 testTranscription = newValue
             }
         }
-        .onChange(of: speechService.confirmedTranscription) { _, newValue in
+        .onChange(of: speechService.confirmedTranscription) { newValue in
             if isTestingVoice && !newValue.isEmpty {
                 testTranscription = newValue
             }

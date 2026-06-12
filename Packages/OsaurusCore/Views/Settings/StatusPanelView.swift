@@ -497,7 +497,7 @@ private struct VADToggleButton: View {
         .onAppear {
             startPulseIfNeeded()
         }
-        .onChange(of: vadService.state) { _, newState in
+        .onChange(of: vadService.state) { newState in
             startPulseIfNeeded(for: newState)
         }
     }

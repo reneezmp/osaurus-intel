@@ -689,7 +689,7 @@ struct MemoryView: View {
                             .font(.system(size: 13))
                             .foregroundColor(theme.primaryText)
                     }
-                    .onChange(of: config.memoryBudgetTokens) { _, _ in
+                    .onChange(of: config.memoryBudgetTokens) { _ in
                         MemoryConfigurationStore.save(config)
                     }
                 }
@@ -712,7 +712,7 @@ struct MemoryView: View {
                         .font(.system(size: 13))
                         .foregroundColor(theme.primaryText)
                     }
-                    .onChange(of: config.episodeRetentionDays) { _, _ in
+                    .onChange(of: config.episodeRetentionDays) { _ in
                         MemoryConfigurationStore.save(config)
                     }
                 }
@@ -732,7 +732,7 @@ struct MemoryView: View {
                             .font(.system(size: 13))
                             .foregroundColor(theme.primaryText)
                     }
-                    .onChange(of: config.consolidationIntervalHours) { _, _ in
+                    .onChange(of: config.consolidationIntervalHours) { _ in
                         MemoryConfigurationStore.save(config)
                     }
 
@@ -786,7 +786,7 @@ struct MemoryView: View {
                     Toggle("", isOn: $config.enabled)
                         .toggleStyle(.switch)
                         .labelsHidden()
-                        .onChange(of: config.enabled) { _, _ in
+                        .onChange(of: config.enabled) { _ in
                             MemoryConfigurationStore.save(config)
                         }
                 }

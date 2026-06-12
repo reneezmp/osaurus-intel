@@ -105,7 +105,7 @@ public struct OnboardingView: View {
                 OnboardingTelemetry.stepViewed(currentStep)
             }
         }
-        .onChange(of: currentStep) { _, newStep in
+        .onChange(of: currentStep) { newStep in
             OnboardingTelemetry.stepViewed(newStep)
         }
     }

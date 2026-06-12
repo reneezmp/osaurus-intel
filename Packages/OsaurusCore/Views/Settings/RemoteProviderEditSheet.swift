@@ -374,7 +374,7 @@ private struct AddProviderFlow: View {
 
                             if customAuthType == .apiKey {
                                 ProviderSecureField(placeholder: "sk-...", text: $apiKey)
-                                    .onChange(of: apiKey) { _, _ in testResult = nil }
+                                    .onChange(of: apiKey) { _ in testResult = nil }
                                     .transition(.opacity.combined(with: .move(edge: .top)))
                             }
                         }
@@ -487,7 +487,7 @@ private struct AddProviderFlow: View {
                     text: $knownHost,
                     isMonospaced: true
                 )
-                .onChange(of: knownHost) { _, _ in testResult = nil }
+                .onChange(of: knownHost) { _ in testResult = nil }
             }
 
             HStack(spacing: 12) {
@@ -498,7 +498,7 @@ private struct AddProviderFlow: View {
                     isMonospaced: true
                 )
                 .frame(width: 90)
-                .onChange(of: knownPort) { _, _ in testResult = nil }
+                .onChange(of: knownPort) { _ in testResult = nil }
 
                 ProviderTextField(
                     label: "Base Path",
@@ -506,7 +506,7 @@ private struct AddProviderFlow: View {
                     text: $knownBasePath,
                     isMonospaced: true
                 )
-                .onChange(of: knownBasePath) { _, _ in testResult = nil }
+                .onChange(of: knownBasePath) { _ in testResult = nil }
             }
 
             if !knownHost.trimmingCharacters(in: .whitespaces).isEmpty {
@@ -545,7 +545,7 @@ private struct AddProviderFlow: View {
             placeholder: "gpt-5.4\nmy-prod-chat",
             theme: theme
         )
-        .onChange(of: manualModelIdsText) { _, _ in testResult = nil }
+        .onChange(of: manualModelIdsText) { _ in testResult = nil }
     }
 
     private func buildKnownEndpointPreview() -> String {
@@ -576,7 +576,7 @@ private struct AddProviderFlow: View {
             }
 
             ProviderSecureField(placeholder: "sk-...", text: $apiKey)
-                .onChange(of: apiKey) { _, _ in testResult = nil }
+                .onChange(of: apiKey) { _ in testResult = nil }
         }
     }
 
@@ -1469,7 +1469,7 @@ private struct EditProviderFlow: View {
                 }
 
                 ProviderSecureField(placeholder: "Leave blank to keep current", text: $apiKey)
-                    .onChange(of: apiKey) { _, _ in
+                    .onChange(of: apiKey) { _ in
                         // User edited the field manually — clear any prior
                         // re-authorize confirmation/error so we don't show
                         // stale feedback against a typed key.

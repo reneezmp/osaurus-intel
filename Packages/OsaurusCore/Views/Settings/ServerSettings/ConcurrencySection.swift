@@ -37,7 +37,7 @@ struct ConcurrencySection: View {
                 step: 1,
                 defaultValue: 1
             )
-            .onChange(of: maxConcurrentText) { _, _ in commitMaxConcurrent() }
+            .onChange(of: maxConcurrentText) { _ in commitMaxConcurrent() }
 
             OptionalIntField(
                 label: "Prompt Prefill Chunk Size",
@@ -96,7 +96,7 @@ struct ConcurrencySection: View {
             initialized = true
             syncFromDraft()
         }
-        .onChange(of: draft.concurrency.maxConcurrentSequences) { _, _ in syncFromDraft() }
+        .onChange(of: draft.concurrency.maxConcurrentSequences) { _ in syncFromDraft() }
     }
 
     private func syncFromDraft() {

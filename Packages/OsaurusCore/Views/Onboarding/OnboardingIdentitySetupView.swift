@@ -478,7 +478,7 @@ struct IdentityCTA: View {
 
     var body: some View {
         ctaContent
-            .onChange(of: state.phase) { _, newPhase in
+            .onChange(of: state.phase) { newPhase in
                 // Auto-advance after the .done confirmation card has had a
                 // beat to register. Guarded so we don't fire twice if the
                 // user rapidly bounces between phases.

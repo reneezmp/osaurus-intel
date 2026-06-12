@@ -496,7 +496,7 @@ struct RemoteAgentDetailView: View {
                 axis: .vertical,
                 lineLimit: 3
             )
-            .onChange(of: note) { _, newValue in
+            .onChange(of: note) { newValue in
                 guard noteHydrated else { return }
                 scheduleNoteSave(newValue, for: remote.id)
             }

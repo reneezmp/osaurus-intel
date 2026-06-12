@@ -210,7 +210,7 @@ struct SkillsView: View {
                 }
             )
         }
-        .onChange(of: isProcessing || skillManager.isRefreshing) { _, newValue in
+        .onChange(of: isProcessing || skillManager.isRefreshing) { newValue in
             if newValue {
                 // Delay showing the progress bar to avoid flickering for fast operations
                 Task { @MainActor in
@@ -249,7 +249,7 @@ struct SkillsView: View {
                 await handleImport(result)
             }
         }
-        .onChange(of: exportingSkill) { _, skill in
+        .onChange(of: exportingSkill) { skill in
             if let skill = skill {
                 Task { @MainActor in
                     exportSkill(skill)

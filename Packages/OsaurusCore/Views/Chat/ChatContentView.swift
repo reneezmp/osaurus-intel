@@ -186,10 +186,10 @@ struct ChatContentView: View {
             }
         }
         .onDisappear {}
-        .onChange(of: observedSession.pickerItems) { _, newItems in
+        .onChange(of: observedSession.pickerItems) { newItems in
             onPickerItemsChanged(newItems)
         }
-        .onChange(of: windowState.selectedDiscoveredAgentProviderId) { _, providerId in
+        .onChange(of: windowState.selectedDiscoveredAgentProviderId) { providerId in
             onChangeSelectedProvider(providerId)
         }
         .environment(\.theme, windowState.theme)

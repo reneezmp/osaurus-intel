@@ -172,9 +172,9 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
     nonisolated private static func isGrantedOffMain(_ permission: SystemPermission) -> Bool? {
         switch permission {
         case .calendar:
-            return EKEventStore.authorizationStatus(for: .event) == .fullAccess
+            return EKEventStore.authorizationStatus(for: .event) == .authorized
         case .reminders:
-            return EKEventStore.authorizationStatus(for: .reminder) == .fullAccess
+            return EKEventStore.authorizationStatus(for: .reminder) == .authorized
         case .accessibility:
             return AXIsProcessTrusted()
         case .contacts:
@@ -313,9 +313,9 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
         let granted: Bool
         switch permission {
         case .calendar:
-            granted = (try? await EKEventStore().requestFullAccessToEvents()) ?? false
+            granted = await EKEventStore().requestAccessCompat(for: .event)
         case .reminders:
-            granted = (try? await EKEventStore().requestFullAccessToReminders()) ?? false
+            granted = await EKEventStore().requestAccessCompat(for: .reminder)
         case .contacts:
             granted = (try? await CNContactStore().requestAccess(for: .contacts)) ?? false
         case .microphone:
@@ -381,14 +381,14 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
 
     private func checkCalendarPermission() -> Bool {
         let status = EKEventStore.authorizationStatus(for: .event)
-        return status == .fullAccess
+        return status == .authorized
     }
 
     private func requestCalendarPermission() {
         Task { @MainActor in
             let store = EKEventStore()
             do {
-                let granted = try await store.requestFullAccessToEvents()
+                let granted = await store.requestAccessCompat(for: .event)
                 setPermission(.calendar, isGranted: granted)
                 if !granted {
                     openSystemSettings(for: .calendar)
@@ -405,14 +405,14 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
 
     private func checkRemindersPermission() -> Bool {
         let status = EKEventStore.authorizationStatus(for: .reminder)
-        return status == .fullAccess
+        return status == .authorized
     }
 
     private func requestRemindersPermission() {
         Task { @MainActor in
             let store = EKEventStore()
             do {
-                let granted = try await store.requestFullAccessToReminders()
+                let granted = await store.requestAccessCompat(for: .reminder)
                 setPermission(.reminders, isGranted: granted)
                 if !granted {
                     openSystemSettings(for: .reminders)
@@ -893,7 +893,7 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
     nonisolated static func debugTestCalendarEventKitAccess() -> String {
         let status = EKEventStore.authorizationStatus(for: .event)
         switch status {
-        case .fullAccess, .writeOnly:  // writeOnly shouldn't happen for us but covering it
+        case .authorized, .writeOnly:  // writeOnly shouldn't happen for us but covering it
             let store = EKEventStore()
             // Try to fetch calendars to verify
             let calendars = store.calendars(for: .event)
@@ -919,7 +919,7 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
     nonisolated static func debugTestRemindersAccess() -> String {
         let status = EKEventStore.authorizationStatus(for: .reminder)
         switch status {
-        case .fullAccess, .writeOnly:
+        case .authorized, .writeOnly:
             let store = EKEventStore()
             let calendars = store.calendars(for: .reminder)
             if !calendars.isEmpty {
@@ -1100,6 +1100,16 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             }
         } catch {
             return .failure(OsascriptError(message: error.localizedDescription))
+        }
+    }
+}
+
+private extension EKEventStore {
+    func requestAccessCompat(for entityType: EKEntityType) async -> Bool {
+        await withCheckedContinuation { continuation in
+            requestAccess(to: entityType) { granted, _ in
+                continuation.resume(returning: granted)
+            }
         }
     }
 }

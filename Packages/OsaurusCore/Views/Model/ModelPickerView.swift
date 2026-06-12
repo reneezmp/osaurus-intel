@@ -161,11 +161,11 @@ struct ModelPickerView: View {
         .onDisappear {
             searchDebounceTask?.cancel()
         }
-        .onChange(of: displayOptions.count) { _, _ in
+        .onChange(of: displayOptions.count) { _ in
             cachedGroupedOptions = displayOptions.groupedBySource()
             recomputeRows()
         }
-        .onChange(of: searchText) { _, newValue in
+        .onChange(of: searchText) { newValue in
             searchDebounceTask?.cancel()
             if newValue.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
                 recomputeRows()
@@ -177,7 +177,7 @@ struct ModelPickerView: View {
                 }
             }
         }
-        .onChange(of: collapsedGroups) { _, _ in
+        .onChange(of: collapsedGroups) { _ in
             // debounce to avoid multiple rapid toggles
             searchDebounceTask?.cancel()
             searchDebounceTask = Task { @MainActor in

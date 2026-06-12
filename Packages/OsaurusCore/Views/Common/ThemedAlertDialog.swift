@@ -516,7 +516,7 @@ private struct ThemedAlertPresenterModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: isPresented) { _, newValue in
+            .onChange(of: isPresented) { newValue in
                 if newValue {
                     Task { @MainActor in
                         ThemedAlertCenter.shared.present(

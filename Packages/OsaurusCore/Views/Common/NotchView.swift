@@ -268,13 +268,13 @@ struct NotchView: View {
         .animation(swingSpring, value: expansion)
         .animation(swingSpring, value: sortedTasks.map(\.id))
         .animation(swingSpring, value: activeTaskIndex)
-        .onChange(of: sortedTasks.count) { _, newCount in
+        .onChange(of: sortedTasks.count) { newCount in
             if activeTaskIndex >= newCount {
                 activeTaskIndex = max(0, newCount - 1)
             }
         }
-        .onChange(of: isHoveringTrigger) { _, _ in handleHoverChange() }
-        .onChange(of: isHoveringBody) { _, _ in handleHoverChange() }
+        .onChange(of: isHoveringTrigger) { _ in handleHoverChange() }
+        .onChange(of: isHoveringBody) { _ in handleHoverChange() }
     }
 
     // MARK: - Notch Body

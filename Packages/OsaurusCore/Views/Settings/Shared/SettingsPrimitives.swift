@@ -214,7 +214,7 @@ struct SettingsSliderField: View {
                     step: step
                 )
                 .tint(themeManager.currentTheme.accentColor)
-                .onChange(of: sliderValue) { _, newValue in
+                .onChange(of: sliderValue) { newValue in
                     guard isInitialized else { return }
                     text = String(format: formatString, newValue)
                 }
@@ -263,7 +263,7 @@ struct SettingsSliderField: View {
                 isInitialized = true
             }
         }
-        .onChange(of: text) { _, _ in
+        .onChange(of: text) { _ in
             guard isInitialized else { return }
             let newEffective = effectiveValue
             if abs(sliderValue - newEffective) > step / 2 {

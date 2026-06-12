@@ -32,7 +32,7 @@ struct ConnectionSection: View {
                 step: 1,
                 defaultValue: 1337
             )
-            .onChange(of: portText) { _, _ in commitPort() }
+            .onChange(of: portText) { _ in commitPort() }
 
             SettingsToggle(
                 title: L("Expose to Network"),
@@ -51,7 +51,7 @@ struct ConnectionSection: View {
                 help:
                     "Browser apps only. Loopback is always allowed. Use * to allow any origin; comma-separated otherwise."
             )
-            .onChange(of: corsText) { _, _ in commitCors() }
+            .onChange(of: corsText) { _ in commitCors() }
 
             SettingsDivider()
 
@@ -68,8 +68,8 @@ struct ConnectionSection: View {
             syncPortFromDraft()
             syncCorsFromDraft()
         }
-        .onChange(of: draft.network.port) { _, _ in syncPortFromDraft() }
-        .onChange(of: draft.network.corsOrigins) { _, _ in syncCorsFromDraft() }
+        .onChange(of: draft.network.port) { _ in syncPortFromDraft() }
+        .onChange(of: draft.network.corsOrigins) { _ in syncCorsFromDraft() }
     }
 
     private func syncPortFromDraft() {

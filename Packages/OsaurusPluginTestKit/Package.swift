@@ -25,7 +25,7 @@ import PackageDescription
 
 let package = Package(
     name: "OsaurusPluginTestKit",
-    platforms: [.macOS(.v14)],
+    platforms: [.macOS(.v13)],
     products: [
         .library(name: "OsaurusPluginTestKit", targets: ["OsaurusPluginTestKit"])
     ],

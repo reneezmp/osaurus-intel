@@ -202,7 +202,7 @@ struct PulsingStatusDot: View {
                 startPulseAnimation()
             }
         }
-        .onChange(of: isPulsing) { _, newValue in
+        .onChange(of: isPulsing) { newValue in
             if newValue {
                 startPulseAnimation()
             }

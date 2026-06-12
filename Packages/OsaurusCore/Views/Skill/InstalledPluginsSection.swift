@@ -333,10 +333,10 @@ struct InstalledPluginsSection: View {
             }
         }
         .onAppear { aggregator.refresh() }
-        .onChange(of: skillManager.skills.count) { _, _ in scheduleRefresh() }
-        .onChange(of: scheduleManager.schedules.count) { _, _ in scheduleRefresh() }
-        .onChange(of: slashCommands.customCommands.count) { _, _ in scheduleRefresh() }
-        .onChange(of: mcpManager.configuration.providers.count) { _, _ in
+        .onChange(of: skillManager.skills.count) { _ in scheduleRefresh() }
+        .onChange(of: scheduleManager.schedules.count) { _ in scheduleRefresh() }
+        .onChange(of: slashCommands.customCommands.count) { _ in scheduleRefresh() }
+        .onChange(of: mcpManager.configuration.providers.count) { _ in
             scheduleRefresh()
         }
     }

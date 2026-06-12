@@ -488,7 +488,7 @@ struct ConfigurationView: View {
                                         description: "Display notifications for background tasks and events",
                                         isOn: $tempToastEnabled
                                     )
-                                    .onChange(of: tempToastEnabled) { _, _ in
+                                    .onChange(of: tempToastEnabled) { _ in
                                         saveToastConfig()
                                     }
 
@@ -498,7 +498,7 @@ struct ConfigurationView: View {
                                         hint: "Where toasts appear on screen"
                                     ) {
                                         ToastPositionPicker(selection: $tempToastPosition)
-                                            .onChange(of: tempToastPosition) { _, _ in
+                                            .onChange(of: tempToastPosition) { _ in
                                                 saveToastConfig()
                                             }
                                     }
@@ -510,7 +510,7 @@ struct ConfigurationView: View {
                                         placeholder: "5.0",
                                         help: "Seconds before auto-dismiss. Empty uses default 5s"
                                     )
-                                    .onChange(of: tempToastTimeout) { _, _ in
+                                    .onChange(of: tempToastTimeout) { _ in
                                         saveToastConfig()
                                     }
 
@@ -521,7 +521,7 @@ struct ConfigurationView: View {
                                         placeholder: "5",
                                         help: "Maximum toasts shown at once. Empty uses default 5"
                                     )
-                                    .onChange(of: tempToastMaxVisible) { _, _ in
+                                    .onChange(of: tempToastMaxVisible) { _ in
                                         saveToastConfig()
                                     }
 
@@ -532,7 +532,7 @@ struct ConfigurationView: View {
                                         placeholder: "5",
                                         help: "Maximum background tasks running at once. Empty uses default 5"
                                     )
-                                    .onChange(of: tempToastMaxConcurrent) { _, _ in
+                                    .onChange(of: tempToastMaxConcurrent) { _ in
                                         saveToastConfig()
                                     }
 

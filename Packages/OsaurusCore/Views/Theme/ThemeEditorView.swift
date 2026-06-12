@@ -236,7 +236,7 @@ struct ThemeEditorView: View {
                 }
             }
         }
-        .onChange(of: editingTheme.background.type) { _, newType in
+        .onChange(of: editingTheme.background.type) { newType in
             // Image backgrounds composite poorly with behind-window blur;
             // force all three glass toggles off when the user switches to
             // an image background.

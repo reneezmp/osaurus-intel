@@ -56,7 +56,7 @@ public struct SchemaTabView: View {
         }
         .background(theme.primaryBackground)
         .task { await reload() }
-        .onChange(of: agentId) { _, _ in Task { await reload() } }
+        .onChange(of: agentId) { _ in Task { await reload() } }
     }
 
     @MainActor
@@ -379,14 +379,14 @@ public struct DataTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .task { await loadTables() }
-        .onChange(of: agentId) { _, _ in
+        .onChange(of: agentId) { _ in
             Task { await loadTables() }
         }
-        .onChange(of: selectedTable) { _, _ in
+        .onChange(of: selectedTable) { _ in
             selectedRowIds.removeAll()
             Task { await reloadRows() }
         }
-        .onChange(of: filterMode) { _, _ in
+        .onChange(of: filterMode) { _ in
             selectedRowIds.removeAll()
             Task { await reloadRows() }
         }
@@ -1514,8 +1514,8 @@ public struct ActivityTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .task { await loadRuns() }
-        .onChange(of: agentId) { _, _ in Task { await loadRuns() } }
-        .onChange(of: selectedRunId) { _, _ in Task { await loadTrace() } }
+        .onChange(of: agentId) { _ in Task { await loadRuns() } }
+        .onChange(of: selectedRunId) { _ in Task { await loadTrace() } }
     }
 
     @ViewBuilder
@@ -1880,8 +1880,8 @@ public struct ViewsTabView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .task { await reload() }
-        .onChange(of: agentId) { _, _ in Task { await reload() } }
-        .onChange(of: selection) { _, _ in Task { await runSelected() } }
+        .onChange(of: agentId) { _ in Task { await reload() } }
+        .onChange(of: selection) { _ in Task { await runSelected() } }
     }
 
     @ViewBuilder
@@ -2175,7 +2175,7 @@ public struct HomeTabView: View {
         }
         .background(theme.primaryBackground)
         .task { await reload() }
-        .onChange(of: agentId) { _, _ in Task { await reload() } }
+        .onChange(of: agentId) { _ in Task { await reload() } }
     }
 
     @ViewBuilder

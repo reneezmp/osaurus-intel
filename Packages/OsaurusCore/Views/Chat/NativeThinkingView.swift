@@ -66,7 +66,7 @@ final class NativeThinkingView: NSView {
         // contents change — during streaming that's every token. supply a cheap
         // rounded-rect path so CoreAnimation composites the shadow directly
         if let layer {
-            let path = NSBezierPath(roundedRect: bounds, xRadius: cornerRadius, yRadius: cornerRadius).cgPath
+            let path = CGPath(roundedRect: bounds, cornerWidth: cornerRadius, cornerHeight: cornerRadius, transform: nil)
             layer.shadowPath = path
         }
     }
@@ -104,7 +104,7 @@ final class NativeThinkingView: NSView {
         stroke.frame = b
         let rect = CGRect(origin: .zero, size: b.size).insetBy(dx: inset, dy: inset)
         let r = max(cornerRadius - inset, 0)
-        stroke.path = NSBezierPath(roundedRect: rect, xRadius: r, yRadius: r).cgPath
+        stroke.path = CGPath(roundedRect: rect, cornerWidth: r, cornerHeight: r, transform: nil)
         stroke.strokeColor = thinkingTint.withAlphaComponent(0.22).cgColor
     }
 

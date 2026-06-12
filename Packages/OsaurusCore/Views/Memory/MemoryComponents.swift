@@ -95,7 +95,7 @@ struct PinnedFactsPanel: View {
                 )
         )
         .onAppear { recomputeFilter() }
-        .onChange(of: facts.count) { _, _ in recomputeFilter() }
+        .onChange(of: facts.count) { _ in recomputeFilter() }
         .task(id: searchText) {
             // 150 ms debounce keeps the panel responsive without
             // re-running the localized contains over the whole pinned-

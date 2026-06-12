@@ -77,7 +77,7 @@ struct SandboxView: View {
             hasAppeared = true
             needsBridgeMigrationRestart = SandboxBridgeMigrationFlag.needsRestart
         }
-        .onChange(of: sandboxState.status) { _, _ in
+        .onChange(of: sandboxState.status) { _ in
             needsBridgeMigrationRestart = SandboxBridgeMigrationFlag.needsRestart
         }
         .onDisappear { stopRefreshLoop() }
@@ -539,7 +539,7 @@ private struct SandboxLogConsoleCard: View {
                                     .stroke(theme.inputBorder, lineWidth: 1)
                             )
                     )
-                    .onChange(of: visibleEntries.last?.id) { _, _ in
+                    .onChange(of: visibleEntries.last?.id) { _ in
                         pendingScrollTask?.cancel()
                         pendingScrollTask = Task {
                             try? await Task.sleep(for: .milliseconds(150))
@@ -572,8 +572,8 @@ private struct SandboxLogConsoleCard: View {
         .onReceive(logBuffer.objectWillChange) { _ in
             scheduleVisibleRefresh()
         }
-        .onChange(of: logLevelFilter) { _, _ in refreshVisibleEntries() }
-        .onChange(of: showFullHistory) { _, _ in refreshVisibleEntries() }
+        .onChange(of: logLevelFilter) { _ in refreshVisibleEntries() }
+        .onChange(of: showFullHistory) { _ in refreshVisibleEntries() }
     }
 
     private func scheduleVisibleRefresh() {
@@ -775,7 +775,7 @@ private extension SandboxView {
                     description: "Start container when Osaurus launches",
                     isOn: $pendingConfig.autoStart
                 )
-                .onChange(of: pendingConfig.autoStart) { _, _ in
+                .onChange(of: pendingConfig.autoStart) { _ in
                     saveConfigIfClean()
                 }
 

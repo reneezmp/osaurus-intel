@@ -173,7 +173,7 @@ struct AgentsView: View {
             }
             consumeDeeplinkIfPossible()
         }
-        .onChange(of: agentManager.agents) { _, _ in
+        .onChange(of: agentManager.agents) { _ in
             // Agent list may load asynchronously after the view appears.
             consumeDeeplinkIfPossible()
         }
@@ -435,8 +435,8 @@ struct AgentsView: View {
 private struct AgentCard: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var agentManager = AgentManager.shared
-    private var scheduleManager = ScheduleManager.shared
-    private var watcherManager = WatcherManager.shared
+    @ObservedObject private var scheduleManager = ScheduleManager.shared
+    @ObservedObject private var watcherManager = WatcherManager.shared
 
     let agent: Agent
     let isActive: Bool
@@ -888,8 +888,8 @@ private struct TabBarScrollOffsetKey: PreferenceKey {
 struct AgentDetailView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var agentManager = AgentManager.shared
-    private let scheduleManager = ScheduleManager.shared
-    private let watcherManager = WatcherManager.shared
+    @ObservedObject private var scheduleManager = ScheduleManager.shared
+    @ObservedObject private var watcherManager = WatcherManager.shared
     /// Reference held for the "Enable Relay" alert callback only.
     /// Tunnel-status observation lives in `AgentDetailRelaySection` /
     /// `AgentRelayBaseURLProvider` so this view doesn't re-render on
@@ -1219,10 +1219,10 @@ struct AgentDetailView: View {
             }
             withAnimation { hasAppeared = true }
         }
-        .onChange(of: agent.id) { _, _ in
+        .onChange(of: agent.id) { _ in
             refreshDetailCaches()
         }
-        .onChange(of: loadedPluginsRefreshNonce) { _, _ in
+        .onChange(of: loadedPluginsRefreshNonce) { _ in
             refreshDetailCaches()
         }
         .onReceive(NotificationCenter.default.publisher(for: .schedulesChanged)) { _ in
@@ -1231,7 +1231,7 @@ struct AgentDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .watchersChanged)) { _ in
             refreshDetailCaches()
         }
-        .onChange(of: dbEnabled) { _, newValue in
+        .onChange(of: dbEnabled) { newValue in
             // Watch the local `@State dbEnabled` (driven by the Configure
             // tab toggle), not `agent.settings.dbEnabled` — the prop is
             // frozen at view construction and would never fire. If the
@@ -1248,7 +1248,7 @@ struct AgentDetailView: View {
         .onReceive(NotificationCenter.default.publisher(for: .agentDetailDeeplink)) { note in
             handleAgentDetailDeeplink(note)
         }
-        .onChange(of: selectedTab) { _, newValue in
+        .onChange(of: selectedTab) { newValue in
             // Drop any leftover notification-driven focus when the
             // user navigates to a tab the focus doesn't apply to.
             // The focused-name state is set together with
@@ -1831,7 +1831,7 @@ struct AgentDetailView: View {
             .animation(.easeOut(duration: 0.2), value: tabsOverflowLeft)
             .animation(.easeOut(duration: 0.2), value: tabsOverflowRight)
             // Auto-scroll the active tab into view when it changes (tap or programmatic).
-            .onChange(of: selectedTab) { _, newValue in
+            .onChange(of: selectedTab) { newValue in
                 withAnimation(.easeOut(duration: 0.2)) {
                     proxy.scrollTo(newValue, anchor: .center)
                 }
@@ -2040,8 +2040,8 @@ struct AgentDetailView: View {
                 }
                 .padding(.top, 2)
             }
-            .onChange(of: name) { debouncedSave() }
-            .onChange(of: description) { debouncedSave() }
+            .onChange(of: name) { _ in debouncedSave() }
+            .onChange(of: description) { _ in debouncedSave() }
         }
     }
 
@@ -2166,8 +2166,8 @@ struct AgentDetailView: View {
                     manualEmptyStateBody
                 }
             }
-            .onChange(of: chatGreetingDraft) { debouncedSave() }
-            .onChange(of: chatSubtitleDraft) { debouncedSave() }
+            .onChange(of: chatGreetingDraft) { _ in debouncedSave() }
+            .onChange(of: chatSubtitleDraft) { _ in debouncedSave() }
         }
     }
 
@@ -2284,7 +2284,7 @@ struct AgentDetailView: View {
                             .stroke(theme.inputBorder, lineWidth: 1)
                     )
             )
-            .onChange(of: greetingPersona) { debouncedSave() }
+            .onChange(of: greetingPersona) { _ in debouncedSave() }
     }
 
     private var avatarSection: some View {
@@ -2505,7 +2505,7 @@ struct AgentDetailView: View {
                 .font(.system(size: 11))
                 .foregroundColor(theme.tertiaryText)
             }
-            .onChange(of: systemPrompt) { debouncedSave() }
+            .onChange(of: systemPrompt) { _ in debouncedSave() }
         }
     }
 
@@ -2750,8 +2750,8 @@ struct AgentDetailView: View {
                     .foregroundColor(theme.tertiaryText)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .onChange(of: temperature) { debouncedSave() }
-            .onChange(of: maxTokens) { debouncedSave() }
+            .onChange(of: temperature) { _ in debouncedSave() }
+            .onChange(of: maxTokens) { _ in debouncedSave() }
         }
     }
 
@@ -3178,7 +3178,7 @@ struct AgentDetailView: View {
             Toggle("", isOn: isOn)
                 .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
                 .labelsHidden()
-                .onChange(of: isOn.wrappedValue) { debouncedSave() }
+                .onChange(of: isOn.wrappedValue) { _ in debouncedSave() }
         }
         .padding(10)
         .background(
@@ -3537,7 +3537,7 @@ struct AgentDetailView: View {
                         )
                 )
             }
-            .onChange(of: pluginInstructionsMap) { debouncedSave() }
+            .onChange(of: pluginInstructionsMap) { _ in debouncedSave() }
         }
     }
 
@@ -4948,7 +4948,7 @@ private struct AgentDetailVoiceSection: View {
                         .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
                         .labelsHidden()
                         .disabled(!ttsService.isModelReady)
-                        .onChange(of: autoSpeak) { onSave() }
+                        .onChange(of: autoSpeak) { _ in onSave() }
                 }
                 .padding(10)
                 .background(
@@ -4994,7 +4994,7 @@ private struct AgentDetailVoiceSection: View {
                         .labelsHidden()
                         .pickerStyle(MenuPickerStyle())
                         .frame(maxWidth: 200)
-                        .onChange(of: ttsVoice) { onSave() }
+                        .onChange(of: ttsVoice) { _ in onSave() }
                     }
                     .padding(10)
                     .background(
@@ -5480,7 +5480,7 @@ private struct AgentEditorSheet: View {
             // from "preset just wrote its defaultName here". Only the former
             // locks the name. Equality covers the harmless case where the
             // user types the exact preset name themselves.
-            .onChange(of: name) { _, newValue in
+            .onChange(of: name) { newValue in
                 if newValue != selectedTemplate.defaultName {
                     nameUserEdited = true
                 }

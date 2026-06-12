@@ -167,7 +167,7 @@ struct VADModeSettingsTab: View {
                     .labelsHidden()
                     .disabled(!canEnableVAD)
                     .opacity(canEnableVAD ? 1 : 0.5)
-                    .onChange(of: vadEnabled) { _, newValue in
+                    .onChange(of: vadEnabled) { newValue in
                         saveSettings()
                         Task {
                             if newValue {
@@ -405,7 +405,7 @@ struct VADModeSettingsTab: View {
                                 .stroke(theme.inputBorder, lineWidth: 1)
                         )
                 )
-                .onChange(of: customWakePhrase) { _, _ in
+                .onChange(of: customWakePhrase) { _ in
                     saveSettings()
                 }
 
@@ -625,13 +625,13 @@ struct VADModeSettingsTab: View {
         }
         .padding(20)
         .modifier(SettingsCardStyle(accentColor: isTestingVAD ? theme.errorColor : nil))
-        .onChange(of: speechService.currentTranscription) { _, newValue in
+        .onChange(of: speechService.currentTranscription) { newValue in
             if isTestingVAD {
                 testTranscription = newValue
                 checkForDetection(in: newValue)
             }
         }
-        .onChange(of: speechService.confirmedTranscription) { _, newValue in
+        .onChange(of: speechService.confirmedTranscription) { newValue in
             if isTestingVAD && !newValue.isEmpty {
                 testTranscription = newValue
                 checkForDetection(in: newValue)
@@ -924,7 +924,7 @@ private struct ToggleSettingRow: View {
             Toggle("", isOn: $isOn)
                 .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
                 .labelsHidden()
-                .onChange(of: isOn) { _, _ in
+                .onChange(of: isOn) { _ in
                     onChange?()
                 }
         }

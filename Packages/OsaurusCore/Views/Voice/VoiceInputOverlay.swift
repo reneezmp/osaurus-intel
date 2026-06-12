@@ -180,7 +180,7 @@ public struct VoiceInputOverlay: View {
         }
         .padding(.horizontal, 20)
         .padding(.bottom, 20)
-        .onChange(of: state) { _, newState in
+        .onChange(of: state) { newState in
             handleStateChange(newState)
         }
     }

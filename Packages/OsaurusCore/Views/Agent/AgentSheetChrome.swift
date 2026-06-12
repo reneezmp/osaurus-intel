@@ -471,7 +471,7 @@ private struct MultilineFocusable: View {
         .font(.system(size: 13))
         .foregroundColor(theme.primaryText)
         .focused($fieldFocused)
-        .onChange(of: fieldFocused) { _, newValue in
+        .onChange(of: fieldFocused) { newValue in
             withAnimation(.easeOut(duration: 0.15)) {
                 isFocused = newValue
             }
