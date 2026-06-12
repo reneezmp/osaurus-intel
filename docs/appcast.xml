@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.17</title>
+      <pubDate>Fri, 12 Jun 2026 13:20:47 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>18</sparkle:version>
+      <sparkle:shortVersionString>1.0.17</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>14.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.17/Osaurus-Intel-1.0.17.zip" length="50888900" type="application/octet-stream" sparkle:edSignature="pi8guJkTcrl1Iu87ufBP1NoqPifMBzNsEhcOg3iAnBzTmysq390A/LWucqo8eW/LUBV/aL+kHQdSfSumEBdQDg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.17
+
+Now runs on macOS 14 (Sonoma) — the minimum dropped from Sequoia to Sonoma, reaching more Intel Macs (native Ventura support is in progress). Also: the Plugins → Installed tab now shows an Update badge + an in-card Update action when a plugin has a newer version available.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.16</title>
       <pubDate>Fri, 12 Jun 2026 12:24:12 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
