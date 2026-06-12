@@ -702,7 +702,8 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                             RegistryCapabilities.ToolSummary(name: $0.id, description: $0.description)
                         }
                     ),
-                    installedVersion: installed ? semver : nil,
+                    installedVersion: installed
+                        ? (installedManifestVersion(for: entry.id) ?? semver) : nil,
                     latestVersion: semver,
                     isInstalling: false,
                     loadError: nil,
@@ -728,6 +729,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                 ($0.name ?? $0.pluginId) < ($1.name ?? $1.pluginId)
             }
             plugins = merged
+            updatesAvailableCount = merged.filter { $0.hasUpdate }.count
             isRefreshing = false
         }
     }
@@ -740,12 +742,17 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             for i in plugins.indices {
                 let pid = plugins[i].pluginId
                 if PluginManager.shared.isNativelyLoaded(pluginId: pid) {
-                    plugins[i].installedVersion = plugins[i].latestVersion
+                    // Read the genuine installed version off disk so an upgrade
+                    // (which overwrites the manifest) correctly clears hasUpdate,
+                    // and a still-outdated install keeps showing it.
+                    plugins[i].installedVersion =
+                        installedManifestVersion(for: pid) ?? plugins[i].latestVersion
                     plugins[i].loadError = nil
                 } else {
                     plugins[i].installedVersion = nil
                 }
             }
+            updatesAvailableCount = plugins.filter { $0.hasUpdate }.count
         }
     }
 }
@@ -758,6 +765,20 @@ private func parseSemver(_ s: String) -> SemanticVersion? {
         minor: parts[1],
         patch: parts.count > 2 ? parts[2] : 0
     )
+}
+
+/// Read the *actually installed* version from a plugin's on-disk manifest.json.
+/// This is what makes update detection real: the index carries `latestVersion`,
+/// and comparing it against the genuine installed version (not "assume it's the
+/// latest") is the difference between `hasUpdate` ever being true or not.
+private func installedManifestVersion(for pluginId: String) -> SemanticVersion? {
+    let manifestURL = OsaurusPaths.pluginDirectory(for: pluginId)
+        .appendingPathComponent("manifest.json")
+    guard let data = try? Data(contentsOf: manifestURL),
+        let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+        let v = json["version"] as? String
+    else { return nil }
+    return parseSemver(v)
 }
 
 private enum PluginInstallError: Error, LocalizedError {
