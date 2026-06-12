@@ -1,8 +1,8 @@
 {
   "plugin_id": "search-intel",
   "name": "Search",
-  "version": "1.0.0",
-  "description": "Web search via DuckDuckGo (no API key).",
+  "version": "1.1.0",
+  "description": "Web search via a multi-engine cascade (DuckDuckGo + Bing, no API key).",
   "secrets": [
     { "id": "region", "label": "Region (DuckDuckGo kl)", "description": "Optional region code, e.g. us-en, uk-en, br-pt. Blank = default.", "required": false, "secret": false, "url": "https://duckduckgo.com/duckduckgo-help-pages/settings/params/" }
   ],
@@ -10,7 +10,7 @@
     "tools": [
       {
         "id": "web_search",
-        "description": "Search the web with DuckDuckGo and return the top results as a list of {title, url, snippet}. Use this to find current information or pages you don't already have a URL for; follow up with the fetch tool to read a result in full.",
+        "description": "Search the web and return the top results as a list of {title, url, snippet}. Tries multiple engines for resilience. Use this to find current information or pages you don't already have a URL for; follow up with the fetch tool to read a result in full.",
         "parameters": {
           "type": "object",
           "properties": {

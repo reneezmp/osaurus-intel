@@ -49,6 +49,27 @@ static int osr_json_get_string(const char *json, const char *key, char *out, siz
     return 1;
 }
 
+// Extract a JSON integer value for `key` from `json` into `*out`.
+// Returns 1 on success, 0 if the key is absent or not a number. Minimal (same
+// "good enough" caveat as osr_json_get_string — no nested-object awareness).
+static int osr_json_get_int(const char *json, const char *key, long *out) {
+    if (!json || !key || !out) return 0;
+    char pat[128];
+    snprintf(pat, sizeof pat, "\"%s\"", key);
+    const char *p = strstr(json, pat);
+    if (!p) return 0;
+    p += strlen(pat);
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    if (*p != ':') return 0;
+    p++;
+    while (*p == ' ' || *p == '\t' || *p == '\n' || *p == '\r') p++;
+    char *end = NULL;
+    long v = strtol(p, &end, 10);
+    if (end == p) return 0;  // no digits consumed
+    *out = v;
+    return 1;
+}
+
 // Escape `in` as a JSON string body (no surrounding quotes) into `out`.
 static void osr_json_escape(const char *in, char *out, size_t outsz) {
     size_t i = 0;
@@ -129,6 +150,46 @@ static void osr_strip_html(const char *start, const char *end, char *out, size_t
             memmove(pos + tlen, pos + flen, strlen(pos + flen) + 1);
             memcpy(pos, to, tlen);
         }
+    }
+
+    // Decode numeric entities &#DDD; / &#xHH; to UTF-8 (in place, shrinking).
+    // Covers accented chars in scraped titles/snippets that the named-entity
+    // table above misses (e.g. &#233; -> é).
+    {
+        char *r = out, *w = out;
+        while (*r) {
+            if (r[0] == '&' && r[1] == '#') {
+                char *q = r + 2;
+                int hex = 0;
+                if (*q == 'x' || *q == 'X') { hex = 1; q++; }
+                char *digits = q;
+                while (*q && *q != ';') q++;
+                if (*q == ';' && q > digits) {
+                    long cp = strtol(digits, NULL, hex ? 16 : 10);
+                    if (cp > 0 && cp <= 0x10FFFF) {
+                        if (cp < 0x80) {
+                            *w++ = (char)cp;
+                        } else if (cp < 0x800) {
+                            *w++ = (char)(0xC0 | (cp >> 6));
+                            *w++ = (char)(0x80 | (cp & 0x3F));
+                        } else if (cp < 0x10000) {
+                            *w++ = (char)(0xE0 | (cp >> 12));
+                            *w++ = (char)(0x80 | ((cp >> 6) & 0x3F));
+                            *w++ = (char)(0x80 | (cp & 0x3F));
+                        } else {
+                            *w++ = (char)(0xF0 | (cp >> 18));
+                            *w++ = (char)(0x80 | ((cp >> 12) & 0x3F));
+                            *w++ = (char)(0x80 | ((cp >> 6) & 0x3F));
+                            *w++ = (char)(0x80 | (cp & 0x3F));
+                        }
+                        r = q + 1;
+                        continue;
+                    }
+                }
+            }
+            *w++ = *r++;
+        }
+        *w = '\0';
     }
 
     // Collapse runs of whitespace to a single space and trim the ends, so
