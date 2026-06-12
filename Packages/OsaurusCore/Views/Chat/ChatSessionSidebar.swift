@@ -827,7 +827,12 @@ private struct SessionRow: View {
         .onAppear {
             editBuffer = session.title
             onBufferChange?(session.title)
-            isTextFieldFocused = true
+            // Defer focus until the context menu finishes dismissing,
+            // otherwise AppKit restores first-responder to the search field
+            // on a later tick and clobbers it.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.1) {
+                isTextFieldFocused = true
+            }
         }
         .onChange(of: editBuffer) { newValue in
             onBufferChange?(newValue)

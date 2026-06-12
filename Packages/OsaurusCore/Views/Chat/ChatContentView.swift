@@ -84,10 +84,14 @@ struct ChatContentView: View {
                             },
                             onRename: { [weak windowState] id, title in
                                 ChatSessionsManager.shared.rename(id: id, title: title)
+                                // Keep the open view-model in sync so the next
+                                // auto-save doesn't clobber the rename. (upstream #1482)
+                                if session.sessionId == id { session.title = title }
                                 windowState?.refreshSessions()
                             },
                             onSetArchived: { [weak windowState] id, archived in
                                 ChatSessionsManager.shared.setArchived(id: id, archived: archived)
+                                if session.sessionId == id { session.archived = archived }
                                 windowState?.refreshSessions()
                             },
                             onExport: { _, _ in
