@@ -2747,6 +2747,9 @@ struct ChatView: View {
     @State private var pendingDiscoveredAgent: DiscoveredAgent? = nil
     // Minimap
     @State private var activeMinimapTurnId: UUID?
+    // Owns the minimap's expanded state here (stable identity) so it survives the
+    // AnyView erasure on the messageThread closure. (Renée, 2026-06-13.)
+    @State private var isMinimapExpanded: Bool = false
     @State private var scrollToTurnId: UUID?
     @State private var scrollToTurnTrigger: Int = 0
     // What's New modal
@@ -2983,7 +2986,7 @@ struct ChatView: View {
             chatBackground: AnyView(chatBackground),
             chatHeader: AnyView(chatHeader),
             emptyStateView: AnyView(emptyStateView),
-            messageThread: { w in AnyView(messageThread(w)) },
+            messageThread: { w, h in AnyView(messageThread(w, h)) },
             promptOverlayLayer: AnyView(promptOverlayLayer),
             onChatOverlayActivated: {},
             handleChatToolbarSelectDiscovered: { n in handleChatToolbarSelectDiscovered(n) },
@@ -3182,7 +3185,7 @@ struct ChatView: View {
     // MARK: - Message Thread
 
     /// Isolated message thread view to prevent cascading re-renders
-    private func messageThread(_ width: CGFloat) -> some View {
+    private func messageThread(_ width: CGFloat, _ height: CGFloat) -> some View {
         ChatPerfTrace.shared.count("body.messageThread")
         // do not read `session.visibleBlocks` here as that would
         // subscribe this enclosing body to per-sync changes (via ChatSession's
@@ -3196,6 +3199,13 @@ struct ChatView: View {
 
         let inlineInsetHeight = agentInlineInsetHeight
 
+        // Thread + agent chrome in a ZStack, CLIPPED to the slot height so the
+        // scroll view's Ventura over-sizing (see CenteredMessageScrollView) can't
+        // bleed behind the header/composer. The minimap and scroll-to-bottom
+        // button are `.overlay`s on this clipped frame: sized to the (stable)
+        // thread area so they can't spill into the header/composer, yet not
+        // themselves clipped — the minimap can still expand + scroll.
+        // (Renée, 2026-06-13.)
         return ZStack {
             // Thread reserves a small top inset matching the *collapsed*
             // pill stack height so the topmost message stays visible
@@ -3248,8 +3258,13 @@ struct ChatView: View {
             .padding(.top, 4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .allowsHitTesting(session.lastCompletionSummary != nil || session.currentTodo != nil)
-
-            // Minimap overlay — sits at vertical center, right edge
+        }
+        .frame(height: height)
+        .clipped()
+        // Minimap — sized to the clipped thread frame (so it can't spill into the
+        // header/composer) but drawn as an overlay so it isn't itself clipped;
+        // expanded, it fills the height and scrolls internally. (Renée, 2026-06-13.)
+        .overlay {
             if minimapMarkers.count >= 2 {
                 HStack {
                     Spacer()
@@ -3259,28 +3274,31 @@ struct ChatView: View {
                         onSelect: { turnId in
                             scrollToTurnId = turnId
                             scrollToTurnTrigger &+= 1
-                        }
+                        },
+                        isExpanded: $isMinimapExpanded
                     )
                     .padding(.trailing, 22)
                 }
+                // Bound the minimap to the message area and CLIP it, so a long
+                // chat's tall tick strip can't spill into the header/composer.
+                // (Expanded, the minimap fills this height and scrolls.)
+                // (Renée, 2026-06-13.)
+                .frame(height: max(0, height - 16))
+                .clipped()
                 .allowsHitTesting(true)
             }
-
-            // Scroll button overlay - isolated from content
-            VStack {
-                Spacer()
-                HStack {
-                    Spacer()
-                    ScrollToBottomButton(
-                        isPinnedToBottom: isPinnedToBottom,
-                        hasTurns: session.hasVisibleThreadMessages,
-                        onTap: {
-                            isPinnedToBottom = true
-                            scrollToBottomTrigger += 1
-                        }
-                    )
+        }
+        // Scroll-to-bottom button, pinned to the bottom-right of the thread frame
+        // (above the composer), bounded to the thread area. (Renée, 2026-06-13.)
+        .overlay(alignment: .bottomTrailing) {
+            ScrollToBottomButton(
+                isPinnedToBottom: isPinnedToBottom,
+                hasTurns: session.hasVisibleThreadMessages,
+                onTap: {
+                    isPinnedToBottom = true
+                    scrollToBottomTrigger += 1
                 }
-            }
+            )
         }
         .sheet(
             isPresented: Binding(

@@ -23,19 +23,39 @@ struct ChatMinimap: View {
     let onSelect: (UUID) -> Void
 
     @Environment(\.theme) private var theme
-    @State private var isExpanded: Bool = false
+    // Hoisted to the parent (ChatView) so it survives the `AnyView` identity
+    // erasure on the messageThread closure — otherwise scroll-driven re-renders
+    // reset it and the expanded minimap collapses mid-scroll. (Renée, 2026-06-13.)
+    @Binding var isExpanded: Bool
 
     private let expandAnimation = Animation.spring(response: 0.36, dampingFraction: 0.86)
 
     var body: some View {
-        VStack(alignment: .leading, spacing: isExpanded ? 1 : 6) {
+        let rows = VStack(alignment: .leading, spacing: isExpanded ? 1 : 6) {
             ForEach(markers) { m in
                 row(for: m)
             }
         }
         .padding(.vertical, isExpanded ? 6 : 10)
         .padding(.horizontal, isExpanded ? 6 : 7)
-        .frame(width: isExpanded ? 240 : 24, alignment: .trailing)
+
+        return Group {
+            if isExpanded {
+                // Expanded, a long chat's prompt list can exceed the window, so
+                // make it independently scrollable to reach every prompt. Fills
+                // the available height (see the minimap overlay in messageThread)
+                // so the ScrollView has a bounded height to scroll within.
+                // (Renée, 2026-06-13.)
+                ScrollView(.vertical, showsIndicators: false) {
+                    rows
+                }
+                .frame(width: 240)
+                .frame(maxHeight: .infinity)
+            } else {
+                rows
+                    .frame(width: 24, alignment: .trailing)
+            }
+        }
         .background(containerBackground)
         // Collapsed, the strip is translucent so the message text reads through
         // it instead of being covered; it becomes fully opaque on hover (and the

@@ -34,6 +34,69 @@ enum MessageSection: Hashable {
 final class CenteredMessageScrollView: NSScrollView {
     var maxContentWidth: CGFloat = 1100
 
+    /// On macOS 13 (Ventura), SwiftUI's NSViewRepresentable hosting sizes this scroll
+    /// view from the document view's CONTENT height instead of honoring the explicit
+    /// `.frame(height:)` slot we set in SwiftUI (our `sizeThatFits` is bypassed in this
+    /// context). `.frame(height:)` then CENTERS the oversized view in its slot, so in
+    /// long chats the content spills symmetrically — UP behind the header and DOWN
+    /// behind the composer (harmless in short chats where content < slot, which is why
+    /// the bug only appears once the thread outgrows the visible area).
+    ///
+    /// Fix at the AppKit source: report NO intrinsic/fitting height so SwiftUI can't
+    /// derive a height from our content, and clamp any frame it still hands us to the
+    /// SwiftUI-managed container (`superview`, whose bounds == the threadHeight slot),
+    /// snapping the origin back to the slot top so a previously-centered view stops
+    /// overflowing upward. Content-independent, no plumbing, a strict no-op when we're
+    /// already sized correctly (short chats / macOS 15). (Renée, 2026-06-13.)
+    override var intrinsicContentSize: NSSize {
+        NSSize(width: NSView.noIntrinsicMetric, height: NSView.noIntrinsicMetric)
+    }
+
+    /// Auto Layout fitting fallback — return zero so a tall document view can't
+    /// balloon our fitting height if SwiftUI consults it instead of `sizeThatFits`.
+    override var fittingSize: NSSize { .zero }
+
+    /// Clamp a proposed frame's height to the slot and pin its origin to the slot top.
+    private func clampedToSlot(_ proposed: NSRect) -> NSRect {
+        guard let superH = superview?.bounds.height, superH > 1,
+            proposed.height > superH + 0.5
+        else { return proposed }
+        NSLog(
+            "[MsgScroll] CLAMP h=%.0f -> %.0f (slot=%.0f docH=%.0f)",
+            proposed.height, superH, superH, documentView?.frame.height ?? -1
+        )
+        // Superview is non-flipped: slot top is at origin.y = 0 within it.
+        return NSRect(x: proposed.origin.x, y: 0, width: proposed.width, height: superH)
+    }
+
+    // SwiftUI's ObjC hosting assigns the whole rect via `setFrame:`, which maps to
+    // this property setter — the hook that FIX-6's `setFrameSize` override missed.
+    override var frame: NSRect {
+        get { super.frame }
+        set { super.frame = clampedToSlot(newValue) }
+    }
+
+    // Backup path: clamp the height if AppKit ever sets size alone.
+    override func setFrameSize(_ newSize: NSSize) {
+        super.setFrameSize(
+            clampedToSlot(NSRect(origin: frame.origin, size: newSize)).size)
+    }
+
+    /// Reliable diagnostic — fires on every layout pass regardless of how SwiftUI
+    /// sized us. Throttled to height changes so it doesn't spam during scroll.
+    private var lastLoggedFrameH: CGFloat = -1
+    override func layout() {
+        super.layout()
+        if abs(frame.height - lastLoggedFrameH) > 0.5 {
+            lastLoggedFrameH = frame.height
+            NSLog(
+                "[MsgScroll] LAYOUT frame h=%.0f (slot=%.0f docH=%.0f)",
+                frame.height, superview?.bounds.height ?? -1,
+                documentView?.frame.height ?? -1
+            )
+        }
+    }
+
     override func tile() {
         let hInset = max(0, (bounds.width - maxContentWidth) / 2)
         if contentInsets.left != hInset || contentInsets.right != hInset {

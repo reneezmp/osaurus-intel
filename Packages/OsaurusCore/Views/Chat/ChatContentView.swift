@@ -24,7 +24,7 @@ struct ChatContentView: View {
     var chatBackground: AnyView
     var chatHeader: AnyView
     var emptyStateView: AnyView
-    var messageThread: (CGFloat) -> AnyView
+    var messageThread: (CGFloat, CGFloat) -> AnyView
     var promptOverlayLayer: AnyView
     var onChatOverlayActivated: () -> Void
     var handleChatToolbarSelectDiscovered: (Notification) -> Void
@@ -136,8 +136,10 @@ struct ChatContentView: View {
                                 // maxHeight on Ventura — it inflates to its content
                                 // height — so only an explicit frame bounds it.
                                 // (Renée, 2026-06-13.)
-                                messageThread(effectiveContentWidth)
-                                    .frame(height: threadHeight)
+                                // messageThread self-sizes to `threadHeight` and
+                                // clips its scroll view internally (overlays float
+                                // outside that clip). (Renée, 2026-06-13.)
+                                messageThread(effectiveContentWidth, threadHeight)
                                     .frame(maxWidth: .infinity)
                             }
                         } else {
