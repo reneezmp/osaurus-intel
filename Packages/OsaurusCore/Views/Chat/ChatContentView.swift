@@ -132,16 +132,21 @@ struct ChatContentView: View {
                             .transition(.opacity)
                         }
                     }
-                    // Pin the composer to the bottom as a safe-area inset so it is
-                    // NEVER clipped, no matter how tall the message thread measures
-                    // itself. The thread is an NSScrollView that reports its FULL
-                    // content height in the VStack flow, so in a long chat the column
-                    // overflowed the window and pushed the composer (and scroll
-                    // button) off the bottom edge — worse in a small/windowed frame.
-                    // safeAreaInset both keeps the composer visible AND insets the
-                    // thread above it so messages don't scroll under it.
-                    // (Renée, 2026-06-13.)
-                    .safeAreaInset(edge: .bottom, spacing: 0) {
+                }
+                // Pin the chat area to the WINDOW's height (from the GeometryReader)
+                // and float the composer as a BOTTOM OVERLAY. The message thread is an
+                // NSScrollView whose content height leaks up through the
+                // NSHostingController into the window sizing, so no SwiftUI height cap
+                // bounds it — in a long chat the column overflowed the window and
+                // pushed the composer off the bottom. Constraining the container to
+                // proxy.size.height + clipping, then overlaying the composer, positions
+                // the composer relative to the WINDOW (not the thread), so it stays
+                // visible no matter how huge the chat is. The thread keeps a bottom
+                // content inset (see MessageTableRepresentable) so the last messages
+                // clear the overlaid composer. (Renée, 2026-06-13.)
+                .frame(height: proxy.size.height)
+                .clipped()
+                .overlay(alignment: .bottom) {
                         FloatingInputCard(
                             text: $observedSession.input,
                             selectedModel: $observedSession.selectedModel,
@@ -183,7 +188,6 @@ struct ChatContentView: View {
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
                     }
-                }
             }
         }
         .frame(minWidth: 800, idealWidth: 950, maxWidth: .infinity, minHeight: 575, idealHeight: 610, maxHeight: .infinity)
