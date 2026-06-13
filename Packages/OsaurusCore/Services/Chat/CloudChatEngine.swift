@@ -360,6 +360,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             "model": resolvedModel,
                             "messages": wireMessages,
                             "stream": true,
+                            // Ask for a final usage chunk so the prompt-cache hit/miss
+                            // split is observable per request (logged in the stream loop).
+                            "stream_options": ["include_usage": true],
                         ]
                         if let toolSpecs {
                             body["tools"] = toolSpecs
@@ -371,7 +374,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         urlRequest.httpMethod = "POST"
                         for (k, v) in endpoint.headers { urlRequest.setValue(v, forHTTPHeaderField: k) }
                         urlRequest.timeoutInterval = 300
-                        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+                        // CANONICAL (sorted-key) serialization — bare JSONSerialization emits
+        // keys in hash order, which differs across app launches (and can differ
+        // per nested dict), changing the request bytes for a logically-identical
+        // conversation. DeepSeek's prompt cache only matches a BYTE-identical
+        // prefix, so non-canonical bytes meant every request missed the cache and
+        // re-billed the whole history. Matches upstream's osaurusCanonical wire
+        // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
+        urlRequest.httpBody = try JSONSerialization.data(
+            withJSONObject: body, options: .osaurusCanonical)
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
 
                         let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
@@ -401,8 +412,22 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if dataStr == "[DONE]" { break }
 
                             guard let chunkData = dataStr.data(using: .utf8),
-                                let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any],
-                                let choices = json["choices"] as? [[String: Any]],
+                                let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
+                            else { continue }
+
+                            // DeepSeek's final usage chunk (from stream_options) carries
+                            // the prompt-cache split. Log it so cache hit/miss is
+                            // measurable per request in Console.app.
+                            if let usage = json["usage"] as? [String: Any] {
+                                let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
+                                let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
+                                let promptTok = usage["prompt_tokens"] as? Int ?? -1
+                                NSLog(
+                                    "[CloudChatEngine] CACHE prompt=\(promptTok) hit=\(hit) miss=\(miss) round=\(round)"
+                                )
+                            }
+
+                            guard let choices = json["choices"] as? [[String: Any]],
                                 let delta = choices.first?["delta"] as? [String: Any]
                             else { continue }
 
@@ -579,7 +604,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if let temperature = request.temperature { body["temperature"] = temperature }
         applyReasoningMode(request, into: &body)
 
-        urlRequest.httpBody = try JSONSerialization.data(withJSONObject: body)
+        // CANONICAL (sorted-key) serialization — bare JSONSerialization emits
+        // keys in hash order, which differs across app launches (and can differ
+        // per nested dict), changing the request bytes for a logically-identical
+        // conversation. DeepSeek's prompt cache only matches a BYTE-identical
+        // prefix, so non-canonical bytes meant every request missed the cache and
+        // re-billed the whole history. Matches upstream's osaurusCanonical wire
+        // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
+        urlRequest.httpBody = try JSONSerialization.data(
+            withJSONObject: body, options: .osaurusCanonical)
 
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
