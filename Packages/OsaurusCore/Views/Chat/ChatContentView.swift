@@ -131,11 +131,17 @@ struct ChatContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
                         }
-                        // No Spacer(): the content branches above already fill the
-                        // available height (maxHeight: .infinity). A Spacer here would
-                        // be a second greedy sibling and split the space with the
-                        // thread, shrinking it to half. The composer stays pinned at
-                        // the VStack's bottom edge on its own.
+                    }
+                    // Pin the composer to the bottom as a safe-area inset so it is
+                    // NEVER clipped, no matter how tall the message thread measures
+                    // itself. The thread is an NSScrollView that reports its FULL
+                    // content height in the VStack flow, so in a long chat the column
+                    // overflowed the window and pushed the composer (and scroll
+                    // button) off the bottom edge — worse in a small/windowed frame.
+                    // safeAreaInset both keeps the composer visible AND insets the
+                    // thread above it so messages don't scroll under it.
+                    // (Renée, 2026-06-13.)
+                    .safeAreaInset(edge: .bottom, spacing: 0) {
                         FloatingInputCard(
                             text: $observedSession.input,
                             selectedModel: $observedSession.selectedModel,
