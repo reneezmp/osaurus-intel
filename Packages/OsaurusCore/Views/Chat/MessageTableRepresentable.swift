@@ -138,6 +138,20 @@ struct MessageTableRepresentable: NSViewRepresentable {
         return scrollView
     }
 
+    /// Report the PROPOSED size, not the document view's full content height.
+    /// By default an NSScrollView-backed NSViewRepresentable claims its content
+    /// height as its ideal size — so in a long chat it inflates every SwiftUI
+    /// ancestor (the chat VStack) far past the window, pushing the composer and
+    /// scroll-to-bottom button off the bottom edge. Returning the proposed size
+    /// (ideal height 0, fills whatever the layout offers) keeps the scroll view
+    /// bounded to the available space and scrolling internally — which is the
+    /// whole point of a scroll view. (Renée, 2026-06-13.)
+    func sizeThatFits(
+        _ proposal: ProposedViewSize, nsView: NSScrollView, context: Context
+    ) -> CGSize? {
+        proposal.replacingUnspecifiedDimensions(by: CGSize(width: width, height: 0))
+    }
+
     func updateNSView(_ scrollView: NSScrollView, context: Context) {
         ChatPerfTrace.shared.count("table.updateNSView")
         let coordinator = context.coordinator
