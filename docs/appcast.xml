@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.20</title>
+      <pubDate>Sat, 13 Jun 2026 21:06:21 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>21</sparkle:version>
+      <sparkle:shortVersionString>1.0.20</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.20/Osaurus-Intel-1.0.20.zip" length="50960522" type="application/octet-stream" sparkle:edSignature="x/yMFXoTji20MTWoyj3FO7ibp2O8Hp2275cAXDCKL2m02wrnthsKCVZKNIyWsWA1mQRVsMRQUqqD8N9jR9kBDQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.20
+
+DeepSeek prompt caching now works on long and tool-heavy chats — big token-cost savings. Fixes the chat layout on macOS Ventura: in very long chats the message box stays reachable, text no longer slips behind the header or composer, and the conversation minimap stays within the message area and scrolls when expanded.
+
+_Intel fork · synced to upstream Osaurus 0.19.15 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.19</title>
       <pubDate>Sat, 13 Jun 2026 00:12:29 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
