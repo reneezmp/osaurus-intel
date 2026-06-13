@@ -286,10 +286,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
         sv.autohidesScrollers = true
         sv.drawsBackground = false
         sv.contentView.drawsBackground = false
-        // Bottom inset clears the overlaid FloatingInputCard composer (pinned as
-        // a bottom overlay in ChatContentView) so the last messages aren't hidden
-        // behind it.
-        sv.contentInsets = NSEdgeInsets(top: 8, left: 0, bottom: 110, right: 0)
+        sv.contentInsets = NSEdgeInsets(top: 8, left: 0, bottom: 24, right: 0)
         return sv
     }
 }

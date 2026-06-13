@@ -34,6 +34,14 @@ struct ChatContentView: View {
     var whatsNewContent: (WhatsNewRelease) -> AnyView
     var agentSheetContent: (DiscoveredAgent) -> AnyView
 
+    // Measured header + composer heights so the message thread can get an EXPLICIT
+    // height (window − header − composer) and STOP above the composer instead of
+    // scrolling behind it. On Ventura the NSScrollView ignores a flexible maxHeight
+    // (it inflates to its content height); only an explicit frame bounds it.
+    // (Renée, 2026-06-13.)
+    @State private var measuredHeaderHeight: CGFloat = 44
+    @State private var measuredComposerHeight: CGFloat = 100
+
     var body: some View {
         GeometryReader { proxy in
             let windowWidth: CGFloat = proxy.size.width
@@ -41,6 +49,8 @@ struct ChatContentView: View {
             let sidebarWidth: CGFloat = showSidebar ? 240 : 0
             let chatWidth = windowWidth - sidebarWidth
             let effectiveContentWidth = min(chatWidth, 1100)
+            let chromeHeight = measuredHeaderHeight + measuredComposerHeight
+            let threadHeight = max(80, proxy.size.height - chromeHeight)
 
             HStack(alignment: .top, spacing: 0) {
                 // Sidebar
@@ -99,6 +109,12 @@ struct ChatContentView: View {
                     chatBackground
                     VStack(spacing: 0) {
                         chatHeader
+                            .background(
+                                GeometryReader { g in
+                                    Color.clear.preference(
+                                        key: ChatHeaderHeightKey.self, value: g.size.height)
+                                }
+                            )
                         if let err = observedSession.lastStreamError {
                             Text(err)
                                 .font(.caption)
@@ -114,14 +130,15 @@ struct ChatContentView: View {
                                 emptyStateView
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
-                                // Must fill ONLY the available space (and scroll
-                                // internally) — without this cap the thread reports
-                                // its full content height in a long chat, the VStack
-                                // overflows the window, and the composer + scroll
-                                // button below get clipped off the bottom edge
-                                // (worse in a small/windowed frame). (Renée, 2026-06-13.)
+                                // EXPLICIT height = window − header − composer so the
+                                // thread STOPS above the composer (instead of scrolling
+                                // behind it). The NSScrollView ignores a flexible
+                                // maxHeight on Ventura — it inflates to its content
+                                // height — so only an explicit frame bounds it.
+                                // (Renée, 2026-06-13.)
                                 messageThread(effectiveContentWidth)
-                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
+                                    .frame(height: threadHeight)
+                                    .frame(maxWidth: .infinity)
                             }
                         } else {
                             VStack(spacing: 16) {
@@ -131,22 +148,6 @@ struct ChatContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
                         }
-                    }
-                }
-                // Pin the chat area to the WINDOW's height (from the GeometryReader)
-                // and float the composer as a BOTTOM OVERLAY. The message thread is an
-                // NSScrollView whose content height leaks up through the
-                // NSHostingController into the window sizing, so no SwiftUI height cap
-                // bounds it — in a long chat the column overflowed the window and
-                // pushed the composer off the bottom. Constraining the container to
-                // proxy.size.height + clipping, then overlaying the composer, positions
-                // the composer relative to the WINDOW (not the thread), so it stays
-                // visible no matter how huge the chat is. The thread keeps a bottom
-                // content inset (see MessageTableRepresentable) so the last messages
-                // clear the overlaid composer. (Renée, 2026-06-13.)
-                .frame(height: proxy.size.height)
-                .clipped()
-                .overlay(alignment: .bottom) {
                         FloatingInputCard(
                             text: $observedSession.input,
                             selectedModel: $observedSession.selectedModel,
@@ -187,7 +188,23 @@ struct ChatContentView: View {
                         )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
+                        .background(
+                            GeometryReader { g in
+                                Color.clear.preference(
+                                    key: ChatComposerHeightKey.self, value: g.size.height)
+                            }
+                        )
                     }
+                }
+                // Pin the chat column to the WINDOW's height (GeometryReader) and clip,
+                // so a mis-measure can never push content past the window. The thread
+                // gets an explicit height (above) computed from the measured header +
+                // composer, so it stops above the composer with a real scrollbar.
+                // (Renée, 2026-06-13.)
+                .frame(height: proxy.size.height)
+                .clipped()
+                .onPreferenceChange(ChatHeaderHeightKey.self) { measuredHeaderHeight = $0 }
+                .onPreferenceChange(ChatComposerHeightKey.self) { measuredComposerHeight = $0 }
             }
         }
         .frame(minWidth: 800, idealWidth: 950, maxWidth: .infinity, minHeight: 575, idealHeight: 610, maxHeight: .infinity)
@@ -221,5 +238,21 @@ struct ChatContentView: View {
         .sheet(item: $pendingDiscoveredAgent) { agent in
             agentSheetContent(agent)
         }
+    }
+}
+
+// Measured heights of the chat chrome, used to give the message thread an explicit
+// height (window − header − composer) so it stops above the composer.
+private struct ChatHeaderHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
+    }
+}
+
+private struct ChatComposerHeightKey: PreferenceKey {
+    static let defaultValue: CGFloat = 0
+    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
+        value = max(value, nextValue())
     }
 }
