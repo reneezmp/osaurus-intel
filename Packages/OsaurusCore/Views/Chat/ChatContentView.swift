@@ -114,7 +114,14 @@ struct ChatContentView: View {
                                 emptyStateView
                                     .frame(maxWidth: .infinity, maxHeight: .infinity)
                             } else {
+                                // Must fill ONLY the available space (and scroll
+                                // internally) — without this cap the thread reports
+                                // its full content height in a long chat, the VStack
+                                // overflows the window, and the composer + scroll
+                                // button below get clipped off the bottom edge
+                                // (worse in a small/windowed frame). (Renée, 2026-06-13.)
                                 messageThread(effectiveContentWidth)
+                                    .frame(maxWidth: .infinity, maxHeight: .infinity)
                             }
                         } else {
                             VStack(spacing: 16) {
@@ -124,7 +131,11 @@ struct ChatContentView: View {
                             .frame(maxWidth: .infinity, maxHeight: .infinity)
                             .transition(.opacity)
                         }
-                        Spacer()
+                        // No Spacer(): the content branches above already fill the
+                        // available height (maxHeight: .infinity). A Spacer here would
+                        // be a second greedy sibling and split the space with the
+                        // thread, shrinking it to half. The composer stays pinned at
+                        // the VStack's bottom edge on its own.
                         FloatingInputCard(
                             text: $observedSession.input,
                             selectedModel: $observedSession.selectedModel,

@@ -37,6 +37,10 @@ struct ChatMinimap: View {
         .padding(.horizontal, isExpanded ? 6 : 7)
         .frame(width: isExpanded ? 240 : 24, alignment: .trailing)
         .background(containerBackground)
+        // Collapsed, the strip is translucent so the message text reads through
+        // it instead of being covered; it becomes fully opaque on hover (and the
+        // 24pt frame still catches the hover to expand). (Renée, 2026-06-13.)
+        .opacity(isExpanded ? 1.0 : 0.3)
         .animation(expandAnimation, value: isExpanded)
         .onHover { hovering in
             isExpanded = hovering
