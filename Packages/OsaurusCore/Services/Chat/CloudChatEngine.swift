@@ -144,6 +144,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     static func sanitizeToolSequence(_ input: [[String: Any]]) -> [[String: Any]] {
         var out: [[String: Any]] = []
         var pending: [String] = []  // call ids awaiting a tool result, in order
+        // Deterministic counter for backfilling missing call ids (see below).
+        var synthCounter = 0
 
         func flushPending() {
             for id in pending {
@@ -160,7 +162,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     var ids: [String] = []
                     for i in calls.indices {
                         var id = (calls[i]["id"] as? String) ?? ""
-                        if id.isEmpty { id = "call_\(UUID().uuidString.prefix(20))" }
+                        if id.isEmpty {
+                            // DETERMINISTIC synthetic id. This used to be a random
+                            // UUID, regenerated on EVERY resend — so a tool-call
+                            // message with a missing id (e.g. a conversation restored
+                            // from an older build that dropped ids) produced different
+                            // bytes each request, and DeepSeek's prefix cache missed on
+                            // everything after the first tool call, re-billing the whole
+                            // conversation every turn. A position-stable id keeps the
+                            // resent history byte-identical so the cache holds.
+                            // (Renée, 2026-06-12 — 11M cache-miss tokens.)
+                            id = "call_synth_\(synthCounter)"
+                            synthCounter += 1
+                        }
                         calls[i]["id"] = id
                         ids.append(id)
                     }
