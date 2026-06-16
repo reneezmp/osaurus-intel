@@ -50,6 +50,32 @@ skills/slash-registry + WindowManager/ModelManager hang fixes (excluded) + appca
   `37a2291b`/`be43da1a` tool/MCP diagnostics (excluded deps), `3a743373` external-model-mgmt
   (Intel-kept `ModelDetailView`/`AppDelegate`), `e6b78e36` onboarding polish, `fc1626c6` whats-new.
 
+### Deferred-shelf deep dive (2026-06-14, Session 7)
+
+Re-examined the deferral list for faithful portability. Outcome:
+
+**✅ Ported faithfully:**
+- `c2231910` **`/agent` slash command** — `SlashCommand` + picker UI (`SharedHeaderComponents`)
+  applied verbatim; `chatToolbarOpenAgentPicker` was added only to `ChatWindowManager`'s
+  `#if !OSAURUS_INTEL` branch, so it was **mirrored into `IntelDataConformers`** and the listener
+  bridged into the Intel `IntelToolbarAgentView` (`openPickerTrigger` + `.onReceive`) so the command
+  actually opens the picker. (3× two-param `onChange` down-leveled for Ventura.)
+- `3a743373` **prune-deleted external models** — `ExternalModelLocator` +`pruneMissing()` call in
+  `ModelPickerView`. The reveal-in-Finder **UI** lives in the divergent `ModelDetailView` → kept ours.
+
+**🧱 Architecturally incompatible (NOT faithfully portable — rooted in amputated subsystems):**
+- `58aab452` **hosted inference / "Osaurus Router"** (+credits/billing) — wiring lives in
+  `ChatEngine`/`ModelService`/`ModelRuntime`/`RemoteProviderService`/`ChatTurn`/`ContentBlock`
+  (all excluded, replaced by `CloudChatEngine`). A working port = hand-built Intel glue, not upstream.
+- `a39b2d89` **p2p e2e** — crypto is self-contained but its transport (`BonjourBrowser`/
+  `RelayTunnelManager`) is excluded; encrypting a channel Intel never opens = dead code.
+- `be43da1a` **local MCP probe** — `MCPProviderProbeService` hard-needs excluded `SandboxStdioRunner`.
+
+**⏭ Skipped / needs-rewrite:** `2a58c239`+`ae4541d4` model-picker (Intel's grouping model would need
+re-architecting to upstream's tabs — not a faithful diff), `7068b131` sandbox-default (enforcement in
+excluded `BuiltinSandboxTools`), `fc1626c6` whats-new (keyed on excluded sandbox/pairing), `e6b78e36`
+onboarding polish (low value).
+
 ## Sync workflow (monthly)
 
 ```bash
