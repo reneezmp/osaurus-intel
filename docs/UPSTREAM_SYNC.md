@@ -3,10 +3,10 @@
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
-**Last synced upstream commit:** `d132b728` (Pin Nemotron vMLX runtime fixes)  
-**Upstream version era:** `0.19.15`  
-**Last sync date:** 2026-06-08  
-**Status:** 🟢 Fully caught up — 0 pending substantive commits  
+**Last synced upstream commit:** `24924e6f` (fixed app hangs, #1523)  
+**Upstream version era:** `0.20.0`  
+**Last sync date:** 2026-06-14  
+**Status:** 🟢 Caught up to 0.20.0 — hang/crash/chat/theme fixes absorbed; MLX- and excluded-heavy features deferred (see *Sync 0.19.15 → 0.20.0* below).  
 
 > **Versioning note:** the fork keeps its **own** version line (`1.0.x`) — we do
 > NOT peg it to upstream's number (the fork amputates whole subsystems, so a
@@ -14,6 +14,41 @@
 > as *metadata* in the About panel + release notes, sourced from a single
 > constant: `IntelBuildInfo.upstreamBase` / `upstreamCommit`. Keep that constant
 > in lockstep with the two values above.
+
+## Sync 0.19.15 → 0.20.0 (2026-06-14, Session 6)
+
+95 commits in `d132b728..24924e6f`. The exclude-list amputates MLX/memory/skills/
+slash-registry/sandbox/p2p, so most were SKIP. **Ported (15 substantive):**
+
+| Area | Upstream | Notes |
+|---|---|---|
+| tok/s accuracy | `26573b24` | new `RollingTokenRate` (shared) |
+| image context tokens | `0da56927` | `Attachment` resolution-based estimate |
+| theme button colors | `0c5b4bf0` | `ThemeEditorView` |
+| raw JSON theme editor | `15df6096` | new `ThemeJSONEditorCodec` + editor; resolved union with the bg-decode hang fix |
+| theme-editor + watcher hang | `76a07e24` | bg image decode off-main (`decodeThemeBackgroundImage`) |
+| fatal crashes | `62191278` | only `ModelMediaCapabilities` applies — PrivacyFilter is DU (Intel lacks it); `osaurusApp` kept ours |
+| quit/plugin-teardown crash | `0168ff40` | `ExternalPlugin`/`DebugLog`; `AppDelegate` kept ours (excluded teardown deps), `TelemetryService` DU |
+| ClipboardService main-thread hang | `f1b069de` `374e3190` `1bb474c1` | pasteboard XPC moved off-main (recurring fix; `ModelDetailView`/`ManagementBadgeStore` kept ours) |
+| tool-envelope hang | `69753ad8` | `ToolEnvelope` shared; `ToolRegistry` excluded (took theirs, dead code) |
+| chat-jump-on-completion | `2c4d6089` | **merged** into our Intel `handlePostSnapshotScroll` — kept our `isNewTurn`/`wasPinnedToBottom` structure, added the `isStreaming` gate |
+| sidebar rename | `24a5e3e9` | sidebar UI auto-merged; the view-model sync (`session.title`/`archived`) hand-ported into Intel `ChatContentView` callbacks (chat layout is extracted on Intel) |
+| visual/interaction polish | `3a4edaae` | theme polish (CustomTheme/Theme/AgentInlineBlocks) only; `FloatingInputCard` budget-tint kept ours (needs excluded `ContextBudgetManager`), `ShimmerLabel` DU dropped |
+| localization | `392954aa` … `e6894ce5` | full-file `Localizable.xcstrings` from upstream (both Intel strings present) |
+
+**SKIP (bulk):** all vMLX pins + Gemma/DiffusionGemma/MLX runtime + memory/episodes +
+skills/slash-registry + WindowManager/ModelManager hang fixes (excluded) + appcasts/CI.
+
+**DEFER (revisit in a focused session):**
+- `58aab452` **hosted inference** (0.20.0 marquee) — `ContentBlock`/`ChatTurn`/`OpenAIAPI`/
+  `RemoteProviderManager` mirrored/excluded; conflicts with `CloudChatEngine`.
+- `a39b2d89` **p2p e2e encryption** — isolated `Identity/*` pairing; not exposed on Intel.
+- `7068b131` **sandbox-by-default** — `BuiltinSandboxTools`/`SandboxToolRegistrar` excluded.
+- `2a58c239` + `ae4541d4` **model-picker UX** — Intel's `ModelPickerView` diverged
+  (`cachedGroupedOptions`/`groupedBySource()` vs upstream's `rebuildTabs()` tabs); reconcile later.
+- `c2231910` slash command (excluded registry), `4a9a23f0` system prompts (excluded composer),
+  `37a2291b`/`be43da1a` tool/MCP diagnostics (excluded deps), `3a743373` external-model-mgmt
+  (Intel-kept `ModelDetailView`/`AppDelegate`), `e6b78e36` onboarding polish, `fc1626c6` whats-new.
 
 ## Sync workflow (monthly)
 
