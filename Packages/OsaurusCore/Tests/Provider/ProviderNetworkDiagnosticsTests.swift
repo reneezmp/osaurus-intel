@@ -27,9 +27,38 @@ struct ProviderNetworkDiagnosticsTests {
 
         let auth = row("auth", in: report)
         #expect(auth.severity == .blocked)
-        #expect(auth.value == "ChatGPT sign-in required")
-        #expect(report.pasteboardText.contains("ChatGPT sign-in required"))
+        #expect(auth.value == L("ChatGPT sign-in required"))
+        #expect(report.pasteboardText.contains(L("ChatGPT sign-in required")))
+
+        let oauth = row("oauth-context", in: report)
+        #expect(oauth.severity == .warning)
+        #expect(oauth.value == L("Codex subscription"))
+        #expect(oauth.detail?.contains("providerType=openAICodex") == true)
+        #expect(oauth.detail?.contains("authType=openAICodexOAuth") == true)
+        #expect(oauth.detail?.contains("redirectURI=http://localhost:1455/auth/callback") == true)
+        #expect(oauth.detail?.contains("callbackPort=1455") == true)
+        #expect(oauth.detail?.contains("tokens=missing") == true)
         #expect(!report.pasteboardText.contains("secret-token"))
+    }
+
+    @Test func codexOAuthReportShowsSignedInContextWithoutSecrets() {
+        let provider = OpenAICodexOAuthService.makeProvider(id: UUID())
+        var state = RemoteProviderState(providerId: provider.id)
+        state.lastError = #"previous callback code=secret-code"#
+
+        let report = ProviderNetworkDiagnostics.remoteProviderReport(
+            provider: provider,
+            state: state,
+            proxy: .disabled,
+            apiKeyPresent: false,
+            oauthTokensPresent: true
+        )
+
+        let oauth = row("oauth-context", in: report)
+        #expect(oauth.severity == .info)
+        #expect(oauth.detail?.contains("tokens=present") == true)
+        #expect(oauth.detail?.contains("lastError=previous callback code=***") == true)
+        #expect(!report.pasteboardText.contains("secret-code"))
     }
 
     @Test func xaiOAuthReportFlagsMissingTokensWithoutLeakingSecrets() {
@@ -47,8 +76,8 @@ struct ProviderNetworkDiagnosticsTests {
 
         let auth = row("auth", in: report)
         #expect(auth.severity == .blocked)
-        #expect(auth.value == "xAI sign-in required")
-        #expect(report.pasteboardText.contains("xAI sign-in required"))
+        #expect(auth.value == L("xAI sign-in required"))
+        #expect(report.pasteboardText.contains(L("xAI sign-in required")))
         #expect(!report.pasteboardText.contains("secret-token"))
     }
 
@@ -72,8 +101,9 @@ struct ProviderNetworkDiagnosticsTests {
             oauthTokensPresent: false
         )
 
-        #expect(row("models", in: report).value == "Fallback available")
-        #expect(row("models", in: report).detail?.contains("Manual IDs") == true)
+        #expect(row("models", in: report).value == L("Fallback available"))
+        // "/models" appears in the detail text across all localizations.
+        #expect(row("models", in: report).detail?.contains("/models") == true)
         #expect(row("format", in: report).detail?.contains("response_format=json_schema") == true)
     }
 
@@ -98,7 +128,7 @@ struct ProviderNetworkDiagnosticsTests {
             oauthTokensPresent: false
         )
 
-        #expect(row("proxy", in: report).value == "Ignored")
+        #expect(row("proxy", in: report).value == L("Ignored"))
         #expect(row("proxy", in: report).severity == .warning)
     }
 
@@ -123,7 +153,7 @@ struct ProviderNetworkDiagnosticsTests {
 
         #expect(row("transport", in: report).value == "Stdio host")
         #expect(row("transport", in: report).severity == .warning)
-        #expect(row("proxy", in: report).value == "Not used for stdio")
+        #expect(row("proxy", in: report).value == L("Not used for stdio"))
         #expect(row("repro", in: report).detail?.contains("listTools") == true)
     }
 

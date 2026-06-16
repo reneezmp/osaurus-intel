@@ -89,21 +89,34 @@ public enum ProviderNetworkDiagnostics {
         apiKeyPresent: Bool,
         oauthTokensPresent: Bool
     ) -> ProviderDiagnosticReport {
-        ProviderDiagnosticReport(
-            title: "Remote provider diagnostics",
-            subtitle: "\(provider.name) | \(provider.displayEndpoint)",
-            rows: [
-                remoteStateRow(provider: provider, state: state),
-                remoteAuthRow(
-                    provider: provider,
-                    state: state,
-                    apiKeyPresent: apiKeyPresent,
-                    oauthTokensPresent: oauthTokensPresent
-                ),
+        var rows = [
+            remoteStateRow(provider: provider, state: state),
+            remoteAuthRow(
+                provider: provider,
+                state: state,
+                apiKeyPresent: apiKeyPresent,
+                oauthTokensPresent: oauthTokensPresent
+            ),
+        ]
+        if let oauthContext = remoteOAuthContextRow(
+            provider: provider,
+            state: state,
+            oauthTokensPresent: oauthTokensPresent
+        ) {
+            rows.append(oauthContext)
+        }
+        rows.append(
+            contentsOf: [
                 remoteModelDiscoveryRow(provider: provider),
                 remoteRequestFormatRow(provider: provider),
                 proxyRow(proxy, appliesTo: "Remote provider requests"),
             ]
+        )
+
+        return ProviderDiagnosticReport(
+            title: "Remote provider diagnostics",
+            subtitle: "\(provider.name) | \(provider.displayEndpoint)",
+            rows: rows
         )
     }
 
@@ -344,6 +357,36 @@ public enum ProviderNetworkDiagnostics {
                 detail: "Tries the remote /models endpoint, then falls back to the agent default model."
             )
         }
+    }
+
+    private static func remoteOAuthContextRow(
+        provider: RemoteProvider,
+        state: RemoteProviderState?,
+        oauthTokensPresent: Bool
+    ) -> ProviderDiagnosticRow? {
+        guard provider.authType == .openAICodexOAuth || provider.providerType == .openAICodex else {
+            return nil
+        }
+
+        var details = [
+            "providerType=\(provider.providerType.rawValue)",
+            "authType=\(provider.authType.rawValue)",
+            "redirectURI=\(OpenAICodexOAuthService.redirectURI)",
+            "callbackPort=1455",
+            "tokens=\(oauthTokensPresent ? "present" : "missing")",
+        ]
+        if let error = state?.lastError, !error.isEmpty {
+            details.append("lastError=\(safeDiagnostic(error))")
+        }
+
+        return ProviderDiagnosticRow(
+            id: "oauth-context",
+            title: L("OAuth context"),
+            value: L("Codex subscription"),
+            severity: oauthTokensPresent ? .info : .warning,
+            detail: details.joined(separator: "; "),
+            action: L("Copy diagnostics after a failed sign-in attempt and include this row in the issue.")
+        )
     }
 
     private static func remoteRequestFormatRow(provider: RemoteProvider) -> ProviderDiagnosticRow {
