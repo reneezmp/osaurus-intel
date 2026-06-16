@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.21</title>
+      <pubDate>Tue, 16 Jun 2026 16:08:05 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>22</sparkle:version>
+      <sparkle:shortVersionString>1.0.21</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.21/Osaurus-Intel-1.0.21.zip" length="51133712" type="application/octet-stream" sparkle:edSignature="GHufPAjGLrYmhviDyE7/VgMLgxN1S7H9SMz+zg1MyDntfynx4EtQePb8Qsrg4YAB2XrOs3h7q8hWVjgoi+kiCw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.21
+
+Absorbs upstream Osaurus fixes through 0.20.0: faster and more accurate tokens/sec, better image context-token estimates, a raw-JSON theme editor plus a theme-editor performance fix, and a batch of main-thread hang/crash fixes (clipboard, quit and plugin teardown, watcher, tool handling). Chat no longer jumps to the top when a response finishes, and renaming a chat in the sidebar now sticks. Updated translations.
+
+_Intel fork · synced to upstream Osaurus 0.20.0 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.20</title>
       <pubDate>Sat, 13 Jun 2026 21:06:21 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
