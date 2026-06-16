@@ -265,6 +265,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let url: String
         let headers: [String: String]
         let providerLabel: String
+        /// When true, the request body must be EIP-191 wallet-signed via
+        /// `OsaurusRouterAuthSigner` (the hosted Osaurus Router uses signed
+        /// `x-wallet-*` headers instead of a Bearer key).
+        var isOsaurusRouter: Bool = false
     }
 
     /// Resolve the endpoint + headers for `model`. On Intel a request can route
@@ -307,7 +311,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     headers["Authorization"] = "Bearer \(key)"
                 }
             }
-            return ResolvedEndpoint(url: url.absoluteString, headers: headers, providerLabel: owner.name)
+            return ResolvedEndpoint(
+                url: url.absoluteString,
+                headers: headers,
+                providerLabel: owner.name,
+                isOsaurusRouter: owner.providerType == .osaurusRouter
+            )
         }
         if let providerEndpoint {
             NSLog(
@@ -383,6 +392,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: body, options: .osaurusCanonical)
+                        // Osaurus Router: EIP-191 wallet-sign the request body.
+                        if endpoint.isOsaurusRouter {
+                            try await OsaurusRouterAuthSigner().sign(
+                                request: &urlRequest, body: urlRequest.httpBody)
+                        }
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
 
                         let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
@@ -613,6 +627,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: body, options: .osaurusCanonical)
+        // Osaurus Router: EIP-191 wallet-sign the request body.
+        if endpoint.isOsaurusRouter {
+            try await OsaurusRouterAuthSigner().sign(request: &urlRequest, body: urlRequest.httpBody)
+        }
 
         let (data, response) = try await URLSession.shared.data(for: urlRequest)
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0

@@ -174,6 +174,8 @@ private extension ManagementView {
             )
         case .providers:
             RemoteProvidersView()
+        case .credits:
+            CreditsView()
         case .agents:
             AgentsView(deeplinkAgentId: deeplinkAgentId)
         case .plugins:

@@ -12,6 +12,7 @@ import SwiftUI
 public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case models
     case providers
+    case credits
     case agents
     case plugins
     case sandbox
@@ -36,6 +37,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .models: "cube.box.fill"
         case .providers: "cloud.fill"
+        case .credits: "creditcard.fill"
         case .agents: "person.2.fill"
         case .plugins: "puzzlepiece.extension.fill"
         case .sandbox: "shippingbox.fill"
@@ -60,6 +62,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .models: L("Models")
         case .providers: L("Providers")
+        case .credits: L("Credits")
         case .agents: L("Agents")
         case .plugins: L("Plugins")
         case .sandbox: L("Sandbox")

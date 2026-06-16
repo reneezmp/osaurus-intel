@@ -72,6 +72,16 @@ public enum OsaurusPaths {
         root().appendingPathComponent("providers", isDirectory: true)
     }
 
+    /// On-device Osaurus Router billing ledger directory (`~/.osaurus/billing/`).
+    public static func billing() -> URL {
+        root().appendingPathComponent("billing", isDirectory: true)
+    }
+
+    /// Encrypted on-device Osaurus Router billing ledger: `~/.osaurus/billing/ledger.sqlite`.
+    public static func billingLedgerDatabaseFile() -> URL {
+        billing().appendingPathComponent("ledger.sqlite")
+    }
+
     /// Agents directory
     public static func agents() -> URL {
         root().appendingPathComponent("agents", isDirectory: true)

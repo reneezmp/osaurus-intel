@@ -357,6 +357,50 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         notifyModelsChanged()
     }
 
+    // MARK: - Osaurus Router (hosted inference)
+
+    /// Stable identity for the managed Osaurus Router provider (mirrors upstream).
+    static let osaurusRouterProviderId = UUID(uuidString: "2CFBD528-62FD-4EF0-A143-3FE532F03840")!
+
+    /// The managed provider pointing the engine at `router.osaurus.ai`. `authType`
+    /// is `.none` — the EIP-191 wallet signature is applied per-request by
+    /// `CloudChatEngine` via `OsaurusRouterAuthSigner`, not a stored API key.
+    private static func makeManagedOsaurusRouterProvider() -> RemoteProvider {
+        RemoteProvider(
+            id: osaurusRouterProviderId,
+            name: "Osaurus",
+            host: OsaurusRouter.defaultBaseURL.host ?? "router.osaurus.ai",
+            providerProtocol: OsaurusRouter.defaultBaseURL.scheme == "http" ? .http : .https,
+            port: OsaurusRouter.defaultBaseURL.port,
+            basePath: "",
+            authType: .none,
+            providerType: .osaurusRouter,
+            enabled: true,
+            autoConnect: true,
+            timeout: 120
+        )
+    }
+
+    /// (Intel) Register the managed Osaurus Router provider (if absent) and refresh
+    /// its model catalog via the signed account API. Called by
+    /// `OsaurusRouterAccountService` once a wallet identity exists. Upstream routes
+    /// this through `RemoteProviderService.connect`; Intel registers the provider
+    /// directly so `CloudChatEngine` resolves the router endpoint + signed auth.
+    func connectOsaurusRouterIfPossible() async {
+        if !configuration.providers.contains(where: { $0.id == Self.osaurusRouterProviderId }) {
+            configuration.add(Self.makeManagedOsaurusRouterProvider())
+        }
+        var state = providerStates[Self.osaurusRouterProviderId]
+            ?? RemoteProviderState(providerId: Self.osaurusRouterProviderId)
+        state.isConnected = true
+        if let models = try? await OsaurusRouterAPIClient().models() {
+            state.discoveredModels = models.map(\.id).sorted()
+            state.lastConnectedAt = Date()
+        }
+        providerStates[Self.osaurusRouterProviderId] = state
+        notifyModelsChanged()
+    }
+
     func addProvider(
         _ provider: RemoteProvider,
         apiKey: String? = nil,
