@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.22</title>
+      <pubDate>Tue, 16 Jun 2026 22:43:08 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>23</sparkle:version>
+      <sparkle:shortVersionString>1.0.22</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.22/Osaurus-Intel-1.0.22.zip" length="51721948" type="application/octet-stream" sparkle:edSignature="eU1w07odd+eUyGwY3V+PixF9ureJ19v1SaHvgUM14TBj3yYU1MPZSNMMKsjjzGpJkCztF9q25JTEcpPUfbo1Ag=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.22
+
+Adds the /agent slash command — type /agent in the composer to quickly switch agents. The model picker now prunes external models you've deleted on disk. Experimental: hosted 'Osaurus Router' inference — a new Credits tab in the Manage window lets you use Osaurus's hosted models, billed to your Osaurus identity (requires funding a router account).
+
+_Intel fork · synced to upstream Osaurus 0.20.0 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.21</title>
       <pubDate>Tue, 16 Jun 2026 16:08:05 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
