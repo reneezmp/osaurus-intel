@@ -64,9 +64,21 @@ Re-examined the deferral list for faithful portability. Outcome:
   `ModelPickerView`. The reveal-in-Finder **UI** lives in the divergent `ModelDetailView` → kept ours.
 
 **🧱 Architecturally incompatible (NOT faithfully portable — rooted in amputated subsystems):**
-- `58aab452` **hosted inference / "Osaurus Router"** (+credits/billing) — wiring lives in
-  `ChatEngine`/`ModelService`/`ModelRuntime`/`RemoteProviderService`/`ChatTurn`/`ContentBlock`
-  (all excluded, replaced by `CloudChatEngine`). A working port = hand-built Intel glue, not upstream.
+- `a39b2d89` **p2p e2e** — crypto is self-contained but its transport (`BonjourBrowser`/
+  `RelayTunnelManager`) is excluded; encrypting a channel Intel never opens = dead code. *(still blocked)*
+- `be43da1a` **local MCP probe** — `MCPProviderProbeService` hard-needs excluded `SandboxStdioRunner`. *(still blocked)*
+
+**🔧 Ported as Intel glue (Session 8, 2026-06-14 — `dfcc19cc`):**
+- `58aab452` **hosted inference / "Osaurus Router"** — initially called incompatible, but
+  `CloudChatEngine` already routes to any OpenAI-compatible provider via the stubbed
+  `RemoteProviderManager`, so it WAS doable as a glue port. The "wallet" is the user's
+  existing Osaurus identity (EIP-191 `deriveOsaurusId`→EVM address), not a separate wallet.
+  Added `.osaurusRouter` provider type, the self-contained Router/credits files, a managed
+  provider registration + signed catalog fetch in the stub, request signing in
+  `CloudChatEngine` (stream+complete), and a `ManagementTab.credits` entry. Dropped the
+  redundant `OpenAICompatibleStreamParser` (CloudChatEngine streams natively) and decoupled
+  `StorageMutationGate`/`FeatureTelemetry`/insights cross-refs. **Compiles app-wide; live use
+  needs a funded router account (untested).** Composer credits-chip deferred.
 - `a39b2d89` **p2p e2e** — crypto is self-contained but its transport (`BonjourBrowser`/
   `RelayTunnelManager`) is excluded; encrypting a channel Intel never opens = dead code.
 - `be43da1a` **local MCP probe** — `MCPProviderProbeService` hard-needs excluded `SandboxStdioRunner`.
