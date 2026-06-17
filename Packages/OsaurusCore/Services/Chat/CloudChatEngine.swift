@@ -54,13 +54,13 @@ struct ChatCompletionResponse: Codable, Sendable {
 /// found no `data:` lines in the JSON error body, reported "0 chunks", and
 /// finished silently — the user saw an empty "poof" turn with no explanation.
 enum CloudChatError: LocalizedError {
-    case httpError(status: Int, message: String)
+    case httpError(provider: String, status: Int, message: String)
 
     var errorDescription: String? {
         switch self {
-        case let .httpError(status, message):
+        case let .httpError(provider, status, message):
             let detail = message.isEmpty ? "no details returned" : message
-            return "DeepSeek API error \(status): \(detail)"
+            return "\(provider) API error \(status): \(detail)"
         }
     }
 }
@@ -292,7 +292,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
                 return discovered.contains(model) || provider.manualModelIds.contains(model)
             }
-            guard let owner, let url = owner.url(for: "/chat/completions") else { return nil }
+            // Use the provider's own chat endpoint, not a hardcoded path: the
+            // Osaurus Router serves OpenAI-compatible inference under `/v1/...`
+            // (its account API lives at root) while its provider `basePath` is
+            // empty, so the `/v1` must come from `chatEndpoint`. Standard
+            // OpenAI-compatible providers still resolve to `/chat/completions`
+            // with any `/v1` carried by their own `basePath`.
+            guard let owner, let url = owner.url(for: owner.providerType.chatEndpoint) else { return nil }
 
             var headers: [String: String] = ["Content-Type": "application/json"]
             for (k, v) in owner.customHeaders { headers[k] = v }
@@ -411,7 +417,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             let message = extractAPIErrorMessage(errorBody)
                             NSLog("[CloudChatEngine] HTTP \(statusCode) error body: \(message)")
                             continuation.finish(
-                                throwing: CloudChatError.httpError(status: statusCode, message: message)
+                                throwing: CloudChatError.httpError(
+                                    provider: endpoint.providerLabel, status: statusCode, message: message)
                             )
                             return
                         }
@@ -637,7 +644,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if !(200...299).contains(statusCode) {
             let message = extractAPIErrorMessage(String(data: data, encoding: .utf8) ?? "")
             NSLog("[CloudChatEngine] completeChat HTTP \(statusCode) error body: \(message)")
-            throw CloudChatError.httpError(status: statusCode, message: message)
+            throw CloudChatError.httpError(
+                provider: endpoint.providerLabel, status: statusCode, message: message)
         }
         return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
     }
