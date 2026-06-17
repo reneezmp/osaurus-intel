@@ -449,11 +449,16 @@ struct ModelPickerView: View {
 #endif
 #else
 import SwiftUI
-/// Intel stub: the upstream rich picker depends on the body-swapped
-/// `ModelPickerTableRepresentable` (which builds the NSTableView with
-/// grouped rows). On Intel we render a minimal SwiftUI list of the
-/// passed-in options instead — the deepseek models still show up and
-/// users can switch between them.
+
+/// Intel model picker. The upstream "rich" picker (the `#if !OSAURUS_INTEL`
+/// half above) renders through `ModelPickerTableRepresentable` — an NSTableView
+/// that trips the same macOS-13 AppKit auto-sizing demon we fought in the chat
+/// layout. So on Intel we render a pure-SwiftUI popover instead, keeping the
+/// pieces that actually matter with a large catalog: a real `ScrollView` (the
+/// old stub rendered an unbounded `VStack` that couldn't scroll), a search
+/// field, and source tabs (e.g. Osaurus / DeepSeek) — mirroring upstream's
+/// structure without the table. Pricing/context badges need catalog metadata
+/// the Intel `ModelPickerItem` doesn't yet carry; Vision comes from `isVLM`.
 struct ModelPickerView: View {
     let options: [ModelPickerItem]
     @Binding var selectedModel: String?
@@ -461,45 +466,227 @@ struct ModelPickerView: View {
     let onDismiss: () -> Void
 
     @Environment(\.theme) private var theme
+    @State private var searchText = ""
+    /// `nil` = the "All" tab; otherwise a `Source.uniqueKey`.
+    @State private var selectedSourceKey: String?
+
+    private var groups: [(source: ModelPickerItem.Source, models: [ModelPickerItem])] {
+        options.groupedBySource()
+    }
+
+    private var visibleModels: [ModelPickerItem] {
+        let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+        var items = options
+        if let key = selectedSourceKey {
+            items = items.filter { $0.source.uniqueKey == key }
+        }
+        if !query.isEmpty {
+            items = items.filter {
+                $0.displayName.lowercased().contains(query) || $0.id.lowercased().contains(query)
+            }
+        }
+        return items
+    }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 4) {
-            Text("Select model", bundle: .module)
-                .font(theme.font(size: 11, weight: .semibold))
-                .foregroundColor(theme.tertiaryText)
-                .padding(.horizontal, 12)
-                .padding(.top, 10)
-                .padding(.bottom, 4)
-            ForEach(options) { item in
-                Button(action: {
-                    selectedModel = item.id
-                    onDismiss()
-                }) {
-                    HStack(spacing: 8) {
-                        Image(systemName: item.id == selectedModel ? "checkmark.circle.fill" : "circle")
-                            .foregroundColor(item.id == selectedModel ? theme.accentColor : theme.secondaryText)
-                            .frame(width: 16)
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text(item.displayName)
-                                .font(theme.font(size: 13, weight: .medium))
-                                .foregroundColor(theme.primaryText)
-                            if let description = item.description, !description.isEmpty {
-                                Text(description)
-                                    .font(theme.font(size: 11))
-                                    .foregroundColor(theme.secondaryText)
-                            }
-                        }
-                        Spacer(minLength: 0)
-                    }
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .contentShape(Rectangle())
+        VStack(spacing: 0) {
+            header
+            Divider().background(theme.primaryBorder.opacity(0.3))
+            searchField
+            if groups.count > 1 {
+                sourceTabs
+            }
+            Divider().background(theme.primaryBorder.opacity(0.3))
+            if visibleModels.isEmpty {
+                emptyState
+            } else {
+                modelScroll
+            }
+        }
+        .frame(width: 380, height: 480)
+        .background(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .fill(theme.primaryBackground)
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 12, style: .continuous)
+                .strokeBorder(theme.primaryBorder.opacity(0.15), lineWidth: 1)
+        )
+    }
+
+    // MARK: - Header
+
+    private var header: some View {
+        HStack(spacing: 8) {
+            Text("Available Models", bundle: .module)
+                .font(theme.font(size: 13, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+            Text("\(options.count)")
+                .font(theme.font(size: 11, weight: .medium))
+                .foregroundColor(theme.secondaryText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 3)
+                .background(Capsule().fill(theme.secondaryBackground))
+            Spacer()
+        }
+        .padding(.horizontal, 14)
+        .padding(.vertical, 12)
+    }
+
+    // MARK: - Search
+
+    private var searchField: some View {
+        HStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 13))
+                .foregroundColor(theme.secondaryText)
+            ZStack(alignment: .leading) {
+                if searchText.isEmpty {
+                    Text("Search models...", bundle: .module)
+                        .font(.system(size: 13))
+                        .foregroundColor(theme.secondaryText)
+                        .allowsHitTesting(false)
+                }
+                TextField("", text: $searchText)
+                    .textFieldStyle(.plain)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.primaryText)
+            }
+            if !searchText.isEmpty {
+                Button(action: { searchText = "" }) {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.tertiaryText)
                 }
                 .buttonStyle(.plain)
             }
         }
-        .frame(minWidth: 260)
-        .padding(.bottom, 8)
+        .padding(.horizontal, 12)
+        .padding(.vertical, 10)
+        .background(theme.secondaryBackground.opacity(theme.isDark ? 0.4 : 0.5))
+    }
+
+    // MARK: - Source Tabs
+
+    private var sourceTabs: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                tabPill(label: String(localized: "All", bundle: .module), count: options.count, key: nil)
+                ForEach(groups, id: \.source.uniqueKey) { group in
+                    tabPill(
+                        label: group.source.displayName,
+                        count: group.models.count,
+                        key: group.source.uniqueKey
+                    )
+                }
+            }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 8)
+        }
+    }
+
+    private func tabPill(label: String, count: Int, key: String?) -> some View {
+        let isSelected = selectedSourceKey == key
+        return Button(action: { selectedSourceKey = key }) {
+            HStack(spacing: 5) {
+                Text(label)
+                    .font(theme.font(size: 11, weight: .medium))
+                Text("\(count)")
+                    .font(theme.font(size: 10, weight: .medium))
+                    .opacity(0.7)
+            }
+            .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 5)
+            .background(
+                Capsule().fill(
+                    isSelected ? theme.accentColor.opacity(0.12) : theme.secondaryBackground.opacity(0.5)
+                )
+            )
+            .overlay(
+                Capsule().strokeBorder(
+                    isSelected ? theme.accentColor.opacity(0.35) : Color.clear, lineWidth: 1
+                )
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Model List
+
+    private var modelScroll: some View {
+        ScrollView {
+            LazyVStack(spacing: 0) {
+                ForEach(visibleModels) { item in
+                    modelRow(item)
+                }
+            }
+            .padding(.vertical, 4)
+        }
+    }
+
+    private func modelRow(_ item: ModelPickerItem) -> some View {
+        let isSelected = item.id == selectedModel
+        return Button(action: {
+            selectedModel = item.id
+            onDismiss()
+        }) {
+            HStack(spacing: 8) {
+                Image(systemName: isSelected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText.opacity(0.5))
+                    .frame(width: 18)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(item.displayName)
+                        .font(theme.font(size: 13, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(1)
+                    if selectedSourceKey == nil, let description = item.description, !description.isEmpty {
+                        Text(description)
+                            .font(theme.font(size: 11))
+                            .foregroundColor(theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer(minLength: 6)
+                if item.isVLM {
+                    visionBadge
+                }
+            }
+            .padding(.horizontal, 14)
+            .padding(.vertical, 7)
+            .contentShape(Rectangle())
+            .background(isSelected ? theme.accentColor.opacity(0.06) : Color.clear)
+        }
+        .buttonStyle(.plain)
+    }
+
+    private var visionBadge: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "eye")
+                .font(.system(size: 9))
+            Text("Vision", bundle: .module)
+                .font(theme.font(size: 9, weight: .medium))
+        }
+        .foregroundColor(theme.accentColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(Capsule().fill(theme.accentColor.opacity(0.1)))
+    }
+
+    // MARK: - Empty State
+
+    private var emptyState: some View {
+        VStack(spacing: 8) {
+            Image(systemName: "magnifyingglass")
+                .font(.system(size: 22))
+                .foregroundColor(theme.tertiaryText)
+            Text("No models found", bundle: .module)
+                .font(theme.font(size: 13))
+                .foregroundColor(theme.secondaryText)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .padding()
     }
 }
 #endif
