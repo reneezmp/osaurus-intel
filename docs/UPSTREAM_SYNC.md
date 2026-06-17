@@ -3,28 +3,30 @@
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
-**Last synced upstream commit:** `24924e6f` (fixed app hangs, #1523)  
-**Upstream version era:** `0.20.0`  
+**Last synced upstream commit:** `7901ec42` (fixed main thread blocking processes, #1556)  
+**Upstream version era:** `0.20.3`  
 **Last sync date:** 2026-06-14  
-**Status:** 🟡 Synced through `24924e6f` (0.20.0). **21 new upstream commits pending** (0.20.1–0.20.3) — see *Pending next sync* below. Hosted-inference ("Osaurus Router") ported as Intel glue in **1.0.22** (compiles app-wide, untested live). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf: `/agent`, prune, hosted inference).  
+**Status:** 🟢 Synced through `7901ec42` (0.20.3). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf incl. hosted inference — untested live), 1.0.23 (0.20.0→0.20.3 sync).  
 
-## Pending next sync (0.20.0 → 0.20.3, 21 commits)
+## Sync 0.20.0 → 0.20.3 (2026-06-14, Session 9)
 
-`git log 24924e6f..upstream/main`. First-pass triage (verify with `git show --stat` per the rubric):
+21 commits in `24924e6f..7901ec42`. **Ported (7):**
 
-| Likely PORT (shared fixes) | |
+| Upstream | Intel action |
 |---|---|
-| `7901ec42` | fixed main thread blocking processes |
-| `6c18cb91` | fix hanging with tools section (+ sandbox vsock diag — partial) |
-| `b768bbcb` | anthropic api failing on remote providers |
-| `5b3c2fa6` | fix pasted provider model-list URLs |
-| `e8bcba8a` | model selected during onboarding not used |
-| `dee498b8` | tool exposure search diagnostics (mirror ToolRegistry?) |
+| `8dd49a65` | Codex OAuth diagnostic context (`ProviderNetworkDiagnostics`) |
+| `4569b76f` | OAuth → global proxy — adapted `GlobalProxySettings.sharedSession()` (unported) → `makeSession()` |
+| `13bb8b47` | configurable Hugging Face cache path (down-leveled the new `onChange`) |
+| `ef180dd8` | local access-key lifecycle — `AccessKeyLifecycleService`; ServerView adapted (`ServerController` excluded → server is loopback-only) |
+| `7901ec42` | **partial** — ChatView static `ISO8601DateFormatter` cache (main-thread alloc); `PluginRepositoryService` part skipped (excluded) |
+| `6c18cb91` | **partial** — `ToolConfigurationStore` only; the ToolsManagerView tools-section hang fix needs the **unported `37a2291b` `ToolAvailability`** + a card refactor that would lose the M16 blank-gap fix |
+| `bd0e196d`+`54d650ba` | `Localizable.xcstrings` full-file from upstream |
 
-**Likely SKIP/excluded:** `33c41661`/`8ff06de3` (host stdio MCP — excluded `SandboxStdioRunner`),
-`e5419a3b` (kv-cache, MLX), `13bb8b47` (HF cache path — model download excluded),
-`4569b76f`/`9e390950` (global proxy — see `GLOBAL_PROXY.md`, evaluate), `8dd49a65` (Codex OAuth diag),
-`ef180dd8` (local access-key lifecycle — evaluate). **i18n/SYNC:** `bd0e196d`, `54d650ba` (xcstrings).
+**SKIP (excluded/divergent):** `b768bbcb` (RemoteProviderService — Intel uses CloudChatEngine),
+`9e390950` (PluginHostAPI), `33c41661`/`8ff06de3` (host stdio MCP → excluded `SandboxStdioRunner`),
+`dee498b8` (ToolIndexService/CapabilityTools), `e5419a3b` (MLX kv-cache), `5b3c2fa6` (paste-URL — a
+*fix* to a feature Intel's divergent `RemoteProviderEditSheet` never had). **DEFER:** `e8bcba8a`
+(onboarding model-selection — mixed with excluded RemoteProviderManager/ToolIndexService).
 **IGNORE:** 3 appcasts, `44bc8ae6` (whats-new), `ae34ca6a` (legacy storage marker).
 
 > **Versioning note:** the fork keeps its **own** version line (`1.0.x`) — we do
