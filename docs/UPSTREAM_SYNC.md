@@ -6,7 +6,26 @@
 **Last synced upstream commit:** `24924e6f` (fixed app hangs, #1523)  
 **Upstream version era:** `0.20.0`  
 **Last sync date:** 2026-06-14  
-**Status:** 🟢 Caught up to 0.20.0 — hang/crash/chat/theme fixes absorbed; MLX- and excluded-heavy features deferred (see *Sync 0.19.15 → 0.20.0* below).  
+**Status:** 🟡 Synced through `24924e6f` (0.20.0). **21 new upstream commits pending** (0.20.1–0.20.3) — see *Pending next sync* below. Hosted-inference ("Osaurus Router") ported as Intel glue in **1.0.22** (compiles app-wide, untested live). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf: `/agent`, prune, hosted inference).  
+
+## Pending next sync (0.20.0 → 0.20.3, 21 commits)
+
+`git log 24924e6f..upstream/main`. First-pass triage (verify with `git show --stat` per the rubric):
+
+| Likely PORT (shared fixes) | |
+|---|---|
+| `7901ec42` | fixed main thread blocking processes |
+| `6c18cb91` | fix hanging with tools section (+ sandbox vsock diag — partial) |
+| `b768bbcb` | anthropic api failing on remote providers |
+| `5b3c2fa6` | fix pasted provider model-list URLs |
+| `e8bcba8a` | model selected during onboarding not used |
+| `dee498b8` | tool exposure search diagnostics (mirror ToolRegistry?) |
+
+**Likely SKIP/excluded:** `33c41661`/`8ff06de3` (host stdio MCP — excluded `SandboxStdioRunner`),
+`e5419a3b` (kv-cache, MLX), `13bb8b47` (HF cache path — model download excluded),
+`4569b76f`/`9e390950` (global proxy — see `GLOBAL_PROXY.md`, evaluate), `8dd49a65` (Codex OAuth diag),
+`ef180dd8` (local access-key lifecycle — evaluate). **i18n/SYNC:** `bd0e196d`, `54d650ba` (xcstrings).
+**IGNORE:** 3 appcasts, `44bc8ae6` (whats-new), `ae34ca6a` (legacy storage marker).
 
 > **Versioning note:** the fork keeps its **own** version line (`1.0.x`) — we do
 > NOT peg it to upstream's number (the fork amputates whole subsystems, so a

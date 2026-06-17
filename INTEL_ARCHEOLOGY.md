@@ -2237,14 +2237,57 @@ Renée posted the port on the official Osaurus Discord. The maintainers loved it
 MacBook — and asked to feature it on their socials. Distribution = handed to the
 people best placed to spread the story. We stay quietly excellent.
 
+## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
+
+### Releases 1.0.18 → 1.0.22 (build 19 → 23)
+- **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
+  reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
+- **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
+- **1.0.20** — **the big one.** (a) DeepSeek **prompt-cache fix**: Intel serialized
+  requests with bare `JSONSerialization` (non-deterministic key order) → cache prefix
+  never matched → ~11M cache-miss tokens. Switched both serialization points to
+  `.osaurusCanonical` (sorted keys, `JSONDeterminism.swift`) → round-to-round ~99%,
+  marginal ~79% hit. **Lesson: every wire path must use the canonical encoder.**
+  (b) The **Ventura chat-layout saga** (11 build iterations) — see below.
+- **1.0.21** — absorbed the **0.19.15→0.20.0 upstream sync** (95 commits, ~16 ported:
+  main-thread hang/crash fixes, the chat-jump-on-completion fix *merged into* Intel's
+  `handlePostSnapshotScroll` scroll logic, tok/s accuracy, theme JSON editor, image-token
+  estimate; the MLX/memory/skills/excluded bulk correctly skipped). Ledger in `docs/UPSTREAM_SYNC.md`.
+- **1.0.22** — the **deferred shelf.** `/agent` slash command (the trigger notification
+  lived only in `ChatWindowManager`'s `#if !OSAURUS_INTEL` branch — mirrored into
+  `IntelDataConformers` + bridged the listener into the Intel toolbar so it actually
+  opens the picker), prune-deleted external models, and **hosted inference ("Osaurus
+  Router")** — a crypto-billed (EIP-191, keyed to the Osaurus identity → EVM address)
+  OpenAI-compatible provider wired into `CloudChatEngine` with request signing + a
+  Manage→Credits tab. **Compiles app-wide; untested against a live router.**
+
+### The Ventura chat-layout saga (the AppKit-vs-SwiftUI demon)
+On macOS 13, SwiftUI sizes the message `NSScrollView` from its *content* height, not the
+`.frame(height:)` slot — inflating the chat column past the window so long chats pushed
+the composer off-screen and bled message text behind the header *and* composer. Fixed at
+the **AppKit source**: `CenteredMessageScrollView` reports no intrinsic/fitting height and
+clamps its real frame to the SwiftUI-managed slot (`superview.bounds`). The minimap +
+scroll-to-bottom button became `.overlay`s on the clipped thread frame (bounded but not
+clipped); the minimap's expanded `@State` was hoisted to the `ChatView` parent (it was
+resetting on every scroll-driven `AnyView` re-render — Renée's "works on hover, breaks at
+rest" clue is what cracked it).
+
+### Hosted inference — the corrected verdict (intellectual honesty)
+First called it "architecturally incompatible," then proved myself wrong: `CloudChatEngine`
+already routes to *any* OpenAI-compatible provider via the stubbed `RemoteProviderManager`.
+So it was a glue port, not a rewrite. Dropped the redundant `OpenAICompatibleStreamParser`
+(CloudChatEngine streams natively), decoupled `StorageMutationGate`/`FeatureTelemetry`, and
+rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still blocked:**
+p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
+
 ### Current state / next
-- **Latest release:** 1.0.17 (build 18). Branch `intel-fork`, clean, pushed.
-- **Synced to upstream:** `d132b728` (0.19.15). **41 upstream commits pending**
-  the next sync (run the monthly workflow in `docs/UPSTREAM_SYNC.md`).
-- **Ventura (macOS 13) backport:** Phase B completed 2026-06-12 — deployment
-  target lowered from 14 to 13, `@Observable`→`ObservableObject` (3 managers),
-  159 `onChange` sites down-levelled to single-param, decorative 14+ APIs removed
-  (`symbolEffect`, `activateAllWindows`). Builds clean on x86_64 at target 13.
-  **Release held** pending Rosy native-Ventura smoke test.
-- **Deferred:** chat-bubble rendering (watch-list); native 1-bit/ternary local
-  backend (when the ecosystem matures); louder distribution (by choice).
+- **Latest release:** 1.0.22 (build 23). Branch `intel-fork`, clean (only the M4-only
+  `FoundationModelService` experiment dirty — never committed), pushed.
+- **Synced to upstream:** `24924e6f` (0.20.0). **21 new upstream commits pending**
+  (0.20.1–0.20.3) — triage table in `docs/UPSTREAM_SYNC.md`.
+- **Open / pending:** hosted-inference runtime test (needs a funded router account) +
+  composer credits-chip (deferred); model-picker UX (needs Intel-side rewrite to upstream's
+  tab model); SQLCipher `hmac` decrypt error seen in Rosy logs; verify V4 honors
+  `thinking`/`reasoning_effort` (possible reasoning-token cost leak).
+- **Deferred (by choice):** chat-bubble rendering (watch-list); native 1-bit/ternary local
+  backend (when the ecosystem matures); louder distribution.
