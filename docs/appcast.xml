@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.23</title>
+      <pubDate>Wed, 17 Jun 2026 14:14:34 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>24</sparkle:version>
+      <sparkle:shortVersionString>1.0.23</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.23/Osaurus-Intel-1.0.23.zip" length="51743326" type="application/octet-stream" sparkle:edSignature="wRRtEofYSWmwR7hSozfQxqu9RZkmRT9LC5AufY5wdi51+VsZfq2RvlYUJilhFN8wmGyuxOtV7gBupakSnv1JCQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.23
+
+Absorbs upstream fixes through 0.20.3: configurable Hugging Face cache path, local access-key lifecycle improvements, OAuth requests routed through the global proxy + Codex OAuth diagnostics, and a main-thread perf fix (cached date formatter). Translations updated.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.22</title>
       <pubDate>Tue, 16 Jun 2026 22:43:08 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
