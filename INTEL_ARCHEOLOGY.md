@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.22 (build 19 → 23)
+### Releases 1.0.18 → 1.0.23 (build 19 → 24)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2260,6 +2260,15 @@ people best placed to spread the story. We stay quietly excellent.
   Router")** — a crypto-billed (EIP-191, keyed to the Osaurus identity → EVM address)
   OpenAI-compatible provider wired into `CloudChatEngine` with request signing + a
   Manage→Credits tab. **Compiles app-wide; untested against a live router.**
+- **1.0.23** — **0.20.0 → 0.20.3 upstream sync** (21 commits, 7 ported): configurable
+  Hugging Face cache path, local access-key lifecycle, OAuth→global-proxy (+Codex OAuth
+  diagnostics), a ChatView main-thread perf fix (cached `ISO8601DateFormatter`),
+  `ToolConfigurationStore`, translations. Two Intel adaptations to keep the build green:
+  OAuth `GlobalProxySettings.sharedSession()` (unported) → `makeSession()`, and `ServerView`
+  reaching into the excluded type-erased `ServerController` config → Intel server is
+  loopback-only. The ToolsManagerView tools-section hang fix was *not* portable (needs the
+  deferred `37a2291b` `ToolAvailability` + a card refactor that would clobber the M16
+  blank-gap fix). **Fully caught up — 0 commits behind upstream 0.20.3.**
 
 ### The Ventura chat-layout saga (the AppKit-vs-SwiftUI demon)
 On macOS 13, SwiftUI sizes the message `NSScrollView` from its *content* height, not the
@@ -2281,13 +2290,14 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.22 (build 23). Branch `intel-fork`, clean (only the M4-only
+- **Latest release:** 1.0.23 (build 24). Branch `intel-fork`, clean (only the M4-only
   `FoundationModelService` experiment dirty — never committed), pushed.
-- **Synced to upstream:** `24924e6f` (0.20.0). **21 new upstream commits pending**
-  (0.20.1–0.20.3) — triage table in `docs/UPSTREAM_SYNC.md`.
+- **Synced to upstream:** `7901ec42` (0.20.3). **0 commits behind** — fully caught up.
 - **Open / pending:** hosted-inference runtime test (needs a funded router account) +
   composer credits-chip (deferred); model-picker UX (needs Intel-side rewrite to upstream's
-  tab model); SQLCipher `hmac` decrypt error seen in Rosy logs; verify V4 honors
-  `thinking`/`reasoning_effort` (possible reasoning-token cost leak).
+  tab model); the deferred `e8bcba8a` onboarding model-selection fix + `37a2291b`
+  ToolAvailability (which gates the ToolsManagerView hang fix); SQLCipher `hmac` decrypt
+  error seen in Rosy logs; verify V4 honors `thinking`/`reasoning_effort` (possible
+  reasoning-token cost leak).
 - **Deferred (by choice):** chat-bubble rendering (watch-list); native 1-bit/ternary local
   backend (when the ecosystem matures); louder distribution.
