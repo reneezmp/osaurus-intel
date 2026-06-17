@@ -3,10 +3,36 @@
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
-**Last synced upstream commit:** `7901ec42` (fixed main thread blocking processes, #1556)  
-**Upstream version era:** `0.20.3`  
-**Last sync date:** 2026-06-14  
-**Status:** 🟢 Synced through `7901ec42` (0.20.3). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf incl. hosted inference — untested live), 1.0.23 (0.20.0→0.20.3 sync).  
+**Last synced upstream commit:** `9124d696` (share artifact tool fix, #1561)  
+**Upstream version era:** `0.20.3` (HEAD is `0.20.3-15-g9124d696`; no newer tag yet)  
+**Last sync date:** 2026-06-17  
+**Status:** 🟢 Synced through `9124d696` (0.20.3 + 12 untagged commits). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf incl. hosted inference — untested live), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global-proxy batch).  
+
+## Sync 0.20.3 → `9124d696` — global-proxy batch (2026-06-17, Session 10)
+
+12 commits in `7901ec42..9124d696`, all the upstream "Route X through global proxy" series
+(threading network calls through `GlobalProxySettings`) plus a couple of fixes. **Ported (4):**
+
+| Upstream | Intel action |
+|---|---|
+| `23aaa5cc` | router API → global proxy — our `OsaurusRouterAPIClient` (uses `makeSession(base:)` verbatim) |
+| `572273a8` | theme API → global proxy — `ThemesAPIClient` (`makeSession(base:)` verbatim) |
+| `62755e65` | markdown image downloads → proxy — `MarkdownImageView` + `NativeMarkdownView`; mapped upstream's `sharedSession()` → our `makeSession()` |
+| `17f27b4f` | sandbox-plugin manifest fetch → proxy — `SandboxPlugin.fromURL`; `sharedSession()` → `makeSession()` |
+
+> **Proxy-API note:** Intel's `GlobalProxySettings` exposes only `makeSession()` (fresh per
+> call), not upstream's cached `sharedSession()`/`currentProxyCacheKey()`. Every upstream
+> `sharedSession()` consumer maps to `makeSession()` — functionally equivalent (always honors the
+> current proxy), just uncached. Do NOT port `currentProxyCacheKey()`; it only serves the caching design we don't use.
+
+**SKIP (excluded/absent/divergent):** `07ba93e1` (MCP OAuth → proxy — our MCP OAuth is divergent;
+`MCPOAuthHTTPTransport`/`noRedirectSession` absent, no valid target), `6e47dfe9` (`SandboxManager`
+excluded), `7dc814bf` (`RelayTunnelManager` excluded), `5621ef11` (`RemoteAgentManager` excluded),
+`217c8c7d` (`PrivacyFilterModelDownloader` absent — model-download subsystem), `8247f63a`
+(`GitHubSkillService` excluded), `9124d696` (`ShareArtifactTool` excluded).
+**DEFER:** `395fe51e` (allow manual provider models during connection tests — needs a `manualModelIds:`
+param threaded through the excluded/mirrored `IntelStubConformers.testConnection` for a niche
+Azure-deployment onboarding flow; ~zero value for Intel's cloud-DeepSeek path).
 
 ## Sync 0.20.0 → 0.20.3 (2026-06-14, Session 9)
 

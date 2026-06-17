@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.23 (build 19 → 24)
+### Releases 1.0.18 → 1.0.24 (build 19 → 25)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2269,6 +2269,17 @@ people best placed to spread the story. We stay quietly excellent.
   loopback-only. The ToolsManagerView tools-section hang fix was *not* portable (needs the
   deferred `37a2291b` `ToolAvailability` + a card refactor that would clobber the M16
   blank-gap fix). **Fully caught up — 0 commits behind upstream 0.20.3.**
+- **1.0.24** — **`0.20.3 → 9124d696` global-proxy batch** (12 commits, 4 ported). Upstream's
+  "Route X through global proxy" series — threading network calls through `GlobalProxySettings`
+  so a user-configured proxy actually covers them. Ported the ones that hit *compiled* Intel
+  code: router API (`OsaurusRouterAPIClient`), theme API (`ThemesAPIClient`), markdown remote
+  image downloads (`MarkdownImageView` + `NativeMarkdownView`), and sandbox-plugin manifest
+  fetch (`SandboxPlugin.fromURL`). Intel's `GlobalProxySettings` exposes only `makeSession()`
+  (fresh per call), so upstream's `sharedSession()` consumers were mapped to it. SKIP'd the rest
+  as excluded/absent (MCP-OAuth transport, SandboxManager, relay tunnel, remote-agent invites,
+  privacy model download, GitHub skills, share-artifact); deferred `395fe51e` (manual provider
+  models in connection tests — needs excluded-mirror surgery for a niche Azure flow).
+  *User-facing impact is near-zero unless a global proxy is configured — it's a plumbing batch.*
 
 ### The Ventura chat-layout saga (the AppKit-vs-SwiftUI demon)
 On macOS 13, SwiftUI sizes the message `NSScrollView` from its *content* height, not the
@@ -2290,9 +2301,10 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.23 (build 24). Branch `intel-fork`, clean (only the M4-only
+- **Latest release:** 1.0.24 (build 25). Branch `intel-fork`, clean (only the M4-only
   `FoundationModelService` experiment dirty — never committed), pushed.
-- **Synced to upstream:** `7901ec42` (0.20.3). **0 commits behind** — fully caught up.
+- **Synced to upstream:** `9124d696` (0.20.3 + 12 untagged commits). **0 commits behind** — fully
+  caught up.
 - **Open / pending:** hosted-inference runtime test (needs a funded router account) +
   composer credits-chip (deferred); model-picker UX (needs Intel-side rewrite to upstream's
   tab model); the deferred `e8bcba8a` onboarding model-selection fix + `37a2291b`

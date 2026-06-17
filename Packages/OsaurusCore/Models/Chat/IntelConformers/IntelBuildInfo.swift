@@ -54,6 +54,6 @@ enum IntelBuildInfo {
 
     /// The exact upstream commit last synced (short hash) — matches the
     /// "Last synced upstream commit" line in `docs/UPSTREAM_SYNC.md`.
-    static let upstreamCommit = "7901ec42"
+    static let upstreamCommit = "9124d696"
 }
 #endif

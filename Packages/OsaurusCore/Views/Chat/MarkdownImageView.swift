@@ -208,7 +208,7 @@ struct MarkdownImageView: View {
 
 // MARK: - Image Loader (non-actor-isolated)
 
-private enum ImageLoader {
+enum ImageLoader {
     static func load(from urlString: String) async throws -> NSImage {
         if urlString.hasPrefix("data:image/") {
             return try loadBase64(urlString)
@@ -248,7 +248,7 @@ private enum ImageLoader {
         guard let url = URL(string: urlString) else {
             throw ImageLoadError.invalidURL
         }
-        let (data, response) = try await URLSession.shared.data(from: url)
+        let (data, response) = try await makeRemoteImageSession().data(from: url)
         guard let httpResponse = response as? HTTPURLResponse,
             (200 ... 299).contains(httpResponse.statusCode)
         else {
@@ -258,6 +258,10 @@ private enum ImageLoader {
             throw ImageLoadError.corruptedImage
         }
         return image
+    }
+
+    static func makeRemoteImageSession() -> URLSession {
+        GlobalProxySettings.makeSession()
     }
 }
 
