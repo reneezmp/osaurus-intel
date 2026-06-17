@@ -350,7 +350,7 @@ public enum OpenAICodexOAuthService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await GlobalProxySettings.sharedSession().data(for: request)
+            (data, response) = try await GlobalProxySettings.makeSession().data(for: request)
         } catch {
             let message = "Network error: \(error.localizedDescription)"
             switch operation {

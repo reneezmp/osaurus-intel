@@ -426,15 +426,19 @@ private struct AccessKeysSection: View {
         )
     }
 
+    /// (Intel) `ServerController` is excluded — its `configuration` is type-erased
+    /// here and the Intel server is loopback-only, so network exposure is always off.
+    private var isServerNetworkExposed: Bool { false }
+
     private var accessKeySummaryText: String {
-        if server.configuration.exposeToNetwork {
+        if isServerNetworkExposed {
             return "Network and relay callers must present an access key. Local loopback bypass is disabled while network exposure is on."
         }
         return "Localhost clients can call the API without a real key. Create access keys for LAN, relay, or clients that require a Bearer value."
     }
 
     private var emptyAccessKeyMessage: String {
-        if server.configuration.exposeToNetwork {
+        if isServerNetworkExposed {
             return "Network and relay callers are restricted until you create an access key."
         }
         return "No keys are stored. Localhost still works without a real token while network exposure is off."
