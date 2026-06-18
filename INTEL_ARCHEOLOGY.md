@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.25 (build 19 → 26)
+### Releases 1.0.18 → 1.0.26 (build 19 → 27)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2295,6 +2295,16 @@ people best placed to spread the story. We stay quietly excellent.
   source tabs, Vision badges) — deliberately *not* the upstream `ModelPickerTableRepresentable`
   (NSTableView → the macOS-13 sizing demon). Pricing/context badges deferred (need catalog
   metadata the Intel `ModelPickerItem` doesn't carry).
+- **1.0.26** (2026-06-17) — **model picker enriched to match the upstream original.** The router
+  catalog (`OsaurusRouterModel`: provider, pricing, context, capabilities) was fetched but discarded
+  (`models.map(\.id)`). Now preserved: re-added the pricing/context/embedding fields +
+  `fromOsaurusRouterModel` factory to `ModelPickerItem` (Intel had stripped them) + the
+  `pickerDescription`/`supportsVision`/`formatContextLength` extensions; `RemoteProviderManager`
+  caches `routerModelMetadata` (populated in `connectOsaurusRouterIfPossible`); `buildModelPickerItems`
+  builds enriched rows. The picker now shows the per-model description line (`venice · $x in · $y out ·
+  128K ctx`), Vision badges from capabilities, an **Add Provider** button, and a **Sort & Filter**
+  popover (price sort + min-context + vision filters) on the Osaurus tab. *Confirmed live: the router
+  itself works (real billed completions on Rosy).*
 
 ### The auto-update un-sticking (2026-06-17)
 Rosy had been silently stuck on the **`LAYOUT-FIX-11` debug build** ever since the layout saga —
@@ -2326,18 +2336,19 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.25 (build 26). Branch `intel-fork`, clean (only the M4-only
-  `FoundationModelService` experiment dirty — never committed), pushed. Rosy is on real 1.0.24
-  (build 25) after the manual un-stick, so 1.0.25 arrives via **auto-update** (26 > 25).
+- **Latest release:** 1.0.26 (build 27). Branch `intel-fork`, clean (only the M4-only
+  `FoundationModelService` experiment dirty — never committed), pushed. Rosy un-stuck onto real
+  releases (1.0.24, build 25), so everything after arrives via **auto-update**.
+- **Hosted inference (Osaurus Router): WORKING** — confirmed live on Rosy (real billed completions,
+  e.g. `venice-uncensored-role-play`). The `/v1` path fix (1.0.25) did it.
 - **Synced to upstream:** `9124d696` (0.20.3 + 12 untagged commits). **0 commits behind** — fully
   caught up.
-- **Hosted inference (Osaurus Router):** the 404 is **fixed** in 1.0.25 (wrong chat path) —
-  awaiting Renée's live confirmation on Rosy. **Model picker:** rewritten in 1.0.25 (scroll +
-  search + tabs) — awaiting visual confirmation.
-- **Open / pending:** picker **pricing/context badges** (need catalog metadata on `ModelPickerItem`)
-  + composer credits-chip (deferred); the **Settings-window Ventura titlebar regression** (plain
-  dark bar instead of Osaurus chrome — cosmetic); the deferred `e8bcba8a` onboarding
-  model-selection fix + `37a2291b` ToolAvailability (gates the ToolsManagerView hang fix);
+- **Model picker:** rewritten (1.0.25) + enriched with router metadata (1.0.26: descriptions,
+  Vision badges, Add Provider, Sort & Filter) — awaiting Renée's visual confirmation on 1.0.26.
+- **Open / pending:** some router models error mid-chat (a few don't stream — provider-specific,
+  needs per-model triage); the **Settings-window Ventura titlebar regression** (plain dark bar
+  instead of Osaurus chrome — cosmetic); composer credits-chip (deferred); the deferred `e8bcba8a`
+  onboarding model-selection fix + `37a2291b` ToolAvailability (gates the ToolsManagerView hang fix);
   SQLCipher `hmac` decrypt error in Rosy logs; verify V4 honors `thinking`/`reasoning_effort`.
   **Intentionally unsurfaced (not bugs):** global-proxy settings UI, community-theme gallery,
   sandbox-plugin install-from-URL — the global-proxy batch ported their plumbing but Intel
