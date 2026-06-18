@@ -6,6 +6,26 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.28</title>
+      <pubDate>Thu, 18 Jun 2026 11:27:52 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>29</sparkle:version>
+      <sparkle:shortVersionString>1.0.28</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.28/Osaurus-Intel-1.0.28.zip" length="51895487" type="application/octet-stream" sparkle:edSignature="pqQ8dFAXrAam8SVtOt6/iJ6x4Wex5FjwlV0aN18L4mkYDpjfyrQ2Cb/OjEDeu4ZiRf+UeJkVgOgduqO6h/HpAQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.28
+
+Two fixes — and the first build signed with a stable identity:
+
+• Osaurus Router models now load on startup. Before, only your DeepSeek models showed in the picker until you opened the Credits tab; the router's catalog needs a signed fetch that now runs at launch.
+• The provider edit sheet's 'Test' button now works for the Osaurus Router (it validates via the signed catalog instead of erroring).
+• Signing: builds are now signed with a stable certificate instead of ad-hoc. This is a ONE-TIME re-authorization — after you allow the keychain prompts on this update, future updates will stop asking.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.27</title>
       <pubDate>Thu, 18 Jun 2026 02:11:06 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
