@@ -6,6 +6,26 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.26</title>
+      <pubDate>Thu, 18 Jun 2026 00:16:01 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>27</sparkle:version>
+      <sparkle:shortVersionString>1.0.26</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.26/Osaurus-Intel-1.0.26.zip" length="51875146" type="application/octet-stream" sparkle:edSignature="2BcNHV8DfGZmKLvc3VPrgke3Ie/sR3Txt/C6JeqYyO5ZeCo5ZnqlXpr8btdG4xNzTxEhHyi1H0JZpRn8aZeeCg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.26
+
+Model picker now matches the original Osaurus design:
+
+• Each model shows a description line — underlying provider, input/output price, and context window (e.g. 'venice · $1.15/M in · $2.30/M out · 128K ctx').
+• Vision-capable models show a Vision badge.
+• New header buttons: Add Provider, and a Sort & Filter control (sort by price, filter by minimum context or vision) on the Osaurus tab.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.25</title>
       <pubDate>Wed, 17 Jun 2026 23:58:23 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
