@@ -55,6 +55,11 @@ struct DocumentChip: View {
             }
         }
 
+        if let onInline {
+            circularButton(systemName: "text.insert", action: onInline)
+                .localizedHelp("Insert into message")
+        }
+
         if let onEdit {
             circularButton(systemName: "pencil", action: onEdit)
                 .localizedHelp("Edit pasted content")

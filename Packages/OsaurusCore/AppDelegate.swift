@@ -403,7 +403,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -411,6 +411,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.minSize = NSSize(width: 900, height: 640)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
+
+        // Match the chat window's inline-traffic-light chrome: a transparent,
+        // title-less titlebar so the SwiftUI content paints to the top edge
+        // instead of sitting under a separate solid macOS title bar. SwiftUI
+        // still insets its content for the titlebar's safe area, so the traffic
+        // lights float over the sidebar's top without overlapping content
+        // (same contract as `ChatWindowManager.createChatPanel`).
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
 
         // Phase 11.0-ter: mirror the appearance + opacity + background
         // contract that `ChatWindowManager.createChatPanel` sets on the

@@ -432,6 +432,12 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
             let manager = RemoteProviderManager.shared
             let providers = manager.configuration.providers.filter { $0.enabled }
             for provider in providers {
+                // Only the managed Osaurus Router provider gets the venice-priced
+                // catalog metadata. A *direct* provider (e.g. DeepSeek) can share
+                // model ids with the router's proxied catalog, so keying the
+                // lookup on id alone would wrongly stamp the direct provider's
+                // rows with the router's pricing/vision. Gate on the provider type.
+                let isRouter = provider.providerType == .osaurusRouter
                 let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
                 var ids: [String] = []
                 for id in discovered + provider.manualModelIds where !ids.contains(id) { ids.append(id) }
@@ -440,7 +446,7 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                     // Osaurus Router models carry rich catalog metadata (provider,
                     // pricing, context, vision) — render the enriched row. Other
                     // providers fall back to the bare id + provider name.
-                    if let metadata = manager.routerModelMetadata[modelId] {
+                    if isRouter, let metadata = manager.routerModelMetadata[modelId] {
                         out.append(
                             ModelPickerItem.fromOsaurusRouterModel(
                                 id: modelId,
