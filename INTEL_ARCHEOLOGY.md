@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.27 (build 19 → 28)
+### Releases 1.0.18 → 1.0.28 (build 19 → 29)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2313,6 +2313,18 @@ people best placed to spread the story. We stay quietly excellent.
   button render, the `onInline`/`inlinePastedContent` wiring was intact. (c) **Settings window** got the chat
   window's chrome (`.fullSizeContentView` + transparent, title-less titlebar) instead of a plain macOS
   title bar. *(c) awaits Renée's visual confirm (traffic-light inset).*
+- **1.0.28** (2026-06-18) — **stable code signing + router-catalog-at-startup.** (a) **Signing:**
+  releases were ad-hoc signed → designated requirement = per-build cdhash → macOS Keychain re-prompted
+  for *every* item (RemoteProvider/MCP/Storage/Master Key) on *every* update. Switched to a stable
+  self-signed cert (`Osaurus Intel Code Signing`, created by `scripts/build/make_signing_identity.sh`,
+  lives only on the dev M4) → requirement is now constant
+  (`identifier "com.dinoki.osaurus" and certificate leaf = H"d2fa923f…"`) → "Always Allow" sticks
+  across updates. One-time re-auth on the 1.0.28 install (identity changed), then silence. Not
+  notarized (Gatekeeper still flags first-open). (b) **Router catalog at startup:** `refreshAllModels`
+  did an unsigned `/models` probe per provider, but the router's catalog needs the EIP-191-signed
+  account fetch — so on a fresh launch only DeepSeek showed until the Credits tab ran the signed fetch.
+  Now `refreshAllModels` (and the edit-sheet `testConnection`) special-case `.osaurusRouter` →
+  `connectOsaurusRouterIfPossible` / signed catalog. Router models + pricing/vision now populate at launch.
 
 ### The auto-update un-sticking (2026-06-17)
 Rosy had been silently stuck on the **`LAYOUT-FIX-11` debug build** ever since the layout saga —
@@ -2344,7 +2356,7 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.27 (build 28). Branch `intel-fork`, clean (only the M4-only
+- **Latest release:** 1.0.28 (build 29). Branch `intel-fork`, clean (only the M4-only
   `FoundationModelService` experiment dirty — never committed), pushed. Rosy un-stuck onto real
   releases (1.0.24, build 25), so everything after arrives via **auto-update**.
 - **Hosted inference (Osaurus Router): WORKING** — confirmed live on Rosy (real billed completions,
