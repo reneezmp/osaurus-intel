@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.24 (build 19 → 25)
+### Releases 1.0.18 → 1.0.25 (build 19 → 26)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2280,6 +2280,31 @@ people best placed to spread the story. We stay quietly excellent.
   privacy model download, GitHub skills, share-artifact); deferred `395fe51e` (manual provider
   models in connection tests — needs excluded-mirror surgery for a niche Azure flow).
   *User-facing impact is near-zero unless a global proxy is configured — it's a plumbing batch.*
+- **1.0.25** (2026-06-17) — **hosted inference actually works now + model picker rewrite.**
+  (a) **Osaurus Router 404 fix:** `CloudChatEngine.resolveEndpoint` hardcoded
+  `owner.url(for: "/chat/completions")`, but the managed router provider has `basePath=""`
+  and serves OpenAI-compatible inference under `/v1` (its *account* API lives at root). So
+  every router chat hit `https://router.osaurus.ai/chat/completions` → 404 "not found". Now
+  resolves via `owner.providerType.chatEndpoint` (`.osaurusRouter` → `/v1/chat/completions`);
+  standard providers still get `/chat/completions` with `/v1` from their own `basePath`. Also
+  threaded the real provider name into `CloudChatError` — it had hardcoded "DeepSeek API error"
+  for *every* provider, mislabeling a router 404 as DeepSeek and costing a debugging detour.
+  (b) **Model picker rewrite:** the Intel stub rendered all models in an unbounded `VStack`
+  with no `ScrollView`, so a 94-model router catalog couldn't scroll and looked scrambled.
+  Replaced with a pure-SwiftUI popover (bounded frame, real `ScrollView`, search, Osaurus/DeepSeek
+  source tabs, Vision badges) — deliberately *not* the upstream `ModelPickerTableRepresentable`
+  (NSTableView → the macOS-13 sizing demon). Pricing/context badges deferred (need catalog
+  metadata the Intel `ModelPickerItem` doesn't carry).
+
+### The auto-update un-sticking (2026-06-17)
+Rosy had been silently stuck on the **`LAYOUT-FIX-11` debug build** ever since the layout saga —
+not a real release. During that fight we hand-cranked the debug `CFBundleVersion` **≥100** so Sparkle
+wouldn't yank our test build mid-iteration. That worked *too* well: Sparkle compares the **build
+number**, and `100 > 25` (the appcast's newest), so it reported "you're up to date" forever and never
+offered 1.0.21→1.0.24. **Fix = one manual install** of a real release (1.0.24, build 25); from there
+auto-update resumes because every future release out-numbers it. **Gotcha for next time:** any
+sideloaded inflated-build-number debug build on Rosy must be replaced by a real release afterward, or
+auto-update dies silently.
 
 ### The Ventura chat-layout saga (the AppKit-vs-SwiftUI demon)
 On macOS 13, SwiftUI sizes the message `NSScrollView` from its *content* height, not the
@@ -2301,15 +2326,21 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.24 (build 25). Branch `intel-fork`, clean (only the M4-only
-  `FoundationModelService` experiment dirty — never committed), pushed.
+- **Latest release:** 1.0.25 (build 26). Branch `intel-fork`, clean (only the M4-only
+  `FoundationModelService` experiment dirty — never committed), pushed. Rosy is on real 1.0.24
+  (build 25) after the manual un-stick, so 1.0.25 arrives via **auto-update** (26 > 25).
 - **Synced to upstream:** `9124d696` (0.20.3 + 12 untagged commits). **0 commits behind** — fully
   caught up.
-- **Open / pending:** hosted-inference runtime test (needs a funded router account) +
-  composer credits-chip (deferred); model-picker UX (needs Intel-side rewrite to upstream's
-  tab model); the deferred `e8bcba8a` onboarding model-selection fix + `37a2291b`
-  ToolAvailability (which gates the ToolsManagerView hang fix); SQLCipher `hmac` decrypt
-  error seen in Rosy logs; verify V4 honors `thinking`/`reasoning_effort` (possible
-  reasoning-token cost leak).
+- **Hosted inference (Osaurus Router):** the 404 is **fixed** in 1.0.25 (wrong chat path) —
+  awaiting Renée's live confirmation on Rosy. **Model picker:** rewritten in 1.0.25 (scroll +
+  search + tabs) — awaiting visual confirmation.
+- **Open / pending:** picker **pricing/context badges** (need catalog metadata on `ModelPickerItem`)
+  + composer credits-chip (deferred); the **Settings-window Ventura titlebar regression** (plain
+  dark bar instead of Osaurus chrome — cosmetic); the deferred `e8bcba8a` onboarding
+  model-selection fix + `37a2291b` ToolAvailability (gates the ToolsManagerView hang fix);
+  SQLCipher `hmac` decrypt error in Rosy logs; verify V4 honors `thinking`/`reasoning_effort`.
+  **Intentionally unsurfaced (not bugs):** global-proxy settings UI, community-theme gallery,
+  sandbox-plugin install-from-URL — the global-proxy batch ported their plumbing but Intel
+  amputates these features' UI doors.
 - **Deferred (by choice):** chat-bubble rendering (watch-list); native 1-bit/ternary local
   backend (when the ecosystem matures); louder distribution.
