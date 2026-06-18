@@ -6,6 +6,26 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.27</title>
+      <pubDate>Thu, 18 Jun 2026 02:11:06 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>28</sparkle:version>
+      <sparkle:shortVersionString>1.0.27</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.27/Osaurus-Intel-1.0.27.zip" length="51875670" type="application/octet-stream" sparkle:edSignature="QrQIoJE0Mke+K+3vP8+/7TYtAqSmXqvB6PJO8GENZ6EsPL7jCmU0NDuublzWgRTModDFa6p8D0+wx99230lwDg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.27
+
+Three fixes:
+
+• Model picker: direct-provider models (e.g. your own DeepSeek) no longer borrow the Osaurus Router's venice pricing when they share a model id — pricing now only shows for actual router models.
+• Pasted-content chip: restored the third button that drops the pasted text into the message box (alongside edit and remove).
+• Settings window now uses the Osaurus titlebar style instead of a plain macOS title bar.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.26</title>
       <pubDate>Thu, 18 Jun 2026 00:16:01 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
