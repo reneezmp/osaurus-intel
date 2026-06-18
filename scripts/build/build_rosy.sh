@@ -37,8 +37,16 @@ echo "→ Baking OsaurusCanonicalData = true (use ~/.osaurus on Rosy)…"
 /usr/libexec/PlistBuddy -c "Set :OsaurusCanonicalData true" "$PLIST" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Add :OsaurusCanonicalData bool true" "$PLIST"
 
-echo "→ Re-signing ad-hoc (editing Info.plist invalidated the signature)…"
-codesign --force --deep --sign - "$APP"
+# Re-sign with the stable self-signed identity (editing Info.plist invalidated
+# the signature). A STABLE identity — not ad-hoc — is what makes macOS Keychain
+# remember "Always Allow" across app updates: the keychain ACL pins to the
+# signature's designated requirement, which for ad-hoc is the per-build cdhash
+# (changes every build → re-prompts forever), but for this cert is a constant
+# `identifier "com.dinoki.osaurus" and certificate leaf = H"<cert>"`.
+# Create once with: scripts/build/make_signing_identity.sh
+SIGN_IDENTITY="${OSAURUS_SIGN_IDENTITY:-Osaurus Intel Code Signing}"
+echo "→ Re-signing with '$SIGN_IDENTITY'…"
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 
 echo ""
 echo "✅ Rosy deploy build ready:"

@@ -79,10 +79,24 @@ CONFIG=Debug scripts/build/build_rosy.sh >/dev/null
 [[ -d "$APP" ]] || { echo "✗ build product missing at $APP"; exit 1; }
 
 # 3) Stamp the version and re-sign (editing Info.plist invalidates the signature).
+#    Sign with the STABLE self-signed identity, not ad-hoc — this is what makes
+#    macOS Keychain keep "Always Allow" across updates instead of re-prompting
+#    for every keychain item on every install (ad-hoc's designated requirement is
+#    the per-build cdhash, which changes every time). Create the identity once
+#    with scripts/build/make_signing_identity.sh. Override via OSAURUS_SIGN_IDENTITY.
 PLIST="$APP/Contents/Info.plist"
 /usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString ${SHORT_VERSION}" "$PLIST"
 /usr/libexec/PlistBuddy -c "Set :CFBundleVersion ${BUILD}" "$PLIST"
-codesign --force --deep --sign - "$APP"
+SIGN_IDENTITY="${OSAURUS_SIGN_IDENTITY:-Osaurus Intel Code Signing}"
+if ! security find-identity -p codesigning 2>/dev/null | grep -q "$SIGN_IDENTITY"; then
+  echo "✗ Signing identity '$SIGN_IDENTITY' not found in keychain."
+  echo "  Run scripts/build/make_signing_identity.sh once to create it"
+  echo "  (or set OSAURUS_SIGN_IDENTITY). Refusing to fall back to ad-hoc —"
+  echo "  that would make every install re-prompt for all keychain items."
+  exit 1
+fi
+echo "→ Signing with '$SIGN_IDENTITY'…"
+codesign --force --deep --sign "$SIGN_IDENTITY" "$APP"
 
 # 4) Package as a ditto zip (NEVER move a raw .app through iCloud — breaks symlinks).
 echo "→ Packaging…"
