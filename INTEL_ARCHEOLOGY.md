@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.26 (build 19 → 27)
+### Releases 1.0.18 → 1.0.27 (build 19 → 28)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2305,6 +2305,14 @@ people best placed to spread the story. We stay quietly excellent.
   128K ctx`), Vision badges from capabilities, an **Add Provider** button, and a **Sort & Filter**
   popover (price sort + min-context + vision filters) on the Osaurus tab. *Confirmed live: the router
   itself works (real billed completions on Rosy).*
+- **1.0.27** (2026-06-17) — three follow-up fixes from Renée's 1.0.26 testing. (a) **Router metadata
+  mislabeling:** `buildModelPickerItems` keyed the venice-priced catalog lookup on model id alone, so a
+  *direct* provider (DeepSeek) sharing ids with the router's proxied catalog inherited venice pricing/vision.
+  Gated the lookup on `provider.providerType == .osaurusRouter`. (b) **Pasted-content chip** regained its
+  third button ("Insert into message" — `text.insert` → `inlinePastedContent`); Intel had stripped only the
+  button render, the `onInline`/`inlinePastedContent` wiring was intact. (c) **Settings window** got the chat
+  window's chrome (`.fullSizeContentView` + transparent, title-less titlebar) instead of a plain macOS
+  title bar. *(c) awaits Renée's visual confirm (traffic-light inset).*
 
 ### The auto-update un-sticking (2026-06-17)
 Rosy had been silently stuck on the **`LAYOUT-FIX-11` debug build** ever since the layout saga —
@@ -2336,7 +2344,7 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.26 (build 27). Branch `intel-fork`, clean (only the M4-only
+- **Latest release:** 1.0.27 (build 28). Branch `intel-fork`, clean (only the M4-only
   `FoundationModelService` experiment dirty — never committed), pushed. Rosy un-stuck onto real
   releases (1.0.24, build 25), so everything after arrives via **auto-update**.
 - **Hosted inference (Osaurus Router): WORKING** — confirmed live on Rosy (real billed completions,
@@ -2346,8 +2354,8 @@ p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxSt
 - **Model picker:** rewritten (1.0.25) + enriched with router metadata (1.0.26: descriptions,
   Vision badges, Add Provider, Sort & Filter) — awaiting Renée's visual confirmation on 1.0.26.
 - **Open / pending:** some router models error mid-chat (a few don't stream — provider-specific,
-  needs per-model triage); the **Settings-window Ventura titlebar regression** (plain dark bar
-  instead of Osaurus chrome — cosmetic); composer credits-chip (deferred); the deferred `e8bcba8a`
+  needs per-model triage); verify the 1.0.27 Settings-window titlebar chrome doesn't overlap the
+  sidebar on Rosy; composer credits-chip (deferred); the deferred `e8bcba8a`
   onboarding model-selection fix + `37a2291b` ToolAvailability (gates the ToolsManagerView hang fix);
   SQLCipher `hmac` decrypt error in Rosy logs; verify V4 honors `thinking`/`reasoning_effort`.
   **Intentionally unsurfaced (not bugs):** global-proxy settings UI, community-theme gallery,
