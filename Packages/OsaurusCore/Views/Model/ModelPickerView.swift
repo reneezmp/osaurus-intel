@@ -469,9 +469,28 @@ struct ModelPickerView: View {
     @State private var searchText = ""
     /// `nil` = the "All" tab; otherwise a `Source.uniqueKey`.
     @State private var selectedSourceKey: String?
+    @State private var sortOrder: ModelPickerSortOrder = .default
+    @State private var contextFilter: ModelPickerContextFilter = .any
+    @State private var visionFilter: ModelPickerVisionFilter = .any
+    @State private var showSortPopover = false
 
     private var groups: [(source: ModelPickerItem.Source, models: [ModelPickerItem])] {
         options.groupedBySource()
+    }
+
+    private var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    /// Sort/filter only makes sense on a single source tab that actually carries
+    /// router pricing/context metadata (the Osaurus tab), and not while searching.
+    private var showSortButton: Bool {
+        guard !isSearching, let key = selectedSourceKey else { return false }
+        return options.contains { $0.source.uniqueKey == key && $0.inputPriceMicroPerMTok != nil }
+    }
+
+    private var isSortOrFilterActive: Bool {
+        sortOrder != .default || contextFilter != .any || visionFilter != .any
     }
 
     private var visibleModels: [ModelPickerItem] {
@@ -484,6 +503,15 @@ struct ModelPickerView: View {
             items = items.filter {
                 $0.displayName.lowercased().contains(query) || $0.id.lowercased().contains(query)
             }
+        }
+        // Filters + price sort apply only on a specific tab (where router
+        // metadata exists); the "All" tab keeps the grouped/alphabetical order.
+        if selectedSourceKey != nil {
+            items =
+                items
+                .filteredByContext(contextFilter)
+                .filteredByVision(visionFilter)
+                .sortedByPrice(sortOrder)
         }
         return items
     }
@@ -528,9 +556,143 @@ struct ModelPickerView: View {
                 .padding(.vertical, 3)
                 .background(Capsule().fill(theme.secondaryBackground))
             Spacer()
+            if showSortButton {
+                sortButton
+            }
+            addProviderButton
         }
         .padding(.horizontal, 14)
         .padding(.vertical, 12)
+    }
+
+    private var sortButton: some View {
+        Button(action: { showSortPopover.toggle() }) {
+            Image(systemName: "arrow.up.arrow.down")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(isSortOrFilterActive ? theme.accentColor : theme.secondaryText)
+                .frame(width: 24, height: 24)
+                .background(
+                    Circle().fill(theme.accentColor.opacity(isSortOrFilterActive ? 0.18 : 0.08))
+                )
+        }
+        .buttonStyle(.plain)
+        .help(Text("Sort and filter", bundle: .module))
+        .popover(isPresented: $showSortPopover, arrowEdge: .bottom) {
+            sortFilterPopover
+        }
+    }
+
+    private var addProviderButton: some View {
+        Button(action: {
+            onDismiss()
+            Task { @MainActor in
+                try? await Task.sleep(for: .milliseconds(120))
+                AppDelegate.shared?.showManagementWindow(initialTab: .providers)
+            }
+        }) {
+            HStack(spacing: 4) {
+                Image(systemName: "plus")
+                    .font(.system(size: 10, weight: .bold))
+                Text("Add Provider", bundle: .module)
+                    .font(theme.font(size: 11, weight: .medium))
+            }
+            .foregroundColor(theme.accentColor)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 4)
+            .background(
+                Capsule()
+                    .strokeBorder(theme.accentColor.opacity(0.3), lineWidth: 1)
+                    .background(Capsule().fill(theme.accentColor.opacity(0.08)))
+            )
+        }
+        .buttonStyle(.plain)
+    }
+
+    // MARK: - Sort & Filter Popover
+
+    private var sortFilterPopover: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            sectionHeader("Sort by price")
+            VStack(spacing: 2) {
+                sortRow(.default, "Default", icon: "list.bullet")
+                sortRow(.priceLowToHigh, "Cheapest first", icon: "arrow.down")
+                sortRow(.priceHighToLow, "Priciest first", icon: "arrow.up")
+            }
+
+            Divider().background(theme.primaryBorder.opacity(0.2))
+
+            sectionHeader("Min context")
+            chipRow(ModelPickerContextFilter.allCases, current: contextFilter, label: { $0.label }) {
+                contextFilter = $0
+            }
+
+            sectionHeader("Vision")
+            chipRow(ModelPickerVisionFilter.allCases, current: visionFilter, label: { $0.label }) {
+                visionFilter = $0
+            }
+
+            if isSortOrFilterActive {
+                Button(action: {
+                    sortOrder = .default
+                    contextFilter = .any
+                    visionFilter = .any
+                }) {
+                    Text("Reset", bundle: .module)
+                        .font(theme.font(size: 11, weight: .medium))
+                        .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(.plain)
+                .padding(.top, 2)
+            }
+        }
+        .padding(14)
+        .frame(width: 240)
+        .background(theme.primaryBackground)
+    }
+
+    private func sectionHeader(_ key: String.LocalizationValue) -> some View {
+        Text(String(localized: key, bundle: .module))
+            .font(theme.font(size: 10, weight: .semibold))
+            .foregroundColor(theme.tertiaryText)
+            .textCase(.uppercase)
+    }
+
+    private func sortRow(_ order: ModelPickerSortOrder, _ titleKey: String.LocalizationValue, icon: String)
+        -> some View
+    {
+        let isSelected = sortOrder == order
+        return Button(action: { sortOrder = order }) {
+            HStack(spacing: 8) {
+                Image(systemName: icon)
+                    .font(.system(size: 11))
+                    .frame(width: 16)
+                Text(String(localized: titleKey, bundle: .module))
+                    .font(theme.font(size: 12))
+                Spacer()
+                if isSelected {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 10, weight: .bold))
+                }
+            }
+            .foregroundColor(isSelected ? theme.accentColor : theme.primaryText)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 5)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(isSelected ? theme.accentColor.opacity(0.1) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func chipRow<T: Hashable>(
+        _ items: [T],
+        current: T,
+        label: @escaping (T) -> String,
+        select: @escaping (T) -> Void
+    ) -> some View {
+        FlowChips(items: items, isSelected: { $0 == current }, label: label, select: select)
     }
 
     // MARK: - Search
@@ -641,7 +803,7 @@ struct ModelPickerView: View {
                         .font(theme.font(size: 13, weight: .medium))
                         .foregroundColor(theme.primaryText)
                         .lineLimit(1)
-                    if selectedSourceKey == nil, let description = item.description, !description.isEmpty {
+                    if let description = item.description, !description.isEmpty {
                         Text(description)
                             .font(theme.font(size: 11))
                             .foregroundColor(theme.secondaryText)
@@ -687,6 +849,43 @@ struct ModelPickerView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .padding()
+    }
+}
+
+/// A horizontally-scrolling row of selectable filter chips. Reads the theme
+/// from the environment so callers don't have to thread it through.
+private struct FlowChips<T: Hashable>: View {
+    let items: [T]
+    let isSelected: (T) -> Bool
+    let label: (T) -> String
+    let select: (T) -> Void
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            HStack(spacing: 6) {
+                ForEach(items, id: \.self) { item in
+                    let selected = isSelected(item)
+                    Button(action: { select(item) }) {
+                        Text(label(item))
+                            .font(theme.font(size: 11, weight: .medium))
+                            .foregroundColor(selected ? theme.accentColor : theme.secondaryText)
+                            .padding(.horizontal, 9)
+                            .padding(.vertical, 4)
+                            .background(
+                                Capsule().fill(
+                                    selected
+                                        ? theme.accentColor.opacity(0.15)
+                                        : theme.secondaryBackground.opacity(0.5)
+                                )
+                            )
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            .padding(.vertical, 1)
+        }
     }
 }
 #endif

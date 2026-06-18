@@ -437,15 +437,29 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                 for id in discovered + provider.manualModelIds where !ids.contains(id) { ids.append(id) }
                 for modelId in ids where !seen.contains(modelId) {
                     seen.insert(modelId)
-                    out.append(
-                        ModelPickerItem(
-                            id: modelId,
-                            displayName: modelId,
-                            source: .remote(providerName: provider.name, providerId: provider.id),
-                            isVLM: false,
-                            description: provider.name
+                    // Osaurus Router models carry rich catalog metadata (provider,
+                    // pricing, context, vision) — render the enriched row. Other
+                    // providers fall back to the bare id + provider name.
+                    if let metadata = manager.routerModelMetadata[modelId] {
+                        out.append(
+                            ModelPickerItem.fromOsaurusRouterModel(
+                                id: modelId,
+                                providerName: provider.name,
+                                providerId: provider.id,
+                                metadata: metadata
+                            )
                         )
-                    )
+                    } else {
+                        out.append(
+                            ModelPickerItem(
+                                id: modelId,
+                                displayName: modelId,
+                                source: .remote(providerName: provider.name, providerId: provider.id),
+                                isVLM: false,
+                                description: provider.name
+                            )
+                        )
+                    }
                 }
             }
             return out

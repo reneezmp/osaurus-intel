@@ -248,6 +248,13 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     @Published private(set) var configuration: RemoteProviderConfiguration
     @Published private(set) var providerStates: [UUID: RemoteProviderState] = [:]
 
+    /// Osaurus Router per-model metadata (pricing, context, capabilities),
+    /// keyed by model id. Populated by `connectOsaurusRouterIfPossible` from the
+    /// catalog and consumed by the model-picker builder to enrich router rows
+    /// with a description + Vision badge. `providerStates.discoveredModels` only
+    /// carries the bare ids, so this is where the rich metadata lives.
+    @Published private(set) var routerModelMetadata: [String: OsaurusRouterModel] = [:]
+
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
         seedConnectedStates()
@@ -396,6 +403,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         if let models = try? await OsaurusRouterAPIClient().models() {
             state.discoveredModels = models.map(\.id).sorted()
             state.lastConnectedAt = Date()
+            routerModelMetadata = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         }
         providerStates[Self.osaurusRouterProviderId] = state
         notifyModelsChanged()

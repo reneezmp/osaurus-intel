@@ -68,6 +68,18 @@ struct ModelPickerItem: Identifiable, Hashable {
     /// Description of the model (optional)
     let description: String?
 
+    /// Input price in micro-USD per million tokens, parsed from the Osaurus
+    /// router metadata. Used only to sort the Osaurus tab by price; `nil` for
+    /// items without router pricing (foundation, plain remote).
+    let inputPriceMicroPerMTok: Int64?
+
+    /// Output price in micro-USD per million tokens (sort tiebreak). `nil` when
+    /// unknown, matching `inputPriceMicroPerMTok`.
+    let outputPriceMicroPerMTok: Int64?
+
+    /// Context window in tokens, from the Osaurus router metadata. `nil` when unknown.
+    let contextLength: Int?
+
     init(
         id: String,
         displayName: String,
@@ -75,7 +87,10 @@ struct ModelPickerItem: Identifiable, Hashable {
         parameterCount: String? = nil,
         quantization: String? = nil,
         isVLM: Bool = false,
-        description: String? = nil
+        description: String? = nil,
+        inputPriceMicroPerMTok: Int64? = nil,
+        outputPriceMicroPerMTok: Int64? = nil,
+        contextLength: Int? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -84,6 +99,9 @@ struct ModelPickerItem: Identifiable, Hashable {
         self.quantization = quantization
         self.isVLM = isVLM
         self.description = description
+        self.inputPriceMicroPerMTok = inputPriceMicroPerMTok
+        self.outputPriceMicroPerMTok = outputPriceMicroPerMTok
+        self.contextLength = contextLength
     }
 
     /// Check if model matches search query using fuzzy matching.
@@ -142,6 +160,39 @@ extension ModelPickerItem {
             displayName: displayName,
             source: .remote(providerName: providerName, providerId: providerId)
         )
+    }
+
+    /// Create an Osaurus Router model picker item enriched with the router's
+    /// per-model metadata (underlying provider, pricing, context, capabilities).
+    /// The metadata is rendered in the picker row's second line via
+    /// `description`; pricing/context power sorting and the Vision badge.
+    static func fromOsaurusRouterModel(
+        id: String,
+        providerName: String,
+        providerId: UUID,
+        metadata: OsaurusRouterModel
+    ) -> ModelPickerItem {
+        ModelPickerItem(
+            id: id,
+            displayName: displayName(fromModelId: id),
+            source: .remote(providerName: providerName, providerId: providerId),
+            isVLM: metadata.supportsVision,
+            description: metadata.pickerDescription,
+            inputPriceMicroPerMTok: Int64(
+                metadata.inputMicroPerMTok.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
+            outputPriceMicroPerMTok: Int64(
+                metadata.outputMicroPerMTok.trimmingCharacters(in: .whitespacesAndNewlines)
+            ),
+            contextLength: metadata.contextLength > 0 ? metadata.contextLength : nil
+        )
+    }
+
+    /// Short display name from a (possibly provider-prefixed) model id: the
+    /// segment after the last "/", e.g. "venice/model-b" -> "model-b".
+    private static func displayName(fromModelId id: String) -> String {
+        guard let slashIndex = id.lastIndex(of: "/") else { return id }
+        return String(id[id.index(after: slashIndex)...])
     }
 }
 
@@ -377,3 +428,110 @@ extension Array where Element == ModelPickerItem {
         }
     }
 #endif
+
+// MARK: - Sort & Filter (Osaurus router metadata)
+
+/// User-chosen ordering for the Osaurus tab. The default keeps the existing
+/// alphabetical order; the price options sort by per-million-token cost.
+enum ModelPickerSortOrder: Hashable {
+    case `default`
+    case priceLowToHigh
+    case priceHighToLow
+}
+
+/// Minimum-context filter for the Osaurus tab. Each case keeps models whose
+/// context window is at least `minTokens`; `.any` disables the filter.
+enum ModelPickerContextFilter: CaseIterable, Identifiable, Hashable {
+    case any
+    case min32K
+    case min128K
+    case min256K
+    case min1M
+
+    var id: Self { self }
+
+    /// Inclusive lower bound in tokens. `.any` has no bound.
+    var minTokens: Int? {
+        switch self {
+        case .any: return nil
+        case .min32K: return 32_000
+        case .min128K: return 128_000
+        case .min256K: return 256_000
+        case .min1M: return 1_000_000
+        }
+    }
+
+    /// Short chip label.
+    var label: String {
+        switch self {
+        case .any: return "Any"
+        case .min32K: return "32K+"
+        case .min128K: return "128K+"
+        case .min256K: return "256K+"
+        case .min1M: return "1M+"
+        }
+    }
+}
+
+/// Vision-capability filter for the Osaurus tab.
+enum ModelPickerVisionFilter: CaseIterable, Identifiable, Hashable {
+    case any
+    case visionOnly
+    case nonVision
+
+    var id: Self { self }
+
+    /// Short chip label.
+    var label: String {
+        switch self {
+        case .any: return "Any"
+        case .visionOnly: return "Vision"
+        case .nonVision: return "Non-vision"
+        }
+    }
+}
+
+extension Array where Element == ModelPickerItem {
+    /// Keep only models whose context window meets the filter's minimum. Items
+    /// with unknown context are dropped when a minimum is set; `.any` is a
+    /// no-op that returns the receiver unchanged.
+    func filteredByContext(_ context: ModelPickerContextFilter) -> [ModelPickerItem] {
+        guard let minTokens = context.minTokens else { return self }
+        return filter { ($0.contextLength ?? 0) >= minTokens }
+    }
+
+    /// Keep only models matching the vision filter; `.any` returns the receiver
+    /// unchanged.
+    func filteredByVision(_ vision: ModelPickerVisionFilter) -> [ModelPickerItem] {
+        switch vision {
+        case .any: return self
+        case .visionOnly: return filter { $0.isVLM }
+        case .nonVision: return filter { !$0.isVLM }
+        }
+    }
+
+    /// Sort by Osaurus router price (input rate primary, output as tiebreak).
+    /// Items without pricing sort last in either direction so a missing rate
+    /// never jumps to the top of a "cheapest first" list. Falls back to the
+    /// receiver unchanged for `.default`.
+    func sortedByPrice(_ order: ModelPickerSortOrder) -> [ModelPickerItem] {
+        guard order != .default else { return self }
+        let ascending = order == .priceLowToHigh
+        return sorted { lhs, rhs in
+            switch (lhs.inputPriceMicroPerMTok, rhs.inputPriceMicroPerMTok) {
+            case let (l?, r?):
+                if l != r { return ascending ? l < r : l > r }
+                let lo = lhs.outputPriceMicroPerMTok ?? 0
+                let ro = rhs.outputPriceMicroPerMTok ?? 0
+                if lo != ro { return ascending ? lo < ro : lo > ro }
+                return lhs.displayName < rhs.displayName
+            case (nil, _?):
+                return false  // unknown price always sorts last
+            case (_?, nil):
+                return true
+            case (nil, nil):
+                return lhs.displayName < rhs.displayName
+            }
+        }
+    }
+}

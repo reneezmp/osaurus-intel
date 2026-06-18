@@ -191,6 +191,60 @@ struct OsaurusRouterModel: Decodable, Identifiable, Equatable, Sendable {
     }
 }
 
+extension OsaurusRouterModel {
+    /// Compact one-line summary for the model picker: underlying provider,
+    /// input/output price, and context window. e.g.
+    /// "venice · $2.00/M in · $4.00/M out · 131K ctx".
+    var pickerDescription: String? {
+        var parts: [String] = []
+
+        let trimmedProvider = provider.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !trimmedProvider.isEmpty {
+            parts.append(trimmedProvider)
+        }
+
+        let input = inputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !input.isEmpty {
+            parts.append("\(input) in")
+        }
+
+        let output = outputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        if !output.isEmpty {
+            parts.append("\(output) out")
+        }
+
+        if let context = Self.formatContextLength(contextLength) {
+            parts.append("\(context) ctx")
+        }
+
+        return parts.isEmpty ? nil : parts.joined(separator: " · ")
+    }
+
+    /// True when the model advertises a vision/image capability, so the picker
+    /// can show its "Vision" badge. Capability keys vary, so match common ones.
+    var supportsVision: Bool {
+        guard let capabilities else { return false }
+        let visionKeys: Set<String> = ["vision", "image", "images", "multimodal"]
+        return capabilities.contains { key, value in
+            value && visionKeys.contains(key.lowercased())
+        }
+    }
+
+    /// Human-friendly context window (e.g. 131072 -> "131K", 1048576 -> "1M").
+    static func formatContextLength(_ context: Int) -> String? {
+        guard context > 0 else { return nil }
+        if context >= 1_000_000 {
+            let millions = Double(context) / 1_000_000
+            let format = millions == millions.rounded() ? "%.0fM" : "%.1fM"
+            return String(format: format, millions)
+        }
+        if context >= 1000 {
+            return "\(context / 1000)K"
+        }
+        return "\(context)"
+    }
+}
+
 struct OsaurusRouterUsageResponse: Decodable, Sendable {
     let data: [OsaurusRouterUsageItem]
     let nextCursor: String?
