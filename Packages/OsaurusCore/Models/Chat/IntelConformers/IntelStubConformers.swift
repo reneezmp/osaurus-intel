@@ -353,6 +353,17 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     func refreshAllModels() async {
         let enabled = configuration.providers.filter { $0.enabled }
         for provider in enabled {
+            // The Osaurus Router's catalog lives behind an EIP-191-signed account
+            // API (GET /models at the host root), not the plain unsigned /models
+            // probe `probeModels` does — an unsigned probe just 404s/401s, leaving
+            // the router with zero models until the Credits tab happened to run the
+            // signed fetch. Route it through the signed path so the catalog (and
+            // its pricing/vision metadata) populates at launch like every other
+            // provider. (Fixes: only DeepSeek showed in the picker on a fresh start.)
+            if provider.providerType == .osaurusRouter {
+                await connectOsaurusRouterIfPossible()
+                continue
+            }
             let models = await probeModels(for: provider)
             var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
             state.isConnected = true
@@ -516,6 +527,14 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         apiKey: String?,
         headers: [String: String]
     ) async throws -> [String] {
+        // The Osaurus Router rejects a plain unsigned /models probe (its catalog
+        // is behind the EIP-191-signed account API), so the generic probe below
+        // would always fail "Test" for it. Validate the router via the signed
+        // catalog fetch instead — the same call that populates the picker.
+        if providerType == .osaurusRouter {
+            return try await OsaurusRouterAPIClient().models().map(\.id).sorted()
+        }
+
         let tempProvider = RemoteProvider(
             name: "Test",
             host: host,
