@@ -45,7 +45,7 @@ public enum MemoryDatabaseError: Error, LocalizedError {
 public final class MemoryDatabase: @unchecked Sendable {
     public static let shared = MemoryDatabase()
 
-    private static let schemaVersion = 8
+    private static let schemaVersion = 9
 
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -164,6 +164,9 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
         if currentVersion < 8 {
             try migrateToV8()
+        }
+        if currentVersion < 9 {
+            try migrateToV9()
         }
     }
 
@@ -482,6 +485,35 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
         try setSchemaVersion(8)
         MemoryLogger.database.info("v8 migration completed (transcript embedding columns)")
+    }
+
+    /// V9 migration (Intel memory Phase 2): mirror the v8 transcript embedding
+    /// columns onto `episodes` and `pinned_facts` so distilled memory (episodes,
+    /// pinned facts) is semantically searchable via the same SQLCipher-BLOB +
+    /// Accelerate-cosine path. Idempotent.
+    private func migrateToV9() throws {
+        MemoryLogger.database.info("Running v9 migration (episode/pinned embedding columns)")
+        for table in ["episodes", "pinned_facts"] {
+            var existing = Set<String>()
+            try executeRaw("PRAGMA table_info(\(table))") { stmt in
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    if let cName = sqlite3_column_text(stmt, 1) {
+                        existing.insert(String(cString: cName))
+                    }
+                }
+            }
+            if !existing.contains("embedding") {
+                try executeRaw("ALTER TABLE \(table) ADD COLUMN embedding BLOB")
+            }
+            if !existing.contains("embedding_dim") {
+                try executeRaw("ALTER TABLE \(table) ADD COLUMN embedding_dim INTEGER")
+            }
+            if !existing.contains("embedding_provider") {
+                try executeRaw("ALTER TABLE \(table) ADD COLUMN embedding_provider TEXT")
+            }
+        }
+        try setSchemaVersion(9)
+        MemoryLogger.database.info("v9 migration completed (episode/pinned embedding columns)")
     }
 
     private func createV5Tables() throws {
