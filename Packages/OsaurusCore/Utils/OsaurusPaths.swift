@@ -82,6 +82,13 @@ public enum OsaurusPaths {
         billing().appendingPathComponent("ledger.sqlite")
     }
 
+    /// Cache for downloaded embedding models (`~/.osaurus/embeddings/`). The Intel
+    /// memory system downloads the static model2vec model here on first use rather
+    /// than bundling it (matching upstream, which keeps the app slim).
+    public static func embeddings() -> URL {
+        root().appendingPathComponent("embeddings", isDirectory: true)
+    }
+
     /// Agents directory
     public static func agents() -> URL {
         root().appendingPathComponent("agents", isDirectory: true)

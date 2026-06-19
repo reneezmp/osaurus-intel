@@ -535,7 +535,9 @@ extension View {
 }
 
 final class MemoryContextAssembler: @unchecked Sendable { static let shared = MemoryContextAssembler(); static func assembleContext(agentId: String = "", config: Any? = nil) async -> Any? { nil } }
-final class MemorySearchService: @unchecked Sendable { static let shared = MemorySearchService(); func initialize() async {}; func indexTranscriptTurn(_ turn: Any) async {} }
+// `MemorySearchService` (real Intel implementation) lives in
+// `IntelMemoryConformers.swift` — it embeds transcript turns and does cosine
+// recall over the SQLCipher-backed transcript table.
 
 // `ModelOptionsStore` and `ModelProfileRegistry` are now provided by
 // upstream (un-excluded as part of Phase 8C-prep-2). The Intel stubs
@@ -1531,9 +1533,57 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.
         let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
-        return ComposedContext(prompt: prompt, toolTokens: toolTokens, tools: tools, promptSections: sections)
+
+        // Recall: pull semantically-relevant past turns and format a memory block
+        // that `injectMemoryPrefix` will splice in just before the user's message.
+        var memorySection: String? = nil
+        let memCfg = MemoryConfigurationStore.load()
+        if memCfg.enabled, let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+            // MVP: search across all agents (agentId: nil) so recall works
+            // regardless of how the transcript agent id was stamped; per-agent
+            // scoping is a Phase-2 refinement.
+            let days = memCfg.episodeRetentionDays > 0 ? memCfg.episodeRetentionDays : 3650
+            let turns = await MemorySearchService.shared.searchTranscript(
+                query: q, agentId: nil, days: days, topK: 6)
+            memorySection = Self.formatMemoryBlock(turns, budgetTokens: memCfg.memoryBudgetTokens)
+        }
+
+        return ComposedContext(
+            prompt: prompt, toolTokens: toolTokens, tools: tools,
+            memorySection: memorySection, promptSections: sections)
     }
-    static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {}
+
+    /// Format recalled transcript turns into a compact memory block, capped to
+    /// the configured token budget.
+    static func formatMemoryBlock(_ turns: [TranscriptTurn], budgetTokens: Int) -> String? {
+        guard !turns.isEmpty else { return nil }
+        var lines: [String] = []
+        var charBudget = max(120, budgetTokens) * MemoryConfiguration.charsPerToken
+        for t in turns {
+            let role = t.role == "user" ? "User" : "Assistant"
+            let snippet = String(
+                t.content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
+            let line = "- \(role): \(snippet)"
+            if line.count > charBudget { break }
+            charBudget -= line.count
+            lines.append(line)
+        }
+        guard !lines.isEmpty else { return nil }
+        return "## Relevant things from earlier conversations\n" + lines.joined(separator: "\n")
+    }
+
+    /// Splice the memory block in as its own system message immediately *before*
+    /// the final user turn — so the long, stable system prefix stays byte-identical
+    /// (keeps DeepSeek's prompt cache warm) while memory sits next to the query.
+    static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {
+        guard let section, !section.isEmpty else { return }
+        let mem = ChatMessage(role: "system", content: section)
+        if let lastUser = messages.lastIndex(where: { $0.role == "user" }) {
+            messages.insert(mem, at: lastUser)
+        } else {
+            messages.append(mem)
+        }
+    }
 }
 
 struct PromptManifest: Sendable { init() {} }
@@ -1768,20 +1818,11 @@ final class LiveVoiceAudioInputRegistry: @unchecked Sendable {
     func store(snapshot: LiveVoiceAudioSnapshot, for id: UUID) {}
 }
 
-final class MemoryDatabase: @unchecked Sendable {
-    static let shared = MemoryDatabase()
-    var isOpen = false
-    var memoryDisabled: Bool { true }
-    func open() throws {}
-    func insertTranscriptTurn(agentId: String, conversationId: String, chunkIndex: Int, role: String, content: String, tokenCount: Int, title: String? = nil, createdAt: String? = nil) throws {}
-
-    // AgentDetailView's memory section (un-body-swapped in M11 Phase
-    // 11.A.4) reads pinned facts + episodes and deletes facts. Memory
-    // is amputated on Intel, so these return empty / no-op.
-    func loadPinnedFacts(agentId: String, limit: Int = 200) throws -> [PinnedFact] { [] }
-    func loadEpisodes(agentId: String, limit: Int = 100) throws -> [Episode] { [] }
-    func deletePinnedFact(id: String) {}
-}
+// NOTE (Intel memory port): the minimal `MemoryDatabase` stub that used to live
+// here was removed — the real `Storage/MemoryDatabase.swift` is now compiled on
+// Intel (it's pure OsaurusSQLCipher, no MLX/VecturaKit) and is a superset of the
+// stub's API, so compiled callers (ChatView, MemoryView, AgentsView) bind to it
+// directly.
 
 // `IdentityView` (un-body-swapped in M11 Phase 11.A.1) reads
 // `@EnvironmentObject private var server: ServerController`, which

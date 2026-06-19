@@ -1076,9 +1076,270 @@ struct MemoryView: View {
 }
 #else
 import SwiftUI
+
+/// Intel memory tab. The upstream `MemoryView` (the `#if !OSAURUS_INTEL` half)
+/// drives the MLX/VecturaKit distillation+episode subsystem; on Intel we expose
+/// the Phase-1 transcript-recall MVP: a master toggle, an embedding-backend
+/// picker (off / on-device static model2vec / cloud), a recall budget, and a
+/// clear-memory action. Storage is the SQLCipher-encrypted memory DB; embeddings
+/// are the pure-Swift `StaticEmbedder` or an OpenAI-compatible cloud API.
 struct MemoryView: View {
+    @ObservedObject private var themeManager = ThemeManager.shared
+    private var theme: ThemeProtocol { themeManager.currentTheme }
+
+    @State private var config = MemoryConfigurationStore.load()
+    @State private var modelReady = false
+    @State private var isDownloading = false
+    @State private var downloadError: String?
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Memory", symbol: "apple.logo")
+        VStack(spacing: 0) {
+            ManagerHeaderWithActions(
+                title: L("Memory"),
+                subtitle: L(
+                    "On-device semantic memory — your chats are embedded locally and recalled when relevant.")
+            ) {
+                HeaderIconButton("arrow.clockwise", isLoading: false, help: "Refresh") { reload() }
+            }
+            ScrollView {
+                VStack(alignment: .leading, spacing: 20) {
+                    statusCard
+                    embeddingCard
+                    budgetCard
+                    dangerCard
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.primaryBackground)
+        .onAppear { reload() }
+    }
+
+    // MARK: - Cards
+
+    private var statusCard: some View {
+        card {
+            HStack(alignment: .top, spacing: 12) {
+                VStack(alignment: .leading, spacing: 6) {
+                    cardTitle("Status")
+                    Text(
+                        config.enabled
+                            ? L("Your chats are remembered and recalled when relevant.")
+                            : L("Memory is off — nothing is stored or recalled.")
+                    )
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer()
+                Toggle(
+                    "",
+                    isOn: Binding(
+                        get: { config.enabled },
+                        set: { v in
+                            mutate { $0.enabled = v }
+                            if v { Task { await MemorySearchService.shared.initialize() } }
+                        })
+                )
+                .labelsHidden()
+                .toggleStyle(.switch)
+            }
+        }
+    }
+
+    private var embeddingCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 12) {
+                cardTitle("Embeddings")
+                Picker(
+                    "",
+                    selection: Binding(
+                        get: { config.embeddingProvider },
+                        set: { v in
+                            mutate { $0.embeddingProvider = v }
+                            modelReady = StaticEmbeddingModel.isAvailable
+                        })
+                ) {
+                    Text("Off", bundle: .module).tag("none")
+                    Text("On-device", bundle: .module).tag("staticLocal")
+                    Text("Cloud", bundle: .module).tag("cloud")
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+
+                switch config.embeddingProvider {
+                case "staticLocal": localDetail
+                case "cloud": cloudDetail
+                default:
+                    Text(
+                        "Recall uses encrypted full-text search — no model, no download, keyword-based.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                }
+            }
+        }
+    }
+
+    private var localDetail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            if isDownloading {
+                HStack(spacing: 8) {
+                    ProgressView().scaleEffect(0.7)
+                    Text("Downloading model (~30 MB)…", bundle: .module)
+                        .font(.system(size: 12)).foregroundColor(theme.secondaryText)
+                }
+            } else if modelReady {
+                HStack(spacing: 6) {
+                    Image(systemName: "checkmark.circle.fill").foregroundColor(theme.successColor)
+                    Text("Model ready — potion-base-8M, on-device", bundle: .module)
+                        .font(.system(size: 12)).foregroundColor(theme.secondaryText)
+                }
+            } else {
+                Button { downloadModel() } label: {
+                    Label(localized: "Download model (~30 MB)", systemImage: "arrow.down.circle")
+                }
+                .controlSize(.small)
+            }
+            if let downloadError {
+                Text(downloadError).font(.system(size: 11)).foregroundColor(theme.errorColor)
+            }
+            Text(
+                "Runs entirely on this Mac — no cloud, no Apple Silicon required. Downloaded once.",
+                bundle: .module
+            )
+            .font(.system(size: 11)).foregroundColor(theme.tertiaryText)
+        }
+    }
+
+    private var cloudDetail: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            field(
+                "Endpoint", "https://api.openai.com/v1",
+                Binding(
+                    get: { config.cloudEmbeddingEndpoint ?? "" },
+                    set: { v in mutate { $0.cloudEmbeddingEndpoint = v.isEmpty ? nil : v } }))
+            field(
+                "Model", "text-embedding-3-small",
+                Binding(
+                    get: { config.cloudEmbeddingModel ?? "" },
+                    set: { v in mutate { $0.cloudEmbeddingModel = v.isEmpty ? nil : v } }))
+            Text(
+                "Uses a configured provider's API key for /v1/embeddings.", bundle: .module
+            )
+            .font(.system(size: 11)).foregroundColor(theme.tertiaryText)
+        }
+    }
+
+    private var budgetCard: some View {
+        card {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    cardTitle("Memory budget")
+                    Text("Max tokens of recalled context added per message.", bundle: .module)
+                        .font(.system(size: 11)).foregroundColor(theme.secondaryText)
+                }
+                Spacer()
+                Stepper(
+                    value: Binding(
+                        get: { config.memoryBudgetTokens },
+                        set: { v in mutate { $0.memoryBudgetTokens = v } }), in: 100...4000, step: 100
+                ) {
+                    Text(verbatim: "\(config.memoryBudgetTokens)")
+                        .font(.system(size: 13, weight: .medium, design: .rounded))
+                        .foregroundColor(theme.primaryText)
+                }
+                .fixedSize()
+            }
+        }
+    }
+
+    private var dangerCard: some View {
+        card {
+            HStack {
+                VStack(alignment: .leading, spacing: 4) {
+                    cardTitle("Clear memory")
+                    Text("Delete all stored conversation turns and embeddings.", bundle: .module)
+                        .font(.system(size: 11)).foregroundColor(theme.secondaryText)
+                }
+                Spacer()
+                Button(role: .destructive) { clearMemory() } label: {
+                    Text("Clear", bundle: .module)
+                }
+                .controlSize(.small)
+            }
+        }
+    }
+
+    // MARK: - Helpers
+
+    @ViewBuilder private func card<Content: View>(@ViewBuilder _ content: () -> Content) -> some View
+    {
+        content()
+            .padding(18)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .fill(theme.secondaryBackground.opacity(0.5))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 14, style: .continuous)
+                    .strokeBorder(theme.primaryBorder.opacity(0.15), lineWidth: 1)
+            )
+    }
+
+    private func cardTitle(_ key: String.LocalizationValue) -> some View {
+        Text(String(localized: key, bundle: .module))
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(theme.primaryText)
+    }
+
+    private func field(_ label: String.LocalizationValue, _ placeholder: String, _ text: Binding<String>)
+        -> some View
+    {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(String(localized: label, bundle: .module))
+                .font(.system(size: 11, weight: .medium)).foregroundColor(theme.secondaryText)
+            TextField("", text: text, prompt: Text(placeholder))
+                .textFieldStyle(.roundedBorder).font(.system(size: 12))
+        }
+    }
+
+    private func mutate(_ change: (inout MemoryConfiguration) -> Void) {
+        var c = config
+        change(&c)
+        config = c.validated()
+        MemoryConfigurationStore.save(config)
+    }
+
+    private func reload() {
+        config = MemoryConfigurationStore.load()
+        modelReady = StaticEmbeddingModel.isAvailable
+    }
+
+    private func downloadModel() {
+        isDownloading = true
+        downloadError = nil
+        Task {
+            do {
+                try await EmbeddingClient.shared.downloadStaticModel()
+                await MainActor.run { modelReady = true }
+            } catch {
+                await MainActor.run { downloadError = error.localizedDescription }
+            }
+            await MainActor.run { isDownloading = false }
+        }
+    }
+
+    private func clearMemory() {
+        let db = MemoryDatabase.shared
+        db.close()
+        try? FileManager.default.removeItem(at: OsaurusPaths.memoryDatabaseFile())
+        try? db.open()
     }
 }
 #endif

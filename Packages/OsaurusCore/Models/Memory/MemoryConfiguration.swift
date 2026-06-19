@@ -43,10 +43,27 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
     public var enabled: Bool
 
     /// Embedding backend ("mlx" or "none"). When "none", search falls back
-    /// to SQLite text matching.
+    /// to SQLite text matching. (Legacy upstream field; on the Intel fork the
+    /// active selection is `embeddingProvider` below — MLX is amputated.)
     public var embeddingBackend: String
     /// Embedding model name (used by VecturaKit when `embeddingBackend == "mlx"`).
     public var embeddingModel: String
+
+    /// (Intel) Which embedder produces vectors for memory:
+    /// - `"staticLocal"`: the bundled pure-Swift model2vec embedder (offline, fast)
+    /// - `"cloud"`: an OpenAI-compatible `/v1/embeddings` provider
+    /// - `"none"`: no embeddings; recall falls back to SQLite FTS5 text search
+    public var embeddingProvider: String
+    /// For `embeddingProvider == "cloud"`: the `/v1/embeddings` base endpoint
+    /// (matched against a configured RemoteProvider for auth), e.g.
+    /// `https://api.openai.com/v1`.
+    public var cloudEmbeddingEndpoint: String?
+    /// For `embeddingProvider == "cloud"`: the embedding model id, e.g.
+    /// `text-embedding-3-small`.
+    public var cloudEmbeddingModel: String?
+    /// Vector dimension written by the active embedder. Stored alongside vectors
+    /// so a backend switch can detect a mismatch and trigger a re-embed.
+    public var embeddingDimensionality: Int
 
     /// When the write pipeline runs distillation. Default `sessionEnd`.
     public var extractionMode: MemoryExtractionMode
@@ -102,6 +119,10 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
         enabled: Bool = true,
         embeddingBackend: String = "mlx",
         embeddingModel: String = "nomic-embed-text-v1.5",
+        embeddingProvider: String = "staticLocal",
+        cloudEmbeddingEndpoint: String? = nil,
+        cloudEmbeddingModel: String? = nil,
+        embeddingDimensionality: Int = 256,
         extractionMode: MemoryExtractionMode = .sessionEnd,
         relevanceGateMode: MemoryRelevanceGateMode = .heuristic,
         memoryBudgetTokens: Int = 800,
@@ -113,6 +134,10 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
         self.enabled = enabled
         self.embeddingBackend = embeddingBackend
         self.embeddingModel = embeddingModel
+        self.embeddingProvider = embeddingProvider
+        self.cloudEmbeddingEndpoint = cloudEmbeddingEndpoint
+        self.cloudEmbeddingModel = cloudEmbeddingModel
+        self.embeddingDimensionality = embeddingDimensionality
         self.extractionMode = extractionMode
         self.relevanceGateMode = relevanceGateMode
         self.memoryBudgetTokens = memoryBudgetTokens
@@ -130,6 +155,7 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
         c.consolidationIntervalHours = max(1, min(c.consolidationIntervalHours, 168))
         c.salienceFloor = max(0.0, min(c.salienceFloor, 1.0))
         c.episodeRetentionDays = max(0, min(c.episodeRetentionDays, 3650))
+        c.embeddingDimensionality = max(1, min(c.embeddingDimensionality, 8192))
         return c
     }
 
@@ -139,6 +165,12 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
         enabled = try c.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
         embeddingBackend = try c.decodeIfPresent(String.self, forKey: .embeddingBackend) ?? defaults.embeddingBackend
         embeddingModel = try c.decodeIfPresent(String.self, forKey: .embeddingModel) ?? defaults.embeddingModel
+        embeddingProvider =
+            try c.decodeIfPresent(String.self, forKey: .embeddingProvider) ?? defaults.embeddingProvider
+        cloudEmbeddingEndpoint = try c.decodeIfPresent(String.self, forKey: .cloudEmbeddingEndpoint)
+        cloudEmbeddingModel = try c.decodeIfPresent(String.self, forKey: .cloudEmbeddingModel)
+        embeddingDimensionality =
+            try c.decodeIfPresent(Int.self, forKey: .embeddingDimensionality) ?? defaults.embeddingDimensionality
         extractionMode =
             try c.decodeIfPresent(MemoryExtractionMode.self, forKey: .extractionMode) ?? defaults.extractionMode
         relevanceGateMode =

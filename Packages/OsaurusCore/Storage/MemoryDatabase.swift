@@ -45,7 +45,7 @@ public enum MemoryDatabaseError: Error, LocalizedError {
 public final class MemoryDatabase: @unchecked Sendable {
     public static let shared = MemoryDatabase()
 
-    private static let schemaVersion = 7
+    private static let schemaVersion = 8
 
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -161,6 +161,9 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
         if currentVersion < 7 {
             try migrateToV7()
+        }
+        if currentVersion < 8 {
+            try migrateToV8()
         }
     }
 
@@ -450,6 +453,35 @@ public final class MemoryDatabase: @unchecked Sendable {
 
         try setSchemaVersion(7)
         MemoryLogger.database.info("v7 migration: rebuilt pending_signals without signal_type column")
+    }
+
+    /// V8 migration (Intel fork): add embedding columns to `transcript` so the
+    /// pure-Swift / cloud embedders can store vectors inline (the Intel build has
+    /// no VecturaKit — vectors live as a float32 BLOB and are cosine-ranked with
+    /// Accelerate). `embedding_dim` + `embedding_provider` are stored alongside so
+    /// a backend switch can detect a dimension mismatch and trigger a re-embed.
+    /// Idempotent: skips columns that already exist (mirrors the v7 table_info guard).
+    private func migrateToV8() throws {
+        MemoryLogger.database.info("Running v8 migration (transcript embedding columns)")
+        var existing = Set<String>()
+        try executeRaw("PRAGMA table_info(transcript)") { stmt in
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if let cName = sqlite3_column_text(stmt, 1) {
+                    existing.insert(String(cString: cName))
+                }
+            }
+        }
+        if !existing.contains("embedding") {
+            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding BLOB")
+        }
+        if !existing.contains("embedding_dim") {
+            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding_dim INTEGER")
+        }
+        if !existing.contains("embedding_provider") {
+            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding_provider TEXT")
+        }
+        try setSchemaVersion(8)
+        MemoryLogger.database.info("v8 migration completed (transcript embedding columns)")
     }
 
     private func createV5Tables() throws {
@@ -1823,6 +1855,69 @@ public final class MemoryDatabase: @unchecked Sendable {
             }
         )
         return turns
+    }
+
+    // MARK: - Transcript embeddings (Intel memory)
+
+    /// Store/replace a transcript turn's embedding vector, matched by composite
+    /// key (agent + conversation + chunk). Vectors are float32 BLOBs; cosine
+    /// ranking happens in Swift via Accelerate (no VecturaKit on Intel).
+    public func setTranscriptEmbedding(
+        agentId: String, conversationId: String, chunkIndex: Int,
+        embedding: [Float], provider: String
+    ) throws {
+        _ = try executeUpdate(
+            """
+            UPDATE transcript SET embedding = ?1, embedding_dim = ?2, embedding_provider = ?3
+            WHERE agent_id = ?4 AND conversation_id = ?5 AND chunk_index = ?6
+            """
+        ) { stmt in
+            embedding.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 1, raw.baseAddress, Int32(raw.count), sqliteTransient)
+            }
+            sqlite3_bind_int(stmt, 2, Int32(embedding.count))
+            Self.bindText(stmt, index: 3, value: provider)
+            Self.bindText(stmt, index: 4, value: agentId)
+            Self.bindText(stmt, index: 5, value: conversationId)
+            sqlite3_bind_int(stmt, 6, Int32(chunkIndex))
+        }
+    }
+
+    /// Load transcript turns that have a stored embedding (optionally scoped to
+    /// an agent + recency window), paired with their float32 vector — the
+    /// candidate set for cosine recall.
+    public func loadEmbeddedTranscript(
+        agentId: String? = nil, days: Int = 365, limit: Int = 500
+    ) throws -> [(turn: TranscriptTurn, vector: [Float])] {
+        var out: [(turn: TranscriptTurn, vector: [Float])] = []
+        var sql = """
+            SELECT id, agent_id, conversation_id, chunk_index, role, content, token_count, title, created_at, embedding
+            FROM transcript
+            WHERE embedding IS NOT NULL
+              AND created_at >= datetime('now', '-' || ?1 || ' days')
+            """
+        if agentId != nil { sql += " AND agent_id = ?2" }
+        sql += " ORDER BY created_at DESC LIMIT ?\(agentId != nil ? 3 : 2)"
+        try prepareAndExecute(
+            sql,
+            bind: { stmt in
+                sqlite3_bind_int(stmt, 1, Int32(days))
+                if let agentId { Self.bindText(stmt, index: 2, value: agentId) }
+                sqlite3_bind_int(stmt, Int32(agentId != nil ? 3 : 2), Int32(limit))
+            },
+            process: { stmt in
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let turn = Self.readTranscriptTurn(stmt)
+                    if let blob = sqlite3_column_blob(stmt, 9) {
+                        let bytes = Int(sqlite3_column_bytes(stmt, 9))
+                        let data = Data(bytes: blob, count: bytes)
+                        let vec = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                        out.append((turn, vec))
+                    }
+                }
+            }
+        )
+        return out
     }
 
     public func loadTranscriptForConversation(

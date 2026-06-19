@@ -106,11 +106,12 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// available. `InsightsService` is Foundation+Combine only; the Schedules
     /// execution chain (ScheduleManager / SchedulerDatabase / NextRunScheduler
     /// / BackgroundTaskManager) is pure Foundation/Combine/SQLCipher and fires
-    /// agents headless through the cloud pipeline. (`.memory` remains gated —
-    /// deferred to a cloud-distillation version.) Apple Silicon always `true`.
+    /// agents headless through the cloud pipeline. `.memory` is now available on
+    /// Intel too — backed by the pure-Swift/cloud embedder + SQLCipher store (no
+    /// MLX/VecturaKit). Apple Silicon always `true`.
     public var isAvailableOnIntel: Bool {
         switch self {
-        case .models, .voice, .memory, .sandbox:
+        case .models, .voice, .sandbox:
             return false
         case .insights, .schedules:
             return true

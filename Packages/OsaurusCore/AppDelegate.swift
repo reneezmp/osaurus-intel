@@ -74,6 +74,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             await StorageMaintenance.shared.start()
         }
 
+        #if OSAURUS_INTEL
+        // Intel memory: open the encrypted memory DB + prewarm the local embedder
+        // so chat turns get embedded for recall and the first search isn't delayed
+        // by a one-time model download.
+        Task.detached(priority: .background) {
+            await MemorySearchService.shared.initialize()
+        }
+        #endif
+
         let launchedByCLI = ProcessInfo.processInfo.arguments.contains("--launched-by-cli")
         if !launchedByCLI {
             LoginItemService.shared.applyStartAtLogin(
