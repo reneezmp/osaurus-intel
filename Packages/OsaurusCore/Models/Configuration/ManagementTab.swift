@@ -44,7 +44,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .tools: "wrench.and.screwdriver.fill"
         case .skills: "sparkles"
         case .commands: "command"
-        case .memory: "brain.head.profile.fill"
+        case .memory: "brain.head.profile"  // the `.fill` variant is macOS 14+; renders blank on Ventura
         case .schedules: "calendar.badge.clock"
         case .watchers: "eye.fill"
         case .voice: "waveform"

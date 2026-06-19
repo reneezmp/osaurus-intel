@@ -278,7 +278,14 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
     func effectiveToolsDisabled(for agentId: UUID) -> Bool { false }
     func effectiveDBEnabled(for agentId: UUID) -> Bool { false }
-    func effectiveMemoryDisabled(for agentId: UUID) -> Bool { true }
+    /// Intel memory is governed by the global Memory tab toggle
+    /// (`MemoryConfiguration.enabled`); per-agent overrides are a Phase-2 thing.
+    /// This used to hard-return `true` (a leftover from when memory was
+    /// amputated), which silently gated OUT the ChatView transcript-write path —
+    /// so nothing was ever stored to recall.
+    func effectiveMemoryDisabled(for agentId: UUID) -> Bool {
+        !MemoryConfigurationStore.load().enabled
+    }
     // M12 follow-up (Renée 2026-06-03): real per-agent capability management,
     // backing the un-body-swapped AgentCapabilityManagerView. Mirrors the real
     // AgentManager (Managers/AgentManager.swift): custom agents persist to their
