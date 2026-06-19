@@ -2239,7 +2239,7 @@ people best placed to spread the story. We stay quietly excellent.
 
 ## M17 — Ventura ships, the cache + layout fights, sync to 0.20.0, the deferred shelf (2026-06-12 → 06-14)
 
-### Releases 1.0.18 → 1.0.28 (build 19 → 29)
+### Releases 1.0.18 → 1.0.30 (build 19 → 31)
 - **1.0.18** — Ventura (macOS 13) Phase B shipped to Rosy (now on *native* Ventura,
   reverted off OCLP-Sequoia). Folder/runtime tools fixed for Manual-mode agents.
 - **1.0.19** — deterministic backfilled tool-call ids (first DeepSeek cache-miss attempt — didn't fix it).
@@ -2325,6 +2325,35 @@ people best placed to spread the story. We stay quietly excellent.
   account fetch — so on a fresh launch only DeepSeek showed until the Credits tab ran the signed fetch.
   Now `refreshAllModels` (and the edit-sheet `testConnection`) special-case `.osaurusRouter` →
   `connectOsaurusRouterIfPossible` / signed catalog. Router models + pricing/vision now populate at launch.
+- **1.0.29 / 1.0.30** (2026-06-19) — **LOCAL SEMANTIC MEMORY revived (Phase 1) — CONFIRMED WORKING.** See
+  the "Memory revival" section below. 1.0.30 fixed the one blocker (`effectiveMemoryDisabled` stub) +
+  the Memory tab icon.
+
+### The memory revival (Phase 1, 2026-06-19) — pure-Swift semantic memory on Intel
+The whole MLX/VecturaKit memory subsystem was amputated. Rebuilt it on Intel with **no MLX, no Metal,
+no Python, no VecturaKit** (VecturaKit is a no-op stub on Intel):
+- **Embedder:** pure-Swift **model2vec / `potion-base-8M`** (256-dim static). Embedding = WordPiece
+  tokenize → matrix-row lookup → mean-pool → Accelerate L2-normalize (microseconds). The model
+  **downloads on first use** from HuggingFace (parsed from `.safetensors` in Swift → flat `.f32` cache
+  at `~/.osaurus/embeddings/`) — *not* bundled, so the app stays ~52 MB. Files:
+  `Services/Memory/Embedding/*` (EmbeddingBackend, StaticEmbedder, WordPieceTokenizer,
+  StaticEmbeddingModel, CloudEmbedder, EmbeddingClient).
+- **Store + recall:** un-excluded `Storage/MemoryDatabase.swift` (pure SQLCipher) + v8 migration
+  (embedding BLOB on transcript). `IntelMemoryConformers.MemorySearchService` embeds turns on index and
+  does brute-force cosine recall (Accelerate `vDSP_dotpr`), FTS5 text fallback.
+- **Injection:** the Intel `SystemPromptComposer` mirror's `composeChatContext` runs `searchTranscript`,
+  formats a memory block, and `injectMemoryPrefix` splices it *before the last user turn* (keeps the
+  stable system prefix byte-identical → DeepSeek cache stays warm).
+- **UI:** Memory tab enabled on Intel (`ManagementTab.isAvailableOnIntel`) + a SwiftUI `MemoryView`
+  (status toggle, embedding picker [off/on-device/cloud] with download state, budget, clear).
+- **The blocker (1.0.30):** `IntelManagerConformers.effectiveMemoryDisabled(for:)` hard-returned `true`
+  (amputation-era stub) → ChatView's `if !memoryOff` transcript-WRITE path never ran → nothing stored.
+  Fixed to `!MemoryConfiguration.enabled`. **Then it worked live** — the model's own reasoning quoted the
+  injected memory ("From the context provided in the system prompt: 'My cat's name is Brisa'").
+- **Phase 2 (in progress):** v9 migration (embedding columns on episodes/pinned_facts) DONE + committed
+  (`625ac135`). Next: the distillation orchestrator (turns → episode + pinned facts + identity via
+  `CloudChatEngine`, replacing the `MemoryService` stub), then episode/pinned indexing+search,
+  consolidation, the search-memory tool, and the full Memory panel. See the resume prompt / tasks #24–27.
 
 ### The auto-update un-sticking (2026-06-17)
 Rosy had been silently stuck on the **`LAYOUT-FIX-11` debug build** ever since the layout saga —
@@ -2356,18 +2385,18 @@ rewired CreditsView's session links to `ChatSessionsManager`. **Genuinely still 
 p2p e2e (excluded Bonjour/relay transport), local MCP probe (excluded `SandboxStdioRunner`).
 
 ### Current state / next
-- **Latest release:** 1.0.28 (build 29). Branch `intel-fork`, clean (only the M4-only
-  `FoundationModelService` experiment dirty — never committed), pushed. Rosy un-stuck onto real
-  releases (1.0.24, build 25), so everything after arrives via **auto-update**.
-- **Hosted inference (Osaurus Router): WORKING** — confirmed live on Rosy (real billed completions,
-  e.g. `venice-uncensored-role-play`). The `/v1` path fix (1.0.25) did it.
+- **Latest release:** 1.0.30 (build 31). Branch `intel-fork`, clean (only the M4-only
+  `FoundationModelService` experiment dirty — never committed), pushed. Auto-update healthy.
+- **Local semantic MEMORY (Phase 1): WORKING** — confirmed live on Rosy (model quoted the injected
+  recall). Pure-Swift model2vec, SQLCipher store, no MLX/Metal/Python. **Phase 2 in progress** —
+  v9 migration committed (`625ac135`); distillation orchestrator is the next chunk (tasks #24–27).
+- **Hosted inference (Osaurus Router): WORKING** — confirmed live on Rosy. The `/v1` path fix (1.0.25) did it.
 - **Synced to upstream:** `9124d696` (0.20.3 + 12 untagged commits). **0 commits behind** — fully
   caught up.
-- **Model picker:** rewritten (1.0.25) + enriched with router metadata (1.0.26: descriptions,
-  Vision badges, Add Provider, Sort & Filter) — awaiting Renée's visual confirmation on 1.0.26.
-- **Open / pending:** some router models error mid-chat (a few don't stream — provider-specific,
-  needs per-model triage); verify the 1.0.27 Settings-window titlebar chrome doesn't overlap the
-  sidebar on Rosy; composer credits-chip (deferred); the deferred `e8bcba8a`
+- **Open / pending:** **Phase 2 memory** (distillation/episodes/identity/consolidation/search-tool/full
+  panel — tasks #24–27); the Settings→**Permissions section Ventura List-spacing** gaps (pre-existing,
+  not memory-related); some router models error mid-chat (a few don't stream — provider-specific);
+  composer credits-chip (deferred); the deferred `e8bcba8a`
   onboarding model-selection fix + `37a2291b` ToolAvailability (gates the ToolsManagerView hang fix);
   SQLCipher `hmac` decrypt error in Rosy logs; verify V4 honors `thinking`/`reasoning_effort`.
   **Intentionally unsurfaced (not bugs):** global-proxy settings UI, community-theme gallery,
