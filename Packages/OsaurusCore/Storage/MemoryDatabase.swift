@@ -1993,6 +1993,78 @@ public final class MemoryDatabase: @unchecked Sendable {
         return out
     }
 
+    /// Load distilled episodes that have a stored embedding (Phase 2 layered
+    /// recall), paired with their float32 vector. Episode counterpart of
+    /// `loadEmbeddedTranscript`; scoped by recency on `conversation_at`.
+    public func loadEmbeddedEpisodes(
+        agentId: String? = nil, days: Int = 365, limit: Int = 500
+    ) throws -> [(episode: Episode, vector: [Float])] {
+        var out: [(episode: Episode, vector: [Float])] = []
+        var sql = """
+            SELECT \(Self.episodeColumns), embedding
+            FROM episodes
+            WHERE status = 'active' AND embedding IS NOT NULL
+              AND conversation_at >= datetime('now', '-' || ?1 || ' days')
+            """
+        if agentId != nil { sql += " AND agent_id = ?2" }
+        sql += " ORDER BY conversation_at DESC LIMIT ?\(agentId != nil ? 3 : 2)"
+        try prepareAndExecute(
+            sql,
+            bind: { stmt in
+                sqlite3_bind_int(stmt, 1, Int32(days))
+                if let agentId { Self.bindText(stmt, index: 2, value: agentId) }
+                sqlite3_bind_int(stmt, Int32(agentId != nil ? 3 : 2), Int32(limit))
+            },
+            process: { stmt in
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let ep = Self.readEpisode(stmt)
+                    if let blob = sqlite3_column_blob(stmt, 14) {
+                        let bytes = Int(sqlite3_column_bytes(stmt, 14))
+                        let data = Data(bytes: blob, count: bytes)
+                        let vec = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                        out.append((ep, vec))
+                    }
+                }
+            }
+        )
+        return out
+    }
+
+    /// Load pinned facts that have a stored embedding (Phase 2 layered recall),
+    /// paired with their float32 vector. No recency window — pinned facts are
+    /// the durable layer; ranked by salience.
+    public func loadEmbeddedPinnedFacts(
+        agentId: String? = nil, limit: Int = 500
+    ) throws -> [(fact: PinnedFact, vector: [Float])] {
+        var out: [(fact: PinnedFact, vector: [Float])] = []
+        var sql = """
+            SELECT \(Self.pinnedColumns), embedding
+            FROM pinned_facts
+            WHERE status = 'active' AND embedding IS NOT NULL
+            """
+        if agentId != nil { sql += " AND agent_id = ?1" }
+        sql += " ORDER BY salience DESC, last_used DESC LIMIT ?\(agentId != nil ? 2 : 1)"
+        try prepareAndExecute(
+            sql,
+            bind: { stmt in
+                if let agentId { Self.bindText(stmt, index: 1, value: agentId) }
+                sqlite3_bind_int(stmt, Int32(agentId != nil ? 2 : 1), Int32(limit))
+            },
+            process: { stmt in
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    let fact = Self.readPinnedFact(stmt)
+                    if let blob = sqlite3_column_blob(stmt, 11) {
+                        let bytes = Int(sqlite3_column_bytes(stmt, 11))
+                        let data = Data(bytes: blob, count: bytes)
+                        let vec = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
+                        out.append((fact, vec))
+                    }
+                }
+            }
+        )
+        return out
+    }
+
     public func loadTranscriptForConversation(
         conversationId: String,
         limit: Int = 500

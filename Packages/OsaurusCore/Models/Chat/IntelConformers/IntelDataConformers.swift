@@ -1534,42 +1534,23 @@ final class SystemPromptComposer: @unchecked Sendable {
         // "Tools" rail instead of 0.
         let toolTokens = ContextBudgetManager.estimateToolTokens(tools)
 
-        // Recall: pull semantically-relevant past turns and format a memory block
-        // that `injectMemoryPrefix` will splice in just before the user's message.
+        // Recall: assemble the layered memory block (identity → pinned →
+        // episodes → transcript fallback) that `injectMemoryPrefix` will splice
+        // in just before the user's message.
         var memorySection: String? = nil
         let memCfg = MemoryConfigurationStore.load()
         if memCfg.enabled, let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
-            // MVP: search across all agents (agentId: nil) so recall works
-            // regardless of how the transcript agent id was stamped; per-agent
-            // scoping is a Phase-2 refinement.
+            // Search across all agents (agentId: nil) so recall works regardless
+            // of how the transcript/episode agent id was stamped; per-agent
+            // scoping is a later refinement.
             let days = memCfg.episodeRetentionDays > 0 ? memCfg.episodeRetentionDays : 3650
-            let turns = await MemorySearchService.shared.searchTranscript(
-                query: q, agentId: nil, days: days, topK: 6)
-            memorySection = Self.formatMemoryBlock(turns, budgetTokens: memCfg.memoryBudgetTokens)
+            memorySection = await MemorySearchService.shared.recall(
+                query: q, agentId: nil, days: days, budgetTokens: memCfg.memoryBudgetTokens)
         }
 
         return ComposedContext(
             prompt: prompt, toolTokens: toolTokens, tools: tools,
             memorySection: memorySection, promptSections: sections)
-    }
-
-    /// Format recalled transcript turns into a compact memory block, capped to
-    /// the configured token budget.
-    static func formatMemoryBlock(_ turns: [TranscriptTurn], budgetTokens: Int) -> String? {
-        guard !turns.isEmpty else { return nil }
-        var lines: [String] = []
-        var charBudget = max(120, budgetTokens) * MemoryConfiguration.charsPerToken
-        for t in turns {
-            let role = t.role == "user" ? "User" : "Assistant"
-            let snippet = String(
-                t.content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(280))
-            let line = "- \(role): \(snippet)"
-            if line.count > charBudget { break }
-            charBudget -= line.count
-            lines.append(line)
-        }
-        guard !lines.isEmpty else { return nil }
-        return "## Relevant things from earlier conversations\n" + lines.joined(separator: "\n")
     }
 
     /// Splice the memory block in as its own system message immediately *before*

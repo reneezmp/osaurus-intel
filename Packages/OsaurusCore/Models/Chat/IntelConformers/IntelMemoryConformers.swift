@@ -127,6 +127,164 @@ final class MemorySearchService: @unchecked Sendable {
         }
     }
 
+    /// Semantic recall over distilled episodes (cosine top-k), with an FTS5
+    /// text-search fallback. Counterpart of `searchTranscript`.
+    func searchEpisodes(
+        query: String, agentId: String? = nil, days: Int = 365, topK: Int = 4
+    ) async -> [Episode] {
+        let cfg = MemoryConfigurationStore.load()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        if cfg.embeddingProvider != "none",
+            let qvec = try? await EmbeddingClient.shared.embedOne(trimmed, config: cfg),
+            !qvec.isEmpty,
+            let rows = try? MemoryDatabase.shared.loadEmbeddedEpisodes(
+                agentId: agentId, days: days, limit: 1000), !rows.isEmpty
+        {
+            let scored =
+                rows
+                .compactMap { row -> (Episode, Float)? in
+                    guard row.vector.count == qvec.count else { return nil }
+                    return (row.episode, Self.cosine(qvec, row.vector))
+                }
+                .sorted { $0.1 > $1.1 }
+            return Array(scored.prefix(topK).map { $0.0 })
+        }
+
+        return
+            (try? MemoryDatabase.shared.searchEpisodesText(
+                query: trimmed, agentId: agentId, limit: topK)) ?? []
+    }
+
+    /// Semantic recall over pinned facts (cosine top-k), FTS5 fallback.
+    func searchPinnedFacts(
+        query: String, agentId: String? = nil, topK: Int = 6
+    ) async -> [PinnedFact] {
+        let cfg = MemoryConfigurationStore.load()
+        let trimmed = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return [] }
+
+        if cfg.embeddingProvider != "none",
+            let qvec = try? await EmbeddingClient.shared.embedOne(trimmed, config: cfg),
+            !qvec.isEmpty,
+            let rows = try? MemoryDatabase.shared.loadEmbeddedPinnedFacts(
+                agentId: agentId, limit: 1000), !rows.isEmpty
+        {
+            let scored =
+                rows
+                .compactMap { row -> (PinnedFact, Float)? in
+                    guard row.vector.count == qvec.count else { return nil }
+                    return (row.fact, Self.cosine(qvec, row.vector))
+                }
+                .sorted { $0.1 > $1.1 }
+            return Array(scored.prefix(topK).map { $0.0 })
+        }
+
+        return
+            (try? MemoryDatabase.shared.searchPinnedFactsText(
+                query: trimmed, agentId: agentId, limit: topK)) ?? []
+    }
+
+    /// Assemble the recalled memory block injected before the user's turn.
+    ///
+    /// Layered, highest-value first, within a shared character budget derived
+    /// from `budgetTokens`:
+    ///   1. **Identity** — user-authored overrides + auto-derived profile
+    ///      (not query-scoped; always worth surfacing).
+    ///   2. **Pinned facts** — semantic, salience-ranked durable facts.
+    ///   3. **Episodes** — past-session summaries.
+    ///   4. **Transcript** — raw turns as the fine-grained fallback, filling
+    ///      whatever budget remains (also catches the *current* session's turns
+    ///      that haven't been distilled yet).
+    ///
+    /// Returns nil when memory is off, the query is empty, or nothing matched.
+    func recall(
+        query: String, agentId: String? = nil, days: Int, budgetTokens: Int
+    ) async -> String? {
+        let cfg = MemoryConfigurationStore.load()
+        guard cfg.enabled else { return nil }
+        let q = query.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !q.isEmpty else { return nil }
+
+        var charBudget = max(200, budgetTokens) * MemoryConfiguration.charsPerToken
+        var blocks: [String] = []
+
+        // Layer 1: Identity (overrides + auto-derived content).
+        if let identity = try? MemoryDatabase.shared.loadIdentity() {
+            var idLines: [String] = []
+            for override in identity.overrides.prefix(12) {
+                let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)
+                guard !trimmed.isEmpty else { continue }
+                let line = "- \(trimmed)"
+                guard line.count <= charBudget else { break }
+                charBudget -= line.count
+                idLines.append(line)
+            }
+            let content = identity.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            if !content.isEmpty {
+                let snippet = String(content.prefix(min(charBudget, 600)))
+                if !snippet.isEmpty, snippet.count <= charBudget {
+                    charBudget -= snippet.count
+                    idLines.append(snippet)
+                }
+            }
+            if !idLines.isEmpty {
+                blocks.append("### About you\n" + idLines.joined(separator: "\n"))
+            }
+        }
+
+        // Layer 2: Pinned facts.
+        let pinned = await searchPinnedFacts(query: q, agentId: agentId, topK: 6)
+        let pinnedLines = Self.budgetedLines(
+            pinned.map { "- \($0.content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(220))" },
+            budget: &charBudget)
+        if !pinnedLines.isEmpty {
+            blocks.append("### Things to remember\n" + pinnedLines.joined(separator: "\n"))
+        }
+
+        // Layer 3: Episodes.
+        let episodes = await searchEpisodes(query: q, agentId: agentId, days: days, topK: 4)
+        let episodeLines = Self.budgetedLines(
+            episodes.map {
+                "- [\($0.conversationAt.prefix(10))] \($0.summary.trimmingCharacters(in: .whitespacesAndNewlines).prefix(220))"
+            },
+            budget: &charBudget)
+        if !episodeLines.isEmpty {
+            blocks.append("### Past sessions\n" + episodeLines.joined(separator: "\n"))
+        }
+
+        // Layer 4: Raw transcript detail (fallback; fills remaining budget).
+        if charBudget > 200 {
+            let turns = await searchTranscript(query: q, agentId: agentId, days: days, topK: 6)
+            let turnLines = Self.budgetedLines(
+                turns.map {
+                    let role = $0.role == "user" ? "You" : "Assistant"
+                    return "- \(role): \($0.content.trimmingCharacters(in: .whitespacesAndNewlines).prefix(200))"
+                },
+                budget: &charBudget)
+            if !turnLines.isEmpty {
+                blocks.append("### Earlier conversation detail\n" + turnLines.joined(separator: "\n"))
+            }
+        }
+
+        guard !blocks.isEmpty else { return nil }
+        return "## Relevant memory\n" + blocks.joined(separator: "\n\n")
+    }
+
+    /// Take candidate lines in order until the shared character budget is spent.
+    private static func budgetedLines(
+        _ candidates: [String], budget: inout Int
+    ) -> [String] {
+        var out: [String] = []
+        for line in candidates where !line.isEmpty {
+            guard line.count <= budget else { break }
+            budget -= line.count
+            out.append(line)
+        }
+        return out
+    }
+
     /// Clearing memory deletes the DB file directly (see the Intel Memory view),
     /// which removes stored vectors too — so there's nothing extra to wipe here.
     func clearIndex() async {}
