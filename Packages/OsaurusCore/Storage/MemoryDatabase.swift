@@ -1915,6 +1915,47 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
+    /// Store a distilled episode's embedding (Intel memory Phase 2). The
+    /// `episodes` embedding columns arrived with the v9 migration; this is the
+    /// episode counterpart of `setTranscriptEmbedding`.
+    public func setEpisodeEmbedding(
+        episodeId: Int, embedding: [Float], provider: String
+    ) throws {
+        _ = try executeUpdate(
+            """
+            UPDATE episodes SET embedding = ?1, embedding_dim = ?2, embedding_provider = ?3
+            WHERE id = ?4
+            """
+        ) { stmt in
+            embedding.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 1, raw.baseAddress, Int32(raw.count), sqliteTransient)
+            }
+            sqlite3_bind_int(stmt, 2, Int32(embedding.count))
+            Self.bindText(stmt, index: 3, value: provider)
+            sqlite3_bind_int64(stmt, 4, Int64(episodeId))
+        }
+    }
+
+    /// Store a pinned fact's embedding (Intel memory Phase 2). `pinned_facts`
+    /// keys on a TEXT UUID, so the WHERE clause binds the id as text.
+    public func setPinnedFactEmbedding(
+        factId: String, embedding: [Float], provider: String
+    ) throws {
+        _ = try executeUpdate(
+            """
+            UPDATE pinned_facts SET embedding = ?1, embedding_dim = ?2, embedding_provider = ?3
+            WHERE id = ?4
+            """
+        ) { stmt in
+            embedding.withUnsafeBytes { raw in
+                sqlite3_bind_blob(stmt, 1, raw.baseAddress, Int32(raw.count), sqliteTransient)
+            }
+            sqlite3_bind_int(stmt, 2, Int32(embedding.count))
+            Self.bindText(stmt, index: 3, value: provider)
+            Self.bindText(stmt, index: 4, value: factId)
+        }
+    }
+
     /// Load transcript turns that have a stored embedding (optionally scoped to
     /// an agent + recency window), paired with their float32 vector — the
     /// candidate set for cosine recall.

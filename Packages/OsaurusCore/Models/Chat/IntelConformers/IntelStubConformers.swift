@@ -1341,12 +1341,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func unregisterSandboxPluginTools(pluginId: String) {}
 }
 
-// MARK: - MemoryService (disabled on Intel)
-
-final class MemoryService: @unchecked Sendable {
-    static let shared = MemoryService()
-    func bufferTurn(userMessage: String, assistantMessage: String?, agentId: String, conversationId: String, sessionDate: String? = nil) async {}
-}
+// MARK: - MemoryService
+//
+// The real Intel distillation orchestrator (buffer → debounce → one-call
+// distill via CloudChatEngine → episode + pinned + identity) lives in
+// `IntelMemoryService.swift`. The old no-op `bufferTurn` stub that used to sit
+// here was removed in Phase 2.
 
 // MARK: - GenerativeGreeting (no-op on Intel)
 

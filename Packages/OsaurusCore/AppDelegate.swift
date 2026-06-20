@@ -80,6 +80,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // by a one-time model download.
         Task.detached(priority: .background) {
             await MemorySearchService.shared.initialize()
+            // Phase 2: drain any sessions that were buffered but never distilled
+            // before the previous launch ended (closed mid-debounce, quit, crash).
+            await MemoryService.shared.recoverOrphanedSignals()
         }
         #endif
 

@@ -81,6 +81,52 @@ final class MemorySearchService: @unchecked Sendable {
                 query: trimmed, agentId: agentId, days: days, limit: topK)) ?? []
     }
 
+    /// Embed a freshly-distilled episode and persist its vector onto the v9
+    /// `episodes` embedding columns. Called by the distillation orchestrator
+    /// (`MemoryService.performDistillSession`) right after the episode is
+    /// inserted. The searchable read side (cosine over episodes) lands in the
+    /// layered-recall work; this is the write/index half. No-op when memory or
+    /// embeddings are disabled.
+    func indexEpisode(_ episode: Episode) async {
+        let cfg = MemoryConfigurationStore.load()
+        guard cfg.enabled, cfg.embeddingProvider != "none", episode.id > 0 else { return }
+        // Embed the summary plus its topic/entity hints so recall can match on
+        // either the gist or a named entity ("what did we decide about X").
+        let parts = [episode.summary, episode.topicsCSV, episode.entitiesCSV]
+            .filter { !$0.isEmpty }
+        let content = parts.joined(separator: " — ").trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        do {
+            guard let vec = try await EmbeddingClient.shared.embedOne(content, config: cfg),
+                !vec.isEmpty
+            else { return }
+            let provider = EmbeddingClient.shared.activeIdentifier(for: cfg) ?? "unknown"
+            try MemoryDatabase.shared.setEpisodeEmbedding(
+                episodeId: episode.id, embedding: vec, provider: provider)
+        } catch {
+            MemoryLogger.database.warning("Intel indexEpisode failed: \(error)")
+        }
+    }
+
+    /// Embed a freshly-promoted pinned fact and persist its vector onto the v9
+    /// `pinned_facts` embedding columns. Counterpart of `indexEpisode`.
+    func indexPinnedFact(_ fact: PinnedFact) async {
+        let cfg = MemoryConfigurationStore.load()
+        guard cfg.enabled, cfg.embeddingProvider != "none" else { return }
+        let content = fact.content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !content.isEmpty else { return }
+        do {
+            guard let vec = try await EmbeddingClient.shared.embedOne(content, config: cfg),
+                !vec.isEmpty
+            else { return }
+            let provider = EmbeddingClient.shared.activeIdentifier(for: cfg) ?? "unknown"
+            try MemoryDatabase.shared.setPinnedFactEmbedding(
+                factId: fact.id, embedding: vec, provider: provider)
+        } catch {
+            MemoryLogger.database.warning("Intel indexPinnedFact failed: \(error)")
+        }
+    }
+
     /// Clearing memory deletes the DB file directly (see the Intel Memory view),
     /// which removes stored vectors too — so there's nothing extra to wipe here.
     func clearIndex() async {}
