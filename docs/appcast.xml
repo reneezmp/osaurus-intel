@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.31</title>
+      <pubDate>Sat, 20 Jun 2026 13:17:18 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>32</sparkle:version>
+      <sparkle:shortVersionString>1.0.31</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.31/Osaurus-Intel-1.0.31.zip" length="52360203" type="application/octet-stream" sparkle:edSignature="VcXVxC50cRAhDddShn7oSGseKxUSexW+dGgI0tkd0kM4O/NfpCiOzLFBw/iONyZds4sJd4QkEQSIgVy7nxfRBg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.31
+
+Local memory — Phase 2. Your conversations are now distilled into durable episodes, pinned facts, and an evolving identity profile, then recalled into context when relevant — layered on top of the existing transcript recall. All on-device and encrypted; no Apple Silicon required.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.30</title>
       <pubDate>Fri, 19 Jun 2026 23:11:08 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
