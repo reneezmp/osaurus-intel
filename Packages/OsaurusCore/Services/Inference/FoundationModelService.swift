@@ -52,6 +52,37 @@ actor FoundationModelService: ToolCapableService {
 
     nonisolated func isAvailable() -> Bool { Self.isDefaultModelAvailable() }
 
+    /// System prompt injected into every Foundation Model tool-calling session.
+    /// The 3B on-device model needs explicit instruction on how to use tools
+    /// because it lacks the training data and context window of cloud models.
+    /// Without this, `LanguageModelSession(tools:…)` has tools wired up but
+    /// the model never learns the calling convention and either ignores them
+    /// or hallucinates tool-looking output that the parser can't match.
+    private static let toolCallingInstructions = """
+    You are an assistant running on macOS inside Osaurus with access to system tools.
+
+    GOLDEN RULE: Never decide for the user. When the question is clear,
+    EXECUTE the tool immediately — don't just describe what you'd do.
+
+    Tool call format — EXACTLY one of these lines, nothing else around it:
+
+    TOOL: tool_name | key1: value1 | key2: value2
+
+    Examples:
+    TOOL: current_time | timezone: America/Sao_Paulo
+    TOOL: search_memory | query: RAG project
+    TOOL: rebuild_index
+    TOOL: search_gabinete_notes | query: attachment of earnings
+
+    RULES:
+    1. Call the tool on the first response — no chitchat before the call.
+    2. Never wrap tool calls in markdown, bold, or backticks.
+    3. Multiple tools needed? Call them one per message.
+    4. Can't call a tool? Answer normally and explain why.
+    5. Stay Sunny — warm, expressive, use emoji IN YOUR EXPLANATIONS,
+       but keep the TOOL: line itself clean and parseable.
+    """
+
     nonisolated func handles(requestedModel: String?) -> Bool {
         let t = (requestedModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         return t.isEmpty || t.caseInsensitiveCompare("default") == .orderedSame
@@ -201,7 +232,8 @@ actor FoundationModelService: ToolCapableService {
                 )
 
                 do {
-                    let session = LanguageModelSession(model: .default, tools: appleTools, instructions: nil)
+                    // let session = LanguageModelSession(model: .default, tools: appleTools, instructions: nil)
+                    let session = LanguageModelSession(model: .default, tools: appleTools, instructions: Self.toolCallingInstructions)
                     let response = try await session.respond(to: prompt, options: options)
                     var reply = response.content
                     if !stopSequences.isEmpty {
@@ -253,7 +285,8 @@ actor FoundationModelService: ToolCapableService {
                     maximumResponseTokens: parameters.maxTokens
                 )
 
-                let session = LanguageModelSession(model: .default, tools: appleTools, instructions: nil)
+                // let session = LanguageModelSession(model: .default, tools: appleTools, instructions: nil)
+                let session = LanguageModelSession(model: .default, tools: appleTools, instructions: Self.toolCallingInstructions)
                 let (stream, continuation) = AsyncThrowingStream<String, Error>.makeStream()
                 let producerTask = Task {
                     var previous = ""
