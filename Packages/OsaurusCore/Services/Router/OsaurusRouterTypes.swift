@@ -5,13 +5,15 @@ enum OsaurusRouter {
     static let stagingBaseURL = URL(string: "https://osaurus-router.fly.dev")!
 
     static var defaultBaseURL: URL {
-        if let override = UserDefaults.standard.string(forKey: "ai.osaurus.router.baseURL"),
-            let url = URL(string: override.trimmingCharacters(in: .whitespacesAndNewlines)),
-            url.scheme != nil,
-            url.host != nil
-        {
-            return url
-        }
+        #if DEBUG
+            if let override = UserDefaults.standard.string(forKey: "ai.osaurus.router.baseURL"),
+                let url = URL(string: override.trimmingCharacters(in: .whitespacesAndNewlines)),
+                url.scheme != nil,
+                url.host != nil
+            {
+                return url
+            }
+        #endif
         return productionBaseURL
     }
 

@@ -255,6 +255,18 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// carries the bare ids, so this is where the rich metadata lives.
     @Published private(set) var routerModelMetadata: [String: OsaurusRouterModel] = [:]
 
+    /// Vendor-advertised context windows for custom (non-router) providers'
+    /// models, keyed by provider id then model id. Populated from the
+    /// `/models` discovery probe when a custom OpenAI-compatible endpoint
+    /// reports `max_model_len`/`context_length`/`max_context_length` for a
+    /// model, so the picker + context-budget logic can honor it instead of
+    /// falling back to the generic default.
+    @Published private(set) var customProviderContextLengths: [UUID: [String: Int]] = [:]
+
+    func customProviderContextLength(providerId: UUID, modelId: String) -> Int? {
+        customProviderContextLengths[providerId]?[modelId]
+    }
+
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
         seedConnectedStates()
@@ -289,12 +301,15 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .remoteProviderModelsChanged, object: nil)
     }
 
-    /// GET the provider's `/models` endpoint and return the discovered model
-    /// ids. This is the SAME OpenAI-compatible probe the "Test" button uses,
-    /// but driven from a saved provider (so it picks up the stored key + auth).
-    /// Returns [] on any failure (server down, 401, unreachable) — a no-auth
-    /// local server like llama.cpp/Bonsai works with an empty header set.
-    private func probeModels(for provider: RemoteProvider) async -> [String] {
+    /// GET the provider's `/models` endpoint: returns the discovered model ids
+    /// and any vendor-advertised context window reported alongside each id in
+    /// the discovery
+    /// response (the OpenAI-compatible `data[]` shape only — the `models[]`
+    /// fallback branch doesn't carry these vendor keys upstream either, so
+    /// it returns an empty context-length map).
+    private func probeModelsDiscovery(for provider: RemoteProvider) async -> (
+        models: [String], contextLengths: [String: Int]
+    ) {
         var headers = provider.customHeaders
         if provider.authType == .apiKey,
             let key = RemoteProviderKeychain.getAPIKey(for: provider.id),
@@ -311,7 +326,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 headers["Authorization"] = "Bearer \(key)"
             }
         }
-        guard let url = provider.url(for: "/models") else { return [] }
+        guard let url = provider.url(for: "/models") else { return ([], [:]) }
         var req = URLRequest(url: url)
         req.httpMethod = "GET"
         req.timeoutInterval = 20
@@ -319,14 +334,36 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         guard let (data, response) = try? await URLSession.shared.data(for: req),
             let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return [] }
+        else { return ([], [:]) }
         if let arr = json["data"] as? [[String: Any]] {
-            return arr.compactMap { $0["id"] as? String }.sorted()
+            var ids: [String] = []
+            var lengths: [String: Int] = [:]
+            for entry in arr {
+                guard let id = entry["id"] as? String else { continue }
+                ids.append(id)
+                let candidates = [entry["max_model_len"], entry["context_length"], entry["max_context_length"]]
+                for raw in candidates {
+                    if let n = raw as? Int, n > 0 {
+                        lengths[id] = n
+                        break
+                    }
+                    if let d = raw as? Double, d.isFinite, d > 0 {
+                        lengths[id] = Int(d)
+                        break
+                    }
+                    if let s = raw as? String, let n = Int(s.trimmingCharacters(in: .whitespaces)), n > 0 {
+                        lengths[id] = n
+                        break
+                    }
+                }
+            }
+            return (ids.sorted(), lengths)
         }
         if let arr = json["models"] as? [[String: Any]] {
-            return arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
+            let ids = arr.compactMap { ($0["id"] as? String) ?? ($0["name"] as? String) }.sorted()
+            return (ids, [:])
         }
-        return []
+        return ([], [:])
     }
 
     /// Probe one enabled provider and cache its models into
@@ -337,12 +374,13 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         guard let provider = configuration.providers.first(where: { $0.id == providerId }),
             provider.enabled
         else { return }
-        let models = await probeModels(for: provider)
+        let (models, contextLengths) = await probeModelsDiscovery(for: provider)
         var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
         state.isConnected = true
         state.discoveredModels = models
         state.lastConnectedAt = Date()
         providerStates[providerId] = state
+        customProviderContextLengths[providerId] = contextLengths
         NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
         notifyModelsChanged()
     }
@@ -355,7 +393,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         for provider in enabled {
             // The Osaurus Router's catalog lives behind an EIP-191-signed account
             // API (GET /models at the host root), not the plain unsigned /models
-            // probe `probeModels` does — an unsigned probe just 404s/401s, leaving
+            // probe `probeModelsDiscovery` does — an unsigned probe just 404s/401s, leaving
             // the router with zero models until the Credits tab happened to run the
             // signed fetch. Route it through the signed path so the catalog (and
             // its pricing/vision metadata) populates at launch like every other
@@ -364,12 +402,13 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 await connectOsaurusRouterIfPossible()
                 continue
             }
-            let models = await probeModels(for: provider)
+            let (models, contextLengths) = await probeModelsDiscovery(for: provider)
             var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
             state.isConnected = true
             state.discoveredModels = models
             state.lastConnectedAt = Date()
             providerStates[provider.id] = state
+            customProviderContextLengths[provider.id] = contextLengths
             NSLog("[RemoteProviderManager] \(provider.name): discovered \(models.count) model(s) → \(models)")
         }
         notifyModelsChanged()

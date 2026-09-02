@@ -24,6 +24,7 @@ public enum OAuthLoopbackError: LocalizedError, Sendable {
     case stateMismatch
     case missingCode
     case oauthError(error: String, description: String?)
+    case callbackTimeout
 
     public var errorDescription: String? {
         switch self {
@@ -40,6 +41,8 @@ public enum OAuthLoopbackError: LocalizedError, Sendable {
                 return "OAuth provider returned error \(error): \(description)"
             }
             return "OAuth provider returned error \(error)"
+        case .callbackTimeout:
+            return "Sign-in timed out waiting for the browser callback"
         }
     }
 }
@@ -188,6 +191,27 @@ public final class OAuthLoopbackServer: @unchecked Sendable {
             }
             self.continuation = continuation
             lock.unlock()
+        }
+    }
+
+    /// Default OAuth sign-in timeout: 5 minutes. Long enough for a real
+    /// human to complete a sign-in flow (SSO redirects, MFA prompts), short
+    /// enough that an abandoned browser tab doesn't pin the loopback port
+    /// and the awaiting flow forever.
+    public static let defaultSignInTimeout: TimeInterval = 300
+
+    /// Like `waitForCallback()`, but throws `.callbackTimeout` instead of
+    /// hanging indefinitely if the browser callback never arrives.
+    public func waitForCallback(timeout: TimeInterval) async throws -> OAuthCallbackResult {
+        try await withThrowingTaskGroup(of: OAuthCallbackResult.self) { group in
+            group.addTask { try await self.waitForCallback() }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                throw OAuthLoopbackError.callbackTimeout
+            }
+            guard let result = try await group.next() else { throw OAuthLoopbackError.callbackTimeout }
+            group.cancelAll()
+            return result
         }
     }
 

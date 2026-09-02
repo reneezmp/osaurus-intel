@@ -427,7 +427,7 @@ public enum OpenAICodexOAuthService {
         }
 
         do {
-            return try await server.waitForCallback()
+            return try await server.waitForCallback(timeout: OAuthLoopbackServer.defaultSignInTimeout)
         } catch let error as OAuthLoopbackError {
             throw mapLoopbackError(error)
         } catch {
@@ -448,6 +448,8 @@ public enum OpenAICodexOAuthService {
             return .authorizationCallbackRejected(detail.isEmpty ? "OAuth provider returned an error" : detail)
         case .invalidCallback:
             return .authorizationCallbackFailed("invalid callback path or request")
+        case .callbackTimeout:
+            return .authorizationCallbackFailed("timed out waiting for the browser callback")
         }
     }
 }

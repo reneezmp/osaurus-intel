@@ -145,7 +145,8 @@ extension ModelPickerItem {
     static func fromRemoteModel(
         modelId: String,
         providerName: String,
-        providerId: UUID
+        providerId: UUID,
+        contextLength: Int? = nil
     ) -> ModelPickerItem {
         // Remote model IDs are prefixed like "provider-name/model-id"
         let displayName: String
@@ -158,7 +159,8 @@ extension ModelPickerItem {
         return ModelPickerItem(
             id: modelId,
             displayName: displayName,
-            source: .remote(providerName: providerName, providerId: providerId)
+            source: .remote(providerName: providerName, providerId: providerId),
+            contextLength: contextLength
         )
     }
 

@@ -434,7 +434,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                             guard let chunkData = dataStr.data(using: .utf8),
                                 let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
-                            else { continue }
+                            else {
+                                // Shape only — never log payload bytes; SSE frames carry
+                                // the user's conversation content.
+                                NSLog(
+                                    "[CloudChatEngine] Skipped unparseable SSE frame (\(dataStr.utf8.count) bytes)"
+                                )
+                                continue
+                            }
 
                             // DeepSeek's final usage chunk (from stream_options) carries
                             // the prompt-cache split. Log it so cache hit/miss is
@@ -450,7 +457,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                             guard let choices = json["choices"] as? [[String: Any]],
                                 let delta = choices.first?["delta"] as? [String: Any]
-                            else { continue }
+                            else {
+                                // Expected for usage-only frames; also the shape the
+                                // Osaurus Router's billing-summary frame arrives in.
+                                // Log top-level keys only — never the payload.
+                                NSLog(
+                                    "[CloudChatEngine] Non-delta SSE frame keys=\(json.keys.sorted().joined(separator: ","))"
+                                )
+                                continue
+                            }
 
                             if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
                                 totalChunks += 1

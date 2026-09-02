@@ -304,6 +304,11 @@ public struct MCPProviderState: Sendable {
     /// Optional `resource_metadata` URL parsed out of `WWW-Authenticate`. When present
     /// the OAuth service can skip path-scoped `.well-known` discovery.
     public var resourceMetadataURL: URL?
+    /// Whether the most recent connect failure was classified as transient
+    /// (network loss, timeout, DNS) rather than terminal (auth challenge, bad
+    /// config, protocol mismatch). Drives launch retry and the network/wake/
+    /// activation recovery sweeps in `MCPProviderManager`.
+    public var lastFailureWasTransient: Bool
 
     public init(providerId: UUID) {
         self.providerId = providerId
@@ -315,6 +320,7 @@ public struct MCPProviderState: Sendable {
         self.lastConnectedAt = nil
         self.requiresAuth = false
         self.resourceMetadataURL = nil
+        self.lastFailureWasTransient = false
     }
 }
 

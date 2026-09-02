@@ -2256,6 +2256,20 @@ private enum ProviderTestResult {
     }
 }
 
+/// Guards custom provider headers against CRLF/control-character injection
+/// (a header name or value containing `\r\n` could smuggle extra request
+/// headers or split the request into the following body once serialized
+/// onto the wire).
+enum RemoteProviderHeaderValidation {
+    static func isSafe(name: String, value: String) -> Bool {
+        if name.isEmpty { return false }
+        let hasControl: (String) -> Bool = { text in
+            text.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
+        }
+        return !hasControl(name) && !hasControl(value)
+    }
+}
+
 struct HeaderEntry: Identifiable {
     let id = UUID()
     var key: String
@@ -2266,6 +2280,7 @@ struct HeaderEntry: Identifiable {
     static func buildHeaders(from entries: [HeaderEntry]) -> [String: String] {
         var headers: [String: String] = [:]
         for entry in entries where !entry.key.isEmpty && !entry.value.isEmpty {
+            guard RemoteProviderHeaderValidation.isSafe(name: entry.key, value: entry.value) else { continue }
             headers[entry.key] = entry.value
         }
         return headers
@@ -2276,7 +2291,15 @@ struct HeaderEntry: Identifiable {
         var regular: [String: String] = [:]
         var secretKeys: [String] = []
         for entry in entries where !entry.key.isEmpty {
-            if entry.isSecret { secretKeys.append(entry.key) } else { regular[entry.key] = entry.value }
+            if entry.isSecret {
+                // Secret values aren't carried through this partition (only
+                // the key name is returned), so only the name needs guarding.
+                guard RemoteProviderHeaderValidation.isSafe(name: entry.key, value: "") else { continue }
+                secretKeys.append(entry.key)
+            } else {
+                guard RemoteProviderHeaderValidation.isSafe(name: entry.key, value: entry.value) else { continue }
+                regular[entry.key] = entry.value
+            }
         }
         return (regular, secretKeys)
     }

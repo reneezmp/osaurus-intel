@@ -302,6 +302,31 @@ extension InsightsService {
         )
     }()
 
+    /// Additional redactors covering third-party provider credential shapes
+    /// (custom OpenAI-compatible providers proxied through this app carry
+    /// their own `Authorization`/`x-api-key`-style headers with real
+    /// upstream secrets — not just Osaurus's own `osk-` token — and the
+    /// Insights detail pane echoes logged bodies verbatim).
+    private nonisolated static let upstreamRedactors: [(regex: NSRegularExpression, template: String)] = {
+        let patterns: [(String, String)] = [
+            // Generic `Bearer <token>` scheme, any non-osk token shape.
+            (#"(?i)(bearer\s+)(?!osk-)[A-Za-z0-9._~+/=-]+"#, "$1<redacted>"),
+            // Generic `sk-...`-style API keys embedded as a JSON string value.
+            (#""sk-[A-Za-z0-9._-]+""#, "\"<redacted>\""),
+            // JWT-shaped tokens (header.payload.signature, base64url segments).
+            (#"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#, "<redacted>"),
+            // Header-style credential fields: "x-api-key": "...", "authorization": "...", etc.
+            (
+                #"(?i)("(?:x-api-key|x-goog-api-key|api-key|authorization)"\s*:\s*)"[^"]*""#,
+                "$1\"<redacted>\""
+            ),
+        ]
+        return patterns.compactMap { pattern, template in
+            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
+            return (regex, template)
+        }
+    }()
+
     /// Internal so tests can verify the redactor's surface independent of
     /// the ring buffer plumbing.
     nonisolated static func redactCredentials(_ body: String) -> String {
@@ -321,6 +346,14 @@ extension InsightsService {
                 options: [],
                 range: nsRange(redacted),
                 withTemplate: "\"<redacted>\""
+            )
+        }
+        for (regex, template) in upstreamRedactors {
+            redacted = regex.stringByReplacingMatches(
+                in: redacted,
+                options: [],
+                range: nsRange(redacted),
+                withTemplate: template
             )
         }
         return redacted

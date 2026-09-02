@@ -32,6 +32,9 @@ public struct MasterMnemonicStore: Sendable {
         guard words.count == 24 else {
             throw OsaurusIdentityError.mnemonicInvalidWordCount
         }
+        if KeychainQueryHelpers.disablesKeychainForProcess {
+            throw OsaurusIdentityError.keychainWriteFailed
+        }
         let phrase = words.joined(separator: " ")
         guard let data = phrase.data(using: .utf8) else {
             throw OsaurusIdentityError.keychainWriteFailed
@@ -74,6 +77,7 @@ public struct MasterMnemonicStore: Sendable {
     /// the lazy backfill path for legacy installs that pre-date this
     /// store.
     public static func exists() -> Bool {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -91,6 +95,9 @@ public struct MasterMnemonicStore: Sendable {
     /// phrase is the seed in a different encoding, so it carries the same
     /// access gate.
     public static func load(context: LAContext) throws -> [String] {
+        if KeychainQueryHelpers.disablesKeychainForProcess {
+            throw OsaurusIdentityError.keychainReadFailed
+        }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -127,6 +134,7 @@ public struct MasterMnemonicStore: Sendable {
     /// "Reset Identity" tears down the mnemonic alongside the master.
     @discardableResult
     public static func delete() -> Bool {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return true }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,

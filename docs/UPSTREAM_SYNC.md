@@ -104,9 +104,15 @@ Upstream went agentic-multiplayer; the Intel fork is sovereign cloud inference o
 ### Blanket SKIP (do not revisit)
 
 Orchestrator / delegation (`8d7c3dd4` alone is a 195-file refactor), Agent Channels + Telegram +
-iMessage, Computer Use + AppleScript, Skills, Knowledge base, Browser Use, image/video generation,
+iMessage, Computer Use + AppleScript, Skills, Browser Use, image/video generation,
 every MTP / speculative-decoding / vMLX repin, the entire evals harness + community leaderboard,
 Sandbox, and upstream's own marketing modals (Product Hunt, "what's new" for amputated features).
+
+> **Not blanket-SKIP: the Knowledge base.** It was previously written off as permanently
+> amputated because it needs embeddings. That is obsolete — the fork's pure-Swift model2vec
+> `potion-base-8M` static embedder already runs acceptably on Rosy (it powers local semantic
+> memory). Knowledge is therefore **viable on Intel and wanted**, just not in this sync. See
+> the backlog in [`SYNC_0.24.3_PLAN.md`](SYNC_0.24.3_PLAN.md) §10.
 
 ---
 
@@ -378,12 +384,12 @@ these Intel-owned customizations survived:**
 | File | Must contain (Intel) | Not (upstream) |
 |---|---|---|
 | `README.md` | `🦕 Osaurus (Intel)` header, "Run a model locally" | `Own your AI`, `brew install --cask osaurus` |
-| `RemoteProviderKeychain.swift` | `ai.osaurus.remote.intel` (`#if OSAURUS_INTEL`) | bare `ai.osaurus.remote` only |
-| `MCPProviderKeychain.swift` | `ai.osaurus.mcp.intel` | bare `ai.osaurus.mcp` only |
+| `Packages/OsaurusCore/Services/Provider/RemoteProviderKeychain.swift` | `ai.osaurus.remote.intel` (`#if OSAURUS_INTEL`) | bare `ai.osaurus.remote` only |
+| `Packages/OsaurusCore/Services/MCP/MCPProviderKeychain.swift` | `ai.osaurus.mcp.intel` | bare `ai.osaurus.mcp` only |
 | `App/osaurus/Info.plist` | `SUFeedURL` → `reneezmp/osaurus-intel`, `SUPublicEDKey` `7Nh8jSxF…` | `osaurus-ai` / missing |
 | `scripts/release/cut_intel_release.sh` | `REPO="reneezmp/osaurus-intel"` | upstream repo |
 | `scripts/build/build_rosy.sh` | bakes `OsaurusCanonicalData` | — |
-| `MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
+| `Packages/OsaurusCore/Identity/MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
 
 **Revert-detector** (run after each sync — lists Swift files that lost ALL their
 Intel guards vs the last known-good tag):

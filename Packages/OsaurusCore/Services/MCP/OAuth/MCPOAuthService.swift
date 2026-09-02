@@ -193,7 +193,7 @@ public enum MCPOAuthService {
         // 6. Wait for callback.
         let callback: OAuthCallbackResult
         do {
-            callback = try await server.waitForCallback()
+            callback = try await server.waitForCallback(timeout: OAuthLoopbackServer.defaultSignInTimeout)
         } catch let error as OAuthLoopbackError {
             throw MCPOAuthError.loopback(error)
         }

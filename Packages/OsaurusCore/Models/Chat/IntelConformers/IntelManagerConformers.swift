@@ -469,7 +469,10 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                                 displayName: modelId,
                                 source: .remote(providerName: provider.name, providerId: provider.id),
                                 isVLM: false,
-                                description: provider.name
+                                description: provider.name,
+                                contextLength: manager.customProviderContextLength(
+                                    providerId: provider.id, modelId: modelId
+                                )
                             )
                         )
                     }

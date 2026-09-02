@@ -114,7 +114,7 @@ public enum OpenRouterOAuthService {
         }
 
         do {
-            return try await server.waitForCallback()
+            return try await server.waitForCallback(timeout: OAuthLoopbackServer.defaultSignInTimeout)
         } catch {
             throw OpenRouterOAuthError.invalidAuthorizationCallback
         }
