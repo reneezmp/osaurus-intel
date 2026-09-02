@@ -203,6 +203,43 @@ Highest-value files in the 52 include `Services/Router/OsaurusRouterAPIClient.sw
 ⚠️ This wave carries **the largest Ventura backport burden** of the whole sync (§5). Do it as
 its own commit series so it can be reverted independently.
 
+---
+
+#### Outcome (executed 2026-09-02) — the premise was half wrong
+
+**Result: 50 selected → 33 landed. Build green, all gates pass.** Seventeen files had to be
+reverted, and the reason matters for Release 3's planning:
+
+> **Pristine ≠ independent.** A file can be byte-identical to upstream at the sync base and
+> *still* be un-fast-forwardable, because upstream evolved it in lockstep with files this fork
+> owns and has diverged. Taking half of a coupled group breaks the build.
+
+Concretely, the seventeen fell into four kinds:
+
+| Kind | Example | Why reverted |
+|---|---|---|
+| Needs a module the fork lacks | `GlobalProxyConfiguration.swift` | upstream extracted `Packages/OsaurusNetworking`; adopting it is a real decision, not a fast-forward |
+| Companion file is fork-owned | `OsaurusRouterAPIClient.swift` | its types live in `OsaurusRouterTypes.swift`, which Wave A modified for the DEBUG-lock |
+| Pulls in amputated-feature types | `ToolPermissionPromptService.swift` (`KnowledgeWritePreview`), Router cloud image/video/web-search types | the feature does not exist here |
+| Upstream deleted something the fork still uses | `BackgroundTaskModels.swift` (`BackgroundTaskStatus.awaitingClarification`) | upstream removed it *and* updated its consumers; ours are fork-owned and diverged |
+
+Also **deliberately declined**: `Models/SystemPermission.swift`, which adds
+`.automationMessages`. That permission exists to serve the amputated iMessage channel; adopting
+it would have meant inventing a Messages permission flow for a feature the fork does not ship.
+
+**Two hand-reconciliations were worth doing rather than reverting:**
+1. `IdentityView.swift` — rewired to the fast-forwarded `RecoverFromMnemonicSheet`, whose new
+   signature (`mode:` + `(OsaurusIdentity.RestoreResult) -> Void`) matches the `restore(words:)`
+   backend Wave A ported. **This closes Wave A's "backend with no UI" gap** — identity restore is
+   now reachable, and reports re-derived agents, revoked access keys and per-item failures.
+2. `ChatView.swift` — supplied `isBlocked: false` to `InlineCompleteBlock`; the badge
+   distinguishes an agent run halted for approval, which cannot occur here.
+
+**Lesson for Release 3.** Wave D₀ (Projects) is a rebuild against fork mirrors, and this wave
+confirms why: the coupling between upstream's files and this fork's owned files is the dominant
+constraint, not the individual file's contents. Budget for reconciliation, not transcription.
+
+
 ### Wave E′ — Proxy & MCP (storage encryption removed to backlog) 🗄️
 
 `304ad2bb` + `0ba6a01a` + `52d4aa9b` (global proxy — continues the 1.0.24 batch, so the

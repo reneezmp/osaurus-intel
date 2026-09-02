@@ -18,6 +18,7 @@ public struct ShowCommand: Command {
         let template: String?
         let details: ShowDetails?
         let modelInfo: [String: AnyCodableValue]?
+        let capabilities: [String]?
 
         private enum CodingKeys: String, CodingKey {
             case modelfile
@@ -25,6 +26,7 @@ public struct ShowCommand: Command {
             case template
             case details
             case modelInfo = "model_info"
+            case capabilities
         }
     }
 
@@ -46,8 +48,9 @@ public struct ShowCommand: Command {
         }
     }
 
-    /// Type-erased decodable for heterogeneous JSON values
-    private enum AnyCodableValue: Decodable {
+    /// Type-erased decodable for heterogeneous JSON values.
+    /// Internal (not private) so the numeric coercion can be unit-tested.
+    enum AnyCodableValue: Decodable {
         case string(String)
         case int(Int)
         case double(Double)
@@ -84,7 +87,7 @@ public struct ShowCommand: Command {
         var intValue: Int? {
             switch self {
             case .int(let i): return i
-            case .double(let d): return Int(d)
+            case .double(let d): return Int(exactly: d)
             case .string(let s): return Int(s)
             default: return nil
             }
@@ -202,9 +205,10 @@ public struct ShowCommand: Command {
         // Quantization
         let quantization = details?.quantizationLevel
 
-        // Determine capabilities from model_info keys set by the server
-        var capabilities: [String] = ["completion"]
-        if let arch = architecture?.lowercased() {
+        // Prefer server-provided capabilities; fall back to inferring them
+        // from model_info keys for older servers that omit the field.
+        var capabilities: [String] = response.capabilities ?? ["completion"]
+        if response.capabilities == nil, let arch = architecture?.lowercased() {
             let vlmArchitectures = [
                 "paligemma", "qwen2_vl", "qwen2_5_vl", "qwen3_vl",
                 "qwen3_5", "qwen3_5_moe", "idefics3", "gemma3", "gemma4",

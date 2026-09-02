@@ -3354,6 +3354,10 @@ struct ChatView: View {
         if let summary = session.lastCompletionSummary {
             InlineCompleteBlock(
                 summary: summary,
+                // Always false on Intel: the badge distinguishes an agent run that
+                // halted awaiting approval from a completed one, and the agent loop
+                // is amputated here, so a completion summary is never "blocked".
+                isBlocked: false,
                 onDismiss: { [weak session] in
                     session?.lastCompletionSummary = nil
                 }

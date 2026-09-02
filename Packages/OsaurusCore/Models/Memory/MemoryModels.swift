@@ -272,6 +272,60 @@ public struct ProcessingStats: Sendable {
     public var avgDurationMs: Int = 0
     public var successCount: Int = 0
     public var errorCount: Int = 0
+    public var skippedCount: Int = 0
+    public var emptyCount: Int = 0
+    public var deadLetterCount: Int = 0
+}
+
+/// Structured result of a single `MemoryService.distillSession` /
+/// `performDistillSession` run. Returned so callers (notably the
+/// `POST /memory/ingest` handler) can report what actually happened
+/// instead of guessing from a fire-and-forget `Task`. Before this existed
+/// the handler returned `{"status":"ok"}` even when distillation was
+/// silently skipped (issue #1632): the heavy non-resident core-model gate
+/// short-circuited the coordinator with no `processing_log` row at all.
+public enum DistillOutcome: Sendable, Equatable {
+    /// An episode was written. `pinned` / `identityFacts` are the counts
+    /// promoted from this session.
+    case distilled(episodeId: Int, pinned: Int, identityFacts: Int)
+    /// No `pending` signals for the conversation (already distilled, or
+    /// nothing was buffered).
+    case noSignals
+    /// A pre-LLM or transient gate skipped the run without erroring.
+    /// `reason` is a stable token: `memory_disabled`, `not_resident`,
+    /// `core_model_unset`, `core_model_unavailable`, `breaker_open`,
+    /// `low_novelty:<n>chars`, `cancelled`.
+    case skipped(reason: String)
+    /// The model ran but produced no usable episode. `reason` is
+    /// `no_episode` or `empty_summary`. Terminal: the signals are marked
+    /// processed so the session is not retried.
+    case empty(reason: String)
+    /// The session failed `attempts` times and was dead-lettered; its
+    /// signals will no longer be retried.
+    case deadLettered(attempts: Int)
+    /// A retryable error occurred (signals stay `pending` until the
+    /// attempt cap is reached).
+    case error(String)
+
+    /// Compact, machine-readable status token for the `/memory/ingest`
+    /// JSON body (`"distilled" | "skipped:<reason>" | "empty:<reason>" |
+    /// "dead_letter:<attempts>" | "error:<msg>" | "no_signals"`).
+    public var apiStatus: String {
+        switch self {
+        case .distilled: return "distilled"
+        case .noSignals: return "no_signals"
+        case .skipped(let reason): return "skipped:\(reason)"
+        case .empty(let reason): return "empty:\(reason)"
+        case .deadLettered(let attempts): return "dead_letter:\(attempts)"
+        case .error(let msg): return "error:\(msg)"
+        }
+    }
+
+    /// The episode primary key when a row was written, else nil.
+    public var episodeId: Int? {
+        if case .distilled(let id, _, _) = self { return id }
+        return nil
+    }
 }
 
 /// One row from `processing_log`. Surfaces what every distillation /
@@ -320,23 +374,31 @@ public struct ProcessingLogRow: Sendable, Identifiable {
 /// anything at all?" is the fastest way to localise a memory-not-building
 /// bug to the buffer step vs the distill step.
 ///
-/// `totalSignals` / `distinctConversations` are **pending** rows only
-/// (status='pending'). `allTimeSignals` is the full count regardless of
-/// status — when `allTimeSignals == 0` the chat code never reached
-/// `bufferTurn` at all; when it's non-zero but `totalSignals == 0`
-/// every signal has been distilled.
+/// `totalSignals` / `distinctConversations` are pending rows only
+/// (status='pending'). `processedSignals` and `deadLetteredSignals`
+/// count retained signal rows in those statuses. `allTimeSignals` is the
+/// full count regardless of status: when `allTimeSignals == 0` the chat
+/// code never reached `bufferTurn` at all; when it's non-zero but
+/// `totalSignals == 0` every signal has either been distilled, purged, or
+/// dead-lettered.
 public struct PendingSignalsSummary: Sendable {
     public var totalSignals: Int
     public var distinctConversations: Int
+    public var processedSignals: Int
+    public var deadLetteredSignals: Int
     public var allTimeSignals: Int
 
     public init(
         totalSignals: Int = 0,
         distinctConversations: Int = 0,
+        processedSignals: Int = 0,
+        deadLetteredSignals: Int = 0,
         allTimeSignals: Int = 0
     ) {
         self.totalSignals = totalSignals
         self.distinctConversations = distinctConversations
+        self.processedSignals = processedSignals
+        self.deadLetteredSignals = deadLetteredSignals
         self.allTimeSignals = allTimeSignals
     }
 }
@@ -389,5 +451,49 @@ public struct MemoryBackfillProgress: Sendable {
         self.sessionsSkipped = sessionsSkipped
         self.turnsBuffered = turnsBuffered
         self.lastSessionTitle = lastSessionTitle
+    }
+}
+
+// MARK: - Memory Namespace
+
+/// Typed wrapper over the string key that partitions every memory store
+/// (episodes, pinned facts, vector buckets, assembler cache). Historically
+/// the key was always an agent UUID; projects add a second kind under a
+/// `project:` prefix. Route new key construction through this so malformed
+/// keys are impossible and every namespace-aware call site greps.
+///
+/// Collision safety: agent keys are bare 36-char UUID strings, which can
+/// never parse once prefixed, so `project-` keys cannot collide with them.
+/// (Hyphen rather than colon: the key doubles as the vector bucket's
+/// on-disk directory name.)
+public enum MemoryNamespace: Equatable, Sendable {
+    case agent(UUID)
+    case project(UUID)
+
+    private static let projectPrefix = "project-"
+
+    /// The string key used across `MemoryDatabase` / search / assembler.
+    public var key: String {
+        switch self {
+        case .agent(let id): return id.uuidString
+        case .project(let id): return Self.projectPrefix + id.uuidString
+        }
+    }
+
+    public init?(key: String) {
+        if key.hasPrefix(Self.projectPrefix),
+            let id = UUID(uuidString: String(key.dropFirst(Self.projectPrefix.count)))
+        {
+            self = .project(id)
+        } else if let id = UUID(uuidString: key) {
+            self = .agent(id)
+        } else {
+            return nil
+        }
+    }
+
+    public var isProject: Bool {
+        if case .project = self { return true }
+        return false
     }
 }

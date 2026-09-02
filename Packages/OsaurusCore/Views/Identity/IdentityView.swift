@@ -64,7 +64,7 @@ struct IdentityView: View {
         }
         .sheet(isPresented: $showRecoverSheet) {
             RecoverFromMnemonicSheet(
-                drift: drift ?? IdentityDrift(mismatchedAgents: [], staleAccessKeys: []),
+                mode: .driftRepair(drift ?? IdentityDrift(mismatchedAgents: [], staleAccessKeys: [])),
                 onRecovered: handleRecovered,
                 onCancel: { showRecoverSheet = false }
             )
@@ -267,12 +267,20 @@ struct IdentityView: View {
 
     // MARK: - Recover
 
-    private func handleRecovered() {
+    private func handleRecovered(_ result: OsaurusIdentity.RestoreResult) {
         showRecoverSheet = false
-        lastActionResult = ActionResult(
-            message: "Master key restored from recovery phrase.",
-            isError: false
-        )
+        // The master always installed if we got here; `failures` lists per-item
+        // reconciliation problems (agents/access keys), so surface those rather
+        // than claiming an unqualified success.
+        var message = "Master key restored from recovery phrase."
+        if result.rederivedAgentCount > 0 || result.revokedAccessKeyCount > 0 {
+            message +=
+                " Re-derived \(result.rederivedAgentCount) agent(s), revoked \(result.revokedAccessKeyCount) stale access key(s)."
+        }
+        if !result.failures.isEmpty {
+            message += " \(result.failures.count) item(s) could not be reconciled: \(result.failures.joined(separator: "; "))"
+        }
+        lastActionResult = ActionResult(message: message, isError: !result.failures.isEmpty)
         runRefresh()
         restartServerIfRunning()
     }
