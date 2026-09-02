@@ -287,6 +287,16 @@ For each upstream commit:
 
 - `Package.swift` — different dependencies, exclude list, OSAURUS_INTEL flag
 - `Package.resolved` — different dependency graph
+
+> **Deliberate pin divergence (2026-09-02): `swift-secp256k1` is `exact: "0.23.2"` here,
+> while upstream stays on `exact: "0.21.1"`.** 0.21.1 does not compile under Swift 6.4:
+> `UInt256` declares both `SIMDWordsInteger` and `UnsignedInteger`, both of which require
+> `words`, and the newer compiler rejects `for word in words` as ambiguous
+> (`P256K/UInt256.swift:215`) — even though the package already declares
+> `swiftLanguageModes: [.v5]`. This breaks **every** commit including untouched baselines, in
+> both architectures, so it is not sync damage. Upstream has not hit it because they are not on
+> 6.4 yet. 0.23.2 builds clean with no source changes on our side. When upstream eventually
+> bumps their pin, drop this divergence and follow them.
 - `RuntimePolicySourceTests.swift` — vMLX source-policy tests
 
 ---
