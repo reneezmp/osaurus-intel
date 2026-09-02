@@ -204,6 +204,13 @@ struct FloatingInputCard: View {
     @State private var pastedContentEdit: Attachment?
     /// Character threshold above which clipboard text is converted to a
     /// pasted-content attachment instead of being inlined into the input.
+    // Compared against `.utf8.count`, not `.count`: grapheme-cluster
+    // counting a large clipboard payload (e.g. a multi-MB paste) can block
+    // the main thread for seconds (Sentry: "App Hanging" in this closure /
+    // `CustomNSTextView.paste`), while `.utf8.count` is effectively free —
+    // Swift's native String storage is already UTF8. This is only a
+    // rough "is this a big paste" gate, so counting bytes instead of
+    // characters doesn't change the decision in practice.
     private static let pastedContentThreshold: Int = 400
     @State private var liveVoicePreencodeTask: Task<Void, Never>?
     @State private var lastLiveVoicePreencodeAt: Date = .distantPast
@@ -2179,7 +2186,7 @@ extension FloatingInputCard {
                 switch content {
                 case .text(let text):
                     Button {
-                        if text.count >= Self.pastedContentThreshold {
+                        if text.utf8.count >= Self.pastedContentThreshold {
                             withAnimation(theme.springAnimation()) {
                                 pendingAttachments.append(.pastedContent(text))
                             }
@@ -2248,7 +2255,7 @@ extension FloatingInputCard {
 
         switch content {
         case .text(let text):
-            if text.count >= Self.pastedContentThreshold {
+            if text.utf8.count >= Self.pastedContentThreshold {
                 // Large paste → convert to a "pasted content" attachment.
                 // Lets the user view / remove the snippet without polluting
                 // the input field with hundreds of lines of text.
@@ -2863,7 +2870,7 @@ extension FloatingInputCard {
                     return true
                 } : nil,
             onPasteText: { pasted in
-                guard pasted.count >= Self.pastedContentThreshold else { return false }
+                guard pasted.utf8.count >= Self.pastedContentThreshold else { return false }
                 withAnimation(theme.springAnimation()) {
                     pendingAttachments.append(.pastedContent(pasted))
                 }
