@@ -21,19 +21,21 @@ public struct MCPCommand: Command {
         let version = Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "cli"
         fputs("[MCP] Creating server with version: \(version)\n", stderr)
 
-        // Build MCP server
+        // Build MCP server. `listChanged: false` — this CLI proxy has no
+        // mechanism to emit tools/list_changed notifications (each ListTools
+        // call is a fresh, one-shot fetch from the HTTP server), so it must
+        // not advertise a capability it can't deliver.
         let server = MCP.Server(
             name: "Osaurus MCP Proxy",
             version: version,
-            capabilities: .init(tools: .init(listChanged: true))
+            capabilities: .init(tools: .init(listChanged: false))
         )
 
         // Register ListTools -> GET /mcp/tools
         await server.withMethodHandler(MCP.ListTools.self) { _ in
             fputs("[MCP] Handling ListTools\n", stderr)
             guard let url = URL(string: "\(baseURL)/mcp/tools") else {
-                fputs("[MCP] Invalid tools URL\n", stderr)
-                return .init(tools: [])
+                throw MCPError.internalError("Invalid tools URL")
             }
             fputs("[MCP] Fetching tools from \(url)\n", stderr)
             var request = URLRequest(url: url)
@@ -42,12 +44,14 @@ public struct MCPCommand: Command {
             request.timeoutInterval = 5.0
             do {
                 let (data, response) = try await URLSession.shared.data(for: request)
-                guard let http = response as? HTTPURLResponse, http.statusCode == 200 else {
-                    fputs(
-                        "[MCP] Failed to list tools: HTTP \((response as? HTTPURLResponse)?.statusCode ?? 0)\n",
-                        stderr
+                guard let http = response as? HTTPURLResponse else {
+                    throw MCPError.internalError("Failed to list tools: non-HTTP response")
+                }
+                guard http.statusCode == 200 else {
+                    let body = String(bytes: data, encoding: .utf8) ?? ""
+                    throw MCPError.internalError(
+                        "Failed to list tools: HTTP \(http.statusCode)\(body.isEmpty ? "" : ": \(body)")"
                     )
-                    return .init(tools: [])
                 }
                 fputs("[MCP] Tools fetched successfully\n", stderr)
                 let tools: [MCP.Tool]
@@ -62,12 +66,14 @@ public struct MCPCommand: Command {
                         return MCP.Tool(name: name, description: description, inputSchema: schema)
                     }
                 } else {
-                    tools = []
+                    throw MCPError.internalError("Failed to list tools: unexpected response shape")
                 }
                 return .init(tools: tools)
+            } catch let error as MCPError {
+                throw error
             } catch {
                 fputs("[MCP] Error fetching tools: \(error)\n", stderr)
-                return .init(tools: [])
+                throw MCPError.internalError("Failed to list tools: \(error.localizedDescription)")
             }
         }
 

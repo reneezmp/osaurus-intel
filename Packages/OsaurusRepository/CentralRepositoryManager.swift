@@ -6,7 +6,89 @@
 //  Refreshes via GitHub's source-archive endpoint (no `git` binary required).
 //
 
+import CFNetwork
 import Foundation
+
+/// Disk-backed proxy resolver for plugin repository downloads.
+///
+/// `OsaurusRepository` cannot depend on `OsaurusCore` (which itself depends on
+/// this package), so it reads the same lightweight `globalProxyURL` setting
+/// from `server.json` independently. That value is already validated and
+/// normalized to `scheme://host:port` by `GlobalProxySection.commitProxy()`
+/// before it is ever persisted, so parsing here only needs to recover the
+/// scheme/host/port to shape a `connectionProxyDictionary`. Sessions are
+/// built fresh per call, matching this fork's `GlobalProxySettings.makeSession()`
+/// pattern (no cached/shared session, no cache-key bookkeeping).
+private enum RepositoryGlobalProxySettings {
+    static func makeSession() -> URLSession {
+        let configuration = URLSessionConfiguration.default
+        if let proxyDictionary = proxyDictionary() {
+            configuration.connectionProxyDictionary = proxyDictionary
+        }
+        return URLSession(configuration: configuration)
+    }
+
+    private static func proxyDictionary() -> [AnyHashable: Any]? {
+        guard
+            let raw = persistedProxyURL()?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !raw.isEmpty,
+            let components = URLComponents(string: raw),
+            let scheme = components.scheme?.lowercased(),
+            let host = components.host, !host.isEmpty,
+            let port = components.port
+        else {
+            return nil
+        }
+
+        switch scheme {
+        case "http", "https":
+            return [
+                key(kCFNetworkProxiesHTTPEnable): 1,
+                key(kCFNetworkProxiesHTTPProxy): host,
+                key(kCFNetworkProxiesHTTPPort): port,
+                key(kCFNetworkProxiesHTTPSEnable): 1,
+                key(kCFNetworkProxiesHTTPSProxy): host,
+                key(kCFNetworkProxiesHTTPSPort): port,
+            ]
+        case "socks", "socks5":
+            return [
+                key(kCFNetworkProxiesSOCKSEnable): 1,
+                key(kCFNetworkProxiesSOCKSProxy): host,
+                key(kCFNetworkProxiesSOCKSPort): port,
+            ]
+        default:
+            return nil
+        }
+    }
+
+    private static func key(_ value: CFString) -> AnyHashable {
+        AnyHashable(value as String)
+    }
+
+    private static func persistedProxyURL() -> String? {
+        guard
+            let data = try? Data(contentsOf: serverConfigFile()),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else {
+            return nil
+        }
+        return object["globalProxyURL"] as? String
+    }
+
+    private static func serverConfigFile() -> URL {
+        let root = ToolsPaths.root()
+        let newPath =
+            root
+            .appendingPathComponent("config", isDirectory: true)
+            .appendingPathComponent("server.json", isDirectory: false)
+        let legacyPath = root.appendingPathComponent("ServerConfiguration.json", isDirectory: false)
+        let fm = FileManager.default
+        if fm.fileExists(atPath: legacyPath.path) && !fm.fileExists(atPath: newPath.path) {
+            return legacyPath
+        }
+        return newPath
+    }
+}
 
 public struct CentralRepository {
     public let url: String
@@ -151,7 +233,7 @@ public final class CentralRepositoryManager: @unchecked Sendable {
     private func downloadFile(from url: URL, to destination: URL) throws {
         let outcome = SyncDownloadOutcome()
         let semaphore = DispatchSemaphore(value: 0)
-        URLSession.shared.downloadTask(with: url) { tempURL, response, error in
+        RepositoryGlobalProxySettings.makeSession().downloadTask(with: url) { tempURL, response, error in
             defer { semaphore.signal() }
             if let error {
                 outcome.error = error

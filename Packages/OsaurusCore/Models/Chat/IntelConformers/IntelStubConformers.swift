@@ -331,7 +331,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         req.httpMethod = "GET"
         req.timeoutInterval = 20
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
-        guard let (data, response) = try? await URLSession.shared.data(for: req),
+        guard let (data, response) = try? await GlobalProxySettings.makeSession().data(for: req),
             let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
             let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return ([], [:]) }
@@ -613,7 +613,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         req.timeoutInterval = 30
         for (k, v) in testHeaders { req.setValue(v, forHTTPHeaderField: k) }
 
-        let (data, response) = try await URLSession.shared.data(for: req)
+        let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
             throw NSError(
                 domain: "RemoteProvider",
@@ -706,7 +706,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                 throw PluginInstallError.badURL(entry.download_url)
             }
             let dylibURL = dir.appendingPathComponent("plugin.dylib")
-            let (dylibData, _) = try await URLSession.shared.data(from: dylibRemote)
+            let (dylibData, _) = try await GlobalProxySettings.makeSession().data(from: dylibRemote)
 
             // Verify SHA256 BEFORE writing anything executable to disk.
             let actualSHA = dylibData.sha256()
@@ -720,7 +720,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                 throw PluginInstallError.badURL(entry.manifest_url)
             }
             let manifestURL = dir.appendingPathComponent("manifest.json")
-            let (manifestData, _) = try await URLSession.shared.data(from: manifestRemote)
+            let (manifestData, _) = try await GlobalProxySettings.makeSession().data(from: manifestRemote)
             try manifestData.write(to: manifestURL)
 
             // Load the plugin
@@ -790,7 +790,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
         // replaced by PluginSpec mapping.
         var intelMapped: [PluginState] = []
         do {
-            let (data, _) = try await URLSession.shared.data(from: Self.intelPluginIndexURL)
+            let (data, _) = try await GlobalProxySettings.makeSession().data(from: Self.intelPluginIndexURL)
             let index = try JSONDecoder().decode(IntelPluginIndex.self, from: data)
             intelIndexEntries = index.plugins
             intelMapped = index.plugins.map { entry in
