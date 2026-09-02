@@ -364,7 +364,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         popover.contentViewController = NSHostingController(rootView: IntelStatusPanelView())
         self.popover = popover
         popover.show(relativeTo: statusButton.bounds, of: statusButton, preferredEdge: .minY)
-        NSApp.activate(ignoringOtherApps: true)
+        // ensure popover window can join all spaces and appear over full screen apps
+        if let popoverWindow = popover.contentViewController?.view.window {
+            popoverWindow.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+            // Key the popover's own window instead of activating the app:
+            // `NSApp.activate` while another app owns a full-screen space
+            // deactivates that app, the auto-revealed menu bar retracts, and
+            // the transient popover closes with it.
+            popoverWindow.makeKey()
+        }
     }
 
     @MainActor
