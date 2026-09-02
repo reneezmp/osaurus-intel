@@ -84,11 +84,31 @@ public enum GlobalProxySettings {
     /// `ServerConfigurationStore` is main-actor isolated because it is also
     /// used by SwiftUI state. Reading the same JSON file directly keeps
     /// session construction synchronous and side-effect free.
+    /// Resolved config-file URL, memoized because `resolvePath` performs two
+    /// `fileExists` stats per call and this function runs on hot paths
+    /// (session builds, tunnel connects). Legacy-vs-new resolution is a
+    /// one-time migration decision per storage root, so the memo is keyed on
+    /// the un-resolved path — cheap pure path math — which also keeps tests
+    /// honest when they repoint `OsaurusPaths.overrideRoot` between runs.
+    private static let resolvedConfigURLLock = NSLock()
+    private nonisolated(unsafe) static var resolvedConfigURLCache: (key: String, path: String)?
+
     static func diskBackedServerConfiguration() -> ServerConfiguration? {
-        let url = OsaurusPaths.resolvePath(
-            new: OsaurusPaths.serverConfigFile(),
-            legacy: "ServerConfiguration.json"
-        )
+        let newPath = OsaurusPaths.serverConfigFile()
+        resolvedConfigURLLock.lock()
+        let resolvedPath: String
+        if let cached = resolvedConfigURLCache, cached.key == newPath.path {
+            resolvedPath = cached.path
+        } else {
+            let resolved = OsaurusPaths.resolvePath(
+                new: newPath,
+                legacy: "ServerConfiguration.json"
+            )
+            resolvedConfigURLCache = (key: newPath.path, path: resolved.path)
+            resolvedPath = resolved.path
+        }
+        resolvedConfigURLLock.unlock()
+        let url = URL(fileURLWithPath: resolvedPath)
         guard let data = try? Data(contentsOf: url) else { return nil }
         return try? JSONDecoder().decode(ServerConfiguration.self, from: data)
     }
