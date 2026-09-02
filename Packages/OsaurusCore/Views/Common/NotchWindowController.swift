@@ -60,6 +60,7 @@ public final class NotchWindowController: NSObject, ObservableObject {
     private var hostingView: NSHostingView<NotchContentView>?
     private var cancellables = Set<AnyCancellable>()
     private var isExpandedForAlert = false
+    private var screenChangeDebounce: DispatchWorkItem?
 
     /// Current screen's notch metrics (published for SwiftUI observation).
     @Published public private(set) var metrics = NotchScreenMetrics(
@@ -159,6 +160,8 @@ public final class NotchWindowController: NSObject, ObservableObject {
     public func teardown() {
         NotificationCenter.default.removeObserver(self)
         cancellables.removeAll()
+        screenChangeDebounce?.cancel()
+        screenChangeDebounce = nil
         notchPanel?.close()
         notchPanel = nil
         hostingView = nil
@@ -166,7 +169,23 @@ public final class NotchWindowController: NSObject, ObservableObject {
 
     // MARK: - Private
 
+    /// `didChangeScreenParametersNotification` is delivered synchronously inside
+    /// the window server's display-reconfigure callout, and macOS posts it
+    /// several times per reconfigure. Repositioning immediately performs
+    /// window-server round-trips (`NotchScreenMetrics.detect`, `setFrame`) that
+    /// can block in `mach_msg` for seconds while the server is mid-reconfigure
+    /// (Sentry APPLE-MACOS-YC / -YH / -YK). Debounce so the work runs once,
+    /// after the reconfiguration burst settles.
     @objc private func screenDidChange() {
+        screenChangeDebounce?.cancel()
+        let work = DispatchWorkItem { [weak self] in
+            self?.handleScreenChange()
+        }
+        screenChangeDebounce = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.3, execute: work)
+    }
+
+    private func handleScreenChange() {
         updatePanelScreen(forWindowId: ChatWindowManager.shared.lastFocusedWindowId)
     }
 
