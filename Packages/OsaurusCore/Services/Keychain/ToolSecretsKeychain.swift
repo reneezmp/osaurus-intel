@@ -15,6 +15,31 @@ public enum ToolSecretsKeychain {
     private static let testStoreLock = NSLock()
     private nonisolated(unsafe) static var testStore: [String: String] = [:]
 
+    // MARK: - Presence memoization
+
+    // `hasSecret` runs on view-body call paths (e.g. the chat context
+    // estimate resolving Discord auto-destinations via `hasBotToken`), and
+    // each call is a full `SecItemCopyMatching` round-trip through securityd
+    // including item decryption — observed as multi-second main-thread hangs
+    // when the daemon is slow. Presence only changes through this type's own
+    // save/delete paths, so it's cached per account and updated there.
+    // External edits via Keychain Access are not tracked; a stale presence
+    // bit there costs one failed plugin call, not a hang.
+    private static let presenceLock = NSLock()
+    private nonisolated(unsafe) static var presenceCache: [String: Bool] = [:]
+
+    private static func notePresence(_ present: Bool, account: String) {
+        presenceLock.lock()
+        presenceCache[account] = present
+        presenceLock.unlock()
+    }
+
+    private static func clearPresenceCache() {
+        presenceLock.lock()
+        presenceCache.removeAll(keepingCapacity: true)
+        presenceLock.unlock()
+    }
+
     // MARK: - Agent-Scoped Secret Management
 
     @discardableResult
@@ -38,7 +63,9 @@ public enum ToolSecretsKeychain {
         ]
 
         let status = SecItemAdd(query as CFDictionary, nil)
-        return status == errSecSuccess
+        let succeeded = status == errSecSuccess
+        if succeeded { notePresence(true, account: account) }
+        return succeeded
     }
 
     public static func getSecret(id: String, for pluginId: String, agentId: UUID) -> String? {
@@ -72,7 +99,20 @@ public enum ToolSecretsKeychain {
     }
 
     public static func hasSecret(id: String, for pluginId: String, agentId: UUID) -> Bool {
-        return getSecret(id: id, for: pluginId, agentId: agentId) != nil
+        let account = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
+        if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
+            return getSecret(id: id, for: pluginId, agentId: agentId) != nil
+        }
+        presenceLock.lock()
+        if let cached = presenceCache[account] {
+            presenceLock.unlock()
+            return cached
+        }
+        presenceLock.unlock()
+
+        let present = getSecret(id: id, for: pluginId, agentId: agentId) != nil
+        notePresence(present, account: account)
+        return present
     }
 
     @discardableResult
@@ -91,7 +131,9 @@ public enum ToolSecretsKeychain {
         ]
 
         let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        let deleted = status == errSecSuccess || status == errSecItemNotFound
+        notePresence(false, account: account)
+        return deleted
     }
 
     public static func deleteAllSecrets(for pluginId: String, agentId: UUID) {
@@ -101,6 +143,7 @@ public enum ToolSecretsKeychain {
 
     /// Delete all agent-scoped secrets for a plugin across every agent.
     public static func deleteAllSecretsAllAgents(for pluginId: String) {
+        clearPresenceCache()
         if KeychainQueryHelpers.disablesKeychainForProcess { return }
         let allItems = fetchAllItems(attributesOnly: true)
         let suffix = ".\(pluginId)."
@@ -287,6 +330,9 @@ public enum ToolSecretsKeychain {
     }
 
     private static func deleteAllMatchingPrefix(_ prefix: String) {
+        // Bulk deletes are rare (plugin uninstall, agent deletion); dropping
+        // the whole presence cache is simpler than prefix-matching it.
+        clearPresenceCache()
         if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
             testStoreLock.withLock {
                 let matchingAccounts = testStore.keys.filter { $0.hasPrefix(prefix) }

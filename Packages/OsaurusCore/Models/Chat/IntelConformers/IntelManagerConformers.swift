@@ -590,14 +590,20 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         if var s = sessions[id] {
             s.title = title
             sessions[id] = s
-            persist(s)
+            // Metadata-only mutation: the in-memory upsert above already
+            // keeps the sidebar correct, so the disk write (encode + write
+            // of the WHOLE session, turns included) can move off the
+            // calling thread — a full synchronous persist on every rename
+            // was a measured main-thread stall on large conversations.
+            persistAsync(s)
         }
     }
     func setArchived(id: UUID, archived: Bool) {
         if var s = sessions[id] {
             s.archived = archived
             sessions[id] = s
-            persist(s)
+            // See `rename` — metadata-only, safe to persist off-thread.
+            persistAsync(s)
         }
     }
     func refresh() { loadFromDisk() }
@@ -632,6 +638,18 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         encoder.dateEncodingStrategy = .iso8601
         guard let encoded = try? encoder.encode(data) else { return }
         try? encoded.write(to: OsaurusPaths.sessionFile(for: data.id), options: .atomic)
+    }
+
+    /// Same encode-and-write as `persist`, off the calling thread. For
+    /// metadata-only mutations (`rename`, `setArchived`) where the in-memory
+    /// `sessions` dict is already updated synchronously, so nothing depends
+    /// on the disk write completing before the caller returns.
+    private static let persistQueue = DispatchQueue(
+        label: "ai.osaurus.chatSessionsManager.persist", qos: .utility)
+    private func persistAsync(_ data: ChatSessionData) {
+        Self.persistQueue.async { [self] in
+            persist(data)
+        }
     }
 
     private func removeFromDisk(id: UUID) {
