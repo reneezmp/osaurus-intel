@@ -205,7 +205,7 @@ final class NativeThinkingView: NSView {
 
         // icons/labels
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.image = NSImage(systemSymbolName: "brain.head.profile", accessibilityDescription: nil)
+        iconView.image = SymbolImageCache.image("brain.head.profile", accessibilityDescription: nil)
         iconView.contentTintColor = thinkingTint
         iconView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(iconView)
@@ -225,7 +225,7 @@ final class NativeThinkingView: NSView {
 
         chevronView.translatesAutoresizingMaskIntoConstraints = false
         chevronView.wantsLayer = true
-        chevronView.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        chevronView.image = SymbolImageCache.image("chevron.right", accessibilityDescription: nil)
         chevronView.contentTintColor = .tertiaryLabelColor
         chevronView.imageScaling = .scaleProportionallyUpOrDown
         addSubview(chevronView)

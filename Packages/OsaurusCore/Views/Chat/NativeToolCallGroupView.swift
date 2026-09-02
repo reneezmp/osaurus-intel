@@ -588,7 +588,7 @@ final class NativeToolCallRowView: NSView {
         refreshStatusIndicator()
 
         let category = ToolCategory.from(toolName: item.call.function.name)
-        categoryIcon.image = NSImage(systemSymbolName: category.icon, accessibilityDescription: nil)
+        categoryIcon.image = SymbolImageCache.image(category.icon, accessibilityDescription: nil)
         let tintColor = category.primaryNSColor
         categoryIcon.contentTintColor = tintColor
         categoryBg.layer?.backgroundColor = tintColor.withAlphaComponent(0.15).cgColor
@@ -938,7 +938,7 @@ final class NativeToolCallRowView: NSView {
 
         chevron.translatesAutoresizingMaskIntoConstraints = false
         chevron.wantsLayer = true
-        chevron.image = NSImage(systemSymbolName: "chevron.right", accessibilityDescription: nil)
+        chevron.image = SymbolImageCache.image("chevron.right", accessibilityDescription: nil)
         chevron.contentTintColor = .tertiaryLabelColor
         chevron.imageScaling = .scaleProportionallyUpOrDown
         chevron.setContentCompressionResistancePriority(.required, for: .horizontal)
