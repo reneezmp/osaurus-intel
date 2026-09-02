@@ -6,7 +6,109 @@
 **Last synced upstream commit:** `9124d696` (share artifact tool fix, #1561)  
 **Upstream version era:** `0.20.3` (HEAD is `0.20.3-15-g9124d696`; no newer tag yet)  
 **Last sync date:** 2026-06-17  
-**Status:** 🟢 Synced through `9124d696` (0.20.3 + 12 untagged commits). Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf incl. hosted inference — untested live), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global-proxy batch).  
+**Status:** 🔴 **783 commits behind** as of 2026-09-02. Upstream is now `0.24.3-17-g4528b56f`. Full triage done — see *Pending next sync* below. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred-shelf incl. hosted inference — untested live), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global-proxy batch), … 1.0.31 (current).  
+
+---
+
+## Pending next sync: 0.20.3 → 0.24.3 (triaged 2026-09-02, Session 11)
+
+**Range:** `9124d696..4528b56f` — **783 commits**, upstream `0.20.3` → `0.24.3` (+17 untagged).
+**Nothing ported yet.** This section is the triage result; the staged execution plan lives in
+[`SYNC_0.24.3_PLAN.md`](SYNC_0.24.3_PLAN.md), and the full per-commit verdict table (all 476
+reviewed commits) is in [`UPSTREAM_TRIAGE_0.24.3.md`](UPSTREAM_TRIAGE_0.24.3.md).
+
+**Shape of the work (decided 2026-09-02): three releases.**
+
+| Release | Contents |
+|---|---|
+| `1.0.32` Stabilize | keychain + Router hotfixes, then the Sentry crash/hang set |
+| `1.0.33` Modernize | fast-forward the 52 PORT-touched pristine files, then proxy + MCP |
+| `1.0.34` **Projects** | `8a9d32ea` rebuilt against the Intel mirrors, then the rest of chat QoL |
+
+Backlogged: `311d9095` (storage encryption — gated on root-causing Rosy's `hmac` decrypt error)
+and the 61-commit deferred shelf (re-triage after 1.0.34).
+
+### How this triage was produced
+
+A deterministic classifier (not judgment) first eliminated **307 of 783** by parsing the
+164-path `exclude:` list straight out of `Packages/OsaurusCore/Package.swift` and intersecting
+it with each commit's touched files:
+
+| Auto-bucket | Count | Rule |
+|---|---:|---|
+| IGNORE | 92 | docs / `.github` / appcast / `.xcstrings` / evals only |
+| NEW-SUBSYSTEM | 90 | touches **only files absent from the fork** — brand-new upstream subsystems |
+| INFRA-ONLY | 76 | only `Package.resolved` / `Package.swift` / xcworkspace — vmlx repin churn |
+| SKIP | 49 | every touched file is on the `exclude:` list |
+| **REVIEW** | **476** | touches ≥1 file the Intel target actually compiles |
+
+The 476 survivors were then split into 5 chronological windows and judged individually.
+
+### Verdict totals (476 reviewed)
+
+| Verdict | Count |
+|---|---:|
+| ✅ PORT | **211** |
+| ⛔️ SKIP | 204 |
+| ⏸️ DEFER | 61 |
+
+| Window | Upstream range | Tags | PORT | SKIP | DEFER |
+|---|---|---|---:|---:|---:|
+| W1 | `b8ef10aa..3bee1703` | 0.20.3 → 0.21.0 | 52 | 32 | 12 |
+| W2 | `f09b2123..a15efa73` | 0.21.0 → 0.21.13 | 40 | 45 | 11 |
+| W3 | `93e6394e..5bb946f7` | 0.21.13 → 0.22.9 | 26 | 61 | 9 |
+| W4 | `d417cdf9..c4d9d140` | 0.22.9 → 0.22.20 | 57 | 29 | 10 |
+| W5 | `4e2bcb03..e03127e7` | 0.22.20 → 0.24.3 | 36 | 37 | 19 |
+
+> ⚠️ **Confidence caveat.** The per-commit verdicts are a **first-pass triage by small models**,
+> not a review. They are a map of where to dig, not an authorization to cherry-pick. Verify each
+> commit against fork reality before it lands. Known first-pass errors already corrected:
+> Product Hunt marketing dialogs (`f8b1c02e`, `67eeaf0b`) were mislabelled PORT; the
+> swap-pressure banner series (`a9d2a150`, `29fedb38`, `1b58dcf9`) warns about *local model*
+> RAM pressure and is meaningless on a cloud-only fork.
+
+### Why 783 collapses to 211
+
+Upstream spent this era building an **agent-orchestration platform**: Orchestrator + delegation,
+Agent Channels (Telegram/iMessage), subagent batching, Computer Use + AppleScript, Skills,
+Knowledge base, Browser Use, image/video generation, and a community model-compat leaderboard.
+The fork amputates every one of those. This is not drift — it is a divergence of *purpose*.
+Upstream went agentic-multiplayer; the Intel fork is sovereign cloud inference on old metal.
+
+### The five PORT clusters
+
+1. **Cloud provider & Router hardening** — the fork's lifeline.
+   `5f12d260` (remote-provider crashes/hangs, endpoint trust, **Router spend safety**, streaming) ·
+   `563f9174` (Router 409 idempotency on refunded iterations) · `6ecd2133` (credits UI dollars→credits) ·
+   `89ccb249` + `757807f9` (redeemable credit codes) · `0a8c5008` (providers stuck disconnected after
+   relaunch) · `577a3eee` (honor custom-provider context windows) · `4137884f` (media rejection recovery
+   + OpenAI hardening) · `f9478c0f` (lenient decode for nonstandard streaming chunks during tool calls) ·
+   `f01e5d44` (xAI OAuth stale catalog) · `bbad6ed9` (Fireworks only showing 6 models)
+2. **Keychain & identity** — `984debe2` (harden keychain on relaunch + identity restore from recovery
+   phrase) · `e06996e3` (specific keychain errors, recover ACL-denied credential saves). Directly on top
+   of the fork's stable-signing-identity scar tissue.
+3. **Crashes & main-thread hangs** — Sentry-triaged, generic AppKit/SwiftUI: `03ea4c93`, `c8be96cc`,
+   `99537680`, `6daf54cb`, `dfd412f6`, `0d07b052` (notch display-reconfig + TextKit), `3ba84c38`,
+   `2eac8d32`, `286c4a9a`, `cc6732d7`, `161e6ca5`.
+4. **Chat QoL** — full-text search + ⌘F (`5ada76dc`) · Projects/chat grouping (`8a9d32ea`) · pinned chats
+   (`6ae20356`) · multi-select delete/archive (`479133ba`) · auto chat titles (`5bb946f7`) + `/title`
+   (`3580502c`) · import from ChatGPT/Claude/Grok (`311f327c`, `48c6d197`) · delete individual messages
+   (`c4d9d140`) · ⌘N (`e0eeba12`) · ⌘± zoom (`1b955c2b`) · resizable sidebar (`035ed272`) · inline +
+   display LaTeX (`f3608d88`, `8a8f01ec`) · escape-eats-your-prompt fix (`08eb8bd8`) · LLM context
+   compaction (`ce414b3f`) · `96b05d20` (hide local-memory warnings for cloud models).
+5. **Storage, proxy, MCP** — `311d9095` (storage encryption opt-in, 50 files — SQLCipher, handle with
+   tongs) · `9ddb49b0` (migration hardening) · `304ad2bb` + `0ba6a01a` + `52d4aa9b` (global proxy) ·
+   `774aa836` (MCP session recovery + OAuth single-flight) · `3f4791e7` (paginated tool discovery) ·
+   `12ff17c7` (bearer 401 classification) · `f5009855` (MCP URL detection in provider form).
+
+### Blanket SKIP (do not revisit)
+
+Orchestrator / delegation (`8d7c3dd4` alone is a 195-file refactor), Agent Channels + Telegram +
+iMessage, Computer Use + AppleScript, Skills, Knowledge base, Browser Use, image/video generation,
+every MTP / speculative-decoding / vMLX repin, the entire evals harness + community leaderboard,
+Sandbox, and upstream's own marketing modals (Product Hunt, "what's new" for amputated features).
+
+---
 
 ## Sync 0.20.3 → `9124d696` — global-proxy batch (2026-06-17, Session 10)
 
