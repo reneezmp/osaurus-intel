@@ -111,6 +111,14 @@ extension SlashCommand {
             isBuiltIn: true
         ),
         SlashCommand(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000106")!,
+            name: "title",
+            description: "Generate a title for this chat",
+            icon: "textformat",
+            kind: .action,
+            isBuiltIn: true
+        ),
+        SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000103")!,
             name: "help",
             description: "Show available commands and shortcuts",

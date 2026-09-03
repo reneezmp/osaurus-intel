@@ -19,11 +19,18 @@ CONFIG="${CONFIG:-Debug}"
 DERIVED="build/rosy-deploy"
 
 echo "→ Building osaurus.app (Intel x86_64, $CONFIG)…"
+# -skipPackagePluginValidation: swift-secp256k1 0.23.2 (which this fork pins so
+# the project compiles under Swift 6.4 — see docs/UPSTREAM_SYNC.md) ships a
+# SharedSourcesPlugin build-tool plugin. Xcode refuses to run an unvalidated
+# plugin from the CLI, so without this flag the build dies at
+# "Validate plug-in SharedSourcesPlugin" before compiling a single file.
 xcodebuild \
   -workspace osaurus.xcworkspace \
   -scheme osaurus \
   -configuration "$CONFIG" \
   -arch x86_64 \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   -derivedDataPath "$DERIVED" \
   ONLY_ACTIVE_ARCH=NO \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \

@@ -28,6 +28,8 @@ xcodebuild -workspace osaurus.xcworkspace \
   -scheme osaurus-cli \
   -configuration Release \
   -derivedDataPath build \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   -clonedSourcePackagesDirPath build/SourcePackages \
   -disableAutomaticPackageResolution \
   ARCHS=arm64 \
@@ -44,6 +46,8 @@ xcodebuild -workspace osaurus.xcworkspace \
   -scheme osaurus \
   -configuration Release \
   -derivedDataPath build \
+  -skipPackagePluginValidation \
+  -skipMacroValidation \
   -clonedSourcePackagesDirPath build/SourcePackages \
   -disableAutomaticPackageResolution \
   ARCHS=arm64 \

@@ -906,6 +906,99 @@ final class ChatSession: ObservableObject {
         }
     }
 
+    /// Generate an AI title on demand from the `/title` slash command
+    /// (Intel port of upstream 3580502c). Reuses the same CloudChatEngine
+    /// call as the automatic path in `generateLLMTitle`, but ignores
+    /// `autoGenerateChatTitles` — the user explicitly asked for a rename —
+    /// and surfaces the result (or failure) as a toast instead of failing
+    /// silently, since the user is waiting on it.
+    func generateTitleFromSlashCommand() {
+        guard let sid = sessionId,
+            let userTurn = turns.first(where: {
+                $0.role == .user
+                    && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })
+        else {
+            ToastManager.shared.infoLocalized(
+                "Chat Title",
+                message: "Send a message first, then use /title to name the chat."
+            )
+            return
+        }
+        let assistantText =
+            turns.first(where: {
+                $0.role == .assistant
+                    && !$0.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            })?.content ?? ""
+        // Latch so a later clean run completion doesn't auto-title over the
+        // name the user just asked for.
+        llmTitleAttempted = true
+
+        let titleModel = ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-v4-flash"
+        let engine = chatEngineFactory()
+        let sys = ChatMessage(
+            role: "system",
+            content:
+                "You write very short chat titles. Reply with ONLY a 3–6 word title in Title "
+                + "Case — no quotes, no trailing punctuation, no preamble.")
+        let usr = ChatMessage(
+            role: "user",
+            content:
+                "First user message:\n\(userTurn.content)\n\nAssistant reply:\n"
+                + "\(String(assistantText.prefix(800)))\n\nTitle:")
+        let req = ChatCompletionRequest(
+            model: titleModel,
+            messages: [sys, usr],
+            temperature: 0.3,
+            max_tokens: 24,
+            stream: false,
+            top_p: nil,
+            frequency_penalty: nil,
+            presence_penalty: nil,
+            stop: nil,
+            n: nil,
+            tools: nil,
+            tool_choice: nil,
+            session_id: nil
+        )
+        // Loading toast while the model thinks, updated in place to the
+        // success/error outcome.
+        let toastId = ToastManager.shared.loadingLocalized("Generating Title…")
+        Task { @MainActor [weak self] in
+            guard let self else { return }
+            do {
+                let resp = try await engine.completeChat(request: req)
+                let raw = resp.choices.first?.message?.content ?? ""
+                let cleaned = Self.cleanTitle(raw)
+                guard !cleaned.isEmpty else {
+                    ToastManager.shared.update(
+                        id: toastId,
+                        type: .error,
+                        title: "Chat Title",
+                        message: "Couldn't generate a title. Check that a model is available and try again."
+                    )
+                    return
+                }
+                ChatSessionsManager.shared.rename(id: sid, title: cleaned)
+                if self.sessionId == sid { self.title = cleaned }
+                self.onSessionChanged?()
+                ToastManager.shared.update(
+                    id: toastId,
+                    type: .success,
+                    title: "Chat Renamed",
+                    message: cleaned
+                )
+            } catch {
+                ToastManager.shared.update(
+                    id: toastId,
+                    type: .error,
+                    title: "Chat Title",
+                    message: "Couldn't generate a title. Check that a model is available and try again."
+                )
+            }
+        }
+    }
+
     /// Normalize a model-returned title: strip quotes/newlines, trim, cap length.
     static func cleanTitle(_ raw: String) -> String {
         var t = raw.trimmingCharacters(in: .whitespacesAndNewlines)
@@ -1362,6 +1455,88 @@ final class ChatSession: ObservableObject {
         save()
     }
 
+    /// Remove a single assistant turn (and the tool turns that belong to it)
+    /// while keeping every other turn in the conversation intact. Upstream
+    /// c4d9d140.
+    ///
+    /// Unlike `deleteTurn(id:)`, which truncates from the given turn onward,
+    /// this excises just one response. When the assistant turn issued tool
+    /// calls, the following `.tool` turns carrying their results are orphaned
+    /// the moment the assistant message goes away — a `tool` message with no
+    /// preceding `tool_calls` is an invalid request shape that providers
+    /// reject — so we drop those paired result turns together. Dropping the
+    /// turn from `turns` is enough for both model requests and the context
+    /// token estimate to stop counting it, since both derive from `turns`.
+    func removeTurn(id: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == id }) else { return }
+        let turn = turns[index]
+
+        var indicesToRemove = IndexSet(integer: index)
+
+        // Assistant turns that made tool calls own the `.tool` result turns that
+        // immediately follow them; those results reference the call ids and must
+        // leave with the assistant message so the remaining sequence stays valid.
+        if turn.role == .assistant, let calls = turn.toolCalls, !calls.isEmpty {
+            let callIds = Set(calls.map { $0.id })
+            var cursor = index + 1
+            while cursor < turns.count, turns[cursor].role == .tool {
+                if let toolCallId = turns[cursor].toolCallId, callIds.contains(toolCallId) {
+                    indicesToRemove.insert(cursor)
+                }
+                cursor += 1
+            }
+        }
+
+        turns.remove(atOffsets: indicesToRemove)
+        isDirty = true
+        rebuildVisibleBlocks()
+        save()
+    }
+
+    /// Remove the whole exchange an assistant turn belongs to: the user turn
+    /// that prompted it plus every assistant/tool turn that answered that
+    /// prompt. Upstream c4d9d140.
+    ///
+    /// Deleting an assistant reply on its own strands the user message (the
+    /// next request would show an unanswered question the model just
+    /// re-answers), so this is the coherent "drop this Q&A and keep the rest"
+    /// operation. The exchange is the contiguous run from the nearest preceding
+    /// `user` turn up to (but not including) the next `user` turn, which keeps
+    /// tool-call/result pairings inside the block intact.
+    func removeExchange(anchoredAt id: UUID) {
+        guard let index = turns.firstIndex(where: { $0.id == id }) else { return }
+
+        // Walk back to the user turn that opened this exchange. If there's no
+        // preceding user turn (e.g. an unprompted opening assistant message),
+        // anchor the block at the turn itself.
+        var start = index
+        var back = index
+        while back >= 0 {
+            if turns[back].role == .user {
+                start = back
+                break
+            }
+            back -= 1
+        }
+
+        // Walk forward to just before the next user turn; everything in between
+        // is part of answering the same prompt.
+        var end = turns.count - 1
+        var forward = index + 1
+        while forward < turns.count {
+            if turns[forward].role == .user {
+                end = forward - 1
+                break
+            }
+            forward += 1
+        }
+
+        turns.removeSubrange(start...end)
+        isDirty = true
+        rebuildVisibleBlocks()
+        save()
+    }
+
     /// Regenerate an assistant response (removes it and regenerates)
     func regenerate(turnId: UUID) {
         guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
@@ -1672,8 +1847,12 @@ final class ChatSession: ObservableObject {
         // Smart title from the core model after the first exchange. Upstream
         // never had model-generated titles (first-line only); this adds them
         // on Intel. One-shot, async, non-blocking; first-line title stays as
-        // the fallback if the model call fails.
-        if let sid = sessionId, !llmTitleAttempted,
+        // the fallback if the model call fails. Gated by
+        // `ChatConfiguration.autoGenerateChatTitles` (upstream 5bb946f7's
+        // opt-out toggle in Settings → Chat), default-on to preserve
+        // pre-existing behavior.
+        if ChatConfiguration.shared.autoGenerateChatTitles,
+            let sid = sessionId, !llmTitleAttempted,
             turns.filter({ $0.role == .user }).count == 1,
             let assistant = assistantContent, !assistant.isEmpty
         {
@@ -2766,6 +2945,32 @@ final class ChatSession: ObservableObject {
     }
 }
 
+/// Backs the "also delete your message" checkbox in the delete-response
+/// confirmation. Observing it (rather than a plain `@State` binding) lets the
+/// checkbox live inside a `ThemedAlertCenter`-presented accessory, which is
+/// constructed once at present time rather than re-rendered by `ChatView`'s
+/// own body. Upstream c4d9d140.
+@MainActor
+final class DeleteMessageOptions: ObservableObject {
+    @Published var alsoDeleteUserMessage: Bool = false
+}
+
+/// Checkbox rendered as the delete-response confirmation accessory. Ticking it
+/// escalates the delete from "just this response" to the whole exchange.
+private struct DeleteAlsoUserMessageToggle: View {
+    @Environment(\.theme) private var theme
+    @ObservedObject var options: DeleteMessageOptions
+
+    var body: some View {
+        Toggle(isOn: $options.alsoDeleteUserMessage) {
+            Text("Also delete my message", bundle: .module)
+                .font(.system(size: 12))
+                .foregroundColor(theme.secondaryText)
+        }
+        .toggleStyle(.checkbox)
+    }
+}
+
 // MARK: - ChatView
 
 struct ChatView: View {
@@ -3280,6 +3485,7 @@ struct ChatView: View {
                 onEdit: beginEditingTurn,
                 onDelete: deleteTurn,
                 onSpeak: speakTurnContent,
+                onDeleteMessage: confirmDeleteAssistantMessage,
                 editingTurnId: editingTurnId,
                 editText: $editText,
                 onConfirmEdit: confirmEditAndRegenerate,
@@ -3487,6 +3693,7 @@ private struct IsolatedThreadView: View {
     let onEdit: ((UUID) -> Void)?
     let onDelete: ((UUID) -> Void)?
     let onSpeak: ((UUID) -> Void)?
+    let onDeleteMessage: ((UUID) -> Void)?
     let editingTurnId: UUID?
     let editText: Binding<String>?
     let onConfirmEdit: (() -> Void)?
@@ -3518,6 +3725,7 @@ private struct IsolatedThreadView: View {
             onEdit: onEdit,
             onDelete: onDelete,
             onSpeak: onSpeak,
+            onDeleteMessage: onDeleteMessage,
             editingTurnId: editingTurnId,
             editText: editText,
             onConfirmEdit: onConfirmEdit,
@@ -3644,6 +3852,80 @@ extension ChatView {
     private func deleteTurn(turnId: UUID) {
         if session.isStreaming { session.stop() }
         session.deleteTurn(id: turnId)
+        discardSessionIfEmptied()
+    }
+
+    /// Ask before deleting an assistant response. Deleting mid-thread can change
+    /// what later turns were answering, so we always confirm. The dialog offers
+    /// an "also delete my message" checkbox that escalates the delete to the
+    /// whole exchange. Upstream c4d9d140.
+    ///
+    /// This fork is cloud-only (no resident local model whose KV cache would
+    /// need reprocessing), so upstream's local-vs-remote branch on the warning
+    /// copy collapses to the single remote-model line. Upstream also gains a
+    /// line here when the turn is covered by a compaction summary
+    /// (`conversationSummary`); that plumbing doesn't exist on Intel yet, so
+    /// it's omitted — revisit once context compaction (ce414b3f) lands.
+    private func confirmDeleteAssistantMessage(turnId: UUID) {
+        guard let turn = session.turns.first(where: { $0.id == turnId }),
+            turn.role == .assistant
+        else { return }
+
+        let hasToolCalls = !(turn.toolCalls?.isEmpty ?? true)
+
+        var lines: [String] = [
+            L("This removes this response from the conversation. It won't be sent to the model on later turns.")
+        ]
+        if hasToolCalls {
+            lines.append(
+                L("Any tool calls in this response and their results will be removed together.")
+            )
+        }
+
+        let options = DeleteMessageOptions()
+        let requestId = UUID()
+        let scope = ThemedAlertScope.chat(windowState.windowId)
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Delete this response?"),
+                message: lines.joined(separator: "\n\n"),
+                accessory: AnyView(DeleteAlsoUserMessageToggle(options: options)),
+                buttons: [
+                    .cancel(L("Cancel")),
+                    .destructive(L("Delete")) { [weak session] in
+                        guard let session else { return }
+                        if session.isStreaming { session.stop() }
+                        if options.alsoDeleteUserMessage {
+                            session.removeExchange(anchoredAt: turnId)
+                        } else {
+                            session.removeTurn(id: turnId)
+                        }
+                        discardSessionIfEmptied()
+                    },
+                ],
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
+    }
+
+    /// A delete can empty the conversation (e.g. removing the only exchange).
+    /// `save()` skips empty conversations, so the stale row would otherwise
+    /// survive and reappear on reopen. Mirror the sidebar's delete of the
+    /// current session: reset the window to a fresh chat, drop the persisted
+    /// row, and refresh the history list. Upstream c4d9d140 also cancels a
+    /// live `BackgroundTaskManager` task for the session here; that lookup
+    /// (`liveTask(forSessionId:)`) isn't part of this fork's task manager —
+    /// the callers above already stop an in-progress stream via
+    /// `session.stop()`, which is this fork's equivalent live-run cancel.
+    private func discardSessionIfEmptied() {
+        guard session.turns.isEmpty, let id = session.sessionId else { return }
+        session.reset()
+        ChatSessionsManager.shared.delete(id: id)
+        windowState.refreshSessions()
     }
 
     // MARK: - Inline Editing

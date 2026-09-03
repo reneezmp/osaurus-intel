@@ -151,6 +151,14 @@ final class NativeMarkdownView: NSView {
         }
         ChatPerfTrace.shared.count("markdown.configure.applied")
 
+        // Fonts live in the attributed-string attributes, and the incremental
+        // text-storage path (`applyPureTextBlocks`'s `incrementalPath`) diffs
+        // blocks only — it would no-op on a theme-only change (e.g. font
+        // zoom, which changes `themeFingerprint` but not block content).
+        // Drop the block memo so the apply path takes the full rebuild
+        // branch and re-derives every attribute. Upstream 1b955c2b.
+        if themeChanged { lastBlocks = [] }
+
         lastWidth = width
         lastThemeFingerprint = themeFingerprint
         lastIsStreaming = isStreaming

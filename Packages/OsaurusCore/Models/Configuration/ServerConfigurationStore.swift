@@ -39,6 +39,12 @@ enum ServerConfigurationStore {
         }
     }
 
+    static func updateFontSizeMultiplier(_ multiplier: Double) {
+        var configuration = load() ?? ServerConfiguration.default
+        configuration.fontSizeMultiplier = ServerConfiguration.clampedFontSizeMultiplier(multiplier)
+        save(configuration)
+    }
+
     private static func configurationFileURL() -> URL {
         if let dir = overrideDirectory {
             return dir.appendingPathComponent("server.json")

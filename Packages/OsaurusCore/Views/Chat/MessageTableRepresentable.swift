@@ -147,6 +147,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
     let onEdit: ((UUID) -> Void)?
     let onDelete: ((UUID) -> Void)?
     let onSpeak: ((UUID) -> Void)?
+    let onDeleteMessage: ((UUID) -> Void)?
 
     // Inline editing state
     let editingTurnId: UUID?
@@ -301,6 +302,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onEdit: onEdit,
             onDelete: onDelete,
             onSpeak: onSpeak,
+            onDeleteMessage: onDeleteMessage,
             onUserImagePreview: onUserImagePreview,
             searchHighlightQuery: searchHighlightQuery
         )
@@ -327,6 +329,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onEdit: onEdit,
             onDelete: onDelete,
             onSpeak: onSpeak,
+            onDeleteMessage: onDeleteMessage,
             onUserImagePreview: onUserImagePreview,
             searchHighlightQuery: searchHighlightQuery
         )
@@ -433,6 +436,7 @@ extension MessageTableRepresentable {
             onEdit: nil,
             onDelete: nil,
             onSpeak: nil,
+            onDeleteMessage: nil,
             onUserImagePreview: nil
         )
 
@@ -740,6 +744,10 @@ extension MessageTableRepresentable {
             // fonts. capture the previous theme so we can force a reconfigure
             // (and height-cache flush) like the width change path does
             let previousThemeConfig = ctx.theme.customThemeConfig
+            // The global font zoom lives on the theme instance, not in the
+            // config, so compare it separately or zoom-only changes are
+            // missed. Upstream 1b955c2b.
+            let previousFontScale = (ctx.theme as? CustomizableTheme)?.fontScale
 
             // if width changed, invalidate the entire height cache
             if widthChanged { heightCache.removeAll() }
@@ -747,7 +755,9 @@ extension MessageTableRepresentable {
             ctx = context
             self.groupHeaderMap = groupHeaderMap
 
-            let themeChanged = previousThemeConfig != context.theme.customThemeConfig
+            let themeChanged =
+                previousThemeConfig != context.theme.customThemeConfig
+                || previousFontScale != (context.theme as? CustomizableTheme)?.fontScale
             if themeChanged { heightCache.removeAll() }
 
             // Editing state lives in the context, not in the blocks themselves.

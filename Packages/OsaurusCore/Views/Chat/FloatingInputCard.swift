@@ -39,6 +39,8 @@ struct FloatingInputCard: View {
     var isCompact: Bool = false
     /// Callback to clear the current chat session (triggered by /clear command).
     var onClearChat: (() -> Void)? = nil
+    /// Callback to generate an AI title for the current chat (triggered by /title command).
+    var onGenerateTitle: (() -> Void)? = nil
     /// Callback when the user selects a skill slash command. Passes the skill UUID so the
     /// caller can inject that skill's instructions as one-off context for the next send.
     var onSkillSelected: ((UUID) -> Void)? = nil
@@ -77,6 +79,7 @@ struct FloatingInputCard: View {
         windowId: UUID? = nil,
         isCompact: Bool = false,
         onClearChat: (() -> Void)? = nil,
+        onGenerateTitle: (() -> Void)? = nil,
         onSkillSelected: ((UUID) -> Void)? = nil,
         pendingSkillId: Binding<UUID?> = .constant(nil),
         autoSpeakAssistant: Binding<Bool> = .constant(false),
@@ -103,6 +106,7 @@ struct FloatingInputCard: View {
         self.windowId = windowId
         self.isCompact = isCompact
         self.onClearChat = onClearChat
+        self.onGenerateTitle = onGenerateTitle
         self.onSkillSelected = onSkillSelected
         self._pendingSkillId = pendingSkillId
         self._autoSpeakAssistant = autoSpeakAssistant
@@ -122,6 +126,10 @@ struct FloatingInputCard: View {
 
     private var slashRegistry = SlashCommandRegistry.shared
     @State private var slashSelectedIndex: Int = 0
+    /// Slash query the user dismissed with Escape. Suppresses the popup for
+    /// that exact query so the typed text survives; cleared as soon as the
+    /// query changes (typing resumes) so the popup can reappear.
+    @State private var dismissedSlashQuery: String?
 
     /// Non-nil when the cursor is inside a slash command token (e.g. "/tr" or "hello /tr").
     /// The slash must be at the start of text or immediately after whitespace.
@@ -149,7 +157,8 @@ struct FloatingInputCard: View {
     }
 
     private var showSlashPopup: Bool {
-        activeSlashQuery != nil && !slashFilteredCommands.isEmpty
+        guard let query = activeSlashQuery else { return false }
+        return query != dismissedSlashQuery && !slashFilteredCommands.isEmpty
     }
 
     // Local state for text input to prevent parent re-renders on every keystroke
@@ -510,6 +519,10 @@ struct FloatingInputCard: View {
             .onChange(of: localText) { _ in
                 // Reset popup selection whenever the typed query changes
                 slashSelectedIndex = 0
+                // Typing after an Escape-dismissal re-arms the slash popup
+                if dismissedSlashQuery != nil, activeSlashQuery != dismissedSlashQuery {
+                    dismissedSlashQuery = nil
+                }
             }
             .onChange(of: showSlashPopup) { isVisible in
                 // Keep registry in sync so the global key monitor can suppress
@@ -1222,6 +1235,13 @@ extension FloatingInputCard {
                 object: nil,
                 userInfo: windowId.map { ["windowId": $0] }
             )
+        case "title":
+            if let generateTitle = onGenerateTitle {
+                generateTitle()
+            } else {
+                ToastManager.shared.infoLocalized(
+                    "Chat Title", message: "Pass an onGenerateTitle handler to enable /title")
+            }
         case "help":
             ToastManager.shared.infoLocalized(
                 "Slash Commands",
@@ -2864,9 +2884,9 @@ extension FloatingInputCard {
                 } : nil,
             onEscape: showSlashPopup
                 ? {
-                    // Dismiss popup by clearing the slash prefix
-                    localText = ""
-                    text = ""
+                    // Dismiss just the popup; leave the typed text (including
+                    // the slash token) intact. Upstream 08eb8bd8.
+                    dismissedSlashQuery = activeSlashQuery
                     return true
                 } : nil,
             onPasteText: { pasted in

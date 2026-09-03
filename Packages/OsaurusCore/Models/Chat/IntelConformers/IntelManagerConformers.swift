@@ -834,6 +834,12 @@ final class ChatConfiguration: @unchecked Sendable {
     var generativeGreetingsEnabled: Bool = false
     var greetingPersona: String = ""
     var enableClipboardMonitoring: Bool = true
+    // Upstream 5bb946f7: background Core-Model title generation after
+    // the first exchange. On Intel this is served by CloudChatEngine
+    // (see `ChatView.generateLLMTitle`), which predates this port and
+    // already ran unconditionally; this flag makes it an opt-out,
+    // default-on to preserve existing behavior on upgrade.
+    var autoGenerateChatTitles: Bool = true
     var defaultToolSelectionMode: Any? = nil
     var defaultManualToolNames: [String]? = nil
     var defaultManualSkillNames: [String]? = nil
@@ -890,6 +896,7 @@ final class ChatConfiguration: @unchecked Sendable {
         defaultManualToolNames: [String]? = nil,
         defaultManualSkillNames: [String]? = nil,
         enableClipboardMonitoring: Bool = true,
+        autoGenerateChatTitles: Bool = true,
         generativeGreetingsEnabled: Bool = false,
         greetingPersona: String = ""
     ) {
@@ -914,6 +921,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualToolNames = defaultManualToolNames
         self.defaultManualSkillNames = defaultManualSkillNames
         self.enableClipboardMonitoring = enableClipboardMonitoring
+        self.autoGenerateChatTitles = autoGenerateChatTitles
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
         self.greetingPersona = greetingPersona
     }
@@ -942,6 +950,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualToolNames = other.defaultManualToolNames
         self.defaultManualSkillNames = other.defaultManualSkillNames
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
+        self.autoGenerateChatTitles = other.autoGenerateChatTitles
         self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
         self.greetingPersona = other.greetingPersona
     }
@@ -974,6 +983,7 @@ final class ChatConfiguration: @unchecked Sendable {
         var generativeGreetingsEnabled: Bool? = nil
         var greetingPersona: String? = nil
         var enableClipboardMonitoring: Bool? = nil
+        var autoGenerateChatTitles: Bool? = nil
         var defaultManualToolNames: [String]? = nil
         var defaultManualSkillNames: [String]? = nil
         var coreModelProvider: String? = nil
@@ -1008,6 +1018,7 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.generativeGreetingsEnabled { generativeGreetingsEnabled = v }
         if let v = s.greetingPersona { greetingPersona = v }
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
+        if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
         if let v = s.defaultManualSkillNames { defaultManualSkillNames = v }
         if let v = s.coreModelProvider { coreModelProvider = v }
@@ -1034,6 +1045,7 @@ final class ChatConfiguration: @unchecked Sendable {
         s.generativeGreetingsEnabled = generativeGreetingsEnabled
         s.greetingPersona = greetingPersona
         s.enableClipboardMonitoring = enableClipboardMonitoring
+        s.autoGenerateChatTitles = autoGenerateChatTitles
         s.defaultManualToolNames = defaultManualToolNames
         s.defaultManualSkillNames = defaultManualSkillNames
         s.coreModelProvider = coreModelProvider

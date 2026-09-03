@@ -38,6 +38,10 @@ struct CellRenderingContext {
     var onEdit: ((UUID) -> Void)? = nil
     var onDelete: ((UUID) -> Void)? = nil
     var onSpeak: ((UUID) -> Void)? = nil
+    /// Deletes an assistant response. The confirmation dialog offers an option
+    /// to also delete the prompting user message. Distinct from `onDelete`,
+    /// which truncates a user turn and everything after it.
+    var onDeleteMessage: ((UUID) -> Void)? = nil
     /// attachment or shared-artifact id string → full screen preview from ChatView
     var onUserImagePreview: ((String) -> Void)? = nil
     /// Active in-conversation find query (Cmd+F). Empty when the find bar is
@@ -454,11 +458,13 @@ final class NativeAssistantActionsView: NSView {
     private let copyButton: HeaderCircleActionControl
     private let regenerateButton: HeaderCircleActionControl
     let speakButton: HeaderCircleActionControl
+    private let deleteButton: HeaderCircleActionControl
 
     private var turnId: UUID = UUID()
     private var onCopy: ((UUID) -> Void)?
     private var onRegenerate: ((UUID) -> Void)?
     var onSpeak: ((UUID) -> Void)?
+    private var onDeleteMessage: ((UUID) -> Void)?
 
     nonisolated(unsafe) private var ttsObservation: NSObjectProtocol?
     nonisolated(unsafe) private var ttsConfigObservation: NSObjectProtocol?
@@ -470,18 +476,22 @@ final class NativeAssistantActionsView: NSView {
         let copyControl = HeaderCircleActionControl(action: {})
         let regenControl = HeaderCircleActionControl(action: {})
         let speakControl = HeaderCircleActionControl(action: {})
+        let deleteControl = HeaderCircleActionControl(action: {})
         self.copyButton = copyControl
         self.regenerateButton = regenControl
         self.speakButton = speakControl
+        self.deleteButton = deleteControl
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
 
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         regenerateButton.translatesAutoresizingMaskIntoConstraints = false
         speakButton.translatesAutoresizingMaskIntoConstraints = false
+        deleteButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(copyButton)
         addSubview(regenerateButton)
         addSubview(speakButton)
+        addSubview(deleteButton)
 
         copyButton.setAction { [weak self] in
             guard let self else { return }
@@ -494,6 +504,10 @@ final class NativeAssistantActionsView: NSView {
         speakButton.setAction { [weak self] in
             guard let self else { return }
             self.onSpeak?(self.turnId)
+        }
+        deleteButton.setAction { [weak self] in
+            guard let self else { return }
+            self.onDeleteMessage?(self.turnId)
         }
 
         let size: CGFloat = 28
@@ -520,7 +534,12 @@ final class NativeAssistantActionsView: NSView {
             speakButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             speakWidth,
             speakButton.heightAnchor.constraint(equalToConstant: size),
-            speakButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+
+            deleteButton.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 4),
+            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            deleteButton.widthAnchor.constraint(equalToConstant: size),
+            deleteButton.heightAnchor.constraint(equalToConstant: size),
+            deleteButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
         ])
 
         ttsObservation = NotificationCenter.default.addObserver(
@@ -560,12 +579,14 @@ final class NativeAssistantActionsView: NSView {
         theme: any ThemeProtocol,
         onCopy: ((UUID) -> Void)?,
         onRegenerate: ((UUID) -> Void)?,
-        onSpeak: ((UUID) -> Void)?
+        onSpeak: ((UUID) -> Void)?,
+        onDeleteMessage: ((UUID) -> Void)? = nil
     ) {
         self.turnId = turnId
         self.onCopy = onCopy
         self.onRegenerate = onRegenerate
         self.onSpeak = onSpeak
+        self.onDeleteMessage = onDeleteMessage
         self.currentTheme = theme
 
         let pointSize = CGFloat(theme.captionSize) - 1
@@ -584,6 +605,14 @@ final class NativeAssistantActionsView: NSView {
             theme: theme,
             iconTint: nil
         )
+        deleteButton.setSymbol(
+            SymbolImageCache.image("trash", accessibilityDescription: L("Delete message"))?
+                .withSymbolConfiguration(cfg),
+            toolTip: L("Delete message"),
+            theme: theme,
+            iconTint: nil
+        )
+        deleteButton.isHidden = onDeleteMessage == nil
         applyTTSVisibility()
         refreshSpeakIcon()
     }
@@ -1881,7 +1910,8 @@ final class NativeMessageCellView: NSTableCellView {
             theme: context.theme,
             onCopy: context.onCopy,
             onRegenerate: context.onRegenerate,
-            onSpeak: context.onSpeak
+            onSpeak: context.onSpeak,
+            onDeleteMessage: context.onDeleteMessage
         )
     }
 

@@ -41,6 +41,13 @@ struct ConfigurationView: View {
     @State private var tempCoreModelName: String = ""
     @State private var coreModelPickerItems: [ModelPickerItem] = []
     @State private var tempEnableClipboardMonitoring: Bool = false
+    @State private var tempAutoGenerateChatTitles: Bool = true
+    /// Make ⌘N start a new chat in the frontmost chat window (the sidebar
+    /// "New Chat" action) instead of opening a new window. Applied
+    /// immediately via `AppStorage`, like `updater.isBetaChannel` above, so
+    /// it's excluded from the debounced save baseline. Upstream e0eeba12.
+    @AppStorage(NewChatShortcutSetting.defaultsKey)
+    private var cmdNStartsNewChatInCurrentWindow: Bool = false
     /// Master switch for AI-generated empty-state greetings. Defaults to
     /// OFF; users opt in here. Per-agent overrides on
     /// `AgentSettings.generativeGreetingsEnabled` still win when set.
@@ -381,6 +388,36 @@ struct ConfigurationView: View {
                                             )
                                             .font(.system(size: 11))
                                             .foregroundColor(theme.tertiaryText)
+                                        }
+                                    }
+
+                                    SettingsDivider()
+
+                                    SettingsSubsection(label: "Chat Titles") {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Toggle(isOn: $tempAutoGenerateChatTitles) {
+                                                Text("Automatically name chats", bundle: .module)
+                                                    .font(.system(size: 12))
+                                            }
+                                            Text(
+                                                "After the first exchange, generate a short descriptive title for the chat instead of using the first message as the title.",
+                                                bundle: .module
+                                            )
+                                            .font(.system(size: 11))
+                                            .foregroundColor(theme.tertiaryText)
+                                        }
+                                    }
+
+                                    SettingsDivider()
+
+                                    SettingsSubsection(label: "Shortcuts") {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            SettingsToggle(
+                                                title: L("⌘+N Starts a New Chat in the Current Window"),
+                                                description:
+                                                    "Make ⌘+N start a new chat in the frontmost chat window, like the sidebar's New Chat button. New Window moves to ⇧+⌘+N, matching other chat apps. Turn off to keep ⌘+N opening a new window.",
+                                                isOn: $cmdNStartsNewChatInCurrentWindow
+                                            )
                                         }
                                     }
 
@@ -792,6 +829,7 @@ struct ConfigurationView: View {
         tempCoreModelProvider = chat.coreModelProvider ?? ""
         tempCoreModelName = chat.coreModelName ?? ""
         tempEnableClipboardMonitoring = chat.enableClipboardMonitoring
+        tempAutoGenerateChatTitles = chat.autoGenerateChatTitles
         tempGenerativeGreetingsEnabled = chat.generativeGreetingsEnabled
         // Storage convention: empty string = "use the built-in default."
         // The editor never displays an empty state — we hydrate it with
@@ -846,6 +884,7 @@ struct ConfigurationView: View {
         tempCoreModelProvider = chatDefaults.coreModelProvider ?? ""
         tempCoreModelName = chatDefaults.coreModelName ?? ""
         tempEnableClipboardMonitoring = chatDefaults.enableClipboardMonitoring
+        tempAutoGenerateChatTitles = chatDefaults.autoGenerateChatTitles
         tempGenerativeGreetingsEnabled = chatDefaults.generativeGreetingsEnabled
         // Match `loadConfiguration`: hydrate the editor with the
         // built-in default rather than leaving it blank. Saving with
@@ -979,6 +1018,7 @@ struct ConfigurationView: View {
             preflightSearchMode: tempPreflightSearchMode,
             disableTools: tempDisableTools,
             enableClipboardMonitoring: tempEnableClipboardMonitoring,
+            autoGenerateChatTitles: tempAutoGenerateChatTitles,
             generativeGreetingsEnabled: tempGenerativeGreetingsEnabled,
             greetingPersona: {
                 // Collapse an unedited built-in default back to "" so

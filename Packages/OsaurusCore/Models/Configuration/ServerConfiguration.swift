@@ -39,6 +39,10 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
     /// Appearance mode (system, light, or dark)
     public var appearanceMode: AppearanceMode
 
+    /// Global UI font scale applied on top of the active theme's font sizes.
+    /// 1.0 is the theme's own sizing; clamped to `fontSizeMultiplierRange`.
+    public var fontSizeMultiplier: Double
+
     /// Number of threads for the event loop group
     public let numberOfThreads: Int
 
@@ -92,6 +96,7 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
         case startAtLogin
         case hideDockIcon
         case appearanceMode
+        case fontSizeMultiplier
         case numberOfThreads
         case backlog
         case genTopP
@@ -116,6 +121,10 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
             try container.decodeIfPresent(Bool.self, forKey: .hideDockIcon) ?? defaults.hideDockIcon
         self.appearanceMode =
             try container.decodeIfPresent(AppearanceMode.self, forKey: .appearanceMode) ?? defaults.appearanceMode
+        self.fontSizeMultiplier = Self.clampedFontSizeMultiplier(
+            try container.decodeIfPresent(Double.self, forKey: .fontSizeMultiplier)
+                ?? defaults.fontSizeMultiplier
+        )
         self.numberOfThreads =
             try container.decodeIfPresent(Int.self, forKey: .numberOfThreads) ?? defaults.numberOfThreads
         self.backlog = try container.decodeIfPresent(Int32.self, forKey: .backlog) ?? defaults.backlog
@@ -145,6 +154,7 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
         startAtLogin: Bool,
         hideDockIcon: Bool = false,
         appearanceMode: AppearanceMode = .system,
+        fontSizeMultiplier: Double = 1.0,
         numberOfThreads: Int,
         backlog: Int32,
         genTopP: Float,
@@ -161,6 +171,7 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
         self.startAtLogin = startAtLogin
         self.hideDockIcon = hideDockIcon
         self.appearanceMode = appearanceMode
+        self.fontSizeMultiplier = Self.clampedFontSizeMultiplier(fontSizeMultiplier)
         self.numberOfThreads = numberOfThreads
         self.backlog = backlog
         self.genTopP = genTopP
@@ -181,6 +192,7 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
             startAtLogin: false,
             hideDockIcon: false,
             appearanceMode: .system,
+            fontSizeMultiplier: 1.0,
             numberOfThreads: ProcessInfo.processInfo.activeProcessorCount,
             backlog: 256,
             genTopP: 1.0,
@@ -192,6 +204,14 @@ public struct ServerConfiguration: Codable, Equatable, Sendable {
             maxRequestBodyBytes: 32 * 1024 * 1024,
             maxPairingBodyBytes: 64 * 1024
         )
+    }
+
+    /// Allowed range for `fontSizeMultiplier`.
+    public static let fontSizeMultiplierRange: ClosedRange<Double> = 0.7...1.6
+
+    public static func clampedFontSizeMultiplier(_ value: Double) -> Double {
+        guard value.isFinite else { return 1.0 }
+        return min(max(value, fontSizeMultiplierRange.lowerBound), fontSizeMultiplierRange.upperBound)
     }
 
     /// Validates if the port is in valid range

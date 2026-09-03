@@ -946,6 +946,11 @@ enum StreamingStatsHint: Sendable {
 // SessionSource`) compile — the real upstream enum is public too.
 public enum SessionSource: String, Codable, CaseIterable, Sendable {
     case chat, plugin, http, schedule, watcher, selfSchedule = "self_schedule"
+    /// Conversation imported from another assistant's export (ChatGPT,
+    /// Claude, Gemini, Grok, Open WebUI, or generic JSON). Upstream
+    /// 311f327c. Continues as a normal chat; the source tag keeps
+    /// provenance visible in the sidebar.
+    case imported
 
     var iconName: String {
         switch self {
@@ -955,6 +960,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "clock.fill"
         case .watcher: return "eye.fill"
         case .selfSchedule: return "alarm.fill"
+        case .imported: return "square.and.arrow.down.fill"
         }
     }
 
@@ -966,6 +972,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "Schedule"
         case .watcher: return "Watcher"
         case .selfSchedule: return "Self-scheduled"
+        case .imported: return "Imported"
         }
     }
 
@@ -979,6 +986,7 @@ public enum SessionSource: String, Codable, CaseIterable, Sendable {
         case .schedule: return "scheduled"
         case .watcher: return "watcher"
         case .selfSchedule: return "self-scheduled"
+        case .imported: return "imported"
         }
     }
 }

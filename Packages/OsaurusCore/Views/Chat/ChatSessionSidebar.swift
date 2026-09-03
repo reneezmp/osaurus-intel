@@ -27,6 +27,9 @@ struct ChatSessionSidebar: View {
     /// confusing "no results" empty state.
     let agentId: UUID
     let currentSessionId: UUID?
+    /// Live width of the rail, driven by the parent's resize handle so the
+    /// inner content (titles, chips, rows) reflows to fill the chosen width.
+    var width: CGFloat = SidebarStyle.width
     let onSelect: (ChatSessionData) -> Void
     let onNewChat: () -> Void
     let onDelete: (UUID) -> Void
@@ -48,6 +51,10 @@ struct ChatSessionSidebar: View {
     @ObservedObject private var agentManager = AgentManager.shared
     @ObservedObject private var projectManager = ProjectManager.shared
     @ObservedObject private var sessionsManager = ChatSessionsManager.shared
+    /// Freshly imported session ids; their rows glow briefly and the list
+    /// scrolls the first one into view so the user can see where the
+    /// imports landed (they sort by original date, not to the top).
+    @ObservedObject private var importHighlight = ChatSessionImportHighlight.shared
     @State private var editingSessionId: UUID?
     @State private var editingBuffer: String = ""
     /// IDs the user has multi-selected (⌘-click to toggle, ⇧-click to
@@ -94,6 +101,7 @@ struct ChatSessionSidebar: View {
         .source(.http),
         .source(.schedule),
         .source(.watcher),
+        .source(.imported),
         .archived,
     ]
 
@@ -163,7 +171,7 @@ struct ChatSessionSidebar: View {
     }
 
     var body: some View {
-        SidebarContainer(attachedEdge: .leading, topPadding: 40) {
+        SidebarContainer(attachedEdge: .leading, topPadding: 40, width: width) {
             lensTabBar
                 .padding(.horizontal, 12)
                 .padding(.bottom, 6)
@@ -641,6 +649,22 @@ struct ChatSessionSidebar: View {
 
             Spacer()
 
+            Button {
+                ChatSessionImportCoordinator.run(
+                    agentId: agentId == Agent.defaultId ? nil : agentId,
+                    scope: alertScope,
+                    // A single-conversation import opens immediately so the
+                    // user isn't left hunting the list for it.
+                    onOpen: { onSelect($0) }
+                )
+            } label: {
+                Image(systemName: "square.and.arrow.down")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .buttonStyle(.plain)
+            .localizedHelp("Import Conversations")
+
             Button(action: onNewChat) {
                 Image(systemName: "square.and.pencil")
                     .font(.system(size: 14, weight: .medium))
@@ -773,61 +797,74 @@ struct ChatSessionSidebar: View {
     // MARK: - Session List
 
     private var sessionList: some View {
-        ScrollView {
-            LazyVStack(spacing: 2) {
-                ForEach(filteredSessions) { session in
-                    SessionRow(
-                        session: session,
-                        agent: agentManager.agent(for: session.agentId ?? Agent.defaultId),
-                        isSelected: session.id == currentSessionId,
-                        isEditing: editingSessionId == session.id,
-                        onSelect: {
-                            handleSelect(session)
-                        },
-                        onStartRename: {
-                            if editingSessionId != nil && editingSessionId != session.id {
-                                dismissEditing()
-                            }
-                            editingSessionId = session.id
-                            editingBuffer = session.title
-                        },
-                        onConfirmRename: { newTitle in
-                            let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
-                            if !trimmed.isEmpty {
-                                onRename(session.id, trimmed)
-                            }
-                            editingSessionId = nil
-                        },
-                        onCancelRename: {
-                            editingSessionId = nil
-                        },
-                        onBufferChange: { editingBuffer = $0 },
-                        onDelete: {
-                            if editingSessionId != nil {
-                                dismissEditing()
-                            }
-                            onDelete(session.id)
-                        },
-                        onToggleArchive: {
-                            onSetArchived(session.id, !session.archived)
-                        },
-                        onTogglePin: {
-                            onSetPinned(session.id, !session.pinned)
-                        },
-                        onExport: { format in
-                            onExport(session, format)
-                        },
-                        onOpenInNewWindow: onOpenInNewWindow != nil
-                            ? {
-                                onOpenInNewWindow?(session)
-                            } : nil
-                    )
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(spacing: 2) {
+                    ForEach(filteredSessions) { session in
+                        SessionRow(
+                            session: session,
+                            agent: agentManager.agent(for: session.agentId ?? Agent.defaultId),
+                            isSelected: session.id == currentSessionId,
+                            isImportHighlighted: importHighlight.sessionIds.contains(session.id),
+                            isEditing: editingSessionId == session.id,
+                            onSelect: {
+                                handleSelect(session)
+                            },
+                            onStartRename: {
+                                if editingSessionId != nil && editingSessionId != session.id {
+                                    dismissEditing()
+                                }
+                                editingSessionId = session.id
+                                editingBuffer = session.title
+                            },
+                            onConfirmRename: { newTitle in
+                                let trimmed = newTitle.trimmingCharacters(in: .whitespaces)
+                                if !trimmed.isEmpty {
+                                    onRename(session.id, trimmed)
+                                }
+                                editingSessionId = nil
+                            },
+                            onCancelRename: {
+                                editingSessionId = nil
+                            },
+                            onBufferChange: { editingBuffer = $0 },
+                            onDelete: {
+                                if editingSessionId != nil {
+                                    dismissEditing()
+                                }
+                                onDelete(session.id)
+                            },
+                            onToggleArchive: {
+                                onSetArchived(session.id, !session.archived)
+                            },
+                            onTogglePin: {
+                                onSetPinned(session.id, !session.pinned)
+                            },
+                            onExport: { format in
+                                onExport(session, format)
+                            },
+                            onOpenInNewWindow: onOpenInNewWindow != nil
+                                ? {
+                                    onOpenInNewWindow?(session)
+                                } : nil
+                        )
+                        .id(session.id)
+                    }
+                }
+                .padding(.vertical, 8)
+                .padding(.horizontal, 8)
+            }
+            .scrollIndicators(.hidden)
+            .onChange(of: importHighlight.sessionIds) { ids in
+                // Bring the topmost freshly imported row into view; the
+                // glow only helps if the row is on screen.
+                guard let target = filteredSessions.first(where: { ids.contains($0.id) })
+                else { return }
+                withAnimation(.easeInOut(duration: 0.35)) {
+                    proxy.scrollTo(target.id, anchor: .center)
                 }
             }
-            .padding(.vertical, 8)
-            .padding(.horizontal, 8)
         }
-        .scrollIndicators(.hidden)
     }
 }
 
@@ -837,6 +874,9 @@ private struct SessionRow: View {
     let session: ChatSessionData
     let agent: Agent?
     let isSelected: Bool
+    /// True while this session is in the freshly-imported flash window;
+    /// renders a short accent glow so the row is findable in the list.
+    var isImportHighlighted: Bool = false
     let isEditing: Bool
     let onSelect: () -> Void
     let onStartRename: () -> Void
@@ -911,6 +951,12 @@ private struct SessionRow: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(theme.primaryText)
                             .lineLimit(1)
+                            // The Text itself must be greedy so it claims all
+                            // free width and pushes the trailing badges to the
+                            // right; putting maxWidth on the enclosing HStack
+                            // instead let the text hug its ideal and truncate
+                            // early while empty space sat after the badges.
+                            .frame(maxWidth: .infinity, alignment: .leading)
 
                         if session.source != .chat {
                             sourceBadge
@@ -926,7 +972,10 @@ private struct SessionRow: View {
                         .foregroundColor(theme.secondaryText.opacity(0.85))
                         .lineLimit(1)
                 }
-                Spacer()
+                // Fill the row so the title uses the full available width
+                // instead of hugging its ideal size and letting the trailing
+                // Spacer eat the slack (which truncated titles prematurely).
+                .frame(maxWidth: .infinity, alignment: .leading)
 
                 if isHovered || showActionsPopover {
                     SidebarRowActionButton(
@@ -951,6 +1000,19 @@ private struct SessionRow: View {
             .padding(.vertical, 8)
             .background(SidebarRowBackground(isSelected: isSelected, isHovered: isHovered))
             .clipShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
+            .overlay(
+                RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous)
+                    .stroke(
+                        theme.accentColor.opacity(isImportHighlighted ? 0.8 : 0),
+                        lineWidth: 1.5
+                    )
+                    .shadow(
+                        color: theme.accentColor.opacity(isImportHighlighted ? 0.5 : 0),
+                        radius: 5
+                    )
+                    .allowsHitTesting(false)
+            )
+            .animation(.easeOut(duration: 0.6), value: isImportHighlighted)
             .contentShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
             .onTapGesture {
                 onSelect()
@@ -1257,6 +1319,7 @@ private struct SessionRow: View {
         case .schedule: return theme.warningColor
         case .watcher: return theme.successColor
         case .selfSchedule: return theme.warningColor.opacity(0.9)
+        case .imported: return theme.accentColorLight.opacity(0.7)
         }
     }
 
@@ -1277,6 +1340,8 @@ private struct SessionRow: View {
             return Text("Watcher", bundle: .module)
         case .selfSchedule:
             return Text("Self-scheduled", bundle: .module)
+        case .imported:
+            return Text("Imported", bundle: .module)
         }
     }
 
