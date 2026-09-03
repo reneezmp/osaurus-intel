@@ -297,6 +297,16 @@ For each upstream commit:
 > both architectures, so it is not sync damage. Upstream has not hit it because they are not on
 > 6.4 yet. 0.23.2 builds clean with no source changes on our side. When upstream eventually
 > bumps their pin, drop this divergence and follow them.
+>
+> **Knock-on effect — build-tool plugin validation.** 0.23.2 ships a
+> `SharedSourcesPlugin` build-tool plugin that 0.21.1 did not. Xcode refuses to run an
+> unvalidated package plugin from the command line, so `xcodebuild` dies at
+> *"Validate plug-in SharedSourcesPlugin"* **before compiling a single file**, while
+> `swift build` is unaffected — which makes it invisible to the usual Ventura build check.
+> `scripts/build/build_rosy.sh` (the release path, called from `cut_intel_release.sh`) and
+> `scripts/build/build_arm64.sh` therefore pass `-skipPackagePluginValidation
+> -skipMacroValidation`. Without them the release ceremony fails with three lines of output
+> and no obvious cause. Remove these flags if the secp256k1 pin is ever reverted.
 - `RuntimePolicySourceTests.swift` — vMLX source-policy tests
 
 ---
