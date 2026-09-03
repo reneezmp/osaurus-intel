@@ -6,6 +6,38 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.32</title>
+      <pubDate>Thu, 03 Sep 2026 13:19:43 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>33</sparkle:version>
+      <sparkle:shortVersionString>1.0.32</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.32/Osaurus-Intel-1.0.32.zip" length="54554785" type="application/octet-stream" sparkle:edSignature="dYzxzWf2dE5Xl5jbj+QUPgEODKBOxZ3kXNYciAX5mabup8QHOA3fVzLaVlv/DZ6mSmCkBEl8dXTnquFSRMDsDA=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.32
+
+Projects — group related chats under a shared set of instructions. Create a project from the sidebar, drop existing chats into it, write the instructions once, and every chat in that project carries them. Instructions ride the same context path as memory recall, so they cost you nothing in prompt-cache reuse.
+
+Your chat history got a lot more workable: full-text search with an in-chat find bar, pinned chats, multi-select for bulk archive and delete, automatic titles (now optional) plus /title on demand, and the ability to delete an individual response. You can also bring conversations in from ChatGPT, Claude, Gemini, Grok and OpenWebUI, including zipped exports. The sidebar resizes, ⌘N opens a new chat, and ⌘= / ⌘- zoom the text.
+
+Lost access to a Mac? Identity restore from your recovery phrase is now reachable in Settings, and it reports exactly what it re-derived and what it could not.
+
+Security: in release builds the Osaurus Router endpoint can no longer be redirected by a local preference. Previously any process able to write this app's defaults could point billed inference somewhere else.
+
+Reliability: a batch of upstream crash and hang fixes — settings windows, management sheets, the find bar, display reconfiguration, text rendering — plus keychain hardening so credentials survive a relaunch, and providers that no longer get stuck disconnected after an update.
+
+MCP servers are considerably tougher: sessions recover and retry instead of failing, OAuth refresh no longer stampedes, tool discovery follows pagination instead of silently keeping the first page, auth failures are classified rather than generic, and stdio servers report why they died.
+
+Privacy: provider model discovery and plugin downloads now honour your configured proxy. Both previously went around it.
+
+Math renders properly now — inline $…$ and display blocks, without the delimiters leaking through or the layout jumping.
+
+Absorbs selected fixes and features from upstream 0.21 through 0.24.3. This is a curated subset, not a full sync — the fork continues to leave out subsystems that need Apple Silicon.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.31</title>
       <pubDate>Sat, 20 Jun 2026 13:17:18 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
