@@ -161,6 +161,10 @@ struct MessageTableRepresentable: NSViewRepresentable {
     var scrollToTurnId: UUID? = nil
     var scrollToTurnTrigger: Int = 0
 
+    /// Active in-conversation find query (Cmd+F); empty when the find bar is
+    /// closed. Threaded into every cell so match occurrences are highlighted.
+    var searchHighlightQuery: String = ""
+
     // MARK: - NSViewRepresentable Lifecycle
 
     func makeCoordinator() -> Coordinator { Coordinator() }
@@ -297,7 +301,8 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onEdit: onEdit,
             onDelete: onDelete,
             onSpeak: onSpeak,
-            onUserImagePreview: onUserImagePreview
+            onUserImagePreview: onUserImagePreview,
+            searchHighlightQuery: searchHighlightQuery
         )
     }
 
@@ -322,7 +327,8 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onEdit: onEdit,
             onDelete: onDelete,
             onSpeak: onSpeak,
-            onUserImagePreview: onUserImagePreview
+            onUserImagePreview: onUserImagePreview,
+            searchHighlightQuery: searchHighlightQuery
         )
     }
 
@@ -724,6 +730,7 @@ extension MessageTableRepresentable {
             let widthChanged = abs(ctx.width - context.width) > 1.0
             let expandedIdsChanged = context.expandedIds != ctx.expandedIds
             let previousEditingTurnId = ctx.editingTurnId
+            let previousSearchHighlightQuery = ctx.searchHighlightQuery
             let previousStreaming = ctx.isStreaming
             let previousLastAssistantTurnId = ctx.lastAssistantTurnId
             // NSView backed cells snapshot the theme
@@ -749,6 +756,13 @@ extension MessageTableRepresentable {
             if context.editingTurnId != previousEditingTurnId {
                 reconfigureCellsForTurn(previousEditingTurnId)
                 reconfigureCellsForTurn(context.editingTurnId)
+            }
+
+            // Find-highlight query also lives in the context, not the blocks.
+            // Repaint every materialized cell when it changes so matches
+            // highlight (and un-highlight on close) immediately.
+            if context.searchHighlightQuery != previousSearchHighlightQuery {
+                reconfigureAllCellsFromLookup(blockLookup)
             }
 
             let newIds = blocks.map(\.id)

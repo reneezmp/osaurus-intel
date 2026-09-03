@@ -45,6 +45,8 @@ struct MessageThreadView: View {
     var onVisibleTopUserTurnChanged: ((UUID?) -> Void)? = nil
     var scrollToTurnId: UUID? = nil
     var scrollToTurnTrigger: Int = 0
+    /// Active in-conversation find query (Cmd+F); empty when the bar is closed.
+    var searchHighlightQuery: String = ""
 
     @Environment(\.theme) private var theme
 
@@ -101,7 +103,8 @@ struct MessageThreadView: View {
             onUserImagePreview: onUserImagePreview,
             onVisibleTopUserTurnChanged: onVisibleTopUserTurnChanged,
             scrollToTurnId: scrollToTurnId,
-            scrollToTurnTrigger: scrollToTurnTrigger
+            scrollToTurnTrigger: scrollToTurnTrigger,
+            searchHighlightQuery: searchHighlightQuery
         )
     }
 }

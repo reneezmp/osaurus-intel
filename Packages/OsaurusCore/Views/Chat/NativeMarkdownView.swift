@@ -74,6 +74,13 @@ final class NativeMarkdownView: NSView {
     private var parseTask: Task<Void, Never>?
     /// cancels stale loads when segment id is reused with a new URL or view is removed
     private var imageLoadTasks: [String: (UUID, Task<Void, Never>)] = [:]
+    /// Active in-conversation find query (Cmd+F). Every case-insensitive
+    /// occurrence in the body text gets a translucent background. Empty =
+    /// feature inactive, zero cost.
+    private var searchHighlightQuery: String = ""
+    /// Ranges the search highlighter painted, so a query change (or clear)
+    /// removes exactly what it added.
+    private var appliedSearchRanges: [NSRange] = []
     /// invalid until first layout pass with positive width — drives remeasure in `layout()`
     private var lastLayoutWidthForHeight: CGFloat = -1
     /// avoids re-entrant `measuredHeight` when `layoutSubtreeIfNeeded` runs during tool-row expand (same instance)
@@ -224,13 +231,82 @@ final class NativeMarkdownView: NSView {
             // full rebuild path needs to mark the whole view dirty
             if !incrementalPath {
                 tv.needsDisplay = true
+                // storage was swapped wholesale — stale ranges point into the
+                // old string, forget them rather than risk stripping a
+                // background the renderer itself owns in the new one.
+                appliedSearchRanges = []
             }
+            applySearchHighlightsIfNeeded(theme: theme)
         }
 
         // nested NativeMarkdownView (text segment inside mixed content) must update heightConstraint
         // or the default 100pt sticks and following segments overlap the text.
         _ = measuredHeight(for: width)
         onHeightChanged?()
+    }
+
+    // MARK: - Search Highlight (Cmd+F)
+
+    /// Set the active find query (Cmd+F). Repaints when the query changed
+    /// and propagates into mixed-segment children (nested text-group views).
+    func setSearchHighlight(query: String, theme: any ThemeProtocol) {
+        let changed = query != searchHighlightQuery
+        searchHighlightQuery = query
+        if changed {
+            applySearchHighlightsIfNeeded(theme: theme)
+        }
+        for entry in segmentViews {
+            if let child = entry.view as? NativeMarkdownView {
+                child.setSearchHighlight(query: query, theme: theme)
+            }
+        }
+    }
+
+    /// Repaint search-match backgrounds on the current textStorage. Always
+    /// removes the previously painted ranges first so a query change or
+    /// storage rebuild can't leave stale backgrounds behind.
+    private func applySearchHighlightsIfNeeded(theme: any ThemeProtocol) {
+        guard let tv = textView, let storage = tv.textStorage else {
+            appliedSearchRanges = []
+            return
+        }
+        if !appliedSearchRanges.isEmpty {
+            storage.beginEditing()
+            for range in appliedSearchRanges where range.upperBound <= storage.length {
+                storage.removeAttribute(.backgroundColor, range: range)
+            }
+            storage.endEditing()
+            appliedSearchRanges = []
+        }
+        let query = searchHighlightQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, storage.length > 0 else {
+            tv.needsDisplay = true
+            return
+        }
+        let color = NSColor(theme.accentColor).withAlphaComponent(0.3)
+        let string = storage.string as NSString
+        var searchRange = NSRange(location: 0, length: string.length)
+        storage.beginEditing()
+        while searchRange.length > 0 {
+            let found = string.range(of: query, options: [.caseInsensitive], range: searchRange)
+            if found.location == NSNotFound { break }
+            var hasExistingBackground = false
+            storage.enumerateAttribute(.backgroundColor, in: found, options: []) { value, _, stop in
+                if value != nil {
+                    hasExistingBackground = true
+                    stop.pointee = true
+                }
+            }
+            if !hasExistingBackground {
+                storage.addAttribute(.backgroundColor, value: color, range: found)
+                appliedSearchRanges.append(found)
+            }
+            let next = found.location + max(found.length, 1)
+            if next >= string.length { break }
+            searchRange = NSRange(location: next, length: string.length - next)
+        }
+        storage.endEditing()
+        tv.needsDisplay = true
     }
 
     // MARK: Height
@@ -396,7 +472,9 @@ final class NativeMarkdownView: NSView {
             updateFader(textView: tv, isStreaming: isStreaming, incrementalPath: incrementalPath)
             if !incrementalPath {
                 tv.needsDisplay = true
+                appliedSearchRanges = []
             }
+            applySearchHighlightsIfNeeded(theme: theme)
         }
 
         // must update heightConstraint — init leaves 100pt; otherwise user bubbles stay artificially tall

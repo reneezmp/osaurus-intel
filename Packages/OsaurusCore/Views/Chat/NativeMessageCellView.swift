@@ -40,6 +40,10 @@ struct CellRenderingContext {
     var onSpeak: ((UUID) -> Void)? = nil
     /// attachment or shared-artifact id string → full screen preview from ChatView
     var onUserImagePreview: ((String) -> Void)? = nil
+    /// Active in-conversation find query (Cmd+F). Empty when the find bar is
+    /// closed. Message cells paint every case-insensitive occurrence in
+    /// their body text via `NativeMarkdownView.setSearchHighlight`.
+    var searchHighlightQuery: String = ""
 }
 
 // MARK: - Cell-Isolated ExpandedBlocksStore Proxy
@@ -1354,6 +1358,7 @@ final class NativeMessageCellView: NSTableCellView {
             cacheKey: block.id,
             isStreaming: isStreaming
         )
+        mv.setSearchHighlight(query: context.searchHighlightQuery, theme: context.theme)
 
         // Apply assistant bubble background only when the target value actually changes —
         // configure() runs on every streaming token, so unconditional CGColor assignment
@@ -1697,6 +1702,7 @@ final class NativeMessageCellView: NSTableCellView {
                 cacheKey: block.id,
                 isStreaming: context.isStreaming
             )
+            mv.setSearchHighlight(query: context.searchHighlightQuery, theme: theme)
         }
 
         if let stack = userImageStack {

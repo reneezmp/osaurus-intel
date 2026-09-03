@@ -163,6 +163,8 @@ final class ChatSession: ObservableObject {
     /// Mirrors `ChatSessionData.archived`. Required here so `toSessionData()`
     /// round-trips the flag instead of stamping `false` on every save.
     var archived: Bool = false
+    /// Mirrors `ChatSessionData.pinned`, for the same round-trip reason as `archived`.
+    var pinned: Bool = false
 
     /// Tracks if session has unsaved content changes
     private var isDirty: Bool = false
@@ -1030,6 +1032,7 @@ final class ChatSession: ObservableObject {
         externalSessionKey = nil
         dispatchTaskId = nil
         archived = false
+        pinned = false
         projectId = nil
         isDirty = false
 
@@ -1222,6 +1225,7 @@ final class ChatSession: ObservableObject {
             externalSessionKey: externalSessionKey,
             dispatchTaskId: dispatchTaskId,
             archived: archived,
+            pinned: pinned,
             capabilities: SessionCapability.derive(from: turnData),
             projectId: projectId
         )
@@ -1271,6 +1275,7 @@ final class ChatSession: ObservableObject {
         externalSessionKey = data.externalSessionKey
         dispatchTaskId = data.dispatchTaskId
         archived = data.archived
+        pinned = data.pinned
         projectId = data.projectId
 
         // Restore the persisted model when it's still valid; otherwise
@@ -2790,6 +2795,12 @@ struct ChatView: View {
     @State private var isMinimapExpanded: Bool = false
     @State private var scrollToTurnId: UUID?
     @State private var scrollToTurnTrigger: Int = 0
+    // In-conversation find (Cmd+F). Visibility lives on `windowState` so the
+    // window-level key monitor can toggle it; query/matches are view state.
+    @State private var findQuery: String = ""
+    /// Ordered turn ids whose content matches `findQuery`.
+    @State private var findMatchTurnIds: [UUID] = []
+    @State private var findMatchIndex: Int = 0
     // What's New modal
     @State private var pendingWhatsNew: WhatsNewRelease? = nil
     @State private var showAutoSpeakPrompt: Bool = false
@@ -3278,7 +3289,9 @@ struct ChatView: View {
                     activeMinimapTurnId = turnId
                 },
                 scrollToTurnId: scrollToTurnId,
-                scrollToTurnTrigger: scrollToTurnTrigger
+                scrollToTurnTrigger: scrollToTurnTrigger,
+                searchHighlightQuery: windowState.isFindBarVisible
+                    ? findQuery.trimmingCharacters(in: .whitespacesAndNewlines) : ""
             )
             .safeAreaInset(edge: .top, spacing: 0) {
                 Color.clear
@@ -3296,6 +3309,36 @@ struct ChatView: View {
             .padding(.top, 4)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
             .allowsHitTesting(session.lastCompletionSummary != nil || session.currentTodo != nil)
+
+            // Find bar overlay (Cmd+F) — top-trailing, above the thread.
+            if windowState.isFindBarVisible {
+                VStack {
+                    HStack {
+                        Spacer()
+                        ChatFindBar(
+                            query: $findQuery,
+                            matchIndex: findMatchIndex,
+                            matchCount: findMatchTurnIds.count,
+                            onPrevious: { advanceFindMatch(by: -1) },
+                            onNext: { advanceFindMatch(by: 1) },
+                            onClose: { windowState.isFindBarVisible = false }
+                        )
+                        .padding(.trailing, 16)
+                        .padding(.top, inlineInsetHeight + 8)
+                    }
+                    Spacer()
+                }
+                .transition(.move(edge: .top).combined(with: .opacity))
+                .onChange(of: findQuery) { _ in
+                    recomputeFindMatches(query: findQuery, jumpToFirst: true)
+                }
+                .onChange(of: session.turns.count) { _ in
+                    recomputeFindMatches(query: findQuery, jumpToFirst: false)
+                }
+                .onAppear {
+                    recomputeFindMatches(query: findQuery, jumpToFirst: false)
+                }
+            }
         }
         .frame(height: height)
         .clipped()
@@ -3452,6 +3495,8 @@ private struct IsolatedThreadView: View {
     var onVisibleTopUserTurnChanged: ((UUID?) -> Void)? = nil
     var scrollToTurnId: UUID? = nil
     var scrollToTurnTrigger: Int = 0
+    /// Active in-conversation find query (Cmd+F); empty when the bar is closed.
+    var searchHighlightQuery: String = ""
 
     var body: some View {
         let _ = ChatPerfTrace.shared.count("body.IsolatedThreadView")
@@ -3480,7 +3525,8 @@ private struct IsolatedThreadView: View {
             onUserImagePreview: onUserImagePreview,
             onVisibleTopUserTurnChanged: onVisibleTopUserTurnChanged,
             scrollToTurnId: scrollToTurnId,
-            scrollToTurnTrigger: scrollToTurnTrigger
+            scrollToTurnTrigger: scrollToTurnTrigger,
+            searchHighlightQuery: searchHighlightQuery
         )
     }
 }
@@ -3627,14 +3673,63 @@ extension ChatView {
         editText = ""
     }
 
+    // MARK: - In-Conversation Find (Cmd+F)
+
+    /// Recompute the ordered turn-id match list for `query` over the visible
+    /// conversation. `jumpToFirst` scrolls to the first match (used while
+    /// typing); otherwise the current match is preserved when it survives the
+    /// recompute (used when streaming appends turns). Logic lives in
+    /// `ChatFindMatcher` so the invariants are unit-tested.
+    private func recomputeFindMatches(query: String, jumpToFirst: Bool) {
+        let (state, jumpTo) = ChatFindMatcher.recompute(
+            query: query,
+            turns: session.turns,
+            previous: ChatFindState(matchTurnIds: findMatchTurnIds, matchIndex: findMatchIndex),
+            preserveCurrentMatch: !jumpToFirst
+        )
+        findMatchTurnIds = state.matchTurnIds
+        findMatchIndex = state.matchIndex
+        if let jumpTo {
+            scrollToTurnId = jumpTo
+            scrollToTurnTrigger &+= 1
+        }
+    }
+
+    /// Step to the next/previous match, wrapping at both ends.
+    private func advanceFindMatch(by delta: Int) {
+        let (state, jumpTo) = ChatFindMatcher.advance(
+            ChatFindState(matchTurnIds: findMatchTurnIds, matchIndex: findMatchIndex),
+            by: delta
+        )
+        findMatchTurnIds = state.matchTurnIds
+        findMatchIndex = state.matchIndex
+        if let jumpTo {
+            scrollToTurnId = jumpTo
+            scrollToTurnTrigger &+= 1
+        }
+    }
+
     // Key monitor for Esc to cancel voice or close window
     private func setupKeyMonitor() {
         if keyMonitor != nil { return }
 
         let capturedWindowId = windowState.windowId
         let session = windowState.session
+        let windowState = self.windowState
 
-        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak session] event in
+        keyMonitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak session, weak windowState] event in
+            // Cmd+F opens the in-conversation find bar.
+            if event.modifierFlags.intersection([.command, .shift, .option, .control]) == .command,
+                event.charactersIgnoringModifiers?.lowercased() == "f"
+            {
+                guard let ourWindow = ChatWindowManager.shared.getNSWindow(id: capturedWindowId),
+                    event.window === ourWindow,
+                    let windowState
+                else { return event }
+                windowState.isFindBarVisible = true
+                return nil
+            }
+
             // Esc key code is 53
             if event.keyCode == 53 {
                 // Only handle Esc if this event is for our specific window
@@ -3651,6 +3746,14 @@ extension ChatView {
                 // Stage 0: Slash command popup is open — let the text view delegate handle it
                 if SlashCommandRegistry.shared.isPopupVisible {
                     return event
+                }
+
+                // Stage 0.5: Find bar is open — close it before any other
+                // transient UI so Esc can't fall through to window close
+                // while the user is mid-search.
+                if let windowState, windowState.isFindBarVisible {
+                    windowState.isFindBarVisible = false
+                    return nil
                 }
 
                 // Check if voice input is active AND overlay is visible

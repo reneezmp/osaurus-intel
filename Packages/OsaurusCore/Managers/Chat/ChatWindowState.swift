@@ -544,6 +544,10 @@ final class ChatWindowState: ObservableObject {
 
     @Published var showSidebar: Bool = true
     @Published var showCloseConfirmation: Bool = false
+    /// Drives the in-conversation find bar (Cmd+F). Set by the window-level
+    /// key monitor (which cannot touch `ChatView`'s `@State`) and cleared by
+    /// the bar's close button or the Esc dismissal chain.
+    @Published var isFindBarVisible: Bool = false
     @Published var agentId: UUID
     @Published var agents: [Agent] = []
     @Published var discoveredAgents: [DiscoveredAgent] = []

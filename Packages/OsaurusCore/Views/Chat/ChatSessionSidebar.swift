@@ -5,6 +5,7 @@
 //  Sidebar showing chat session history
 //
 
+import AppKit
 import SwiftUI
 
 /// In-memory toggle for the delete-conversation confirmation. Resets on
@@ -31,6 +32,7 @@ struct ChatSessionSidebar: View {
     let onDelete: (UUID) -> Void
     let onRename: (UUID, String) -> Void
     let onSetArchived: (UUID, Bool) -> Void
+    let onSetPinned: (UUID, Bool) -> Void
     let onExport: (ChatSessionData, ExportFormat) -> Void
     /// Optional callback for opening a session in a new window
     var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
@@ -48,6 +50,11 @@ struct ChatSessionSidebar: View {
     @ObservedObject private var sessionsManager = ChatSessionsManager.shared
     @State private var editingSessionId: UUID?
     @State private var editingBuffer: String = ""
+    /// IDs the user has multi-selected (⌘-click to toggle, ⇧-click to
+    /// range-select). Empty means normal single-select navigation is active.
+    @State private var selectedIds: Set<UUID> = []
+    /// The row a ⇧-click range extends from. Set on every plain or ⌘ click.
+    @State private var selectionAnchorId: UUID?
     @State private var searchQuery: String = ""
     @State private var sourceFilter: SourceFilter = .all
     @State private var hoveredFilter: SourceFilter?
@@ -104,9 +111,9 @@ struct ChatSessionSidebar: View {
             byFilter = sessions.filter { $0.archived }
         }
         guard !searchQuery.trimmingCharacters(in: .whitespaces).isEmpty else {
-            return byFilter
+            return pinnedFirst(byFilter)
         }
-        return byFilter.filter { session in
+        let matched = byFilter.filter { session in
             if SearchService.matches(query: searchQuery, in: session.title) { return true }
             if let key = session.externalSessionKey,
                 SearchService.matches(query: searchQuery, in: key)
@@ -114,10 +121,29 @@ struct ChatSessionSidebar: View {
                 return true
             }
             // Match capability labels so "vision" / "code" finds tagged chats.
-            return session.capabilities.contains { cap in
+            if session.capabilities.contains(where: { cap in
                 SearchService.matches(query: searchQuery, in: cap.label)
+            }) {
+                return true
+            }
+            // Full-text match over message bodies. Intel sessions keep their
+            // turns in memory (no lazy SQLite-backed store to query against),
+            // so this is a synchronous scan rather than the upstream async
+            // database lookup.
+            return session.turns.contains { turn in
+                SearchService.matches(query: searchQuery, in: turn.content)
             }
         }
+        return pinnedFirst(matched)
+    }
+
+    /// Stable partition floating pinned sessions to the top while preserving
+    /// the incoming (recency-descending) order within each group. The
+    /// `.archived` lens keeps its own order — pins are a default-view concern
+    /// — but partitioning there too is harmless and keeps the rule uniform.
+    private func pinnedFirst(_ list: [ChatSessionData]) -> [ChatSessionData] {
+        guard list.contains(where: { $0.pinned }) else { return list }
+        return list.filter { $0.pinned } + list.filter { !$0.pinned }
     }
 
     /// Source-filter chips shown above the list. Hides chips with no
@@ -152,10 +178,12 @@ struct ChatSessionSidebar: View {
         // sidebar's loadSession) is a context change — wipe per-window
         // filter state so the new agent starts on "All" with an empty
         // search instead of inheriting the previous agent's lens.
+        .animation(theme.animationQuick(), value: selectedIds)
         .onChange(of: agentId) { _ in
             sourceFilter = .all
             searchQuery = ""
             hoveredFilter = nil
+            clearSelection()
         }
         // A "What's New" deep link asked to reveal the Projects tab.
         .onChange(of: projectManager.pendingRevealProjectsTab) { pending in
@@ -192,6 +220,14 @@ struct ChatSessionSidebar: View {
 
         Divider()
             .opacity(0.3)
+
+        // Batch action bar for the current multi-selection.
+        if !selectedIds.isEmpty {
+            selectionActionBar
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .transition(.move(edge: .top).combined(with: .opacity))
+        }
 
         // Session list
         if sessions.isEmpty {
@@ -485,6 +521,59 @@ struct ChatSessionSidebar: View {
         editingBuffer = ""
     }
 
+    // MARK: - Multi-Select
+
+    /// Routes a row tap by the modifier keys held at click time. ⌘ toggles
+    /// the row in the multi-selection and ⇧ extends a contiguous range from
+    /// the anchor. With no modifier: while a selection is active a plain click
+    /// toggles the row (so a chat can be deselected as easily as it was
+    /// selected); otherwise it navigates to the chat as usual.
+    private func handleTap(_ session: ChatSessionData) {
+        let flags = NSEvent.modifierFlags
+        if flags.contains(.command) {
+            toggleSelection(session.id)
+        } else if flags.contains(.shift) {
+            extendSelection(to: session.id)
+        } else if !selectedIds.isEmpty {
+            toggleSelection(session.id)
+        } else {
+            selectionAnchorId = session.id
+            handleSelect(session)
+        }
+    }
+
+    private func toggleSelection(_ id: UUID) {
+        if selectedIds.contains(id) {
+            selectedIds.remove(id)
+        } else {
+            selectedIds.insert(id)
+        }
+        selectionAnchorId = id
+    }
+
+    /// Adds every row between the anchor and `id` (inclusive) in the
+    /// currently-visible order. Falls back to a single toggle when there is
+    /// no usable anchor yet.
+    private func extendSelection(to id: UUID) {
+        let ids = filteredSessions.map(\.id)
+        guard
+            let anchor = selectionAnchorId ?? currentSessionId,
+            let anchorIndex = ids.firstIndex(of: anchor),
+            let targetIndex = ids.firstIndex(of: id)
+        else {
+            selectedIds.insert(id)
+            selectionAnchorId = id
+            return
+        }
+        let range = anchorIndex <= targetIndex ? anchorIndex...targetIndex : targetIndex...anchorIndex
+        selectedIds.formUnion(ids[range])
+    }
+
+    private func clearSelection() {
+        selectedIds.removeAll()
+        selectionAnchorId = nil
+    }
+
     // MARK: - Navigate-Away Rename Guard
 
     private func handleSelect(_ session: ChatSessionData) {
@@ -565,6 +654,106 @@ struct ChatSessionSidebar: View {
         .padding(.bottom, 8)
     }
 
+    // MARK: - Selection Action Bar
+
+    /// Batch actions for the current multi-selection: archive, delete, and a
+    /// trailing clear. Mirrors the per-row menu's destructive-delete flow but
+    /// operates on every selected id at once.
+    private var selectionActionBar: some View {
+        HStack(spacing: 8) {
+            Text("\(selectedIds.count) selected", bundle: .module)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+                .lineLimit(1)
+
+            Spacer(minLength: 4)
+
+            selectionBarButton(icon: "archivebox", help: "Archive", tint: theme.secondaryText) {
+                archiveSelected()
+            }
+            selectionBarButton(icon: "trash", help: "Delete", tint: .red) {
+                requestDeleteSelected()
+            }
+            selectionBarButton(icon: "xmark", help: "Clear Selection", tint: theme.secondaryText) {
+                clearSelection()
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 6)
+        .background(
+            RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous)
+                .fill(theme.accentColor.opacity(theme.isDark ? 0.16 : 0.10))
+        )
+    }
+
+    private func selectionBarButton(
+        icon: String,
+        help: LocalizedStringKey,
+        tint: Color,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Image(systemName: icon)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(tint)
+                .frame(width: SidebarStyle.actionButtonSize, height: SidebarStyle.actionButtonSize)
+                .background(
+                    RoundedRectangle(cornerRadius: SidebarStyle.actionButtonCornerRadius, style: .continuous)
+                        .fill(theme.secondaryBackground.opacity(0.5))
+                )
+        }
+        .buttonStyle(.plain)
+        .localizedHelp(help)
+    }
+
+    // MARK: - Batch Operations
+
+    /// Archives every selected session (idempotent per row) and clears the
+    /// selection. Archiving is non-destructive, so it skips the confirm.
+    private func archiveSelected() {
+        for id in selectedIds {
+            onSetArchived(id, true)
+        }
+        clearSelection()
+    }
+
+    /// Confirms once, then deletes every selected session. Honors the
+    /// per-session "don't ask again" opt-out just like the single-row flow.
+    private func requestDeleteSelected() {
+        let ids = selectedIds
+        guard !ids.isEmpty else { return }
+        if DeleteConfirmationPreference.shared.skipForSession {
+            performDelete(ids)
+            return
+        }
+        let requestId = UUID()
+        let scope = alertScope
+        let accessory = AnyView(DontAskAgainToggle())
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: "Delete Conversations?",
+                message: L("\(ids.count) conversations will be removed permanently. This can't be undone."),
+                accessory: accessory,
+                buttons: [
+                    .cancel(L("Cancel")),
+                    .destructive(L("Delete")) { performDelete(ids) },
+                ],
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
+    }
+
+    private func performDelete(_ ids: Set<UUID>) {
+        for id in ids {
+            onDelete(id)
+        }
+        clearSelection()
+    }
+
     // MARK: - Empty State
 
     private var emptyState: some View {
@@ -622,6 +811,9 @@ struct ChatSessionSidebar: View {
                         onToggleArchive: {
                             onSetArchived(session.id, !session.archived)
                         },
+                        onTogglePin: {
+                            onSetPinned(session.id, !session.pinned)
+                        },
                         onExport: { format in
                             onExport(session, format)
                         },
@@ -655,6 +847,7 @@ private struct SessionRow: View {
     var onBufferChange: ((String) -> Void)? = nil
     let onDelete: () -> Void
     let onToggleArchive: () -> Void
+    let onTogglePin: () -> Void
     let onExport: (ChatSessionSidebar.ExportFormat) -> Void
     /// Optional callback for opening in a new window
     var onOpenInNewWindow: (() -> Void)? = nil
@@ -707,6 +900,13 @@ private struct SessionRow: View {
 
                 VStack(alignment: .leading, spacing: 2) {
                     HStack(spacing: 5) {
+                        if session.pinned {
+                            Image(systemName: "pin.fill")
+                                .font(.system(size: 9, weight: .semibold))
+                                .foregroundColor(theme.secondaryText.opacity(0.85))
+                                .rotationEffect(.degrees(45))
+                        }
+
                         Text(session.title)
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(theme.primaryText)
@@ -775,6 +975,9 @@ private struct SessionRow: View {
                     Divider()
                 }
                 Button(action: onStartRename) { Text("Rename", bundle: .module) }
+                Button(action: onTogglePin) {
+                    Text(session.pinned ? "Unpin" : "Pin", bundle: .module)
+                }
                 Divider()
 #if !OSAURUS_INTEL
                 Button(action: requestExport) { Text("Export…", bundle: .module) }
@@ -812,6 +1015,14 @@ private struct SessionRow: View {
             ActionsPopoverButton(icon: "pencil", label: "Rename", isDestructive: false) {
                 showActionsPopover = false
                 onStartRename()
+            }
+            ActionsPopoverButton(
+                icon: session.pinned ? "pin.slash" : "pin",
+                label: session.pinned ? "Unpin" : "Pin",
+                isDestructive: false
+            ) {
+                showActionsPopover = false
+                onTogglePin()
             }
             Divider().padding(.vertical, 2)
 #if !OSAURUS_INTEL
@@ -1327,6 +1538,7 @@ private struct DontAskAgainToggle: View {
                 onDelete: { _ in },
                 onRename: { _, _ in },
                 onSetArchived: { _, _ in },
+                onSetPinned: { _, _ in },
                 onExport: { _, _ in }
             )
             .frame(height: 400)

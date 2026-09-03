@@ -94,6 +94,13 @@ struct ChatContentView: View {
                                 if session.sessionId == id { session.archived = archived }
                                 windowState?.refreshSessions()
                             },
+                            onSetPinned: { [weak windowState] id, pinned in
+                                ChatSessionsManager.shared.setPinned(id: id, pinned: pinned)
+                                // Keep the open view-model in sync so the next
+                                // auto-save doesn't clobber the flag.
+                                if session.sessionId == id { session.pinned = pinned }
+                                windowState?.refreshSessions()
+                            },
                             onExport: { _, _ in
                                 // Export pipeline is amputated on Intel
                                 // (ChatSessionExportCoordinator + ExportChooserSheet

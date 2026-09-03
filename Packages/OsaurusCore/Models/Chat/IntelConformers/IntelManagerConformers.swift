@@ -507,6 +507,10 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
     var externalSessionKey: String?
     var dispatchTaskId: UUID?
     var archived: Bool
+    /// User-set pin flag. Pinned sessions float to the top of the sidebar
+    /// list (within their current filter) so frequently-used chats stay
+    /// reachable without searching.
+    var pinned: Bool = false
     var selectedModel: String?
     var turns: [ChatTurnData]
     var capabilities: Set<SessionCapability> = []
@@ -528,6 +532,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         externalSessionKey: String? = nil,
         dispatchTaskId: UUID? = nil,
         archived: Bool = false,
+        pinned: Bool = false,
         capabilities: Set<SessionCapability> = [],
         projectId: UUID? = nil
     ) {
@@ -543,6 +548,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         self.sourcePluginId = sourcePluginId
         self.externalSessionKey = externalSessionKey
         self.dispatchTaskId = dispatchTaskId
+        self.pinned = pinned
         self.capabilities = capabilities
         self.projectId = projectId
     }
@@ -611,6 +617,15 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
             // See `rename` — metadata-only, safe to persist off-thread.
             persistAsync(s)
         }
+    }
+    /// Toggle a session's pin flag. Like `setArchived`, this does not touch
+    /// `updatedAt`: pinning is a display-ordering concern handled by the
+    /// sidebar and must not bubble the row up the recency list.
+    func setPinned(id: UUID, pinned: Bool) {
+        guard var s = sessions[id], s.pinned != pinned else { return }
+        s.pinned = pinned
+        sessions[id] = s
+        persistAsync(s)
     }
     /// Move a session into a project (or out, with nil). Metadata-only,
     /// same off-thread persist as `rename`/`setArchived`.
