@@ -118,6 +118,11 @@ public enum OsaurusPaths {
         root().appendingPathComponent("sessions", isDirectory: true)
     }
 
+    /// Projects directory (one JSON file per project, like `agents()`)
+    public static func projects() -> URL {
+        root().appendingPathComponent("projects", isDirectory: true)
+    }
+
     /// Archive directory used by the chat-history SQLite migration to retain
     /// the original per-session JSON files (never deleted).
     public static func sessionsArchive() -> URL {
@@ -456,6 +461,10 @@ public enum OsaurusPaths {
 
     public static func sessionFile(for id: UUID) -> URL {
         sessions().appendingPathComponent("\(id.uuidString).json")
+    }
+
+    public static func projectFile(for id: UUID) -> URL {
+        projects().appendingPathComponent("\(id.uuidString).json")
     }
 
     public static func scheduleFile(for id: UUID) -> URL {

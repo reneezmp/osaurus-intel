@@ -1160,11 +1160,16 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
 @MainActor
 final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
     static let sidebarItem = NSToolbarItem.Identifier("IntelChatToolbar.sidebar")
+    /// Back-to-project chip — shows the current chat's project name (when
+    /// it has one) and reopens that project's detail sheet. Empty/hidden
+    /// otherwise; always present in the toolbar so we don't need to
+    /// reconfigure `NSToolbar`'s item set at runtime.
+    static let projectItem = NSToolbarItem.Identifier("IntelChatToolbar.project")
     static let agentItem = NSToolbarItem.Identifier("IntelChatToolbar.agent")
     static let actionItem = NSToolbarItem.Identifier("IntelChatToolbar.action")
 
     private static let ids: [NSToolbarItem.Identifier] = [
-        sidebarItem, .flexibleSpace, agentItem, .flexibleSpace, actionItem,
+        sidebarItem, projectItem, .flexibleSpace, agentItem, .flexibleSpace, actionItem,
     ]
 
     private weak var windowState: ChatWindowState?
@@ -1191,6 +1196,11 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
         switch itemIdentifier {
         case Self.sidebarItem:
             return host(itemIdentifier, IntelToolbarSidebarView(windowState: windowState))
+        case Self.projectItem:
+            return host(
+                itemIdentifier,
+                IntelToolbarProjectView(windowState: windowState, session: windowState.session)
+            )
         case Self.agentItem:
             return host(itemIdentifier, IntelToolbarAgentView(windowState: windowState))
         case Self.actionItem:
@@ -1232,6 +1242,57 @@ private struct IntelToolbarSidebarView: View {
             }
         )
         .environment(\.theme, windowState.theme)
+    }
+}
+
+/// Back-to-project toolbar chip. Renders nothing when the current chat has
+/// no project; otherwise shows the project's name and reopens its detail
+/// sheet (the same `ProjectDetailView` the sidebar's Projects tab presents).
+private struct IntelToolbarProjectView: View {
+    @ObservedObject var windowState: ChatWindowState
+    @ObservedObject var session: ChatSession
+    @ObservedObject private var projectManager = ProjectManager.shared
+
+    var body: some View {
+        Group {
+            if let pid = session.projectId, let project = projectManager.project(for: pid) {
+                Button(action: { presentDetail(project) }) {
+                    HStack(spacing: 4) {
+                        Image(systemName: "folder.fill")
+                            .font(.system(size: 10, weight: .medium))
+                        Text(verbatim: project.name)
+                            .font(.system(size: 11, weight: .medium))
+                            .lineLimit(1)
+                    }
+                    .foregroundColor(windowState.theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .localizedHelp("Back to Project")
+            }
+        }
+        .environment(\.theme, windowState.theme)
+    }
+
+    private func presentDetail(_ project: Project) {
+        let requestId = UUID()
+        let scope = ThemedAlertScope.chat(windowState.windowId)
+        let detail = ProjectDetailView(projectId: project.id) { selected in
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+            windowState.loadSession(selected)
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: project.name,
+                message: nil,
+                buttons: [.cancel(L("Close"))],
+                showsCloseButton: true,
+                customContent: AnyView(detail),
+                width: 480,
+                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
+            ),
+            scope: scope
+        )
     }
 }
 

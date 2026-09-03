@@ -44,12 +44,21 @@ struct ChatSessionSidebar: View {
     @Environment(\.theme) private var theme
     @Environment(\.themedAlertScope) private var alertScope
     @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var projectManager = ProjectManager.shared
+    @ObservedObject private var sessionsManager = ChatSessionsManager.shared
     @State private var editingSessionId: UUID?
     @State private var editingBuffer: String = ""
     @State private var searchQuery: String = ""
     @State private var sourceFilter: SourceFilter = .all
     @State private var hoveredFilter: SourceFilter?
     @FocusState private var isSearchFocused: Bool
+    /// Chats vs. Projects lens, shown as a tab bar above the history header.
+    @State private var lens: SidebarLens = .chats
+
+    enum SidebarLens: Hashable {
+        case chats
+        case projects
+    }
 
     // MARK: - Source Filter
 
@@ -129,44 +138,14 @@ struct ChatSessionSidebar: View {
 
     var body: some View {
         SidebarContainer(attachedEdge: .leading, topPadding: 40) {
-            // Header with New Chat button
-            sidebarHeader
+            lensTabBar
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
 
-            // Search field
-            SidebarSearchField(
-                text: $searchQuery,
-                placeholder: "Search conversations...",
-                isFocused: $isSearchFocused
-            )
-            .padding(.horizontal, 12)
-            .padding(.bottom, 6)
-
-            // Source filter chips — always visible while the agent has
-            // any session, so the user can never "lose" the rail just
-            // by selecting a filter (or by drilling into a single-source
-            // agent via loadSession). The chip set itself still hides
-            // sources the agent has never used.
-            if !sessions.isEmpty {
-                sourceFilterRail
-                    .padding(.horizontal, 12)
-                    .padding(.bottom, 6)
-            }
-
-            Divider()
-                .opacity(0.3)
-
-            // Session list
-            if sessions.isEmpty {
-                emptyState
-            } else if filteredSessions.isEmpty {
-                SidebarNoResultsView(searchQuery: searchQuery) {
-                    withAnimation(theme.animationQuick()) {
-                        searchQuery = ""
-                        sourceFilter = .all
-                    }
-                }
+            if lens == .chats {
+                chatsTabContent
             } else {
-                sessionList
+                projectsTabContent
             }
         }
         // Adopting a new agent (via the dropdown's switchAgent or the
@@ -178,6 +157,255 @@ struct ChatSessionSidebar: View {
             searchQuery = ""
             hoveredFilter = nil
         }
+        // A "What's New" deep link asked to reveal the Projects tab.
+        .onChange(of: projectManager.pendingRevealProjectsTab) { pending in
+            guard pending else { return }
+            lens = .projects
+            projectManager.pendingRevealProjectsTab = false
+        }
+    }
+
+    @ViewBuilder
+    private var chatsTabContent: some View {
+        // Header with New Chat button
+        sidebarHeader
+
+        // Search field
+        SidebarSearchField(
+            text: $searchQuery,
+            placeholder: "Search conversations...",
+            isFocused: $isSearchFocused
+        )
+        .padding(.horizontal, 12)
+        .padding(.bottom, 6)
+
+        // Source filter chips — always visible while the agent has
+        // any session, so the user can never "lose" the rail just
+        // by selecting a filter (or by drilling into a single-source
+        // agent via loadSession). The chip set itself still hides
+        // sources the agent has never used.
+        if !sessions.isEmpty {
+            sourceFilterRail
+                .padding(.horizontal, 12)
+                .padding(.bottom, 6)
+        }
+
+        Divider()
+            .opacity(0.3)
+
+        // Session list
+        if sessions.isEmpty {
+            emptyState
+        } else if filteredSessions.isEmpty {
+            SidebarNoResultsView(searchQuery: searchQuery) {
+                withAnimation(theme.animationQuick()) {
+                    searchQuery = ""
+                    sourceFilter = .all
+                }
+            }
+        } else {
+            sessionList
+        }
+    }
+
+    // MARK: - Lens Tab Bar
+
+    private var lensTabBar: some View {
+        HStack(spacing: 4) {
+            lensTabButton(.chats, label: "Chats", icon: "bubble.left.and.bubble.right")
+            lensTabButton(.projects, label: "Projects", icon: "folder")
+        }
+        .padding(.top, 12)
+    }
+
+    private func lensTabButton(_ target: SidebarLens, label: String, icon: String) -> some View {
+        let isSelected = lens == target
+        return Button {
+            withAnimation(theme.animationQuick()) { lens = target }
+        } label: {
+            HStack(spacing: 5) {
+                Image(systemName: icon)
+                    .font(.system(size: 11, weight: .semibold))
+                Text(LocalizedStringKey(label), bundle: .module)
+                    .font(.system(size: 12, weight: isSelected ? .semibold : .medium))
+            }
+            .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(isSelected ? theme.accentColor.opacity(theme.isDark ? 0.2 : 0.14) : .clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+        .pointingHandCursor()
+    }
+
+    // MARK: - Projects Tab
+
+    private var projectsTabContent: some View {
+        VStack(spacing: 0) {
+            HStack {
+                Text("Projects", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Spacer()
+                Button(action: presentCreateProject) {
+                    Image(systemName: "plus")
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                }
+                .buttonStyle(.plain)
+                .localizedHelp("New Project")
+            }
+            .padding(.horizontal, 16)
+            .padding(.top, 20)
+            .padding(.bottom, 8)
+
+            Divider().opacity(0.3)
+
+            if projectManager.projects.isEmpty {
+                projectsEmptyState
+            } else {
+                ScrollView {
+                    LazyVStack(spacing: 2) {
+                        ForEach(projectManager.projects) { project in
+                            ProjectRow(
+                                project: project,
+                                chatCount: sessionsManager.sessions(forProject: project.id).count,
+                                onOpen: { presentProjectDetail(project) },
+                                onRename: { presentRenameProject(project) },
+                                onDelete: { presentDeleteProject(project) }
+                            )
+                        }
+                    }
+                    .padding(.vertical, 8)
+                    .padding(.horizontal, 8)
+                }
+                .scrollIndicators(.hidden)
+            }
+        }
+    }
+
+    private var projectsEmptyState: some View {
+        VStack(spacing: 8) {
+            Spacer()
+            Image(systemName: "folder")
+                .font(.system(size: 28))
+                .foregroundColor(theme.secondaryText.opacity(0.5))
+            Text("No projects yet", bundle: .module)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(theme.secondaryText.opacity(0.85))
+            Text(
+                "Group related chats so they share the same instructions.",
+                bundle: .module
+            )
+            .font(.system(size: 11))
+            .foregroundColor(theme.secondaryText.opacity(0.7))
+            .multilineTextAlignment(.center)
+            .fixedSize(horizontal: false, vertical: true)
+            .padding(.horizontal, 24)
+            Spacer()
+        }
+        .frame(maxWidth: .infinity)
+    }
+
+    // MARK: - Project Sheets
+
+    private func presentCreateProject() {
+        let requestId = UUID()
+        let scope = alertScope
+        let sheet = ProjectNamePromptSheet(initialName: "", submitLabel: "Create", showsIntro: true) {
+            name in
+            let project = projectManager.create(name: name)
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+            presentProjectDetail(project)
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("New Project"),
+                message: nil,
+                buttons: [.cancel(L("Cancel"))],
+                showsCloseButton: true,
+                customContent: AnyView(sheet),
+                width: 360,
+                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
+            ),
+            scope: scope
+        )
+    }
+
+    private func presentRenameProject(_ project: Project) {
+        let requestId = UUID()
+        let scope = alertScope
+        let sheet = ProjectNamePromptSheet(initialName: project.name, submitLabel: "Save") { name in
+            var updated = project
+            updated.name = name
+            projectManager.update(updated)
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Rename Project"),
+                message: nil,
+                buttons: [.cancel(L("Cancel"))],
+                showsCloseButton: true,
+                customContent: AnyView(sheet),
+                width: 360,
+                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
+            ),
+            scope: scope
+        )
+    }
+
+    private func presentDeleteProject(_ project: Project) {
+        let requestId = UUID()
+        let scope = alertScope
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Delete Project?"),
+                message: L(
+                    "\"\(project.name)\" will be removed. Its chats stay, just ungrouped."
+                ),
+                buttons: [
+                    .cancel(L("Cancel")),
+                    .destructive(L("Delete")) {
+                        sessionsManager.deleteProject(id: project.id)
+                    },
+                ],
+                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
+            ),
+            scope: scope
+        )
+    }
+
+    private func presentProjectDetail(_ project: Project) {
+        let requestId = UUID()
+        let scope = alertScope
+        let detail = ProjectDetailView(
+            projectId: project.id,
+            onSelectChat: { session in
+                ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                onSelect(session)
+            }
+        )
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: project.name,
+                message: nil,
+                buttons: [.cancel(L("Close"))],
+                showsCloseButton: true,
+                customContent: AnyView(detail),
+                width: 480,
+                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
+            ),
+            scope: scope
+        )
     }
 
     // MARK: - Source Filter Rail
@@ -433,8 +661,13 @@ private struct SessionRow: View {
 
     @Environment(\.theme) private var theme
     @Environment(\.themedAlertScope) private var alertScope
+    @ObservedObject private var projectManager = ProjectManager.shared
     @State private var isHovered = false
     @State private var showActionsPopover = false
+    /// Drill-in state for the actions popover's "Move to Project" row —
+    /// swaps the popover body to a project picker without opening a
+    /// second popover.
+    @State private var showingProjectPicker = false
     /// Local buffer for the rename TextField. Kept on the row (not the
     /// sidebar) so focus churn during popover dismissal cannot desync it
     /// from the focused row.
@@ -502,7 +735,14 @@ private struct SessionRow: View {
                         action: { showActionsPopover.toggle() }
                     )
                     .popover(isPresented: $showActionsPopover, arrowEdge: .trailing) {
-                        actionsPopover
+                        if showingProjectPicker {
+                            projectPicker
+                        } else {
+                            actionsPopover
+                        }
+                    }
+                    .onChange(of: showActionsPopover) { isOpen in
+                        if !isOpen { showingProjectPicker = false }
                     }
                     .transition(.opacity.combined(with: .scale(scale: 0.9)))
                 }
@@ -543,6 +783,23 @@ private struct SessionRow: View {
                 Button(action: onToggleArchive) {
                     Text(session.archived ? "Unarchive" : "Archive", bundle: .module)
                 }
+                if !projectManager.projects.isEmpty {
+                    Menu {
+                        ForEach(projectManager.projects) { project in
+                            Button(project.name) {
+                                ChatSessionsManager.shared.setProject(id: session.id, projectId: project.id)
+                            }
+                        }
+                        if session.projectId != nil {
+                            Divider()
+                            Button("Remove from Project") {
+                                ChatSessionsManager.shared.setProject(id: session.id, projectId: nil)
+                            }
+                        }
+                    } label: {
+                        Text(session.projectId != nil ? "Change Project" : "Move to Project", bundle: .module)
+                    }
+                }
                 Button(role: .destructive, action: requestDelete) { Text("Delete", bundle: .module) }
             }
         }
@@ -572,6 +829,23 @@ private struct SessionRow: View {
                 showActionsPopover = false
                 onToggleArchive()
             }
+            Divider().padding(.vertical, 2)
+            ActionsPopoverButton(
+                icon: "folder.badge.plus",
+                label: session.projectId != nil ? "Change Project" : "Move to Project",
+                isDestructive: false
+            ) {
+                showingProjectPicker = true
+            }
+            if session.projectId != nil {
+                ActionsPopoverButton(
+                    icon: "folder.badge.minus", label: "Remove from Project", isDestructive: true
+                ) {
+                    showActionsPopover = false
+                    ChatSessionsManager.shared.setProject(id: session.id, projectId: nil)
+                }
+            }
+            Divider().padding(.vertical, 2)
             ActionsPopoverButton(icon: "trash", label: "Delete", isDestructive: true) {
                 showActionsPopover = false
                 requestDelete()
@@ -579,6 +853,40 @@ private struct SessionRow: View {
         }
         .padding(6)
         .frame(minWidth: 180)
+    }
+
+    // MARK: - Move to Project Picker
+
+    /// Drill-in content swapped into the same popover by "Move to Project" —
+    /// mirrors upstream's "standard popover button with drill-in picker"
+    /// rather than opening a second popover.
+    private var projectPicker: some View {
+        VStack(alignment: .leading, spacing: 2) {
+            ActionsPopoverButton(icon: "chevron.left", label: "Back", isDestructive: false) {
+                showingProjectPicker = false
+            }
+            Divider().padding(.vertical, 2)
+            if projectManager.projects.isEmpty {
+                Text("No projects yet", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .padding(8)
+            } else {
+                ForEach(projectManager.projects) { project in
+                    ActionsPopoverButton(
+                        icon: session.projectId == project.id ? "checkmark.circle.fill" : "folder",
+                        label: project.name,
+                        isDestructive: false
+                    ) {
+                        showActionsPopover = false
+                        showingProjectPicker = false
+                        ChatSessionsManager.shared.setProject(id: session.id, projectId: project.id)
+                    }
+                }
+            }
+        }
+        .padding(6)
+        .frame(minWidth: 200)
     }
 
     // MARK: - Export Format Chooser
@@ -860,6 +1168,83 @@ private struct SessionRow: View {
         }
     }
 
+}
+
+// MARK: - Project Row
+
+private struct ProjectRow: View {
+    let project: Project
+    let chatCount: Int
+    let onOpen: () -> Void
+    let onRename: () -> Void
+    let onDelete: () -> Void
+
+    @Environment(\.theme) private var theme
+    @State private var isHovered = false
+    @State private var showActionsPopover = false
+
+    var body: some View {
+        HStack(spacing: 10) {
+            ZStack {
+                RoundedRectangle(cornerRadius: 7, style: .continuous)
+                    .fill(theme.accentColor.opacity(theme.isDark ? 0.18 : 0.12))
+                    .frame(width: 24, height: 24)
+                Image(systemName: "folder.fill")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.accentColor)
+            }
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: project.name)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+                Text(chatCount == 1 ? L("1 chat") : L("\(chatCount) chats"))
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.secondaryText.opacity(0.85))
+            }
+
+            Spacer()
+
+            Image(systemName: "chevron.right")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(theme.secondaryText.opacity(0.5))
+
+            if isHovered || showActionsPopover {
+                SidebarRowActionButton(
+                    icon: "ellipsis",
+                    help: "Actions",
+                    action: { showActionsPopover.toggle() }
+                )
+                .popover(isPresented: $showActionsPopover, arrowEdge: .trailing) {
+                    VStack(alignment: .leading, spacing: 2) {
+                        ActionsPopoverButton(icon: "pencil", label: "Rename", isDestructive: false) {
+                            showActionsPopover = false
+                            onRename()
+                        }
+                        ActionsPopoverButton(icon: "trash", label: "Delete", isDestructive: true) {
+                            showActionsPopover = false
+                            onDelete()
+                        }
+                    }
+                    .padding(6)
+                    .frame(minWidth: 160)
+                }
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(SidebarRowBackground(isSelected: false, isHovered: isHovered))
+        .clipShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
+        .contentShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
+        .onTapGesture(perform: onOpen)
+        .onHover { hovering in
+            withAnimation(theme.springAnimation(responseMultiplier: 0.8)) {
+                isHovered = hovering
+            }
+        }
+        .pointingHandCursor()
+    }
 }
 
 // MARK: - Actions Popover Button

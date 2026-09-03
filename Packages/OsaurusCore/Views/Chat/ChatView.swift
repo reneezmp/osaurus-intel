@@ -130,6 +130,10 @@ final class ChatSession: ObservableObject {
     @Published var showVoiceOverlay: Bool = false
     /// The agent this session belongs to
     @Published var agentId: UUID?
+    /// The project this chat is grouped under, if any. Mirrors
+    /// `ChatSessionData.projectId`; feeds project instructions into
+    /// `composeChatContext` at send time.
+    @Published var projectId: UUID?
 
     /// Skill ID to inject as one-off context for the next outgoing message.
     /// Set when the user selects a skill from the slash command popup; cleared after send.
@@ -263,6 +267,11 @@ final class ChatSession: ObservableObject {
     private var isLoadingModel: Bool = false
 
     nonisolated(unsafe) private var localModelsObserver: NSObjectProtocol?
+    /// Keeps this live session's `projectId` in sync when the chat is moved
+    /// between projects (or its project is deleted) from another window —
+    /// otherwise the next send would keep injecting a stale project's
+    /// instructions. Removed in deinit.
+    nonisolated(unsafe) private var projectMembershipObserver: NSObjectProtocol?
 
     init() {
         let cache = ModelPickerItemCache.shared
@@ -311,6 +320,21 @@ final class ChatSession: ObservableObject {
             Task { @MainActor in
                 guard let self, sid == self.expectedTodoSessionId else { return }
                 self.currentTodo = await AgentTodoStore.shared.todo(for: sid)
+            }
+        }
+
+        projectMembershipObserver = NotificationCenter.default.addObserver(
+            forName: .chatSessionProjectDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self else { return }
+            if let sid = note.userInfo?["sessionId"] as? UUID, sid == self.sessionId {
+                self.projectId = note.userInfo?["projectId"] as? UUID
+            } else if let cleared = note.userInfo?["clearedProjectId"] as? UUID,
+                cleared == self.projectId
+            {
+                self.projectId = nil
             }
         }
 
@@ -384,6 +408,9 @@ final class ChatSession: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = agentTodoObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = projectMembershipObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         modelSelectionCancellable = nil
@@ -1003,6 +1030,7 @@ final class ChatSession: ObservableObject {
         externalSessionKey = nil
         dispatchTaskId = nil
         archived = false
+        projectId = nil
         isDirty = false
 
         // Reset agent-loop UI state.
@@ -1194,7 +1222,8 @@ final class ChatSession: ObservableObject {
             externalSessionKey: externalSessionKey,
             dispatchTaskId: dispatchTaskId,
             archived: archived,
-            capabilities: SessionCapability.derive(from: turnData)
+            capabilities: SessionCapability.derive(from: turnData),
+            projectId: projectId
         )
     }
 
@@ -1242,6 +1271,7 @@ final class ChatSession: ObservableObject {
         externalSessionKey = data.externalSessionKey
         dispatchTaskId = data.dispatchTaskId
         archived = data.archived
+        projectId = data.projectId
 
         // Restore the persisted model when it's still valid; otherwise
         // fall back to the agent's preferred model. `isLoadingModel`
@@ -2126,7 +2156,8 @@ final class ChatSession: ObservableObject {
                     cachedPreflight: cachedSession?.initialPreflight,
                     additionalToolNames: cachedSession?.loadedToolNames ?? [],
                     frozenAlwaysLoadedNames: cachedSession?.initialAlwaysLoadedNames,
-                    trace: ttftTrace
+                    trace: ttftTrace,
+                    projectId: projectId
                 )
                 guard isRunActive(runId) else { return }
 

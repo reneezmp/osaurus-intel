@@ -510,6 +510,10 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
     var selectedModel: String?
     var turns: [ChatTurnData]
     var capabilities: Set<SessionCapability> = []
+    /// Project this chat belongs to, if any. Grouping only — orthogonal to
+    /// `agentId`. Optional so old on-disk sessions (no key present) decode
+    /// to `nil` via synthesized Codable's `decodeIfPresent`.
+    var projectId: UUID? = nil
 
     init(
         id: UUID = UUID(),
@@ -524,7 +528,8 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         externalSessionKey: String? = nil,
         dispatchTaskId: UUID? = nil,
         archived: Bool = false,
-        capabilities: Set<SessionCapability> = []
+        capabilities: Set<SessionCapability> = [],
+        projectId: UUID? = nil
     ) {
         self.id = id
         self.title = title
@@ -539,6 +544,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         self.externalSessionKey = externalSessionKey
         self.dispatchTaskId = dispatchTaskId
         self.capabilities = capabilities
+        self.projectId = projectId
     }
 
     /// Derive a chat title from the first user message — mirrors the upstream
@@ -605,6 +611,44 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
             // See `rename` — metadata-only, safe to persist off-thread.
             persistAsync(s)
         }
+    }
+    /// Move a session into a project (or out, with nil). Metadata-only,
+    /// same off-thread persist as `rename`/`setArchived`.
+    func setProject(id: UUID, projectId: UUID?) {
+        guard var s = sessions[id], s.projectId != projectId else { return }
+        s.projectId = projectId
+        sessions[id] = s
+        persistAsync(s)
+        NotificationCenter.default.post(
+            name: .chatSessionProjectDidChange,
+            object: nil,
+            userInfo: ["sessionId": id, "projectId": projectId as Any]
+        )
+    }
+    /// Detach every session from a deleted project, then drop the project
+    /// record itself. Call this instead of `ProjectManager.delete` directly.
+    func deleteProject(id: UUID) {
+        for (sid, var s) in sessions where s.projectId == id {
+            s.projectId = nil
+            sessions[sid] = s
+            persistAsync(s)
+        }
+        // `ProjectManager` is `@MainActor`; this manager isn't statically
+        // isolated, so hop explicitly rather than assume the caller's thread.
+        Task { @MainActor in
+            ProjectManager.shared.delete(id: id)
+        }
+        NotificationCenter.default.post(
+            name: .chatSessionProjectDidChange,
+            object: nil,
+            userInfo: ["clearedProjectId": id]
+        )
+    }
+    /// Sessions belonging to a given project, newest first.
+    func sessions(forProject projectId: UUID) -> [ChatSessionData] {
+        Array(sessions.values)
+            .filter { $0.projectId == projectId }
+            .sorted { $0.updatedAt > $1.updatedAt }
     }
     func refresh() { loadFromDisk() }
 

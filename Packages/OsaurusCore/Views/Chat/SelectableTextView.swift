@@ -719,12 +719,22 @@ struct SelectableTextView: NSViewRepresentable {
     // MARK: - Inline Math Helpers
 
     private struct InlineSegment {
+        /// Content without delimiters — what gets typeset when `isMath`.
         let text: String
         let isMath: Bool
+        /// The original source spelling, delimiters included. Shown verbatim when the
+        /// typesetter rejects a span, so the message still says what the model wrote
+        /// rather than a re-delimited guess.
+        let fallback: String
+
+        init(text: String, isMath: Bool, fallback: String? = nil) {
+            self.text = text
+            self.isMath = isMath
+            self.fallback = fallback ?? text
+        }
     }
 
-    /// A delimited segment only counts as math when its content contains a LaTeX-ish
-    /// character. This prevents currency runs (e.g. `$100 ... $200`) from being typeset.
+    /// Content that is unambiguously LaTeX because it uses LaTeX syntax.
     @inline(__always)
     private func looksLikeLatex(_ s: String) -> Bool {
         for scalar in s.unicodeScalars {
@@ -736,10 +746,33 @@ struct SelectableTextView: NSViewRepresentable {
         return false
     }
 
+    @inline(__always)
+    private func isASCIIDigit(_ scalar: Unicode.Scalar) -> Bool {
+        scalar >= "0" && scalar <= "9"
+    }
+
+    /// Whether a `$...$` span carrying no explicit LaTeX syntax should still be typeset.
+    ///
+    /// Currency amounts begin with a digit right after the `$`; and when a currency run is
+    /// mis-paired, the "closing" `$` is really the opening `$` of the next amount, so a
+    /// digit follows it. The first guard rejects `$5 to $10`, the second rejects
+    /// `$USD 5 and $10`. A span that starts with a digit and has no LaTeX syntax (`$2$`)
+    /// stays literal — the deliberate cost of never typesetting a price.
+    @inline(__always)
+    private func looksLikeDollarMath(_ content: String, followedBy next: Unicode.Scalar?) -> Bool {
+        let scalars = content.unicodeScalars
+        guard let first = scalars.first, scalars.count <= 64 else { return false }
+        guard !isASCIIDigit(first) else { return false }
+        if let next, isASCIIDigit(next) { return false }
+        for scalar in scalars where scalar == "\n" { return false }
+        // Require something substantive; a span of pure punctuation is not math.
+        return scalars.contains { CharacterSet.alphanumerics.contains($0) }
+    }
+
     /// Split text into alternating plain-text and math segments.
-    /// Handles `$...$` (no whitespace padding) and `\(...\)` delimiters.
-    /// Spans whose content does not look like LaTeX are emitted as literal text so the
-    /// outer scanner can still match a real math span later on the same line.
+    /// Handles `$...$` (no whitespace padding) and `\(...\)` delimiters. A delimited span
+    /// that fails the rules above is emitted as literal text, and scanning resumes just past
+    /// the opening delimiter, so a real math span later on the same line can still match.
     private func splitInlineMath(_ text: String) -> [InlineSegment] {
         var segments: [InlineSegment] = []
         var current = ""
@@ -766,21 +799,37 @@ struct SelectableTextView: NSViewRepresentable {
         }
 
         @inline(__always)
-        func emitMath(_ content: String, advanceTo nextIndex: Int) {
+        func emitMath(_ content: String, fallback: String, advanceTo nextIndex: Int) {
             flushText()
-            segments.append(InlineSegment(text: content, isMath: true))
+            segments.append(InlineSegment(text: content, isMath: true, fallback: fallback))
             i = nextIndex
         }
 
         while i < scalars.count {
             let c = scalars[i]
 
-            // \(...\) delimiter
+            // Inline code span. `$HOME and $PATH` inside backticks is shell, not math, and
+            // `\(` inside backticks is a literal escape — neither may be typeset.
+            if c == "`" {
+                var runLength = 0
+                while i + runLength < scalars.count, scalars[i + runLength] == "`" { runLength += 1 }
+                if let closeStart = findClosingBacktickRun(scalars, from: i + runLength, runLength: runLength) {
+                    current += slice(i, closeStart + runLength)
+                    i = closeStart + runLength
+                } else {
+                    // Unclosed (or still streaming): emit the run and keep scanning.
+                    current += slice(i, i + runLength)
+                    i += runLength
+                }
+                continue
+            }
+
+            // \(...\) delimiter — explicit and unambiguous, so any non-empty content is math.
             if c == "\\", peek(1) == "(" {
                 if let closeIdx = findClosingParen(scalars, from: i + 2) {
                     let content = slice(i + 2, closeIdx)
-                    if !content.isEmpty, looksLikeLatex(content) {
-                        emitMath(content, advanceTo: closeIdx + 2)
+                    if !content.isEmpty {
+                        emitMath(content, fallback: slice(i, closeIdx + 2), advanceTo: closeIdx + 2)
                         continue
                     }
                 }
@@ -805,8 +854,8 @@ struct SelectableTextView: NSViewRepresentable {
                 let closeIdx = findClosingDollar(scalars, from: i + 1)
             {
                 let content = slice(i + 1, closeIdx)
-                if looksLikeLatex(content) {
-                    emitMath(content, advanceTo: closeIdx + 1)
+                if looksLikeLatex(content) || looksLikeDollarMath(content, followedBy: peek(closeIdx - i + 1)) {
+                    emitMath(content, fallback: slice(i, closeIdx + 1), advanceTo: closeIdx + 1)
                     continue
                 }
                 // Currency/plain text: fall through, keeping the `$` literal.
@@ -818,6 +867,23 @@ struct SelectableTextView: NSViewRepresentable {
 
         flushText()
         return segments
+    }
+
+    /// Find the start of a backtick run of exactly `runLength`, closing a code span
+    /// opened by a run of the same length.
+    private func findClosingBacktickRun(_ scalars: [Unicode.Scalar], from start: Int, runLength: Int) -> Int? {
+        var j = start
+        while j < scalars.count {
+            guard scalars[j] == "`" else {
+                j += 1
+                continue
+            }
+            var length = 0
+            while j + length < scalars.count, scalars[j + length] == "`" { length += 1 }
+            if length == runLength { return j }
+            j += length
+        }
+        return nil
     }
 
     /// Find the index of a closing `\)` for an opening `\(`.
@@ -874,8 +940,8 @@ struct SelectableTextView: NSViewRepresentable {
                     )
                     result.append(NSAttributedString(attachment: attachment))
                 } else {
-                    // Fallback: render the raw LaTeX as code-styled text
-                    let fallback = NSMutableAttributedString(string: "$\(segment.text)$", attributes: baseAttributes)
+                    // Typesetter rejected it — show the source exactly as written.
+                    let fallback = NSMutableAttributedString(string: segment.fallback, attributes: baseAttributes)
                     result.append(fallback)
                 }
             } else {

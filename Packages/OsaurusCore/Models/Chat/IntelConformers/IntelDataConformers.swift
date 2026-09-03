@@ -1434,7 +1434,7 @@ final class SystemPromptComposer: @unchecked Sendable {
     // we CAN honor the one thing that matters here: the agent's effective
     // system prompt (custom prompt for custom agents, global config prompt
     // for Default). Memory/tools stay inert, matching the amputated build.
-    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil) async -> ComposedContext {
+    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil, projectId: UUID? = nil) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
         let (basePrompt, folder, toolMode, enabledToolNames, folderToolNames) = await MainActor.run {
             (
@@ -1546,6 +1546,23 @@ final class SystemPromptComposer: @unchecked Sendable {
             let days = memCfg.episodeRetentionDays > 0 ? memCfg.episodeRetentionDays : 3650
             memorySection = await MemorySearchService.shared.recall(
                 query: q, agentId: nil, days: days, budgetTokens: memCfg.memoryBudgetTokens)
+        }
+
+        // Project instructions: shared free-form context for every chat in a
+        // project. Rides the SAME cache-safe inject-prefix path as recalled
+        // memory (spliced in by `injectMemoryPrefix` just before the last
+        // user turn) rather than the stable `prompt` above, so this stays a
+        // single injection point — Intel Projects have no per-turn-variable
+        // content, but reusing the existing plumbing avoids a second path
+        // doing the same job.
+        if let projectId,
+            let instructions = await MainActor.run(body: {
+                ProjectManager.shared.project(for: projectId)?.instructions
+            })?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !instructions.isEmpty
+        {
+            let block = "## Project Instructions\n" + instructions
+            memorySection = [block, memorySection].compactMap { $0 }.joined(separator: "\n\n")
         }
 
         return ComposedContext(
