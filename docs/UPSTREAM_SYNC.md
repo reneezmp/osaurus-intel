@@ -13,7 +13,9 @@
 ## Pending next sync: 0.20.3 → 0.24.3 (triaged 2026-09-02, Session 11)
 
 **Range:** `9124d696..4528b56f` — **783 commits**, upstream `0.20.3` → `0.24.3` (+17 untagged).
-**Nothing ported yet.** This section is the triage result; the staged execution plan lives in
+**Status: Waves A–E are ported and committed on `sync/0.24.3` / `intel-fork`; nothing is released
+yet.** See *Sync execution log* at the end of this section. The triage below is what the work was
+planned from; the staged execution plan lives in
 [`SYNC_0.24.3_PLAN.md`](SYNC_0.24.3_PLAN.md), and the full per-commit verdict table (all 476
 reviewed commits) is in [`UPSTREAM_TRIAGE_0.24.3.md`](UPSTREAM_TRIAGE_0.24.3.md).
 
@@ -113,6 +115,28 @@ Sandbox, and upstream's own marketing modals (Product Hunt, "what's new" for amp
 > `potion-base-8M` static embedder already runs acceptably on Rosy (it powers local semantic
 > memory). Knowledge is therefore **viable on Intel and wanted**, just not in this sync. See
 > the backlog in [`SYNC_0.24.3_PLAN.md`](SYNC_0.24.3_PLAN.md) §10.
+
+### Sync execution log (2026-09-02/03)
+
+| Commit | Wave | Result |
+|---|---|---|
+| `9ca6c90f` | A — keychain / Router / provider | 7 candidates → 4 partial ports, 3 dissolved to SKIP |
+| `56e3a422..0680502c` | B — crashes & hangs | 11 candidates → 8 hand-ported, 3 SKIP |
+| `1c84bf11` | build | `swift-secp256k1` → 0.23.2 (Swift 6.4; see the pin note above) |
+| `52cf68ce` | C — pristine fast-forward | 50 selected → 33 landed, 17 reverted as coupled |
+| `7b816ca5` | E′ — proxy & MCP | 8 candidates → 5 ported/partial, 3 SKIP |
+| `c53a84f0` | D₀ — **Projects** + math | rebuilt against Intel mirrors; knowledge dimension dropped |
+| `b1c68b3b` | D₁a — search, pinned chats, multi-select | salvaged after a rate-limit interruption |
+| `2d6ee24d` | D₁b — titles, import, delete, resize, shortcuts | 9 ported, 1 declined, 1 SKIP |
+
+**Two numbers worth carrying into the next sync:** **zero** upstream commits applied as a clean
+cherry-pick — every single one needed hand-porting or reverting. And **~31%** of first-pass PORT
+verdicts dissolved once checked against what the fork actually compiles. Budget for verification,
+not transcription.
+
+**Not ported, deliberately:** `ce414b3f` (LLM context compaction — ~3800 lines tied to local
+warm-up and KV-cache machinery this fork lacks) and `96b05d20` (hides local RAM/swap warnings that
+do not exist here). Both belong to the backlog, not to a future retry-as-is.
 
 ---
 
