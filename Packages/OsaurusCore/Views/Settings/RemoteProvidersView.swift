@@ -92,7 +92,7 @@ struct RemoteProvidersView: View {
 
     private var headerView: some View {
         ManagerHeaderWithActions(
-            title: L("Providers"),
+            title: L("Cloud Models"),
             subtitle: subtitleText
         ) {
             if manager.configuration.providers.count > 1 {
