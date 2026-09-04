@@ -186,6 +186,27 @@ func signEIP191Message(_ message: String, privateKey: Data) throws -> Data {
 
 /// Recover the signer's Osaurus address from a payload and its 65-byte recoverable signature.
 /// The `domainPrefix` must match the prefix used during signing.
+/// True when `bytes` is a valid secp256k1 scalar: a 32-byte big-endian integer
+/// in `[1, n-1]`, where n is the group order. Used to reject signature
+/// components that cannot recover a public key before the library is asked to
+/// try (see `recoverAddress`).
+private func isValidSecp256k1Scalar(_ bytes: [UInt8]) -> Bool {
+    guard bytes.count == 32 else { return false }
+    if bytes.allSatisfy({ $0 == 0 }) { return false }   // zero is not a valid scalar
+    // secp256k1 group order n.
+    let n: [UInt8] = [
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF,
+        0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFE,
+        0xBA, 0xAE, 0xDC, 0xE6, 0xAF, 0x48, 0xA0, 0x3B,
+        0xBF, 0xD2, 0x5E, 0x8C, 0xD0, 0x36, 0x41, 0x41,
+    ]
+    for (a, b) in zip(bytes, n) {
+        if a < b { return true }
+        if a > b { return false }
+    }
+    return false   // exactly n is out of range
+}
+
 func recoverAddress(payload: Data, signature: Data, domainPrefix: String) throws -> OsaurusID {
     guard signature.count == 65 else {
         throw OsaurusIdentityError.signingFailed
@@ -195,6 +216,39 @@ func recoverAddress(payload: Data, signature: Data, domainPrefix: String) throws
 
     let compactSig = signature.prefix(64)
     let v = Int32(signature[signature.startIndex + 64]) - 27
+
+    // Reject anything that cannot possibly recover, BEFORE handing it to the
+    // library.
+    //
+    // `P256K.Recovery.PublicKey(_:signature:format:)` in swift-secp256k1 0.23.2
+    // reacts to a failed `secp256k1_ecdsa_recover` with a `preconditionFailure`
+    // ("failed with valid signature — library bug"), not a thrown error. A
+    // precondition cannot be caught, so it takes the whole process down. Since
+    // `APIKeyValidator.validate(rawKey:)` calls this on every authenticated
+    // request, a single malformed access key would otherwise kill the server —
+    // a denial of service reachable by anything that can reach the port.
+    //
+    // The library's assumption is that a signature which parsed must be
+    // recoverable. That is false for tampered input, so validate the parts
+    // ourselves: the recovery id must be 0...3, and r and s must each be a
+    // valid scalar in [1, n-1] for the secp256k1 group order n.
+    // ⚠️ RESIDUAL RISK — this check narrows the hole, it does not close it.
+    // A signature can have an in-range r, s and v and still have no recoverable
+    // point, and the library still answers that with `fatalError`. The only
+    // complete fix is to stop using the crashing wrapper and call
+    // `secp256k1_ecdsa_recover` from the `libsecp256k1` C product directly,
+    // checking its return value the way the wrapper declines to. That is a
+    // deliberate, reviewable change to an authentication path and is tracked as
+    // a follow-up rather than done in passing.
+    guard (0...3).contains(v) else {
+        throw OsaurusIdentityError.signingFailed
+    }
+    let rBytes = [UInt8](compactSig.prefix(32))
+    let sBytes = [UInt8](compactSig.suffix(32))
+    guard isValidSecp256k1Scalar(rBytes), isValidSecp256k1Scalar(sBytes) else {
+        throw OsaurusIdentityError.signingFailed
+    }
+
     let recoverySig = try P256K.Recovery.ECDSASignature(
         compactRepresentation: compactSig,
         recoveryId: v
