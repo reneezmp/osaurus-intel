@@ -18,6 +18,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
     case connection
     case globalProxy
     case authentication
+    #if !OSAURUS_INTEL
     case sampling
     case concurrency
     case cache
@@ -27,6 +28,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
     case tools
     case modelMemory
     case power
+    #endif
     case requestLimits
 
     var id: String { rawValue }
@@ -37,6 +39,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .connection: return "Connection"
         case .globalProxy: return "Global Proxy"
         case .authentication: return "Authentication"
+        #if !OSAURUS_INTEL
         case .sampling: return "Sampling Defaults"
         case .concurrency: return "Concurrency & Batching"
         case .cache: return "Cache"
@@ -46,6 +49,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .tools: return "Tools & Templates"
         case .modelMemory: return "Model Memory"
         case .power: return "Power & Sleep"
+        #endif
         case .requestLimits: return "Request Limits"
         }
     }
@@ -56,6 +60,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .connection: return "network"
         case .globalProxy: return "shield.lefthalf.filled"
         case .authentication: return "key.horizontal"
+        #if !OSAURUS_INTEL
         case .sampling: return "slider.horizontal.3"
         case .concurrency: return "gauge.with.dots.needle.bottom.0percent"
         case .cache: return "externaldrive.connected.to.line.below"
@@ -65,6 +70,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .tools: return "wrench.and.screwdriver"
         case .modelMemory: return "memorychip"
         case .power: return "powersleep"
+        #endif
         case .requestLimits: return "shield.lefthalf.filled"
         }
     }
@@ -73,13 +79,17 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         switch self {
         case .connection, .globalProxy, .authentication:
             return .server
+        #if !OSAURUS_INTEL
         case .sampling:
             return .generation
         case .concurrency, .cache, .speculative, .liveActivity:
             return .performance
         case .multimodal, .tools:
             return .capabilities
-        case .modelMemory, .power, .requestLimits:
+        case .modelMemory, .power:
+            return .lifecycle
+        #endif
+        case .requestLimits:
             return .lifecycle
         }
     }

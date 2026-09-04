@@ -133,7 +133,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             let config = ServerConfigurationStore.load() ?? .default
             let serverConfig = OsaurusServer.Config(
                 host: "127.0.0.1",
-                port: 1338,
+                port: config.port,
                 trustLoopback: true
             )
             do {
@@ -508,6 +508,31 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             ChatWindowManager.shared.toggleLastFocused()
         }
     }
+
+    /// Server → Settings tab revival (2026-09-04, Renée): persists
+    /// `config` to `server.json` and stops + restarts the live
+    /// `OsaurusServer` in place so a changed port / CORS allow-list /
+    /// request-body cap takes effect without quitting the app. Intel's
+    /// HTTP server is loopback-only by design — this always binds
+    /// `127.0.0.1` with `trustLoopback: true`, mirroring the launch-time
+    /// config in `applicationDidFinishLaunching`. Called by the Intel
+    /// `ServerController` stub's `restartServer()`.
+    @MainActor
+    func applyServerConfiguration(_ config: ServerConfiguration) async {
+        ServerConfigurationStore.save(config)
+        await server.stop()
+        let serverConfig = OsaurusServer.Config(
+            host: "127.0.0.1",
+            port: config.port,
+            trustLoopback: true
+        )
+        do {
+            try await server.start(serverConfig, serverConfiguration: config)
+            NSLog("[Osaurus Intel] HTTP server restarted on port \(config.port)")
+        } catch {
+            NSLog("[Osaurus Intel] Server restart failed: \(error)")
+        }
+    }
 }
 
 // MARK: - Intel Server Controller Surface
@@ -546,7 +571,10 @@ struct IntelStatusPanelView: View {
     private var appVersion: String {
         Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "1.0.0"
     }
-    private let serverURL = "http://127.0.0.1:1338"
+    /// Reads the live port from `ServerController.shared` rather than a
+    /// hardcoded literal — the Server → Settings tab can now change and
+    /// persist the port, so a stale constant here would lie to the user.
+    private var serverURL: String { "http://127.0.0.1:\(ServerController.shared.port)" }
 
     var body: some View {
         ZStack {

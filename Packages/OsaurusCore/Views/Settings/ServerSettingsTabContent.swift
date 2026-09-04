@@ -254,10 +254,141 @@ struct ServerSettingsTabContent: View {
 }
 
 #else
-import SwiftUI
+
+// Intel Server → Settings tab. Upstream wraps its whole real
+// implementation in `#if !OSAURUS_INTEL` and this branch used to just
+// render `AppleSiliconOnlyTab` — so a user on Intel couldn't even
+// change the port the local HTTP server listens on. Port, CORS,
+// outbound proxy, and request-body caps have nothing to do with the
+// chip; only the local-inference sections (sampling, concurrency/
+// batching, cache, speculative decoding, live activity, multimodal,
+// tools/templates, model memory, power) are Apple-Silicon-only, and
+// those stay excluded here. Mirrors the non-Intel structure above:
+// same scroll + anchor + sidebar-minimap pattern, narrowed section
+// list, edits a local `draftLegacy: ServerConfiguration` and saves
+// through `ServerController.restartServer()`.
 struct ServerSettingsTabContent: View {
+    @EnvironmentObject var server: ServerController
+    @ObservedObject private var themeManager = ThemeManager.shared
+
+    @State private var draftLegacy: ServerConfiguration = .default
+    @State private var hasLoaded: Bool = false
+    @State private var saving: Bool = false
+    @State private var successMessage: String?
+    @State private var activeSection: ServerSettingsSection = .connection
+
+    private var theme: ThemeProtocol { themeManager.currentTheme }
+
+    /// Fields that require restarting the live `OsaurusServer` to take
+    /// effect (port + CORS are read once at bind time; body-size caps
+    /// are read live, but grouping them here keeps the chip conservative).
+    private var pendingRestart: Bool {
+        draftLegacy.port != server.configuration.port
+            || draftLegacy.allowedOrigins != server.configuration.allowedOrigins
+            || draftLegacy.maxRequestBodyBytes != server.configuration.maxRequestBodyBytes
+            || draftLegacy.maxPairingBodyBytes != server.configuration.maxPairingBodyBytes
+    }
+
+    private var hasUnsavedChanges: Bool {
+        draftLegacy != server.configuration
+    }
+
+    private var requiresRestart: Bool { pendingRestart && server.isRunning }
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Server Settings", symbol: "server.rack")
+        ZStack(alignment: .bottom) {
+            VStack(spacing: 0) {
+                HStack(spacing: 0) {
+                    ServerSettingsSidebarNav(selection: $activeSection)
+                        .frame(width: 220)
+
+                    contentPane
+                }
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                ServerSettingsActionBar(
+                    hasUnsavedChanges: hasUnsavedChanges,
+                    requiresRestart: requiresRestart,
+                    saving: saving,
+                    onSave: { Task { await save() } },
+                    onReset: resetToDefaults
+                )
+            }
+
+            if let message = successMessage {
+                ThemedToastView(message, type: .success)
+                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(.bottom, 70)
+            }
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity)
+        .background(theme.primaryBackground)
+        .onAppear {
+            guard !hasLoaded else { return }
+            hasLoaded = true
+            draftLegacy = server.configuration
+        }
+        .onChange(of: server.configuration) { newValue in
+            if !hasUnsavedChanges { draftLegacy = newValue }
+        }
+    }
+
+    // MARK: - Content pane
+
+    private var contentPane: some View {
+        ScrollViewReader { proxy in
+            ScrollView {
+                LazyVStack(alignment: .leading, spacing: 24) {
+                    ConnectionSection(draft: $draftLegacy)
+                        .id(ServerSettingsSection.connection)
+                    GlobalProxySection(draft: $draftLegacy)
+                        .id(ServerSettingsSection.globalProxy)
+                    AuthenticationSection()
+                        .id(ServerSettingsSection.authentication)
+                    AdvancedHTTPSection(draft: $draftLegacy)
+                        .id(ServerSettingsSection.requestLimits)
+                }
+                .padding(.horizontal, 24)
+                .padding(.vertical, 24)
+                .frame(maxWidth: .infinity)
+            }
+            // Gives `scrollTo(_:anchor: .top)` a breathing-room buffer so
+            // anchored sections don't kiss the top edge of the scroll.
+            .safeAreaInset(edge: .top, spacing: 0) {
+                Color.clear.frame(height: 12)
+            }
+            .onChange(of: activeSection) { new in
+                withAnimation(.smooth(duration: 0.45)) {
+                    proxy.scrollTo(new, anchor: .top)
+                }
+            }
+        }
+    }
+
+    // MARK: - Actions
+
+    private func resetToDefaults() {
+        draftLegacy = .default
+    }
+
+    private func save() async {
+        saving = true
+        defer { saving = false }
+
+        server.configuration = draftLegacy
+        await server.restartServer()
+        showSuccess(L("Settings saved successfully"))
+    }
+
+    private func showSuccess(_ message: String) {
+        withAnimation(theme.springAnimation()) {
+            successMessage = message
+        }
+        DispatchQueue.main.asyncAfter(deadline: .now() + 2.5) {
+            withAnimation(theme.animationQuick()) {
+                successMessage = nil
+            }
+        }
     }
 }
 #endif

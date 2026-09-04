@@ -1836,24 +1836,33 @@ final class LiveVoiceAudioInputRegistry: @unchecked Sendable {
 // `Networking/ServerController.swift` (excluded on Intel) is an
 // `ObservableObject` with `@Published` properties; we mirror just
 // the protocol conformance here so SwiftUI's environment-object
-// plumbing type-checks. No `@Published` storage is needed for Intel —
-// the HTTP server is wired through `OsaurusServer` directly in
-// `AppDelegate`, not through this controller surface.
+// plumbing type-checks. The HTTP server itself is wired through
+// `OsaurusServer` directly in `AppDelegate`, not through this
+// controller surface — `restartServer()` below bridges to it.
+//
+// Settings-tab revival (2026-09-04, Renée): `configuration` used to be
+// a hardcoded `Any? { nil }` with `port` pinned to a literal 1338 —
+// there was no way for the Server → Settings tab to change or persist
+// the listening port at all. It now holds the real, persisted
+// `ServerConfiguration` (same file `AppDelegate` reads at launch), so
+// `ServerSettingsTabContent` can edit port / CORS / proxy / body-size
+// caps and have `restartServer()` actually apply them.
+@MainActor
 final class ServerController: ObservableObject, @unchecked Sendable {
     static let shared = ServerController()
+
     static func signalGenerationStart() {}
     static func signalGenerationEnd() {}
-    var configuration: Any? { nil }
-    /// The Intel HTTP server binds 1338 in `AppDelegate` (see
-    /// `OsaurusServer.Config(port: 1338)`), so report that — the old
-    /// 1337 was a stale default that made ServerView's URL wrong.
-    var port: Int { 1338 }
+
+    @Published var configuration: ServerConfiguration = ServerConfigurationStore.load() ?? .default
+
+    var port: Int { configuration.port }
     var isRunning: Bool { true }
 
     /// ServerView (un-body-swapped in M11 Phase 11.B.1) reads these for
     /// the connection URL + status badge. The Intel HTTP server
-    /// (`OsaurusServer`) binds 127.0.0.1:1338 and is always up while the
-    /// app runs, so health is `.running` and the address is loopback.
+    /// (`OsaurusServer`) is loopback-only and always up while the app
+    /// runs, so health is `.running` and the address is loopback.
     var localNetworkAddress: String { "127.0.0.1" }
     var serverHealth: ServerHealth { .running }
 
@@ -1863,13 +1872,15 @@ final class ServerController: ObservableObject, @unchecked Sendable {
     /// happens on Intel).
     func startServer() async {}
 
-    /// Called by `IdentityView` after an agent's address rotates/revokes
-    /// so the HTTP server picks up the new key set. On Intel the server
-    /// is `OsaurusServer` (driven from `AppDelegate`), and access-key
-    /// validation reads the live `APIKeyManager` on each request — there's
-    /// no cached key table to reload — so this is a no-op. Async signature
-    /// preserved for the upstream call site `await server.restartServer()`.
-    func restartServer() async {}
+    /// Persists `configuration` and asks `AppDelegate` to stop + restart
+    /// the live `OsaurusServer` in place with the new port / CORS /
+    /// body-size caps. Also the same path `IdentityView` calls after an
+    /// agent's address rotates/revokes — access-key validation reads the
+    /// live `APIKeyManager` on each request, so the restart there is
+    /// only to be safe, not because keys are cached.
+    func restartServer() async {
+        await AppDelegate.shared?.applyServerConfiguration(configuration)
+    }
 }
 
 extension ChatMessage {

@@ -93,9 +93,54 @@ struct AuthenticationSection: View {
 }
 #else
 import SwiftUI
+
+/// Intel access-key callout only. The upstream "Planned Controls"
+/// subsection (rate limit / request timeout / log level) binds fields
+/// on vmlx's `VMLXServerRuntimeSettings` — a local-inference runtime
+/// settings type that doesn't exist for a cloud-only proxy with no
+/// local model — and upstream itself labels those "saved today; the
+/// request pipeline will start enforcing these in a follow-up," i.e.
+/// inert even on Apple Silicon. Omitted rather than faked with storage
+/// that enforces nothing.
 struct AuthenticationSection: View {
+    @Environment(\.theme) private var theme
+
     var body: some View {
-        AppleSiliconOnlyTab(tabName: "Authentication", symbol: "apple.logo")
+        ServerSettingsCard(
+            section: .authentication,
+            status: .hostOwned,
+            blurb: "Who can call your API."
+        ) {
+            accessKeyCallout
+        }
+    }
+
+    private var accessKeyCallout: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: "key.horizontal")
+                .font(.system(size: 16, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .padding(.top, 1)
+            VStack(alignment: .leading, spacing: 4) {
+                Text("API access keys", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(
+                    "Manage keys in the Server → Overview tab. They are stored in the macOS Keychain and never leave this device.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+            ServerSettingsStatusBadge(status: .hostOwned)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.tertiaryBackground.opacity(0.5))
+        )
     }
 }
 #endif

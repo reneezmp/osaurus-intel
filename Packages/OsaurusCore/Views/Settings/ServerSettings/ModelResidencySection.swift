@@ -5,7 +5,15 @@
 //  Osaurus-owned model memory policy (eviction + idle residency) for
 //  the Server → Settings tab. Persisted to `server.json`.
 //
+//  Local-inference-only: eviction/idle-residency policy governs when a
+//  loaded MLX model is dropped from RAM. Intel is cloud-only and never
+//  loads a local model, so this file (and its `.modelMemory` sidebar
+//  anchor) isn't compiled there — this wasn't previously gated because
+//  nothing on Intel used to reference `ServerSettingsSection.modelMemory`
+//  at all; it does now that the Intel Settings tab is real.
+//
 
+#if !OSAURUS_INTEL
 import SwiftUI
 
 struct ModelResidencySection: View {
@@ -54,3 +62,4 @@ struct ModelResidencySection: View {
         }
     }
 }
+#endif

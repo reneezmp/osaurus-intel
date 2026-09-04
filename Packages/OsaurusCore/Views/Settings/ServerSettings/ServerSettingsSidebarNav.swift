@@ -24,7 +24,13 @@ struct ServerSettingsSidebarNav: View {
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
-                ForEach(ServerSettingsSectionGroup.allCases, id: \.self) { group in
+                // Filter out groups with no sections — on Intel, several
+                // groups (Generation/Performance/Capabilities) are
+                // entirely local-inference-only and end up empty once
+                // `ServerSettingsSection` trims those cases. An empty
+                // group header with no rows beneath it is worse than no
+                // header at all.
+                ForEach(ServerSettingsSectionGroup.allCases.filter { !$0.sections.isEmpty }, id: \.self) { group in
                     groupBlock(group)
                 }
             }
