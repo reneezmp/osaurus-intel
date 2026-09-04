@@ -8,6 +8,56 @@
 import Foundation
 import SwiftUI
 
+// MARK: - Management Section
+
+/// Labeled groups the sidebar renders tabs under, in display order.
+///
+/// Grouping is deliberately different from upstream's `general / models /
+/// agents / capabilities / automation / developers` split in two ways:
+///
+/// 1. This is a cloud-only fork, so `.models` leads with the cloud-relevant
+///    tabs (Cloud Models, Credits) rather than starting with local-inference
+///    concerns that don't apply here.
+/// 2. The three tabs whose subsystem is amputated on Intel (`.models` i.e.
+///    Local Models, `.voice`, `.sandbox` — see `ManagementTab.isAvailableOnIntel`)
+///    are pulled out of their thematic homes and clustered together in a
+///    trailing `.unavailable` group, so the disabled rows read as one
+///    coherent "not on this machine" area instead of being scattered one-
+///    per-group through the column.
+public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
+    case models
+    case capabilities
+    case automation
+    case developerTools
+    case general
+    case unavailable
+
+    public var id: String { rawValue }
+
+    public var title: String {
+        switch self {
+        case .models: L("Models")
+        case .capabilities: L("Capabilities")
+        case .automation: L("Automation")
+        case .developerTools: L("Developer Tools")
+        case .general: L("General")
+        case .unavailable: L("Not Available on This Mac")
+        }
+    }
+
+    /// Tabs belonging to this section, in display order.
+    public var tabs: [ManagementTab] {
+        switch self {
+        case .models: [.providers, .credits]
+        case .capabilities: [.tools, .skills, .plugins, .memory, .commands]
+        case .automation: [.agents, .schedules, .watchers]
+        case .developerTools: [.server, .insights]
+        case .general: [.settings, .themes, .permissions, .identity, .storage]
+        case .unavailable: [.models, .voice, .sandbox]
+        }
+    }
+}
+
 /// Defines all available tabs in the management sidebar.
 public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case models
@@ -108,7 +158,14 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// / BackgroundTaskManager) is pure Foundation/Combine/SQLCipher and fires
     /// agents headless through the cloud pipeline. `.memory` is now available on
     /// Intel too — backed by the pure-Swift/cloud embedder + SQLCipher store (no
-    /// MLX/VecturaKit). Apple Silicon always `true`.
+    /// MLX/VecturaKit).
+    ///
+    /// Note this deliberately has **no architecture check**, and that is
+    /// correct: `Package.swift` defines `OSAURUS_INTEL` for every build of this
+    /// fork, so an arm64 build of *this* codebase still amputates MLX, voice and
+    /// the sandbox and must still disable those tabs. The property name refers
+    /// to the fork, not the CPU. Upstream's tree has no equivalent property at
+    /// all — there, every tab is simply available.
     public var isAvailableOnIntel: Bool {
         switch self {
         case .models, .voice, .sandbox:

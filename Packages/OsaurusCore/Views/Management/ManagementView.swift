@@ -134,7 +134,7 @@ private extension ManagementView {
         SidebarNavigation(
             selection: selectedTabBinding,
             searchText: $searchText,
-            items: sidebarItems
+            sections: sidebarSections
         ) { tabId in
             contentView(for: tabId)
                 .opacity(hasAppeared ? 1 : 0)
@@ -220,26 +220,39 @@ private extension ManagementView {
 
 private extension ManagementView {
 
-    var sidebarItems: [SidebarItemData] {
-        ManagementTab.allCases.map { tab in
-            var item = tab.sidebarItem(
-                badge: badgeCount(for: tab),
-                badgeHighlight: badgeHighlight(for: tab)
+    /// Sidebar items grouped into labeled sections. Grouping/order lives on
+    /// `ManagementSection`; this just maps each section's tabs to sidebar
+    /// rows and attaches badges + the disabled/help treatment. Empty
+    /// sections are dropped by `SidebarNavigation` itself, so there's no
+    /// need to special-case that here.
+    var sidebarSections: [SidebarSectionData] {
+        ManagementSection.allCases.map { section in
+            SidebarSectionData(
+                id: section.id,
+                title: section.title,
+                items: section.tabs.map(sidebarItem(for:))
             )
-            // On Intel, tabs whose entire backing subsystem is amputated
-            // (Models / Voice / Memory / Sandbox / Schedules / Insights)
-            // stay listed but render disabled so users get a discoverable
-            // explainer instead of a working button that opens an empty
-            // placeholder. `SidebarItemView` applies `.disabled(true)` +
-            // `.opacity(0.45)` + `.help(...)`. Apple Silicon never flips
-            // this branch because `isAvailableOnIntel` always returns
-            // `true` there by definition.
-            if !tab.isAvailableOnIntel {
-                item.isDisabled = true
-                item.disabledHelp = "Not available on Intel — requires Apple Silicon"
-            }
-            return item
         }
+    }
+
+    func sidebarItem(for tab: ManagementTab) -> SidebarItemData {
+        var item = tab.sidebarItem(
+            badge: badgeCount(for: tab),
+            badgeHighlight: badgeHighlight(for: tab)
+        )
+        // On Intel, tabs whose entire backing subsystem is amputated
+        // (Models / Voice / Sandbox) stay listed — clustered together under
+        // the "Not Available on This Mac" section — but render disabled so
+        // users get a discoverable explainer instead of a working button
+        // that opens an empty placeholder. `SidebarItemView` applies
+        // `.disabled(true)` + `.opacity(0.45)` + `.help(...)`. Apple
+        // Silicon never flips this branch because `isAvailableOnIntel`
+        // always returns `true` there by definition.
+        if !tab.isAvailableOnIntel {
+            item.isDisabled = true
+            item.disabledHelp = "Not available on Intel — requires Apple Silicon"
+        }
+        return item
     }
 
     func badgeCount(for tab: ManagementTab) -> Int? {
