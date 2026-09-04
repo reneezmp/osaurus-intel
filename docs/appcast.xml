@@ -6,6 +6,30 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.33</title>
+      <pubDate>Fri, 04 Sep 2026 19:33:30 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>34</sparkle:version>
+      <sparkle:shortVersionString>1.0.33</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.33/Osaurus-Intel-1.0.33.zip" length="54624072" type="application/octet-stream" sparkle:edSignature="XlhWYN354YS+PNKiFHaztwmxj4oHbHpWv52kiSDz69us4DPfQST5/xkbGuJ0/R1TfSWPdlo2FPvHXc/xfdQqCA=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.33
+
+Restores the chat sessions that disappeared after 1.0.32. They were never lost — a new field made older session files unreadable, so they were skipped on load. They come back on first launch, untouched.
+
+Server settings are reachable again. The whole Server → Settings tab was previously hidden behind an "Apple Silicon only" notice, which was wrong: port, CORS, authentication and proxy have nothing to do with the chip. You can now change the port the local server listens on, and it takes effect without relaunching. Related: the server had been ignoring your saved port and always binding to the built-in one.
+
+Settings sidebar is organised into groups — Models, Capabilities, Automation, Developer Tools, General — with anything this Mac can't run gathered at the bottom instead of scattered through the list. Providers is now "Cloud Models" and Models is "Local Models", which says something truer about how this build works.
+
+If a provider ever loses access to its stored API key, the app now says so in the log instead of quietly behaving as though no key was ever saved. Previously that produced an empty model list and a bare Retry button with no explanation.
+
+Plugin downloads now honour your proxy settings properly, including the host and port checks the rest of the app already applied.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.32</title>
       <pubDate>Thu, 03 Sep 2026 13:19:43 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
