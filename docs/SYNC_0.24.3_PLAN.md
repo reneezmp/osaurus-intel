@@ -457,6 +457,49 @@ Recorded so these are decisions, not omissions.
 | **Provider discovery bypasses the global proxy** | `IntelStubConformers.swift` uses `URLSession.shared` 6× and `makeSession()` 0× — the 1.0.24 global-proxy batch never reached this file, so `/models` probes leak around a configured proxy. Pre-existing. | Wave E′ in Release 2 (`0ba6a01a` covers exactly this). |
 ---
 
+## 11b. Post-release postmortem — 1.0.32 (2026-09-04)
+
+Two failures on first install, both of the same shape: **a lookup that fails returns a
+plausible empty value instead of an error**, so the UI shows "nothing here" and nobody
+learns anything.
+
+### All chat sessions vanished — our bug
+
+`pinned: Bool = false` was added to `ChatSessionData`. **Swift's synthesized `Decodable`
+does not fall back to a property's default value** — a missing key throws `keyNotFound` —
+and `loadFromDisk()` decodes with `try?` and skips whatever fails. Every session written
+before that field existed was silently dropped from the sidebar.
+
+No data was lost: sessions are one JSON file each, and nothing in the load path deletes or
+rewrites them. Fixed in `fbd569fe` with an explicit tolerant `init(from:)`.
+
+> **Rule for this fork: never add a non-optional stored property to a persisted `Codable`
+> type.** Give it a case in the hand-written `init(from:)` with `decodeIfPresent` and a
+> default. A property default alone will not save you. The same audit cleared
+> `ServerConfiguration.fontSizeMultiplier` (already tolerant) and `MCPProviderState` (not
+> `Codable`), so `pinned` was the only instance — but the trap is permanent.
+
+### Every provider reported 0 models — not a code regression
+
+All three providers 401'd, with `request_bytes=106` proving no `Authorization` header was
+sent at all. `RemoteProviderKeychain.getAPIKey` was **untouched by the sync**; what changed
+was the binary, which is what the keychain ACL binds to. Because the query sets
+`kSecUseAuthenticationUISkip`, macOS never prompts — the read just fails and returns `nil`,
+indistinguishable from "no key saved". The dialog's "Stored in Keychain" is a static label,
+not a live check.
+
+**Remedy: re-save the API key in Settings → Providers.** Confirmed working. `69f1c443` now
+logs any non-`errSecItemNotFound` status with its `OSStatus` and the remedy, so the next
+occurrence is one Console line rather than a log-forensics session.
+
+> **Watch item:** the stable signing identity is supposed to keep the keychain ACL across
+> updates, and it held through 1.0.30 and 1.0.31. Why it did not hold at 1.0.32 is not
+> established. If the next release also needs keys re-entered, check the installed app's
+> authority with `codesign -dv --verbose=4 /Applications/osaurus.app` before assuming it is
+> a one-time migration.
+
+---
+
 ## 11. Known first-pass triage errors
 
 The per-commit verdicts came from small models and are a map, not an authorization. Already
