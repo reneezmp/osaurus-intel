@@ -457,6 +457,16 @@ Recorded so these are decisions, not omissions.
 | **Provider discovery bypasses the global proxy** | `IntelStubConformers.swift` uses `URLSession.shared` 6× and `makeSession()` 0× — the 1.0.24 global-proxy batch never reached this file, so `/models` probes leak around a configured proxy. Pre-existing. | Wave E′ in Release 2 (`0ba6a01a` covers exactly this). |
 ---
 
+## 11a. Open follow-ups (2026-09-04)
+
+| Item | Note |
+|---|---|
+| **`OsaurusCoreTests` does not compile** | Pre-existing, not caused by any sync work. `Tests/Tool/ConfigurationDomainRegistryTests.swift` and `Tests/Context/PreflightCompanionsTests.swift` reference types gated out under `#if !OSAURUS_INTEL`; `Tests/Networking/GlobalProxyConfigurationTests.swift` references `StoragePathsTestLock` and `GlobalProxySettings.sharedSession()`, neither of which exist in this fork. So `swift test` cannot run at all on the main target — which is why every verification in this sync leaned on `swift build` plus targeted new test files instead. Worth fixing: a fork with an uncompilable test target has no regression net, and both bugs that shipped in 1.0.32 were the kind a test would have caught. |
+| **`swift test --arch x86_64` cannot load the XCTest bundle** on the arm64 dev machine | Environment limitation, not a code issue. Tests must be run on the native arch; only non-test builds cross-compile cleanly. |
+| **22 upstream commits still worth porting** | From a second sweep of the 174 PORT-verdict commits never revisited after the five prioritized clusters. Shortlist and landmines in `missed_wins.md` (scratch). Three of that sweep's picks turned out already-applied via Wave C's file fast-forwards — when filtering candidates, compare against `git diff upstream/main HEAD`, not against a list of ported commit hashes. |
+
+---
+
 ## 11b. Post-release postmortem — 1.0.32 (2026-09-04)
 
 Two failures on first install, both of the same shape: **a lookup that fails returns a
