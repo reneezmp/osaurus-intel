@@ -597,7 +597,11 @@ final class ChatSession: ObservableObject {
             )
             let newHeaderMap = blockMemoizer.groupHeaderMap
             withAnimation(.none) {
-                visibleBlocksStore.blocks = newBlocks
+                visibleBlocksStore.blocks = Self.appendingAssistantActionFooters(
+                    newBlocks,
+                    turns: mockTurns,
+                    streamingTurnId: nil
+                )
                 visibleBlocksStore.groupHeaderMap = newHeaderMap
             }
             return
@@ -614,9 +618,64 @@ final class ChatSession: ObservableObject {
         // use withAnimation(.none) to suppress the warning about publishing during view updates
         // this wraps the changes in a proper SwiftUI transaction
         withAnimation(.none) {
-            visibleBlocksStore.blocks = newBlocks
+            visibleBlocksStore.blocks = Self.appendingAssistantActionFooters(
+                newBlocks,
+                turns: turns,
+                streamingTurnId: streamingTurnId
+            )
             visibleBlocksStore.groupHeaderMap = newHeaderMap
         }
+    }
+
+    /// Compensates for `BlockMemoizer.blocks(from:...)` (the Intel-lite
+    /// reimplementation in `IntelDataConformers.swift` — the upstream
+    /// `Managers/BlockMemoizer.swift` / `Models/Chat/ContentBlock.swift`
+    /// are excluded from this fork's build entirely, see `Package.swift`)
+    /// never emitting `.assistantActions` footer rows. That stub only
+    /// builds header/thinking/paragraph/tool-call blocks, so the
+    /// copy/regenerate/speak/delete row under a completed assistant
+    /// turn was silently never generated. Mirrors the footer-eligibility
+    /// rule the excluded upstream code used to apply inline: last turn
+    /// in its consecutive-assistant group, not currently streaming, and
+    /// carrying visible text, renderable thinking, or a tool call.
+    private static func appendingAssistantActionFooters(
+        _ blocks: [ContentBlock],
+        turns: [ChatTurn],
+        streamingTurnId: UUID?
+    ) -> [ContentBlock] {
+        let filteredTurns = turns.filter { $0.role != .tool }
+        var footerEligibleTurnIds = Set<UUID>()
+        for (index, turn) in filteredTurns.enumerated() {
+            guard turn.role == .assistant, turn.id != streamingTurnId else { continue }
+            let nextRole: MessageRole? =
+                index + 1 < filteredTurns.count ? filteredTurns[index + 1].role : nil
+            guard nextRole != turn.role else { continue }  // isLastInGroup
+            let hasVisibleContent =
+                !turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            let hasFooterableContent =
+                hasVisibleContent || turn.hasRenderableThinking || !(turn.toolCalls ?? []).isEmpty
+            guard hasFooterableContent else { continue }
+            footerEligibleTurnIds.insert(turn.id)
+        }
+        guard !footerEligibleTurnIds.isEmpty else { return blocks }
+
+        var result: [ContentBlock] = []
+        result.reserveCapacity(blocks.count + footerEligibleTurnIds.count)
+        for (index, block) in blocks.enumerated() {
+            result.append(block)
+            let isLastBlockForTurn =
+                index + 1 == blocks.count || blocks[index + 1].turnId != block.turnId
+            if isLastBlockForTurn, footerEligibleTurnIds.contains(block.turnId) {
+                result.append(
+                    ContentBlock(
+                        id: "actions-\(block.turnId.uuidString)",
+                        turnId: block.turnId,
+                        kind: .assistantActions(turnId: block.turnId)
+                    )
+                )
+            }
+        }
+        return result
     }
 
     /// Estimated token count for current session context (~4 chars per token).
@@ -1831,6 +1890,21 @@ final class ChatSession: ObservableObject {
         let context = activeRunContext
         activeRunId = nil
         activeRunContext = nil
+
+        // Snapshot "this was the first exchange" BEFORE completeRunCleanup(),
+        // which — via flushQueuedSendIfEligible() — may synchronously append
+        // a second `.user` turn right here if the user queued a follow-up
+        // message while this run was still streaming. That auto-flushed
+        // turn belongs to the NEXT run, not this one; counting it here made
+        // the `== 1` check below fail for the run that actually just
+        // finished its first exchange, and since `llmTitleAttempted` is only
+        // ever set true inside that (now permanently unreachable) guard,
+        // auto-titling silently never fired again for the rest of the
+        // session. Anything queued lands strictly after the assistant turn
+        // this run just completed, so it can't affect which assistant turn
+        // `turns.last(where: role == .assistant)` finds below.
+        let isFirstUserExchange = turns.filter { $0.role == .user }.count == 1
+
         completeRunCleanup()
 
         guard persistConversationArtifacts, let context else { return }
@@ -1853,7 +1927,7 @@ final class ChatSession: ObservableObject {
         // pre-existing behavior.
         if ChatConfiguration.shared.autoGenerateChatTitles,
             let sid = sessionId, !llmTitleAttempted,
-            turns.filter({ $0.role == .user }).count == 1,
+            isFirstUserExchange,
             let assistant = assistantContent, !assistant.isEmpty
         {
             llmTitleAttempted = true
@@ -3243,6 +3317,8 @@ struct ChatView: View {
             messageThread: { w, h in AnyView(messageThread(w, h)) },
             promptOverlayLayer: AnyView(promptOverlayLayer),
             onChatOverlayActivated: {},
+            onSetupFindKeyMonitor: { setupKeyMonitor() },
+            onCleanupFindKeyMonitor: { cleanupKeyMonitor() },
             handleChatToolbarSelectDiscovered: { n in handleChatToolbarSelectDiscovered(n) },
             onRelayAgentNotify: { n in relayAgentReceived(n) },
             onPickerItemsChanged: { items in onPickerItemsChanged(items) },

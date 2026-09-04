@@ -64,6 +64,11 @@ final class NativeHeaderView: NSView {
     private var avatarLeadingConstraint: NSLayoutConstraint?
     private var nameLeadingToAvatar: NSLayoutConstraint?
     private var nameLeadingToSelf: NSLayoutConstraint?
+    /// User turns have no avatar and their bubble is right-aligned (trailing);
+    /// pinning the name label there too (left of the action stack) keeps "You"
+    /// visually anchored above its own bubble instead of stranded on the left
+    /// edge of the full-width header row.
+    private var nameTrailingToActionStack: NSLayoutConstraint?
     /// Default avatar diameter when the theme doesn't provide one. Theme
     /// override comes through `configure(...)` and is clamped to [16, 108]
     /// before being applied via `avatarSizeConstraints`.
@@ -127,6 +132,12 @@ final class NativeHeaderView: NSView {
         avatarLeadingConstraint = avatarLeading
         nameLeadingToAvatar = nameToAvatar
         nameLeadingToSelf = nameToSelf
+
+        let nameToActionStack = nameLabel.trailingAnchor.constraint(
+            equalTo: actionStack.leadingAnchor,
+            constant: -8
+        )
+        nameTrailingToActionStack = nameToActionStack
 
         let avatarW = avatarImageView.widthAnchor.constraint(equalToConstant: Self.defaultAvatarSize)
         let avatarH = avatarImageView.heightAnchor.constraint(equalToConstant: Self.defaultAvatarSize)
@@ -212,8 +223,15 @@ final class NativeHeaderView: NSView {
         avatarImageView.isHidden = !showAvatar
         avatarImageView.layer?.borderColor =
             NSColor(theme.secondaryText).withAlphaComponent(0.35).cgColor
-        nameLeadingToSelf?.isActive = !showAvatar
-        nameLeadingToAvatar?.isActive = showAvatar
+        // User bubbles sit flush against the trailing edge; pin "You" there
+        // too (left of the action stack) instead of the leading edge used
+        // for the assistant's avatar+name so the header reads as attached
+        // to its own bubble rather than stranded on the opposite side.
+        let alignTrailing = role == .user
+        nameLeadingToSelf?.isActive = !alignTrailing && !showAvatar
+        nameLeadingToAvatar?.isActive = !alignTrailing && showAvatar
+        nameTrailingToActionStack?.isActive = alignTrailing
+        nameLabel.alignment = alignTrailing ? .right : .left
 
         let nameVisible = role == .user || theme.showAgentName
         nameLabel.isHidden = !nameVisible

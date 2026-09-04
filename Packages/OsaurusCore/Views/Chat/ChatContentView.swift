@@ -28,6 +28,16 @@ struct ChatContentView: View {
     var messageThread: (CGFloat, CGFloat) -> AnyView
     var promptOverlayLayer: AnyView
     var onChatOverlayActivated: () -> Void
+    /// Installs / tears down the window-scoped Cmd+F (find bar) and Esc key
+    /// monitor. Must run on appear/disappear here — `ChatView.body` just
+    /// delegates to `chatModeContent` with no lifecycle hooks of its own
+    /// (see `ChatView.setupKeyMonitor`/`cleanupKeyMonitor`), so this was the
+    /// only place upstream's monitor wiring could still attach after the
+    /// M10.5 Phase 7 extraction into this standalone view. It never got
+    /// carried over — `.onDisappear` below was an empty stub — so Cmd+F
+    /// silently had no monitor to catch it.
+    var onSetupFindKeyMonitor: () -> Void
+    var onCleanupFindKeyMonitor: () -> Void
     var handleChatToolbarSelectDiscovered: (Notification) -> Void
     var onRelayAgentNotify: (Notification) -> Void
     var onPickerItemsChanged: ([ModelPickerItem]) -> Void
@@ -281,6 +291,15 @@ struct ChatContentView: View {
                             agentId: windowState.agentId,
                             windowId: windowState.windowId,
                             isCompact: windowState.showSidebar,
+                            // Never wired up: FloatingInputCard's built-in /clear
+                            // handler falls back to a "pass a handler" toast
+                            // without this. Mirrors the Cmd+N "New Chat" action
+                            // (`ChatWindowState.startNewChat()`) — same
+                            // save-current/flush/reset-session/refresh-sidebar
+                            // behavior the toolbar button and shortcut use.
+                            onClearChat: { [weak windowState] in
+                                windowState?.startNewChat()
+                            },
                             onGenerateTitle: { [weak observedSession] in
                                 observedSession?.generateTitleFromSlashCommand()
                             },
@@ -323,8 +342,11 @@ struct ChatContentView: View {
             if session.selectedModel == nil {
                 session.selectedModel = "deepseek-v4-pro"
             }
+            onSetupFindKeyMonitor()
         }
-        .onDisappear {}
+        .onDisappear {
+            onCleanupFindKeyMonitor()
+        }
         .onChange(of: observedSession.pickerItems) { newItems in
             onPickerItemsChanged(newItems)
         }
