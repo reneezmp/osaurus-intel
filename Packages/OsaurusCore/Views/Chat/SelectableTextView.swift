@@ -664,11 +664,6 @@ struct SelectableTextView: NSViewRepresentable {
         text.contains("*") || text.contains("_") || text.contains("`") || text.contains("[") || text.contains("~")
     }
 
-    @inline(__always)
-    private func containsInlineMath(_ text: String) -> Bool {
-        text.contains("$") || text.contains("\\(")
-    }
-
     private func renderInlineMarkdown(
         _ text: String,
         fontSize: CGFloat,
@@ -683,8 +678,8 @@ struct SelectableTextView: NSViewRepresentable {
         ]
 
         // Check for inline math — if present, split and render segments
-        if containsInlineMath(text) {
-            let segments = splitInlineMath(text)
+        if InlineMathScanner.mayContainMath(text) {
+            let segments = InlineMathScanner.split(text)
             if segments.contains(where: { $0.isMath }) {
                 return renderSegmentsWithMath(
                     segments,
@@ -716,203 +711,9 @@ struct SelectableTextView: NSViewRepresentable {
         return NSMutableAttributedString(string: text, attributes: baseAttributes)
     }
 
-    // MARK: - Inline Math Helpers
-
-    private struct InlineSegment {
-        /// Content without delimiters — what gets typeset when `isMath`.
-        let text: String
-        let isMath: Bool
-        /// The original source spelling, delimiters included. Shown verbatim when the
-        /// typesetter rejects a span, so the message still says what the model wrote
-        /// rather than a re-delimited guess.
-        let fallback: String
-
-        init(text: String, isMath: Bool, fallback: String? = nil) {
-            self.text = text
-            self.isMath = isMath
-            self.fallback = fallback ?? text
-        }
-    }
-
-    /// Content that is unambiguously LaTeX because it uses LaTeX syntax.
-    @inline(__always)
-    private func looksLikeLatex(_ s: String) -> Bool {
-        for scalar in s.unicodeScalars {
-            switch scalar {
-            case "\\", "^", "_", "{": return true
-            default: continue
-            }
-        }
-        return false
-    }
-
-    @inline(__always)
-    private func isASCIIDigit(_ scalar: Unicode.Scalar) -> Bool {
-        scalar >= "0" && scalar <= "9"
-    }
-
-    /// Whether a `$...$` span carrying no explicit LaTeX syntax should still be typeset.
-    ///
-    /// Currency amounts begin with a digit right after the `$`; and when a currency run is
-    /// mis-paired, the "closing" `$` is really the opening `$` of the next amount, so a
-    /// digit follows it. The first guard rejects `$5 to $10`, the second rejects
-    /// `$USD 5 and $10`. A span that starts with a digit and has no LaTeX syntax (`$2$`)
-    /// stays literal — the deliberate cost of never typesetting a price.
-    @inline(__always)
-    private func looksLikeDollarMath(_ content: String, followedBy next: Unicode.Scalar?) -> Bool {
-        let scalars = content.unicodeScalars
-        guard let first = scalars.first, scalars.count <= 64 else { return false }
-        guard !isASCIIDigit(first) else { return false }
-        if let next, isASCIIDigit(next) { return false }
-        for scalar in scalars where scalar == "\n" { return false }
-        // Require something substantive; a span of pure punctuation is not math.
-        return scalars.contains { CharacterSet.alphanumerics.contains($0) }
-    }
-
-    /// Split text into alternating plain-text and math segments.
-    /// Handles `$...$` (no whitespace padding) and `\(...\)` delimiters. A delimited span
-    /// that fails the rules above is emitted as literal text, and scanning resumes just past
-    /// the opening delimiter, so a real math span later on the same line can still match.
-    private func splitInlineMath(_ text: String) -> [InlineSegment] {
-        var segments: [InlineSegment] = []
-        var current = ""
-        let scalars = Array(text.unicodeScalars)
-        var i = 0
-
-        @inline(__always)
-        func flushText() {
-            if !current.isEmpty {
-                segments.append(InlineSegment(text: current, isMath: false))
-                current = ""
-            }
-        }
-
-        @inline(__always)
-        func peek(_ offset: Int) -> Unicode.Scalar? {
-            let idx = i + offset
-            return idx < scalars.count ? scalars[idx] : nil
-        }
-
-        @inline(__always)
-        func slice(_ from: Int, _ to: Int) -> String {
-            String(String.UnicodeScalarView(scalars[from ..< to]))
-        }
-
-        @inline(__always)
-        func emitMath(_ content: String, fallback: String, advanceTo nextIndex: Int) {
-            flushText()
-            segments.append(InlineSegment(text: content, isMath: true, fallback: fallback))
-            i = nextIndex
-        }
-
-        while i < scalars.count {
-            let c = scalars[i]
-
-            // Inline code span. `$HOME and $PATH` inside backticks is shell, not math, and
-            // `\(` inside backticks is a literal escape — neither may be typeset.
-            if c == "`" {
-                var runLength = 0
-                while i + runLength < scalars.count, scalars[i + runLength] == "`" { runLength += 1 }
-                if let closeStart = findClosingBacktickRun(scalars, from: i + runLength, runLength: runLength) {
-                    current += slice(i, closeStart + runLength)
-                    i = closeStart + runLength
-                } else {
-                    // Unclosed (or still streaming): emit the run and keep scanning.
-                    current += slice(i, i + runLength)
-                    i += runLength
-                }
-                continue
-            }
-
-            // \(...\) delimiter — explicit and unambiguous, so any non-empty content is math.
-            if c == "\\", peek(1) == "(" {
-                if let closeIdx = findClosingParen(scalars, from: i + 2) {
-                    let content = slice(i + 2, closeIdx)
-                    if !content.isEmpty {
-                        emitMath(content, fallback: slice(i, closeIdx + 2), advanceTo: closeIdx + 2)
-                        continue
-                    }
-                }
-                // Not real math (or unclosed): treat `\(` as literal text and resume scanning.
-                current.append("\\(")
-                i += 2
-                continue
-            }
-
-            // Escaped \$ — not a math delimiter
-            if c == "\\", peek(1) == "$" {
-                current.append("$")
-                i += 2
-                continue
-            }
-
-            // $...$ delimiter — require non-whitespace after opening and before closing $
-            if c == "$",
-                let after = peek(1),
-                !after.properties.isWhitespace,
-                after != "$",
-                let closeIdx = findClosingDollar(scalars, from: i + 1)
-            {
-                let content = slice(i + 1, closeIdx)
-                if looksLikeLatex(content) || looksLikeDollarMath(content, followedBy: peek(closeIdx - i + 1)) {
-                    emitMath(content, fallback: slice(i, closeIdx + 1), advanceTo: closeIdx + 1)
-                    continue
-                }
-                // Currency/plain text: fall through, keeping the `$` literal.
-            }
-
-            current.append(String(c))
-            i += 1
-        }
-
-        flushText()
-        return segments
-    }
-
-    /// Find the start of a backtick run of exactly `runLength`, closing a code span
-    /// opened by a run of the same length.
-    private func findClosingBacktickRun(_ scalars: [Unicode.Scalar], from start: Int, runLength: Int) -> Int? {
-        var j = start
-        while j < scalars.count {
-            guard scalars[j] == "`" else {
-                j += 1
-                continue
-            }
-            var length = 0
-            while j + length < scalars.count, scalars[j + length] == "`" { length += 1 }
-            if length == runLength { return j }
-            j += length
-        }
-        return nil
-    }
-
-    /// Find the index of a closing `\)` for an opening `\(`.
-    private func findClosingParen(_ scalars: [Unicode.Scalar], from start: Int) -> Int? {
-        var j = start
-        while j + 1 < scalars.count {
-            if scalars[j] == "\\" && scalars[j + 1] == ")" {
-                return j
-            }
-            j += 1
-        }
-        return nil
-    }
-
-    /// Find the index of a closing `$` whose preceding character is not whitespace.
-    private func findClosingDollar(_ scalars: [Unicode.Scalar], from start: Int) -> Int? {
-        var j = start
-        while j < scalars.count {
-            if scalars[j] == "$", j > 0, !scalars[j - 1].properties.isWhitespace {
-                return j
-            }
-            j += 1
-        }
-        return nil
-    }
-
     /// Build an attributed string from mixed text/math segments.
     private func renderSegmentsWithMath(
-        _ segments: [InlineSegment],
+        _ segments: [InlineMathScanner.Segment],
         fontSize: CGFloat,
         weight: NSFont.Weight,
         isItalic: Bool,

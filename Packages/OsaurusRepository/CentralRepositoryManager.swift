@@ -6,8 +6,8 @@
 //  Refreshes via GitHub's source-archive endpoint (no `git` binary required).
 //
 
-import CFNetwork
 import Foundation
+import OsaurusNetworking
 
 /// Disk-backed proxy resolver for plugin repository downloads.
 ///
@@ -15,54 +15,24 @@ import Foundation
 /// this package), so it reads the same lightweight `globalProxyURL` setting
 /// from `server.json` independently. That value is already validated and
 /// normalized to `scheme://host:port` by `GlobalProxySection.commitProxy()`
-/// before it is ever persisted, so parsing here only needs to recover the
-/// scheme/host/port to shape a `connectionProxyDictionary`. Sessions are
-/// built fresh per call, matching this fork's `GlobalProxySettings.makeSession()`
-/// pattern (no cached/shared session, no cache-key bookkeeping).
-private enum RepositoryGlobalProxySettings {
+/// before it is ever persisted, but parsing here still routes through
+/// `OsaurusNetworking.GlobalProxyConfiguration` so this reader enforces the
+/// same credential/host/port validation as every other network call in the
+/// app, instead of re-deriving a looser CFNetwork proxy dictionary by hand.
+/// Sessions are built fresh per call, matching this fork's
+/// `GlobalProxySettings.makeSession()` pattern (no cached/shared session, no
+/// cache-key bookkeeping).
+enum RepositoryGlobalProxySettings {
     static func makeSession() -> URLSession {
-        let configuration = URLSessionConfiguration.default
-        if let proxyDictionary = proxyDictionary() {
-            configuration.connectionProxyDictionary = proxyDictionary
-        }
-        return URLSession(configuration: configuration)
+        GlobalProxyURLSessionFactory.makeSession(proxy: currentConfiguration())
     }
 
-    private static func proxyDictionary() -> [AnyHashable: Any]? {
+    static func currentConfiguration() -> GlobalProxyConfiguration? {
         guard
             let raw = persistedProxyURL()?.trimmingCharacters(in: .whitespacesAndNewlines),
-            !raw.isEmpty,
-            let components = URLComponents(string: raw),
-            let scheme = components.scheme?.lowercased(),
-            let host = components.host, !host.isEmpty,
-            let port = components.port
-        else {
-            return nil
-        }
-
-        switch scheme {
-        case "http", "https":
-            return [
-                key(kCFNetworkProxiesHTTPEnable): 1,
-                key(kCFNetworkProxiesHTTPProxy): host,
-                key(kCFNetworkProxiesHTTPPort): port,
-                key(kCFNetworkProxiesHTTPSEnable): 1,
-                key(kCFNetworkProxiesHTTPSProxy): host,
-                key(kCFNetworkProxiesHTTPSPort): port,
-            ]
-        case "socks", "socks5":
-            return [
-                key(kCFNetworkProxiesSOCKSEnable): 1,
-                key(kCFNetworkProxiesSOCKSProxy): host,
-                key(kCFNetworkProxiesSOCKSPort): port,
-            ]
-        default:
-            return nil
-        }
-    }
-
-    private static func key(_ value: CFString) -> AnyHashable {
-        AnyHashable(value as String)
+            !raw.isEmpty
+        else { return nil }
+        return try? GlobalProxyConfiguration(urlString: raw)
     }
 
     private static func persistedProxyURL() -> String? {
