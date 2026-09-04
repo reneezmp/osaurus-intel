@@ -864,13 +864,26 @@ final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
     }
 
     /// FloatingInputCard reads this every time the user types `/`.
-    /// Upstream does prefix-fuzzy across custom + built-in commands;
-    /// Intel returns prefix matches across custom only (built-ins
-    /// require the amputated slash-command engine).
+    /// Upstream does prefix-fuzzy across custom + built-in commands.
+    /// The built-ins (clear/model/agent/title/help) are NOT amputated on
+    /// Intel — `FloatingInputCard.handleBuiltInSlashAction(_:)` already
+    /// implements every one of them locally — so surface them here too,
+    /// built-ins first then custom (matching upstream's `allCommands`
+    /// order in the excluded `Managers/SlashCommandRegistry.swift`),
+    /// deduplicated by name so a custom command can't collide with a
+    /// built-in of the same name.
     func filtered(query: String) -> [SlashCommand] {
+        var seen = Set<String>()
+        var all: [SlashCommand] = []
+        for cmd in SlashCommand.builtIns + customCommands {
+            let key = cmd.name.lowercased()
+            guard !seen.contains(key) else { continue }
+            seen.insert(key)
+            all.append(cmd)
+        }
         let q = query.lowercased()
-        guard !q.isEmpty else { return customCommands }
-        return customCommands.filter { $0.name.lowercased().hasPrefix(q) }
+        guard !q.isEmpty else { return all }
+        return all.filter { $0.name.lowercased().hasPrefix(q) }
     }
 
     @discardableResult

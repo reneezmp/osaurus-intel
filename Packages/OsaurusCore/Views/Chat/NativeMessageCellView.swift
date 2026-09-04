@@ -539,7 +539,13 @@ final class NativeAssistantActionsView: NSView {
             deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
             deleteButton.widthAnchor.constraint(equalToConstant: size),
             deleteButton.heightAnchor.constraint(equalToConstant: size),
-            deleteButton.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor),
+            // Required equality (not `<=`) — with the 4th button, chaining another
+            // `<=` here left this view's own trailing edge doubly unbounded (the
+            // button's `<=` to us, ours `<=` to the cell in configureAsAssistantActions),
+            // so nothing pinned our width to our content. Harmless while the row has
+            // room, but leaves the row's own frame undefined the moment it doesn't —
+            // hug the last button exactly instead.
+            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
         ttsObservation = NotificationCenter.default.addObserver(
