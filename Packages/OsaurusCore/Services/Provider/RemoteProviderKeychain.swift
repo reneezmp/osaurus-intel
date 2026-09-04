@@ -97,6 +97,23 @@ public enum RemoteProviderKeychain {
             let data = result as? Data,
             let apiKey = String(data: data, encoding: .utf8)
         else {
+            // `errSecItemNotFound` is ordinary: no key has been saved yet.
+            // Anything else means the item EXISTS but we could not read it —
+            // typically the ACL not carrying across to a newly installed
+            // binary. Because the query above sets `kSecUseAuthenticationUISkip`
+            // the system never prompts, so this failure is otherwise completely
+            // invisible: the provider silently loses its Authorization header,
+            // every /models probe 401s, and the UI just shows an empty model
+            // list. Log it loudly so the next occurrence is diagnosable, and so
+            // "no key stored" is distinguishable from "key locked away".
+            if status != errSecItemNotFound {
+                NSLog(
+                    "[RemoteProviderKeychain] Could not read API key for %@ — OSStatus %d. "
+                        + "The item exists but is not readable by this build; re-saving the key "
+                        + "in Settings → Providers will re-authorize it.",
+                    account, Int(status)
+                )
+            }
             return nil
         }
 
