@@ -553,6 +553,37 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         self.projectId = projectId
     }
 
+    // MARK: - Tolerant decoding
+    //
+    // ⚠️ Synthesized `Decodable` does NOT fall back to a property's default
+    // value: a missing key throws `keyNotFound`, and `loadFromDisk()` skips any
+    // session it cannot decode. So adding a NON-OPTIONAL field here — even one
+    // with `= false` — makes every previously-written session silently vanish
+    // from the sidebar. That is exactly what shipping `pinned` did.
+    //
+    // This hand-written initializer makes every additive field tolerant, so old
+    // files keep loading. When adding a field, give it a case here too; do not
+    // rely on the property default.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        id = try c.decode(UUID.self, forKey: .id)
+        title = try c.decodeIfPresent(String.self, forKey: .title) ?? "New Chat"
+        createdAt = try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date()
+        updatedAt = try c.decodeIfPresent(Date.self, forKey: .updatedAt) ?? createdAt
+        agentId = try c.decodeIfPresent(UUID.self, forKey: .agentId) ?? UUID()
+        source = try c.decodeIfPresent(SessionSource.self, forKey: .source) ?? .chat
+        sourcePluginId = try c.decodeIfPresent(String.self, forKey: .sourcePluginId)
+        externalSessionKey = try c.decodeIfPresent(String.self, forKey: .externalSessionKey)
+        dispatchTaskId = try c.decodeIfPresent(UUID.self, forKey: .dispatchTaskId)
+        archived = try c.decodeIfPresent(Bool.self, forKey: .archived) ?? false
+        pinned = try c.decodeIfPresent(Bool.self, forKey: .pinned) ?? false
+        selectedModel = try c.decodeIfPresent(String.self, forKey: .selectedModel)
+        turns = try c.decodeIfPresent([ChatTurnData].self, forKey: .turns) ?? []
+        capabilities =
+            try c.decodeIfPresent(Set<SessionCapability>.self, forKey: .capabilities) ?? []
+        projectId = try c.decodeIfPresent(UUID.self, forKey: .projectId)
+    }
+
     /// Derive a chat title from the first user message — mirrors the upstream
     /// `ChatSessionData.generateTitle` (excluded on Intel). The old stub always
     /// returned "Chat", which is why every Intel conversation was named "Chat".
