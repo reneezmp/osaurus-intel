@@ -819,9 +819,6 @@ struct ChatSessionSidebar: View {
                             onTogglePin: {
                                 onSetPinned(session.id, !session.pinned)
                             },
-                            onExport: { format in
-                                onExport(session, format)
-                            },
                             onOpenInNewWindow: onOpenInNewWindow != nil
                                 ? {
                                     onOpenInNewWindow?(session)
@@ -872,7 +869,6 @@ private struct SessionRow: View {
     let onDelete: () -> Void
     let onToggleArchive: () -> Void
     let onTogglePin: () -> Void
-    let onExport: (ChatSessionSidebar.ExportFormat) -> Void
     /// Optional callback for opening in a new window
     var onOpenInNewWindow: (() -> Void)? = nil
 
@@ -1040,14 +1036,6 @@ private struct SessionRow: View {
                 Button(action: onTogglePin) {
                     Text(session.pinned ? "Unpin" : "Pin", bundle: .module)
                 }
-                Divider()
-#if !OSAURUS_INTEL
-                Button(action: requestExport) { Text("Export…", bundle: .module) }
-                Divider()
-#endif
-                Button(action: onToggleArchive) {
-                    Text(session.archived ? "Unarchive" : "Archive", bundle: .module)
-                }
                 if !projectManager.projects.isEmpty {
                     Menu {
                         ForEach(projectManager.projects) { project in
@@ -1064,6 +1052,10 @@ private struct SessionRow: View {
                     } label: {
                         Text(session.projectId != nil ? "Change Project" : "Move to Project", bundle: .module)
                     }
+                }
+                Divider()
+                Button(action: onToggleArchive) {
+                    Text(session.archived ? "Unarchive" : "Archive", bundle: .module)
                 }
                 Button(role: .destructive, action: requestDelete) { Text("Delete", bundle: .module) }
             }
@@ -1086,14 +1078,16 @@ private struct SessionRow: View {
                 showActionsPopover = false
                 onTogglePin()
             }
-            Divider().padding(.vertical, 2)
-#if !OSAURUS_INTEL
-            ActionsPopoverButton(icon: "square.and.arrow.up", label: "Export…", isDestructive: false) {
-                showActionsPopover = false
-                requestExport()
+            if !projectManager.projects.isEmpty {
+                ActionsPopoverButton(
+                    icon: "folder.badge.plus",
+                    label: session.projectId != nil ? "Change Project" : "Move to Project",
+                    isDestructive: false
+                ) {
+                    showingProjectPicker = true
+                }
             }
             Divider().padding(.vertical, 2)
-#endif
             ActionsPopoverButton(
                 icon: session.archived ? "tray.and.arrow.up" : "archivebox",
                 label: session.archived ? "Unarchive" : "Archive",
@@ -1102,23 +1096,6 @@ private struct SessionRow: View {
                 showActionsPopover = false
                 onToggleArchive()
             }
-            Divider().padding(.vertical, 2)
-            ActionsPopoverButton(
-                icon: "folder.badge.plus",
-                label: session.projectId != nil ? "Change Project" : "Move to Project",
-                isDestructive: false
-            ) {
-                showingProjectPicker = true
-            }
-            if session.projectId != nil {
-                ActionsPopoverButton(
-                    icon: "folder.badge.minus", label: "Remove from Project", isDestructive: true
-                ) {
-                    showActionsPopover = false
-                    ChatSessionsManager.shared.setProject(id: session.id, projectId: nil)
-                }
-            }
-            Divider().padding(.vertical, 2)
             ActionsPopoverButton(icon: "trash", label: "Delete", isDestructive: true) {
                 showActionsPopover = false
                 requestDelete()
@@ -1156,51 +1133,20 @@ private struct SessionRow: View {
                         ChatSessionsManager.shared.setProject(id: session.id, projectId: project.id)
                     }
                 }
+                if session.projectId != nil {
+                    Divider().padding(.vertical, 2)
+                    ActionsPopoverButton(
+                        icon: "folder.badge.minus", label: "Remove from Project", isDestructive: true
+                    ) {
+                        showActionsPopover = false
+                        showingProjectPicker = false
+                        ChatSessionsManager.shared.setProject(id: session.id, projectId: nil)
+                    }
+                }
             }
         }
         .padding(6)
         .frame(minWidth: 200)
-    }
-
-    // MARK: - Export Format Chooser
-
-    private func requestExport() {
-#if OSAURUS_INTEL
-        // Export pipeline (ExportChooserSheet body / ChatSessionExportCoordinator)
-        // is amputated on Intel — the chooser sheet and the export coordinator
-        // both live in excluded files. The Export menu item is also gated below
-        // so users never reach this path; keep the function body around for
-        // signature parity with the upstream call sites.
-        onExport(.markdown)
-#else
-        let requestId = UUID()
-        let scope = alertScope
-        let metadata = session
-        let sheet = ExportChooserSheet(session: session) { format, options in
-            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
-            ChatSessionExportCoordinator.run(
-                metadataSession: metadata,
-                format: format,
-                options: options,
-                scope: scope
-            )
-        }
-        ThemedAlertCenter.shared.present(
-            ThemedAlertRequest(
-                id: requestId,
-                title: "Export Conversation",
-                message: nil,
-                buttons: [.cancel(L("Cancel"))],
-                showsCloseButton: true,
-                customContent: AnyView(sheet),
-                width: 420,
-                onDismiss: {
-                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
-                }
-            ),
-            scope: scope
-        )
-#endif
     }
 
     // MARK: - Delete Confirmation
