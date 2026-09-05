@@ -412,6 +412,12 @@ struct SidebarRowActionButton: View {
 struct SidebarRowBackground: View {
     let isSelected: Bool
     let isHovered: Bool
+    /// True when the row is part of a multi-selection (⌘/⇧-click), as
+    /// opposed to `isSelected` which marks "this is the currently-open
+    /// item." Rendered as a flat accent fill + solid stroke so it never
+    /// reads the same as the gradient "currently open" treatment — even
+    /// when both are true at once.
+    var isMultiSelected: Bool = false
 
     @Environment(\.theme) private var theme
 
@@ -419,14 +425,19 @@ struct SidebarRowBackground: View {
 
     var body: some View {
         ZStack {
-            // Layer 1: Background fill with glass effect
-            if isSelected || isHovered {
+            if isMultiSelected {
+                RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                    .fill(theme.accentColor.opacity(theme.isDark ? 0.22 : 0.16))
+            } else if isSelected || isHovered {
+                // Layer 1: Background fill with glass effect
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(backgroundColor)
             }
 
             // Layer 2: Accent gradient overlay for selected/hovered states
-            if isSelected {
+            if isMultiSelected {
+                EmptyView()
+            } else if isSelected {
                 RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                     .fill(
                         LinearGradient(
@@ -466,7 +477,12 @@ struct SidebarRowBackground: View {
 
     @ViewBuilder
     private var borderOverlay: some View {
-        if isSelected {
+        if isMultiSelected {
+            // Multi-selection: flat solid stroke, deliberately not the
+            // gradient used for "currently open" below.
+            RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
+                .strokeBorder(theme.accentColor.opacity(0.9), lineWidth: 1.5)
+        } else if isSelected {
             // Selected state: gradient border with accent highlight
             RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
                 .strokeBorder(

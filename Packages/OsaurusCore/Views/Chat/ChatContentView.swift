@@ -196,6 +196,9 @@ struct ChatContentView: View {
                                 // (ChatSessionExportCoordinator + ExportChooserSheet
                                 // both live in excluded files). The Export menu
                                 // item is gated to hidden inside the sidebar.
+                            },
+                            onOpenProject: { [weak windowState] projectId in
+                                windowState?.openProjectId = projectId
                             }
                         )
                     }
@@ -213,6 +216,28 @@ struct ChatContentView: View {
                 // Main chat area
                 ZStack {
                     chatBackground
+                    if let openProjectId = windowState.openProjectId {
+                        // Bug #5/#6 route: a project is open, so the main
+                        // area renders the project page instead of the
+                        // chat thread/composer. `chatBackground` above
+                        // stays so the window chrome is continuous.
+                        ProjectPageView(
+                            projectId: openProjectId,
+                            onSelectChat: { [weak windowState] data in
+                                windowState?.loadSession(data)
+                                windowState?.openProjectId = nil
+                            },
+                            onNewChat: { [weak windowState] in
+                                guard let windowState else { return }
+                                windowState.startNewChat()
+                                windowState.session.projectId = openProjectId
+                                windowState.openProjectId = nil
+                            },
+                            onLeave: { [weak windowState] in
+                                windowState?.openProjectId = nil
+                            }
+                        )
+                    } else {
                     VStack(spacing: 0) {
                         chatHeader
                             .background(
@@ -314,6 +339,7 @@ struct ChatContentView: View {
                                     key: ChatComposerHeightKey.self, value: g.size.height)
                             }
                         )
+                    }
                     }
                 }
                 // Pin the chat column to the WINDOW's height (GeometryReader) and clip,

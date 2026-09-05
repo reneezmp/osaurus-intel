@@ -1273,17 +1273,22 @@ private struct IntelToolbarSidebarView: View {
 }
 
 /// Back-to-project toolbar chip. Renders nothing when the current chat has
-/// no project; otherwise shows the project's name and reopens its detail
-/// sheet (the same `ProjectDetailView` the sidebar's Projects tab presents).
+/// no project; otherwise shows the project's name and routes the window's
+/// main content area to the project page (`ChatWindowState.openProjectId`)
+/// — a real "inside the project" state, not the old themed-alert modal
+/// (`ProjectDetailView`) that left you nowhere once closed. Capsule styling
+/// mirrors `AgentPill`'s pill chrome (`pillBackground`/`pillBorder` below)
+/// so it reads as part of the same toolbar family.
 private struct IntelToolbarProjectView: View {
     @ObservedObject var windowState: ChatWindowState
     @ObservedObject var session: ChatSession
     @ObservedObject private var projectManager = ProjectManager.shared
+    @State private var isHovered = false
 
     var body: some View {
         Group {
             if let pid = session.projectId, let project = projectManager.project(for: pid) {
-                Button(action: { presentDetail(project) }) {
+                Button(action: { windowState.openProjectId = pid }) {
                     HStack(spacing: 4) {
                         Image(systemName: "folder.fill")
                             .font(.system(size: 10, weight: .medium))
@@ -1292,34 +1297,19 @@ private struct IntelToolbarProjectView: View {
                             .lineLimit(1)
                     }
                     .foregroundColor(windowState.theme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 4)
+                    .background(
+                        Capsule()
+                            .fill(windowState.theme.secondaryBackground.opacity(isHovered ? 0.9 : 0.65))
+                    )
                 }
                 .buttonStyle(.plain)
+                .onHover { isHovered = $0 }
                 .localizedHelp("Back to Project")
             }
         }
         .environment(\.theme, windowState.theme)
-    }
-
-    private func presentDetail(_ project: Project) {
-        let requestId = UUID()
-        let scope = ThemedAlertScope.chat(windowState.windowId)
-        let detail = ProjectDetailView(projectId: project.id) { selected in
-            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
-            windowState.loadSession(selected)
-        }
-        ThemedAlertCenter.shared.present(
-            ThemedAlertRequest(
-                id: requestId,
-                title: project.name,
-                message: nil,
-                buttons: [.cancel(L("Close"))],
-                showsCloseButton: true,
-                customContent: AnyView(detail),
-                width: 480,
-                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
-            ),
-            scope: scope
-        )
     }
 }
 

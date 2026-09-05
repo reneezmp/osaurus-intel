@@ -567,6 +567,12 @@ final class ChatWindowState: ObservableObject {
     @Published var cachedAgentDisplayName: String = "Assistant"
     @Published var selectedModel: String = "deepseek-v4-pro"
     @Published var availableModels: [String] = ["deepseek-v4-pro", "deepseek-v4-flash"]
+    /// Non-nil while the window's main content area is showing a project
+    /// page instead of the chat thread/composer. In-memory window state only
+    /// (not persisted `Codable`), so a plain stored property is safe here —
+    /// this is NOT `ChatSessionData`/`Project`, the types the "never add a
+    /// non-optional stored property to a persisted Codable type" rule guards.
+    @Published public var openProjectId: UUID?
 
     /// Holds the `.globalThemeChanged` notification observer so it can be
     /// torn down in `cleanup()`. M11 Phase 11.A.1.x bug fix: prior to this,

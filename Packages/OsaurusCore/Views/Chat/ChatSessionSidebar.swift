@@ -39,6 +39,9 @@ struct ChatSessionSidebar: View {
     let onExport: (ChatSessionData, ExportFormat) -> Void
     /// Optional callback for opening a session in a new window
     var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
+    /// Opens the project page route for the given project id, replacing the
+    /// old behavior of presenting `ProjectDetailView` as a modal sheet.
+    var onOpenProject: (UUID) -> Void = { _ in }
 
     enum ExportFormat {
         case markdown
@@ -318,7 +321,7 @@ struct ChatSessionSidebar: View {
                             ProjectRow(
                                 project: project,
                                 chatCount: sessionsManager.sessions(forProject: project.id).count,
-                                onOpen: { presentProjectDetail(project) },
+                                onOpen: { onOpenProject(project.id) },
                                 onRename: { presentRenameProject(project) },
                                 onDelete: { presentDeleteProject(project) }
                             )
@@ -364,7 +367,7 @@ struct ChatSessionSidebar: View {
             name in
             let project = projectManager.create(name: name)
             ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
-            presentProjectDetail(project)
+            onOpenProject(project.id)
         }
         ThemedAlertCenter.shared.present(
             ThemedAlertRequest(
@@ -421,31 +424,6 @@ struct ChatSessionSidebar: View {
                         sessionsManager.deleteProject(id: project.id)
                     },
                 ],
-                onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
-            ),
-            scope: scope
-        )
-    }
-
-    private func presentProjectDetail(_ project: Project) {
-        let requestId = UUID()
-        let scope = alertScope
-        let detail = ProjectDetailView(
-            projectId: project.id,
-            onSelectChat: { session in
-                ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
-                onSelect(session)
-            }
-        )
-        ThemedAlertCenter.shared.present(
-            ThemedAlertRequest(
-                id: requestId,
-                title: project.name,
-                message: nil,
-                buttons: [.cancel(L("Close"))],
-                showsCloseButton: true,
-                customContent: AnyView(detail),
-                width: 480,
                 onDismiss: { ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId) }
             ),
             scope: scope
@@ -805,10 +783,11 @@ struct ChatSessionSidebar: View {
                             session: session,
                             agent: agentManager.agent(for: session.agentId ?? Agent.defaultId),
                             isSelected: session.id == currentSessionId,
+                            isMultiSelected: selectedIds.contains(session.id),
                             isImportHighlighted: importHighlight.sessionIds.contains(session.id),
                             isEditing: editingSessionId == session.id,
                             onSelect: {
-                                handleSelect(session)
+                                handleTap(session)
                             },
                             onStartRename: {
                                 if editingSessionId != nil && editingSessionId != session.id {
@@ -874,6 +853,11 @@ private struct SessionRow: View {
     let session: ChatSessionData
     let agent: Agent?
     let isSelected: Bool
+    /// True when this row is part of the sidebar's ⌘/⇧-click multi-selection.
+    /// Distinct from `isSelected` (which marks the currently-open chat) so a
+    /// multi-selected row never looks identical to the open one — a row can
+    /// be both at once (the open chat can be multi-selected too).
+    var isMultiSelected: Bool = false
     /// True while this session is in the freshly-imported flash window;
     /// renders a short accent glow so the row is findable in the list.
     var isImportHighlighted: Bool = false
@@ -927,7 +911,13 @@ private struct SessionRow: View {
             editingView
                 .padding(.horizontal, 10)
                 .padding(.vertical, 8)
-                .background(SidebarRowBackground(isSelected: isSelected, isHovered: isHovered))
+                .background(
+                    SidebarRowBackground(
+                        isSelected: isSelected,
+                        isHovered: isHovered,
+                        isMultiSelected: isMultiSelected
+                    )
+                )
                 .clipShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
         } else {
             HStack(spacing: 10) {
@@ -957,6 +947,10 @@ private struct SessionRow: View {
                             // instead let the text hug its ideal and truncate
                             // early while empty space sat after the badges.
                             .frame(maxWidth: .infinity, alignment: .leading)
+
+                        if let project = memberProject {
+                            projectBadge(project)
+                        }
 
                         if session.source != .chat {
                             sourceBadge
@@ -1280,6 +1274,33 @@ private struct SessionRow: View {
 
     /// Compact icon-only badge that surfaces the session's `SessionSource`
     /// (plugin / http / schedule / watcher). Chat-source rows hide it.
+    /// The project this chat belongs to, if any — resolved live so a
+    /// rename elsewhere updates the badge without a row refresh, and a
+    /// deleted project (id now dangling) just makes the badge disappear.
+    private var memberProject: Project? { projectManager.project(for: session.projectId) }
+
+    /// Small folder-glyph pill naming the project a chat belongs to —
+    /// without it a member chat gave no sign of its membership. Mirrors
+    /// `sourceBadge`'s compact-pill language but carries text since a bare
+    /// glyph wouldn't distinguish which project.
+    private func projectBadge(_ project: Project) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: "folder.fill")
+                .font(.system(size: 8, weight: .semibold))
+            Text(verbatim: project.name)
+                .font(.system(size: 9, weight: .medium))
+                .lineLimit(1)
+        }
+        .foregroundColor(theme.accentColor.opacity(0.9))
+        .padding(.horizontal, 5)
+        .padding(.vertical, 2)
+        .background(
+            Capsule(style: .continuous)
+                .fill(theme.accentColor.opacity(theme.isDark ? 0.18 : 0.12))
+        )
+        .help(Text(verbatim: project.name))
+    }
+
     private var sourceBadge: some View {
         Image(systemName: session.source.iconName)
             .font(.system(size: 8.5, weight: .semibold))
