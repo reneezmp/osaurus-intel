@@ -6,6 +6,34 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.34</title>
+      <pubDate>Sat, 05 Sep 2026 20:54:03 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>35</sparkle:version>
+      <sparkle:shortVersionString>1.0.34</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.34/Osaurus-Intel-1.0.34.zip" length="54725054" type="application/octet-stream" sparkle:edSignature="7bc9QYNYmA7lzaMPDB2V5mTedlp5KxKpzGt1YmAq/evkzjZ42OvoJqkijDdd3+heSXgOXtbiCalSbKSARQCkCw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.34
+
+Projects now have a real page. Clicking a project opens it in the main window — shared instructions, its chat list, and a New Chat button — instead of a modal you could only close. Chats inside a project show a chip in the toolbar that takes you back, and project membership is now visible on every chat in the sidebar.
+
+Fixed: project instructions could move between projects. Creating or switching projects could write one project's instructions onto another and blank the original. Instructions are now bound to a single project by construction. Chats that appeared to ignore their project's instructions were hitting the same bug.
+
+Fixed: window chrome overlapped the project page. The agent picker and New Chat button no longer render on top of a project's title.
+
+Fixed: multi-select showed no selection. Command-click and Shift-click now highlight the chats they select.
+
+Fixed: duplicated message buttons. Copy, edit and delete rendered twice on your own messages.
+
+Fixed: the right-click menu and the actions popover offered different items in different orders. Both now match, and the Export entry — which could never work in this build — is gone.
+
+Also fixed: slash commands never appeared when typing /; assistant messages had no copy or regenerate row; Command-F and Escape did nothing; /clear did nothing; chats stopped naming themselves automatically.
+
+_Intel fork · synced to upstream Osaurus 0.20.3 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.33</title>
       <pubDate>Fri, 04 Sep 2026 19:33:30 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
