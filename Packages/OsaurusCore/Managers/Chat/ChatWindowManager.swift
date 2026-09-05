@@ -1195,8 +1195,14 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
     static let agentItem = NSToolbarItem.Identifier("IntelChatToolbar.agent")
     static let actionItem = NSToolbarItem.Identifier("IntelChatToolbar.action")
 
+    /// Layout: sidebar toggle on the leading edge; the back-to-project chip
+    /// sits immediately next to the centered agent pill (no flexible space
+    /// between them) so it reads as the chat's identity chrome rather than
+    /// sidebar chrome. Bug fix: `projectItem` used to sit right after
+    /// `sidebarItem`, far to the left above the sidebar — users didn't
+    /// recognize it as belonging to the chat at all.
     private static let ids: [NSToolbarItem.Identifier] = [
-        sidebarItem, projectItem, .flexibleSpace, agentItem, .flexibleSpace, actionItem,
+        sidebarItem, .flexibleSpace, projectItem, agentItem, .flexibleSpace, actionItem,
     ]
 
     private weak var windowState: ChatWindowState?
@@ -1287,7 +1293,15 @@ private struct IntelToolbarProjectView: View {
 
     var body: some View {
         Group {
-            if let pid = session.projectId, let project = projectManager.project(for: pid) {
+            // Hidden while a project page is open: that page draws its own
+            // header with the same folder glyph and name, and the chip would
+            // render straight over it — the identical overlap the agent pill
+            // and action items are gated for just above. The chip is a way
+            // back INTO a project from a chat; on the project page there is
+            // nothing to go back to.
+            if windowState.openProjectId == nil,
+                let pid = session.projectId, let project = projectManager.project(for: pid)
+            {
                 Button(action: { windowState.openProjectId = pid }) {
                     HStack(spacing: 4) {
                         Image(systemName: "folder.fill")
@@ -1320,30 +1334,40 @@ private struct IntelToolbarAgentView: View {
     @State private var openPickerTrigger: Int = 0
 
     var body: some View {
-        AgentPill(
-            agents: windowState.agents,
-            activeAgentId: windowState.agentId,
-            onSelectAgent: { windowState.switchAgent(to: $0) },
-            onOpenActiveAgentSettings: {
-                let active = windowState.agents.first { $0.id == windowState.agentId }
-                let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
-                AppDelegate.shared?.showManagementWindow(
-                    initialTab: .agents,
-                    deeplinkAgentId: deeplinkId
+        // Bug fix: when a project page is open in the window's main
+        // content area, this chat-scoped pill used to keep rendering on top
+        // of it, overlapping the project title. Gating on `openProjectId`
+        // mirrors `IntelToolbarProjectView`'s existing empty-else pattern
+        // just below, which already collapses that item out of the toolbar
+        // layout rather than leaving an invisible-but-occupied gap.
+        Group {
+            if windowState.openProjectId == nil {
+                AgentPill(
+                    agents: windowState.agents,
+                    activeAgentId: windowState.agentId,
+                    onSelectAgent: { windowState.switchAgent(to: $0) },
+                    onOpenActiveAgentSettings: {
+                        let active = windowState.agents.first { $0.id == windowState.agentId }
+                        let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
+                        AppDelegate.shared?.showManagementWindow(
+                            initialTab: .agents,
+                            deeplinkAgentId: deeplinkId
+                        )
+                    },
+                    openPickerTrigger: openPickerTrigger
                 )
-            },
-            openPickerTrigger: openPickerTrigger
-        )
-        .environment(\.theme, windowState.theme)
-        // Bridge the `/agent` slash command into the Intel toolbar's agent
-        // picker — mirrors the non-Intel branch's listener (line ~810).
-        // (Renée, 2026-06-14.)
-        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
-                targetWindowId == windowState.windowId
-            else { return }
-            openPickerTrigger &+= 1
+                // Bridge the `/agent` slash command into the Intel toolbar's
+                // agent picker — mirrors the non-Intel branch's listener
+                // (line ~810). (Renée, 2026-06-14.)
+                .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
+                    guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
+                        targetWindowId == windowState.windowId
+                    else { return }
+                    openPickerTrigger &+= 1
+                }
+            }
         }
+        .environment(\.theme, windowState.theme)
     }
 }
 
@@ -1353,16 +1377,22 @@ private struct IntelToolbarActionView: View {
 
     var body: some View {
         Group {
-            if session.turns.isEmpty {
-                SettingsButton(action: {
-                    AppDelegate.shared?.showManagementWindow(initialTab: nil)
-                })
-            } else {
-                HeaderActionButton(
-                    icon: "plus",
-                    help: "New chat",
-                    action: { windowState.startNewChat() }
-                )
+            // Bug fix: the settings gear / "+ New Chat" button used to
+            // render on top of the project page's own header once a project
+            // was open, overlapping its controls. Same gating pattern as
+            // `IntelToolbarAgentView` above.
+            if windowState.openProjectId == nil {
+                if session.turns.isEmpty {
+                    SettingsButton(action: {
+                        AppDelegate.shared?.showManagementWindow(initialTab: nil)
+                    })
+                } else {
+                    HeaderActionButton(
+                        icon: "plus",
+                        help: "New chat",
+                        action: { windowState.startNewChat() }
+                    )
+                }
             }
         }
         .environment(\.theme, windowState.theme)

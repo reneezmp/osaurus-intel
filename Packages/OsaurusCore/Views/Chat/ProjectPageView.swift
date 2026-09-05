@@ -36,12 +36,17 @@ struct ProjectPageView: View {
     @ObservedObject private var sessionsManager = ChatSessionsManager.shared
     @ObservedObject private var agentManager = AgentManager.shared
 
+    // NOTE: `ChatContentView` mounts this view with `.id(projectId)`, so a
+    // project switch tears the whole page down and builds a fresh one rather
+    // than re-pointing a live instance. That is load-bearing: it makes
+    // `projectId` immutable for the lifetime of this instance, so the buffer
+    // below can only ever belong to one project. The previous design kept the
+    // buffer alive across switches and tracked its owner in a second piece of
+    // state; when the two desynced during a lifecycle transition the buffer
+    // was written to the WRONG project, and instructions appeared to migrate
+    // from one project to another. Do not reintroduce a cross-project buffer.
     @State private var instructions: String = ""
     @State private var saveTask: Task<Void, Never>?
-    /// Which project the `instructions` buffer currently belongs to. The page
-    /// stays mounted across project switches, so this is what a pending save
-    /// must be keyed to — `projectId` has already moved on by then.
-    @State private var editingProjectId: UUID?
     @State private var query: String = ""
     @FocusState private var isSearchFocused: Bool
     @State private var showingAddChats = false
@@ -82,16 +87,10 @@ struct ProjectPageView: View {
             }
         }
         .onAppear { loadInstructions() }
-        // The page can stay mounted while `projectId` changes (leave one
-        // project, open another without ever unmounting ChatContentView's
-        // main area) — flush the outgoing project's pending edit, THEN resync
-        // the buffer. Without the flush the resync's own `onChange` cancels
-        // the in-flight debounce and the last keystrokes are lost.
-        .onChange(of: projectId) { _ in
-            flushInstructions()
-            loadInstructions()
-        }
-        // Leaving the page (back to a chat) tears the view down mid-debounce.
+        // Leaving the page — back to a chat, or over to another project —
+        // tears this view down, and the 600ms debounce does not survive that.
+        // Flush so the last keystrokes are not lost. Safe unconditionally:
+        // `projectId` cannot have changed under us (see the note above).
         .onDisappear { flushInstructions() }
         .sheet(isPresented: $showingAddChats) {
             addChatsSheet
@@ -213,7 +212,7 @@ struct ProjectPageView: View {
                 .onChange(of: instructions) { newValue in
                     // Debounced auto-save — same 600ms debounce as
                     // `ProjectDetailView`, just re-housed.
-                    let target = editingProjectId ?? projectId
+                    let target = projectId
                     saveTask?.cancel()
                     saveTask = Task {
                         try? await Task.sleep(nanoseconds: 600_000_000)
@@ -226,23 +225,19 @@ struct ProjectPageView: View {
 
     // MARK: - Instructions Persistence
 
-    /// Loads the editor buffer for the current project and records which
-    /// project it belongs to.
+    /// Loads the editor buffer for this page's project.
     private func loadInstructions() {
         saveTask?.cancel()
         saveTask = nil
         instructions = project?.instructions ?? ""
-        editingProjectId = projectId
     }
 
     /// Writes any pending edit through immediately, cancelling the debounce.
-    /// Called when the page is switching projects or being torn down — the
-    /// 600ms timer does not survive either.
+    /// Called on teardown — the 600ms timer does not survive it.
     private func flushInstructions() {
         saveTask?.cancel()
         saveTask = nil
-        guard let target = editingProjectId else { return }
-        writeInstructions(instructions, to: target)
+        writeInstructions(instructions, to: projectId)
     }
 
     /// Single write path. No-ops when the text is unchanged so a buffer

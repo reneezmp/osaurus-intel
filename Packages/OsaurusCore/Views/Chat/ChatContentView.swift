@@ -237,6 +237,15 @@ struct ChatContentView: View {
                                 windowState?.openProjectId = nil
                             }
                         )
+                        // Load-bearing: keying the page to the project id makes
+                        // switching projects a full teardown + rebuild with
+                        // fresh @State, instead of re-pointing a live instance
+                        // whose instructions buffer still holds the PREVIOUS
+                        // project's text. Without this the buffer and its owner
+                        // could desync across the lifecycle transition and the
+                        // text was written to the wrong project — instructions
+                        // appeared to migrate between projects.
+                        .id(openProjectId)
                     } else {
                     VStack(spacing: 0) {
                         chatHeader

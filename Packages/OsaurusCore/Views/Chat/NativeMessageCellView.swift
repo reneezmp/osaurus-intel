@@ -168,7 +168,13 @@ final class NativeHeaderView: NSView {
         onRegenerate: ((UUID) -> Void)?,
         onEdit: ((UUID) -> Void)?,
         onDelete: ((UUID) -> Void)?,
-        onCancelEdit: (() -> Void)?
+        onCancelEdit: (() -> Void)?,
+        /// User turns render their action cluster once, per message, anchored
+        /// beside the bubble (see `configureAsUserMessage`). The "You" name
+        /// header is emitted only when the conversation side FLIPS, so it
+        /// covers just the first turn of a run — it must not draw a second,
+        /// partial copy of the same buttons. Label-only there.
+        showsActions: Bool = true
     ) {
         self.turnId = turnId
         self.isEditing = isEditing
@@ -240,7 +246,8 @@ final class NativeHeaderView: NSView {
         nameLabel.font = NSFont.systemFont(ofSize: nameSize, weight: .semibold)
         nameLabel.textColor = role == .user ? NSColor(theme.accentColor) : NSColor(theme.secondaryText)
 
-        rebuildActionButtons(role: role, theme: theme, onCancelEdit: onCancelEdit)
+        rebuildActionButtons(
+            role: role, theme: theme, onCancelEdit: onCancelEdit, showsActions: showsActions)
         invalidateIntrinsicContentSize()
         setHovered(isHovered, animated: false)
     }
@@ -319,7 +326,10 @@ final class NativeHeaderView: NSView {
         }
     }
 
-    private func rebuildActionButtons(role: MessageRole, theme: any ThemeProtocol, onCancelEdit: (() -> Void)?) {
+    private func rebuildActionButtons(
+        role: MessageRole, theme: any ThemeProtocol, onCancelEdit: (() -> Void)?,
+        showsActions: Bool = true
+    ) {
         for v in actionStack.arrangedSubviews {
             actionStack.removeArrangedSubview(v)
             v.removeFromSuperview()
@@ -329,7 +339,7 @@ final class NativeHeaderView: NSView {
         // under every completed assistant turn, so the header only carries actions for
         // user messages now. This lets the table coordinator skip hover reconfigures
         // for assistant rows entirely.
-        guard role == .user else { return }
+        guard showsActions, role == .user else { return }
 
         addBtn(icon: "doc.on.doc", help: L("Copy"), theme: theme, tint: nil) { [weak self] in
             guard let self else { return }
@@ -1372,7 +1382,8 @@ final class NativeMessageCellView: NSTableCellView {
             onRegenerate: context.onRegenerate,
             onEdit: context.onEdit,
             onDelete: context.onDelete,
-            onCancelEdit: context.onCancelEdit
+            onCancelEdit: context.onCancelEdit,
+            showsActions: false
         )
     }
 

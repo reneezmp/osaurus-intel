@@ -992,7 +992,13 @@ private struct SessionRow: View {
             }
             .padding(.horizontal, 10)
             .padding(.vertical, 8)
-            .background(SidebarRowBackground(isSelected: isSelected, isHovered: isHovered))
+            .background(
+                SidebarRowBackground(
+                    isSelected: isSelected,
+                    isHovered: isHovered,
+                    isMultiSelected: isMultiSelected
+                )
+            )
             .clipShape(RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous))
             .overlay(
                 RoundedRectangle(cornerRadius: SidebarStyle.rowCornerRadius, style: .continuous)
