@@ -116,6 +116,67 @@ public enum TextSimilarity {
         return !onlyA.isDisjoint(with: polarityTerms) || !onlyB.isDisjoint(with: polarityTerms)
     }
 
+    /// Conservative veto for destructive fuzzy folds. Semantic embeddings can
+    /// put corrections unusually close together, so callers must check wording
+    /// as well as a similarity score. In addition to polarity, reject pairs
+    /// that state different explicit numbers or different one-word values for
+    /// the same singular preference/identity attribute. False positives merely
+    /// retain two facts; false negatives can erase a correction.
+    public static func factualConflict(_ a: String, _ b: String) -> Bool {
+        guard !polarityConflict(a, b) else { return true }
+
+        let tokensA = orderedAlphanumericTokens(a)
+        let tokensB = orderedAlphanumericTokens(b)
+        let numbersA = Set(tokensA.filter { $0.allSatisfy(\.isNumber) })
+        let numbersB = Set(tokensB.filter { $0.allSatisfy(\.isNumber) })
+        if !numbersA.isEmpty, !numbersB.isEmpty, numbersA != numbersB { return true }
+
+        let valuesA = explicitAttributeValues(tokensA)
+        let valuesB = explicitAttributeValues(tokensB)
+        for (attribute, valueA) in valuesA {
+            guard let valueB = valuesB[attribute] else { continue }
+            // "New York" and "New York City" may be the same place, but
+            // Paris and London, or two unrelated model IDs, are not.
+            guard !valueA.starts(with: valueB), !valueB.starts(with: valueA) else { continue }
+            return true
+        }
+        return false
+    }
+
+    private static func explicitAttributeValues(_ tokens: [String]) -> [String: [String]] {
+        // These predicates carry a single current value in the memory facts we
+        // distill. We intentionally omit broad predicates such as "has".
+        let aliases: [String: String] = [
+            "lives": "location", "live": "location", "located": "location",
+            "born": "birth", "model": "model", "name": "name", "called": "name",
+            "prefers": "preference", "prefer": "preference", "favorite": "preference",
+            "likes": "preference", "like": "preference",
+        ]
+        let fillers: Set<String> = ["is", "was", "in", "at", "the", "a", "an", "my", "their", "her", "his"]
+        var result: [String: [String]] = [:]
+        for (index, token) in tokens.enumerated() where aliases[token] != nil {
+            let tail = tokens[(index + 1)...].drop(while: { fillers.contains($0) })
+            guard !tail.isEmpty, let attribute = aliases[token] else { continue }
+            result[attribute] = Array(tail)
+        }
+        return result
+    }
+
+    private static func orderedAlphanumericTokens(_ text: String) -> [String] {
+        var result: [String] = []
+        var current = ""
+        for character in text.lowercased() {
+            if character.isLetter || character.isNumber {
+                current.append(character)
+            } else if !current.isEmpty {
+                result.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { result.append(current) }
+        return result
+    }
+
     private static func polarityTokens(_ text: String) -> Set<String> {
         var out: Set<String> = []
         var current = ""

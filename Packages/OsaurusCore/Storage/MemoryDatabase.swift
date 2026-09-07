@@ -47,6 +47,37 @@ public final class MemoryDatabase: @unchecked Sendable {
 
     private static let schemaVersion = 9
 
+    /// An embedding together with the identity of the space that produced it.
+    /// `provider` is the full `EmbeddingClient.activeIdentifier` (including model
+    /// and configured dimension), rather than merely the backend kind.
+    public struct PinnedFactEmbedding: Sendable {
+        public let fact: PinnedFact
+        public let vector: [Float]
+        public let dimension: Int
+        public let provider: String
+    }
+
+    public struct EpisodeEmbedding: Sendable {
+        public let episode: Episode
+        public let vector: [Float]
+        public let dimension: Int
+        public let provider: String
+    }
+
+    /// A fully prepared pinned-fact fold. Planning happens outside the
+    /// database queue; applying every update and delete happens in one SQL
+    /// transaction so a failed later deletion cannot leave earlier metadata
+    /// updates committed on their own.
+    public struct PinnedFactMerge: Sendable {
+        public let survivor: PinnedFact
+        public let droppedIDs: [String]
+
+        public init(survivor: PinnedFact, droppedIDs: [String]) {
+            self.survivor = survivor
+            self.droppedIDs = droppedIDs
+        }
+    }
+
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
         return f
@@ -1092,20 +1123,22 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
-    /// Fuzzy counterpart of `deduplicateIdentityOverrides`: fold override
-    /// pairs whose word-overlap is ≥ `threshold` into a single override,
+    /// Fuzzy counterpart of `deduplicateIdentityOverrides`: fold only clear
+    /// paraphrases into a single override,
     /// keeping the longer (more specific) wording. Runs after the safe exact
     /// dedup, so this only sees paraphrases the normalized-key pass cannot
     /// collapse ("the model I prefer is Claude" vs "her preferred model is
     /// Claude", say).
     ///
-    /// Safety: pairs whose wording differs on polarity — one side gains a
-    /// negation/opposition term the other lacks (`TextSimilarity.polarityConflict`)
-    /// — are never merged, so a correction ("no longer", "doesn't like") cannot
-    /// be folded into its opposite. This is the 2026-09-07 owner decision to
-    /// extend merging to identity overrides; the guard is what keeps that safe.
-    public func mergeSimilarIdentityOverrides(threshold: Double) throws -> Int {
-        try inTransaction { connection in
+    /// This deliberately does *not* reuse the episode cosine setting. Jaccard
+    /// and cosine have different distributions, and a user lowering the episode
+    /// slider must never turn identity cleanup into broad destructive folding.
+    ///
+    /// Safety: pairs with a polarity or attribute-value conflict are never
+    /// merged. This protects corrections such as different names, cities,
+    /// years, and model preferences as well as negations.
+    public func mergeSimilarIdentityOverrides() throws -> Int {
+        return try inTransaction { connection in
             guard var identity = try Self.loadIdentity(on: connection) else { return 0 }
             guard !identity.overrides.isEmpty else { return 0 }
             var list = identity.overrides
@@ -1118,8 +1151,12 @@ public final class MemoryDatabase: @unchecked Sendable {
                         let a = list[i]
                         let b = list[j]
                         let sim = TextSimilarity.jaccardTokenized(
-                            TextSimilarity.shingleSet(a), TextSimilarity.shingleSet(b))
-                        guard sim >= threshold, !TextSimilarity.polarityConflict(a, b) else { continue }
+                            Self.identityOverrideComparisonTokens(a),
+                            Self.identityOverrideComparisonTokens(b))
+                        guard sim >= Self.identityOverrideMergeThreshold,
+                              !TextSimilarity.factualConflict(a, b),
+                              !Self.identityOverrideValueConflict(a, b)
+                        else { continue }
                         // Keep the longer (more specific) wording; on a tie keep the
                         // earlier entry. Drop the other.
                         let dropIndex = a.count < b.count ? i : j
@@ -1135,6 +1172,70 @@ public final class MemoryDatabase: @unchecked Sendable {
             try Self.saveIdentity(on: connection, identity: identity)
             return merged
         }
+    }
+
+    /// A lexical threshold chosen for the normalized comparison representation
+    /// below, not for embedding cosine. It is intentionally private: identity
+    /// overrides are user-authored facts, and their destructive maintenance
+    /// needs a stable conservative policy rather than a shared UI slider.
+    private static let identityOverrideMergeThreshold = 0.8
+
+    /// Remove grammatical glue and normalize the small set of wording variants
+    /// that commonly occur in manually entered identity facts. Values remain in
+    /// the set, so the similarity check cannot alone merge a different name,
+    /// city, year, or model.
+    private static func identityOverrideComparisonTokens(_ text: String) -> Set<String> {
+        let ignored: Set<String> = [
+            "a", "an", "the", "as", "at", "for", "from", "in", "is", "of", "on", "their", "to", "was", "with",
+            "s", "user", "users",
+        ]
+        let synonym: [String: String] = [
+            "prefers": "prefer", "preferred": "prefer", "preference": "prefer",
+            "lives": "live", "living": "live", "located": "live",
+            "called": "name", "named": "name",
+        ]
+        return identityOverrideWords(text).reduce(into: Set<String>()) { result, token in
+            let normalized = synonym[token] ?? token
+            guard !ignored.contains(normalized) else { return }
+            result.insert(normalized)
+        }
+    }
+
+    private static func identityOverrideWords(_ text: String) -> [String] {
+        var words: [String] = []
+        var current = ""
+        for character in text.lowercased() {
+            if character.isLetter || character.isNumber {
+                current.append(character)
+            } else if !current.isEmpty {
+                words.append(current)
+                current = ""
+            }
+        }
+        if !current.isEmpty { words.append(current) }
+        return words
+    }
+
+    /// Identity facts often share most of their grammar while changing the one
+    /// word that matters. Detect differing values for common single-value
+    /// attributes before a lexical merge. This errs on the side of retaining
+    /// two paraphrases when it cannot establish that their values agree.
+    private static func identityOverrideValueConflict(_ a: String, _ b: String) -> Bool {
+        let tokensA = identityOverrideComparisonTokens(a)
+        let tokensB = identityOverrideComparisonTokens(b)
+
+        let numbersA = Set(tokensA.filter { $0.allSatisfy(\.isNumber) })
+        let numbersB = Set(tokensB.filter { $0.allSatisfy(\.isNumber) })
+        if !numbersA.isEmpty, !numbersB.isEmpty, numbersA != numbersB { return true }
+
+        let attributes: Set<String> = ["name", "live", "birth", "born", "model", "prefer", "favorite"]
+        let sharedAttributes = tokensA.intersection(tokensB).intersection(attributes)
+        guard !sharedAttributes.isEmpty else { return false }
+
+        let valueA = tokensA.subtracting(attributes)
+        let valueB = tokensB.subtracting(attributes)
+        guard !valueA.isEmpty, !valueB.isEmpty else { return false }
+        return valueA.isDisjoint(with: valueB)
     }
 
     private static func loadIdentity(on connection: OpaquePointer) throws -> Identity? {
@@ -1211,16 +1312,19 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
-    /// When the UI supplies `expectedText`, delete that displayed value rather
-    /// than trusting an index that a concurrent deduplication pass may have
-    /// shifted. The index-only form remains for existing callers.
+    /// When the UI supplies `expectedText`, require the snapshot's text to
+    /// still occupy that exact slot. A stale row action becomes a no-op rather
+    /// than deleting the first matching sibling (important for legacy duplicate
+    /// entries). The index-only form remains for existing callers.
     public func removeIdentityOverride(at index: Int, expectedText: String? = nil) throws {
         try inTransaction { connection in
             var current = try Self.loadIdentity(on: connection) ?? Identity()
             let targetIndex: Int
             if let expectedText {
-                guard let matchedIndex = current.overrides.firstIndex(of: expectedText) else { return }
-                targetIndex = matchedIndex
+                guard index >= 0, index < current.overrides.count,
+                      current.overrides[index] == expectedText
+                else { return }
+                targetIndex = index
             } else {
                 guard index >= 0, index < current.overrides.count else { return }
                 targetIndex = index
@@ -1231,30 +1335,39 @@ public final class MemoryDatabase: @unchecked Sendable {
     }
 
     /// Replace one override's text (the UI's "edit" action). The row is read
-    /// and written inside the same transaction as `append`/`remove`. Replacing
-    /// with a value whose normalized key already exists elsewhere simply drops
-    /// the edited entry — the edited text collapses into the duplicate rather
-    /// than creating a second copy. Editing needs no re-embedding: identity
-    /// overrides are plain strings injected verbatim, never stored as vectors.
+    /// and written inside the same transaction as `append`/`remove`. The UI's
+    /// index and expected text form an occurrence-aware snapshot: a shifted or
+    /// removed row is a no-op, never an edit of a same-text sibling. Replacing
+    /// with a value whose normalized key already exists elsewhere drops the
+    /// edited entry; otherwise the replacement stays at its original position.
+    /// Editing needs no re-embedding: identity overrides are plain strings
+    /// injected verbatim, never stored as vectors.
     public func replaceIdentityOverride(at index: Int, with newText: String, expectedText: String? = nil) throws {
         try inTransaction { connection in
             var current = try Self.loadIdentity(on: connection) ?? Identity()
             let targetIndex: Int
             if let expectedText {
-                guard let matchedIndex = current.overrides.firstIndex(of: expectedText) else { return }
-                targetIndex = matchedIndex
+                guard index >= 0, index < current.overrides.count,
+                      current.overrides[index] == expectedText
+                else { return }
+                targetIndex = index
             } else {
                 guard index >= 0, index < current.overrides.count else { return }
                 targetIndex = index
             }
-            current.overrides.remove(at: targetIndex)
             let trimmed = newText.trimmingCharacters(in: .whitespacesAndNewlines)
             let key = TextSimilarity.identityOverrideKey(trimmed)
             if !trimmed.isEmpty, !key.isEmpty {
-                let seen = Set(current.overrides.map { TextSimilarity.identityOverrideKey($0) })
-                if !seen.contains(key) {
-                    current.overrides.append(trimmed)
+                let seen = Set(current.overrides.enumerated().compactMap { offset, value in
+                    offset == targetIndex ? nil : TextSimilarity.identityOverrideKey(value)
+                })
+                if seen.contains(key) {
+                    current.overrides.remove(at: targetIndex)
+                } else {
+                    current.overrides[targetIndex] = trimmed
                 }
+            } else {
+                current.overrides.remove(at: targetIndex)
             }
             try Self.saveIdentity(on: connection, identity: current)
         }
@@ -1322,6 +1435,118 @@ public final class MemoryDatabase: @unchecked Sendable {
         _ = try executeUpdate("DELETE FROM pinned_facts WHERE id = ?1") { stmt in
             Self.bindText(stmt, index: 1, value: id)
         }
+    }
+
+    /// Apply a non-overlapping set of pinned-fact folds atomically. Similarity
+    /// planning happens before this transaction, but mutable metadata is read
+    /// again inside it. A recall usage bump or other update that lands between
+    /// planning and commit therefore contributes to the survivor instead of
+    /// being overwritten by the planning snapshot or deleted with a duplicate.
+    public func applyPinnedFactMerges(_ merges: [PinnedFactMerge]) throws -> Int {
+        guard !merges.isEmpty else { return 0 }
+        var touched = Set<String>()
+        for merge in merges {
+            guard !merge.droppedIDs.isEmpty, touched.insert(merge.survivor.id).inserted else {
+                throw MemoryDatabaseError.failedToExecute("overlapping pinned-fact merge plan")
+            }
+            for droppedID in merge.droppedIDs {
+                guard droppedID != merge.survivor.id, touched.insert(droppedID).inserted else {
+                    throw MemoryDatabaseError.failedToExecute("overlapping pinned-fact merge plan")
+                }
+            }
+        }
+
+        return try inTransaction { connection in
+            for merge in merges {
+                let memberIDs = [merge.survivor.id] + merge.droppedIDs
+                let members = try Self.loadActivePinnedFacts(on: connection, ids: memberIDs)
+                guard members.count == memberIDs.count,
+                      var fact = members.first(where: { $0.id == merge.survivor.id })
+                else {
+                    throw MemoryDatabaseError.failedToExecute("pinned-fact merge member is missing")
+                }
+                for retired in members where retired.id != fact.id {
+                    fact = Self.mergingPinnedMetadata(into: fact, from: retired)
+                }
+                try Self.executeUpdate(
+                    on: connection,
+                    """
+                    UPDATE pinned_facts
+                    SET salience = ?1, source_count = ?2, source_episode_id = ?3,
+                        last_used = ?4, use_count = ?5, tags_csv = ?6
+                    WHERE id = ?7 AND status = 'active'
+                    """
+                ) { stmt in
+                    sqlite3_bind_double(stmt, 1, fact.salience)
+                    sqlite3_bind_int64(stmt, 2, Int64(fact.sourceCount))
+                    if let sourceEpisodeID = fact.sourceEpisodeId {
+                        sqlite3_bind_int64(stmt, 3, Int64(sourceEpisodeID))
+                    } else {
+                        sqlite3_bind_null(stmt, 3)
+                    }
+                    Self.bindText(stmt, index: 4, value: fact.lastUsed)
+                    sqlite3_bind_int64(stmt, 5, Int64(fact.useCount))
+                    Self.bindText(stmt, index: 6, value: fact.tagsCSV)
+                    Self.bindText(stmt, index: 7, value: fact.id)
+                }
+                guard sqlite3_changes(connection) == 1 else {
+                    throw MemoryDatabaseError.failedToExecute("pinned-fact merge survivor is missing")
+                }
+                for droppedID in merge.droppedIDs {
+                    try Self.executeUpdate(
+                        on: connection,
+                        "DELETE FROM pinned_facts WHERE id = ?1 AND status = 'active'"
+                    ) { stmt in
+                        Self.bindText(stmt, index: 1, value: droppedID)
+                    }
+                    guard sqlite3_changes(connection) == 1 else {
+                        throw MemoryDatabaseError.failedToExecute("pinned-fact merge duplicate is missing")
+                    }
+                }
+            }
+            return merges.reduce(0) { $0 + $1.droppedIDs.count }
+        }
+    }
+
+    private static func loadActivePinnedFacts(
+        on connection: OpaquePointer, ids: [String]
+    ) throws -> [PinnedFact] {
+        guard !ids.isEmpty else { return [] }
+        let placeholders = ids.enumerated().map { "?\($0.offset + 1)" }.joined(separator: ",")
+        var facts: [PinnedFact] = []
+        try prepareAndExecute(
+            on: connection,
+            "SELECT \(pinnedColumns) FROM pinned_facts WHERE status = 'active' AND id IN (\(placeholders))",
+            bind: { stmt in
+                for (index, id) in ids.enumerated() {
+                    bindText(stmt, index: Int32(index + 1), value: id)
+                }
+            },
+            process: { stmt in
+                while sqlite3_step(stmt) == SQLITE_ROW {
+                    facts.append(readPinnedFact(stmt))
+                }
+            }
+        )
+        return facts
+    }
+
+    private static func mergingPinnedMetadata(into survivor: PinnedFact, from retired: PinnedFact) -> PinnedFact {
+        var merged = survivor
+        merged.salience = max(survivor.salience, retired.salience)
+        merged.sourceCount = saturatingAdd(survivor.sourceCount, retired.sourceCount)
+        merged.useCount = saturatingAdd(survivor.useCount, retired.useCount)
+        merged.lastUsed = max(survivor.lastUsed, retired.lastUsed)
+        merged.sourceEpisodeId = [survivor.sourceEpisodeId, retired.sourceEpisodeId].compactMap { $0 }.min()
+        var seen = Set<String>()
+        let tags = (survivor.tags + retired.tags).filter { seen.insert($0.lowercased()).inserted }
+        merged.tagsCSV = tags.isEmpty ? nil : tags.joined(separator: ", ")
+        return merged
+    }
+
+    private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (result, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : result
     }
 
     public func evictPinnedFacts(belowSalience floor: Double, idleDays: Int) throws -> Int {
@@ -2277,10 +2502,10 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// `loadEmbeddedTranscript`; scoped by recency on `conversation_at`.
     public func loadEmbeddedEpisodes(
         agentId: String? = nil, days: Int = 365, limit: Int = 500
-    ) throws -> [(episode: Episode, vector: [Float])] {
-        var out: [(episode: Episode, vector: [Float])] = []
+    ) throws -> [EpisodeEmbedding] {
+        var out: [EpisodeEmbedding] = []
         var sql = """
-            SELECT \(Self.episodeColumns), embedding
+            SELECT \(Self.episodeColumns), embedding, embedding_dim, embedding_provider
             FROM episodes
             WHERE status = 'active' AND embedding IS NOT NULL
               AND conversation_at >= datetime('now', '-' || ?1 || ' days')
@@ -2301,7 +2526,11 @@ public final class MemoryDatabase: @unchecked Sendable {
                         let bytes = Int(sqlite3_column_bytes(stmt, 14))
                         let data = Data(bytes: blob, count: bytes)
                         let vec = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-                        out.append((ep, vec))
+                        let dimension = sqlite3_column_type(stmt, 15) == SQLITE_NULL
+                            ? 0 : Int(sqlite3_column_int(stmt, 15))
+                        let provider = sqlite3_column_text(stmt, 16).map { String(cString: $0) } ?? ""
+                        out.append(EpisodeEmbedding(
+                            episode: ep, vector: vec, dimension: dimension, provider: provider))
                     }
                 }
             }
@@ -2314,10 +2543,10 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// the durable layer; ranked by salience.
     public func loadEmbeddedPinnedFacts(
         agentId: String? = nil, limit: Int = 500
-    ) throws -> [(fact: PinnedFact, vector: [Float])] {
-        var out: [(fact: PinnedFact, vector: [Float])] = []
+    ) throws -> [PinnedFactEmbedding] {
+        var out: [PinnedFactEmbedding] = []
         var sql = """
-            SELECT \(Self.pinnedColumns), embedding
+            SELECT \(Self.pinnedColumns), embedding, embedding_dim, embedding_provider
             FROM pinned_facts
             WHERE status = 'active' AND embedding IS NOT NULL
             """
@@ -2336,7 +2565,11 @@ public final class MemoryDatabase: @unchecked Sendable {
                         let bytes = Int(sqlite3_column_bytes(stmt, 11))
                         let data = Data(bytes: blob, count: bytes)
                         let vec = data.withUnsafeBytes { Array($0.bindMemory(to: Float.self)) }
-                        out.append((fact, vec))
+                        let dimension = sqlite3_column_type(stmt, 12) == SQLITE_NULL
+                            ? 0 : Int(sqlite3_column_int(stmt, 12))
+                        let provider = sqlite3_column_text(stmt, 13).map { String(cString: $0) } ?? ""
+                        out.append(PinnedFactEmbedding(
+                            fact: fact, vector: vec, dimension: dimension, provider: provider))
                     }
                 }
             }

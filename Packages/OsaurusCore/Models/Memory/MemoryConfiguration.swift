@@ -96,22 +96,24 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
     /// near-duplicates. Higher = only merge when near-identical (fewer
     /// merges); lower = merge more eagerly.
     ///
-    /// Applies to all three stores, merged in one phase before the other
+    /// Applies to compatible-vector episodes and pinned facts, merged in one
+    /// phase before the other
     /// consolidation steps (owner decision 2026-09-07):
     ///   - **Episodes** and **pinned facts** — compared by cosine over their
     ///     stored embeddings (pinned facts fall back to word-overlap when a
     ///     vector is missing). The survivor keeps its higher-salience copy.
-    ///   - **Identity overrides** — compared by word-overlap (they have no
-    ///     vectors); the longer wording survives, and polarity-conflicting
-    ///     pairs are never merged.
+    ///   - **Identity overrides** — cleaned by separate conservative lexical
+    ///     rules (they have no vectors), independent of this threshold.
     ///
     /// The property name (and persisted JSON key) retains "Episode" from when
     /// it was an episodes-only constant; renaming would silently reset a saved
     /// value on disk, so the historical name is kept. The Memory → Settings
-    /// slider ("Merge threshold") is the single control for all three.
+    /// slider ("Merge threshold") controls the compatible-vector stores;
+    /// identity cleanup uses its own conservative fixed rules.
     ///
     /// Default intentionally unchanged (0.9) so existing behavior is preserved
-    /// until an owner lowers it.
+    /// until an owner lowers it. Values below the UI's minimum are clamped to
+    /// 0.50 before consolidation runs.
     public var episodeMergeCosineThreshold: Double
 
     /// Per-agent opt-in for **distillation** — the cloud call in
@@ -218,7 +220,7 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
         c.consolidationIntervalHours = max(1, min(c.consolidationIntervalHours, 168))
         c.salienceFloor = max(0.0, min(c.salienceFloor, 1.0))
         c.episodeRetentionDays = max(0, min(c.episodeRetentionDays, 3650))
-        c.episodeMergeCosineThreshold = max(0.0, min(c.episodeMergeCosineThreshold, 1.0))
+        c.episodeMergeCosineThreshold = max(0.50, min(c.episodeMergeCosineThreshold, 1.0))
         c.embeddingDimensionality = max(1, min(c.embeddingDimensionality, 8192))
         return c
     }

@@ -139,13 +139,15 @@ final class MemorySearchService: @unchecked Sendable {
         if cfg.embeddingProvider != "none",
             let qvec = try? await EmbeddingClient.shared.embedOne(trimmed, config: cfg),
             !qvec.isEmpty,
+            let queryProvider = EmbeddingClient.shared.activeIdentifier(for: cfg),
             let rows = try? MemoryDatabase.shared.loadEmbeddedEpisodes(
                 agentId: agentId, days: days, limit: 1000), !rows.isEmpty
         {
             let scored =
                 rows
                 .compactMap { row -> (Episode, Float)? in
-                    guard row.vector.count == qvec.count else { return nil }
+                    guard row.provider == queryProvider, row.dimension == qvec.count,
+                          row.vector.count == qvec.count else { return nil }
                     return (row.episode, Self.cosine(qvec, row.vector))
                 }
                 .sorted { $0.1 > $1.1 }
@@ -168,13 +170,15 @@ final class MemorySearchService: @unchecked Sendable {
         if cfg.embeddingProvider != "none",
             let qvec = try? await EmbeddingClient.shared.embedOne(trimmed, config: cfg),
             !qvec.isEmpty,
+            let queryProvider = EmbeddingClient.shared.activeIdentifier(for: cfg),
             let rows = try? MemoryDatabase.shared.loadEmbeddedPinnedFacts(
                 agentId: agentId, limit: 1000), !rows.isEmpty
         {
             let scored =
                 rows
                 .compactMap { row -> (PinnedFact, Float)? in
-                    guard row.vector.count == qvec.count else { return nil }
+                    guard row.provider == queryProvider, row.dimension == qvec.count,
+                          row.vector.count == qvec.count else { return nil }
                     return (row.fact, Self.cosine(qvec, row.vector))
                 }
                 .sorted { $0.1 > $1.1 }

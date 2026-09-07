@@ -106,6 +106,10 @@ public actor MemoryConsolidator {
     private static let promotionLookbackDays = 60
     private static let promotionShingleThreshold = 0.4
     private static let promotionSalienceBoost = 0.05
+    /// Word overlap and cosine are different scales. Text is only a safe
+    /// fallback for nearly identical wording, never a second interpretation of
+    /// the owner-configured cosine threshold.
+    private static let lexicalMergeThreshold = 0.85
 
     private static let sqliteDateFormatter: DateFormatter = {
         let f = DateFormatter()
@@ -229,13 +233,10 @@ public actor MemoryConsolidator {
         MemoryLogger.service.info("MemoryConsolidator: starting pass")
 
         // Merge phase — fold near-duplicates in ALL three stores before any
-        // other step (owner decision 2026-09-07), so decay, promotion,
-        // eviction and pruning all see a deduplicated pool. One threshold
-        // (`MemoryConfiguration.episodeMergeCosineThreshold`, the "Merge
-        // threshold" slider) governs every store: episodes and pinned facts
-        // compare by stored-embedding cosine, identity overrides by word
-        // overlap. Pinned facts keep their higher-salience copy; overrides
-        // keep the longer wording (never merging polarity-conflicting pairs).
+        // other step, so decay, promotion, eviction and pruning all see a
+        // deduplicated pool. Episodes and pinned facts use the persisted cosine
+        // threshold. Identity overrides use their own fixed conservative lexical
+        // policy: a cosine setting must not control destructive word matching.
         let mergeThreshold = config.episodeMergeCosineThreshold
 
         // 1. Identity overrides — exact normalized dedup first (catches the
@@ -249,7 +250,7 @@ public actor MemoryConsolidator {
         }
         let mergedOverrides: Int
         do {
-            mergedOverrides = try MemoryDatabase.shared.mergeSimilarIdentityOverrides(threshold: mergeThreshold)
+            mergedOverrides = try MemoryDatabase.shared.mergeSimilarIdentityOverrides()
         } catch {
             MemoryLogger.service.warning("MemoryConsolidator: override merge failed: \(error)")
             mergedOverrides = 0
@@ -350,7 +351,7 @@ public actor MemoryConsolidator {
             (try? MemoryDatabase.shared.loadEmbeddedEpisodes(
                 days: Self.unboundedHistoryDays, limit: 2000
             )) ?? []
-        let embeddedCount = embedded.filter { !$0.1.isEmpty }.count
+        let embeddedCount = embedded.filter { !$0.vector.isEmpty }.count
         var bestSimilarity = 0.0
         lastMergeDiagnostics = "considered=\(embedded.count) embedded=\(embeddedCount)"
         guard embedded.count > 1 else { return 0 }
@@ -360,21 +361,36 @@ public actor MemoryConsolidator {
 
         for (_, group) in byAgent {
             guard group.count > 1 else { continue }
+            // The oldest member is always the anchor. This avoids continuing
+            // an inner loop through an anchor that was just retired.
+            let ordered = group.sorted {
+                $0.episode.conversationAt == $1.episode.conversationAt
+                    ? $0.episode.id < $1.episode.id
+                    : $0.episode.conversationAt < $1.episode.conversationAt
+            }
             var consumed = Set<Int>()
-            for i in 0..<group.count {
-                let (epI, vecI) = group[i]
-                if consumed.contains(epI.id) { continue }
-                for j in (i + 1)..<group.count {
-                    let (epJ, vecJ) = group[j]
-                    if consumed.contains(epJ.id) { continue }
-                    guard vecI.count == vecJ.count, !vecI.isEmpty else { continue }
-                    let sim = Double(MemorySearchService.cosine(vecI, vecJ))
+            for i in 0..<ordered.count {
+                let epI = ordered[i]
+                if consumed.contains(epI.episode.id) { continue }
+                for j in (i + 1)..<ordered.count {
+                    let epJ = ordered[j]
+                    if consumed.contains(epJ.episode.id) { continue }
+                    guard Self.compatibleEmbeddingSpaces(epI.vector, epI.dimension, epI.provider,
+                                                         epJ.vector, epJ.dimension, epJ.provider)
+                    else { continue }
+                    let sim = Double(MemorySearchService.cosine(epI.vector, epJ.vector))
                     if sim > bestSimilarity { bestSimilarity = sim }
                     guard sim >= threshold else { continue }
 
-                    // Keep the older episode; delete the newer near-dup.
-                    let keep = epI.conversationAt <= epJ.conversationAt ? epI : epJ
-                    let drop = keep.id == epI.id ? epJ : epI
+                    // A vector score cannot establish that two statements
+                    // agree. Never let it fold a correction into its opposite.
+                    guard !TextSimilarity.factualConflict(epI.episode.summary, epJ.episode.summary) else {
+                        continue
+                    }
+
+                    // `ordered` makes epI the older anchor; it is never
+                    // deleted while still driving subsequent comparisons.
+                    let drop = epJ.episode
                     do {
                         try MemoryDatabase.shared.deleteEpisode(id: drop.id)
                         consumed.insert(drop.id)
@@ -402,26 +418,25 @@ public actor MemoryConsolidator {
     /// decay operate on, so keeping the highest-salience copy is the closest
     /// this store has to "keep the most authoritative wording".
     ///
-    /// Comparison mirrors the episode merge: cosine over the fact's stored
-    /// embedding when both rows carry one (`loadEmbeddedPinnedFacts`); facts
-    /// distilled before an embedder was configured have no vector and fall
-    /// back to word-shingle overlap. The polarity guard applies on the
-    /// text-only path so a low threshold can't fold "likes X" into "doesn't
-    /// like X"; cosine pairs are inherently safer and are not guarded.
-    private func mergePinnedFacts(threshold: Double) -> Int {
+    /// Cosine is used only when both rows declare the same complete embedding
+    /// identity (provider + model + dimension). Missing or incompatible vector
+    /// metadata falls back to a fixed, conservative lexical threshold; neither
+    /// path can merge a wording conflict.
+    func mergePinnedFacts(threshold: Double) -> Int {
         let pinned = (try? MemoryDatabase.shared.loadPinnedFacts(agentId: nil, limit: 5000)) ?? []
         guard pinned.count > 1 else { return 0 }
         let embedded = (try? MemoryDatabase.shared.loadEmbeddedPinnedFacts(agentId: nil, limit: 5000)) ?? []
-        var vectors: [String: [Float]] = [:]
+        var vectors: [String: MemoryDatabase.PinnedFactEmbedding] = [:]
         for row in embedded where !row.vector.isEmpty {
-            vectors[row.fact.id] = row.vector
+            vectors[row.fact.id] = row
         }
 
         func vectorPair(_ a: PinnedFact, _ b: PinnedFact) -> (va: [Float], vb: [Float])? {
             guard let va = vectors[a.id], let vb = vectors[b.id],
-                va.count == vb.count, !va.isEmpty
+                Self.compatibleEmbeddingSpaces(va.vector, va.dimension, va.provider,
+                                               vb.vector, vb.dimension, vb.provider)
             else { return nil }
-            return (va, vb)
+            return (va.vector, vb.vector)
         }
         func similarity(_ a: PinnedFact, _ b: PinnedFact) -> Double {
             if let v = vectorPair(a, b) {
@@ -430,9 +445,6 @@ public actor MemoryConsolidator {
             return TextSimilarity.jaccardTokenized(
                 TextSimilarity.shingleSet(a.content), TextSimilarity.shingleSet(b.content))
         }
-        func comparedByVector(_ a: PinnedFact, _ b: PinnedFact) -> Bool {
-            vectorPair(a, b) != nil
-        }
         func olderCreated(_ a: PinnedFact, _ b: PinnedFact) -> PinnedFact {
             if a.createdAt.isEmpty { return a }
             if b.createdAt.isEmpty { return b }
@@ -440,38 +452,82 @@ public actor MemoryConsolidator {
         }
 
         let byAgent = Dictionary(grouping: pinned, by: \.agentId)
-        var merged = 0
-        var consumed = Set<String>()
+        var plans: [MemoryDatabase.PinnedFactMerge] = []
 
         for (_, group) in byAgent {
             guard group.count > 1 else { continue }
-            for i in 0 ..< group.count {
-                let a = group[i]
-                if consumed.contains(a.id) { continue }
-                for j in (i + 1) ..< group.count {
-                    let b = group[j]
-                    if consumed.contains(b.id) { continue }
-                    guard similarity(a, b) >= threshold else { continue }
-                    // Text-only path: never fold a polarity flip into its opposite.
-                    if !comparedByVector(a, b), TextSimilarity.polarityConflict(a.content, b.content) {
-                        continue
+            // Build disjoint clusters before mutating the database. If a
+            // stronger fact replaces the initial anchor, restart the scan of
+            // the remaining candidates against that new survivor; otherwise a
+            // bridge pair could create two overlapping plans and roll back the
+            // whole transaction.
+            var unassigned = group
+            while !unassigned.isEmpty {
+                var survivor = unassigned.removeFirst()
+                var droppedIDs = Set<String>()
+                var changed = true
+                while changed {
+                    changed = false
+                    for candidate in unassigned {
+                        let isVectorPair = vectorPair(survivor, candidate) != nil
+                        let requiredThreshold = isVectorPair ? threshold : Self.lexicalMergeThreshold
+                        guard similarity(survivor, candidate) >= requiredThreshold,
+                              !TextSimilarity.factualConflict(survivor.content, candidate.content)
+                        else { continue }
+
+                        let preferred = survivor.salience != candidate.salience
+                            ? (survivor.salience > candidate.salience ? survivor : candidate)
+                            : olderCreated(survivor, candidate)
+                        let retired = preferred.id == survivor.id ? candidate : survivor
+                        survivor = Self.mergedPinnedSurvivor(preferred, retired)
+                        droppedIDs.insert(retired.id)
+                        unassigned.removeAll { $0.id == candidate.id }
+                        changed = true
+                        break
                     }
-                    let keep: PinnedFact =
-                        a.salience != b.salience
-                        ? (a.salience > b.salience ? a : b)
-                        : olderCreated(a, b)
-                    let drop = keep.id == a.id ? b : a
-                    do {
-                        try MemoryDatabase.shared.deletePinnedFact(id: drop.id)
-                        consumed.insert(drop.id)
-                        merged += 1
-                    } catch {
-                        MemoryLogger.service.warning("MemoryConsolidator: pinned merge delete failed: \(error)")
-                    }
+                }
+                if !droppedIDs.isEmpty {
+                    plans.append(MemoryDatabase.PinnedFactMerge(
+                        survivor: survivor, droppedIDs: droppedIDs.sorted()))
                 }
             }
         }
+        do {
+            return try MemoryDatabase.shared.applyPinnedFactMerges(plans)
+        } catch {
+            MemoryLogger.service.warning("MemoryConsolidator: pinned merge transaction failed: \(error)")
+            return 0
+        }
+    }
+
+    nonisolated static func compatibleEmbeddingSpaces(
+        _ left: [Float], _ leftDimension: Int, _ leftProvider: String,
+        _ right: [Float], _ rightDimension: Int, _ rightProvider: String
+    ) -> Bool {
+        !left.isEmpty && !right.isEmpty && leftDimension == left.count && rightDimension == right.count
+            && leftDimension == rightDimension && !leftProvider.isEmpty && leftProvider == rightProvider
+    }
+
+    nonisolated static func mergedPinnedSurvivor(_ survivor: PinnedFact, _ retired: PinnedFact) -> PinnedFact {
+        var merged = survivor
+        merged.salience = max(survivor.salience, retired.salience)
+        merged.sourceCount = saturatingAdd(survivor.sourceCount, retired.sourceCount)
+        merged.useCount = saturatingAdd(survivor.useCount, retired.useCount)
+        merged.lastUsed = max(survivor.lastUsed, retired.lastUsed)
+        merged.sourceEpisodeId = [survivor.sourceEpisodeId, retired.sourceEpisodeId].compactMap { $0 }.min()
+        let survivorTags = survivor.tags
+        var seen = Set(survivorTags.map { $0.lowercased() })
+        let extra = retired.tags
+            .sorted { $0.localizedCaseInsensitiveCompare($1) == .orderedAscending }
+            .filter { seen.insert($0.lowercased()).inserted }
+        let tags = survivorTags + extra
+        merged.tagsCSV = tags.isEmpty ? nil : tags.joined(separator: ", ")
         return merged
+    }
+
+    nonisolated private static func saturatingAdd(_ lhs: Int, _ rhs: Int) -> Int {
+        let (result, overflow) = lhs.addingReportingOverflow(rhs)
+        return overflow ? Int.max : result
     }
 
     // MARK: - Pinned candidate promotion

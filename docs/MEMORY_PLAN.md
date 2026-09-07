@@ -417,17 +417,20 @@ not-identical episodes survived consolidation. Rather than guess at a new consta
 against a corpus we cannot yet measure well, the owner asked for a control.
 
 - `MemoryConfiguration.episodeMergeCosineThreshold` (new stored setting, default
-  **0.9**, validated `0.0 – 1.0`, tolerant `decodeIfPresent`). The former static
+  **0.9**, validated `0.50 – 1.0`, tolerant `decodeIfPresent`). The former static
   `MemoryConfiguration.episodeMergeCosineThreshold` constant is gone.
 - Both consolidators (`Services/Memory/MemoryConsolidator.swift` and the Intel
   mirror `Models/Chat/IntelConformers/IntelMemoryConsolidator.swift`) now read the
-  threshold from the loaded config instead of a constant; the Intel pass already
-  logs the active value (`bestSim=… threshold=…`), so tuning stays observable.
+  threshold from the loaded config instead of a constant for compatible-vector
+  episode and pinned-fact candidates; identity override cleanup uses separate
+  conservative fixed rules. The Intel pass already logs the active value
+  (`bestSim=… threshold=…`), so tuning stays observable.
 - **Memory → Settings → Merge threshold**: a `0.50 – 1.00` slider directly below
   the Consolidation row, matching the existing row layout, persisting through the
   same `mutate`/`save` path as the interval stepper.
-- Default unchanged keeps untouched installs byte-for-byte equivalent; only an
-  owner who lowers it changes behaviour.
+- Default unchanged preserves the existing merge behavior for untouched installs;
+  saving configuration may add the new key to the serialized JSON even when the
+  owner leaves the default unchanged.
 
 This also retires the D5 concern about comparing cosine across embedding spaces
 (MLX 768-dim vs. this fork's `potion-base-8M` 256-dim): a user control sidesteps
@@ -444,10 +447,10 @@ blocking.
 - `codesign --verify --deep --strict` on the built app — passed.
 - `swift test --no-parallel` — **707 tests / 104 suites passed**.
 - `git diff --check` — passed.
-- New-config expectations were added to `Tests/Memory/MemoryTests.swift`
-  (defaults, decode-with-missing-key, clamps). Note that suite is in
-  `Package.swift`'s `exclude:` list, so the expectations document rather than
-  gate until that suite is re-enabled.
+- New-config expectations live in the compiled
+  `Tests/Memory/MemoryConfigurationTests.swift` suite (defaults,
+  decode-with-missing-key, round-trip, and validation clamps). The merge
+  threshold is validated to the same `0.50 – 1.0` range exposed by the UI.
 - Fresh Rosy deploy zip built and round-trip verified (symlinks + signature
   intact after unzip).
 
@@ -461,12 +464,12 @@ Rosy.
 
 ## New in this build
 
-### Near-duplicate merging now covers all three stores — and runs FIRST
-Previously only episodes merged. Owner decision (2026-09-07): identity
-overrides and pinned facts get the same "keep the strongest twin, retire the
-echo" treatment, run before decay / promotion / eviction / pruning on one
-threshold — the existing **Merge threshold** slider (Settings copy updated;
-default unchanged at 0.9).
+### Near-duplicate merging covers vector stores — and runs FIRST
+Previously only episodes merged. Owner decision (2026-09-07): compatible-vector
+episodes and pinned facts get store-specific survivor treatment, run before decay /
+promotion / eviction / pruning on the **Merge threshold** slider (default remains
+0.9). Identity overrides are cleaned in the same phase with separate conservative
+fixed lexical rules and are unaffected by the slider.
 
 - **Identity overrides** — `MemoryDatabase.mergeSimilarIdentityOverrides`:
   the safe exact-normalized dedup runs first, then word-overlap folding.

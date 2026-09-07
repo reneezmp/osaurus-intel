@@ -12,8 +12,8 @@ The mental model is simple: a smart secretary that knows what you've discussed a
 
 1. Open the Management window (`⌘ Shift M`) → **Memory**
 2. Memory is **enabled by default** — toggle it off in the Memory settings if you prefer stateless conversations
-3. The **core model** for distillation defaults to `foundation` (Apple's on-device Language Model on macOS 26+) — change it in Settings → General if you'd rather use a remote model like `anthropic/claude-haiku-4-5`
-4. Start chatting — sessions are distilled in the background once they end
+3. Local recall and embeddings stay on-device. Cloud distillation is separate: it is **off by default for every agent** and must be explicitly enabled per agent in Memory → Settings, where the selected provider is shown before it can receive buffered conversation text.
+4. Start chatting — sessions are distilled in the background once they end when that agent's distillation setting is enabled
 
 No manual tagging, saving, or annotation is required.
 
@@ -152,7 +152,7 @@ The cache layer holds the assembled block for 10s per (agent, query) pair so ret
 
 `MemoryConsolidator` runs on a low-priority background task every `consolidationIntervalHours` (default 24h) and on the explicit **Run Consolidation Now** button in the Memory UI. Each pass:
 
-1. **Merge (first)** — collapse near-duplicates in *all three stores* on one threshold, `episodeMergeCosineThreshold` (default `0.9`, the **Memory → Settings → Merge threshold** slider; lower it to merge more eagerly). Pass log reports `merged=` (episodes), `mergedPinned=`, `mergedOverrides=`, `dedupedOverrides=`:
+1. **Merge (first)** — evaluate compatible-vector near-duplicate candidates in episodes and pinned facts using `episodeMergeCosineThreshold` (default `0.9`, the **Memory → Settings → Merge threshold** slider; lower it to merge more eagerly). Identity overrides are cleaned separately by conservative fixed lexical rules, so lowering this slider does not affect them. Candidate merges are scoped by agent where applicable and retain store-specific survivor rules. Pass log reports `merged=` (episodes), `mergedPinned=`, `mergedOverrides=`, `dedupedOverrides=`:
    - **Episodes** — cosine over stored embeddings, same agent; keeps the older digest.
    - **Pinned facts** — cosine over stored embeddings (word-overlap fallback when a vector is missing), same agent; keeps the higher-salience copy.
    - **Identity overrides** — word-overlap folding, global; keeps the longer wording, and never merges polarity-conflicting pairs (a "likes X" can't be folded into a "dislikes X").
@@ -182,7 +182,7 @@ The full configuration lives in `~/.osaurus/config/memory.json` and is editable 
 | `consolidationIntervalHours` | `24` | 1 – 168 | How often the consolidator runs |
 | `salienceFloor` | `0.2` | 0.0 – 1.0 | Pinned facts below this and idle 30+ days are evicted |
 | `episodeRetentionDays` | `365` | 0 – 3,650 | How long episodes/transcript are kept (0 = forever) |
-| `episodeMergeCosineThreshold` | `0.9` | 0.0 – 1.0 | Similarity above which consolidation merges near-duplicate episodes, pinned facts, and identity overrides. Lower = merge more eagerly. Name retains "Episode" from its origin; it now governs all three stores. |
+| `episodeMergeCosineThreshold` | `0.9` | 0.50 – 1.0 | Similarity above which consolidation considers compatible-vector near-duplicate episodes and pinned facts. Lower = merge more eagerly. Identity override cleanup uses separate conservative fixed rules. |
 
 That's the entire surface. v1's 18 knobs (`mmrLambda`, `mmrFetchMultiplier`, `verification*Threshold`, per-section budgets, recall topK, profile regen thresholds, max entries per agent, …) are all gone.
 

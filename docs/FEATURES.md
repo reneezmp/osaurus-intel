@@ -1157,7 +1157,7 @@ All three search services use VecturaKit (hybrid BM25 + vector search):
 
 ### Memory
 
-**Purpose:** Persistent, on-device memory that distills conversations at session boundaries, scores facts by salience, and surfaces at most one compact slice per request based on what the user is actually asking. Replaces the v1 four-layer / per-turn-extraction system. See [MEMORY.md](MEMORY.md) for the full architecture.
+**Purpose:** Persistent, on-device memory that recalls relevant facts and distills conversations at session boundaries, scores facts by salience, and surfaces at most one compact slice per request based on what the user is actually asking. Local recall and embeddings remain on-device. Cloud distillation is a separate per-agent opt-in and defaults off; the selected provider is disclosed in Memory settings before conversation text can be sent. Replaces the v1 four-layer / per-turn-extraction system. See [MEMORY.md](MEMORY.md) for the full architecture.
 
 **Components:**
 
@@ -1184,7 +1184,7 @@ All three search services use VecturaKit (hybrid BM25 + vector search):
 **Write Path (deferred, debounced):**
 
 1. Each turn → `bufferTurn` → single SQL insert into `pending_signals` + debounce arm
-2. Debounce expires (default 60s) or `flushSession` is called → ONE LLM call distills the whole session
+2. Debounce expires (default 60s) or `flushSession` is called → when the agent has opted in, ONE configured provider call distills the whole session; otherwise the buffered signal remains local and no cloud call is made
 3. Distillation emits an episode + entity list + pinned candidates + identity delta in one schema-constrained JSON
 4. Pinned candidates pass a Jaccard-dedup check before being persisted
 5. Identity facts are appended to overrides only when distinct (case-insensitive)
@@ -1208,7 +1208,7 @@ No per-turn LLM call. No verification pipeline. Most chitchat sessions produce z
 
 | Step | What it does |
 |------|--------------|
-| Merge (first) | Collapse near-duplicates in all three stores on `episodeMergeCosineThreshold` (default 0.9): episodes (cosine, keep older), pinned facts (cosine/text, keep higher salience), identity overrides (word overlap, keep longer; never polarity flips) |
+| Merge (first) | Evaluate compatible-vector near-duplicate candidates in episodes and pinned facts using `episodeMergeCosineThreshold` (default 0.9); identity overrides use separate conservative fixed cleanup rules |
 | Decay | `salience *= 0.5 ^ (Δdays / halfLife)` for pinned facts and episodes (halfLife=30d) |
 | Promote | Boost salience on pinned facts whose content overlaps ≥ 3 recent episodes |
 | Evict | Delete pinned facts below `salienceFloor` and idle for 30+ days |
@@ -1237,9 +1237,9 @@ Reverse maps from VecturaKit UUIDs to episode/transcript composite keys are buil
 | `consolidationIntervalHours` | 24 | 1 -- 168 |
 | `salienceFloor` | 0.2 | 0.0 -- 1.0 |
 | `episodeRetentionDays` | 365 | 0 -- 3,650 |
-| `episodeMergeCosineThreshold` | 0.9 | 0.0 -- 1.0 (Memory → Settings slider: 0.50 -- 1.00) |
+| `episodeMergeCosineThreshold` | 0.9 | 0.50 -- 1.0 (Memory → Settings slider: 0.50 -- 1.00) |
 
-Nine settings total, down from v1's 18. The per-section budget knobs, MMR tuning, verification thresholds, profile regen thresholds, and `maxEntriesPerAgent` are gone. `episodeMergeCosineThreshold` was added back as a user control on the Intel fork (2026-09-07) because the inherited 0.9 constant proved too strict against this fork's 256-dim embedder; it now governs the near-duplicate merge for all three stores (episodes, pinned facts, identity overrides).
+Nine settings total, down from v1's 18. The per-section budget knobs, MMR tuning, verification thresholds, profile regen thresholds, and `maxEntriesPerAgent` are gone. `episodeMergeCosineThreshold` was added back as a user control on the Intel fork because the inherited 0.9 constant proved too strict against this fork's 256-dim embedder; it governs candidate near-duplicate merges for compatible-vector episodes and pinned facts. Identity override cleanup uses separate conservative fixed rules. Cloud distillation remains a separate per-agent opt-in setting and defaults off.
 
 **Tool API:** `search_memory(scope, query)` with three scopes: `pinned`, `episodes`, `transcript`. Replaces v1's five-scope tool.
 

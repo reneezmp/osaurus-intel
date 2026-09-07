@@ -68,11 +68,51 @@ struct IdentityOverrideTests {
         // removed the duplicate before the user clicked its delete button.
         #expect(try db.deduplicateIdentityOverrides() == 1)
         try db.removeIdentityOverride(at: 2, expectedText: "intended")
-        #expect(try db.loadIdentity()?.overrides == ["duplicate", "other"])
+        #expect(try db.loadIdentity()?.overrides == ["duplicate", "intended", "other"])
 
         // A row that vanished before the click must not delete whichever row
         // has moved into the stale index.
         try db.removeIdentityOverride(at: 0, expectedText: "already removed")
-        #expect(try db.loadIdentity()?.overrides == ["duplicate", "other"])
+        #expect(try db.loadIdentity()?.overrides == ["duplicate", "intended", "other"])
+    }
+
+    @Test func fuzzyMergeFoldsClearModelParaphrasesUnderItsOwnPolicy() throws {
+        let db = try makeTempDB()
+        try db.saveIdentity(Identity(overrides: [
+            "User's preferred model is Claude.",
+            "User prefers Claude as their model.",
+        ]))
+
+        // Identity folding uses a separate lexical policy. This pair is a clear
+        // same-value paraphrase even though it is not byte-for-byte identical.
+        #expect(try db.mergeSimilarIdentityOverrides() == 1)
+        #expect(try db.loadIdentity()?.overrides == ["User's preferred model is Claude."])
+    }
+
+    @Test func fuzzyMergeKeepsPolarityAndDifferentAttributeValues() throws {
+        let db = try makeTempDB()
+        try db.saveIdentity(Identity(overrides: [
+            "User likes tea.", "User does not like tea.",
+            "User lives in São Paulo.", "User lives in Rio de Janeiro.",
+            "User was born in 1980.", "User was born in 1981.",
+            "User's preferred model is Claude.", "User's preferred model is GPT.",
+            "User's name is Ada.", "User's name is Grace.",
+        ]))
+
+        #expect(try db.mergeSimilarIdentityOverrides() == 0)
+        #expect(try db.loadIdentity()?.overrides.count == 10)
+    }
+
+    @Test func editTargetsDuplicateOccurrencePreservesPositionAndRejectsStaleSnapshot() throws {
+        let db = try makeTempDB()
+        try db.saveIdentity(Identity(overrides: ["duplicate", "duplicate", "after"]))
+
+        try db.replaceIdentityOverride(at: 1, with: "second", expectedText: "duplicate")
+        #expect(try db.loadIdentity()?.overrides == ["duplicate", "second", "after"])
+
+        // A concurrent cleanup or mutation shifted the old row. Do not edit the
+        // first matching duplicate or whichever item moved into its old slot.
+        try db.replaceIdentityOverride(at: 1, with: "wrong", expectedText: "duplicate")
+        #expect(try db.loadIdentity()?.overrides == ["duplicate", "second", "after"])
     }
 }
