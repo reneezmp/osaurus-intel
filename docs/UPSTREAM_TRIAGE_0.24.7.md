@@ -1,11 +1,17 @@
 # Upstream triage: 0.24.3 → 0.24.7
 
+> [!WARNING]
+> This ledger records commit verdicts, not product parity. Future reviews must
+> apply [`FEATURE_PARITY.md`](FEATURE_PARITY.md), including to absent and
+> excluded-only subsystems.
+
 > **2026-09-08 correction:** The historical `DEFER` label below conflated difficulty, mixed commits, and actual incompatibility. [The full feasibility audit](DEFER_FEASIBILITY_AUDIT_2026-09-08.md) supersedes those verdicts: 58/73 are feasible Intel work; 15 are true skips.
 
 
 **Range:** `490e0a58..7e109ade` (inclusive) — 53 commits
 
-This ledger is the final Intel verdict for the upstream 0.24.4–0.24.7 window.
+This ledger is the final **commit-level** Intel verdict for the upstream
+0.24.4–0.24.7 window. Feature states remain independently tracked.
 It consolidates the three bounded reviews and supersedes their provisional
 `REVIEW` labels. It is a hand-port map, not a cherry-pick queue.
 

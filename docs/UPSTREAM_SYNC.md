@@ -1,12 +1,20 @@
 # Upstream → Intel Sync Ledger
 
+> [!WARNING]
+> This document tracks **commit coverage**, not product parity. “Reviewed” means
+> a commit received a verdict; “ported” may mean only an Intel-relevant slice;
+> and “current” means the range is classified. Before any new upstream analysis,
+> read [`FEATURE_PARITY.md`](FEATURE_PARITY.md) and update its feature-level
+> states. Excluded, absent, large, or conflicting code must still be evaluated
+> for an Intel hand port or dependency backlog.
+
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Status:** 🟢 **Current through `7e109ade`**. All 53 commits after the 0.24.3 sync point were classified; applicable Intel slices are ported and incompatible/coupled work is explicitly deferred or skipped. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
+**Commit-coverage status:** 🟢 **Classified through `7e109ade`**. This does not claim feature parity. All 53 commits after the 0.24.3 checkpoint received a verdict; applicable Intel slices were hand-ported, while the feature ledger records what is still partial, dependency-blocked, absent, or intentionally omitted. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
 
@@ -553,3 +561,28 @@ Bare ids remain a compatibility input only when one provider owns them; the
 wire request always receives the owner's bare model id. Do not reintroduce
 global bare-id deduplication in future sync conflict resolution—it hides Router
 models and breaks persisted per-agent defaults.
+
+## 2026-09-09 — Agent settings General and Abilities mirror
+
+Ported the upstream 0.25.0 grouped Agent-detail navigation while preserving the
+fork's working Intel managers. General now exposes Configure and Appearance;
+Abilities exposes Overview, Tools, Subagents, and Sandbox. Keep the Intel
+availability decisions during future conflict resolution: Tools, Knowledge,
+Memory, schedules/watchers, custom avatars, per-agent themes, and Claude Code
+folder permissions are live; native container sandbox, native subagents,
+per-agent structured databases, and the Claude-to-Osaurus MCP bridge are shown
+as unavailable until their real backends land.
+
+Agent JSON now accepts upstream `toolsEnabled` / `memoryEnabled` keys and stores
+per-agent `claudeCode` settings. Intel still writes its legacy
+`disableTools` / `disableMemory` keys, so the custom decoder is the compatibility
+boundary and positive upstream keys take precedence when both forms are
+present. Preserve `bonjourEnabled`, `order`, and `claudeCode` whenever the
+editor reconstructs an Agent value.
+
+
+## 2026-09-09 — Remaining Agent settings groups and route compatibility
+
+Connections now mirrors upstream with Network, Remote Connections, and Channels nested routes. Automation and conversational Memory keep their working Intel managers, while Database has the upstream nested route shape with dependency-aware content. Preserve `AgentDetailTabRoute.swift`: it converts legacy Home/Schema/Data/Views/Activity deep links into the consolidated Database sections.
+
+The dependency contract is `docs/INTEL_AGENT_SETTINGS_BACKLOG.md`. Bonjour, schedules/watchers, history, pinned facts, and episodes are live. Relay/workspace sharing, peer grants, Channels/outbox, and private Agent Database remain backlog items until their full Intel backends are restored.

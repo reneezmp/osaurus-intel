@@ -1,5 +1,11 @@
 # Deferred-commit feasibility audit — 2026-09-08
 
+> This is a commit-feasibility audit, not a feature-parity report. Apply the
+> states and mandatory review workflow in [`FEATURE_PARITY.md`](FEATURE_PARITY.md)
+> before describing any upstream range as complete. A feasible commit remains
+> unimplemented until its user-visible behavior is recorded as working and
+> tested there.
+
 ## Correction
 
 The earlier ledgers used **DEFER** for several different judgments: hardware-incompatible, irrelevant to the Intel product, mixed with excluded code, large, or simply difficult. That blurred feasibility with effort. This audit supersedes every DEFER verdict in the 0.24.3 and 0.24.7 ledgers.
@@ -12,7 +18,7 @@ The live ledgers now show 72 DEFER rows because `eca456c3` was corrected to PORT
 
 | Commit | Corrected verdict | Upstream change | Why |
 |---|---|---|---|
-| `eca456c3` | **LANDED** | Add Claude Code CLI integration (#2257) | Core CLI discovery, auth UI, text streaming, model routing, and teardown now compile on Intel; optional MCP/agent mode remains additive. |
+| `eca456c3` | **LANDED** | Add Claude Code CLI integration (#2257) | CLI discovery, auth, streaming, model routing, teardown, per-agent Agent/Text-only mode, and opt-in file/shell permissions ship on Intel; the Osaurus MCP bridge remains additive. |
 | `03ea4c93` | **PORT NEXT** | resolved crashes and hangs (#1575) | Touches a live Intel path and has a narrow useful subset that can be adapted without waiting for another milestone. |
 | `f9b72fb5` | **PORT NEXT** | fixed app hangs (#1595) | Touches a live Intel path and has a narrow useful subset that can be adapted without waiting for another milestone. |
 | `ad0698d7` | **PORT NEXT** | Stabilize the default configuration agent and fix disappearing custom agents (#1608) | Touches a live Intel path and has a narrow useful subset that can be adapted without waiting for another milestone. |

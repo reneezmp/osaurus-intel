@@ -1,5 +1,10 @@
 # Sync plan: upstream `0.20.3` → `0.24.3`
 
+> [!WARNING]
+> This historical plan executed selected commit ports; it is not evidence of
+> complete feature parity. Use [`FEATURE_PARITY.md`](FEATURE_PARITY.md) for all
+> new upstream reviews and product-status claims.
+
 **Written:** 2026-09-02 (Session 11)
 **Scope:** `9124d696..4528b56f` — 783 upstream commits, 476 reviewed, **211 PORT candidates**
 **Inputs:** [`UPSTREAM_SYNC.md`](UPSTREAM_SYNC.md) (triage summary) · [`UPSTREAM_TRIAGE_0.24.3.md`](UPSTREAM_TRIAGE_0.24.3.md) (per-commit verdicts)

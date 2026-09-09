@@ -753,12 +753,24 @@ private struct AgentCard: View {
 
 private enum DetailTab: String, CaseIterable {
     case configure
+    /// Abilities overview: the verified Intel capability switches in one place.
+    case abilities
     case capabilities
+    /// Intel's subagent surface explains the available Claude Code route and
+    /// the upstream helpers that require newer hardware/runtime support.
+    case subagents
     case customization
     case network
+    /// Host-side peer grants. Intel keeps the route visible while the secure pairing stack is ported.
+    case connections
+    /// Agent-scoped channel routing. The global Channels backend is tracked separately.
+    case channels
     case sandbox
     case automation
     case memory
+    /// Grouped private-database surface matching upstream. Intel renders its nested routes
+    /// as dependency-aware empty states until AgentDatabase is restored.
+    case database
     /// Agent DB feature (spec §5.5 / §7). Visible only when
     /// `Agent.settings.dbEnabled == true`; the tab strip filters
     /// these out via `Self.allTabsForAgent`. Order in the strip
@@ -778,21 +790,34 @@ private enum DetailTab: String, CaseIterable {
     /// adjacent to memory — both surface "what does this agent
     /// remember?" but along different axes.
     static func allTabsForAgent(_ agent: Agent) -> [DetailTab] {
+#if OSAURUS_INTEL
+        _ = agent
+        // The Intel target currently supplies only an AgentDatabaseStore stub.
+        // Never resurrect its historical DB tabs from a migrated `dbEnabled`
+        // flag: those controls would accept edits that cannot reach storage.
+        return DetailTab.allCases.filter { !dbTabs.contains($0) }
+#else
         if agent.settings.dbEnabled {
             return DetailTab.allCases
         }
         return DetailTab.allCases.filter { !dbTabs.contains($0) }
+#endif
     }
 
     var label: String {
         switch self {
         case .configure: return "Configure"
-        case .capabilities: return "Capabilities"
-        case .customization: return "Customization"
+        case .abilities: return "Overview"
+        case .capabilities: return "Tools"
+        case .subagents: return "Subagents"
+        case .customization: return "Appearance"
         case .network: return "Network"
+        case .connections: return "Remote Connections"
+        case .channels: return "Channels"
         case .sandbox: return "Sandbox"
         case .automation: return "Automation"
         case .memory: return "Memory"
+        case .database: return "Database"
         case .home: return "Home"
         case .schema: return "Schema"
         case .data: return "Data"
@@ -804,12 +829,17 @@ private enum DetailTab: String, CaseIterable {
     var icon: String {
         switch self {
         case .configure: return "gear"
+        case .abilities: return "switch.2"
         case .capabilities: return "wrench.and.screwdriver"
+        case .subagents: return "person.2.wave.2"
         case .customization: return "paintpalette.fill"
         case .network: return "network"
+        case .connections: return "person.2.badge.key"
+        case .channels: return "bubble.left.and.bubble.right"
         case .sandbox: return "shippingbox"
         case .automation: return "clock.badge.checkmark"
         case .memory: return "brain.head.profile"
+        case .database: return "cylinder.split.1x2"
         case .home: return "house"
         case .schema: return "tablecells"
         case .data: return "square.grid.3x1.below.line.grid.1x2"
@@ -821,12 +851,17 @@ private enum DetailTab: String, CaseIterable {
     var helperText: String {
         switch self {
         case .configure: return "Identity, model, and behavior overrides."
-        case .capabilities: return "Pick which tools and skills this agent can use."
+        case .abilities: return "Everything this agent can do on this Mac."
+        case .capabilities: return "Pick which tools this agent can use."
+        case .subagents: return "Delegated work and external agent runtimes available to this agent."
         case .customization: return "Avatar, empty state, and visual theme."
         case .network: return "Bonjour discovery and relay tunnel."
+        case .connections: return "Peers granted access to this agent — usage and revocation."
+        case .channels: return "Where this agent replies on connected channels — and where it may start messages of its own."
         case .sandbox: return "Container-based code execution."
         case .automation: return "Schedules and file watchers for autonomous behavior."
         case .memory: return "Conversation history, pinned facts, and episode summaries."
+        case .database: return "Everything this agent stores — browse tables, saved views, and history."
         case .home:
             return "Dashboard of pinned views — the agent's own home screen."
         case .schema:
@@ -837,6 +872,68 @@ private enum DetailTab: String, CaseIterable {
             return "Saved SQL views the agent reuses across runs."
         case .activity:
             return "Run history and the audit trail of every write the agent has done."
+        }
+    }
+}
+
+private enum DetailTabGroup: String, CaseIterable {
+    case general
+    case abilities
+    case connections
+    case automation
+    case memory
+
+    var label: String {
+        switch self {
+        case .general: return "General"
+        case .abilities: return "Abilities"
+        case .connections: return "Connections"
+        case .automation: return "Automation"
+        case .memory: return "Memory"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .general: return "gear"
+        case .abilities: return "wrench.and.screwdriver"
+        case .connections: return "network"
+        case .automation: return "clock.badge.checkmark"
+        case .memory: return "brain.head.profile"
+        }
+    }
+
+    var builtInTabs: [DetailTab] {
+        switch self {
+        case .general: return [.configure, .customization]
+        case .abilities: return [.abilities, .capabilities, .subagents, .sandbox]
+        case .connections: return [.network, .connections, .channels]
+        case .automation: return [.automation]
+        case .memory: return [.memory, .database]
+        }
+    }
+
+    static func group(for tab: DetailTab) -> DetailTabGroup {
+        allCases.first(where: { $0.builtInTabs.contains(tab) }) ?? .general
+    }
+}
+
+private extension AgentDatabaseSection {
+    var label: String {
+        switch self {
+        case .overview: return "Overview"
+        case .tables: return "Tables"
+        case .savedViews: return "Saved Views"
+        case .history: return "History"
+        }
+    }
+
+    var icon: String {
+        switch self {
+        case .overview: return "square.grid.2x2"
+        case .tables: return "tablecells"
+        case .savedViews: return "eye"
+        case .history: return "clock.arrow.circlepath"
         }
     }
 }
@@ -1005,6 +1102,7 @@ struct AgentDetailView: View {
     // MARK: - UI State
 
     @State private var selectedTab: AgentTab = .builtIn(.configure)
+    @State private var selectedDatabaseSubtab: AgentDatabaseSection = .overview
     /// Optional saved-view name to focus when the user lands on the
     /// Views tab via the notification deep-link (spec §3.3). Passed
     /// through to `ViewsTabView`, which uses it as an initial
@@ -1026,6 +1124,7 @@ struct AgentDetailView: View {
     @State private var pickerItems: [ModelPickerItem] = []
     @State private var showModelPicker = false
     @State private var selectedModel: String?
+    @State private var claudeCodeConfig: ClaudeCodeAgentConfig = .default
     @State private var showCreateSchedule = false
     @State private var showCreateWatcher = false
     @State private var pinnedFacts: [PinnedFact] = []
@@ -1189,8 +1288,7 @@ struct AgentDetailView: View {
             }
 
             VStack(alignment: .leading, spacing: 0) {
-                tabBar
-                    .padding(.horizontal, 20)
+                groupedTabBar
                     .padding(.top, 8)
 
                 Divider()
@@ -1282,11 +1380,15 @@ struct AgentDetailView: View {
             targetId == agent.id
         else { return }
         if let tabRaw = info["tab"] as? String,
-            let tab = DetailTab(rawValue: tabRaw),
+            let route = AgentDetailTabRoute.resolve(tabRaw),
+            let tab = DetailTab(rawValue: route.tabRawValue),
             DetailTab.allTabsForAgent(currentAgent).contains(tab)
         {
             pendingFocusedViewName = info["viewRef"] as? String
             pendingFocusedTableName = info["tableRef"] as? String
+            if tab == .database {
+                selectedDatabaseSubtab = route.databaseSection ?? .overview
+            }
             selectedTab = .builtIn(tab)
         }
     }
@@ -1727,8 +1829,8 @@ struct AgentDetailView: View {
         switch tab {
         case .builtIn(let dt):
             switch dt {
-            case .configure, .capabilities, .customization, .network, .sandbox,
-                .home, .schema, .data, .views, .activity:
+            case .configure, .abilities, .capabilities, .subagents, .customization, .network, .connections,
+                .channels, .sandbox, .database, .home, .schema, .data, .views, .activity:
                 return nil
             case .automation:
                 let count = linkedSchedules.count + linkedWatchers.count
@@ -1747,6 +1849,86 @@ struct AgentDetailView: View {
         }
     }
 
+    private var selectedGroup: DetailTabGroup {
+        switch selectedTab {
+        case .builtIn(let tab): return DetailTabGroup.group(for: tab)
+        case .plugin, .failedPlugin: return .abilities
+        }
+    }
+
+    private var visibleTabsForSelectedGroup: [DetailTab] {
+        let allowed = Set(DetailTab.allTabsForAgent(currentAgent))
+        return selectedGroup.builtInTabs.filter { allowed.contains($0) }
+    }
+
+    private var groupedTabBar: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(spacing: 2) {
+                ForEach(DetailTabGroup.allCases, id: \.self) { group in
+                    groupButton(group)
+                }
+                Spacer(minLength: 8)
+            }
+            .padding(.horizontal, 20)
+
+            if visibleTabsForSelectedGroup.count > 1 || selectedGroup == .abilities {
+                tabBar
+                    .padding(.horizontal, 20)
+                    .background(theme.secondaryBackground.opacity(0.45))
+                    .overlay(alignment: .top) {
+                        Rectangle().fill(theme.primaryBorder.opacity(0.45)).frame(height: 1)
+                    }
+            }
+        }
+    }
+
+    private func groupButton(_ group: DetailTabGroup) -> some View {
+        let active = selectedGroup == group
+        return Button {
+            guard !active else { return }
+            if let destination = group.builtInTabs.first(where: {
+                DetailTab.allTabsForAgent(currentAgent).contains($0)
+            }) {
+                selectedTab = .builtIn(destination)
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Image(systemName: group.icon)
+                    .font(.system(size: 11, weight: active ? .semibold : .regular))
+                Text(group.label)
+                    .font(.system(size: 12, weight: active ? .semibold : .medium))
+                if let count = groupBadgeCount(group) {
+                    Text("\(count)", bundle: .module)
+                        .font(.system(size: 9, weight: .bold, design: .rounded))
+                        .padding(.horizontal, 5)
+                        .padding(.vertical, 1)
+                        .background(Capsule().fill(theme.inputBackground))
+                }
+            }
+            .foregroundColor(active ? theme.accentColor : theme.secondaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 9)
+                    .fill(active ? theme.accentColor.opacity(0.08) : Color.clear)
+            )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func groupBadgeCount(_ group: DetailTabGroup) -> Int? {
+        switch group {
+        case .automation:
+            let count = linkedSchedules.count + linkedWatchers.count
+            return count > 0 ? count : nil
+        case .memory:
+            return chatSessions.isEmpty ? nil : chatSessions.count
+        default:
+            return nil
+        }
+    }
+
     /// Horizontally scrollable tab bar — built-in tabs stay leftmost, then one
     /// per plugin. Wrapping in `ScrollView(.horizontal)` keeps every tab
     /// reachable when many plugins are installed; the right-edge fade + chevron
@@ -1761,10 +1943,11 @@ struct AgentDetailView: View {
                     // re-fetches from `AgentManager` so flipping
                     // `Enable Database` in Configure causes the DB tabs
                     // (Home/Schema/Data/Views/Activity) to appear here.
-                    ForEach(DetailTab.allTabsForAgent(currentAgent), id: \.self) { tab in
+                    ForEach(visibleTabsForSelectedGroup, id: \.self) { tab in
                         tabButton(for: .builtIn(tab), label: tab.label, icon: tab.icon)
                             .id(AgentTab.builtIn(tab))
                     }
+                    if selectedGroup == .abilities {
                     ForEach(agentPlugins, id: \.plugin.id) { loaded in
                         tabButton(
                             for: .plugin(loaded.plugin.id),
@@ -1785,6 +1968,7 @@ struct AgentDetailView: View {
                             icon: "exclamationmark.triangle.fill"
                         )
                         .id(AgentTab.failedPlugin(failed.pluginId))
+                    }
                     }
                 }
                 .padding(.horizontal, 4)
@@ -1962,9 +2146,12 @@ struct AgentDetailView: View {
     private var configureTabContent: some View {
         tabHelperText(DetailTab.configure.helperText)
         identitySection
-        voiceSection
-        systemPromptSection
         defaultModelSection
+        if isClaudeCodeModelSelected {
+            claudeCodeSection
+        }
+        systemPromptSection
+        voiceSection
         if agent.id != Agent.defaultId {
             scheduleSection
         }
@@ -1979,16 +2166,26 @@ struct AgentDetailView: View {
         switch selectedTab {
         case .builtIn(.configure):
             configureTabContent
+        case .builtIn(.abilities):
+            abilitiesOverviewContent
+        case .builtIn(.subagents):
+            subagentsTabContent
         case .builtIn(.customization):
             customizationTabContent
         case .builtIn(.network):
             networkTabContent
+        case .builtIn(.connections):
+            remoteConnectionsTabContent
+        case .builtIn(.channels):
+            channelsTabContent
         case .builtIn(.sandbox):
-            sandboxTabContent
+            intelSandboxUnavailableContent
         case .builtIn(.automation):
             automationTabContent
         case .builtIn(.memory):
             memoryTabContent
+        case .builtIn(.database):
+            intelDatabaseTabContent
         case .builtIn(.home),
             .builtIn(.schema),
             .builtIn(.data),
@@ -2105,6 +2302,206 @@ struct AgentDetailView: View {
         if disableTools { parts.append("tools off") }
         if disableMemory { parts.append("memory off") }
         return parts.isEmpty ? L("Defaults") : parts.joined(separator: " · ")
+    }
+
+    @ViewBuilder
+    private var abilitiesOverviewContent: some View {
+        tabHelperText(DetailTab.abilities.helperText)
+        AgentDetailSection(title: L("Model Access"), icon: "switch.2") {
+            VStack(spacing: 10) {
+                abilityToggleRow(
+                    title: "Tools",
+                    description: "Let the agent use its assigned tools and Knowledge collections.",
+                    icon: "wrench.and.screwdriver",
+                    isOn: Binding(
+                        get: { !disableTools },
+                        set: { disableTools = !$0; debouncedSave() }
+                    ),
+                    destination: .capabilities
+                )
+                abilityToggleRow(
+                    title: "Memory",
+                    description: "Pull relevant memories into prompts and save new ones as you chat.",
+                    icon: "brain.head.profile",
+                    isOn: Binding(
+                        get: { !disableMemory },
+                        set: { disableMemory = !$0; debouncedSave() }
+                    ),
+                    destination: .memory
+                )
+            }
+        }
+
+        IntelKnowledgeGrantSection(
+            agentId: agent.id,
+            theme: theme
+        )
+
+        AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
+            VStack(spacing: 10) {
+                abilityLinkRow(
+                    title: "Self-scheduling",
+                    description: "Configure scheduled runs and file watchers for this agent.",
+                    icon: "calendar.badge.clock",
+                    destination: .automation
+                )
+                abilityUnavailableRow(
+                    title: "Database",
+                    description: "Per-agent structured storage is not available in this Intel build.",
+                    icon: "cylinder"
+                )
+            }
+        }
+
+        AgentDetailSection(title: L("Code Execution"), icon: "terminal") {
+            abilityUnavailableRow(
+                title: "Autonomous Execution",
+                description: "The upstream sandbox requires a newer supported runtime. Claude Code can use a selected chat folder instead.",
+                icon: "shippingbox"
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var subagentsTabContent: some View {
+        tabHelperText(DetailTab.subagents.helperText)
+        AgentDetailSection(title: L("Claude Code"), icon: "terminal") {
+            VStack(alignment: .leading, spacing: 10) {
+                Text(
+                    "Claude Code runs as the selected agent model. Attach a Folder in chat to give it a working directory and its configured file and shell tools.",
+                    bundle: .module
+                )
+                .font(.system(size: 12))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+                abilityUnavailableRow(
+                    title: "Native subagents",
+                    description: "Computer Use, Browser Use, Spawn, image, video, and AppleScript helpers are unavailable on this Intel build.",
+                    icon: "person.2.wave.2"
+                )
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var intelSandboxUnavailableContent: some View {
+        tabHelperText(DetailTab.sandbox.helperText)
+        AgentDetailSection(title: L("Sandbox"), icon: "shippingbox") {
+            abilityUnavailableRow(
+                title: "Sandboxed execution",
+                description: "The upstream container runtime is unavailable on this Intel build. Claude Code can work in a selected chat folder with the permissions configured under General.",
+                icon: "terminal"
+            )
+        }
+    }
+
+    private func abilityToggleRow(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey,
+        icon: String,
+        isOn: Binding<Bool>,
+        destination: DetailTab?
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .frame(width: 34, height: 34)
+                .background(RoundedRectangle(cornerRadius: 9).fill(theme.accentColor.opacity(0.10)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title, bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(description, bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                if let destination {
+                    Button {
+                        selectedTab = .builtIn(destination)
+                    } label: {
+                        Text("Configure", bundle: .module)
+                            .font(.system(size: 10, weight: .semibold))
+                            .foregroundColor(theme.accentColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(theme.inputBackground))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder, lineWidth: 1))
+    }
+
+    private func abilityLinkRow(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey,
+        icon: String,
+        destination: DetailTab
+    ) -> some View {
+        Button { selectedTab = .builtIn(destination) } label: {
+            HStack(spacing: 12) {
+                Image(systemName: icon)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.accentColor)
+                    .frame(width: 34, height: 34)
+                    .background(RoundedRectangle(cornerRadius: 9).fill(theme.accentColor.opacity(0.10)))
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(title, bundle: .module)
+                        .font(.system(size: 13, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                    Text(description, bundle: .module)
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
+                }
+                Spacer()
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            .padding(12)
+            .background(RoundedRectangle(cornerRadius: 10).fill(theme.inputBackground))
+            .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder, lineWidth: 1))
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func abilityUnavailableRow(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey,
+        icon: String
+    ) -> some View {
+        HStack(spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.tertiaryText)
+                .frame(width: 34, height: 34)
+                .background(RoundedRectangle(cornerRadius: 9).fill(theme.tertiaryBackground))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title, bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+                Text(description, bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer()
+            Text("Unavailable", bundle: .module)
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(theme.tertiaryText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(theme.tertiaryBackground))
+        }
+        .padding(12)
+        .background(RoundedRectangle(cornerRadius: 10).fill(theme.inputBackground.opacity(0.7)))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder, lineWidth: 1))
     }
 
     @ViewBuilder
@@ -2312,8 +2709,9 @@ struct AgentDetailView: View {
     /// Square tile rendering the live custom avatar; tap clears it.
     private var customAvatarPreview: some View {
         Button {
+            let oldURL = currentAgent.customAvatarURL
             agentManager.clearCustomAvatar(for: agent.id)
-            if let url = currentAgent.customAvatarURL {
+            if let url = oldURL {
                 AvatarImageCache.shared.invalidate(url: url)
             }
         } label: {
@@ -2443,7 +2841,59 @@ struct AgentDetailView: View {
     private var networkTabContent: some View {
         tabHelperText(DetailTab.network.helperText)
         bonjourSection
-        relaySection
+        AgentDetailSection(title: L("Relay"), icon: "network") {
+            dependencyEmptyState(
+                icon: "network.slash",
+                title: "Relay tunnel unavailable",
+                hint: "Public relay sharing depends on the Secure Channel pairing and relay services. The route is reserved here and will become interactive when that Intel backend lands."
+            )
+        }
+        AgentDetailSection(title: L("Shared With"), icon: "person.2.fill") {
+            dependencyEmptyState(
+                icon: "person.2",
+                title: "Not shared with any workspace",
+                hint: "Workspace sharing depends on the workspace and shared-agent host services. This section will list those workspaces without changing its navigation location."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var remoteConnectionsTabContent: some View {
+        tabHelperText(DetailTab.connections.helperText)
+        AgentDetailSection(title: L("Remote Connections"), icon: "person.2.badge.key") {
+            dependencyEmptyState(
+                icon: "antenna.radiowaves.left.and.right.slash",
+                title: "No connections yet",
+                hint: "Peer grants require the Secure Channel pairing, invite, and access-revocation stack. This page is ready to receive those records when the Intel port is complete."
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var channelsTabContent: some View {
+        tabHelperText(DetailTab.channels.helperText)
+        AgentDetailSection(
+            title: L("Replies"),
+            icon: "arrowshape.turn.up.left",
+            subtitle: L("Channels where this agent answers incoming messages.")
+        ) {
+            dependencyEmptyState(
+                icon: "bubble.left.and.bubble.right",
+                title: "No channel replies",
+                hint: "The global Channels service is not yet part of the Intel build. When it lands, reply assignments configured there will appear here automatically."
+            )
+        }
+        AgentDetailSection(
+            title: L("Messages It Can Start"),
+            icon: "paperplane",
+            subtitle: L("Destinations where this agent may begin a conversation.")
+        ) {
+            dependencyEmptyState(
+                icon: "paperplane",
+                title: "No destinations yet",
+                hint: "Proactive destinations depend on the same Channels and outbox policy backend. The Add Destination action will be connected here when that settings surface is restored."
+            )
+        }
     }
 
     @ViewBuilder
@@ -2465,6 +2915,85 @@ struct AgentDetailView: View {
         historySection
         pinnedFactsSection
         episodesSection
+    }
+
+    @ViewBuilder
+    private var intelDatabaseTabContent: some View {
+        tabHelperText(DetailTab.database.helperText)
+        intelDatabaseSubtabBar
+
+        switch selectedDatabaseSubtab {
+        case .overview:
+            AgentDetailSection(title: L("Overview"), icon: "square.grid.2x2") {
+                dependencyEmptyState(
+                    icon: "cylinder.split.1x2",
+                    title: "Private database unavailable",
+                    hint: "The encrypted per-agent structured database and bundle service are not compiled into the Intel target yet. Tables and rows will be summarized here after that backend is restored."
+                )
+            }
+        case .tables:
+            AgentDetailSection(title: L("Tables"), icon: "tablecells") {
+                dependencyEmptyState(
+                    icon: "tablecells",
+                    title: "No database tables",
+                    hint: "Table browsing depends on AgentDatabase, its schema tools, and the table editor. This nested route is stable for the eventual port."
+                )
+            }
+        case .savedViews:
+            AgentDetailSection(title: L("Saved Views"), icon: "eye") {
+                dependencyEmptyState(
+                    icon: "eye.slash",
+                    title: "No saved views",
+                    hint: "Saved SQL views depend on the private Agent Database. They will be listed and previewed on this page when that service becomes available."
+                )
+            }
+        case .history:
+            AgentDetailSection(title: L("History"), icon: "clock.arrow.circlepath") {
+                dependencyEmptyState(
+                    icon: "clock.badge.questionmark",
+                    title: "No database run history",
+                    hint: "The database audit trail depends on AgentDatabase write logging and schedule-run integration. Conversation history remains available in the Memory tab."
+                )
+            }
+        }
+    }
+
+    private var intelDatabaseSubtabBar: some View {
+        HStack(spacing: 4) {
+            ForEach(AgentDatabaseSection.allCases, id: \.self) { tab in
+                let active = selectedDatabaseSubtab == tab
+                Button {
+                    selectedDatabaseSubtab = tab
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: tab.icon)
+                            .font(.system(size: 10, weight: active ? .semibold : .regular))
+                        Text(tab.label)
+                            .font(.system(size: 11, weight: active ? .semibold : .medium))
+                    }
+                    .foregroundColor(active ? theme.accentColor : theme.secondaryText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 7)
+                    .background(
+                        Capsule().fill(active ? theme.accentColor.opacity(0.10) : Color.clear)
+                    )
+                    .contentShape(Rectangle())
+                }
+                .buttonStyle(.plain)
+            }
+            Spacer()
+        }
+        .padding(.horizontal, 4)
+    }
+
+    private func dependencyEmptyState(
+        icon: String,
+        title: LocalizedStringKey,
+        hint: LocalizedStringKey
+    ) -> some View {
+        AgentSectionEmptyState(icon: icon, title: title, hint: hint)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 12)
     }
 
     // MARK: - Configure Tab Sections
@@ -2580,6 +3109,121 @@ struct AgentDetailView: View {
                     .buttonStyle(PlainButtonStyle())
                 }
             }
+        }
+    }
+
+    private var isClaudeCodeModelSelected: Bool {
+        ClaudeCodeModel.fromPickerId(selectedModel ?? "") != nil
+    }
+
+    /// Claude Code owns its own tool loop, so host-file permissions live beside
+    /// the model picker. Every enabled control is consumed on the next turn.
+    private var claudeCodeSection: some View {
+        AgentDetailSection(title: "Claude Code", icon: "terminal") {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(spacing: 0) {
+                    claudeCodeModeButton(.agent, label: "Agent")
+                    claudeCodeModeButton(.textOnly, label: "Text only")
+                }
+                .padding(3)
+                .background(Capsule().fill(theme.secondaryBackground))
+                .frame(maxWidth: 240)
+
+                Text(
+                    claudeCodeConfig.mode == .agent
+                        ? "Claude Code can inspect files in the selected chat folder. Wider access is opt-in below."
+                        : "Claude Code answers as a text model with all of its built-in tools disabled.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+                if claudeCodeConfig.mode == .agent {
+                    claudePermissionToggle(
+                        title: "Allow file changes",
+                        description: "Allow Edit, Write, and NotebookEdit in the selected chat folder.",
+                        isOn: Binding(
+                            get: { claudeCodeConfig.allowWrites },
+                            set: { claudeCodeConfig.allowWrites = $0; debouncedSave() }
+                        )
+                    )
+                    claudePermissionToggle(
+                        title: "Allow shell commands",
+                        description: "Allow Bash under your macOS account, starting in the selected chat folder.",
+                        isOn: Binding(
+                            get: { claudeCodeConfig.allowShell },
+                            set: { claudeCodeConfig.allowShell = $0; debouncedSave() }
+                        )
+                    )
+                    claudePermissionUnavailable(
+                        title: "Osaurus tools",
+                        description: "The local MCP bridge is not attached to Claude Code turns in this Intel build yet."
+                    )
+                }
+            }
+        }
+    }
+
+    private func claudeCodeModeButton(_ mode: ClaudeCodeMode, label: LocalizedStringKey) -> some View {
+        let selected = claudeCodeConfig.mode == mode
+        return Button {
+            claudeCodeConfig.mode = mode
+            debouncedSave()
+        } label: {
+            Text(label, bundle: .module)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(selected ? .white : theme.secondaryText)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 7)
+                .background(Capsule().fill(selected ? theme.accentColor : Color.clear))
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func claudePermissionToggle(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey,
+        isOn: Binding<Bool>
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title, bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(description, bundle: .module)
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Toggle("", isOn: isOn)
+                .labelsHidden()
+                .toggleStyle(.switch)
+        }
+    }
+
+    private func claudePermissionUnavailable(
+        title: LocalizedStringKey,
+        description: LocalizedStringKey
+    ) -> some View {
+        HStack(spacing: 12) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title, bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+                Text(description, bundle: .module)
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 12)
+            Text("Unavailable", bundle: .module)
+                .font(.system(size: 9, weight: .semibold))
+                .foregroundColor(theme.tertiaryText)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 4)
+                .background(Capsule().fill(theme.secondaryBackground))
         }
     }
 
@@ -4717,6 +5361,7 @@ struct AgentDetailView: View {
         disableTools = agent.disableTools ?? false
         disableMemory = agent.disableMemory ?? false
         dbEnabled = agent.settings.dbEnabled
+        claudeCodeConfig = agent.claudeCode ?? .default
         generativeGreetingsEnabled = agent.settings.generativeGreetingsEnabled
         // Hydrate the Personality editor with the resolved default
         // (global persona, falling back to built-in) when the agent has
@@ -4884,7 +5529,9 @@ struct AgentDetailView: View {
             agentIndex: current.agentIndex,
             agentAddress: current.agentAddress,
             autonomousExec: current.autonomousExec,
+            claudeCode: claudeCodeConfig,
             pluginInstructions: effectivePluginInstructions,
+            bonjourEnabled: current.bonjourEnabled,
             toolSelectionMode: current.toolSelectionMode,
             manualToolNames: current.manualToolNames,
             manualSkillNames: current.manualSkillNames,
@@ -4914,7 +5561,8 @@ struct AgentDetailView: View {
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     return trimmed == inheritedTrimmed ? nil : trimmed
                 }()
-            )
+            ),
+            order: current.order
         )
 
         agentManager.update(updated)

@@ -2776,3 +2776,62 @@ The canonical Rosy x86_64 build passed and the final app satisfied its stable
 designated signing requirement. After the mutation grant, the focused Claude
 suite passed **10 tests**, the complete serial suite remained green at **810
 tests in 121 suites**, and the canonical signed Rosy build passed again.
+
+## M23 — Agent settings General and Abilities mirror (2026-09-09)
+
+The 0.25.0 upstream Agent editor replaced the old flat detail strip with five
+top-level groups and nested pages. Intel now mirrors that information
+architecture: **General** contains Configure and Appearance; **Abilities**
+contains Overview, Tools, Subagents, and Sandbox; the existing Connections,
+Automation, and Memory pages remain reachable in their corresponding groups.
+Existing Tools and Knowledge pickers were retained rather than duplicated, and
+the overview links users to the working implementation behind each capability.
+
+This pass also repaired four persistence seams exposed by the UI audit. Agent
+saves now preserve `bonjourEnabled` and `order`; upstream `toolsEnabled` and
+`memoryEnabled` JSON migrate into Intel's older negative-polarity fields;
+custom avatars now write and clear real files under `agents/avatars`; and
+per-agent themes are returned to `ChatWindowState` instead of being discarded
+by the Intel manager conformer.
+
+Claude Code now has a per-agent configuration stored with the Agent record.
+Configure shows Agent versus Text-only mode when a Claude Code model is
+selected, plus separate opt-ins for file changes and shell commands. The
+runtime consumes those settings on the next turn. Defaults remain fail-closed:
+Agent mode permits only read/search tools until the user enables writes or
+Bash. The prepared Osaurus MCP configuration helpers are not attached to the
+Intel subprocess yet, so the UI reports that capability as unavailable rather
+than offering a dead switch.
+
+The same rule is applied elsewhere in Abilities. Knowledge, ordinary tools,
+memory, schedules/watchers, and Claude Code folders remain interactive because
+they have working Intel backends. Native upstream subagents, the container
+sandbox, and per-agent structured databases are named but disabled with a
+plain explanation. Migrated `dbEnabled` values cannot resurrect the historical
+stub-backed database tabs.
+
+Validation: the focused migration/presentation suite passed **3 tests in 2
+suites**. The complete OsaurusCore run passed **813 tests in 123 suites**.
+
+
+## M24 — Agent settings Connections, Automation, and Memory mirror (2026-09-09)
+
+Completed the remaining upstream 0.25.0 Agent editor information architecture. Connections now contains Network, Remote Connections, and Channels; Automation retains the live Intel Schedule and Watcher managers; Memory contains the live conversational memory page and the nested Database workspace. The canonical upstream `AgentDetailTabRoute` preserves old database deep links by mapping Home/Schema/Data/Views/Activity into Overview/Tables/Saved Views/History.
+
+Bonjour, schedules, watchers, chat history, pinned facts, and episode summaries remain interactive. Relay sharing, peer grants, Channels, and the private structured Agent Database are visible dependency states because their complete backends are excluded. Their exact prerequisites and future attachment points live in `docs/INTEL_AGENT_SETTINGS_BACKLOG.md`; do not replace those states with switches or buttons until the corresponding store, runtime, and editor all ship.
+
+## M25 — Commit coverage is not feature parity (2026-09-09)
+
+The upstream-sync documentation now makes the distinction mandatory. A commit
+ledger proves only that commits received verdicts; it cannot establish that the
+corresponding user-facing features exist on Intel. `docs/FEATURE_PARITY.md` is
+the product-level source of truth and must be read before every new upstream
+analysis. It defines five explicit states, requires absent and excluded-only
+subsystems to remain in the feature inventory, and forbids treating conflict
+size or an `exclude:` entry as a product verdict.
+
+The first corrected roadmap records Orchestrator, Credits, Channels,
+Computer/Browser Use, Web Search, cloud-only Media, and Privacy. The chat-shell
+and Workspaces redesigns added upstream on 2026-09-09 are deliberately later,
+but still require ordinary commit and feature classification rather than an
+automatic skip.

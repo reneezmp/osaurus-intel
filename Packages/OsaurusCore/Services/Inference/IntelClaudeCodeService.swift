@@ -28,15 +28,26 @@ actor IntelClaudeCodeService {
 
         let rendered = Self.renderPrompt(messages: request.messages)
         let workingFolder = ChatExecutionContext.currentFolderRoot
-        let mode: ClaudeCodeMode = workingFolder == nil ? .textOnly : .agent
-        let allowedTools = workingFolder == nil
-            ? []
-            : ClaudeCodeConfiguration.allowedTools(allowWrites: true, allowShell: true)
+        let selectedAgentId = ChatExecutionContext.currentAgentId
+        let config = await MainActor.run {
+            let manager = AgentManager.shared
+            let agentId = selectedAgentId ?? manager.activeAgentId
+            return manager.effectiveClaudeCodeConfig(for: agentId)
+        }
+        let mode = config.mode
+        let allowedTools = mode == .agent
+            ? ClaudeCodeConfiguration.allowedTools(
+                allowWrites: config.allowWrites,
+                allowShell: config.allowShell
+            )
+            : []
         let systemNote: String
         if let workingFolder {
-            systemNote = "Claude Code can inspect and modify the selected working folder at \(workingFolder.path), and run shell commands there. Treat that folder as the workspace root unless the user explicitly asks you to work elsewhere."
+            systemNote = "Claude Code starts in the selected working folder at \(workingFolder.path). Treat that folder as the workspace root unless the user explicitly asks you to work elsewhere."
+        } else if mode == .agent {
+            systemNote = "Claude Code has no selected working folder, so its tool session starts in Osaurus's private scratch directory."
         } else {
-            systemNote = "Claude Code is connected in text-only mode because this chat has no working folder. Select a folder in the chat to enable safe folder browsing."
+            systemNote = "Claude Code is connected in text-only mode, with every built-in tool disabled."
         }
         let systemPrompt = [rendered.systemPrompt, systemNote]
             .compactMap { $0 }

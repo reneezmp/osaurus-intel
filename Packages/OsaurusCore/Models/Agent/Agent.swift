@@ -90,6 +90,9 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var agentAddress: String?
     /// Controls the agent's ability to run arbitrary commands in the sandbox
     public var autonomousExec: AutonomousExecConfig?
+    /// Behavior of the Claude Code subprocess backend when this agent uses a
+    /// `claude-code/…` model. `nil` uses the safe read-only defaults.
+    public var claudeCode: ClaudeCodeAgentConfig?
     /// Per-agent plugin instruction overrides keyed by plugin ID
     public var pluginInstructions: [String: String]?
     /// Whether this agent is advertised via Bonjour on the local network
@@ -139,6 +142,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         agentIndex: UInt32? = nil,
         agentAddress: String? = nil,
         autonomousExec: AutonomousExecConfig? = nil,
+        claudeCode: ClaudeCodeAgentConfig? = nil,
         pluginInstructions: [String: String]? = nil,
         bonjourEnabled: Bool = false,
         toolSelectionMode: ToolSelectionMode? = nil,
@@ -170,6 +174,7 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.agentIndex = agentIndex
         self.agentAddress = agentAddress
         self.autonomousExec = autonomousExec
+        self.claudeCode = claudeCode
         self.pluginInstructions = pluginInstructions
         self.bonjourEnabled = bonjourEnabled
         self.toolSelectionMode = toolSelectionMode
@@ -251,6 +256,14 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
 // MARK: - Decodable Migration
 
 extension Agent {
+    /// Positive-polarity keys written by upstream builds. The Intel fork keeps
+    /// its existing negative-polarity storage/API, so these are migration-only
+    /// aliases and win when both forms appear in the same imported JSON.
+    private enum UpstreamAbilityCodingKeys: String, CodingKey {
+        case toolsEnabled
+        case memoryEnabled
+    }
+
     /// Custom decoder that provides default values for fields added after the initial release,
     /// ensuring older persisted JSON files remain loadable.
     public init(from decoder: Decoder) throws {
@@ -272,19 +285,79 @@ extension Agent {
         agentIndex = try c.decodeIfPresent(UInt32.self, forKey: .agentIndex)
         agentAddress = try c.decodeIfPresent(String.self, forKey: .agentAddress)
         autonomousExec = try c.decodeIfPresent(AutonomousExecConfig.self, forKey: .autonomousExec)
+        claudeCode = try c.decodeIfPresent(ClaudeCodeAgentConfig.self, forKey: .claudeCode)
         pluginInstructions = try c.decodeIfPresent([String: String].self, forKey: .pluginInstructions)
         bonjourEnabled = try c.decodeIfPresent(Bool.self, forKey: .bonjourEnabled) ?? false
         toolSelectionMode = try c.decodeIfPresent(ToolSelectionMode.self, forKey: .toolSelectionMode)
         manualToolNames = try c.decodeIfPresent([String].self, forKey: .manualToolNames)
         manualSkillNames = try c.decodeIfPresent([String].self, forKey: .manualSkillNames)
-        disableTools = try c.decodeIfPresent(Bool.self, forKey: .disableTools)
-        disableMemory = try c.decodeIfPresent(Bool.self, forKey: .disableMemory)
+        let upstreamAbilities = try decoder.container(keyedBy: UpstreamAbilityCodingKeys.self)
+        if let toolsEnabled = try upstreamAbilities.decodeIfPresent(Bool.self, forKey: .toolsEnabled) {
+            disableTools = toolsEnabled ? nil : true
+        } else {
+            disableTools = try c.decodeIfPresent(Bool.self, forKey: .disableTools)
+        }
+        if let memoryEnabled = try upstreamAbilities.decodeIfPresent(Bool.self, forKey: .memoryEnabled) {
+            disableMemory = memoryEnabled ? nil : true
+        } else {
+            disableMemory = try c.decodeIfPresent(Bool.self, forKey: .disableMemory)
+        }
         avatar = try c.decodeIfPresent(String.self, forKey: .avatar)
         customAvatarFilename = try c.decodeIfPresent(String.self, forKey: .customAvatarFilename)
         autoSpeak = try c.decodeIfPresent(Bool.self, forKey: .autoSpeak)
         ttsVoice = try c.decodeIfPresent(String.self, forKey: .ttsVoice)
         settings = try c.decodeIfPresent(AgentSettings.self, forKey: .settings) ?? .defaultDisabled
         order = try c.decodeIfPresent(Int.self, forKey: .order)
+    }
+}
+
+// MARK: - Claude Code Configuration
+
+/// Per-agent behavior for the Claude Code subprocess backend.
+///
+/// Only consulted while the selected model is a `claude-code/…` model.
+public struct ClaudeCodeAgentConfig: Codable, Sendable, Equatable {
+    /// Whether Claude Code runs its own tool loop or only generates text.
+    public var mode: ClaudeCodeMode
+    /// Auto-approve Claude Code's file-writing built-ins.
+    public var allowWrites: Bool
+    /// Auto-approve Claude Code's `Bash` tool.
+    public var allowShell: Bool
+    /// Opt in to Osaurus tools when that bridge is available.
+    public var allowOsaurusTools: Bool
+    /// Nested under `allowOsaurusTools`: permit configuration-changing tools.
+    public var allowOsaurusConfigWrites: Bool
+
+    public init(
+        mode: ClaudeCodeMode = .agent,
+        allowWrites: Bool = false,
+        allowShell: Bool = false,
+        allowOsaurusTools: Bool = false,
+        allowOsaurusConfigWrites: Bool = false
+    ) {
+        self.mode = mode
+        self.allowWrites = allowWrites
+        self.allowShell = allowShell
+        self.allowOsaurusTools = allowOsaurusTools
+        self.allowOsaurusConfigWrites = allowOsaurusConfigWrites
+    }
+
+    public static let `default` = ClaudeCodeAgentConfig()
+
+    private enum CodingKeys: String, CodingKey {
+        case mode, allowWrites, allowShell, allowOsaurusTools, allowOsaurusConfigWrites
+    }
+
+    /// Older JSON and future unknown mode values must not make its entire
+    /// enclosing agent disappear from the Intel manager's best-effort load.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        mode = (try? c.decode(ClaudeCodeMode.self, forKey: .mode)) ?? .agent
+        allowWrites = try c.decodeIfPresent(Bool.self, forKey: .allowWrites) ?? false
+        allowShell = try c.decodeIfPresent(Bool.self, forKey: .allowShell) ?? false
+        allowOsaurusTools = try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusTools) ?? false
+        allowOsaurusConfigWrites =
+            try c.decodeIfPresent(Bool.self, forKey: .allowOsaurusConfigWrites) ?? false
     }
 }
 

@@ -1,5 +1,11 @@
 # Upstream 0.20.3 → 0.24.3 — Intel fork triage ledger
 
+> [!WARNING]
+> Historical commit verdicts do not establish product parity. Future reviews
+> must apply the feature states and workflow in
+> [`FEATURE_PARITY.md`](FEATURE_PARITY.md), including to commits automatically
+> bucketed as new-subsystem-only or excluded-only.
+
 > **2026-09-08 correction:** The historical `DEFER` label below conflated difficulty, mixed commits, and actual incompatibility. [The full feasibility audit](DEFER_FEASIBILITY_AUDIT_2026-09-08.md) supersedes those verdicts: 58/73 are feasible Intel work; 15 are true skips.
 
 
@@ -505,4 +511,3 @@ Range: `9124d696..4528b56f` (783 commits). 307 auto-eliminated (docs/CI/appcast/
 | ecd027a9 | fix unreadable approval in tool modal | SKIP | Plugin/tool approval amputated |
 | f13e429b | added custom endpoint support to onboarding | PORT | Custom endpoint config valuable |
 | e03127e7 | Watcher/dispatch agents reach target folder | DEFER | Watcher/dispatch agents amputated |
-

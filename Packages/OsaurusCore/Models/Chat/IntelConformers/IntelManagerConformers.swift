@@ -197,6 +197,20 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         reload()
     }
 
+    /// Selected-agent Claude Code settings, with a safe fallback for agents
+    /// saved before this configuration existed.
+    func effectiveClaudeCodeConfig(for agentId: UUID) -> ClaudeCodeAgentConfig {
+        agent(for: agentId)?.claudeCode ?? .default
+    }
+
+    /// Mutate and persist the complete agent record so unrelated per-agent
+    /// settings survive an Agent Settings save.
+    func updateClaudeCodeConfig(_ config: ClaudeCodeAgentConfig, for agentId: UUID) {
+        guard var agent = agent(for: agentId) else { return }
+        agent.claudeCode = config
+        update(agent)
+    }
+
     func delete(id: UUID) async -> AgentDeleteResult {
         // The Default agent is mandatory and cannot be deleted (matches
         // upstream). Return `deleted: false` so the UI keeps the card.
@@ -212,13 +226,51 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         return AgentDeleteResult(deleted: true)
     }
 
-    // Per-agent custom avatar. Avatars are amputated on Intel (no
-    // sandbox-side image processing pipeline), so these are no-ops; the
-    // view's `customAvatarURL` reads stay nil. Surface kept so the
-    // AgentDetailView avatar section (un-body-swapped in M11 Phase
-    // 11.A.4) type-checks.
-    func setCustomAvatar(_ data: Data, ext: String, for agentId: UUID) {}
-    func clearCustomAvatar(for agentId: UUID) {}
+    @discardableResult
+    func setCustomAvatar(_ data: Data, ext: String, for agentId: UUID) -> Bool {
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        let dir = OsaurusPaths.agents().appendingPathComponent("avatars", isDirectory: true)
+        OsaurusPaths.ensureExistsSilent(dir)
+        let safeExt = ext.lowercased().trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
+        let filename = "\(agentId.uuidString).\(safeExt.isEmpty ? "png" : safeExt)"
+        let destination = dir.appendingPathComponent(filename)
+        do {
+            if let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil
+            ) {
+                for file in files
+                where file.deletingPathExtension().lastPathComponent == agentId.uuidString
+                    && file.lastPathComponent != filename
+                {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
+            try data.write(to: destination, options: [.atomic])
+            agent.customAvatarFilename = filename
+            agent.avatar = nil
+            update(agent)
+            return true
+        } catch {
+            print("[Osaurus Intel] Failed to save avatar for \(agentId): \(error)")
+            return false
+        }
+    }
+
+    func clearCustomAvatar(for agentId: UUID) {
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        let dir = OsaurusPaths.agents().appendingPathComponent("avatars", isDirectory: true)
+        if let files = try? FileManager.default.contentsOfDirectory(
+            at: dir, includingPropertiesForKeys: nil
+        ) {
+            for file in files
+            where file.deletingPathExtension().lastPathComponent == agentId.uuidString
+            {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+        agent.customAvatarFilename = nil
+        update(agent)
+    }
 
     // MARK: - Cryptographic agent addresses (M11 Phase 11.A.5 — Identity)
     //
@@ -535,7 +587,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func effectiveAutonomousExec(for agentId: UUID) -> AutonomousExecConfig? { .default }
     func updateAutonomousExec(_ config: AutonomousExecConfig, for agentId: UUID) async throws {}
     func ttsVoice(for agentId: UUID) -> Any? { nil }
-    func themeId(for agentId: UUID) -> UUID? { nil }
+    func themeId(for agentId: UUID) -> UUID? { agent(for: agentId)?.themeId }
 }
 
 // MARK: - ModelPickerItemCache
