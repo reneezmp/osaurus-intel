@@ -10,8 +10,12 @@
 //  `tearDownEnv` removing the temp dir while another suite's test
 //  is mid-flight).
 //
-//  Tests that touch either of these globals should wrap their
+//  Tests that touch either global, or that read/write any path-backed
+//  store while another suite could change the root, must wrap the whole
 //  critical section in `await StoragePathsTestLock.shared.run { ... }`.
+//  Resolve destination URLs only after acquiring the lock. Prefer an
+//  explicit temporary store over saving a shared singleton. See
+//  docs/TEST_STORAGE_SAFETY.md for the incident and complete contract.
 //
 
 import Foundation

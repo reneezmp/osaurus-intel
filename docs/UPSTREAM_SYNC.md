@@ -8,6 +8,14 @@
 > states. Excluded, absent, large, or conflicting code must still be evaluated
 > for an Intel hand port or dependency backlog.
 
+> [!CAUTION]
+> Upstream-sync and repair validation must follow
+> [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md). Tests that touch
+> path-backed stores can otherwise write fixtures into live `~/.osaurus` data
+> when process-global storage overrides race across suites. Use an isolated test
+> root, the shared storage lock, an explicit serial full-suite run, and live-data
+> preflight/postflight checks.
+
 **Base commit:** `d0782cbb` (Pin vMLX main runtime and harden server boundaries, #1201)  
 **Intel fork:** `github.com/reneezmp/osaurus-intel` (`intel-fork`)  
 **Upstream:** `github.com/osaurus-ai/osaurus` (`main`)  
@@ -15,6 +23,24 @@
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
 **Commit-coverage status:** 🟢 **Classified through `7e109ade`**. This does not claim feature parity. All 53 commits after the 0.24.3 checkpoint received a verdict; applicable Intel slices were hand-ported, while the feature ledger records what is still partial, dependency-blocked, absent, or intentionally omitted. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
+
+---
+
+## Test-storage isolation incident (2026-09-10)
+
+Agent Settings runtime tests initially saved the global chat configuration while
+other suites changed the process-wide storage root. Cross-suite concurrency let
+cleanup write a sparse fixture into the live chat configuration and leave one
+test agent behind. The live model and tool-attempt fields were recovered from
+the preceding application log, the test agent was inspected and removed, and
+the affected tests were changed to use disposable agents and the shared storage
+lock.
+
+The definitive validation used explicit `--no-parallel --disable-xctest` and
+passed **902 tests in 131 suites**. The incident, guardrails, and residue checks
+are recorded in [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md). A green test
+count is not accepted as complete validation unless live storage is also proven
+unchanged.
 
 ---
 

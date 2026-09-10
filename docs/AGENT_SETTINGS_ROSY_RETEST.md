@@ -1,5 +1,10 @@
 # Agent Settings Rosy Retest
 
+Before running automated tests or installing the candidate build, complete the
+preflight and postflight in [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).
+Record hashes of the live configuration and an inventory of the agents folder;
+any unexplained difference fails the handoff even if the test suite is green.
+
 Use a copy of the existing Rosy data directory. Keep at least two established
 agents with different models, avatars, themes, tools, memory, and Knowledge
 assignments. Relaunch where requested: a same-session result does not prove
