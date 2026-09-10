@@ -320,12 +320,6 @@ enum AgentStore {
     static func loadAll() -> [Agent] { [] }
 }
 
-// MARK: - Bonjour Advertiser (Intel stub)
-
-enum BonjourAdvertiser {
-    static let serviceType = "_osaurus._tcp"
-}
-
 // MARK: - Chat History Database (Intel stub)
 
 final class ChatHistoryDatabase: @unchecked Sendable {
@@ -499,19 +493,104 @@ struct ViewsTabView: View {
 }
 
 struct PinnedFactsPanel: View {
+    @Environment(\.theme) private var theme
+
     let facts: [PinnedFact]
     let onDelete: (String) -> Void
     init(facts: [PinnedFact], onDelete: @escaping (String) -> Void) {
         self.facts = facts
         self.onDelete = onDelete
     }
-    var body: some View { AppleSiliconOnlyTab(tabName: "Pinned Facts", symbol: "pin") }
+    var body: some View {
+        ScrollView {
+            LazyVStack(alignment: .leading, spacing: 0) {
+                ForEach(facts) { fact in
+                    HStack(alignment: .top, spacing: 10) {
+                        RoundedRectangle(cornerRadius: 2)
+                            .fill(theme.accentColor)
+                            .frame(width: 4)
+
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text(fact.content)
+                                .font(.system(size: 12))
+                                .foregroundColor(theme.primaryText)
+                                .fixedSize(horizontal: false, vertical: true)
+
+                            HStack(spacing: 8) {
+                                Text("\(Int(fact.salience * 100))% salience")
+                                if !fact.tags.isEmpty {
+                                    Text(fact.tags.joined(separator: " · "))
+                                }
+                                Spacer(minLength: 0)
+                                Button {
+                                    onDelete(fact.id)
+                                } label: {
+                                    Image(systemName: "trash")
+                                        .font(.system(size: 10))
+                                }
+                                .buttonStyle(.plain)
+                                .foregroundColor(theme.tertiaryText)
+                            }
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.tertiaryText)
+                        }
+                    }
+                    .padding(.vertical, 10)
+
+                    if fact.id != facts.last?.id {
+                        Divider().opacity(0.5)
+                    }
+                }
+            }
+            .padding(.horizontal, 4)
+        }
+        .frame(maxHeight: 340)
+    }
 }
 
 struct EpisodeRow: View {
+    @Environment(\.theme) private var theme
+
     let episode: Episode
     init(episode: Episode) { self.episode = episode }
-    var body: some View { AppleSiliconOnlyTab(tabName: "Episode", symbol: "clock.arrow.circlepath") }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                Text(episode.summary)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 0)
+                Text(episode.conversationAt)
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+                    .lineLimit(1)
+            }
+
+            if !episode.topics.isEmpty {
+                Text(episode.topics.joined(separator: " · "))
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.accentColor)
+                    .lineLimit(2)
+            }
+
+            if !episode.decisions.isEmpty || !episode.actionItems.isEmpty {
+                VStack(alignment: .leading, spacing: 3) {
+                    if !episode.decisions.isEmpty {
+                        Text("Decisions: \(episode.decisions)")
+                    }
+                    if !episode.actionItems.isEmpty {
+                        Text("Actions: \(episode.actionItems)")
+                    }
+                }
+                .font(.system(size: 10))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .padding(.vertical, 10)
+    }
 }
 
 // NOTE: `WatcherEditorSheet` is defined by `WatchersView.swift` (Group B,

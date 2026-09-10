@@ -49,7 +49,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
     public var tabs: [ManagementTab] {
         switch self {
         case .models: [.providers, .credits]
-        case .capabilities: [.tools, .skills, .plugins, .knowledge, .memory, .commands]
+        case .capabilities: [.search, .tools, .skills, .plugins, .knowledge, .memory, .commands]
         case .automation: [.agents, .schedules, .watchers]
         case .developerTools: [.server, .insights]
         case .general: [.settings, .themes, .permissions, .identity, .storage]
@@ -67,6 +67,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case plugins
     case sandbox
     case tools
+    case search
     case skills
     case commands
     case knowledge
@@ -93,6 +94,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .plugins: "puzzlepiece.extension.fill"
         case .sandbox: "shippingbox.fill"
         case .tools: "wrench.and.screwdriver.fill"
+        case .search: "globe"
         case .skills: "sparkles"
         case .commands: "command"
         case .knowledge: "books.vertical.fill"
@@ -119,6 +121,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .plugins: L("Plugins")
         case .sandbox: L("Sandbox")
         case .tools: L("Tools")
+        case .search: L("Web Search")
         case .skills: L("Skills")
         case .commands: L("Commands")
         case .knowledge: L("Knowledge")

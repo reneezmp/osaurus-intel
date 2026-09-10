@@ -1589,6 +1589,7 @@ import Foundation
 @MainActor
 public final class PluginManager: ObservableObject {
     public static let shared = PluginManager()
+    public static let supersededPluginIds: Set<String> = ["search-intel"]
 
     /// Successfully loaded (compatible) plugins.
     @Published public private(set) var loadedPlugins: [LoadedPluginInfo] = []
@@ -1791,6 +1792,12 @@ public final class PluginManager: ObservableObject {
     /// are logged but don't abort the scan — the plugin still shows in the
     /// (capability) bucket; it just won't be invocable.
     private func loadNative(pluginId: String, pluginDir: URL) {
+        // Retired by the native provider cascade. Refuse the legacy Intel
+        // dylib so it cannot overwrite ToolRegistry's first-party web_search.
+        guard !Self.supersededPluginIds.contains(pluginId) else {
+            NSLog("[Osaurus Intel] skipped retired native plugin 'search-intel'")
+            return
+        }
         guard let dylib = IntelPluginLoader.findDylib(in: pluginDir) else {
             NSLog("[Osaurus Intel] plugin '\(pluginId)': no .dylib found in \(pluginDir.lastPathComponent) (browse-only)")
             return

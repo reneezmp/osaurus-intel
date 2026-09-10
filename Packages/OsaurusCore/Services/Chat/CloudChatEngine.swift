@@ -85,6 +85,7 @@ private func extractAPIErrorMessage(_ body: String) -> String {
 // MARK: - Cloud Chat Engine
 
 actor ChatEngine: Sendable, ChatEngineProtocol {
+    private let source: InferenceSource
     private let model: String
     private let apiBase: String
     private let providerOverride: RemoteProvider?
@@ -100,11 +101,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         session: URLSession = .shared,
         credentials: IntelCodexCredentials = .shared
     ) {
+        self.source = source
         self.model = model
         self.providerOverride = provider
         self.session = session
         self.credentials = credentials
         self.apiBase = "https://api.deepseek.com/v1/chat/completions"
+    }
+
+    /// Keep Intel's replacement engine visible in Insights just like the
+    /// upstream engine. Runtime-only request fields are already excluded by
+    /// `ChatCompletionRequest.CodingKeys`.
+    private static func serializeRequestForInsights(_ request: ChatCompletionRequest) -> String? {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        guard let data = try? encoder.encode(request) else { return nil }
+        return String(data: data, encoding: .utf8)
+    }
+
+    private static func estimatedInputTokens(_ request: ChatCompletionRequest) -> Int {
+        let messageCharacters = request.messages.reduce(0) { partial, message in
+            partial + (message.content?.count ?? 0)
+                + (message.tool_calls?.reduce(0) {
+                    $0 + $1.function.name.count + $1.function.arguments.count
+                } ?? 0)
+        }
+        let toolCharacters = request.tools?.reduce(0) {
+            $0 + $1.function.name.count + ($1.function.description?.count ?? 0)
+        } ?? 0
+        return max(1, (messageCharacters + toolCharacters) / 4)
     }
 
     /// Accumulates one streamed tool call across DeepSeek's incremental
@@ -447,6 +472,43 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         return AsyncThrowingStream { continuation in
             let task = Task {
+                let inferenceStartedAt = Date()
+                let requestBody = Self.serializeRequestForInsights(request)
+                var responseText = ""
+                var promptTokens: Int?
+                var completionTokens: Int?
+                var insightToolCalls: [ToolCallLog] = []
+                var didLogInference = false
+
+                func captureResponseText(_ emission: String) {
+                    guard !StreamingToolHint.isSentinel(emission),
+                        StreamingReasoningHint.decode(emission) == nil,
+                        StreamingStatsHint.decode(emission) == nil
+                    else { return }
+                    responseText += emission
+                }
+
+                func logInference(error: Error? = nil) {
+                    guard !didLogInference else { return }
+                    didLogInference = true
+                    let outputTokens = completionTokens
+                        ?? max(responseText.isEmpty ? 0 : 1, responseText.count / 4)
+                    InsightsService.logInference(
+                        source: self.source,
+                        model: resolvedModel,
+                        inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
+                        outputTokens: outputTokens,
+                        durationMs: Date().timeIntervalSince(inferenceStartedAt) * 1_000,
+                        temperature: request.temperature.map(Float.init),
+                        maxTokens: request.max_tokens ?? 0,
+                        toolCalls: insightToolCalls.isEmpty ? nil : insightToolCalls,
+                        finishReason: error == nil ? .stop : .error,
+                        errorMessage: error?.localizedDescription,
+                        requestBody: requestBody,
+                        responseBody: responseText.isEmpty ? nil : responseText
+                    )
+                }
+
                 do {
                     // Running conversation as wire dicts. We append the
                     // assistant tool-call message + tool-result messages after
@@ -555,6 +617,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 if buffer.count >= 2_048 {
                                     for emission in try decoder.append(buffer) {
                                         totalChunks += 1
+                                        captureResponseText(emission)
                                         continuation.yield(emission)
                                     }
                                     buffer.removeAll(keepingCapacity: true)
@@ -563,16 +626,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if !buffer.isEmpty {
                                 for emission in try decoder.append(buffer) {
                                     totalChunks += 1
+                                    captureResponseText(emission)
                                     continuation.yield(emission)
                                 }
                             }
                             let finalized = try decoder.finish()
                             for emission in finalized.emissions {
                                 totalChunks += 1
+                                captureResponseText(emission)
                                 continuation.yield(emission)
                             }
                             if finalized.completion.toolCalls.isEmpty {
                                 NSLog("[CloudChatEngine] Codex stream finished — \(totalChunks) chunks, \(round) round(s)")
+                                logInference()
                                 continuation.finish()
                                 return
                             }
@@ -620,6 +686,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         result: result
                                     )
                                 )
+                                insightToolCalls.append(
+                                    ToolCallLog(
+                                        name: call.name,
+                                        arguments: call.arguments,
+                                        result: result,
+                                        isError: result.hasPrefix("⛔️")
+                                    )
+                                )
                                 results.append(.init(callID: call.callID, output: result))
                             }
                             codexReplayItems.append(
@@ -649,6 +723,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // the prompt-cache split. Log it so cache hit/miss is
                             // measurable per request in Console.app.
                             if let usage = json["usage"] as? [String: Any] {
+                                promptTokens = usage["prompt_tokens"] as? Int ?? promptTokens
+                                completionTokens = usage["completion_tokens"] as? Int ?? completionTokens
                                 let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
                                 let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
                                 let promptTok = usage["prompt_tokens"] as? Int ?? -1
@@ -676,6 +752,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if let content = delta["content"] as? String, !content.isEmpty {
                                 totalChunks += 1
                                 assistantContent += content
+                                responseText += content
                                 continuation.yield(content)
                             }
                             // Accumulate streamed tool calls (M12 Gap 3).
@@ -712,6 +789,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // answer has streamed; we're done.
                         if partials.isEmpty {
                             NSLog("[CloudChatEngine] Stream finished — \(totalChunks) chunks, \(round) round(s), no tool calls")
+                            logInference()
                             continuation.finish()
                             return
                         }
@@ -795,6 +873,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     result: result
                                 )
                             )
+                            insightToolCalls.append(
+                                ToolCallLog(
+                                    name: call.name,
+                                    arguments: call.arguments,
+                                    result: result,
+                                    durationMs: Date().timeIntervalSince(toolStart) * 1_000,
+                                    isError: result.hasPrefix("⛔️")
+                                )
+                            )
                             wireMessages.append([
                                 "role": "tool",
                                 "tool_call_id": callId,
@@ -805,9 +892,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     }
 
                     NSLog("[CloudChatEngine] Tool loop hit max rounds (\(maxToolRounds))")
-                    continuation.finish(throwing: EngineError(message: "Tool-call limit reached before the response completed."))
+                    let error = EngineError(message: "Tool-call limit reached before the response completed.")
+                    logInference(error: error)
+                    continuation.finish(throwing: error)
                 } catch {
                     NSLog("[CloudChatEngine] Stream error: \(error.localizedDescription)")
+                    logInference(error: error)
                     continuation.finish(throwing: error)
                 }
             }

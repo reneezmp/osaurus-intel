@@ -73,6 +73,7 @@ struct ManagementView: View {
             .background(theme.primaryBackground)
             .environment(\.theme, themeManager.currentTheme)
             .tint(theme.accentColor)
+            .intelControlRendering(theme: themeManager.currentTheme)
             .themedAlertScope(.management)
             // The `.environment(\.theme, ...)` applied above propagates
             // to descendants of `sidebarNavigation` but NOT to siblings
@@ -184,6 +185,8 @@ private extension ManagementView {
             SandboxView()
         case .tools:
             ToolsManagerView()
+        case .search:
+            SearchView()
         case .skills:
             SkillsView()
         case .commands:

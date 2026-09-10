@@ -157,6 +157,24 @@ struct ChatWindowStateAgentSyncTests {
         }
     }
 
+    @Test("active custom agent theme change → window resolves the agent theme")
+    func activeCustomAgentThemeChange_refreshesWindowTheme() async throws {
+        try await ChatHistoryTestStorage.run {
+            let theme = try #require(ThemeManager.shared.installedThemes.first)
+            var custom = makeCustomAgent(name: "ThemeTest")
+            AgentManager.shared.add(custom)
+
+            let window = makeWindow(for: custom.id)
+            custom.themeId = theme.metadata.id
+            AgentManager.shared.update(custom)
+
+            #expect(window.themeId == theme.metadata.id)
+            #expect(window.theme.customThemeConfig?.metadata.id == theme.metadata.id)
+
+            _ = await AgentManager.shared.delete(id: custom.id)
+        }
+    }
+
     /// Pins that the existing `.appConfigurationChanged` observer was
     /// preserved across the issue-1004 fix. Without this, a future
     /// contributor could remove that observer thinking the new Combine

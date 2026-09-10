@@ -586,3 +586,41 @@ editor reconstructs an Agent value.
 Connections now mirrors upstream with Network, Remote Connections, and Channels nested routes. Automation and conversational Memory keep their working Intel managers, while Database has the upstream nested route shape with dependency-aware content. Preserve `AgentDetailTabRoute.swift`: it converts legacy Home/Schema/Data/Views/Activity deep links into the consolidated Database sections.
 
 The dependency contract is `docs/INTEL_AGENT_SETTINGS_BACKLOG.md`. Bonjour, schedules/watchers, history, pinned facts, and episodes are live. Relay/workspace sharing, peer grants, Channels/outbox, and private Agent Database remain backlog items until their full Intel backends are restored.
+
+## 2026-09-10 — Native Web Search Intel hand-port
+
+Upstream's free/custom Web Search stack was rebuilt through the Intel-compiled
+registry and prompt composer: provider catalog and ordering, built-in
+fallbacks, declarative providers, Keychain credentials, test search,
+Readability extraction, Settings navigation, and per-agent opt-in gating. The
+legacy `search-intel` dylib is retired to prevent duplicate tool registration.
+The baseline schema also includes upstream's immutable-category fix so provider
+changes cannot alter the prompt prefix. Osaurus Premium routing is deferred as
+an explicit Credits/Router dependency. Automated and Rosy acceptance evidence
+are tracked separately in `WEB_SEARCH_TEST_PLAN.md`.
+
+## 2026-09-10 — Agent Settings Rosy acceptance correction
+
+The first Rosy pass disproved the automated-only classification recorded by
+the Agent Settings revamp. Existing-agent model migration, runtime capability
+gating, custom avatars and themes, Bonjour state, schedule/watcher management,
+and memory data projection all had material failures. Ventura also exposed an
+app-wide native-control rendering regression: insertion carets, switch tint,
+button content, menu content, and hover feedback could be absent until
+interaction.
+
+Future settings ports must keep the feature **Partial** until the exact Intel
+build has passed Rosy acceptance. Codable round trips and route tests prove the
+data shape and navigation only. They do not prove migration from Renée's live
+store, the model/tool set sent by an existing chat, AppKit rendering on
+Ventura, or manager actions reached through the rebuilt screen. Any sentence
+that says manual acceptance is pending is incompatible with **Working and
+tested** status.
+
+Intel's compiled `CloudChatEngine` also bypassed upstream `ChatEngine`'s
+Insights logging because the latter is excluded from the Intel target. The
+replacement engine now records streamed Chat UI success, failure, response,
+usage, and tool-call data in `InsightsService`. This remains Partial until the
+new Rosy retest confirms the Insights list and detail panes render the records.
+The per-message diagnostic controls seen in current upstream remain part of the
+separately backlogged chat-interface revamp.

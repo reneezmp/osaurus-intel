@@ -487,6 +487,9 @@ final class ChatConfigurationStore: @unchecked Sendable {
         }
         // Persist to ~/.osaurus/config/chat.json so Settings survive restart.
         ChatConfiguration.shared.persistToDisk()
+        // A new chat must not reuse a tool snapshot captured under the old
+        // global capability settings (model/tool mode/tool assignments).
+        AgentManager.shared.bumpCapabilityRevision()
     }
 }
 
@@ -743,12 +746,34 @@ enum SessionCapability: String, Codable, Hashable, Sendable, CaseIterable {
     /// stay empty on Intel until a fuller turn-inspection pipeline lands.
     static func derive(from turnData: Any? = nil) -> Set<SessionCapability> { [] }
 }
-struct SessionToolState: Sendable {
-    init() {}
-    static func fingerprint(executionMode: Any?, toolMode: Any?) -> String { "" }
-    var initialPreflight: Any? { nil }
-    var loadedToolNames: [String]? { nil }
-    var initialAlwaysLoadedNames: Any? { nil }
+struct SessionToolState: @unchecked Sendable {
+    var initialPreflight: Any?
+    var loadedToolNames: [String]
+    var initialAlwaysLoadedNames: Any?
+    var sessionFingerprint: String?
+
+    init(
+        initialPreflight: Any? = nil,
+        loadedToolNames: [String] = [],
+        initialAlwaysLoadedNames: Any? = nil,
+        sessionFingerprint: String? = nil
+    ) {
+        self.initialPreflight = initialPreflight
+        self.loadedToolNames = loadedToolNames
+        self.initialAlwaysLoadedNames = initialAlwaysLoadedNames
+        self.sessionFingerprint = sessionFingerprint
+    }
+
+    static func fingerprint(executionMode: Any?, toolMode: Any?) -> String {
+        // Intel does not compile the upstream ExecutionMode implementation,
+        // so keep the same stable shape while adding a process-wide capability
+        // generation. Agent/configuration/tool changes then invalidate an
+        // already-open session on its next send.
+        let mode = String(describing: executionMode)
+        let tools = String(describing: toolMode)
+        let revision = AgentManager.shared.currentCapabilityRevision()
+        return "intel/\(mode)/\(tools)/r\(revision)"
+    }
 }
 
 struct IntelSkillInfo: Sendable {
@@ -1342,15 +1367,88 @@ final class LiveExecSink: @unchecked Sendable {
 // unaffected).
 func diagnosticWarnings(command: String, exitCode: Int32, stdout: String, stderr: String) -> [String] { [] }
 
-final class SessionToolStateStore: @unchecked Sendable {
+final actor SessionToolStateStore {
     static let shared = SessionToolStateStore()
-    func invalidate(_ key: Any) async {}
-    func invalidateAll() async {}
-    func invalidateIfFingerprintChanged(_ key: Any, liveFingerprint: Any) async {}
-    func get(_ key: Any) async -> SessionToolState? { nil }
-    func setInitial(_ key: Any, preflight: Any?, alwaysLoadedNames: Any?, fingerprint: String) async {}
-    func recordSend(sessionId: Any, cacheHint: Any?, trace: Any?) async {}
-    func appendLoadedTools(_ key: Any, names: [String], fallbackPreflight: Any?, fallbackAlwaysLoadedNames: Any?) async {}
+
+    private var states: [String: SessionToolState] = [:]
+    private var lastSendCacheHints: [String: String] = [:]
+
+    private func stateKey(_ key: Any) -> String {
+        if let uuid = key as? UUID { return uuid.uuidString }
+        return String(describing: key)
+    }
+
+    func invalidate(_ key: Any) {
+        let key = stateKey(key)
+        states.removeValue(forKey: key)
+        lastSendCacheHints.removeValue(forKey: key)
+    }
+
+    func invalidateAll() {
+        states.removeAll(keepingCapacity: true)
+        lastSendCacheHints.removeAll(keepingCapacity: true)
+    }
+
+    func invalidateIfFingerprintChanged(_ key: Any, liveFingerprint: Any) {
+        let key = stateKey(key)
+        guard var state = states[key] else { return }
+        let live = String(describing: liveFingerprint)
+        guard let recorded = state.sessionFingerprint else {
+            state.sessionFingerprint = live
+            states[key] = state
+            return
+        }
+        guard recorded != live else { return }
+        states.removeValue(forKey: key)
+        lastSendCacheHints.removeValue(forKey: key)
+    }
+
+    func get(_ key: Any) -> SessionToolState? {
+        states[stateKey(key)]
+    }
+
+    func setInitial(
+        _ key: Any,
+        preflight: Any?,
+        alwaysLoadedNames: Any?,
+        fingerprint: String
+    ) {
+        let key = stateKey(key)
+        guard states[key] == nil else { return }
+        states[key] = SessionToolState(
+            initialPreflight: preflight,
+            initialAlwaysLoadedNames: alwaysLoadedNames,
+            sessionFingerprint: fingerprint
+        )
+    }
+
+    func recordSend(sessionId: Any, cacheHint: Any?, trace: Any?) {
+        let key = stateKey(sessionId)
+        lastSendCacheHints[key] = String(describing: cacheHint)
+        _ = trace
+    }
+
+    func appendLoadedTools(
+        _ key: Any,
+        names: [String],
+        fallbackPreflight: Any?,
+        fallbackAlwaysLoadedNames: Any?
+    ) {
+        let key = stateKey(key)
+        var state = states[key] ?? SessionToolState(
+            initialPreflight: fallbackPreflight,
+            initialAlwaysLoadedNames: fallbackAlwaysLoadedNames
+        )
+        for name in names where !state.loadedToolNames.contains(name) {
+            state.loadedToolNames.append(name)
+        }
+        states[key] = state
+    }
+
+    func reset() {
+        states.removeAll(keepingCapacity: true)
+        lastSendCacheHints.removeAll(keepingCapacity: true)
+    }
 }
 
 final class TTSService: ObservableObject, @unchecked Sendable {
@@ -1620,6 +1718,12 @@ enum StreamingReasoningHint: Sendable {
 
 final class SystemPromptComposer: @unchecked Sendable {
     static let shared = SystemPromptComposer()
+
+    static func filteringWebSearchTools(_ specs: [Tool], enabled: Bool) -> [Tool] {
+        specs.filter {
+            enabled || !["web_search", "search_and_extract"].contains($0.function.name)
+        }
+    }
     static func composePreviewContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil) -> ComposedContext { ComposedContext() }
 
     static func folderToolIsVisible(
@@ -1655,9 +1759,19 @@ final class SystemPromptComposer: @unchecked Sendable {
         let enabledToolNames = await MainActor.run {
             AgentManager.shared.effectiveEnabledToolNames(for: id)
         }
+        let agentToolsDisabled = await MainActor.run {
+            AgentManager.shared.effectiveToolsDisabled(for: id)
+        }
+        let selfSchedulingEnabled = await MainActor.run {
+            AgentManager.shared.effectiveSelfSchedulingEnabled(for: id)
+        }
+        let webSearchEnabled = await MainActor.run {
+            AgentManager.shared.agent(for: id)?.settings.webSearchEnabled ?? false
+        }
         let folderToolNames = await MainActor.run {
             Set(FolderToolManager.shared.folderToolNames)
         }
+        await KnowledgeManager.shared.ensureLoaded()
         let knowledgeAllowed = await MainActor.run {
             let ownKnowledge = AgentManager.shared.effectiveKnowledgeCollections(for: id)
             let projectKnowledge = projectId.flatMap { projectId in
@@ -1716,10 +1830,13 @@ final class SystemPromptComposer: @unchecked Sendable {
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
         // allowlist; in Auto mode (or un-seeded), send everything registered.
         let tools: [Tool]
-        if toolsDisabled {
+        if toolsDisabled || agentToolsDisabled {
             tools = []
         } else {
-            let allSpecs = ToolRegistry.shared.openAISpecs()
+            let allSpecs = filteringWebSearchTools(
+                ToolRegistry.shared.openAISpecs(),
+                enabled: webSearchEnabled
+            )
                 .filter {
                     knowledgeAllowed || !["list_knowledge", "read_knowledge", "search_knowledge"]
                         .contains($0.function.name)
@@ -1730,6 +1847,9 @@ final class SystemPromptComposer: @unchecked Sendable {
                         folder: folder,
                         registeredFolderToolNames: folderToolNames
                     )
+                }
+                .filter { spec in
+                    selfSchedulingEnabled || !["schedule_next_run", "cancel_next_run", "notify"].contains(spec.function.name)
                 }
             if toolMode == .manual, let enabled = enabledToolNames {
                 // Folder/runtime tools (file_read, file_write, file_edit,
@@ -1772,7 +1892,14 @@ final class SystemPromptComposer: @unchecked Sendable {
         // in just before the user's message.
         var memorySection: String? = nil
         let memCfg = MemoryConfigurationStore.load()
-        if memCfg.enabled, let q = query?.trimmingCharacters(in: .whitespacesAndNewlines), !q.isEmpty {
+        let memoryDisabled = await MainActor.run {
+            AgentManager.shared.effectiveMemoryDisabled(for: id)
+        }
+        if memCfg.enabled,
+            !memoryDisabled,
+            let q = query?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !q.isEmpty
+        {
             // `projectId` additionally opens the project's own namespace as a
             // second lane, mirroring upstream: a chat inside a project recalls
             // what the whole project has learned, floored at a share of the

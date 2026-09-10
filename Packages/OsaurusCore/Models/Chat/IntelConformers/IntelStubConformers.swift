@@ -1127,6 +1127,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
+        registerWebSearchTools()
     }
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
@@ -1150,6 +1151,19 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             SearchKnowledgeTool(),
             ReadKnowledgeTool(),
             ListKnowledgeTool(),
+        ]
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
+    /// First-party web search is available on Intel without the legacy native
+    /// plugin. Prompt composition controls per-agent visibility.
+    private func registerWebSearchTools() {
+        let tools: [OsaurusTool] = [
+            WebSearchTool(),
+            SearchAndExtractTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -1193,8 +1207,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 
     // MARK: Tool source predicates (for AgentCapabilityManagerView grouping)
 
-    /// Always-loaded built-in tools. Intel has none (folder tools are
-    /// folder-scoped, not always-loaded built-ins), so this stays empty.
+    /// Always-loaded first-party tools. Per-agent visibility is filtered while
+    /// composing the prompt.
     private(set) var builtInToolNames: Set<String> = []
 
     /// Built-in sandbox tool names. Amputated on Intel — always empty.
@@ -1264,6 +1278,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     func execute(name: String, argumentsJSON: String) async throws -> String {
+        if let denial = await runtimeCapabilityDenial(for: name) {
+            return denial
+        }
         guard let tool = toolsByName[name] else {
             return ToolEnvelope.failure(
                 kind: .toolNotFound,
@@ -1273,6 +1290,86 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             )
         }
         return try await tool.execute(argumentsJSON: argumentsJSON)
+    }
+
+    /// Dispatch is the final capability boundary. Prompt filtering keeps the
+    /// model's schema honest, but restored sessions and older models can still
+    /// submit a stale tool name. Re-check the live agent/configuration state
+    /// here so a tool removed after turn one cannot run silently.
+    private func runtimeCapabilityDenial(for name: String) async -> String? {
+        if disabledToolNames.contains(name) {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "This tool is disabled in the Tools settings.",
+                tool: name
+            )
+        }
+
+        guard let agentId = ChatExecutionContext.currentAgentId else { return nil }
+
+        if AgentManager.shared.effectiveToolsDisabled(for: agentId) {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "Tools are disabled for this agent.",
+                tool: name
+            )
+        }
+
+        if ["web_search", "search_and_extract"].contains(name) {
+            let enabled = AgentManager.shared.agent(for: agentId)?.settings.webSearchEnabled ?? false
+            guard enabled else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Web Search is disabled for this agent.",
+                    tool: name
+                )
+            }
+        }
+
+        if ["schedule_next_run", "cancel_next_run", "notify"].contains(name),
+            !AgentManager.shared.effectiveSelfSchedulingEnabled(for: agentId)
+        {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "Self-scheduling is disabled for this agent.",
+                tool: name
+            )
+        }
+
+        if ["list_knowledge", "read_knowledge", "search_knowledge"].contains(name) {
+            let allowed = await MainActor.run {
+                var collections = AgentManager.shared.effectiveKnowledgeCollections(for: agentId)
+                if let projectId = ChatExecutionContext.currentProjectId,
+                    let project = ProjectManager.shared.project(for: projectId)
+                {
+                    let existing = Set(collections.map(\.id))
+                    collections += KnowledgeManager.shared
+                        .enabledCollections(withIds: project.knowledgeCollectionIds)
+                        .filter { !existing.contains($0.id) }
+                }
+                return !collections.isEmpty
+            }
+            guard allowed else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Knowledge is not enabled for this agent or project.",
+                    tool: name
+                )
+            }
+        }
+
+        if AgentManager.shared.effectiveToolSelectionMode(for: agentId) == .manual,
+            let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
+            !enabled.contains(name)
+        {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "This tool is not assigned to the active agent.",
+                tool: name
+            )
+        }
+
+        return nil
     }
 
     /// Mirror of upstream's `invalidToolArgumentsEnvelope`. When the model
@@ -1449,6 +1546,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         guard changed else { return }
         objectWillChange.send()
         persistPolicies()
+        AgentManager.shared.bumpCapabilityRevision()
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 

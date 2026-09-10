@@ -53,7 +53,7 @@ No visible control counts as shipped until its store, runtime action,
 persistence, and focused tests work. An explanatory dependency card is useful
 UI, but its feature state remains **Dependency-blocked**.
 
-## Current checkpoint — 2026-09-09
+## Current checkpoint — 2026-09-10
 
 | Area | Product state | Evidence and remaining work |
 |---|---|---|
@@ -61,12 +61,14 @@ UI, but its feature state remains **Dependency-blocked**.
 | Knowledge | Working and tested | Local collections, indexing, search, refresh, unavailable-folder reporting, and project attachment passed Rosy acceptance. |
 | Projects and working folders | Working and tested | Instructions, Knowledge attachment, shared memory, default agent, per-chat folder ownership, persistence, and relaunch passed Rosy acceptance. |
 | Claude Code | Working and tested | CLI auth, streaming, cancellation, progress, folder access, and opt-in file/shell execution passed Rosy acceptance. Osaurus MCP configuration remains dependency-blocked. |
-| Agent Settings — General and Appearance | Working and tested | Identity, model choice, generation overrides, avatar, empty state, action bar, themes, and Claude Code configuration use Intel stores/runtime paths. Automated validation passed; Rosy UI acceptance remains pending. |
-| Agent Settings — Abilities Overview and Tools | Working and tested | Existing Intel tool, Knowledge, Memory, web-search, and scheduling controls remain connected to their live implementations. Automated validation passed; Rosy UI acceptance remains pending. |
-| Agent Settings — Connections | Partial | Bonjour is live. Relay/workspace sharing, remote grants, and Channels are dependency-blocked; see `INTEL_AGENT_SETTINGS_BACKLOG.md`. |
-| Agent Settings — Automation | Working and tested | Schedules and watchers retain their Intel managers and creation flows. Automated validation passed; this revised layout still needs Rosy UI acceptance. |
-| Agent Settings — Memory | Partial | Conversational history, pinned facts, and episodes are live. Private Agent Database is dependency-blocked. |
+| Agent Settings — General and Appearance | Partial | Rosy acceptance on 2026-09-10 found incorrect migrated model display/runtime selection, missing reset/Claude controls/Delete Data, broken custom-avatar selection, unapplied agent themes, and app-wide control rendering defects. Persistence-only tests did not prove this surface. Repair and repeat Rosy acceptance before promotion. |
+| Agent Settings — Abilities Overview and Tools | Partial | Rosy acceptance on 2026-09-10 found that Tools, Memory, Knowledge, Web Search, and scheduling state was not consistently enforced in the chat runtime, especially for existing sessions. Tool assignment UI persists, but runtime invalidation and capability tests are required before promotion. |
+| Agent Settings — Connections | Partial | Rosy acceptance found the Network page did not expose Bonjour's persisted value as an operable toggle. Relay/workspace sharing, remote grants, and Channels remain dependency-blocked; see `INTEL_AGENT_SETTINGS_BACKLOG.md`. |
+| Agent Settings — Automation | Partial | Schedule/watcher creation and persistence work, but Rosy acceptance found missing edit/pause/resume/run/delete actions, an unreadable watcher dropdown, and watcher runs that did not inherit the selected folder. |
+| Agent Settings — Memory | Partial | Chat history opens, but Rosy acceptance found pinned facts and episode summaries missing for agents that have data. Private Agent Database remains dependency-blocked, and its Ability card must not expose working-looking controls. |
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
+| Insights | Partial | Intel's replacement chat engine now records Chat UI requests, responses, timings, token estimates/provider usage, tool calls, and failures in the existing Insights ring buffer. Automated x86_64 compilation passes; Rosy must confirm entries and detail rendering before promotion. The newer per-message diagnostics belong to the deliberately later chat-interface revamp. |
+| Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented and covered by focused tests. Rosy x86_64 UI/network acceptance is pending. Osaurus Premium routing remains dependency-blocked on Credits/Router. |
 
 ## Prioritized roadmap
 
@@ -88,9 +90,11 @@ implementations compile unchanged on Intel.
    Accessibility and Screen Recording behavior, browser-engine availability,
    model requirements, and approval/cancellation semantics. Do not assume these
    are Apple-Silicon-only or universally Intel-compatible.
-5. **Web Search** — mirror provider ordering, test search, built-in fallbacks,
-   category preferences, custom REST providers, credential storage, and agent
-   capability gating. Paid/premium routing must stay explicit and opt-in.
+5. **Web Search — free/custom slice implemented** — complete Rosy acceptance
+   for provider ordering, test search, built-in fallbacks, custom REST
+   providers, Keychain credentials, extraction, and per-agent opt-in gating.
+   Osaurus Premium remains dependency-blocked on the Credits/Router roadmap;
+   do not add a premium switch before that service path is real.
 6. **Media, cloud models only** — implement remote image/video model discovery,
    defaults, permissions, quoting, job recovery, and results. Exclude local MLX
    generation/editing from the Intel scope unless a separate compatible runtime
@@ -101,7 +105,8 @@ implementations compile unchanged on Intel.
 
 ## Deliberately later
 
-- The revamped chat interface added upstream on 2026-09-09.
+- The revamped chat interface added upstream on 2026-09-09, including the
+  current message action rows, per-message diagnostics affordances, and stats.
 - The revamped Workspaces tab added upstream on 2026-09-09.
 
 They still receive commit classifications and feature-ledger rows during the

@@ -585,7 +585,11 @@ public final class WatcherManager: ObservableObject {
                     agentId: watcher.agentId,
                     title: watcher.name,
                     parameters: watcher.parameters,
-                    folderPath: watcher.watchPath,
+                    // Use the resolved bookmark path when one exists. The
+                    // watcher and the dispatched chat must share the same
+                    // folder root; passing only the display path made a
+                    // relaunch-created watcher lose its working context.
+                    folderPath: self.resolveWatchPath(for: watcher) ?? watcher.watchPath,
                     folderBookmark: watcher.watchBookmark,
                     source: .watcher,
                     externalSessionKey: watcher.id.uuidString

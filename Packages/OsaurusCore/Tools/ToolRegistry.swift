@@ -186,6 +186,11 @@ final class ToolRegistry: ObservableObject {
             CapabilitiesLoadTool(),
             // Persistent memory recall — one tool, dispatched by `scope`.
             SearchMemoryTool(),
+            // Native provider cascade configured in Settings → Web Search.
+            // Both tools are registered here on Intel because this fork does
+            // not compile upstream's dynamic capability-loader subsystem.
+            WebSearchTool(),
+            SearchAndExtractTool(),
             // Inline data visualization rendered as a chart card.
             RenderChartTool(),
             // Agent DB feature (spec §6). The system prompt composer

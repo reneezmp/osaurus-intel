@@ -23,6 +23,8 @@ for dir in "$HERE"/*/; do
     [ -n "$src" ] || continue
 
     plugin_id="$(/usr/bin/python3 -c "import json;print(json.load(open('$manifest'))['plugin_id'])")"
+    # Native Web Search supersedes the retired search-intel dylib.
+    [ "$plugin_id" = "search-intel" ] && continue
     install_dir="$HOME/.osaurus-intel/Tools/$plugin_id"
 
     echo "→ $name → $plugin_id"

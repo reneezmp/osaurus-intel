@@ -17,6 +17,23 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     static let shared = AgentManager()
 
     private var defaultModel = "deepseek-v4-pro"
+    private let capabilityRevisionLock = NSLock()
+    private var capabilityRevision: UInt64 = 0
+
+    /// Monotonic runtime-generation token used by the Intel session capability
+    /// cache. A changed agent/configuration record must invalidate the tool
+    /// snapshot captured by an already-open chat.
+    func currentCapabilityRevision() -> UInt64 {
+        capabilityRevisionLock.lock()
+        defer { capabilityRevisionLock.unlock() }
+        return capabilityRevision
+    }
+
+    func bumpCapabilityRevision() {
+        capabilityRevisionLock.lock()
+        capabilityRevision &+= 1
+        capabilityRevisionLock.unlock()
+    }
 
     /// Intel keeps Knowledge grants in a small sidecar until the Intel Agent
     /// model grows the upstream AgentSettings fields. The sidecar is scoped by
@@ -154,6 +171,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
             collectionIds: ids
         )
         persistKnowledgeGrants()
+        bumpCapabilityRevision()
         NotificationCenter.default.post(name: .agentUpdated, object: agentId)
     }
 
@@ -181,6 +199,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     func add(_ agent: Agent) {
         persist(agent)
         reload()
+        bumpCapabilityRevision()
     }
 
     func update(_ agent: Agent) {
@@ -191,10 +210,14 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
             if let idx = agents.firstIndex(where: { $0.id == Agent.defaultId }) {
                 agents[idx] = agent
             }
+            bumpCapabilityRevision()
+            NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
             return
         }
         persist(agent)
         reload()
+        bumpCapabilityRevision()
+        NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
     }
 
     /// Selected-agent Claude Code settings, with a safe fallback for agents
@@ -223,6 +246,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         persistKnowledgeGrants()
         if activeAgentId == id { activeAgentId = Agent.defaultId }
         reload()
+        bumpCapabilityRevision()
         return AgentDeleteResult(deleted: true)
     }
 
@@ -361,7 +385,28 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func updateDefaultModel(for agentId: UUID, model: String?) {
-        if agentId == activeAgentId, let model { defaultModel = model }
+        let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let storedModel = normalizedModel?.isEmpty == true ? nil : normalizedModel
+        if agentId == Agent.defaultId {
+            let config = ChatConfigurationStore.load()
+            config.defaultModel = storedModel
+            ChatConfigurationStore.save(config)
+            defaultModel = storedModel ?? "deepseek-v4-pro"
+            bumpCapabilityRevision()
+            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
+            return
+        }
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        agent.defaultModel = storedModel
+        agent.updatedAt = Date()
+        update(agent)
+    }
+
+    /// Clear an agent override so new chats inherit the current global model.
+    /// Keeping this operation in the store prevents stale overrides when a
+    /// reset originates outside the settings view.
+    func resetDefaultModel(for agentId: UUID) {
+        updateDefaultModel(for: agentId, model: nil)
     }
 
     // M12 Gap 1 follow-up (Renée 2026-06-03 click-through): the agent pill
@@ -406,15 +451,30 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         }
         return ChatConfigurationStore.load().systemPrompt
     }
-    func effectiveToolsDisabled(for agentId: UUID) -> Bool { false }
-    func effectiveDBEnabled(for agentId: UUID) -> Bool { false }
-    /// Intel memory is governed by the global Memory tab toggle
-    /// (`MemoryConfiguration.enabled`); per-agent overrides are a Phase-2 thing.
-    /// This used to hard-return `true` (a leftover from when memory was
-    /// amputated), which silently gated OUT the ChatView transcript-write path —
-    /// so nothing was ever stored to recall.
+    func effectiveToolsDisabled(for agentId: UUID) -> Bool {
+        let globalDisabled = ChatConfigurationStore.load().disableTools
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return globalDisabled }
+        return (agent.disableTools ?? false) || globalDisabled
+    }
+
+    func effectiveDBEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.dbEnabled
+    }
+
     func effectiveMemoryDisabled(for agentId: UUID) -> Bool {
-        !MemoryConfigurationStore.load().enabled
+        let globalDisabled = !MemoryConfigurationStore.load().enabled
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return globalDisabled }
+        return (agent.disableMemory ?? false) || globalDisabled
+    }
+
+    /// Self-scheduling is an explicit per-agent opt-in. The upstream scheduler
+    /// tool file is excluded from the Intel target, so runtime policy must be
+    /// available here for both prompt composition and dispatch enforcement.
+    func effectiveSelfSchedulingEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        let schedule = agent.settings.schedule
+        return schedule.mode != .manual && schedule.dailyRunCap > 0
     }
 
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a
@@ -570,6 +630,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         var config = MemoryConfigurationStore.load()
         config.setDistillationEnabled(enabled, for: agentId)
         MemoryConfigurationStore.save(config)
+        bumpCapabilityRevision()
         NotificationCenter.default.post(name: .agentUpdated, object: agentId)
     }
 
@@ -965,7 +1026,13 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {
         let id = UUID()
-        sessions[id] = ChatSessionData(id: id, agentId: agentId ?? UUID())
+        let resolvedAgentId = agentId ?? Agent.defaultId
+        let resolvedModel = selectedModel ?? AgentManager.shared.effectiveModel(for: resolvedAgentId)
+        sessions[id] = ChatSessionData(
+            id: id,
+            selectedModel: resolvedModel,
+            agentId: resolvedAgentId
+        )
         return id
     }
 

@@ -862,13 +862,18 @@ struct WatcherEditorSheet: View {
 
                     Picker(selection: $responsiveness) {
                         ForEach(Responsiveness.allCases, id: \.self) { level in
-                            Text(level.displayName).tag(level)
+                            Text(level.displayName)
+                                .foregroundColor(theme.primaryText)
+                                .tag(level)
                         }
                     } label: {
                         Text("Responsiveness", bundle: .module)
                     }
                     .pickerStyle(.menu)
                     .labelsHidden()
+                    .foregroundColor(theme.primaryText)
+                    .tint(theme.accentColor)
+                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(responsiveness.displayDescription)
                         .font(.system(size: 11))

@@ -1032,6 +1032,7 @@ struct AgentDetailView: View {
     /// Features section binds a toggle to this; `debouncedSave`
     /// folds it back into the persisted `AgentSettings` block.
     @State private var dbEnabled: Bool = false
+    @State private var webSearchEnabled: Bool = false
     /// Per-agent on/off for the chat empty-state generative greeting.
     /// `nil` resolves to "auto" — the feature runs whenever a Core Model
     /// is configured. Values flow through `loadAgent` / `saveAgent`
@@ -1055,6 +1056,9 @@ struct AgentDetailView: View {
     /// away its only copy (the encrypted `db.sqlite`) of the data it
     /// has accumulated — no Trash, no undo.
     @State private var showDeleteDBConfirmation: Bool = false
+    /// Delete Data is a General → Configure action, separate from toggling
+    /// the optional structured database in Abilities.
+    @State private var showDeleteAgentDataConfirmation: Bool = false
 
     // MARK: - Bundle export/import state (spec §11.1)
 
@@ -1085,6 +1089,10 @@ struct AgentDetailView: View {
     @State private var autoSpeak: Bool = false
     @State private var ttsVoice: String = ""
     @State private var avatar: String? = nil
+    /// Forces the avatar strip to redraw after replacing the image at the
+    /// stable per-agent file URL.  Without it Ventura can retain the old
+    /// decoded image until some unrelated interaction invalidates the view.
+    @State private var avatarRevision: Int = 0
     /// Drives the title-bar agent picker popover. Tapping the avatar / name in the
     /// header bar reveals the list of other custom agents so the user can jump
     /// between them without bouncing back to the Agents grid every time.
@@ -1127,6 +1135,8 @@ struct AgentDetailView: View {
     @State private var claudeCodeConfig: ClaudeCodeAgentConfig = .default
     @State private var showCreateSchedule = false
     @State private var showCreateWatcher = false
+    @State private var editingSchedule: Schedule?
+    @State private var editingWatcher: Watcher?
     @State private var pinnedFacts: [PinnedFact] = []
     @State private var episodes: [Episode] = []
     @State private var sessionTurnCounts: [UUID: Int] = [:]
@@ -1489,6 +1499,13 @@ struct AgentDetailView: View {
                 secondaryButton: .cancel(L("Cancel"))
             )
             .themedAlert(
+                L("Delete this agent's data?"),
+                isPresented: $showDeleteAgentDataConfirmation,
+                message: L("This permanently removes this agent's chats, pinned facts, and episode summaries. The agent and its settings stay. This cannot be undone."),
+                primaryButton: .destructive(L("Delete Data")) { deleteAgentConversationData() },
+                secondaryButton: .cancel(L("Cancel"))
+            )
+            .themedAlert(
                 L("Expose Agent to Internet?"),
                 isPresented: $showRelayConfirmation,
                 message:
@@ -1548,6 +1565,9 @@ struct AgentDetailView: View {
                             name: schedule.name,
                             instructions: schedule.instructions,
                             agentId: schedule.agentId,
+                            parameters: schedule.parameters,
+                            folderPath: schedule.folderPath,
+                            folderBookmark: schedule.folderBookmark,
                             frequency: schedule.frequency,
                             isEnabled: schedule.isEnabled
                         )
@@ -1556,6 +1576,18 @@ struct AgentDetailView: View {
                     },
                     onCancel: { showCreateSchedule = false },
                     initialAgentId: agent.id
+                )
+                .environment(\.theme, themeManager.currentTheme)
+            }
+            .sheet(item: $editingSchedule) { schedule in
+                ScheduleEditorSheet(
+                    mode: .edit(schedule),
+                    onSave: { updated in
+                        ScheduleManager.shared.update(updated)
+                        editingSchedule = nil
+                        showSuccess("Updated schedule \"\(updated.name)\"")
+                    },
+                    onCancel: { editingSchedule = nil }
                 )
                 .environment(\.theme, themeManager.currentTheme)
             }
@@ -1578,6 +1610,18 @@ struct AgentDetailView: View {
                     },
                     onCancel: { showCreateWatcher = false },
                     initialAgentId: agent.id
+                )
+                .environment(\.theme, themeManager.currentTheme)
+            }
+            .sheet(item: $editingWatcher) { watcher in
+                WatcherEditorSheet(
+                    mode: .edit(watcher),
+                    onSave: { updated in
+                        WatcherManager.shared.update(updated)
+                        editingWatcher = nil
+                        showSuccess("Updated watcher \"\(updated.name)\"")
+                    },
+                    onCancel: { editingWatcher = nil }
                 )
                 .environment(\.theme, themeManager.currentTheme)
             }
@@ -2236,6 +2280,40 @@ struct AgentDetailView: View {
                     .foregroundColor(theme.tertiaryText)
                 }
                 .padding(.top, 2)
+
+                if !agent.isBuiltIn {
+                    Divider().padding(.vertical, 2)
+
+                    HStack {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Delete chats and memory", bundle: .module)
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(theme.primaryText)
+                            Text(
+                                "Keeps this agent and its settings, but permanently removes its chats, pinned facts, and episode summaries.",
+                                bundle: .module
+                            )
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.tertiaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 12)
+                        Button(role: .destructive) {
+                            showDeleteAgentDataConfirmation = true
+                        } label: {
+                            Label("Delete Data", systemImage: "trash")
+                                .font(.system(size: 11, weight: .semibold))
+                                .foregroundColor(theme.errorColor)
+                                .padding(.horizontal, 10)
+                                .padding(.vertical, 7)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 7)
+                                        .fill(theme.errorColor.opacity(0.12))
+                                )
+                        }
+                        .buttonStyle(.plain)
+                    }
+                }
             }
             .onChange(of: name) { _ in debouncedSave() }
             .onChange(of: description) { _ in debouncedSave() }
@@ -2336,6 +2414,19 @@ struct AgentDetailView: View {
             agentId: agent.id,
             theme: theme
         )
+
+        AgentDetailSection(title: L("Web"), icon: "globe") {
+            abilityToggleRow(
+                title: "Web Search",
+                description: "Let the agent search through the providers configured in Settings > Web Search.",
+                icon: "magnifyingglass",
+                isOn: Binding(
+                    get: { webSearchEnabled },
+                    set: { webSearchEnabled = $0; debouncedSave() }
+                ),
+                destination: nil
+            )
+        }
 
         AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
             VStack(spacing: 10) {
@@ -2714,6 +2805,8 @@ struct AgentDetailView: View {
             if let url = oldURL {
                 AvatarImageCache.shared.invalidate(url: url)
             }
+            avatar = nil
+            avatarRevision &+= 1
         } label: {
             AgentAvatarView(
                 mascotId: nil,
@@ -2724,6 +2817,7 @@ struct AgentDetailView: View {
                 monogramFontSize: 16,
                 borderWidth: 1.5
             )
+            .id("\(currentAgent.customAvatarFilename ?? "monogram")-\(avatarRevision)")
             .overlay(
                 Circle()
                     .strokeBorder(theme.accentColor, lineWidth: 2)
@@ -2773,7 +2867,12 @@ struct AgentDetailView: View {
         guard let original = NSImage(contentsOf: url) else { return }
         let downscaled = downscaleAvatar(original, maxDimension: 256)
         guard let pngData = pngData(from: downscaled) else { return }
-        agentManager.setCustomAvatar(pngData, ext: "png", for: agent.id)
+        guard agentManager.setCustomAvatar(pngData, ext: "png", for: agent.id) else { return }
+        // A custom image takes precedence over a mascot. Keep this view's
+        // draft aligned with the persisted agent so the old mascot cannot
+        // remain selected, then force Ventura to decode the replaced file.
+        avatar = nil
+        avatarRevision &+= 1
         // Bust the cache for this agent's avatar URL so the new bytes show
         // up immediately in inline chat + sidebar without an mtime race.
         if let updated = agentManager.agent(for: agent.id), let newURL = updated.customAvatarURL {
@@ -2813,6 +2912,14 @@ struct AgentDetailView: View {
     private func avatarOption(mascotId: String?) -> some View {
         let isSelected = avatar == mascotId
         return Button {
+            let oldURL = currentAgent.customAvatarURL
+            if oldURL != nil {
+                agentManager.clearCustomAvatar(for: agent.id)
+                if let oldURL {
+                    AvatarImageCache.shared.invalidate(url: oldURL)
+                }
+                avatarRevision &+= 1
+            }
             avatar = mascotId
             saveAgent()
         } label: {
@@ -3092,22 +3199,23 @@ struct AgentDetailView: View {
                     )
                 }
 
-                if selectedModel != nil {
-                    Button {
-                        selectedModel = nil
-                        agentManager.updateDefaultModel(for: agent.id, model: nil)
-                        showSaveIndicator()
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: "arrow.uturn.backward")
-                                .font(.system(size: 10))
-                            Text("Reset to default", bundle: .module)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(theme.accentColor)
-                    }
-                    .buttonStyle(PlainButtonStyle())
+                Button {
+                    selectedModel = nil
+                    agentManager.updateDefaultModel(for: agent.id, model: nil)
+                    showSaveIndicator()
+                } label: {
+                    Label(localized: "Reset to default", systemImage: "arrow.uturn.backward")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(selectedModel == nil ? theme.tertiaryText : theme.accentColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(theme.secondaryBackground.opacity(selectedModel == nil ? 0.45 : 0.8))
+                        )
                 }
+                .buttonStyle(.plain)
+                .help(Text("Use the global default model for new chats", bundle: .module))
             }
         }
     }
@@ -3199,7 +3307,7 @@ struct AgentDetailView: View {
             Spacer(minLength: 12)
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
         }
     }
 
@@ -3315,7 +3423,10 @@ struct AgentDetailView: View {
         current.settings = AgentSettings(
             dbEnabled: current.settings.dbEnabled,
             schedule: AgentScheduleSettings.defaults(for: newMode),
-            limits: current.settings.limits
+            limits: current.settings.limits,
+            generativeGreetingsEnabled: current.settings.generativeGreetingsEnabled,
+            greetingPersona: current.settings.greetingPersona,
+            webSearchEnabled: current.settings.webSearchEnabled
         )
         current.updatedAt = Date()
         agentManager.update(current)
@@ -3439,91 +3550,13 @@ struct AgentDetailView: View {
         }
     }
 
-    /// Row for the Agent DB feature (spec §5.5). Houses the on/off
-    /// toggle plus a Delete Data action that wipes the per-agent
-    /// `db.sqlite` (encrypted) and the scheduler-side rows belonging
-    /// to this agent. The Delete action only renders when the agent
-    /// has the feature on, since there's nothing to delete otherwise.
     @ViewBuilder
     private var databaseFeatureRow: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            featureToggleRow(
-                title: "Enable Database",
-                subtitle:
-                    "Give this agent a private encrypted SQLite database to remember structured data across runs.",
-                isOn: $dbEnabled
-            )
-            if dbEnabled, isUsingRemoteProvider {
-                // Spec §5.5.5 / line 340: when the agent's effective
-                // model is a remote (cloud) provider, surface the
-                // schema-leak disclaimer right under the toggle so the
-                // user knows exactly what crosses the wire.
-                HStack(alignment: .top, spacing: 6) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 11))
-                        .foregroundColor(theme.tertiaryText)
-                    Text(
-                        "Schema (table names and column types) is sent with each request. Row data is not.",
-                        bundle: .module
-                    )
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .fixedSize(horizontal: false, vertical: true)
-                    Spacer(minLength: 0)
-                }
-                .padding(.horizontal, 10)
-                .padding(.bottom, 2)
-            }
-            if dbEnabled {
-                HStack(spacing: 8) {
-                    Button {
-                        beginBundleExport()
-                    } label: {
-                        Label(localized: "Export Bundle…", systemImage: "square.and.arrow.up")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isBundleBusy)
-                    Button {
-                        beginBundleImport()
-                    } label: {
-                        Label(localized: "Import Bundle…", systemImage: "square.and.arrow.down")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .disabled(isBundleBusy)
-                    Spacer()
-                    Button(role: .destructive) {
-                        showDeleteDBConfirmation = true
-                    } label: {
-                        Label(localized: "Delete Data", systemImage: "trash")
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .buttonStyle(.bordered)
-                    .controlSize(.small)
-                    .tint(.red)
-                }
-            }
-        }
-        .confirmationDialog(
-            "Delete this agent's database?",
-            isPresented: $showDeleteDBConfirmation,
-            titleVisibility: .visible
-        ) {
-            Button(localized: "Delete Data", role: .destructive) {
-                deleteAgentDatabaseData()
-            }
-            Button(localized: "Cancel", role: .cancel) {}
-        } message: {
-            Text(
-                "This permanently erases the encrypted SQLite database, all "
-                    + "schema artifacts, all scheduled / pause state, and the run "
-                    + "history for this agent. The agent itself stays. This can't "
-                    + "be undone."
-            )
-        }
+        abilityUnavailableRow(
+            title: "Private Database",
+            description: "The structured per-agent database is not compiled into this Intel build. Its controls will return when the database backend is restored.",
+            icon: "cylinder"
+        )
     }
 
     /// Whether the agent's effective model resolves to a connected
@@ -3797,11 +3830,7 @@ struct AgentDetailView: View {
         // and forget any cached per-agent serial queue. The next DB
         // write reopens lazily and the agent rebuilds its own
         // tables from scratch — exactly the cold-start path.
-        do {
-            try AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
-        } catch {
-            print("[Configure] Failed to delete agent DB for \(agentId): \(error)")
-        }
+        AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
         do {
             try SchedulerDatabase.shared.deleteAllForAgent(agentId)
         } catch {
@@ -3810,6 +3839,30 @@ struct AgentDetailView: View {
             )
         }
         LocalAgentBridge.shared.forget(agentId: agentId)
+    }
+
+    /// Clear only the data that is genuinely available in the Intel build.
+    /// The private Agent Database is dependency-blocked here, but normal chat
+    /// history and memory are local and can be deleted without removing the
+    /// agent configuration itself.
+    private func deleteAgentConversationData() {
+        let agentId = agent.id
+        for session in ChatSessionsManager.shared.sessions(for: agentId) {
+            ChatSessionsManager.shared.delete(id: session.id)
+        }
+
+        do {
+            if !MemoryDatabase.shared.isOpen {
+                try MemoryDatabase.shared.open()
+            }
+            try MemoryDatabase.shared.deleteNamespaceData(agentId: agentId.uuidString)
+        } catch {
+            print("[Agent Settings] Failed to delete memory for \(agentId): \(error)")
+        }
+
+        refreshDetailCaches()
+        loadMemoryData()
+        showSuccess("Deleted chats and memory")
     }
 
     private func featureToggleRow(title: LocalizedStringKey, subtitle: LocalizedStringKey, isOn: Binding<Bool>)
@@ -4121,7 +4174,7 @@ struct AgentDetailView: View {
     private func confirmUninstallFailedPlugin(_ pid: String) {
         PluginManager.removeFromQuarantine(pid)
         Task {
-            try? await PluginRepositoryService.shared.uninstall(pluginId: pid)
+            await PluginRepositoryService.shared.uninstall(pluginId: pid)
         }
     }
 
@@ -5056,6 +5109,23 @@ struct AgentDetailView: View {
 
                             Spacer()
 
+                            AgentScheduleActionMenu(
+                                schedule: schedule,
+                                isRunning: scheduleManager.isRunning(schedule.id),
+                                onEdit: { editingSchedule = schedule },
+                                onRunNow: {
+                                    scheduleManager.runNow(schedule.id)
+                                    showSuccess("Started \"\(schedule.name)\"")
+                                },
+                                onToggle: { enabled in
+                                    scheduleManager.setEnabled(schedule.id, enabled: enabled)
+                                },
+                                onDelete: {
+                                    scheduleManager.delete(id: schedule.id)
+                                    showSuccess("Deleted \"\(schedule.name)\"")
+                                }
+                            )
+
                             Text(schedule.isEnabled ? "Active" : "Paused")
                                 .font(.system(size: 10, weight: .medium))
                                 .foregroundColor(schedule.isEnabled ? theme.successColor : theme.tertiaryText)
@@ -5162,6 +5232,23 @@ struct AgentDetailView: View {
 
             Spacer()
 
+            AgentWatcherActionMenu(
+                watcher: watcher,
+                isRunning: watcherManager.isRunning(watcher.id),
+                onEdit: { editingWatcher = watcher },
+                onRunNow: {
+                    watcherManager.runNow(watcher.id)
+                    showSuccess("Started \"\(watcher.name)\"")
+                },
+                onToggle: { enabled in
+                    watcherManager.setEnabled(watcher.id, enabled: enabled)
+                },
+                onDelete: {
+                    watcherManager.delete(id: watcher.id)
+                    showSuccess("Deleted \"\(watcher.name)\"")
+                }
+            )
+
             Text(watcher.isEnabled ? "Active" : "Paused")
                 .font(.system(size: 10, weight: .medium))
                 .foregroundColor(watcher.isEnabled ? theme.successColor : theme.tertiaryText)
@@ -5205,7 +5292,7 @@ struct AgentDetailView: View {
                         }
                         Spacer()
                         Button {
-                            ChatWindowManager.shared.createWindow(agentId: agent.id)
+                            _ = ChatWindowManager.shared.createWindow(agentId: agent.id)
                         } label: {
                             HStack(spacing: 3) {
                                 Image(systemName: "plus")
@@ -5225,7 +5312,7 @@ struct AgentDetailView: View {
                             hint:
                                 "Start a conversation to build this agent's memory — history, pinned facts, and episode summaries all flow from here.",
                             actionLabel: "New Chat",
-                            action: { ChatWindowManager.shared.createWindow(agentId: agent.id) }
+                            action: { _ = ChatWindowManager.shared.createWindow(agentId: agent.id) }
                         )
                     } else {
                         ForEach(chatSessions.prefix(5)) { session in
@@ -5361,6 +5448,7 @@ struct AgentDetailView: View {
         disableTools = agent.disableTools ?? false
         disableMemory = agent.disableMemory ?? false
         dbEnabled = agent.settings.dbEnabled
+        webSearchEnabled = agent.settings.webSearchEnabled
         claudeCodeConfig = agent.claudeCode ?? .default
         generativeGreetingsEnabled = agent.settings.generativeGreetingsEnabled
         // Hydrate the Personality editor with the resolved default
@@ -5560,7 +5648,8 @@ struct AgentDetailView: View {
                         resolvedPersonaDefault
                         .trimmingCharacters(in: .whitespacesAndNewlines)
                     return trimmed == inheritedTrimmed ? nil : trimmed
-                }()
+                }(),
+                webSearchEnabled: webSearchEnabled
             ),
             order: current.order
         )

@@ -264,6 +264,16 @@ extension Agent {
         case memoryEnabled
     }
 
+    /// Model identifiers were written under `defaultModel` by the current
+    /// Agent store, but a few upstream snapshots used the shorter `model`
+    /// (and one early migration used `modelId`). Read all three so an Intel
+    /// upgrade never silently falls back to the global model.
+    private enum ModelMigrationCodingKeys: String, CodingKey {
+        case model
+        case modelId
+        case selectedModel
+    }
+
     /// Custom decoder that provides default values for fields added after the initial release,
     /// ensuring older persisted JSON files remain loadable.
     public init(from decoder: Decoder) throws {
@@ -273,7 +283,14 @@ extension Agent {
         description = try c.decode(String.self, forKey: .description)
         systemPrompt = try c.decode(String.self, forKey: .systemPrompt)
         themeId = try c.decodeIfPresent(UUID.self, forKey: .themeId)
-        defaultModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+        let migration = try decoder.container(keyedBy: ModelMigrationCodingKeys.self)
+        let storedModel = try c.decodeIfPresent(String.self, forKey: .defaultModel)
+        let migratedModel = try migration.decodeIfPresent(String.self, forKey: .model)
+            ?? migration.decodeIfPresent(String.self, forKey: .modelId)
+            ?? migration.decodeIfPresent(String.self, forKey: .selectedModel)
+        defaultModel = [storedModel, migratedModel]
+            .compactMap { $0?.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .first { !$0.isEmpty }
         temperature = try c.decodeIfPresent(Float.self, forKey: .temperature)
         maxTokens = try c.decodeIfPresent(Int.self, forKey: .maxTokens)
         chatQuickActions = try c.decodeIfPresent([AgentQuickAction].self, forKey: .chatQuickActions)
@@ -588,6 +605,9 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// The on-disk `db.sqlite` is preserved on toggle-off; "Delete agent data"
     /// is the only path that removes it.
     public var dbEnabled: Bool
+    /// Exposes the native `web_search` and `search_and_extract` tools to this
+    /// agent. Outbound search is opt-in on the Intel fork.
+    public var webSearchEnabled: Bool
     /// Self-scheduling bounds. Always present so the UI never has to disambiguate
     /// "schedule disabled" vs "schedule with default bounds"; `mode = .manual`
     /// (dailyRunCap = 0) is the off state.
@@ -611,9 +631,11 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         schedule: AgentScheduleSettings,
         limits: AgentLimitsSettings = .defaults,
         generativeGreetingsEnabled: Bool? = nil,
-        greetingPersona: String? = nil
+        greetingPersona: String? = nil,
+        webSearchEnabled: Bool = false
     ) {
         self.dbEnabled = dbEnabled
+        self.webSearchEnabled = webSearchEnabled
         self.schedule = schedule
         self.limits = limits
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
@@ -623,9 +645,10 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dbEnabled = try c.decodeIfPresent(Bool.self, forKey: .dbEnabled) ?? false
+        webSearchEnabled = try c.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? false
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
-            ?? AgentScheduleSettings.defaults(for: .ambient)
+            ?? AgentScheduleSettings.defaults(for: .manual)
         limits = try c.decodeIfPresent(AgentLimitsSettings.self, forKey: .limits) ?? .defaults
         // Backward compat: prior versions stored a tri-state enum under
         // `generativeGreetings`. Map it onto the new `Bool?` shape so
@@ -652,6 +675,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case dbEnabled
+        case webSearchEnabled
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -663,6 +687,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public func encode(to encoder: Encoder) throws {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(dbEnabled, forKey: .dbEnabled)
+        try c.encode(webSearchEnabled, forKey: .webSearchEnabled)
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)
@@ -674,7 +699,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public static var defaultDisabled: AgentSettings {
         AgentSettings(
             dbEnabled: false,
-            schedule: AgentScheduleSettings.defaults(for: .ambient),
+            schedule: AgentScheduleSettings.defaults(for: .manual),
             limits: .defaults,
             generativeGreetingsEnabled: nil,
             greetingPersona: nil

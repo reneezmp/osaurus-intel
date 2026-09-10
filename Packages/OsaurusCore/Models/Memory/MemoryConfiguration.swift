@@ -293,6 +293,9 @@ public enum MemoryConfigurationStore: Sendable {
             let data = try encoder.encode(validated)
             try data.write(to: url, options: .atomic)
             lock.withLock { $0 = validated }
+            #if OSAURUS_INTEL
+            AgentManager.shared.bumpCapabilityRevision()
+            #endif
         } catch {
             MemoryLogger.config.error("Failed to save config: \(error)")
         }

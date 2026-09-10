@@ -602,13 +602,16 @@ final class ChatWindowState: ObservableObject {
     private var sessionsCancellable: AnyCancellable?
 
     var activeAgent: Agent { cachedActiveAgent }
-    var themeId: UUID? { nil }
+    /// The active custom agent may select a theme that is independent of
+    /// Settings → Themes. Keep the identifier visible to chat presentation so
+    /// switching agents cannot leak the previous agent's appearance.
+    var themeId: UUID? { AgentManager.shared.themeId(for: agentId) }
 
     init(windowId: UUID, agentId: UUID, sessionData: ChatSessionData? = nil) {
         self.windowId = windowId
         self.agentId = agentId
         self.session = ChatSession()
-        self.theme = ThemeManager.shared.currentTheme
+        self.theme = Self.loadTheme(for: agentId)
         self.filteredSessions = ChatSessionsManager.shared.sessions(for: agentId)
         self.session.windowState = self
         self.session.agentId = agentId
@@ -661,6 +664,9 @@ final class ChatWindowState: ObservableObject {
         cachedAgentDisplayName =
             cachedActiveAgent.name.isEmpty ? "Assistant" : cachedActiveAgent.name
         cachedSystemPrompt = AgentManager.shared.effectiveSystemPrompt(for: agentId)
+        // Agent edits publish through this stream. Re-resolve here so a theme
+        // chosen in Agent Settings reaches an already-open chat immediately.
+        refreshTheme()
     }
 
     /// Switch the window's active agent and start a fresh chat for it.
@@ -693,18 +699,27 @@ final class ChatWindowState: ObservableObject {
         }
     }
 
-    /// Re-read the active theme from `ThemeManager` and republish it.
-    /// Intel uses the global `currentTheme` directly because the per-agent
-    /// theme override machinery (upstream's `Self.loadTheme(for:)`) is
-    /// excluded — every chat window inherits the user's picked theme
-    /// regardless of which agent is active.
+    /// Re-read the effective theme for this agent and republish it. Custom
+    /// agent themes intentionally override the global Settings theme only for
+    /// that agent's chat window.
     func refreshTheme() {
-        let newTheme = ThemeManager.shared.currentTheme
+        let newTheme = Self.loadTheme(for: agentId)
         // `@Published` deduplicates on Equatable-of-self semantics, but
         // `ThemeProtocol` isn't Equatable, so we always republish here.
         // SwiftUI's environment-key diffing inside the view layer handles
         // no-op redraws cleanly.
         theme = newTheme
+    }
+
+    private static func loadTheme(for agentId: UUID) -> ThemeProtocol {
+        if let themeId = AgentManager.shared.themeId(for: agentId),
+           let customTheme = ThemeManager.shared.installedThemes.first(where: {
+               $0.metadata.id == themeId
+           })
+        {
+            return CustomizableTheme(config: customTheme)
+        }
+        return ThemeManager.shared.currentTheme
     }
 
     func confirmCloseInBackground() { showCloseConfirmation = false }
