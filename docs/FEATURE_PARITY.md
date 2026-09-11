@@ -69,6 +69,7 @@ UI, but its feature state remains **Dependency-blocked**.
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Partial | Intel's replacement chat engine now records Chat UI requests, responses, timings, token estimates/provider usage, tool calls, and failures in the existing Insights ring buffer. Automated x86_64 compilation passes; Rosy must confirm entries and detail rendering before promotion. The newer per-message diagnostics belong to the deliberately later chat-interface revamp. |
 | Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented and covered by focused tests. Rosy x86_64 UI/network acceptance is pending. Osaurus Premium routing remains dependency-blocked on Credits/Router. |
+| Orchestrator | Partial | Intel Gates 1–2 are implemented: persistent built-in identity/model/prompt/generation configuration, Restore Defaults, sidebar routing, and active Intel runtime resolution. Focused tests and an x86_64 macOS 13 build pass. Delegation remains dependency-blocked pending the measured cloud/custom-agent spike; Rosy Ventura QA is pending. See `ORCHESTRATOR_INTEL_PLAN.md`. |
 
 ## Prioritized roadmap
 
@@ -78,6 +79,11 @@ implementations compile unchanged on Intel.
 1. **Orchestrator** — restore the built-in configuration/delegation agent in
    dependency order. Separate configuration features that can use current Intel
    managers from delegation features that require the subagent runtime.
+   The dependency gates, cloud/custom-agent spike, unavailable target boundary,
+   storage-safe test contract, and Rosy Ventura checklist are tracked in
+   [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md). Configuration and
+   runtime routing (Gates 1–2) are implemented and tested; delegation remains a
+   roadmap item until its measured spike and bounded runtime contracts pass.
 2. **Revamped Credits** — audit wallet, activity, redemption, premium-search,
    Router, and diagnostics paths. Never expose balance-changing controls without
    the real remote service and error handling.

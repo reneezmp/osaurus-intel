@@ -43,7 +43,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         case .general: [.settings, .themes, .credits, .identity, .permissions, .storage]
         case .models: [.providers]
-        case .agents: [.agents]
+        case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
         case .automation: [.schedules, .watchers]
         case .unavailable: [.models, .voice, .sandbox]
@@ -58,6 +58,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case providers
     case credits
     case agents
+    case orchestrator
     case plugins
     case sandbox
     case tools
@@ -85,6 +86,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .providers: "cloud.fill"
         case .credits: "creditcard.fill"
         case .agents: "person.2.fill"
+        case .orchestrator: "point.3.connected.trianglepath.dotted"
         case .plugins: "puzzlepiece.extension.fill"
         case .sandbox: "shippingbox.fill"
         case .tools: "wrench.and.screwdriver.fill"
@@ -112,6 +114,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .providers: L("Cloud Models")
         case .credits: L("Credits")
         case .agents: L("Agents")
+        case .orchestrator: L("Orchestrator")
         case .plugins: L("Plugins")
         case .sandbox: L("Sandbox")
         case .tools: L("Tools")

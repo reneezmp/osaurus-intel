@@ -55,6 +55,14 @@ disabled together under **Not Available on This Mac**, immediately before the
 Developer Tools footer section, so the upstream organization stays recognizable
 without misrepresenting Intel support.
 
+The Orchestrator chain is documented as an Intel dependency-ordered plan and
+focused test contract in [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md).
+Intel Gates 1–2 now provide persistent built-in configuration, a real settings
+route, and effective runtime model/prompt/generation resolution. The focused store
+and runtime tests pass, and the macOS 13 x86_64 app builds. Delegation remains
+dependency-blocked pending the Gate 3 measured cloud/custom-agent spike; Rosy
+Ventura QA remains separate and pending.
+
 ---
 
 ## Rosy titlebar-control report (2026-09-11)

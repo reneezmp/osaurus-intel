@@ -83,6 +83,9 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     /// always pinned first). Triggers the `@Published` so the grid +
     /// pickers refresh.
     func reload() {
+        // Keep `Agent.default`'s in-memory display name synchronized before
+        // rebuilding the published built-in record.
+        _ = DefaultAgentConfigurationStore.load()
         let dir = OsaurusPaths.agents()
         OsaurusPaths.ensureExistsSilent(dir)
         var custom: [Agent] = []
@@ -204,14 +207,13 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 
     func update(_ agent: Agent) {
         if agent.id == Agent.defaultId {
-            // The Default agent is built-in and not persisted; reflect
-            // the edit in-memory so the editor's bindings stay live for
-            // the session.
-            if let idx = agents.firstIndex(where: { $0.id == Agent.defaultId }) {
-                agents[idx] = agent
-            }
-            bumpCapabilityRevision()
-            NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
+            var configuration = DefaultAgentConfigurationStore.load()
+            configuration.displayName = agent.name
+            configuration.systemPrompt = agent.systemPrompt
+            configuration.defaultModel = agent.defaultModel
+            configuration.temperature = agent.temperature
+            configuration.maxTokens = agent.maxTokens
+            updateDefaultAgentConfiguration(configuration)
             return
         }
         persist(agent)
@@ -388,12 +390,10 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         let normalizedModel = model?.trimmingCharacters(in: .whitespacesAndNewlines)
         let storedModel = normalizedModel?.isEmpty == true ? nil : normalizedModel
         if agentId == Agent.defaultId {
-            let config = ChatConfigurationStore.load()
-            config.defaultModel = storedModel
-            ChatConfigurationStore.save(config)
+            var configuration = DefaultAgentConfigurationStore.load()
+            configuration.defaultModel = storedModel
+            updateDefaultAgentConfiguration(configuration)
             defaultModel = storedModel ?? "deepseek-v4-pro"
-            bumpCapabilityRevision()
-            NotificationCenter.default.post(name: .agentUpdated, object: agentId)
             return
         }
         guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
@@ -425,6 +425,13 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func effectiveModel(for agentId: UUID) -> String? {
+        if agentId == Agent.defaultId,
+            let model = DefaultAgentConfigurationStore.load().defaultModel?
+                .trimmingCharacters(in: .whitespacesAndNewlines),
+            !model.isEmpty
+        {
+            return model
+        }
         if let agent = resolvedAgent(agentId), let model = agent.defaultModel, !model.isEmpty {
             return model
         }
@@ -432,6 +439,11 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func effectiveTemperature(for agentId: UUID) -> Double? {
+        if agentId == Agent.defaultId,
+            let temperature = DefaultAgentConfigurationStore.load().temperature
+        {
+            return Double(temperature)
+        }
         if let agent = resolvedAgent(agentId) {
             return agent.temperature.map { Double($0) }
         }
@@ -439,6 +451,11 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func effectiveMaxTokens(for agentId: UUID) -> Int? {
+        if agentId == Agent.defaultId,
+            let maxTokens = DefaultAgentConfigurationStore.load().maxTokens
+        {
+            return maxTokens
+        }
         if let agent = resolvedAgent(agentId) {
             return agent.maxTokens
         }
@@ -446,10 +463,24 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func effectiveSystemPrompt(for agentId: UUID) -> String {
+        if agentId == Agent.defaultId,
+            let systemPrompt = DefaultAgentConfigurationStore.load().systemPrompt
+        {
+            return systemPrompt
+        }
         if let agent = resolvedAgent(agentId) {
             return agent.systemPrompt
         }
         return ChatConfigurationStore.load().systemPrompt
+    }
+
+    /// Save built-in Orchestrator settings and make an already-open Intel chat
+    /// re-evaluate its cached capabilities and presentation immediately.
+    func updateDefaultAgentConfiguration(_ configuration: DefaultAgentConfiguration) {
+        DefaultAgentConfigurationStore.save(configuration)
+        reload()
+        bumpCapabilityRevision()
+        NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
     }
     func effectiveToolsDisabled(for agentId: UUID) -> Bool {
         let globalDisabled = ChatConfigurationStore.load().disableTools

@@ -179,6 +179,8 @@ private extension ManagementView {
             CreditsView()
         case .agents:
             AgentsView(deeplinkAgentId: deeplinkAgentId)
+        case .orchestrator:
+            OrchestratorSettingsView()
         case .plugins:
             PluginsView()
         case .sandbox:

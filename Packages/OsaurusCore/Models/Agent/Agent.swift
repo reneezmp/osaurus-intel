@@ -210,7 +210,10 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// catalog so the sidebar, pickers, menus, etc. render in the user's
     /// language. User-created agents always render their stored name verbatim.
     public var displayName: String {
-        isBuiltIn ? L(String.LocalizationValue(name)) : name
+        if isBuiltIn, id == Self.defaultId, Self.defaultAgentNameOverride != nil {
+            return name
+        }
+        return isBuiltIn ? L(String.LocalizationValue(name)) : name
     }
 
     /// Display description for UI rendering. Same rules as `displayName`.
@@ -224,18 +227,26 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// Well-known UUID for the default Osaurus agent
     public static let defaultId = UUID(uuidString: "00000000-0000-0000-0000-000000000001")!
 
+    /// Custom display name for the built-in Orchestrator. The durable value
+    /// lives in `DefaultAgentConfiguration`; its store mirrors the resolved
+    /// name here when it loads or saves so `Agent.default` can remain a plain
+    /// value accessor used from the existing Intel runtime.
+    nonisolated(unsafe) public static var defaultAgentNameOverride: String?
+
     /// Check whether an agent ID string refers to the default (built-in) agent.
     /// The default agent operates in read-only memory mode.
     public static func isDefaultAgentId(_ id: String) -> Bool {
         id == defaultId.uuidString
     }
 
-    /// The default agent - uses global settings
+    /// The default agent — the built-in Orchestrator. Its runtime generation
+    /// values live in `DefaultAgentConfiguration`; nil overrides continue to
+    /// inherit the global chat configuration.
     public static var `default`: Agent {
         Agent(
             id: defaultId,
-            name: "Default",
-            description: "Uses your global chat settings",
+            name: defaultAgentNameOverride ?? "Osaurus",
+            description: "Configures Osaurus and delegates work to your agents",
             systemPrompt: "",
             themeId: nil,
             defaultModel: nil,
