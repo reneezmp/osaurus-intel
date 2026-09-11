@@ -44,6 +44,19 @@ unchanged.
 
 ---
 
+## Rosy titlebar-control report (2026-09-11)
+
+A screenshot appeared to show missing close, minimize, and zoom controls on Rosy.
+The first M4 reproduction attempt was invalid: macOS placed its screen-sharing
+indicator directly over the traffic-light area, and the app under inspection was
+initially a current upstream build rather than the Intel fork. Accessibility still
+reported all three standard controls in the isolated Intel build, but that does
+not prove their appearance on Ventura. Do not infer a titlebar regression or land
+a speculative fix from a captured screenshot. Validate directly on Rosy with
+screen sharing stopped, then record the Ventura result and any confirmed cause.
+
+---
+
 ## Post-sync restoration: Knowledge and the full Project page (2026-09-08)
 
 The two deferrals recorded below are now resolved. Intel Knowledge is a real,

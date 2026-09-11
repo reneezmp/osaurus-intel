@@ -111,6 +111,11 @@ Intel chat UI and the Insights data source.
 
 ## 9. Regression and relaunch
 
+- With screen sharing and screen recording stopped, open both Settings and chat
+  windows. Confirm the native red, yellow, and green window controls are visible,
+  retain their system colours, and remain clickable before and after switching
+  agent themes. macOS places its screen-sharing indicator over this area, so a
+  screenshot captured while sharing cannot prove whether the controls are present.
 - Resize Settings from compact width to full screen. Confirm both navigation
   rows, selected pills, hover states, controls, and cards remain legible.
 - Switch rapidly among agents and tabs; confirm no model, theme, avatar, or
