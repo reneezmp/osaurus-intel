@@ -2,8 +2,7 @@
 //  OrchestratorSettingsView.swift
 //  osaurus
 //
-//  Intel-safe configuration for the built-in Orchestrator. Delegation is
-//  intentionally presented as a dependency state until its runtime exists.
+//  Intel-safe configuration for the built-in Orchestrator.
 //
 
 import SwiftUI
@@ -16,7 +15,9 @@ struct OrchestratorSettingsView: View {
     @State private var maxTokens = ""
     @State private var selectedModel: String?
     @State private var pickerItems: [ModelPickerItem] = []
+    @State private var delegation = OrchestratorDelegationConfiguration.default
     @State private var showModelPicker = false
+    @State private var showDelegationSheet = false
     @State private var loaded = false
     @State private var saveTask: Task<Void, Never>?
 
@@ -47,6 +48,10 @@ struct OrchestratorSettingsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .environment(\.theme, theme)
+        .sheet(isPresented: $showDelegationSheet) {
+            OrchestratorDelegationSheet()
+                .environment(\.theme, theme)
+        }
         .onAppear(perform: load)
         .onReceive(ModelPickerItemCache.shared.$items) { pickerItems = $0 }
         .onChange(of: formSnapshot) { _ in scheduleSave() }
@@ -56,7 +61,7 @@ struct OrchestratorSettingsView: View {
     private var capabilityStrip: some View {
         HStack(alignment: .top, spacing: 12) {
             capabilityTile("slider.horizontal.3", "Configures Osaurus", "Its saved identity and generation settings drive new chats.")
-            capabilityTile("point.3.connected.trianglepath.dotted", "Delegates work", "The Intel delegation runtime is the next measured milestone.")
+            capabilityTile("point.3.connected.trianglepath.dotted", "Delegates one turn", "Only custom agents and remote cloud models you explicitly admit can run.")
             capabilityTile("person.text.rectangle", "Yours to shape", "Rename it and give it a persona below.")
         }
     }
@@ -156,30 +161,29 @@ struct OrchestratorSettingsView: View {
 
     private var delegationSection: some View {
         SettingsSection(title: "Delegation", icon: "point.3.connected.trianglepath.dotted") {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: "hammer.fill").foregroundColor(theme.accentColor)
-                VStack(alignment: .leading, spacing: 5) {
-                    Text("Intel runtime work in progress", bundle: .module)
-                        .font(.system(size: 13, weight: .semibold)).foregroundColor(theme.primaryText)
-                    Text("Agent and cloud-model delegation needs an Intel-safe session, cancellation, artifact, permission, and budget pipeline. Controls will appear here only after that path works end to end.", bundle: .module)
-                        .font(.system(size: 11)).foregroundColor(theme.secondaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer()
-                Text("Unavailable", bundle: .module)
-                    .font(.system(size: 10, weight: .semibold)).foregroundColor(theme.tertiaryText)
-                    .padding(.horizontal, 9).padding(.vertical, 5)
-                    .background(Capsule().fill(theme.inputBackground))
-            }
+            OrchestratorDelegationSettings(
+                configuration: $delegation,
+                pickerItems: pickerItems,
+                onPersist: saveDelegation,
+                onRun: { showDelegationSheet = true }
+            )
         }
     }
 
     private struct FormSnapshot: Equatable {
         let name: String; let prompt: String; let model: String?; let temperature: String; let maxTokens: String
+        let delegation: OrchestratorDelegationConfiguration
     }
 
     private var formSnapshot: FormSnapshot {
-        FormSnapshot(name: displayName, prompt: systemPrompt, model: selectedModel, temperature: temperature, maxTokens: maxTokens)
+        FormSnapshot(
+            name: displayName,
+            prompt: systemPrompt,
+            model: selectedModel,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            delegation: delegation
+        )
     }
 
     private func load() {
@@ -189,6 +193,7 @@ struct OrchestratorSettingsView: View {
         selectedModel = config.defaultModel
         temperature = config.temperature.map { String($0) } ?? ""
         maxTokens = config.maxTokens.map { String($0) } ?? ""
+        delegation = config.delegation
         loaded = true
         Task { await ModelPickerItemCache.shared.prewarmModelCache() }
     }
@@ -215,12 +220,21 @@ struct OrchestratorSettingsView: View {
         config.defaultModel = selectedModel
         config.temperature = temp
         config.maxTokens = tokens
+        config.delegation = delegation
+        AgentManager.shared.updateDefaultAgentConfiguration(config)
+    }
+
+    private func saveDelegation(_ delegation: OrchestratorDelegationConfiguration) {
+        self.delegation = delegation
+        var config = DefaultAgentConfigurationStore.load()
+        config.delegation = delegation
         AgentManager.shared.updateDefaultAgentConfiguration(config)
     }
 
     private func restoreDefaults() {
         loaded = false
         displayName = ""; systemPrompt = ""; selectedModel = nil; temperature = ""; maxTokens = ""
+        delegation = .default
         AgentManager.shared.updateDefaultAgentConfiguration(.default)
         loaded = true
     }

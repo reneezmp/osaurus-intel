@@ -1,11 +1,11 @@
 # Orchestrator on Intel — implementation plan and focused test contract
 
-**Status (2026-09-11):** Gates 1–2 are implemented in the Intel fork: the built-in
-Orchestrator has a persistent configuration store, a real settings route, and
-effective model/prompt/generation routing in the Intel chat runtime. The internal
-Gate 3 delegation probe passes against the real Intel cloud adapter with an
-in-process provider fixture. User-facing bounded delegation remains
-dependency-blocked on Gate 4. Rosy Ventura QA is still pending.
+**Status (2026-09-11):** Gates 1–4 are implemented in the Intel fork. The built-in
+Orchestrator has a persistent configuration store, a real settings route, effective
+model/prompt/generation routing, and a deliberately narrow manual one-turn
+delegation surface. Gate 4 admits only explicitly selected custom agents and
+explicitly admitted remote cloud models. M4 automated validation is recorded below;
+Rosy Ventura QA is still pending.
 
 **Scope:** `intel-fork`, Intel/x86_64, macOS 13 Ventura minimum. This plan is based on
 the audited `upstream/main` chain and the active Intel target, including its
@@ -156,16 +156,28 @@ bounded policy and has focused tests. Until then, cloud/custom-agent delegation 
 
 ### Gate 4 — bounded text delegation
 
-After a passing spike, port the smallest real text path: allowed custom agents and
-explicitly admitted cloud models, one-model residency at a time, bounded turns,
-tokens, time, and concurrency, cancellation, permission modes, target tool policy,
-and text/artifact return. Keep the dispatcher separate from settings and preserve
-the Intel chat engine’s ownership boundaries.
+**Implemented 2026-09-11.** The Intel settings surface now exposes a manual
+one-turn sheet. It admits only explicitly selected non-built-in custom agents and
+explicitly admitted remote cloud models, revalidating both the target and model
+before dispatch. Permission is scoped to the exact Orchestrator/target pair and
+supports Ask, Deny, and Always Allow. Ask requires a per-run approval from the
+sheet; Deny fails closed; Always Allow remains subject to admission and model
+availability checks.
 
-The default spawn pool, same-turn activation, artifact pass-through, and model
-override behavior from `679ba750` and later commits are follow-up contracts. Each
-must have a test before being exposed. Do not seed hidden targets or silently add
-all existing agents to a runnable pool.
+The child is always a fresh, standalone, text-only request. Gate 4 fixes one turn,
+one active child globally, and no child tools or nested child creation. It enforces
+maximum input characters, child tokens, output characters, and timeout, supports
+cancellation, and returns only a bounded inline text result in the manual sheet.
+It creates no durable child chat/session, queue, background continuation, filesystem
+artifact, or model-owned spawn. Parent state and parent model/tool policy are not
+mutated.
+
+The intentionally small surface is the Intel product boundary for this gate. Child
+tools and model-owned autonomous delegation move to the later dependency/backlog
+work because Intel cloud tool-loop limits are not request-scoped; the current
+runtime cannot safely claim per-request child-tool budgets. Default spawn pools,
+same-turn activation, durable sessions, background dispatch, and artifact
+pass-through likewise remain later contracts.
 
 ### Gate 5 — declarative configuration plane
 
@@ -197,6 +209,8 @@ implementation claims:
 | Workspace/shared-agent targets | **Dependency-blocked** | Workspace identity, relay/pairing, grants, target liveness, and revocation |
 | Remote-agent dispatch | **Dependency-blocked** | Relay and remote connection backend with bounded usage and failure recovery |
 | Background autonomous delegation | **Dependency-blocked** | Durable task/session lifecycle, cancellation, notification, and recovery |
+| Child tools in delegated runs | **Dependency-blocked** | Intel cloud tool-loop limits are not request-scoped; add request-scoped tool budgets and cancellation before exposing any child tool |
+| Model-owned autonomous delegation | **Dependency-blocked** | Model-owned spawning needs an Intel request-scoped admission, budget, and lifecycle contract |
 
 No unavailable target receives an enabled switch, selectable model, runnable tool,
 or success-looking empty state. The dependency belongs in the relevant roadmap or
@@ -216,9 +230,8 @@ temporary roots are mandatory. The matrix below defines the minimum contract.
 | Effective runtime settings | New built-in chats use stored model/prompt/generation values; reset restores inheritance; live-session invalidation/rebuild behavior is explicit and tested |
 | Route and navigation | Orchestrator route resolves, remains selected across tab switches, survives relaunch, and unavailable sections render dependency states without dead actions |
 | Target admission | Only explicitly allowed custom agents/admitted cloud models enter schemas; unavailable, removed, denied, or malformed targets fail closed |
-| Delegation spike | Parent/child isolation, prompt and tool-policy transfer, result return, artifact return, timeout, cancellation, and parent-resume behavior are observable |
-| Delegation budgets | Token, turn, time, and concurrency ceilings stop work deterministically; denied and always-allow modes behave distinctly |
-| Tool policy | Child receives only its allowed tools; removing a tool affects fresh and existing sessions according to the documented invalidation contract |
+| Delegation runtime | Explicit custom-agent/model admission, exact launcher/target permission scope, Ask/Deny/Always Allow, one-turn child, one-child concurrency, no tools, bounded input/tokens/output/timeout, cancellation, and inline result are observable |
+| Deferred delegation | Child tools, durable child sessions, filesystem artifacts, queues, background continuation, and model-owned spawning remain unavailable and fail closed |
 | Spawn-pool migration | Existing custom agents seed exactly once if enabled; manual removal persists; no hidden or unavailable target is seeded |
 | Declarative configuration | Plans are inspectable, approval is required before mutation, supported domains apply correctly, unsupported domains reject cleanly, and no secret is logged |
 | Intel boundary | No test accidentally enables local MLX, sandbox, browser, computer-use, image, workspace, remote, or background targets |
@@ -246,10 +259,11 @@ Do not use the current upstream app as the comparison target.
    prompt/model silently survives.
 5. Confirm every unavailable target is labelled with its Intel dependency and has
    no dead switch, blank action, or selectable fake model.
-6. If the cloud/custom-agent spike has passed, use one disposable custom agent:
-   verify Ask pauses, Deny prevents execution, Always Allow behaves as configured,
-   cancellation stops the child, limits stop over-budget work, and the parent
-   receives the result/artifact and resumes with its own settings.
+6. Use one disposable admitted custom agent with an admitted remote model. Verify
+   the manual sheet, Ask pauses for approval, Deny prevents execution, Always
+   Allow is scoped to the exact target, cancellation stops the child, limits stop
+   over-budget work, the result is bounded inline text, and no child tool, durable
+   session, background continuation, or model-owned spawn appears.
 7. Remove a permitted target or tool, relaunch, and verify removal persists and
    the target/tool cannot be used by a fresh session. Verify the documented result
    for an already-open session.
@@ -310,6 +324,38 @@ complete.
   fresh child session identity, standalone system/user request, no tools, one
   active child, timeout/cancellation, bounded text/inline artifact, and no parent
   mutation.
-- Still Gate 4+: user permission modes, tool-policy intersection, durable child
-  sessions, filesystem artifacts, queues, background continuation, and model/tool
-  exposure to the Orchestrator.
+- Still later: child tools, durable child sessions, filesystem artifacts, queues,
+  background continuation, and model-owned tool/spawn exposure to the Orchestrator.
+
+## Gate 4 validation record — 2026-09-11
+
+- M4 automated validation ran the focused configuration/runtime suite on
+  `arm64e-apple-macos14.0`: 11 tests in 2 suites passed. The separate Intel app
+  build targeted x86_64 with a macOS 13 deployment target and completed with
+  `BUILD SUCCEEDED`. Together they cover the admitted-target checks, exact
+  permission scope, Ask approval, Deny, Always Allow, one-child concurrency,
+  no-tools request, input/token/output/timeout bounds, cancellation, bounded
+  inline text, and no parent mutation.
+- Final integration found that directly decoding malformed UUIDs, permission
+  enum values, or negative bounds could discard the whole parent Orchestrator
+  configuration. The decoder now preserves valid parent identity/instructions,
+  drops invalid admissions, treats unknown permission as Ask, and clamps unsafe
+  bounds. A focused regression covers this migration path.
+- An earlier delegated documentation pass reported 13 tests in 3 suites before
+  the final tree had been independently run. That claim was rejected and
+  replaced with the measured 11-test result above. Documentation counts and
+  build claims must come from the final integrated checkout, after the last
+  production or test edit.
+- The focused run used an isolated `OSAURUS_TEST_ROOT`. The live
+  `default-agent.json` hash matched its Gate 4 preflight value. Live `chat.json`
+  had changed at 18:00, before the final test invocation, so it is recorded as
+  concurrent app-state drift rather than presented as a frozen-run comparison.
+  No test-named agent or Gate 4 fixture was written to the live stores.
+- The manual launcher is intentionally a one-turn sheet. It does not create or
+  retain a child chat/session, enqueue work, continue in the background, write a
+  filesystem artifact, or allow the model to spawn another child.
+- Child tools and model-owned autonomous delegation are later dependency/backlog
+  work because Intel cloud tool-loop limits are not request-scoped.
+- Rosy Ventura manual QA: pending. M4 build/test results are automated evidence
+  only and do not establish Ventura UI behavior, Rosy persistence behavior, or
+  live-provider behavior.

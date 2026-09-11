@@ -57,13 +57,32 @@ without misrepresenting Intel support.
 
 The Orchestrator chain is documented as an Intel dependency-ordered plan and
 focused test contract in [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md).
-Intel Gates 1–2 provide persistent built-in configuration, a real settings route,
-and effective runtime model/prompt/generation resolution. The internal Gate 3
-probe proves one explicitly admitted custom agent/model through the real Intel
-cloud adapter using an in-process provider fixture, with bounded text return,
-cancellation, timeout, and no parent mutation. User-facing delegation remains
-dependency-blocked on Gate 4 permission, tool-policy, and lifecycle contracts.
-Rosy Ventura QA remains separate and pending.
+Intel Gates 1–4 provide persistent built-in configuration, a real settings route,
+effective runtime model/prompt/generation resolution, and a manual one-turn
+delegation sheet. Gate 4 admits only explicitly selected custom agents and remote
+cloud models; Ask/Deny/Always Allow is scoped to the exact launcher/target pair;
+the child is fresh, one-turn, one-at-a-time, tool-free, bounded by input/tokens/
+output/timeout, cancellable, and returned as inline text. M4 automated validation
+and the x86_64 build are recorded separately from pending Rosy Ventura QA.
+Child tools and model-owned autonomous delegation remain later dependency/backlog
+work because Intel cloud tool-loop limits are not request-scoped.
+
+## 2026-09-11 — Bounded Intel Orchestrator Gate 4
+
+Gate 4 is implemented as the smallest user-facing text path. The manual sheet
+requires explicit admission for both the custom-agent target and its remote model,
+rechecks availability before dispatch, and persists the exact target-pair
+permission choice. It supports Ask, Deny, and Always Allow, with Ask producing a
+per-run approval. The runtime creates one fresh child request, suppresses child
+tools and nested spawning, permits one active child globally, enforces input,
+token, output, and timeout limits, handles cancellation, and displays a bounded
+inline result.
+
+This is Partial product parity until Rosy Ventura validates the built UI and live
+behavior. No durable child session, filesystem artifact, queue, background
+continuation, or model-owned spawn is claimed. Child tools and model-owned
+autonomous delegation stay in the later dependency/backlog because Intel cloud
+tool-loop limits are not request-scoped.
 
 ---
 

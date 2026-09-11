@@ -69,7 +69,7 @@ UI, but its feature state remains **Dependency-blocked**.
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Partial | Intel's replacement chat engine now records Chat UI requests, responses, timings, token estimates/provider usage, tool calls, and failures in the existing Insights ring buffer. Automated x86_64 compilation passes; Rosy must confirm entries and detail rendering before promotion. The newer per-message diagnostics belong to the deliberately later chat-interface revamp. |
 | Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented and covered by focused tests. Rosy x86_64 UI/network acceptance is pending. Osaurus Premium routing remains dependency-blocked on Credits/Router. |
-| Orchestrator | Partial | Intel Gates 1–2 are implemented. The internal Gate 3 probe now proves one explicitly admitted custom agent/model through the real Intel cloud adapter with deterministic timeout, cancellation, limits, text return, and no parent mutation. No user-facing delegation control exists yet: permission modes, child tool policy, durable sessions, and model exposure remain dependency-blocked on Gate 4. Rosy Ventura QA is pending. See `ORCHESTRATOR_INTEL_PLAN.md`. |
+| Orchestrator | Partial | Intel Gates 1–4 are implemented. The manual Gate 4 sheet admits only explicitly selected custom agents and remote cloud models, scopes Ask/Deny/Always Allow to the exact launcher/target pair, runs one fresh child for one turn with no tools, enforces input/token/output/timeout and one-child limits, and returns bounded inline text. M4 automated validation covers the runtime and x86_64 build; Rosy Ventura QA is pending. Durable child sessions, background/model-owned spawning, and child tools remain dependency-blocked because Intel cloud tool-loop limits are not request-scoped. See `ORCHESTRATOR_INTEL_PLAN.md`. |
 
 ## Prioritized roadmap
 
@@ -83,8 +83,9 @@ implementations compile unchanged on Intel.
    storage-safe test contract, and Rosy Ventura checklist are tracked in
    [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md). Configuration and
    runtime routing (Gates 1–2) and the internal Gate 3 probe are implemented and
-   tested; user-facing delegation remains a roadmap item until the bounded Gate 4
-   runtime and permission contracts pass.
+   tested; the bounded Gate 4 surface is implemented. Child tools, durable or
+   background execution, and model-owned autonomous delegation remain later
+   dependency work.
 2. **Revamped Credits** — audit wallet, activity, redemption, premium-search,
    Router, and diagnostics paths. Never expose balance-changing controls without
    the real remote service and error handling.
@@ -115,6 +116,10 @@ implementations compile unchanged on Intel.
 - The revamped chat interface added upstream on 2026-09-09, including the
   current message action rows, per-message diagnostics affordances, and stats.
 - The revamped Workspaces tab added upstream on 2026-09-09.
+
+- Orchestrator child tools and model-owned autonomous delegation. Intel cloud
+  tool-loop limits are not request-scoped, so these require a later request-scoped
+  budget and lifecycle contract.
 
 They still receive commit classifications and feature-ledger rows during the
 next review; “later” means scheduled later, not silently skipped.
