@@ -57,11 +57,13 @@ without misrepresenting Intel support.
 
 The Orchestrator chain is documented as an Intel dependency-ordered plan and
 focused test contract in [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md).
-Intel Gates 1–2 now provide persistent built-in configuration, a real settings
-route, and effective runtime model/prompt/generation resolution. The focused store
-and runtime tests pass, and the macOS 13 x86_64 app builds. Delegation remains
-dependency-blocked pending the Gate 3 measured cloud/custom-agent spike; Rosy
-Ventura QA remains separate and pending.
+Intel Gates 1–2 provide persistent built-in configuration, a real settings route,
+and effective runtime model/prompt/generation resolution. The internal Gate 3
+probe proves one explicitly admitted custom agent/model through the real Intel
+cloud adapter using an in-process provider fixture, with bounded text return,
+cancellation, timeout, and no parent mutation. User-facing delegation remains
+dependency-blocked on Gate 4 permission, tool-policy, and lifecycle contracts.
+Rosy Ventura QA remains separate and pending.
 
 ---
 

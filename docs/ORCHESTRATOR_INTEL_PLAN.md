@@ -2,9 +2,10 @@
 
 **Status (2026-09-11):** Gates 1–2 are implemented in the Intel fork: the built-in
 Orchestrator has a persistent configuration store, a real settings route, and
-effective model/prompt/generation routing in the Intel chat runtime. Delegation
-remains dependency-blocked pending the Gate 3 measured spike. Rosy Ventura QA is
-still pending.
+effective model/prompt/generation routing in the Intel chat runtime. The internal
+Gate 3 delegation probe passes against the real Intel cloud adapter with an
+in-process provider fixture. User-facing bounded delegation remains
+dependency-blocked on Gate 4. Rosy Ventura QA is still pending.
 
 **Scope:** `intel-fork`, Intel/x86_64, macOS 13 Ventura minimum. This plan is based on
 the audited `upstream/main` chain and the active Intel target, including its
@@ -117,6 +118,18 @@ unsupported delegation controls must remain visibly unavailable and linked to th
 appropriate backlog entry.
 
 ### Gate 3 — explicit cloud/custom-agent delegation capability spike
+
+**Internal spike passed 2026-09-11.** `IntelDelegationProbe` proves one admitted
+custom agent can be resolved into an immutable, standalone, one-turn child request
+and sent through the real Intel `ChatEngine`. The focused fixture uses the actual
+HTTP adapter without contacting or billing a remote provider. It verifies typed
+denial, timeout, cancellation, concurrency rejection, token/output clamping,
+bounded inline text return, and unchanged parent policy.
+
+This does not expose delegation in Settings or to the model. The spike deliberately
+suppresses all child tools and does not persist a child session. A paid/live
+provider call is separate acceptance evidence, not a substitute for the
+deterministic adapter test.
 
 Before restoring the full delegation runtime, run a bounded spike against one
 cloud-capable Intel model and one disposable custom agent. The spike must measure,
@@ -271,3 +284,32 @@ complete.
   was inspected as Mach-O 64-bit x86_64.
 - Rosy Ventura manual QA: pending. Automated build and tests do not promote the
   feature without the separate checklist evidence above.
+
+## Gate 3 validation record — 2026-09-11
+
+- Three independent audits of the compiled Intel target found no existing child
+  result contract. The reusable seams are the Intel `ChatEngine`, immutable agent
+  settings, cancellation-aware requests, and the existing background-task limits.
+- Focused suite: `IntelDelegationProbeTests`, 6 tests passed, including 7
+  parameterized admission denials and one request through the real Intel cloud
+  adapter using an in-process HTTP fixture.
+- The first worker verification stalled because its blocking test continuation
+  ignored cancellation. That run was rejected; the gate was replaced with a
+  cancellation-aware wait before the suite was rerun.
+- A first real-adapter fixture returned SSE text to the non-streaming completion
+  API and correctly failed JSON decoding. The fixture was corrected to return the
+  endpoint's actual JSON completion contract; the complete suite then passed.
+- Tests ran with an isolated `OSAURUS_TEST_ROOT`, explicit serial flags, and live
+  configuration/agent-inventory preflight and postflight hashes. Live data was
+  unchanged.
+- The app rebuilt successfully for x86_64 with a macOS 13 deployment target from
+  the same working tree. The dependency plugin emitted its known stale-output
+  copy-denial noise during prebuild, but Xcode completed with `BUILD SUCCEEDED`
+  and produced an x86_64 executable.
+- Proven now: one admitted custom-agent target, one explicitly admitted model,
+  fresh child session identity, standalone system/user request, no tools, one
+  active child, timeout/cancellation, bounded text/inline artifact, and no parent
+  mutation.
+- Still Gate 4+: user permission modes, tool-policy intersection, durable child
+  sessions, filesystem artifacts, queues, background continuation, and model/tool
+  exposure to the Orchestrator.
