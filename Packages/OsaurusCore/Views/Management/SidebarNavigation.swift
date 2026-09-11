@@ -46,6 +46,12 @@ struct SidebarSectionData: Identifiable {
     let id: String
     let title: String
     let items: [SidebarItemData]
+    /// Collapsible sections hide their rows behind a persistent header switch.
+    var isCollapsible: Bool = false
+}
+
+private enum SidebarSectionExpansion {
+    static let defaultsKey = "settingsSidebarExpandedSections"
 }
 
 // MARK: - Layout Constants
@@ -80,6 +86,9 @@ struct SidebarNavigation<Content: View, Footer: View>: View {
 
     @State private var isCollapsed = false
     @State private var canScrollDown = true
+    @State private var expandedCollapsibleSections: Set<String> = Set(
+        UserDefaults.standard.stringArray(forKey: SidebarSectionExpansion.defaultsKey) ?? []
+    )
     @Namespace private var sidebarNamespace
 
     private var sidebarWidth: CGFloat {
@@ -200,18 +209,20 @@ private extension SidebarNavigation {
                     ForEach(Array(visibleSections.enumerated()), id: \.element.id) { index, section in
                         sectionHeader(for: section, isFirst: index == 0)
 
-                        ForEach(section.items) { item in
-                            SidebarItemView(
-                                item: item,
-                                isSelected: selection == item.id,
-                                isCollapsed: isCollapsed,
-                                namespace: sidebarNamespace
-                            ) {
-                                withAnimation(.easeOut(duration: 0.2)) {
-                                    selection = item.id
+                        if showsItems(for: section) {
+                            ForEach(section.items) { item in
+                                SidebarItemView(
+                                    item: item,
+                                    isSelected: selection == item.id,
+                                    isCollapsed: isCollapsed,
+                                    namespace: sidebarNamespace
+                                ) {
+                                    withAnimation(.easeOut(duration: 0.2)) {
+                                        selection = item.id
+                                    }
                                 }
+                                .id(item.id)
                             }
-                            .id(item.id)
                         }
                     }
 
@@ -235,6 +246,26 @@ private extension SidebarNavigation {
         }
     }
 
+    func showsItems(for section: SidebarSectionData) -> Bool {
+        guard section.isCollapsible else { return true }
+        return expandedCollapsibleSections.contains(section.id)
+            || section.items.contains { $0.id == selection }
+    }
+
+    func toggleSectionExpansion(_ section: SidebarSectionData) {
+        withAnimation(.easeOut(duration: 0.2)) {
+            if expandedCollapsibleSections.contains(section.id) {
+                expandedCollapsibleSections.remove(section.id)
+            } else {
+                expandedCollapsibleSections.insert(section.id)
+            }
+        }
+        UserDefaults.standard.set(
+            Array(expandedCollapsibleSections).sorted(),
+            forKey: SidebarSectionExpansion.defaultsKey
+        )
+    }
+
     /// Group label when expanded; a thin divider between groups when
     /// collapsed (the collapsed rail has no room for text, but a divider
     /// still lets the disabled "not on this Mac" rows read as one cluster
@@ -249,6 +280,14 @@ private extension SidebarNavigation {
                         .fill(theme.primaryBorder.opacity(0.6))
                         .frame(width: 24, height: 1)
                         .padding(.vertical, 4)
+                }
+            } else if section.isCollapsible {
+                SidebarCollapsibleSectionHeader(
+                    title: section.title,
+                    isExpanded: showsItems(for: section),
+                    topPadding: isFirst ? 4 : 16
+                ) {
+                    toggleSectionExpansion(section)
                 }
             } else {
                 SidebarSectionHeader(title: section.title, topPadding: isFirst ? 4 : 16)
@@ -470,6 +509,41 @@ struct SidebarSectionHeader: View {
             .padding(.horizontal, 12)
             .padding(.top, topPadding)
             .padding(.bottom, 4)
+    }
+}
+
+/// Upstream-style section header whose switch reveals optional developer tabs.
+struct SidebarCollapsibleSectionHeader: View {
+    @Environment(\.theme) private var theme
+    let title: String
+    let isExpanded: Bool
+    var topPadding: CGFloat = 16
+    let action: () -> Void
+
+    var body: some View {
+        HStack(spacing: 4) {
+            Text(title.uppercased())
+                .font(.system(size: 11, weight: .semibold, design: .rounded))
+                .foregroundColor(theme.tertiaryText)
+            Spacer(minLength: 0)
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { isExpanded },
+                    set: { _ in action() }
+                )
+            )
+            .toggleStyle(.switch)
+            .controlSize(.mini)
+            .labelsHidden()
+            .help(Text(localized: "Show Developer Tools in the sidebar"))
+        }
+        .padding(.horizontal, 12)
+        .padding(.top, topPadding)
+        .padding(.bottom, 4)
+        .accessibilityElement(children: .combine)
+        .accessibilityAddTraits(.isHeader)
+        .accessibilityValue(isExpanded ? Text("Shown") : Text("Hidden"))
     }
 }
 

@@ -44,6 +44,19 @@ unchanged.
 
 ---
 
+## Settings sidebar parity (2026-09-11)
+
+The Intel sidebar follows upstream's section sequence and row ordering for every
+settings surface that exists in this fork: General, Models, Agents,
+Capabilities, Automation, and Developer Tools. Developer Tools uses upstream's
+persistent reveal switch. Do not add working-looking rows for roadmap features
+before their settings surfaces exist. Local Models, Voice, and Sandbox remain
+disabled together under **Not Available on This Mac**, immediately before the
+Developer Tools footer section, so the upstream organization stays recognizable
+without misrepresenting Intel support.
+
+---
+
 ## Rosy titlebar-control report (2026-09-11)
 
 A screenshot appeared to show missing close, minimize, and zoom controls on Rosy.

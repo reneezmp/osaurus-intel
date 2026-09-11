@@ -12,48 +12,42 @@ import SwiftUI
 
 /// Labeled groups the sidebar renders tabs under, in display order.
 ///
-/// Grouping is deliberately different from upstream's `general / models /
-/// agents / capabilities / automation / developers` split in two ways:
-///
-/// 1. This is a cloud-only fork, so `.models` leads with the cloud-relevant
-///    tabs (Cloud Models, Credits) rather than starting with local-inference
-///    concerns that don't apply here.
-/// 2. The three tabs whose subsystem is amputated on Intel (`.models` i.e.
-///    Local Models, `.voice`, `.sandbox` — see `ManagementTab.isAvailableOnIntel`)
-///    are pulled out of their thematic homes and clustered together in a
-///    trailing `.unavailable` group, so the disabled rows read as one
-///    coherent "not on this machine" area instead of being scattered one-
-///    per-group through the column.
+/// Mirrors upstream's section order and tab order wherever this fork has the
+/// corresponding surface. Hardware-bound tabs stay together in a trailing
+/// unavailable section instead of appearing active in their upstream homes.
 public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
+    case general
     case models
+    case agents
     case capabilities
     case automation
-    case developerTools
-    case general
     case unavailable
+    case developerTools
 
     public var id: String { rawValue }
 
     public var title: String {
         switch self {
+        case .general: L("General")
         case .models: L("Models")
+        case .agents: L("Agents")
         case .capabilities: L("Capabilities")
         case .automation: L("Automation")
-        case .developerTools: L("Developer Tools")
-        case .general: L("General")
         case .unavailable: L("Not Available on This Mac")
+        case .developerTools: L("Developer Tools")
         }
     }
 
     /// Tabs belonging to this section, in display order.
     public var tabs: [ManagementTab] {
         switch self {
-        case .models: [.providers, .credits]
-        case .capabilities: [.search, .tools, .skills, .plugins, .knowledge, .memory, .commands]
-        case .automation: [.agents, .schedules, .watchers]
-        case .developerTools: [.server, .insights]
-        case .general: [.settings, .themes, .permissions, .identity, .storage]
+        case .general: [.settings, .themes, .credits, .identity, .permissions, .storage]
+        case .models: [.providers]
+        case .agents: [.agents]
+        case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
+        case .automation: [.schedules, .watchers]
         case .unavailable: [.models, .voice, .sandbox]
+        case .developerTools: [.server, .insights]
         }
     }
 }
@@ -135,7 +129,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .permissions: L("Permissions")
         case .identity: L("Identity")
         case .storage: L("Storage")
-        case .settings: L("Settings")
+        case .settings: L("General")
         }
     }
 

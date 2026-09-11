@@ -235,7 +235,8 @@ private extension ManagementView {
             SidebarSectionData(
                 id: section.id,
                 title: section.title,
-                items: section.tabs.map(sidebarItem(for:))
+                items: section.tabs.map(sidebarItem(for:)),
+                isCollapsible: section == .developerTools
             )
         }
     }
