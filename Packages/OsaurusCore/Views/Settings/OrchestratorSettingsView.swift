@@ -18,6 +18,7 @@ struct OrchestratorSettingsView: View {
     @State private var delegation = OrchestratorDelegationConfiguration.default
     @State private var showModelPicker = false
     @State private var showDelegationSheet = false
+    @State private var showDeclarativeConfigurationSheet = false
     @State private var loaded = false
     @State private var saveTask: Task<Void, Never>?
 
@@ -40,6 +41,7 @@ struct OrchestratorSettingsView: View {
                     identitySection
                     generationSection
                     delegationSection
+                    declarativeConfigurationSection
                 }
                 .padding(24)
                 .frame(maxWidth: .infinity)
@@ -50,6 +52,10 @@ struct OrchestratorSettingsView: View {
         .environment(\.theme, theme)
         .sheet(isPresented: $showDelegationSheet) {
             OrchestratorDelegationSheet()
+                .environment(\.theme, theme)
+        }
+        .sheet(isPresented: $showDeclarativeConfigurationSheet) {
+            IntelOrchestratorConfigSheet()
                 .environment(\.theme, theme)
         }
         .onAppear(perform: load)
@@ -167,6 +173,28 @@ struct OrchestratorSettingsView: View {
                 onPersist: saveDelegation,
                 onRun: { showDelegationSheet = true }
             )
+        }
+    }
+
+    private var declarativeConfigurationSection: some View {
+        SettingsSection(title: "Declarative Configuration", icon: "list.bullet.rectangle.portrait") {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Describe changes as JSON, inspect the exact before-and-after plan, and approve it explicitly before the Intel Orchestrator applies anything.", bundle: .module)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                HStack {
+                    Label("Gate 5 · bounded Intel scope", systemImage: "lock.shield")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.tertiaryText)
+                    Spacer()
+                    Button("Open Configuration…") {
+                        showDeclarativeConfigurationSheet = true
+                    }
+                    .buttonStyle(SettingsButtonStyle())
+                }
+            }
         }
     }
 

@@ -35,23 +35,38 @@ public enum DefaultAgentConfigurationStore {
     /// live runtime to refresh should use `AgentManager`'s default-agent
     /// update method, which also invalidates active capability snapshots.
     public static func save(_ configuration: DefaultAgentConfiguration) {
-        lock.lock()
-        cached = configuration
-        Agent.defaultAgentNameOverride = configuration.resolvedDisplayName
-        let url = configurationFileURL()
-        lock.unlock()
-
         do {
-            try FileManager.default.createDirectory(
-                at: url.deletingLastPathComponent(),
-                withIntermediateDirectories: true
-            )
-            let encoder = JSONEncoder()
-            encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(configuration).write(to: url, options: [.atomic])
+            try saveChecked(configuration)
         } catch {
             print("[Osaurus] Failed to save default-agent.json: \(error)")
         }
+    }
+
+    /// Persist first, then update the cache. Declarative configuration uses
+    /// this throwing variant so a failed write can never look successful just
+    /// because the requested value was already placed in memory.
+    public static func saveChecked(_ configuration: DefaultAgentConfiguration) throws {
+        lock.lock()
+        defer { lock.unlock() }
+
+        let url = configurationFileURL()
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        try encoder.encode(configuration).write(to: url, options: [.atomic])
+        cached = configuration
+        Agent.defaultAgentNameOverride = configuration.resolvedDisplayName
+    }
+
+    /// Read persisted bytes without consulting or changing the cache.
+    public static func loadFreshFromDisk() throws -> DefaultAgentConfiguration {
+        lock.lock()
+        defer { lock.unlock() }
+        let data = try Data(contentsOf: configurationFileURL())
+        return try JSONDecoder().decode(DefaultAgentConfiguration.self, from: data)
     }
 
     /// Clears only the memory cache; useful after changing the isolated test

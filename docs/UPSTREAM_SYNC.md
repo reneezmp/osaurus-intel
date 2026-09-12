@@ -59,13 +59,40 @@ The Orchestrator chain is documented as an Intel dependency-ordered plan and
 focused test contract in [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md).
 Intel Gates 1–4 provide persistent built-in configuration, a real settings route,
 effective runtime model/prompt/generation resolution, and a manual one-turn
-delegation sheet. Gate 4 admits only explicitly selected custom agents and remote
+delegation sheet. Gate 5A adds a Settings-owned declarative planner/applier for
+the existing `default_agent` and `delegation` stores. Gate 4 admits only explicitly selected custom agents and remote
 cloud models; Ask/Deny/Always Allow is scoped to the exact launcher/target pair;
 the child is fresh, one-turn, one-at-a-time, tool-free, bounded by input/tokens/
 output/timeout, cancellable, and returned as inline text. M4 automated validation
 and the x86_64 build are recorded separately from pending Rosy Ventura QA.
 Child tools and model-owned autonomous delegation remain later dependency/backlog
 work because Intel cloud tool-loop limits are not request-scoped.
+
+## 2026-09-12 — Intel Orchestrator declarative configuration Gate 5A
+
+Upstream's broad configuration plane was not transplanted. Intel exposes strict
+version-1 JSON for two compiled, durable domains only: `default_agent` and
+`delegation`. Orchestrator Settings exports the current slice, previews a
+deterministic before/after plan, asks the user to approve that exact plan, rejects
+stale/mismatched/replayed approval, writes atomically, and verifies fresh disk
+bytes. Unknown domains, secret-shaped keys, and secret references fail before
+mutation. Other upstream domains stay in their owning backlog until their stores
+and approval contracts exist.
+
+Two implementation traps are now part of the sync contract. Persistence
+verification must bypass caches: the first adapter cached requested state before
+the disk write, which could make a failed save look verified. Secret detection
+must distinguish credentials from ordinary limits: a broad `token` substring
+check incorrectly rejected `max_tokens`. JSON numeric decoding must also reject
+bridged booleans explicitly.
+
+This is Gate 5A, not the model-facing half of upstream parity. A callable tool and
+chat approval card remain Gate 5B because they require a caller-independent,
+user-owned approval queue. Never expose the Settings receipt-minting method to a
+model as a substitute for that boundary. Focused M4 validation passed 13 tests in
+one suite with isolated storage. The final app compiled and linked for x86_64 with
+minimum macOS 13.0; the known `swift-secp256k1` stale-output copy-denial prebuild
+noise remains visible and tracked. Rosy Ventura acceptance remains pending.
 
 ## 2026-09-11 — Bounded Intel Orchestrator Gate 4
 

@@ -181,12 +181,30 @@ pass-through likewise remain later contracts.
 
 ### Gate 5 — declarative configuration plane
 
-Port the configuration manifest, planner, applier, approval queue, schema references,
-secret references, document decoding, tool, and approval card only after the
-underlying Intel stores and mutation APIs exist. Configuration plans must show the
-intended changes before applying them, preserve approval semantics, and reject
-unsupported domains. No plan may claim to configure a backend that Intel does not
-compile.
+Gate 5 is split at the real approval boundary rather than pretending the Settings
+sheet and a model-facing tool are the same feature.
+
+**Gate 5A implemented 2026-09-12.** The Orchestrator Settings page can export,
+edit, preview, approve, and atomically apply a strict version-1 JSON document for
+the two Intel-owned durable domains that already exist: `default_agent` and
+`delegation`. The plan lists every before/after value, is deterministic, binds
+approval to the exact current and target fingerprints, rejects stale or replayed
+approval, and verifies fresh persisted bytes after saving. Unsupported or unknown
+domains fail before mutation. Secret-shaped keys and `env:`/`keychain:` references
+are rejected without echoing values.
+
+The supported fields are Orchestrator name, prompt, model, temperature, maximum
+tokens, admitted custom-agent IDs and cloud-model IDs, pair-scoped permissions,
+and Gate 4 child/input/output/time bounds. Agents, tools, providers, channels,
+Knowledge, Memory, schedules, watchers, relay/workspaces, media, and secrets remain
+outside this plane until their Intel stores and approval contracts exist.
+
+**Gate 5B remains dependency-blocked.** A model-callable configuration tool and
+chat approval card need a durable user-owned approval queue. The Settings bridge
+must not be reused as a shortcut: it mints its single-use receipt only after the
+user confirms the visible plan in that sheet. Registering a tool that could call
+the same method would let the caller manufacture its own approval. Schema/secret
+reference expansion likewise waits for the stores that can resolve them safely.
 
 ### Gate 6 — promotion and Rosy evidence
 
@@ -272,6 +290,17 @@ Do not use the current upstream app as the comparison target.
    indicators remain visible on Ventura.
 9. Quit and relaunch again. Confirm no data was written outside the intended
    configuration/agent stores and no unrelated live agent or chat was created.
+10. Open Orchestrator → Declarative Configuration and load the current export.
+    Preview it unchanged and confirm it is a no-op. Change the name or maximum
+    tokens, inspect every before/after row, cancel once, then approve and apply.
+    Quit and relaunch; confirm the approved value persisted and personal agents
+    were untouched.
+11. Create a plan, change the same Orchestrator setting elsewhere, then try the
+    old plan. It must reject the stale approval without overwriting the newer
+    value. Confirm a second use of one approval is also rejected.
+12. Confirm `{"version":1,"agents":[]}` is rejected as unsupported and an
+    `api_key` field is rejected without displaying its value. Confirm the ordinary
+    `max_tokens` field is accepted; token limits are configuration, not secrets.
 
 Record Rosy results separately from automated output, including macOS version,
 Intel model, build identifier, data-root mode, and any screen-sharing/titlebar
@@ -359,3 +388,31 @@ complete.
 - Rosy Ventura manual QA: pending. M4 build/test results are automated evidence
   only and do not establish Ventura UI behavior, Rosy persistence behavior, or
   live-provider behavior.
+
+## Gate 5A validation record — 2026-09-12
+
+- Focused suite: `IntelDeclarativeConfigContractTests`, 13 tests in 1 suite
+  passed with a fresh `OSAURUS_TEST_ROOT`, explicit serial execution, and the
+  XCTest runner disabled. It covers strict decoding, deterministic/no-op plans,
+  exact approval, stale/mismatched/replayed approval, isolated apply, unsupported
+  domains, secret redaction, and strict numeric values.
+- Review found that the first persistence adapter updated its in-memory cache
+  before writing and then reloaded that cache for verification. A disk failure
+  could therefore look successful. The checked path now writes atomically first,
+  updates the cache only after success, and verifies by decoding fresh disk bytes.
+- The initial secret-key detector treated every field containing `token` as a
+  credential and rejected the legitimate `max_tokens` setting. Secret detection
+  now uses exact credential names and credential-specific suffixes. Keep a
+  positive `max_tokens` regression whenever this detector changes.
+- JSON numbers bridge through `NSNumber`, including booleans. Temperature parsing
+  now explicitly rejects `CFBoolean` and enforces the existing 0...2 UI range;
+  maximum output tokens enforce 1...65,536.
+- The model-facing tool and chat approval card are not implemented by Gate 5A.
+  They remain Gate 5B until a caller-independent approval queue exists.
+- The final app build targeted x86_64 with deployment minimum macOS 13.0 and
+  completed with `BUILD SUCCEEDED`. The `swift-secp256k1` prebuild plugin again
+  emitted its known copy-denial noise against stale generated outputs; the final
+  Intel sources compiled and linked, but this dependency warning remains build
+  hygiene to resolve rather than evidence to suppress.
+- Rosy Ventura manual QA: pending. The checklist above is the promotion evidence;
+  M4 tests and an x86_64 build do not establish Rosy UI or persistence behavior.
