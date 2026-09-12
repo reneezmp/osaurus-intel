@@ -650,11 +650,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
                                 let policy = ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
+                                let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                                 let approved: Bool
                                 switch policy {
                                 case .deny: approved = false
                                 case .auto: approved = true
                                 case .ask:
+                                    if ownsApproval {
+                                        approved = true
+                                        break
+                                    }
                                     let description = request.tools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
                                     approved = await ToolPermissionPromptService.requestApproval(
                                         toolName: call.name,
@@ -825,6 +830,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Ask shows a confirmation before running; Auto runs.
                             let policy =
                                 ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
+                            let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                             let approved: Bool
                             switch policy {
                             case .deny:
@@ -832,6 +838,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             case .auto:
                                 approved = true
                             case .ask:
+                                if ownsApproval {
+                                    approved = true
+                                    break
+                                }
                                 // Real upstream permission card (ToolPermissionView via
                                 // ToolPermissionPromptService) — Allow / Deny / Always Allow.
                                 // "Always Allow" persists the policy internally.

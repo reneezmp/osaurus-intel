@@ -1,6 +1,6 @@
 # Orchestrator on Intel — implementation plan and focused test contract
 
-**Status (2026-09-11):** Gates 1–4 are implemented in the Intel fork. The built-in
+**Status (2026-09-12):** Gates 1–5B are implemented in the Intel fork. The built-in
 Orchestrator has a persistent configuration store, a real settings route, effective
 model/prompt/generation routing, and a deliberately narrow manual one-turn
 delegation surface. Gate 4 admits only explicitly selected custom agents and
@@ -199,12 +199,24 @@ and Gate 4 child/input/output/time bounds. Agents, tools, providers, channels,
 Knowledge, Memory, schedules, watchers, relay/workspaces, media, and secrets remain
 outside this plane until their Intel stores and approval contracts exist.
 
-**Gate 5B remains dependency-blocked.** A model-callable configuration tool and
-chat approval card need a durable user-owned approval queue. The Settings bridge
-must not be reused as a shortcut: it mints its single-use receipt only after the
-user confirms the visible plan in that sheet. Registering a tool that could call
-the same method would let the caller manufacture its own approval. Schema/secret
-reference expansion likewise waits for the stores that can resolve them safely.
+**Gate 5B implemented 2026-09-12.** The built-in Orchestrator alone receives the
+`orchestrator_config` schema. Unbound callers and custom agents fail closed at both
+schema composition and dispatch. The tool supports schema inspection, read-only
+planning, and attended apply for the same bounded Gate 5A domains. It does not
+export the current configuration to the model, so private existing prompt values
+do not become provider-visible tool output.
+
+Apply parks the exact fingerprint-bound plan in a process-wide, user-owned queue.
+The chat renders a structured before/after card with Apply and Cancel; only an
+explicit Apply result lets the service mint the single-use receipt. Denial,
+timeout, turn cancellation, missing chat surface, stale state, and replay all fail
+without mutation. The tool owns this review, so the generic Always Allow prompt is
+skipped while an explicit per-tool Deny still wins. Long values are shortened only
+for display; fingerprints bind their complete values.
+
+The queue is intentionally process-local: pending reviews are cancelled by turn
+or UI teardown and do not survive relaunch. Durable unattended approvals, secret
+references, extra domains, and model-readable export remain outside this gate.
 
 ### Gate 6 — promotion and Rosy evidence
 
@@ -251,7 +263,7 @@ temporary roots are mandatory. The matrix below defines the minimum contract.
 | Delegation runtime | Explicit custom-agent/model admission, exact launcher/target permission scope, Ask/Deny/Always Allow, one-turn child, one-child concurrency, no tools, bounded input/tokens/output/timeout, cancellation, and inline result are observable |
 | Deferred delegation | Child tools, durable child sessions, filesystem artifacts, queues, background continuation, and model-owned spawning remain unavailable and fail closed |
 | Spawn-pool migration | Existing custom agents seed exactly once if enabled; manual removal persists; no hidden or unavailable target is seeded |
-| Declarative configuration | Plans are inspectable, approval is required before mutation, supported domains apply correctly, unsupported domains reject cleanly, and no secret is logged |
+| Declarative configuration | Plans are inspectable, only the built-in Orchestrator sees/calls the tool, private current values stay out of tool output, approval/denial/timeout/cancellation are explicit, supported domains apply correctly, unsupported domains reject cleanly, and no secret is logged |
 | Intel boundary | No test accidentally enables local MLX, sandbox, browser, computer-use, image, workspace, remote, or background targets |
 | Build and architecture | Intel package/build passes for x86_64 with macOS 13 deployment; tests do not rely on Apple-Silicon-only APIs |
 
@@ -301,6 +313,23 @@ Do not use the current upstream app as the comparison target.
 12. Confirm `{"version":1,"agents":[]}` is rejected as unsupported and an
     `api_key` field is rejected without displaying its value. Confirm the ordinary
     `max_tokens` field is accepted; token limits are configuration, not secrets.
+13. In a new built-in Orchestrator chat, confirm `orchestrator_config` is visible.
+    Confirm a custom-agent chat and an unbound tool request cannot see or execute
+    it.
+14. Ask the Orchestrator to plan a supported change. Confirm the tool result lists
+    changed paths and fingerprints without revealing the current private prompt or
+    other before-values.
+15. Ask it to apply the plan. Confirm the review card appears only in the chat that
+    requested it, shows the exact local before/after values, and has only Apply and
+    Cancel. Cancel once and verify nothing changed; retry, Apply, quit, and relaunch
+    to verify persistence.
+16. While a card is pending, change the same setting elsewhere and then Apply. The
+    stale plan must fail without overwriting the newer value. Stop or close the
+    originating chat during another pending review and confirm cancellation leaves
+    configuration untouched.
+17. Set the tool policy to Deny and confirm the call is blocked without a review
+    card. Restore Ask/Auto and confirm the dedicated card still appears and offers
+    no Always Allow path.
 
 Record Rosy results separately from automated output, including macOS version,
 Intel model, build identifier, data-root mode, and any screen-sharing/titlebar
@@ -416,3 +445,27 @@ complete.
   hygiene to resolve rather than evidence to suppress.
 - Rosy Ventura manual QA: pending. The checklist above is the promotion evidence;
   M4 tests and an x86_64 build do not establish Rosy UI or persistence behavior.
+
+## Gate 5B validation record — 2026-09-12
+
+- M4 focused validation executed 23 tests in 3 suites: 13 Gate 5A contract tests,
+  5 approval-queue tests, and 5 model-tool tests. They cover strict planning and
+  apply, exact approval and persistence, stale/replay rejection, cancellation and
+  timeout, built-in-only registry/dispatch scope, private plan output, denial, and
+  session-scoped review-surface ownership.
+- The first filtered Gate 5B run reported success while executing zero tests
+  because the test files repeated the production-only `OSAURUS_INTEL` guard. The
+  guards were removed and the zero-test result was rejected. Test counts must be
+  read from the executed suite summary, not inferred from a successful build.
+- A first multi-window hardening edit used SwiftUI's two-value `onChange`, which is
+  macOS 14-only. Compilation against the macOS 13 deployment target rejected it.
+  The card now remounts by session identity using Ventura-compatible APIs, and the
+  complete 23-test suite passed afterward.
+- The model receives changed paths and fingerprints only. Existing prompt and
+  configuration values remain local to the review card. Model-readable export was
+  deliberately omitted because returning those current values would expose them
+  to the selected provider before the user could review the disclosure.
+- The final Rosy deploy build completed with `BUILD SUCCEEDED`; the signed app
+  contains a thin Mach-O x86_64 executable, declares macOS 13.0 minimum, and has
+  `OsaurusCanonicalData = true`. Rosy Ventura manual QA remains pending and the
+  feature stays Partial until checklist items 13–17 are recorded on Rosy.

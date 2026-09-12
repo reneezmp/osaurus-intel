@@ -27,4 +27,11 @@ protocol PermissionedTool {
     var requirements: [String] { get }
     /// Default policy suggested by the tool (host configuration may override)
     var defaultPermissionPolicy: ToolPermissionPolicy { get }
+    /// True when the tool owns a stricter, caller-independent approval flow.
+    /// Generic Ask prompts must not run in front of that dedicated review.
+    var handlesOwnApproval: Bool { get }
+}
+
+extension PermissionedTool {
+    var handlesOwnApproval: Bool { false }
 }

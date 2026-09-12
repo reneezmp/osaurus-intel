@@ -74,6 +74,11 @@ the shared storage-path lock.
 8. **Check for residue after stateful tests.** Confirm the live configuration
    checksum is unchanged, no test-named agent remains under `~/.osaurus/agents`,
    and no test fixture appeared in another live store.
+9. **Prove the filter matched real tests.** SwiftPM can finish successfully with
+   `No matching test cases were run`. Read the final executed test count and fail
+   the validation if it is zero. The Intel define belongs to the production
+   target; do not wrap Intel test files in `#if OSAURUS_INTEL` unless the test
+   target also defines it, because that silently compiles the tests out.
 
 ## Preflight and postflight
 

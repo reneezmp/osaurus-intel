@@ -432,7 +432,18 @@ public actor IntelDeclarativeConfigurationService {
 
     private static func append<Value: Equatable>(_ path: String, _ before: Value, _ after: Value, into changes: inout [IntelDeclarativeConfigurationChange]) {
         guard before != after else { return }
-        changes.append(.init(path: path, before: String(describing: before), after: String(describing: after)))
+        changes.append(.init(path: path, before: boundedDescription(before), after: boundedDescription(after)))
+    }
+
+    /// Approval cards and tool results must stay reviewable even when a prompt
+    /// or allowlist is large. The fingerprints still bind the complete values;
+    /// only the human-facing preview is shortened.
+    private static func boundedDescription<Value>(_ value: Value) -> String {
+        let flattened = String(describing: value)
+            .replacingOccurrences(of: "\n", with: "\\n")
+            .replacingOccurrences(of: "\r", with: "\\r")
+        guard flattened.count > 240 else { return flattened }
+        return String(flattened.prefix(237)) + "…"
     }
 
     private static func appendPermissions(

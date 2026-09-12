@@ -3363,7 +3363,12 @@ struct ChatView: View {
     }
 
     var body: some View {
+#if OSAURUS_INTEL
         chatModeContent
+            .overlay { IntelConfigPlanApprovalCard(sessionID: session.sessionId?.uuidString) }
+#else
+        chatModeContent
+#endif
     }
 
     /// Shared overlay layer for in-chat prompts (secrets + clarify).

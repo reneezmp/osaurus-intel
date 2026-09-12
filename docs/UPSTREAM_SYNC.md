@@ -732,3 +732,25 @@ usage, and tool-call data in `InsightsService`. This remains Partial until the
 new Rosy retest confirms the Insights list and detail panes render the records.
 The per-message diagnostic controls seen in current upstream remain part of the
 separately backlogged chat-interface revamp.
+
+## 2026-09-12 — Intel Orchestrator Gate 5B approval boundary
+
+Added the built-in-only `orchestrator_config` tool for the bounded Gate 5A JSON
+domains. The model can inspect the schema, plan changed paths, and request apply;
+it cannot export current private values or mint its own approval. Apply suspends
+on a caller-independent in-chat queue and proceeds only after the visible exact
+plan is accepted. Denial, timeout, cancellation, missing UI, stale plans, and
+replay fail closed. Generic Always Allow prompts are bypassed for this dedicated
+review, while an explicit tool-policy Deny still blocks execution.
+
+Approval requests and mounted cards are keyed to the originating chat session.
+This prevents one chat window from displaying or approving another window's
+pending plan. The first implementation used SwiftUI's two-value `onChange`, which
+is unavailable on the macOS 13 deployment target; the Ventura-safe implementation
+remounts the approval surface when its session identity changes.
+
+Validation must quote the executed test count. During this gate, `swift test`
+first returned success with zero matching tests because the new test files were
+wrapped in `#if OSAURUS_INTEL` while only the production target defines that flag.
+This is now a permanent test-manual rule: a successful build is not evidence that
+a filtered test ran.

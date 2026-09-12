@@ -69,7 +69,7 @@ UI, but its feature state remains **Dependency-blocked**.
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Partial | Intel's replacement chat engine now records Chat UI requests, responses, timings, token estimates/provider usage, tool calls, and failures in the existing Insights ring buffer. Automated x86_64 compilation passes; Rosy must confirm entries and detail rendering before promotion. The newer per-message diagnostics belong to the deliberately later chat-interface revamp. |
 | Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented and covered by focused tests. Rosy x86_64 UI/network acceptance is pending. Osaurus Premium routing remains dependency-blocked on Credits/Router. |
-| Orchestrator | Partial | Intel Gates 1–4 and Settings-based Gate 5A are implemented. Gate 5A exports, plans, visibly approves, atomically applies, and fresh-disk verifies only `default_agent` and `delegation`; unsupported domains and secret references fail closed, and stale/replayed plans cannot overwrite current state. The manual Gate 4 sheet remains one fresh, bounded, text-only child with no tools. Gate 5B's model-callable tool/chat approval card needs a caller-independent approval queue. Durable child sessions, background/model-owned spawning, and child tools remain dependency-blocked. M4 automated validation and the x86_64 build do not replace pending Rosy Ventura QA. See `ORCHESTRATOR_INTEL_PLAN.md`. |
+| Orchestrator | Partial | Intel Gates 1–5B are implemented. Settings and the built-in-only `orchestrator_config` tool plan and atomically apply only `default_agent` and `delegation`; model applies require a fingerprint-bound in-chat review, and private current values are omitted from tool output. Unsupported domains, secret references, missing surfaces, denial, timeout, cancellation, stale state, and replay fail closed. The manual Gate 4 sheet remains one fresh, bounded, text-only child with no tools. Durable child sessions, background/model-owned spawning, secret references, extra configuration domains, and child tools remain dependency-blocked. M4 automated validation and the x86_64 build do not replace pending Rosy Ventura QA. See `ORCHESTRATOR_INTEL_PLAN.md`. |
 
 ## Prioritized roadmap
 
@@ -82,8 +82,8 @@ implementations compile unchanged on Intel.
    The dependency gates, cloud/custom-agent spike, unavailable target boundary,
    storage-safe test contract, and Rosy Ventura checklist are tracked in
    [`ORCHESTRATOR_INTEL_PLAN.md`](ORCHESTRATOR_INTEL_PLAN.md). Configuration and
-   runtime routing (Gates 1–2) and the internal Gate 3 probe are implemented and
-   tested; the bounded Gate 4 surface is implemented. Child tools, durable or
+   runtime routing (Gates 1–2), the internal Gate 3 probe, bounded Gate 4, and
+   bounded declarative configuration Gates 5A–5B are implemented. Child tools, durable or
    background execution, and model-owned autonomous delegation remain later
    dependency work.
 2. **Revamped Credits** — audit wallet, activity, redemption, premium-search,

@@ -1128,6 +1128,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         loadPersistedPolicies()
         registerKnowledgeTools()
         registerWebSearchTools()
+        registerIntelOrchestratorTools()
+    }
+
+    private func registerIntelOrchestratorTools() {
+        let tool = IntelOrchestratorConfigurationTool()
+        toolsByName[tool.name] = tool
+        builtInToolNames.insert(tool.name)
     }
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
@@ -1273,6 +1280,10 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     func openAISpecs() -> [Tool] {
         toolsByName.values
             .filter { !disabledToolNames.contains($0.name) }
+            .filter { tool in
+                tool.name != IntelOrchestratorConfigurationTool.toolName
+                    || ChatExecutionContext.currentAgentId == Agent.defaultId
+            }
             .sorted { $0.name < $1.name }
             .map { $0.asOpenAITool() }
     }
@@ -1292,6 +1303,10 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         return try await tool.execute(argumentsJSON: argumentsJSON)
     }
 
+    func handlesOwnApproval(for name: String) -> Bool {
+        (toolsByName[name] as? any PermissionedTool)?.handlesOwnApproval == true
+    }
+
     /// Dispatch is the final capability boundary. Prompt filtering keeps the
     /// model's schema honest, but restored sessions and older models can still
     /// submit a stale tool name. Re-check the live agent/configuration state
@@ -1301,6 +1316,16 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             return ToolEnvelope.failure(
                 kind: .unavailable,
                 message: "This tool is disabled in the Tools settings.",
+                tool: name
+            )
+        }
+
+        if name == IntelOrchestratorConfigurationTool.toolName,
+            ChatExecutionContext.currentAgentId != Agent.defaultId
+        {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "This configuration tool is available only to the built-in Orchestrator.",
                 tool: name
             )
         }
@@ -1550,16 +1575,18 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
-    /// Policy detail for a tool. Returns a default-`.auto` policy with
-    /// no permission requirements on Intel (sandbox-gated tools are
-    /// amputated).
+    /// Policy detail for a tool, including the tool's declared Intel default
+    /// and requirements. Sandbox-only permission sources remain amputated.
     func policyInfo(for name: String) -> ToolPolicyInfo? {
-        ToolPolicyInfo(
-            isPermissioned: false,
-            defaultPolicy: .auto,
+        guard let tool = toolsByName[name] else { return nil }
+        let permissioned = tool as? any PermissionedTool
+        let defaultPolicy = permissioned?.defaultPermissionPolicy ?? .auto
+        return ToolPolicyInfo(
+            isPermissioned: permissioned != nil,
+            defaultPolicy: defaultPolicy,
             configuredPolicy: _policies[name],
-            effectivePolicy: _policies[name] ?? .auto,
-            requirements: [],
+            effectivePolicy: _policies[name] ?? defaultPolicy,
+            requirements: permissioned?.requirements ?? [],
             grantsByRequirement: [:],
             systemPermissions: [],
             systemPermissionStates: [:]
