@@ -213,6 +213,33 @@ Complete the matching detailed test section when each feature lands:
       bypass rules, persistence, and destructive actions.
 - [ ] Revamped chat interface and Workspaces when their deferred ports land.
 
+### 14A. Credits, Router, and Premium Web Search
+
+- [ ] Router defaults on for an existing install unless the user previously
+      opted out; the explicit value survives relaunch.
+- [ ] Turning Router off requires confirmation, removes Router models, clears
+      stale balance/activity, and causes no balance, usage, catalog, inference,
+      Premium Search, or extraction request.
+- [ ] Turning Router on reconnects and restores its real catalog and account
+      state without creating duplicate providers.
+- [ ] Top-up accepts the minimum and ordinary decimal amounts; zero, negative,
+      non-numeric, non-finite, and huge values cannot open Checkout.
+- [ ] Checkout cancellation, browser handoff, successful return, network error,
+      insufficient funds, frozen account, unauthorized identity, and rate limit
+      have distinct useful states with no raw server body.
+- [ ] Activity and exported diagnostics contain no prompt, response, query,
+      URL, page text, key, signature, or identity secret.
+- [ ] Premium Search defaults off. Router on alone never enables it.
+- [ ] Included search credits are used before wallet funds; wallet auto-pay is
+      independently opt-in and persists.
+- [ ] Premium success, empty/replayed response, 402, paid-web-disabled, 404,
+      409, 429, timeout, and 5xx follow the documented native fallback path
+      without duplicate billing or speculative retries.
+- [ ] Settings test search and agent tools use the same route; removing the
+      agent's Web Search ability still blocks both search tools.
+- [ ] Hosted extraction rejects localhost and private-network targets before a
+      request and never exposes billing details to the model.
+
 ## 15. Final regression and postflight
 
 - [ ] With screen sharing stopped, Settings and chat windows show clickable native

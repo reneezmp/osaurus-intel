@@ -49,12 +49,21 @@ final class OsaurusRouterAccountService: ObservableObject {
     }
 
     func refreshAll() async {
+        guard OsaurusRouter.isEnabled else { return }
         await RemoteProviderManager.shared.connectOsaurusRouterIfPossible()
         await refreshBalance()
         await refreshUsage(reset: true)
     }
 
+    func clearForDisabledRouter() {
+        balance = nil
+        usage = []
+        nextUsageCursor = nil
+        lastError = nil
+    }
+
     func refreshBalance() async {
+        guard OsaurusRouter.isEnabled else { return }
         guard OsaurusIdentity.exists() else {
             balance = nil
             lastError = OsaurusRouterAPIError.noIdentity.localizedDescription
@@ -84,6 +93,7 @@ final class OsaurusRouterAccountService: ObservableObject {
     }
 
     func refreshUsage(reset: Bool = true) async {
+        guard OsaurusRouter.isEnabled else { return }
         guard OsaurusIdentity.exists() else {
             usage = []
             nextUsageCursor = nil

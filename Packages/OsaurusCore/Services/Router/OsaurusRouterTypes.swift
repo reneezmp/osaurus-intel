@@ -17,7 +17,34 @@ enum OsaurusRouter {
         return productionBaseURL
     }
 
+    static let enabledDefaultsKey = "ai.osaurus.router.enabled"
+
+    /// The Router is available by default; only an explicit user opt-out turns
+    /// it off. Tests can pass an isolated defaults suite without touching the
+    /// user's live preference.
+    static func isEnabled(in defaults: UserDefaults = .standard) -> Bool {
+        defaults.object(forKey: enabledDefaultsKey) as? Bool ?? true
+    }
+
+    static var isEnabled: Bool { isEnabled() }
+
+    static func setEnabled(_ enabled: Bool, in defaults: UserDefaults = .standard) {
+        defaults.set(enabled, forKey: enabledDefaultsKey)
+    }
+
     static let minimumTopUpMicro = 5_000_000
+
+    /// Parse a positive dollar amount into whole micro-USD without allowing a
+    /// floating-point conversion to overflow `Int`.
+    static func parseMicroUSD(_ rawValue: String) -> Int? {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        let cleaned = trimmed.hasPrefix("$") ? String(trimmed.dropFirst()) : trimmed
+        guard let dollars = Double(cleaned), dollars.isFinite, dollars > 0 else { return nil }
+        let micro = (dollars * 1_000_000).rounded()
+        guard micro <= Double(Int.max) else { return nil }
+        return Int(micro)
+    }
 
     static func formatMicroUSD(_ rawValue: String) -> String {
         let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)

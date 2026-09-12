@@ -275,11 +275,7 @@ struct CreditsTopUpSheet: View {
     /// Parse the amount field as a dollar amount into micro-USD. Tolerates a
     /// leading "$". Returns nil when empty or not a positive number.
     private var currentMicro: Int? {
-        let trimmed = amountTrimmed
-        guard !trimmed.isEmpty else { return nil }
-        let cleaned = trimmed.hasPrefix("$") ? String(trimmed.dropFirst()) : trimmed
-        guard let dollars = Double(cleaned), dollars.isFinite, dollars > 0 else { return nil }
-        return Int((dollars * 1_000_000).rounded())
+        OsaurusRouter.parseMicroUSD(amountTrimmed)
     }
 
     private var isValid: Bool {

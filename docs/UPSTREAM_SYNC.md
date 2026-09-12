@@ -44,6 +44,32 @@ unchanged.
 
 ---
 
+## 2026-09-12 — Credits/Router Gate C1
+
+Upstream review had established that hosted inference and the first Credits
+screen existed on Intel, but it had not established modern Credits/Router or
+Premium Search parity. The new `CREDITS_ROUTER_INTEL_PLAN.md` records the full
+dependency chain and forbids treating commit coverage as product coverage.
+
+Gate C1 adds a real persisted Router master switch to the compiled Intel
+manager. Turning it off removes the managed Router provider and catalog,
+clears cached account state, suppresses Credits polling, and shows an honest
+off state after a confirmation. Turning it on reconnects. Top-up conversion is
+now bounded before converting to `Int`, closing an upstream overflow trap.
+
+Premium Search remains absent. Unlike upstream's free-only default behavior,
+the Intel fork requires explicit Premium opt-in and keeps wallet auto-pay as a
+second independent setting. Router enabled alone is never paid-search consent.
+
+Focused M4 validation passed 2 tests in one suite. The signed canonical x86_64
+Rosy build succeeded with macOS 13.0 minimum. C1 remains Partial until Rosy
+Ventura validates persistence, model removal/restoration, and zero account
+traffic while disabled.
+
+Every important implementation or test discovery must update the owning plan,
+feature-parity table, sync log, and final Rosy checklist in the same change.
+These manuals are part of the product contract, not a retrospective extra.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every

@@ -247,6 +247,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     @Published private(set) var configuration: RemoteProviderConfiguration
     @Published private(set) var providerStates: [UUID: RemoteProviderState] = [:]
+    @Published private(set) var isOsaurusRouterEnabled = OsaurusRouter.isEnabled
 
     /// Osaurus Router per-model metadata (pricing, context, capabilities),
     /// keyed by model id. Populated by `connectOsaurusRouterIfPossible` from the
@@ -269,6 +270,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
+        reconcileManagedOsaurusRouterProvider()
         seedConnectedStates()
         // Discover each enabled provider's models in the background so the
         // chat picker + the "N models available" counter populate at launch.
@@ -299,6 +301,15 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// Intel routes through env/saved keys, so we post it on config mutation.)
     private func notifyModelsChanged() {
         NotificationCenter.default.post(name: .remoteProviderModelsChanged, object: nil)
+    }
+
+    private func reconcileManagedOsaurusRouterProvider() {
+        if isOsaurusRouterEnabled {
+            return
+        }
+        configuration.providers.removeAll { $0.id == Self.osaurusRouterProviderId }
+        providerStates.removeValue(forKey: Self.osaurusRouterProviderId)
+        routerModelMetadata = [:]
     }
 
     /// GET the provider's `/models` endpoint: returns the discovered model ids
@@ -476,6 +487,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// this through `RemoteProviderService.connect`; Intel registers the provider
     /// directly so `CloudChatEngine` resolves the router endpoint + signed auth.
     func connectOsaurusRouterIfPossible() async {
+        guard isOsaurusRouterEnabled else { return }
         if !configuration.providers.contains(where: { $0.id == Self.osaurusRouterProviderId }) {
             configuration.add(Self.makeManagedOsaurusRouterProvider())
         }
@@ -489,6 +501,22 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         }
         providerStates[Self.osaurusRouterProviderId] = state
         notifyModelsChanged()
+    }
+
+    func setOsaurusRouterEnabled(_ enabled: Bool) {
+        guard enabled != isOsaurusRouterEnabled else { return }
+        OsaurusRouter.setEnabled(enabled)
+        isOsaurusRouterEnabled = enabled
+
+        if enabled {
+            Task { await connectOsaurusRouterIfPossible() }
+        } else {
+            configuration.providers.removeAll { $0.id == Self.osaurusRouterProviderId }
+            providerStates.removeValue(forKey: Self.osaurusRouterProviderId)
+            routerModelMetadata = [:]
+            OsaurusRouterAccountService.shared.clearForDisabledRouter()
+            notifyModelsChanged()
+        }
     }
 
     func addProvider(
