@@ -273,6 +273,10 @@ infrastructure must be ported into Intel-specific tests or recorded as unavailab
 
 ## Rosy Ventura manual checklist
 
+These checks are also included in the canonical end-of-roadmap
+[`ROSY_FINAL_ACCEPTANCE_CHECKLIST.md`](ROSY_FINAL_ACCEPTANCE_CHECKLIST.md). Keep
+both documents synchronized when the Orchestrator contract changes.
+
 Run this only with an isolated Intel build and a disposable test account/agent.
 Do not use the current upstream app as the comparison target.
 

@@ -55,6 +55,11 @@ UI, but its feature state remains **Dependency-blocked**.
 
 ## Current checkpoint — 2026-09-10
 
+The consolidated end-of-roadmap Rosy pass lives in
+[`ROSY_FINAL_ACCEPTANCE_CHECKLIST.md`](ROSY_FINAL_ACCEPTANCE_CHECKLIST.md). Add
+new feature-specific acceptance work there when a roadmap slice lands so the
+final Intel release is tested as one integrated product.
+
 | Area | Product state | Evidence and remaining work |
 |---|---|---|
 | OpenAI ChatGPT/Codex OAuth | Working and tested | Login, catalog filtering, Responses Lite streaming, follow-up context, and cancellation passed Rosy acceptance. |
