@@ -49,7 +49,13 @@ The Agent editor mirrors upstream 0.25.0 navigation even where an Intel backend 
 
 ## B5 — Database automation history
 
-**Current UI:** Automation remains fully functional through the Intel Schedule and Watcher managers. Database History explains that no database audit trail is present.
+**Current UI:** Automation is Partial after Rosy Ventura acceptance on
+2026-09-13. Creation and persistence work, but schedule/watcher card menus are
+not visible even though their edit, run, pause/resume, and delete actions exist
+in source. Monitoring-mode controls remain unreadable. Both schedule and watcher
+dispatches lose the selected folder in the resulting chat, and an automatic
+watcher run may persist its user turn without producing an assistant response.
+Database History explains that no database audit trail is present.
 
 **Required backend:** after B4, connect schedule/watcher run records and database mutations to the Database History section. This is separate from conversational Memory history, which already works.
 

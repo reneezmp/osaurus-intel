@@ -109,31 +109,36 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 5. Insights
 
-- [ ] An ordinary Intel chat creates an Insights entry with the correct model,
+- [x] An ordinary Intel chat creates an Insights entry with the correct model,
       duration, request, output, token data, and completion state.
-- [ ] A tool-using request records offered and executed tools.
-- [ ] A harmless provider failure creates a useful failed entry.
-- [ ] Insights does not render as an empty page when records exist.
-- [ ] Missing newer per-message diagnostics are recorded as part of the later
+- [x] A tool-using request records offered and executed tools.
+- [x] A harmless provider failure creates a useful failed entry.
+- [x] Insights does not render as an empty page when records exist.
+- [x] Missing newer per-message diagnostics are recorded as part of the later
       chat-interface revamp, not misreported as an Insights data failure.
 
 ## 6. Connections and Bonjour
 
-- [ ] Network, Remote Connections, and Agent Channels open correctly.
-- [ ] Bonjour changes immediately and persists through navigation and relaunch.
-- [ ] Its explanatory status matches the stored value.
-- [ ] If a second device is available, `_osaurus._tcp` appears only while enabled.
-- [ ] Relay, Shared With, remote grants, and Agent Channels show accurate
+- [x] Network, Remote Connections, and Agent Channels open correctly.
+- [x] Bonjour changes immediately and persists through navigation and relaunch.
+- [x] Its explanatory status matches the stored value.
+- [x] A second device sees `_osaurus._tcp` only while Bonjour is enabled.
+- [x] Relay, Shared With, remote grants, and Agent Channels show accurate
       dependency states with no dead actions.
 
 ## 7. Automation
 
-- [ ] Create, edit, pause, resume, run now, relaunch, and delete a schedule.
-- [ ] The next-run banner updates after each schedule operation.
+- [ ] **Failed:** a schedule can be created and survives relaunch, but its card
+      exposes no visible ellipsis/menu for edit, pause, resume, run now, or
+      delete. Those actions exist in source but are unreachable on Rosy.
+- [x] The next-run banner updates after schedule operations that are reachable.
 - [ ] Create a watcher and select a temporary folder.
-- [ ] Every monitoring-mode option is readable.
-- [ ] Adding a file triggers a run whose chat inherits the watched folder.
-- [ ] Pause, resume, relaunch, and delete the watcher.
+- [ ] **Failed:** monitoring-mode options remain unreadable on Ventura.
+- [ ] **Failed:** adding a file triggers a watcher session and inserts the user
+      request, but the session does not inherit the watched folder and produces
+      no assistant response. Scheduled sessions also lose their assigned folder.
+- [ ] **Failed:** watcher cards expose no visible menu for pause, resume, or
+      delete, so those operations and their relaunch state cannot be accepted.
 
 ## 8. Agent Memory and Database boundary
 

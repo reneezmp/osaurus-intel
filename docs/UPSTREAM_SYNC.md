@@ -168,6 +168,33 @@ and AppleScript, but Rosy displayed no unavailable-ability explanation. Treat
 that as a candidate UI reachability/rendering mismatch and verify the shipped
 x86_64 bundle rather than claiming the declarations are user-visible.
 
+## 2026-09-13 — Rosy acceptance retest, sections 5–7
+
+Insights now has complete Rosy Ventura acceptance for its current Intel scope.
+Ordinary chats, tool-using chats, and harmless provider failures create useful
+records with the expected model, duration, request/output, token, completion,
+and offered/executed-tool data. The page renders existing records. Newer
+per-message diagnostics remain part of the separately deferred chat-interface
+revamp and are not an Insights regression.
+
+The Agent Connections surface also passes its Intel contract. Network, Remote
+Connections, and Channels open; Bonjour state changes immediately, survives
+navigation and relaunch, and matches its status text; and a second device sees
+`_osaurus._tcp` only while enabled. Relay, sharing, peer grants, and Channels
+remain dependency-blocked, but their cards accurately say so and expose no dead
+actions.
+
+Automation remains Partial. Rosy can create and persist a schedule and observe
+the next-run banner, but neither schedule nor watcher cards expose the ellipsis
+menus that source code declares. Edit, run-now, pause/resume, and delete are
+therefore unreachable in the shipped UI. The monitoring-mode picker is still
+unreadable on Ventura. More seriously, both scheduled and watched runs lose the
+assigned folder in the created chat despite `DispatchRequest` carrying
+`folderPath` and `ExecutionContext` declaring Intel folder activation. A watcher
+also created and persisted the user turn without generating an assistant reply.
+Treat folder activation and background generation completion as separate runtime
+failures; do not infer either from successful session creation.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every
