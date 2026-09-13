@@ -17,10 +17,10 @@
   opt-in filtering, and backward-compatible settings persistence.
 - Legacy `search-intel` plugin retirement so it cannot replace the native tool.
 
-## Rosy acceptance — pending
+## Rosy acceptance — passed 2026-09-13
 
-Run these on the Intel Mac before changing Web Search from **Partial** to
-**Working and tested** in `FEATURE_PARITY.md`.
+The following checks passed on Rosy Ventura, allowing native Web Search to move
+to **Working and tested** in `FEATURE_PARITY.md`.
 
 1. Open Settings → Web Search and confirm the page fits at Rosy's normal window
    size without clipped controls or overlapping text.
@@ -46,10 +46,13 @@ Run these on the Intel Mac before changing Web Search from **Partial** to
 10. Test cancellation and offline/provider-failure behavior. The chat must stay
     responsive and present a useful retry path.
 
+Image-category results expose `image_url` and `thumbnail_url` in structured tool
+output. The current chat renderer presents those as links rather than an inline
+gallery; that is a chat presentation enhancement, not a failed search route.
+
 ## Dependency boundary
 
-Osaurus Premium Search is intentionally absent. It depends on the revamped
-Credits wallet and Router service, including balance state, explicit paid
-consent, billing errors, diagnostics, and fallback policy. Add that integration
-as part of the Credits/Router roadmap and link it into the existing Search page
-only after the complete service path is testable.
+Premium Search is present behind the real Credits/Router path, defaults off, and
+does not activate merely because Router is enabled. Funded-account billing and
+accounting acceptance remains tracked under Credits and Router rather than the
+native search feature.

@@ -195,6 +195,29 @@ also created and persisted the user turn without generating an assistant reply.
 Treat folder activation and background generation completion as separate runtime
 failures; do not infer either from successful session creation.
 
+## 2026-09-13 — Rosy acceptance retest, sections 8–10
+
+Agent Memory's navigation and dependency boundary pass: Recent Chats and New
+Chat retain the agent, all Database subtabs preserve navigation, and the absent
+Intel database backend is explained without fake mutation controls. Pinned-fact,
+episode, and compact-empty-state acceptance remains blocked by the existing
+distillation regression. Do not record those as independent rendering failures
+until Rosy can generate or load trustworthy distilled data again.
+
+The reorganized Settings sidebar passes Rosy Ventura acceptance at narrow,
+normal, and full-screen widths, including section and row ordering, counters,
+selection, scrolling, the unavailable Intel group, persistent Developer Tools
+reveal state, and Check for Updates.
+
+Native Web Search passes its complete Intel acceptance set: default-off agent
+gating, keyless built-ins, web/news/image categories, provider lifecycle and
+secret handling, fallback/cancellation, category ordering, custom providers,
+safe bounded extraction, legacy-plugin suppression, and Premium consent
+separation. Image hits deliberately return structured `image_url` and
+`thumbnail_url` fields; the current chat shows links because it has no tool-hit
+gallery. Track inline thumbnails with chat presentation work, not as a search
+backend defect. Funded Router billing remains a Credits/Router acceptance item.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every

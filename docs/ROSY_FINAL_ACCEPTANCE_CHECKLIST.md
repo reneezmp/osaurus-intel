@@ -142,45 +142,50 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 8. Agent Memory and Database boundary
 
-- [ ] Recent chats open and New Chat retains the current agent.
-- [ ] Known pinned facts show text, tags, use counts, and scores.
-- [ ] Existing episode summaries render compactly.
-- [ ] Agents without episodes receive a compact empty state.
-- [ ] Database Overview, Tables, Saved Views, and History preserve navigation.
-- [ ] Until the Intel backend exists, every Database page and Ability card states
+- [x] Recent chats open and New Chat retains the current agent.
+- [ ] **Blocked:** known pinned-fact text, tags, use counts, and scores cannot be
+      accepted while the distillation regression prevents test data generation.
+- [ ] **Blocked:** existing episode-summary rendering cannot be accepted while
+      distillation is failing.
+- [ ] **Blocked:** the compact no-episodes state cannot be distinguished from
+      the broken distillation state until distillation works again.
+- [x] Database Overview, Tables, Saved Views, and History preserve navigation.
+- [x] Until the Intel backend exists, every Database page and Ability card states
       the dependency and offers no fake import/export/edit/delete controls.
 
 ## 9. Settings sidebar
 
-- [ ] Sections appear in upstream order: General, Models, Agents, Capabilities,
+- [x] Sections appear in upstream order: General, Models, Agents, Capabilities,
       Automation, Developer Tools.
-- [ ] Rows within each section follow upstream ordering.
-- [ ] Intel-unavailable Local Models, Voice, and Sandbox appear together under
+- [x] Rows within each section follow upstream ordering.
+- [x] Intel-unavailable Local Models, Voice, and Sandbox appear together under
       Not Available on This Mac immediately before Developer Tools.
-- [ ] Unavailable rows are disabled and explanatory.
-- [ ] Developer Tools reveal state works and persists.
-- [ ] Narrow, normal, and full-screen widths keep labels, counters, selection,
+- [x] Unavailable rows are disabled and explanatory.
+- [x] Developer Tools reveal state works and persists.
+- [x] Narrow, normal, and full-screen widths keep labels, counters, selection,
       scrolling, and Check for Updates usable.
 
 ## 10. Native Web Search
 
-- [ ] Web Search defaults off for existing and new agents, persists when enabled,
+- [x] Web Search defaults off for existing and new agents, persists when enabled,
       and gates `web_search` plus `search_and_extract` at runtime.
-- [ ] A keyless built-in search returns useful results or a redacted error and
+- [x] A keyless built-in search returns useful results or a redacted error and
       never invokes a paid provider.
-- [ ] Web, news, and image categories work where supported.
-- [ ] Offline, provider-failure, fallback, and cancellation paths keep chat
+- [x] Web, news, and image categories work where supported. Image results expose
+      image and thumbnail URLs as structured tool output; inline image previews
+      are not part of the current search/chat rendering contract.
+- [x] Offline, provider-failure, fallback, and cancellation paths keep chat
       responsive and provide a useful retry path.
-- [ ] Add, test, disable, re-enable, relaunch, reorder, and delete one credentialed
+- [x] Add, test, disable, re-enable, relaunch, reorder, and delete one credentialed
       provider; its secret never appears in logs, diagnostics, export, or errors.
-- [ ] Category preferences persist and control the actual routing order.
-- [ ] Add, test, relaunch, and remove a custom REST provider; bundled identifiers
+- [x] Category preferences persist and control the actual routing order.
+- [x] Add, test, relaunch, and remove a custom REST provider; bundled identifiers
       cannot be shadowed.
-- [ ] Extraction handles a normal article, redirect, and large page with bounded
+- [x] Extraction handles a normal article, redirect, and large page with bounded
       output; localhost/private-network targets are rejected before fetch.
-- [ ] An installed legacy `search-intel` plugin is ignored and cannot duplicate
+- [x] An installed legacy `search-intel` plugin is ignored and cannot duplicate
       or override the native tools.
-- [ ] Premium Search is present only with the real Credits/Router path, defaults
+- [x] Premium Search is present only with the real Credits/Router path, defaults
       off, and never turns on merely because Router is enabled.
 
 ## 11. Orchestrator settings and bounded delegation
