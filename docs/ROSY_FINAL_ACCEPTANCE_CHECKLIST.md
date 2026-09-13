@@ -149,7 +149,8 @@ selected setting, the visible result, and whether a full relaunch changed it.
       output; localhost/private-network targets are rejected before fetch.
 - [ ] An installed legacy `search-intel` plugin is ignored and cannot duplicate
       or override the native tools.
-- [ ] Premium Search remains absent until Credits/Router is real.
+- [ ] Premium Search is present only with the real Credits/Router path, defaults
+      off, and never turns on merely because Router is enabled.
 
 ## 11. Orchestrator settings and bounded delegation
 
@@ -252,6 +253,14 @@ Complete the matching detailed test section when each feature lands:
       agent's Web Search ability still blocks both search tools.
 - [ ] Hosted extraction rejects localhost and private-network targets before a
       request and never exposes billing details to the model.
+- [ ] A direct article URL uses hosted contents when available, falls back
+      locally once on empty/replayed/error responses, and local fallback blocks
+      redirects into localhost or a private network.
+- [ ] The same logical idempotency key reaches `/v1/search` or `/v1/contents`
+      in both the signed JSON body and `Idempotency-Key` header; no fallback
+      invents a second paid attempt.
+- [ ] Included requests update the allowance display without reducing the
+      wallet balance; only paid requests reduce the optimistic balance.
 
 ## 15. Final regression and postflight
 

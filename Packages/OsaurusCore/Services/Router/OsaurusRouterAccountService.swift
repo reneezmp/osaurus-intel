@@ -12,6 +12,10 @@ final class OsaurusRouterAccountService: ObservableObject {
     @Published private(set) var isLoadingBalance = false
     @Published private(set) var isLoadingUsage = false
     @Published private(set) var isLoadingTransactions = false
+    @Published private(set) var webSettings: OsaurusRouterWebSettingsResponse?
+    @Published private(set) var webUsage: [OsaurusRouterWebUsageItem] = []
+    @Published private(set) var lastWebBilling: RouterWebBillingSummary?
+    @Published private(set) var webSearchNeedsTopUp = false
     @Published private(set) var isCreatingCheckout = false
     @Published var lastError: String?
 
@@ -64,12 +68,18 @@ final class OsaurusRouterAccountService: ObservableObject {
         await refreshBalance()
         await refreshUsage(reset: true)
         await refreshTransactions(reset: true)
+        await refreshWebSettings()
+        await refreshWebUsage()
     }
 
     func clearForDisabledRouter() {
         balance = nil
         usage = []
         transactions = []
+        webSettings = nil
+        webUsage = []
+        lastWebBilling = nil
+        webSearchNeedsTopUp = false
         nextUsageCursor = nil
         lastError = nil
     }
@@ -147,6 +157,50 @@ final class OsaurusRouterAccountService: ObservableObject {
         } catch {
             lastError = error.localizedDescription
         }
+    }
+
+    func refreshWebSettings() async {
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { return }
+        do { webSettings = try await client.webSettings() }
+        catch { if !Self.isWebFeatureUnavailable(error) { lastError = error.localizedDescription } }
+    }
+
+    func setWebAutoPay(_ enabled: Bool) async {
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { return }
+        do { webSettings = try await client.updateWebSettings(autoPayEnabled: enabled) }
+        catch { lastError = error.localizedDescription }
+    }
+
+    func refreshWebUsage() async {
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { webUsage = []; return }
+        do { webUsage = try await client.webUsage(limit: 50).data }
+        catch { if !Self.isWebFeatureUnavailable(error) { lastError = error.localizedDescription } }
+    }
+
+    func noteWebBilling(_ summary: RouterWebBillingSummary) {
+        lastWebBilling = summary
+        webSearchNeedsTopUp = false
+        guard summary.billing.lowercased() == "paid" else { return }
+        guard let current = balance,
+              let currentMicro = Int64(current.balanceMicro),
+              let cost = Int64(summary.costMicro), cost > 0 else { return }
+        balance = .init(balanceMicro: String(max(0, currentMicro - cost)), frozen: current.frozen)
+    }
+
+    func noteWebInsufficientFunds() {
+        webSearchNeedsTopUp = true
+        Task { await refreshBalance() }
+    }
+
+    func noteWebPaidDisabled() {
+        guard var current = webSettings else { return }
+        current.autoPayEnabled = false
+        webSettings = current
+    }
+
+    private static func isWebFeatureUnavailable(_ error: Error) -> Bool {
+        guard case .server(_, _, let status) = error as? OsaurusRouterAPIError else { return false }
+        return status == 404
     }
 
     func createCheckout(amountMicro: Int = OsaurusRouter.minimumTopUpMicro) async -> URL? {

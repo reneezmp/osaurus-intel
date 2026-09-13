@@ -27,6 +27,7 @@ struct SearchProviderConfigurationTests {
         #expect(config.providers.allSatisfy { $0.enabled })
         #expect(config.routing.isEmpty)
         #expect(!config.pluginKeysMigrated)
+        #expect(config.hostedSearchEnabled == nil)
     }
 
     // MARK: - Routing resolution
@@ -106,6 +107,16 @@ struct SearchProviderConfigurationTests {
         #expect(decoded.providers.isEmpty)
         #expect(decoded.routing.isEmpty)
         #expect(!decoded.pluginKeysMigrated)
+        #expect(decoded.hostedSearchEnabled == nil)
+    }
+
+    @Test func premiumSearchConsentRoundTripsExplicitly() throws {
+        let original = SearchProviderConfiguration(hostedSearchEnabled: true)
+        let decoded = try JSONDecoder().decode(
+            SearchProviderConfiguration.self,
+            from: JSONEncoder().encode(original)
+        )
+        #expect(decoded.hostedSearchEnabled == true)
     }
 
     @Test func definitionDecodesMinimalJSONWithDefaults() throws {

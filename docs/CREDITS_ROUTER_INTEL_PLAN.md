@@ -75,6 +75,19 @@ applies the configured identity; strict trust verification on the M4 reports
 - Project billing status into Credits without leaking financial or request
   details into model context.
 
+**Implemented on M4, pending Rosy:** the Intel fork now has signed
+`/v1/search`, `/v1/contents`, `/credits/web-settings`, and
+`/credits/web-usage` contracts, typed fallback/backoff handling, explicit
+Premium consent that defaults off, and an independent wallet auto-pay switch.
+Settings Try It and both agent tools share the hosted-first coordinator;
+provider credential tests stay pinned to their selected native provider so a
+key test cannot spend Router credits. Direct extraction rejects private targets
+before any hosted request, and local Readability remains the per-page fallback.
+The same logical idempotency key is sent in both the signed JSON body and the
+`Idempotency-Key` header. Included billing no longer decrements the displayed
+wallet. Focused M4 validation passes 33 tests in 3 suites; Rosy Ventura and a
+real funded/test Router account remain the promotion gate.
+
 ### C4 — Rosy promotion
 
 - Run focused suites and the full serialized storage-safe suite.
@@ -92,6 +105,11 @@ an external handoff. Insights deep links remain blocked until Intel correlation
 is measured. Onboarding-triggered welcome-credit redemption remains separate
 from the Credits page and must be linked only after that coordinator exists on
 Intel. Premium image/video search remains outside C3.
+Redirect-to-private validation inside hosted `/v1/contents` remains a Router
+service responsibility because the Mac sends the URL to that service rather
+than following the redirect itself. The Intel client still blocks direct and
+DNS-resolved private targets before disclosure and its local fallback rejects
+unsafe redirects.
 
 ## Maintenance rule
 

@@ -45,9 +45,14 @@ public final class SearchProviderManager: ObservableObject {
     @Published public private(set) var lastOutcome: LastSearchOutcome?
 
     private let engine: SearchEngine
+    private let hostedBackend: OsaurusRouterSearchBackend
 
-    init(engine: SearchEngine = .shared) {
+    init(
+        engine: SearchEngine = .shared,
+        hostedBackend: OsaurusRouterSearchBackend = OsaurusRouterSearchBackend()
+    ) {
         self.engine = engine
+        self.hostedBackend = hostedBackend
         self.configuration = SearchProviderConfigurationStore.load()
         self.customDefinitions = SearchProviderDefinitionStore.loadCustom()
         migratePluginKeysIfNeeded()
@@ -236,6 +241,36 @@ public final class SearchProviderManager: ObservableObject {
         }
     }
 
+    // MARK: - Premium search consent
+
+    public var hostedSearchEnabled: Bool { configuration.hostedSearchEnabled ?? false }
+
+    public func setHostedSearchEnabled(_ enabled: Bool) {
+        configuration.hostedSearchEnabled = enabled
+        persist()
+    }
+
+    func shouldTryHostedSearch(category: String) -> Bool {
+        Self.shouldTryHostedSearch(
+            category: category,
+            hostedSearchEnabled: hostedSearchEnabled,
+            routerEnabled: OsaurusRouter.isEnabled,
+            identityExists: OsaurusIdentity.exists(),
+            hostedAvailable: RouterWebSearchAvailability.shared.isAvailable
+        )
+    }
+
+    nonisolated static func shouldTryHostedSearch(
+        category: String,
+        hostedSearchEnabled: Bool,
+        routerEnabled: Bool,
+        identityExists: Bool,
+        hostedAvailable: Bool
+    ) -> Bool {
+        guard hostedSearchEnabled, routerEnabled, identityExists, hostedAvailable else { return false }
+        return category != SearchCategory.images && category != "video" && category != "videos"
+    }
+
     // MARK: - Search entry points
 
     /// Full cascade for a request (used by the tools and the Try-it playground).
@@ -249,6 +284,94 @@ public final class SearchProviderManager: ObservableObject {
             hitCount: outcome.hits.count
         )
         return outcome
+    }
+
+    public func runHostedFirstSearch(
+        _ request: SearchRequest,
+        idempotencyKey: String,
+        extractTextMaxCharacters: Int? = nil
+    ) async -> HostedFirstSearchResult {
+        var hostedAttempt: SearchAttempt?
+        var billing: RouterWebBillingSummary?
+        var fallbackReason: String?
+
+        if shouldTryHostedSearch(category: request.category) {
+            let result = await hostedBackend.search(
+                request,
+                extractTextMaxCharacters: extractTextMaxCharacters,
+                idempotencyKey: idempotencyKey
+            )
+            switch result {
+            case .success(let hosted) where !hosted.hits.isEmpty:
+                billing = hosted.billing
+                if let billing { OsaurusRouterAccountService.shared.noteWebBilling(billing) }
+                let outcome = SearchEngineOutcome(
+                    hits: hosted.hits,
+                    provider: OsaurusRouterSearchBackend.providerId,
+                    attempts: [.init(provider: OsaurusRouterSearchBackend.providerId, ok: true, count: hosted.hits.count)]
+                )
+                lastOutcome = .init(date: Date(), ok: true, providerId: outcome.provider, hitCount: outcome.hits.count)
+                return .init(
+                    outcome: outcome,
+                    source: .premium,
+                    billing: billing,
+                    hostedTextByURL: hosted.textByURL,
+                    hostedFallbackReason: nil
+                )
+            case .success(let hosted):
+                billing = hosted.billing
+                if let billing { OsaurusRouterAccountService.shared.noteWebBilling(billing) }
+                fallbackReason = hosted.replayed ? "replayed" : "empty"
+                hostedAttempt = .init(provider: OsaurusRouterSearchBackend.providerId, ok: true, count: 0)
+            case .failure(let failure):
+                fallbackReason = failure.reason
+                hostedAttempt = .init(
+                    provider: OsaurusRouterSearchBackend.providerId,
+                    ok: false,
+                    kind: failure.attemptKind,
+                    error: failure.reason
+                )
+                noteHostedFailure(failure)
+            }
+        }
+
+        var outcome = await runSearch(request)
+        if let hostedAttempt { outcome.attempts.insert(hostedAttempt, at: 0) }
+        return .init(
+            outcome: outcome,
+            source: classifySource(providerId: outcome.provider),
+            billing: billing,
+            hostedTextByURL: [:],
+            hostedFallbackReason: fallbackReason
+        )
+    }
+
+    func hostedExtract(urls: [String], idempotencyKey: String) async -> HostedContentsOutcome? {
+        guard shouldTryHostedSearch(category: SearchCategory.web) else { return nil }
+        switch await hostedBackend.contents(urls: urls, idempotencyKey: idempotencyKey) {
+        case .success(let outcome):
+            if let billing = outcome.billing { OsaurusRouterAccountService.shared.noteWebBilling(billing) }
+            return outcome
+        case .failure(let failure):
+            noteHostedFailure(failure)
+            return nil
+        }
+    }
+
+    private func noteHostedFailure(_ failure: HostedSearchFailure) {
+        switch failure {
+        case .insufficientFunds: OsaurusRouterAccountService.shared.noteWebInsufficientFunds()
+        case .paidWebDisabled: OsaurusRouterAccountService.shared.noteWebPaidDisabled()
+        case .accountFrozen: Task { await OsaurusRouterAccountService.shared.refreshBalance() }
+        default: break
+        }
+    }
+
+    func classifySource(providerId: String?) -> WebSearchSource {
+        guard let id = providerId else { return .free }
+        if id == OsaurusRouterSearchBackend.providerId { return .premium }
+        guard let definition = definition(id: id) else { return .free }
+        return definition.isKeyless ? .free : .custom
     }
 
     /// Pinned single-provider run; updates the published `testStatus` so
@@ -367,6 +490,20 @@ public final class SearchProviderManager: ObservableObject {
             SearchProviderConfigurationStore.save(configuration)
         }
     }
+}
+
+public enum WebSearchSource: String, Sendable, Equatable {
+    case premium
+    case custom
+    case free
+}
+
+public struct HostedFirstSearchResult: Sendable {
+    public var outcome: SearchEngineOutcome
+    public var source: WebSearchSource
+    public var billing: RouterWebBillingSummary?
+    public var hostedTextByURL: [String: String]
+    public var hostedFallbackReason: String?
 }
 
 // MARK: - Schema state bridge

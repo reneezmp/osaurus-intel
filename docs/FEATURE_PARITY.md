@@ -73,8 +73,8 @@ final Intel release is tested as one integrated product.
 | Agent Settings — Memory | Partial | Chat history opens, but Rosy acceptance found pinned facts and episode summaries missing for agents that have data. Private Agent Database remains dependency-blocked, and its Ability card must not expose working-looking controls. |
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Partial | Intel's replacement chat engine now records Chat UI requests, responses, timings, token estimates/provider usage, tool calls, and failures in the existing Insights ring buffer. Automated x86_64 compilation passes; Rosy must confirm entries and detail rendering before promotion. The newer per-message diagnostics belong to the deliberately later chat-interface revamp. |
-| Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented and covered by focused tests. Rosy x86_64 UI/network acceptance is pending. Premium routing is now planned with Credits/Router in `CREDITS_ROUTER_INTEL_PLAN.md`; it remains unavailable until the consent, billing, fallback, and hosted endpoint gates exist. |
-| Credits and Router | Partial | Signed hosted inference, balance, Checkout, usage, activity, and metadata-only diagnostics compile on Intel. Gates C1-C2 add an explicit Router opt-out, bounded top-up parsing, credit-unit presentation, Credits-only code redemption, and an account usage center over existing signed contracts. Onboarding redemption, Insights correlation, Premium Search, and Rosy Ventura acceptance remain pending; commit coverage alone is not parity. |
+| Web Search | Partial | Native provider ordering, built-in fallbacks, category routing, custom REST providers, Keychain credentials, test search, extraction, and opt-in per-agent tool gating are implemented. Gate C3 adds explicitly opted-in hosted search/extraction with native fallback, private-target preflight, shared Settings/tool routing, and exact idempotency-key coverage. Images/video remain native. Rosy x86_64 UI/network and real Router acceptance are pending. |
+| Credits and Router | Partial | Signed hosted inference, balance, Checkout, usage, activity, and metadata-only diagnostics compile on Intel. Gates C1-C3 add an explicit Router opt-out, bounded top-up parsing, credit-unit presentation, Credits-only code redemption, an account usage center, Premium Web Search consent, a separate wallet auto-pay switch, and safe billing status. Onboarding redemption, Insights correlation, and Rosy Ventura acceptance remain pending; commit coverage alone is not parity. |
 | Orchestrator | Partial | Intel Gates 1–5B are implemented. Settings and the built-in-only `orchestrator_config` tool plan and atomically apply only `default_agent` and `delegation`; model applies require a fingerprint-bound in-chat review, and private current values are omitted from tool output. Unsupported domains, secret references, missing surfaces, denial, timeout, cancellation, stale state, and replay fail closed. The manual Gate 4 sheet remains one fresh, bounded, text-only child with no tools. Durable child sessions, background/model-owned spawning, secret references, extra configuration domains, and child tools remain dependency-blocked. M4 automated validation and the x86_64 build do not replace pending Rosy Ventura QA. See `ORCHESTRATOR_INTEL_PLAN.md`. |
 
 ## Prioritized roadmap
@@ -104,11 +104,11 @@ implementations compile unchanged on Intel.
    Accessibility and Screen Recording behavior, browser-engine availability,
    model requirements, and approval/cancellation semantics. Do not assume these
    are Apple-Silicon-only or universally Intel-compatible.
-5. **Web Search — free/custom slice implemented** — complete Rosy acceptance
-   for provider ordering, test search, built-in fallbacks, custom REST
-   providers, Keychain credentials, extraction, and per-agent opt-in gating.
-   Osaurus Premium remains dependency-blocked on the Credits/Router roadmap;
-   do not add a premium switch before that service path is real.
+5. **Web Search — free/custom and Premium C3 implemented** — complete Rosy
+   acceptance for provider ordering, hosted/native fallback, test search,
+   custom REST providers, Keychain credentials, extraction, billing consent,
+   and per-agent opt-in gating. Premium remains Partial until the real Router
+   endpoints and funded/test-account paths pass on Rosy.
 6. **Media, cloud models only** — implement remote image/video model discovery,
    defaults, permissions, quoting, job recovery, and results. Exclude local MLX
    generation/editing from the Intel scope unless a separate compatible runtime

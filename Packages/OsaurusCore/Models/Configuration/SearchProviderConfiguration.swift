@@ -361,6 +361,8 @@ public struct SearchProvider: Codable, Identifiable, Sendable, Equatable {
 // MARK: - Configuration
 
 public struct SearchProviderConfiguration: Codable, Sendable {
+    /// Explicit consent for Router-hosted search. Absent means off.
+    public var hostedSearchEnabled: Bool?
     /// Ordered provider list; order = default fallback ranking.
     public var providers: [SearchProvider]
     /// Per-category ranking overrides (category -> ordered definition ids).
@@ -372,11 +374,13 @@ public struct SearchProviderConfiguration: Codable, Sendable {
     public init(
         providers: [SearchProvider] = [],
         routing: [String: [String]] = [:],
-        pluginKeysMigrated: Bool = false
+        pluginKeysMigrated: Bool = false,
+        hostedSearchEnabled: Bool? = nil
     ) {
         self.providers = providers
         self.routing = routing
         self.pluginKeysMigrated = pluginKeysMigrated
+        self.hostedSearchEnabled = hostedSearchEnabled
     }
 
     public init(from decoder: Decoder) throws {
@@ -384,6 +388,7 @@ public struct SearchProviderConfiguration: Codable, Sendable {
         self.providers = try c.decodeIfPresent([SearchProvider].self, forKey: .providers) ?? []
         self.routing = try c.decodeIfPresent([String: [String]].self, forKey: .routing) ?? [:]
         self.pluginKeysMigrated = try c.decodeIfPresent(Bool.self, forKey: .pluginKeysMigrated) ?? false
+        self.hostedSearchEnabled = try c.decodeIfPresent(Bool.self, forKey: .hostedSearchEnabled)
     }
 
     /// Default configuration: the three free scrapers enabled, so search

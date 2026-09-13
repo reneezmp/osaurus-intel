@@ -18,6 +18,7 @@ import SwiftUI
 
 struct SearchView: View {
     @ObservedObject private var manager = SearchProviderManager.shared
+    @ObservedObject private var routerAccount = OsaurusRouterAccountService.shared
     @ObservedObject private var themeManager = ThemeManager.shared
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -48,6 +49,7 @@ struct SearchView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
                     hubPanel
+                    premiumSearchStrip
                     tryItCard
                     if apiProviderRows.isEmpty {
                         presetGallery
@@ -245,6 +247,47 @@ struct SearchView: View {
 
     // MARK: - Try it
 
+    private var premiumSearchStrip: some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: "magnifyingglass.circle.fill")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(manager.hostedSearchEnabled ? theme.accentColor : theme.tertiaryText)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Premium search", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                Text(
+                    manager.hostedSearchEnabled
+                        ? "Searches try Osaurus first, then fall back to your providers and built-in sources."
+                        : "Off by default. Your providers and built-in sources handle every search.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+            }
+            Spacer()
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { manager.hostedSearchEnabled },
+                    set: { manager.setHostedSearchEnabled($0) }
+                )
+            )
+            .labelsHidden()
+            .toggleStyle(.switch)
+            .controlSize(.small)
+            .tint(theme.accentColor)
+            .disabled(!OsaurusRouter.isEnabled || !OsaurusIdentity.exists())
+        }
+        .padding(14)
+        .background(RoundedRectangle(cornerRadius: 10).fill(theme.cardBackground))
+        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.cardBorder))
+        .task {
+            if OsaurusRouter.isEnabled, OsaurusIdentity.exists() {
+                await routerAccount.refreshWebSettings()
+            }
+        }
+    }
+
     private var tryItCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 8) {
@@ -422,7 +465,11 @@ struct SearchView: View {
         trySearching = true
         tryOutcome = nil
         Task {
-            let outcome = await manager.runSearch(SearchRequest(query: query, maxResults: 5))
+            let run = await manager.runHostedFirstSearch(
+                SearchRequest(query: query, maxResults: 5),
+                idempotencyKey: UUID().uuidString
+            )
+            let outcome = run.outcome
             await MainActor.run {
                 tryOutcome = outcome
                 trySearching = false

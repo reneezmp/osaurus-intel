@@ -5,6 +5,7 @@ actor OsaurusRouterAPIClient {
 
     private let baseURL: URL
     private let session: URLSession
+    private let searchSession: URLSession
     private let signer: OsaurusRouterAuthSigner
     private let authOverride: (@Sendable (inout URLRequest, Data?) async throws -> Void)?
     private let decoder: JSONDecoder
@@ -12,6 +13,7 @@ actor OsaurusRouterAPIClient {
     init(
         baseURL: URL = OsaurusRouter.defaultBaseURL,
         session: URLSession? = nil,
+        searchSession: URLSession? = nil,
         signer: OsaurusRouterAuthSigner = OsaurusRouterAuthSigner(),
         authOverride: (@Sendable (inout URLRequest, Data?) async throws -> Void)? = nil
     ) {
@@ -19,12 +21,21 @@ actor OsaurusRouterAPIClient {
         self.signer = signer
         self.authOverride = authOverride
         self.session = session ?? Self.makeSession()
+        self.searchSession = searchSession ?? session ?? Self.makeSearchSession()
         self.decoder = JSONDecoder()
     }
 
     static func makeSession() -> URLSession {
         let config = URLSessionConfiguration.ephemeral
         config.timeoutIntervalForRequest = 30
+        config.timeoutIntervalForResource = 120
+        config.waitsForConnectivity = false
+        return GlobalProxySettings.makeSession(base: config)
+    }
+
+    static func makeSearchSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.timeoutIntervalForRequest = 35
         config.timeoutIntervalForResource = 120
         config.waitsForConnectivity = false
         return GlobalProxySettings.makeSession(base: config)
@@ -86,6 +97,33 @@ actor OsaurusRouterAPIClient {
         return try await get("/credits/transactions", queryItems: queryItems)
     }
 
+    func webSearch(_ body: OsaurusRouterWebSearchRequestBody) async throws -> OsaurusRouterWebSearchResponse {
+        try await post(
+            "/v1/search", body: body, session: searchSession,
+            idempotencyKey: body.idempotency_key)
+    }
+
+    func webContents(_ body: OsaurusRouterWebContentsRequestBody) async throws -> OsaurusRouterWebContentsResponse {
+        try await post(
+            "/v1/contents", body: body, session: searchSession,
+            idempotencyKey: body.idempotency_key)
+    }
+
+    func webSettings() async throws -> OsaurusRouterWebSettingsResponse {
+        try await get("/credits/web-settings")
+    }
+
+    func updateWebSettings(autoPayEnabled: Bool) async throws -> OsaurusRouterWebSettingsResponse {
+        struct Body: Encodable { let auto_pay_enabled: Bool }
+        return try await post("/credits/web-settings", body: Body(auto_pay_enabled: autoPayEnabled))
+    }
+
+    func webUsage(limit: Int = 50, cursor: String? = nil) async throws -> OsaurusRouterWebUsageResponse {
+        var queryItems = [URLQueryItem(name: "limit", value: String(limit))]
+        if let cursor, !cursor.isEmpty { queryItems.append(.init(name: "cursor", value: cursor)) }
+        return try await get("/credits/web-usage", queryItems: queryItems)
+    }
+
     func signedJSONRequest(method: String, path: String, body: Data? = nil) async throws -> URLRequest {
         let url = try url(path: path)
         return try await signedJSONRequest(method: method, url: url, body: body)
@@ -112,18 +150,26 @@ actor OsaurusRouterAPIClient {
         return try decoder.decode(T.self, from: data)
     }
 
-    private func post<Body: Encodable, T: Decodable>(_ path: String, body: Body) async throws -> T {
+    private func post<Body: Encodable, T: Decodable>(
+        _ path: String,
+        body: Body,
+        session overrideSession: URLSession? = nil,
+        idempotencyKey: String? = nil
+    ) async throws -> T {
         let bodyData = try JSONEncoder.osaurusCanonical(prettyPrinted: false).encode(body)
         var request = try await signedJSONRequest(method: "POST", path: path, body: bodyData)
         request.setValue("application/json", forHTTPHeaderField: "Accept")
-        let (data, response) = try await perform(request)
+        if let idempotencyKey {
+            request.setValue(idempotencyKey, forHTTPHeaderField: "Idempotency-Key")
+        }
+        let (data, response) = try await perform(request, session: overrideSession)
         try ensureOK(data: data, response: response)
         return try decoder.decode(T.self, from: data)
     }
 
-    private func perform(_ request: URLRequest) async throws -> (Data, URLResponse) {
+    private func perform(_ request: URLRequest, session overrideSession: URLSession? = nil) async throws -> (Data, URLResponse) {
         do {
-            return try await session.data(for: request)
+            return try await (overrideSession ?? session).data(for: request)
         } catch {
             throw OsaurusRouterAPIError.transport(error.localizedDescription)
         }

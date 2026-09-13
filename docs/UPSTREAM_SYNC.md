@@ -91,6 +91,28 @@ set passes 8 tests in 4 suites. The Rosy build succeeds as x86_64 with macOS
 verification reports `CSSMERR_TP_NOT_TRUSTED`; Rosy launch remains the signing
 and product promotion gate.
 
+## 2026-09-12 — Credits/Router Gate C3 Premium Web Search
+
+Selectively ported the product contract from upstream `d16b06763`: signed
+hosted search and contents, web settings/usage, typed fallback and availability
+backoff, and billing metadata. The Intel fork deliberately differs by keeping
+Premium Search off until explicit consent and keeping wallet auto-pay as a
+second setting. Router availability alone grants neither permission.
+
+The upstream audit exposed a wire detail that source-presence review had missed:
+the same idempotency key belongs in both the canonical signed JSON body and the
+`Idempotency-Key` header. Focused tests now inspect both for `/v1/search` and
+`/v1/contents`. Settings Try It and agent tools share one hosted-first seam;
+provider credential tests remain native and pinned. Direct URL extraction runs
+the existing private-address/DNS preflight before disclosing a URL to the Router,
+then falls back locally once. Hosted redirect safety remains a server dependency
+because the local client never follows those redirects.
+
+An accounting review also caught optimistic wallet subtraction for included
+requests. Only responses explicitly marked `paid` may now reduce the displayed
+balance. Focused M4 validation passes 33 tests in 3 suites. C3 stays Partial
+until the x86_64 candidate and real Router behavior pass Rosy Ventura.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every

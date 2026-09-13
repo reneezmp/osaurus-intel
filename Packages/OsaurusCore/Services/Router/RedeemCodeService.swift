@@ -109,7 +109,8 @@ final class RedeemCodeService: ObservableObject {
             return L("Set up your Osaurus Identity before redeeming a code.")
         case .invalidResponse:
             return L("The redeem service returned an invalid response. Please try again.")
-        case .invalidURL, .server, .belowMinimumTopUp, .insufficientFunds:
+        case .invalidURL, .server, .belowMinimumTopUp, .insufficientFunds,
+            .paidWebDisabled, .idempotencyConflict:
             return error.localizedDescription
         }
     }

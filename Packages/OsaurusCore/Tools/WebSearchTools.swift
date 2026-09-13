@@ -123,6 +123,11 @@ enum WebSearchResultFormatter {
             + "add a free search provider in Settings → Search."
     }
 
+    static func applySourceMetadata(_ payload: inout [String: Any], run: HostedFirstSearchResult) {
+        payload["search_source"] = run.source.rawValue
+        if let reason = run.hostedFallbackReason { payload["premium_fallback"] = reason }
+    }
+
     static func noResultsFailure(
         tool: String,
         request: SearchRequest,
@@ -240,7 +245,9 @@ final class WebSearchTool: OsaurusTool, @unchecked Sendable {
             region: region
         )
 
-        let outcome = await SearchProviderManager.shared.runSearch(request)
+        let run = await SearchProviderManager.shared.runHostedFirstSearch(
+            request, idempotencyKey: UUID().uuidString)
+        let outcome = run.outcome
         if outcome.hits.isEmpty {
             let hasAPIProvider = await SearchProviderManager.shared.hasConfiguredAPIProvider
             return WebSearchResultFormatter.noResultsFailure(
@@ -251,9 +258,11 @@ final class WebSearchTool: OsaurusTool, @unchecked Sendable {
                 hasConfiguredAPIProvider: hasAPIProvider
             )
         }
+        var payload = WebSearchResultFormatter.resultsPayload(request: request, outcome: outcome)
+        WebSearchResultFormatter.applySourceMetadata(&payload, run: run)
         return ToolEnvelope.success(
             tool: name,
-            result: WebSearchResultFormatter.resultsPayload(request: request, outcome: outcome),
+            result: payload,
             warnings: warnings.isEmpty ? nil : warnings
         )
     }
@@ -264,15 +273,19 @@ final class WebSearchTool: OsaurusTool, @unchecked Sendable {
 final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
     let name = "search_and_extract"
     let description =
-        "Search the web and extract the top results' page content as markdown in one step. "
-        + "Use when you need a grounded answer without a separate fetch step."
+        "Fetch a specific URL or search the web and extract page content as markdown. "
+        + "After web_search, pass the selected result in `url`; use `query` only when no URL is known."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "properties": .object([
             "query": .object([
                 "type": .string("string"),
-                "description": .string("Plain-language search query."),
+                "description": .string("Plain-language search query. Use only when no URL is known."),
+            ]),
+            "url": .object([
+                "type": .string("string"),
+                "description": .string("Direct http(s) page URL to fetch."),
             ]),
             "max_results": .object([
                 "type": .string("integer"),
@@ -300,7 +313,6 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
                 "description": .string("Per-page extraction timeout in seconds. Default 25."),
             ]),
         ]),
-        "required": .array([.string("query")]),
         "additionalProperties": .bool(false),
     ])
 
@@ -308,15 +320,13 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
 
-        let queryReq = requireString(args, "query", expected: "non-empty search query", tool: name)
-        guard case .value(let queryRaw) = queryReq else { return queryReq.failureEnvelope ?? "" }
-        let query = queryRaw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty else {
+        let directURL = WebSearchArgs.optionalTrimmedString(args["url"])
+        let query = WebSearchArgs.optionalTrimmedString(args["query"])
+        guard directURL != nil || query != nil else {
             return ToolEnvelope.failure(
                 kind: .invalidArgs,
-                message: "Argument `query` must not be whitespace-only.",
-                field: "query",
-                expected: "non-empty search query",
+                message: "Provide a direct `url` or a non-empty `query`.",
+                expected: "url or query",
                 tool: name
             )
         }
@@ -331,8 +341,60 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
             return 25
         }()
 
+        if let directURL {
+            // Never disclose an obvious or DNS-resolved private target to the
+            // hosted extractor. The local fallback repeats this check and
+            // also rejects unsafe redirects.
+            var hostedText: (title: String?, text: String)?
+            if SearchHTML.resolvedUnsafeExtractionURLReason(directURL) == nil,
+               let hosted = await SearchProviderManager.shared.hostedExtract(
+                    urls: [directURL], idempotencyKey: UUID().uuidString),
+               !hosted.replayed,
+               let page = hosted.pages.first(where: { $0.succeeded }),
+               let text = page.text, !text.isEmpty
+            {
+                hostedText = (page.title, text)
+            }
+
+            var entry = SearchHit(
+                title: hostedText?.title ?? directURL,
+                url: directURL,
+                snippet: "",
+                engine: "direct_url"
+            ).toDict(rank: 1)
+            if let hostedText {
+                let bounded = SearchDiagnostics.truncate(
+                    hostedText.text, maxCharacters: SearchReadability.maxMarkdownCharacters)
+                entry["extract_status"] = SearchExtractionStatus.ok.rawValue
+                entry["word_count"] = bounded.text.split(whereSeparator: \.isWhitespace).count
+                entry["extracted"] = true
+                entry["markdown"] = bounded.text
+                entry["truncated"] = bounded.truncated
+                entry["extract_source"] = "premium"
+            } else {
+                let extraction = await SearchReadability.extract(url: directURL, timeout: timeout)
+                if let title = extraction.title, !title.isEmpty { entry["title"] = title }
+                if let canonicalURL = extraction.canonicalURL, !canonicalURL.isEmpty {
+                    entry["canonical_url"] = canonicalURL
+                }
+                entry["extract_status"] = extraction.status.rawValue
+                entry["word_count"] = extraction.wordCount
+                entry["extracted"] = extraction.extracted
+                if extraction.extracted {
+                    entry["markdown"] = extraction.markdown
+                    entry["truncated"] = extraction.truncated
+                } else if let message = extraction.message, !message.isEmpty {
+                    entry["extract_error"] = message
+                }
+            }
+            return ToolEnvelope.success(
+                tool: name,
+                result: ["mode": "direct_url", "provider": "direct_url", "results": [entry]]
+            )
+        }
+
         let request = SearchRequest(
-            query: query,
+            query: query ?? "",
             category: SearchCategory.web,
             maxResults: maxResults,
             site: WebSearchArgs.optionalTrimmedString(args["site"]),
@@ -340,7 +402,12 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
             timeRange: timeRange
         )
 
-        let outcome = await SearchProviderManager.shared.runSearch(request)
+        let run = await SearchProviderManager.shared.runHostedFirstSearch(
+            request,
+            idempotencyKey: UUID().uuidString,
+            extractTextMaxCharacters: SearchReadability.maxMarkdownCharacters
+        )
+        let outcome = run.outcome
         if outcome.hits.isEmpty {
             let hasAPIProvider = await SearchProviderManager.shared.hasConfiguredAPIProvider
             return WebSearchResultFormatter.noResultsFailure(
@@ -357,6 +424,18 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
         for (index, hit) in outcome.hits.enumerated() {
             var entry = hit.toDict(rank: index + 1)
             let shouldExtract = index < extractCount && !hit.url.isEmpty && !Task.isCancelled
+            if shouldExtract, let hostedText = run.hostedTextByURL[hit.url.lowercased()], !hostedText.isEmpty {
+                let bounded = SearchDiagnostics.truncate(
+                    hostedText, maxCharacters: SearchReadability.maxMarkdownCharacters)
+                entry["extract_status"] = SearchExtractionStatus.ok.rawValue
+                entry["word_count"] = bounded.text.split(whereSeparator: \.isWhitespace).count
+                entry["extracted"] = true
+                entry["markdown"] = bounded.text
+                entry["truncated"] = bounded.truncated
+                entry["extract_source"] = "premium"
+                enriched.append(entry)
+                continue
+            }
             if shouldExtract {
                 let extraction = await SearchReadability.extract(url: hit.url, timeout: timeout)
                 if let title = extraction.title, !title.isEmpty { entry["title"] = title }
@@ -384,6 +463,7 @@ final class SearchAndExtractTool: OsaurusTool, @unchecked Sendable {
             enriched.append(entry)
         }
         payload["results"] = enriched
+        WebSearchResultFormatter.applySourceMetadata(&payload, run: run)
 
         return ToolEnvelope.success(
             tool: name,

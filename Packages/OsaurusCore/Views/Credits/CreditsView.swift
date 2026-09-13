@@ -7,6 +7,7 @@ struct CreditsView: View {
     @ObservedObject private var accountService = OsaurusRouterAccountService.shared
     @ObservedObject private var insightsService = InsightsService.shared
     @ObservedObject private var providerManager = RemoteProviderManager.shared
+    @ObservedObject private var searchManager = SearchProviderManager.shared
 
     private static let activityPageSize = 10
     private static let ledgerMatchLimit = 500
@@ -42,6 +43,7 @@ struct CreditsView: View {
                         }
                         balanceCard
                         CreditsRedeemCodeCard(isEnabled: canAddCredits)
+                        premiumSearchCard
                         activityCard
                     } else {
                         routerOffCard
@@ -182,6 +184,72 @@ struct CreditsView: View {
                     .fixedSize(horizontal: false, vertical: true)
                 }
                 Spacer()
+            }
+        }
+    }
+
+    private var premiumSearchCard: some View {
+        card {
+            VStack(alignment: .leading, spacing: 14) {
+                HStack(alignment: .top, spacing: 12) {
+                    Image(systemName: "magnifyingglass.circle.fill")
+                        .font(.system(size: 20, weight: .semibold))
+                        .foregroundColor(searchManager.hostedSearchEnabled ? theme.accentColor : theme.secondaryText)
+                    VStack(alignment: .leading, spacing: 3) {
+                        Text("Premium web search", bundle: .module)
+                            .font(.system(size: 15, weight: .semibold))
+                        Text(
+                            "Explicitly send searches through Osaurus first. Failures fall back to your providers and built-in sources.",
+                            bundle: .module
+                        )
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                    }
+                    Spacer()
+                    Toggle("", isOn: Binding(
+                        get: { searchManager.hostedSearchEnabled },
+                        set: { searchManager.setHostedSearchEnabled($0) }
+                    ))
+                    .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(theme.accentColor)
+                    .disabled(!canAddCredits)
+                }
+
+                if let settings = accountService.webSettings {
+                    Divider()
+                    HStack(alignment: .center, spacing: 12) {
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text("Use wallet when included search credits run out", bundle: .module)
+                                .font(.system(size: 12, weight: .semibold))
+                            Text("This is separate from enabling Premium Search.", bundle: .module)
+                                .font(.system(size: 11)).foregroundColor(theme.secondaryText)
+                        }
+                        Spacer()
+                        Toggle("", isOn: Binding(
+                            get: { settings.autoPayEnabled },
+                            set: { enabled in Task { await accountService.setWebAutoPay(enabled) } }
+                        ))
+                        .labelsHidden().toggleStyle(.switch).controlSize(.small).tint(theme.accentColor)
+                    }
+                }
+
+                if accountService.webSearchNeedsTopUp {
+                    Label("Premium search is using fallback sources until the wallet is topped up.", systemImage: "exclamationmark.circle.fill")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.warningColor)
+                } else if let billing = accountService.lastWebBilling {
+                    HStack(spacing: 14) {
+                        Label(
+                            billing.isIncluded ? "Included search credit" : "Wallet-funded request",
+                            systemImage: billing.isIncluded ? "checkmark.circle.fill" : "creditcard.fill"
+                        )
+                        if let remaining = billing.allowanceRemaining {
+                            Text("\(remaining) included requests remaining", bundle: .module)
+                        }
+                        Spacer()
+                    }
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                }
             }
         }
     }
