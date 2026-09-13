@@ -29,41 +29,56 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 1. Existing agents and model routing
 
-- [ ] Every existing agent keeps its name, description, model, avatar, order,
+- [x] Every existing agent keeps its name, description, model, avatar, order,
       theme, tools, Memory, Knowledge, and Bonjour settings.
-- [ ] Existing agents display their stored models rather than a shared Claude
+- [x] Existing agents display their stored models rather than a shared Claude
       Code fallback.
-- [ ] A fresh chat from each agent selects and calls that agent's stored model.
-- [ ] Changing an agent model affects a fresh chat.
-- [ ] Reset to default restores active-model inheritance in a fresh chat.
-- [ ] Display and runtime routing remain correct after relaunch.
+- [x] A fresh chat from each agent selects and calls that agent's stored model.
+- [x] Changing an agent model affects a fresh chat.
+- [x] Reset to default restores active-model inheritance in a fresh chat.
+- [x] Display and runtime routing remain correct after relaunch.
+- [ ] **Regression:** changing the model from a fresh chat must not rewrite the
+      agent's configured model in Settings. Rosy currently couples the two.
 
 ## 2. App-wide Ventura controls
 
-- [ ] Text fields show insertion carets, focus rings, selection, and hover.
-- [ ] Untouched toggles show the correct state and colour before interaction.
-- [ ] Toggle appearance remains correct after navigation and relaunch.
-- [ ] Buttons show labels/icons in normal, hover, pressed, and disabled states.
-- [ ] Menus and dropdown options are readable before selection.
-- [ ] Tab and subtab hover states are visible throughout the app.
-- [ ] Database and watcher controls do not render blank.
+- [ ] **Failed:** text fields accept focus/input but do not show insertion
+      carets on Rosy Ventura.
+- [x] Untouched toggles show the correct state and colour before interaction.
+- [x] Toggle appearance remains correct after navigation and relaunch.
+- [ ] **Failed:** several buttons and selectors render white labels on white
+      backgrounds.
+- [ ] **Failed:** the Add Knowledge Collection sheet renders its fields and
+      buttons with effectively invisible labels; folder selection and creation
+      still work, making this a dangerous blind workflow.
+- [x] Tab and subtab hover states are visible throughout the app.
+- [x] Database and watcher controls do not render blank.
+- [ ] Native red/yellow/green window controls remain absent. Record screen
+      sharing/recording state before assigning the cause; the current evidence
+      proves the visible failure but not whether window chrome or the sharing
+      indicator owns it.
 
 ## 3. Agent General and Appearance
 
-- [ ] Name, description, instructions, temperature, maximum tokens, model, and
+- [x] Name, description, instructions, temperature, maximum tokens, model, and
       follow-up model save and survive relaunch.
-- [ ] Reset to default is present and restores model inheritance.
-- [ ] Claude Code exposes Agent/Text only plus file-change and shell-command
-      permissions; each disabled/enabled state is enforced.
-- [ ] Unavailable Claude MCP support is explanatory and has no dead switch.
-- [ ] Delete Data removes chats and memory from a disposable agent but keeps the
-      agent.
-- [ ] A custom avatar appears on first upload, can be selected, updates the
+- [x] Reset to default is present and restores model inheritance.
+- [ ] **Failed:** no Claude Code control surface exposes Agent/Text mode,
+      file-change permission, or shell-command permission anywhere in General
+      or Agent Settings.
+- [x] Unavailable Claude MCP support is explanatory and has no dead switch.
+- [ ] **Failed:** no Delete Data button is visible in the Agents window for a
+      disposable custom agent, so deletion cannot be tested. The compiled view
+      declares the action under General → Configure, which makes this a UI
+      reachability/rendering defect rather than proof that the backend is absent.
+- [x] A custom avatar appears on first upload, can be selected, updates the
       header/chat, and survives relaunch.
-- [ ] Removing the custom avatar restores the letter fallback without leaving a
+- [x] Removing the custom avatar restores the letter fallback without leaving a
       mascot falsely selected.
-- [ ] Distinct agent themes apply to their chats and never leak between agents.
-- [ ] Mascots, greeting, empty state, action bar, and action-bar items work.
+- [x] Distinct agent themes apply to their chats and never leak between agents.
+- [x] Mascots, greeting, empty state, action bar, and action-bar items work.
+- [ ] **Regression:** selecting a custom avatar updates the main chat but leaves
+      the upper Agent Settings header showing the previous avatar.
 
 ## 4. Ability and tool enforcement
 

@@ -113,6 +113,34 @@ requests. Only responses explicitly marked `paid` may now reduce the displayed
 balance. Focused M4 validation passes 33 tests in 3 suites. C3 stays Partial
 until the x86_64 candidate and real Router behavior pass Rosy Ventura.
 
+## 2026-09-13 — Rosy acceptance retest, sections 1–3
+
+The second Agent Settings acceptance pass materially changes the diagnosis from
+2026-09-10. Existing agents now preserve their configuration, display and call
+their stored models, reset to inherited defaults, and survive relaunch. Custom
+avatar upload/removal and per-agent themes also work. Toggle colour and tab hover
+feedback are repaired. These are observed Rosy Ventura results, not inferred
+from Codable or M4 tests.
+
+Four defects remain. First, changing the model in a fresh chat also rewrites the
+agent's configured model, so chat-local selection and agent defaults are still
+incorrectly coupled. Second, Ventura text fields still hide insertion carets,
+and several controls use white labels on white backgrounds; the Add Knowledge
+Collection sheet is operable only as a blind workflow. Third, no discoverable
+Claude Code panel exposes Agent/Text mode or file/shell permissions. The source
+contains that panel behind Claude model recognition, so its absence may be a
+picker-id/conditional-rendering failure. The source also declares Delete Data
+under General → Configure for non-built-in agents, but Rosy shows no visible
+button for a disposable custom agent; treat it as an inaccessible UI action,
+not an untested backend. Fourth, a selected custom avatar
+updates chat but not the Agent Settings header, proving stale presentation state.
+
+Native traffic lights are also still absent. The screenshots prove the visual
+failure but do not isolate its owner because the test record does not yet state
+whether screen sharing or recording was active; preserve that uncertainty when
+repairing the titlebar. Future fixes must be tested on Ventura with explicit
+screen-sharing/recording state rather than accepted from M4 appearance alone.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every
