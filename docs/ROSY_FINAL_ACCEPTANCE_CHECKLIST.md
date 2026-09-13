@@ -190,20 +190,32 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 11. Orchestrator settings and bounded delegation
 
-- [ ] The Orchestrator route stays selected across Settings navigation.
-- [ ] Name, prompt, model, temperature, and maximum tokens persist after relaunch
+- [x] The Orchestrator route stays selected across Settings navigation.
+- [x] Name, prompt, model, temperature, and maximum tokens persist after relaunch
       without changing custom agents.
-- [ ] Fresh chats use the selected model and prompt; reset restores inheritance;
+- [x] Fresh chats use the selected model and prompt; reset restores inheritance;
       already-open chats follow the documented invalidation behavior.
-- [ ] Only explicitly admitted custom agents and cloud models can be delegated to.
-- [ ] Missing, removed, unavailable, denied, and malformed targets fail closed.
-- [ ] Ask pauses, Deny prevents execution, and Always Allow is scoped to the exact
-      launcher/target pair.
-- [ ] The child is fresh, standalone, one-turn, tool-free, one-at-a-time,
-      cancellable, and bounded by input, token, output, and timeout limits.
-- [ ] The result is bounded inline text; no durable child session, filesystem
-      artifact, background continuation, or nested/model-owned spawn appears.
-- [ ] Removing an admitted target persists and blocks it in a fresh chat.
+- [ ] **Blocked:** the Orchestrator chat receives no orchestration/delegation
+      tools, so admitted-target enforcement cannot be exercised there.
+- [ ] **Blocked:** missing, removed, unavailable, denied, and malformed target
+      failures cannot be exercised without a callable delegation path.
+- [ ] **Blocked:** Ask, Deny, and launcher/target-scoped Always Allow cannot be
+      exercised from the Orchestrator chat.
+- [ ] **Blocked:** child freshness, isolation, concurrency, cancellation, and
+      input/token/output/timeout bounds cannot be exercised from chat.
+- [ ] **Blocked:** bounded inline return and the absence of durable sessions,
+      artifacts, background work, and nested/model-owned spawn cannot be
+      exercised from chat.
+- [ ] **Blocked:** admitted-target removal cannot be tested against a fresh
+      Orchestrator chat because that chat has no delegation tool.
+- [ ] **Failed:** the built-in Orchestrator does not use upstream's standard
+      green mascot; the Intel `Agent.default` omits `avatar: "green"`.
+- [ ] **Failed:** completed Orchestrator messages lack the ellipsis/actions row
+      and message statistics shown beneath ordinary upstream assistant messages.
+- [ ] **Failed:** the Intel Orchestrator receives only the user-editable prompt.
+      Upstream's substantial built-in Orchestrator instructions are compiled out
+      with `DefaultAgentSystemPromptBuilder` and are not replaced in the Intel
+      prompt composer.
 
 ## 12. Declarative configuration in Settings
 
@@ -219,18 +231,19 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 13. Model-callable `orchestrator_config`
 
-- [ ] A new built-in Orchestrator chat sees the tool; custom-agent and unbound
-      contexts cannot see or execute it.
-- [ ] Plan output contains changed paths and fingerprints, never current private
-      prompt/configuration values.
-- [ ] Apply opens the exact before/after card only in the requesting chat window.
-- [ ] The card offers Apply and Cancel only; Cancel never mutates.
-- [ ] Apply persists through relaunch.
-- [ ] A pending plan made stale elsewhere fails without overwriting new state.
-- [ ] Stopping or closing the originating chat cancels a pending review without
-      mutation.
-- [ ] Explicit tool-policy Deny blocks without a card; Ask/Auto still use the
-      dedicated card and never expose an Always Allow shortcut.
+- [ ] **Failed at entry:** a new built-in Orchestrator chat does not see
+      `orchestrator_config`; therefore its custom-agent and unbound denial paths
+      were not tested manually.
+- [ ] **Blocked by missing tool exposure:** plan paths, fingerprints, and private
+      value omission were not exercised.
+- [ ] **Blocked by missing tool exposure:** the requesting-chat approval card was
+      not exercised.
+- [ ] **Blocked by missing tool exposure:** Apply/Cancel behavior was not exercised.
+- [ ] **Blocked by missing tool exposure:** apply persistence was not exercised.
+- [ ] **Blocked by missing tool exposure:** stale-plan rejection was not exercised.
+- [ ] **Blocked by missing tool exposure:** stop/close cancellation was not exercised.
+- [ ] **Blocked by missing tool exposure:** tool-policy Deny and dedicated-card
+      Ask/Auto behavior were not exercised.
 
 ## 14. Later-roadmap feature acceptance
 

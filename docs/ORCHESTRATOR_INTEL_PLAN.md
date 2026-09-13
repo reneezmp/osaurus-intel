@@ -1,11 +1,12 @@
 # Orchestrator on Intel — implementation plan and focused test contract
 
-**Status (2026-09-12):** Gates 1–5B are implemented in the Intel fork. The built-in
-Orchestrator has a persistent configuration store, a real settings route, effective
-model/prompt/generation routing, and a deliberately narrow manual one-turn
-delegation surface. Gate 4 admits only explicitly selected custom agents and
-explicitly admitted remote cloud models. M4 automated validation is recorded below;
-Rosy Ventura QA is still pending.
+**Status (corrected by Rosy QA, 2026-09-13):** Gates 1–2 pass on Intel. Gate 4's
+manual Settings sheet and Gate 5B's tool/runtime code exist and have automated
+coverage, but the Orchestrator chat receives no orchestration or delegation tools,
+so they are not promoted as a working model-facing Orchestrator. The Intel prompt
+also omits upstream's compiled-out built-in Orchestrator instructions, and its
+default agent omits the standard green avatar. Treat Gates 3–5B as implementation
+work awaiting repaired chat exposure and fresh Rosy acceptance.
 
 **Scope:** `intel-fork`, Intel/x86_64, macOS 13 Ventura minimum. This plan is based on
 the audited `upstream/main` chain and the active Intel target, including its

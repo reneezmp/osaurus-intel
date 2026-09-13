@@ -218,6 +218,32 @@ separation. Image hits deliberately return structured `image_url` and
 gallery. Track inline thumbnails with chat presentation work, not as a search
 backend defect. Funded Router billing remains a Credits/Router acceptance item.
 
+## 2026-09-13 — Rosy Orchestrator acceptance correction
+
+All screenshots and observations in this acceptance sequence were captured
+directly on Rosy running Ventura. They are Intel product evidence, not images of
+the current upstream build on the M4.
+
+Rosy confirms the Orchestrator settings route, persistence, reset/inheritance,
+and editable model/prompt/generation routing. It does not confirm Gates 3–5B as
+a usable Orchestrator: the built-in chat receives no orchestration or delegation
+tools, so admission, failure, permission, bounds, cancellation, inline-result,
+and target-removal contracts cannot be exercised from the product's primary
+Orchestrator surface. The same entry failure blocks every manual
+`orchestrator_config` check. A manual Settings delegation sheet and automated
+runtime tests are implementation evidence, not proof of model-callable
+orchestration.
+
+The audit also found two concrete upstream omissions. Upstream's `Agent.default`
+sets `avatar: "green"`; Intel does not. Upstream prepends a substantial built-in
+role through `DefaultAgentSystemPromptBuilder`, covering configuration reads and
+writes, same-turn action, approval, secrets, and specialist delegation. That file
+is compiled out under `OSAURUS_INTEL`, while Intel's replacement composer appends
+no equivalent and therefore sends only the editable prompt. Rosy also reports
+missing assistant message footer actions and statistics in Orchestrator chat;
+track that with the broader chat presentation regression while verifying the
+Intel footer-synthesis path.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every
