@@ -141,6 +141,33 @@ whether screen sharing or recording was active; preserve that uncertainty when
 repairing the titlebar. Future fixes must be tested on Ventura with explicit
 screen-sharing/recording state rather than accepted from M4 appearance alone.
 
+## 2026-09-13 — Rosy acceptance retest, section 4
+
+Ability persistence and several broad gates now have real Ventura evidence:
+whole-agent Tools off/on works for fresh and restored chats, Knowledge access is
+blocked without losing assignments, Web Search tools follow their toggle, and
+the picker/search/provider controls persist. These passes do not establish
+per-tool runtime revocation. Rosy showed a removed tool as unselected while the
+open chat could still call it. Although `runtimeCapabilityDenial` declares a
+live allowlist check, the observed behavior means dispatch lacks the correct
+current agent context or bypasses that boundary on the failing path.
+
+Memory produced two distinct failures with `osaurus/qwen-3-8-max`: completed
+requests failed response decoding as “The data couldn’t be read because it isn’t
+in the correct format,” while attempts after relaunch were skipped as
+`no_model:configured_unservable:osaurus/qwen-3-8-max`. Do not collapse these
+into one configuration bug. Repair and test provider/model rediscovery across
+relaunch separately from tolerant extraction and decoding of the provider's
+distillation response. Until then, Memory off/on injection and saving is blocked.
+
+Self-scheduling is currently an Automation link in the Abilities overview, not
+an ability toggle, and tested agents report no scheduling tools. Web Search's
+passing gate therefore says nothing about scheduling. The source also declares
+Intel-unavailable rows for Database, Computer Use, Browser Use, Spawn, media,
+and AppleScript, but Rosy displayed no unavailable-ability explanation. Treat
+that as a candidate UI reachability/rendering mismatch and verify the shipped
+x86_64 bundle rather than claiming the declarations are user-visible.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every

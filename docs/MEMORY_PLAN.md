@@ -468,3 +468,23 @@ same path; pending signals remain recoverable when a provider is temporarily
 unavailable.
 - Fresh Rosy deploy zip built and round-trip verified (symlinks + signature
   intact after unzip).
+
+---
+
+## 2026-09-13 — Rosy distillation regression
+
+Rosy Ventura exposed two independent failures while testing per-agent Memory
+enforcement. Distillation requests routed to `osaurus/qwen-3-8-max` reached the
+provider but ended with “The data couldn’t be read because it isn’t in the
+correct format.” After quitting and reopening Osaurus, later attempts did not
+reach generation and were logged as
+`no_model:configured_unservable:osaurus/qwen-3-8-max`.
+
+The first path must preserve the raw provider response in diagnostics and test
+the exact response envelope/content shape before changing the digest parser.
+The second must test provider discovery and qualified model identity after a
+cold relaunch. A successful chat with that model before relaunch does not prove
+that `resolveDistillModel()` can still match it afterward. Pending signals must
+remain recoverable through either failure. The acceptance item “Memory off
+prevents injection and saving; Memory on restores both” remains blocked until
+both failures are repaired and the off/on behavior is then tested separately.

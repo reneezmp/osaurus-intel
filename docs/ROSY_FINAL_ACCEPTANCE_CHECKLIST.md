@@ -82,19 +82,30 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 4. Ability and tool enforcement
 
-- [ ] Tools off removes assigned tools from fresh and restored chats; Tools on
+- [x] Tools off removes assigned tools from fresh and restored chats; Tools on
       restores them.
-- [ ] Removing a tool from an already-open chat removes it on the next turn and
-      stale calls cannot execute.
-- [ ] Memory off prevents injection and saving; Memory on restores both.
-- [ ] Knowledge off retains collection assignments but blocks chat access;
+- [ ] **Failed:** removing a tool from an already-open chat updates the picker,
+      but the tool remains callable on the next turn. The runtime dispatch
+      boundary is not enforcing the live agent allowlist on Rosy.
+- [ ] **Blocked by two Memory failures:** distillation with
+      `osaurus/qwen-3-8-max` first fails with “The data couldn’t be read because
+      it isn’t in the correct format”; after relaunch it is skipped as
+      `no_model:configured_unservable:osaurus/qwen-3-8-max`. Memory off/on
+      injection and saving cannot be accepted until both paths are repaired.
+- [x] Knowledge off retains collection assignments but blocks chat access;
       Knowledge on restores search.
-- [ ] Web Search and Self-scheduling toggles remove and restore their tools in
-      fresh and restored chats.
-- [ ] All ability values persist after relaunch.
-- [ ] Tools search, All/Enabled filters, individual/provider assignment, counts,
-      persistence, allowed execution, and removed-tool denial work.
-- [ ] Unavailable abilities remain clearly marked and cannot create fake config.
+- [ ] **Partial:** Web Search removes and restores its tools, but
+      Self-scheduling has no ability toggle and agents report no scheduling
+      tools, so its off/on enforcement cannot be tested.
+- [x] All ability values persist after relaunch.
+- [x] Tools search, All/Enabled filters, individual/provider assignment, counts,
+      persistence, and allowed execution work. Runtime denial after removal is
+      tracked separately above and has failed.
+- [ ] **Failed:** Rosy shows no unavailable-ability explanation. The compiled
+      view declares unavailable rows for Database, Computer Use, Browser Use,
+      Spawn, image/video, and AppleScript, so this is a candidate UI
+      reachability/rendering mismatch rather than proof those declarations are
+      absent from source.
 
 ## 5. Insights
 
