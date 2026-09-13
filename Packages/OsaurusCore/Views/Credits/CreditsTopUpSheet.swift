@@ -158,7 +158,7 @@ struct CreditsTopUpSheet: View {
         } else if isValid, let micro = currentMicro {
             Label {
                 Text(
-                    "You'll add \(OsaurusRouter.formatMicroUSD(String(micro)))",
+                    "You'll add \(OsaurusRouter.formatMicroAsCredits(String(micro))) (\(OsaurusRouter.formatMicroUSD(String(micro))))",
                     bundle: .module
                 )
                 .font(.system(size: 12))

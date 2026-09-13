@@ -229,6 +229,19 @@ Complete the matching detailed test section when each feature lands:
       have distinct useful states with no raw server body.
 - [ ] Activity and exported diagnostics contain no prompt, response, query,
       URL, page text, key, signature, or identity secret.
+- [ ] Balance, model prices, usage charges, and wallet activity use credits;
+      Checkout still states the exact dollar charge before opening the browser.
+- [ ] Redeem a valid code and confirm the awarded credits and refreshed balance;
+      trim surrounding whitespace and reject an empty or overlong submission.
+- [ ] Already-redeemed and referral-pending successes are clear; invalid code,
+      403/account restriction, unauthorized identity, 429, network failure, and
+      5xx states are distinct and reveal no raw server response.
+- [ ] Quit and reopen after redemption; the wallet remains authoritative and no
+      code or transient success/error state is persisted.
+- [ ] Account details show request/input/output totals, usage cost, wallet net,
+      recent usage, and transactions; refresh does not duplicate entries.
+- [ ] No Insights link appears until a selected Router request can be correlated
+      with a real Intel chat turn. No onboarding redemption is implied.
 - [ ] Premium Search defaults off. Router on alone never enables it.
 - [ ] Included search credits are used before wallet funds; wallet auto-pay is
       independently opt-in and persists.

@@ -48,6 +48,11 @@ actor OsaurusRouterAPIClient {
         return try await post("/credits/checkout", body: Body(amount_micro: amountMicro))
     }
 
+    func redeemCode(_ code: String) async throws -> OsaurusRouterRedeemCodeResponse {
+        struct Body: Encodable { let code: String }
+        return try await post("/credits/redeem", body: Body(code: code))
+    }
+
     func models() async throws -> [OsaurusRouterModel] {
         let response: OsaurusRouterModelListResponse = try await get("/models")
         return response.data

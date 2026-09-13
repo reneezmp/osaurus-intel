@@ -33,6 +33,7 @@ enum OsaurusRouter {
     }
 
     static let minimumTopUpMicro = 5_000_000
+    static let microPerCredit: Int64 = 100
 
     /// Parse a positive dollar amount into whole micro-USD without allowing a
     /// floating-point conversion to overflow `Int`.
@@ -77,6 +78,59 @@ enum OsaurusRouter {
             return "\(sign)<$0.0001"
         }
         return "\(sign)$\(String(format: "%.4f", dollars))"
+    }
+
+    static func formatMicroAsCredits(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isNegative = trimmed.hasPrefix("-")
+        let unsigned = String(trimmed.drop { $0 == "-" || $0 == "+" })
+        guard let micro = Int64(unsigned), micro != 0 else { return "0 credits" }
+        let sign = isNegative ? "-" : ""
+        let credits = micro / microPerCredit
+        let residue = micro % microPerCredit
+        guard credits != 0 else { return "\(sign)<1 credit" }
+        var value = groupedThousands(credits)
+        if residue != 0 { value += ".\(String(format: "%02d", residue))" }
+        let unit = credits == 1 && residue == 0 ? "credit" : "credits"
+        return "\(sign)\(value) \(unit)"
+    }
+
+    static func formatMicroAsCreditsValue(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isNegative = trimmed.hasPrefix("-")
+        let unsigned = String(trimmed.drop { $0 == "-" || $0 == "+" })
+        guard let micro = Int64(unsigned), micro != 0 else { return "0" }
+        let sign = isNegative ? "-" : ""
+        let credits = micro / microPerCredit
+        return credits == 0 ? "\(sign)<1" : "\(sign)\(groupedThousands(credits))"
+    }
+
+    static func formatMicroAsCreditsCompact(_ rawValue: String) -> String {
+        let trimmed = rawValue.trimmingCharacters(in: .whitespacesAndNewlines)
+        let isNegative = trimmed.hasPrefix("-")
+        let unsigned = String(trimmed.drop { $0 == "-" || $0 == "+" })
+        guard let micro = Int64(unsigned), micro != 0 else { return "0 credits" }
+        let sign = isNegative ? "-" : ""
+        let credits = micro / microPerCredit
+        guard credits != 0 else { return "\(sign)<1 credit" }
+        if credits < 10_000 {
+            return "\(sign)\(groupedThousands(credits)) \(credits == 1 ? "credit" : "credits")"
+        }
+        let millions = credits >= 999_950
+        let scaled = millions ? Double(credits) / 1_000_000 : Double(credits) / 1_000
+        var figure = String(format: millions ? "%.2f" : "%.1f", scaled)
+        while figure.contains("."), figure.hasSuffix("0") { figure.removeLast() }
+        if figure.hasSuffix(".") { figure.removeLast() }
+        return "\(sign)\(figure)\(millions ? "M" : "K") credits"
+    }
+
+    private static func groupedThousands(_ value: Int64) -> String {
+        var grouped: [Character] = []
+        for (offset, character) in String(value).reversed().enumerated() {
+            if offset != 0, offset.isMultiple(of: 3) { grouped.append(",") }
+            grouped.append(character)
+        }
+        return String(grouped.reversed())
     }
 
     /// True when a chat/stream error string indicates the router rejected the
@@ -173,6 +227,24 @@ struct OsaurusRouterCheckoutResponse: Decodable, Equatable, Sendable {
     }
 }
 
+struct OsaurusRouterRedeemCodeResponse: Decodable, Equatable, Sendable {
+    let redeemed: Bool
+    let alreadyRedeemed: Bool
+    let campaignKind: String
+    let amountMicro: String
+    let referralPending: Bool
+    let redemptionMessage: String
+
+    enum CodingKeys: String, CodingKey {
+        case redeemed
+        case alreadyRedeemed = "already_redeemed"
+        case campaignKind = "campaign_kind"
+        case amountMicro = "amount_micro"
+        case referralPending = "referral_pending"
+        case redemptionMessage = "redemption_message"
+    }
+}
+
 struct OsaurusRouterModelListResponse: Decodable, Sendable {
     let data: [OsaurusRouterModel]
 }
@@ -207,6 +279,8 @@ struct OsaurusRouterModel: Decodable, Identifiable, Equatable, Sendable {
     let outputMicroPerMTok: String
     let inputDisplay: String
     let outputDisplay: String
+    let inputCreditsDisplay: String?
+    let outputCreditsDisplay: String?
     let stale: Bool
     let capabilities: [String: Bool]?
 
@@ -217,6 +291,8 @@ struct OsaurusRouterModel: Decodable, Identifiable, Equatable, Sendable {
         case outputMicroPerMTok = "output_micro_per_mtok"
         case inputDisplay = "input_display"
         case outputDisplay = "output_display"
+        case inputCreditsDisplay = "input_credits_display"
+        case outputCreditsDisplay = "output_credits_display"
     }
 }
 
@@ -232,12 +308,18 @@ extension OsaurusRouterModel {
             parts.append(trimmedProvider)
         }
 
-        let input = inputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        let inputCredits = inputCreditsDisplay?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let input = inputCredits.isEmpty
+            ? inputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+            : inputCredits
         if !input.isEmpty {
             parts.append("\(input) in")
         }
 
-        let output = outputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+        let outputCredits = outputCreditsDisplay?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let output = outputCredits.isEmpty
+            ? outputDisplay.trimmingCharacters(in: .whitespacesAndNewlines)
+            : outputCredits
         if !output.isEmpty {
             parts.append("\(output) out")
         }

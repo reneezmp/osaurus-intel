@@ -70,6 +70,27 @@ Every important implementation or test discovery must update the owning plan,
 feature-parity table, sync log, and final Rosy checklist in the same change.
 These manuals are part of the product contract, not a retrospective extra.
 
+## 2026-09-12 — Credits/Router Gate C2
+
+The credit-unit, redeem-code, and account-detail portions of upstream commits
+`6ecd2133`, `89ccb249`, and `757807f9` were re-evaluated as product behavior,
+then hand-ported against the Intel Router contracts. Balances, model prices,
+usage, and wallet activity now display credits; Checkout keeps the dollar
+charge explicit. The Credits page can redeem a bounded code through a signed
+request and presents typed, redacted error states. Its account center summarizes
+the existing `/usage` and `/credits/transactions` responses without introducing
+an unproven Insights link.
+
+The upstream onboarding/welcome-credit coordinator was not copied: Intel does
+not yet have that dependency, and silently coupling it to this page would turn
+commit coverage into another false parity claim. It is recorded as backlog work
+to link after the coordinator exists. A compile pass caught and corrected an
+invalid combined Swift switch pattern before focused validation; the final C2
+set passes 8 tests in 4 suites. The Rosy build succeeds as x86_64 with macOS
+13.0 minimum and applies the configured signing identity. M4 strict trust
+verification reports `CSSMERR_TP_NOT_TRUSTED`; Rosy launch remains the signing
+and product promotion gate.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every

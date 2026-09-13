@@ -22,6 +22,7 @@ struct CreditsView: View {
     @State private var diagnosticsMessage: String?
     @State private var showTopUpSheet = false
     @State private var showDisableRouterConfirm = false
+    @State private var showAccountDetails = false
 
     private var routerEnabled: Bool { providerManager.isOsaurusRouterEnabled }
     private var canAddCredits: Bool { routerEnabled && OsaurusIdentity.exists() }
@@ -40,6 +41,7 @@ struct CreditsView: View {
                             identityRequiredCard
                         }
                         balanceCard
+                        CreditsRedeemCodeCard(isEnabled: canAddCredits)
                         activityCard
                     } else {
                         routerOffCard
@@ -68,6 +70,10 @@ struct CreditsView: View {
         }
         .sheet(isPresented: $showTopUpSheet) {
             CreditsTopUpSheet()
+                .environment(\.theme, themeManager.currentTheme)
+        }
+        .sheet(isPresented: $showAccountDetails) {
+            RouterAccountUsageCenterView()
                 .environment(\.theme, themeManager.currentTheme)
         }
         .confirmationDialog(
@@ -105,6 +111,11 @@ struct CreditsView: View {
             }
             .disabled(!routerEnabled)
             .opacity(routerEnabled ? 1 : 0.55)
+            HeaderIconButton("chart.bar.xaxis", help: "Account details") {
+                showAccountDetails = true
+            }
+            .disabled(!canAddCredits)
+            .opacity(canAddCredits ? 1 : 0.55)
             HeaderPrimaryButton("Add credits", icon: "creditcard.fill") {
                 showTopUpSheet = true
             }
@@ -218,9 +229,16 @@ struct CreditsView: View {
                             .font(.system(size: 13, weight: .semibold))
                             .foregroundColor(theme.secondaryText)
                         HStack(alignment: .firstTextBaseline, spacing: 10) {
-                            Text(verbatim: accountService.formattedBalance)
-                                .font(.system(size: 34, weight: .bold, design: .rounded))
-                                .foregroundColor(theme.primaryText)
+                            HStack(alignment: .firstTextBaseline, spacing: 6) {
+                                Text(verbatim: accountService.formattedBalanceValue)
+                                    .font(.system(size: 34, weight: .bold, design: .rounded))
+                                    .foregroundColor(theme.primaryText)
+                                    .lineLimit(1)
+                                    .minimumScaleFactor(0.6)
+                                Text("credits", bundle: .module)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(theme.secondaryText)
+                            }
                             if accountService.isLoadingBalance {
                                 ProgressView()
                                     .scaleEffect(0.7)
@@ -488,7 +506,7 @@ struct CreditsView: View {
 
             Spacer(minLength: 12)
 
-            Text(verbatim: OsaurusRouter.formatMicroUSDPrecise(row.costMicro))
+            Text(verbatim: "-" + OsaurusRouter.formatMicroAsCredits(row.costMicro))
                 .font(.system(size: 14, weight: .semibold, design: .rounded))
                 .foregroundColor(theme.primaryText)
                 .monospacedDigit()

@@ -7,9 +7,11 @@ final class OsaurusRouterAccountService: ObservableObject {
 
     @Published private(set) var balance: OsaurusRouterBalanceResponse?
     @Published private(set) var usage: [OsaurusRouterUsageItem] = []
+    @Published private(set) var transactions: [OsaurusRouterTransactionItem] = []
     @Published private(set) var nextUsageCursor: String?
     @Published private(set) var isLoadingBalance = false
     @Published private(set) var isLoadingUsage = false
+    @Published private(set) var isLoadingTransactions = false
     @Published private(set) var isCreatingCheckout = false
     @Published var lastError: String?
 
@@ -36,7 +38,15 @@ final class OsaurusRouterAccountService: ObservableObject {
     }
 
     var formattedBalance: String {
-        OsaurusRouter.formatMicroUSD(balance?.balanceMicro ?? "0")
+        OsaurusRouter.formatMicroAsCredits(balance?.balanceMicro ?? "0")
+    }
+
+    var formattedBalanceValue: String {
+        OsaurusRouter.formatMicroAsCreditsValue(balance?.balanceMicro ?? "0")
+    }
+
+    var compactFormattedBalance: String {
+        OsaurusRouter.formatMicroAsCreditsCompact(balance?.balanceMicro ?? "0")
     }
 
     /// Current balance in micro-USD (0 when unknown or unparseable).
@@ -53,11 +63,13 @@ final class OsaurusRouterAccountService: ObservableObject {
         await RemoteProviderManager.shared.connectOsaurusRouterIfPossible()
         await refreshBalance()
         await refreshUsage(reset: true)
+        await refreshTransactions(reset: true)
     }
 
     func clearForDisabledRouter() {
         balance = nil
         usage = []
+        transactions = []
         nextUsageCursor = nil
         lastError = nil
     }
@@ -119,6 +131,22 @@ final class OsaurusRouterAccountService: ObservableObject {
     func loadMoreUsage() async {
         guard nextUsageCursor != nil, !isLoadingUsage else { return }
         await refreshUsage(reset: false)
+    }
+
+    func refreshTransactions(reset: Bool = true) async {
+        guard OsaurusRouter.isEnabled else { return }
+        guard OsaurusIdentity.exists() else {
+            transactions = []
+            return
+        }
+        isLoadingTransactions = true
+        defer { isLoadingTransactions = false }
+        do {
+            let response = try await client.transactions(limit: 100, cursor: nil)
+            transactions = response.data
+        } catch {
+            lastError = error.localizedDescription
+        }
     }
 
     func createCheckout(amountMicro: Int = OsaurusRouter.minimumTopUpMicro) async -> URL? {

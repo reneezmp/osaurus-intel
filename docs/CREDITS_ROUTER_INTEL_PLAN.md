@@ -52,6 +52,18 @@ focused tests pass and the signed x86_64 app builds with macOS 13.0 minimum.
   request/turn correlation is proven.
 - Keep the local diagnostic ledger metadata-only.
 
+**Implemented on M4, pending Rosy:** balances, model prices, usage, and wallet
+activity now use the Router's credit unit while Checkout still states the real
+dollar charge. The Credits page has a bounded redeem-code flow with typed,
+redacted failures and an account usage center built from the existing signed
+`/usage` and `/credits/transactions` contracts. Redemption is deliberately
+Credits-only: upstream onboarding/welcome-credit coordination is a separate
+dependency and remains in the backlog. Insights deep links remain absent until
+Intel request/turn correlation is proven. Focused validation passes 8 tests in
+4 suites. The Rosy script produces an x86_64 app with macOS 13.0 minimum and
+applies the configured identity; strict trust verification on the M4 reports
+`CSSMERR_TP_NOT_TRUSTED`, so Rosy launch remains the signing acceptance gate.
+
 ### C3 — Premium Web Search
 
 - Add signed Router contracts for web settings, web usage, `/v1/search`, and
@@ -77,7 +89,9 @@ The hosted Router must provide the four web endpoints and stable error codes.
 If any contract is absent, keep its UI explanatory and record the server work
 in the backlog; do not ship a working-looking control. Browser Checkout remains
 an external handoff. Insights deep links remain blocked until Intel correlation
-is measured. Premium image/video search remains outside C3.
+is measured. Onboarding-triggered welcome-credit redemption remains separate
+from the Credits page and must be linked only after that coordinator exists on
+Intel. Premium image/video search remains outside C3.
 
 ## Maintenance rule
 
