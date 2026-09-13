@@ -247,21 +247,30 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 14. Later-roadmap feature acceptance
 
-Complete the matching detailed test section when each feature lands:
+**Owner decision, 2026-09-13:** this section is intentionally deferred. Renée
+completed the Native Web Search acceptance she actively uses; she is not the
+sole QA department for Credits/Router, Channels, Browser Use, Computer Use,
+cloud Media, Privacy, or later Chat/Workspaces features she rarely or never uses.
+Their unchecked items remain invitations for future users and contributors to
+test and report defects. They must not be converted into release claims or
+treated as failures merely because the owner declined this disproportionate
+test burden.
 
-- [ ] Revamped Credits and Router, including paid consent, billing failures,
+Complete the matching detailed test section when a future tester exercises it:
+
+- [ ] **Future-user field testing:** Revamped Credits and Router, including paid consent, billing failures,
       diagnostics, balance/activity, and Web Search integration.
-- [ ] Global Channels transports, credentials, allowlists, reply assignment,
+- [ ] **Future-user field testing:** Global Channels transports, credentials, allowlists, reply assignment,
       proactive destinations, outbox policy, activity, and revocation.
-- [ ] Browser Use feasibility/runtime, persistent isolated sessions, sign-in,
+- [ ] **Future-user field testing:** Browser Use feasibility/runtime, persistent isolated sessions, sign-in,
       approvals, cancellation, and Ventura support.
-- [ ] Computer Use feasibility/runtime, Accessibility, optional Screen Recording,
+- [ ] **Future-user field testing:** Computer Use feasibility/runtime, Accessibility, optional Screen Recording,
       action approval, cancellation, and Ventura support.
-- [ ] Cloud-only Media discovery, model defaults, image/video permissions, quotes,
+- [ ] **Future-user field testing:** Cloud-only Media discovery, model defaults, image/video permissions, quotes,
       job recovery, cancellation semantics, and returned artifacts.
-- [ ] Privacy Overview, Rules, Providers, Models, Storage, redaction review, local
+- [ ] **Future-user field testing:** Privacy Overview, Rules, Providers, Models, Storage, redaction review, local
       bypass rules, persistence, and destructive actions.
-- [ ] Revamped chat interface and Workspaces when their deferred ports land.
+- [ ] **Future-user field testing:** Revamped chat interface and Workspaces when their deferred ports land.
 
 ### 14A. Credits, Router, and Premium Web Search
 

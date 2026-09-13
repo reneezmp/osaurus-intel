@@ -244,6 +244,16 @@ missing assistant message footer actions and statistics in Orchestrator chat;
 track that with the broader chat presentation regression while verifying the
 Intel footer-synthesis path.
 
+## 2026-09-13 — Owner acceptance scope boundary
+
+Renée completed direct Rosy acceptance for Native Web Search, the feature in the
+later roadmap set she actively uses. She explicitly declines sole responsibility
+for exhaustive manual testing of Credits/Router, Channels, Browser Use, Computer
+Use, cloud Media, Privacy, and the deferred Chat/Workspaces revamps. Those areas
+remain available for future-user and contributor field reports. Unchecked cases
+mean untested under this owner scope; they are neither observed failures nor
+evidence for **Working and tested** status.
+
 ## Settings sidebar parity (2026-09-11)
 
 The Intel sidebar follows upstream's section sequence and row ordering for every
