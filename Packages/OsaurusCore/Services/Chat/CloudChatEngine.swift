@@ -38,6 +38,63 @@ struct ChatCompletionResponse: Codable, Sendable {
         let content: String?
         let tool_calls: [ToolCall]?
         let reasoning_content: String?
+
+        private enum CodingKeys: String, CodingKey {
+            case role, content, tool_calls, reasoning_content
+        }
+
+        init(
+            role: String?,
+            content: String?,
+            tool_calls: [ToolCall]?,
+            reasoning_content: String?
+        ) {
+            self.role = role
+            self.content = content
+            self.tool_calls = tool_calls
+            self.reasoning_content = reasoning_content
+        }
+
+        /// The Router's Qwen completion can return visible text as content
+        /// parts. Accept only its exact text-part shape; malformed, tool, and
+        /// media parts must remain decoding failures rather than becoming an
+        /// empty distillation.
+        private struct TextContentPart: Decodable {
+            let text: String
+
+            private enum CodingKeys: String, CodingKey { case type, text }
+
+            init(from decoder: Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                let type = try container.decode(String.self, forKey: .type)
+                guard type == "text" else {
+                    throw DecodingError.dataCorruptedError(
+                        forKey: .type,
+                        in: container,
+                        debugDescription: "Only text content parts are supported in chat completions"
+                    )
+                }
+                text = try container.decode(String.self, forKey: .text)
+            }
+        }
+
+        init(from decoder: Decoder) throws {
+            let container = try decoder.container(keyedBy: CodingKeys.self)
+            role = try container.decodeIfPresent(String.self, forKey: .role)
+            tool_calls = try container.decodeIfPresent([ToolCall].self, forKey: .tool_calls)
+            reasoning_content = try container.decodeIfPresent(String.self, forKey: .reasoning_content)
+
+            guard container.contains(.content), try !container.decodeNil(forKey: .content) else {
+                content = nil
+                return
+            }
+            do {
+                content = try container.decode(String.self, forKey: .content)
+            } catch DecodingError.typeMismatch(_, _) {
+                let parts = try container.decode([TextContentPart].self, forKey: .content)
+                content = parts.map(\.text).joined()
+            }
+        }
     }
 
     struct Usage: Codable, Sendable {
@@ -55,13 +112,62 @@ struct ChatCompletionResponse: Codable, Sendable {
 /// finished silently — the user saw an empty "poof" turn with no explanation.
 enum CloudChatError: LocalizedError {
     case httpError(provider: String, status: Int, message: String)
+    case responseDecoding(provider: String, message: String, diagnostic: String)
 
     var errorDescription: String? {
         switch self {
         case let .httpError(provider, status, message):
             let detail = message.isEmpty ? "no details returned" : message
             return "\(provider) API error \(status): \(detail)"
+        case let .responseDecoding(provider, message, diagnostic):
+            return "\(provider) returned an unsupported completion response (\(message)). Raw response (redacted, capped): \(diagnostic)"
         }
+    }
+}
+
+/// An enabled managed Router owns its qualified `osaurus/...` models even
+/// before its signed catalog finishes loading after a cold launch. This narrow
+/// rule is shared by endpoint routing and Memory model resolution.
+enum IntelRemoteModelEligibility {
+    static func providerPrefix(_ name: String) -> String {
+        name.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+    }
+
+    static func canRouteQualifiedModelDuringDiscovery(
+        _ model: String,
+        through provider: RemoteProvider
+    ) -> Bool {
+        guard provider.enabled, provider.providerType == .osaurusRouter else { return false }
+        return model.lowercased().hasPrefix(providerPrefix(provider.name) + "/")
+    }
+
+    /// The Router is a managed provider. During a cold launch its provider
+    /// record is installed asynchronously, while Memory orphan recovery can
+    /// begin immediately. A persisted `osaurus/...` selection must therefore
+    /// remain routable in that small window. This does not bless arbitrary
+    /// provider-prefixed names: only the managed Router's exact prefix is
+    /// eligible, and only while the Router is enabled.
+    static func canRouteManagedRouterModelDuringColdLaunch(_ model: String) -> Bool {
+        guard OsaurusRouter.isEnabled else { return false }
+        return model.lowercased().hasPrefix(providerPrefix("Osaurus") + "/")
+    }
+
+    static func provisionalManagedRouterProvider() -> RemoteProvider {
+        RemoteProvider(
+            id: UUID(uuidString: "2CFBD528-62FD-4EF0-A143-3FE532F03840")!,
+            name: "Osaurus",
+            host: OsaurusRouter.defaultBaseURL.host ?? "router.osaurus.ai",
+            providerProtocol: OsaurusRouter.defaultBaseURL.scheme == "http" ? .http : .https,
+            port: OsaurusRouter.defaultBaseURL.port,
+            basePath: "",
+            authType: .none,
+            providerType: .osaurusRouter,
+            enabled: true,
+            autoConnect: true,
+            timeout: 120
+        )
     }
 }
 
@@ -337,7 +443,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             let matchingProviders = providers.filter { provider in
                 let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
                 let bare = Self.bareModelId(model, for: provider)
-                return discovered.contains(bare) || provider.manualModelIds.contains(bare)
+                return discovered.contains(bare)
+                    || provider.manualModelIds.contains(bare)
+                    || IntelRemoteModelEligibility.canRouteQualifiedModelDuringDiscovery(
+                        model,
+                        through: provider
+                    )
             }
             let owner: RemoteProvider?
             if model.contains("/") {
@@ -377,6 +488,27 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             )
             return providerEndpoint
         }
+        // The managed Router's provider record is installed asynchronously at
+        // launch. Memory recovery may run before that task has populated the
+        // manager, so route a persisted qualified Router model through the
+        // same managed endpoint rather than falsely falling back to DeepSeek
+        // or declaring it unavailable. The signer still enforces identity and
+        // the Router still validates the selected model.
+        if IntelRemoteModelEligibility.canRouteManagedRouterModelDuringColdLaunch(model) {
+            let provider = IntelRemoteModelEligibility.provisionalManagedRouterProvider()
+            let path = provider.providerType.chatEndpoint
+            guard let url = provider.url(for: path) else { return nil }
+            var endpoint = ResolvedEndpoint(
+                url: url.absoluteString,
+                headers: [:],
+                providerLabel: provider.name,
+                modelId: Self.bareModelId(model, for: provider),
+                isOsaurusRouter: true,
+                provider: provider
+            )
+            endpoint.headers = try await requestHeaders(for: endpoint)
+            return endpoint
+        }
         // Built-in DeepSeek fallback.
         guard let key = await resolveAPIKey() else { return nil }
         return ResolvedEndpoint(
@@ -388,9 +520,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     }
 
     private nonisolated static func providerPrefix(_ name: String) -> String {
-        name.lowercased()
-            .replacingOccurrences(of: " ", with: "-")
-            .replacingOccurrences(of: "/", with: "-")
+        IntelRemoteModelEligibility.providerPrefix(name)
     }
 
     private nonisolated static func bareModelId(_ model: String, for provider: RemoteProvider) -> String {
@@ -997,7 +1127,26 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             throw CloudChatError.httpError(
                 provider: endpoint.providerLabel, status: statusCode, message: message)
         }
-        return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+        do {
+            return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+        } catch {
+            throw CloudChatError.responseDecoding(
+                provider: endpoint.providerLabel,
+                message: error.localizedDescription,
+                diagnostic: Self.safeResponseDiagnostic(data)
+            )
+        }
+    }
+
+    /// Retain enough raw response data to diagnose an envelope mismatch while
+    /// preventing credentials or an unbounded payload from entering the local
+    /// Memory processing log.
+    nonisolated static func safeResponseDiagnostic(_ data: Data) -> String {
+        let raw = String(decoding: data, as: UTF8.self)
+        let redacted = InsightsService.redactCredentials(raw)
+        let limit = 4_096
+        guard redacted.count > limit else { return redacted }
+        return String(redacted.prefix(limit)) + "…[truncated]"
     }
 
     struct EngineError: LocalizedError {

@@ -492,6 +492,20 @@ public actor MemoryService {
     public func resolveDistillModel() async -> String? {
         let cfg = ChatConfigurationStore.load()
         let (servable, bareModels) = await Self.servableModels()
+        let configuredProviders = await MainActor.run {
+            RemoteProviderManager.shared.configuration.providers
+        }
+
+        func isEligible(_ candidate: String) -> Bool {
+            servable.contains(candidate)
+                || configuredProviders.contains {
+                    IntelRemoteModelEligibility.canRouteQualifiedModelDuringDiscovery(
+                        candidate,
+                        through: $0
+                    )
+                }
+                || IntelRemoteModelEligibility.canRouteManagedRouterModelDuringColdLaunch(candidate)
+        }
 
         // `coreModelIdentifier` is built from the Core (local/MLX) model
         // picker — amputated on Intel (see `IntelManagerConformers.swift`).
@@ -499,10 +513,10 @@ public actor MemoryService {
         // "mlx-community/Qwen3-8B-4bit") is NOT a remote-provider model and
         // MLX cannot run on this fork, so it must be validated exactly like
         // any other candidate rather than trusted just because it's set.
-        if let core = cfg.coreModelIdentifier, !core.isEmpty, servable.contains(core) {
+        if let core = cfg.coreModelIdentifier, !core.isEmpty, isEligible(core) {
             return core
         }
-        if let def = cfg.defaultModel, !def.isEmpty, servable.contains(def) {
+        if let def = cfg.defaultModel, !def.isEmpty, isEligible(def) {
             return def
         }
         // Final fallback: whatever a connected provider actually discovered,
@@ -543,14 +557,14 @@ public actor MemoryService {
             var servable = Set<String>()
             var bare: [String] = []
             for provider in manager.configuration.providers {
-                guard let state = manager.providerStates[provider.id],
-                    !state.discoveredModels.isEmpty
-                else { continue }
-                let prefix = provider.name
-                    .lowercased()
-                    .replacingOccurrences(of: " ", with: "-")
-                    .replacingOccurrences(of: "/", with: "-")
-                for modelId in state.discoveredModels {
+                guard provider.enabled else { continue }
+                let discovered = manager.providerStates[provider.id]?.discoveredModels ?? []
+                let prefix = IntelRemoteModelEligibility.providerPrefix(provider.name)
+                var modelIds: [String] = []
+                for modelId in discovered + provider.manualModelIds where !modelIds.contains(modelId) {
+                    modelIds.append(modelId)
+                }
+                for modelId in modelIds {
                     servable.insert(modelId)
                     servable.insert("\(prefix)/\(modelId)")
                     bare.append(modelId)

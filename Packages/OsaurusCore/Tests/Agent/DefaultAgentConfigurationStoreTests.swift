@@ -5,6 +5,13 @@ import Testing
 
 @Suite("Default Orchestrator configuration", .serialized)
 struct DefaultAgentConfigurationStoreTests {
+    @Test("built-in Orchestrator keeps the upstream green identity")
+    func builtInIdentityUsesGreenAvatar() {
+        #expect(Agent.default.id == Agent.defaultId)
+        #expect(Agent.default.isBuiltIn)
+        #expect(Agent.default.avatar == "green")
+    }
+
     @Test
     func roundTripUsesIsolatedStore() async {
         await StoragePathsTestLock.shared.run {

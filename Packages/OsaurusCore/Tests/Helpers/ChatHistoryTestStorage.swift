@@ -28,9 +28,13 @@ enum ChatHistoryTestStorage {
                 SymmetricKey(data: Data(repeating: 0x44, count: 32))
             )
             AgentManager.shared.refresh()
+            #if !SWIFT_PACKAGE
             ChatSessionStore._resetForTesting()
+            #endif
             defer {
+                #if !SWIFT_PACKAGE
                 ChatSessionStore._resetForTesting()
+                #endif
                 StorageKeyManager.shared.wipeCache()
                 OsaurusPaths.overrideRoot = previousRoot
                 AgentManager.shared.refresh()

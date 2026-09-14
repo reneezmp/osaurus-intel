@@ -488,3 +488,13 @@ that `resolveDistillModel()` can still match it afterward. Pending signals must
 remain recoverable through either failure. The acceptance item “Memory off
 prevents injection and saving; Memory on restores both” remains blocked until
 both failures are repaired and the off/on behavior is then tested separately.
+
+### 2026-09-14 repair candidate
+
+The compiled Intel cloud decoder now accepts OpenAI-compatible content arrays
+containing text parts, while rejecting non-text parts. Cold launch may resolve
+only the exact enabled managed Router namespace before catalog discovery; bare,
+foreign, disabled, and ordinary providers do not inherit that exception. Raw
+failure diagnostics are bounded and redact authorization values. Five focused
+tests pass. This is implementation evidence only: Memory stays Partial until
+Rosy successfully distills, renders facts/episodes, and verifies Memory off/on.

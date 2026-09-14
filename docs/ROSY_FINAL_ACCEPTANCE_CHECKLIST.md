@@ -322,17 +322,23 @@ Complete the matching detailed test section when a future tester exercises it:
 
 ## 15. Final regression and postflight
 
-- [ ] With screen sharing stopped, Settings and chat windows show clickable native
-      red, yellow, and green controls before and after theme changes.
-- [ ] Rapid agent/tab/subtab switching leaks no model, theme, avatar, ability, or
+- [ ] **Failed:** with screen sharing stopped, Settings and chat windows still do
+      not show clickable native red, yellow, and green controls before or after
+      theme changes.
+- [x] Rapid agent/tab/subtab switching leaks no model, theme, avatar, ability, or
       content state.
-- [ ] Smoke-test ordinary chat, Codex, Claude Code, Knowledge, Projects, working
+- [x] Smoke-test ordinary chat, Codex, Claude Code, Knowledge, Projects, working
       folders, project memory, Web Search, and every newly landed roadmap feature.
-- [ ] Quit completely and reopen for one final migration/persistence pass.
-- [ ] Compare final configuration hashes and agent inventory with preflight.
-- [ ] Explain every expected difference; any unexplained mutation fails handoff.
+- [x] Quit completely and reopen for one final migration/persistence pass.
+- [x] Compare final configuration hashes and agent inventory with preflight.
+- [x] Explain every expected difference; any unexplained mutation fails handoff.
 
 ## Evidence rule
+
+The defects from the 2026-09-13 run have a focused repair checklist in
+[`ROSY_2026-09-14_FIX_RETEST.md`](ROSY_2026-09-14_FIX_RETEST.md). Preserve the
+failed observations above as history; mark them passed only from that exact Rosy
+build and record the result in every owning manual.
 
 Update `FEATURE_PARITY.md`, `UPSTREAM_SYNC.md`, and the relevant feature manual
 with the exact Rosy result. A visible route, successful M4 build, or passing

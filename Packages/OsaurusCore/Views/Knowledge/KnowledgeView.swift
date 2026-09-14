@@ -429,6 +429,7 @@ private struct KnowledgeCollectionEditorSheet: View {
         .frame(width: 520, height: 300)
         .background(theme.primaryBackground)
         .environment(\.theme, theme)
+        .intelControlRendering(theme: theme)
     }
 
     private func chooseFolder() {

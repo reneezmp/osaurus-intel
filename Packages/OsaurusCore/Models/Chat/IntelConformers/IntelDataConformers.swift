@@ -1517,7 +1517,8 @@ final class BlockMemoizer: @unchecked Sendable {
         // belonged to, so a header is emitted only when the side flips.
         // Consecutive assistant + tool turns (a tool round) share one header.
         var prevSideIsUser: Bool?
-        for turn in turns {
+        let visibleTurns = turns.filter { $0.role != .tool }
+        for (visibleIndex, turn) in visibleTurns.enumerated() {
             // M12 Gap 3: `.tool`-role turns exist ONLY to carry the tool result
             // back to the API on the continuation request. Their content is the
             // raw result envelope and must NOT render as a chat bubble — it's
@@ -1602,6 +1603,38 @@ final class BlockMemoizer: @unchecked Sendable {
                     id: "toolgroup-\(turn.id.uuidString)",
                     turnId: turn.id,
                     kind: .toolCallGroup(calls: items)
+                ))
+            }
+
+            let isStreaming = turn.id == streamingTurnId
+            let nextRole: MessageRole? =
+                visibleIndex + 1 < visibleTurns.count ? visibleTurns[visibleIndex + 1].role : nil
+            let isLastInGroup = nextRole != turn.role
+
+            if !isUser, !isStreaming,
+                turn.timeToFirstToken != nil || turn.generationTokensPerSecond != nil
+                    || turn.generationTokenCount != nil || turn.unclosedReasoning
+            {
+                blocks.append(ContentBlock(
+                    id: "stats-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .generationStats(
+                        ttft: turn.timeToFirstToken,
+                        tokensPerSecond: turn.generationTokensPerSecond,
+                        tokenCount: turn.generationTokenCount,
+                        unclosedReasoning: turn.unclosedReasoning
+                    )
+                ))
+            }
+
+            let hasFooterableContent =
+                !turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                || turn.hasRenderableThinking || !(turn.toolCalls ?? []).isEmpty
+            if !isUser, !isStreaming, isLastInGroup, hasFooterableContent {
+                blocks.append(ContentBlock(
+                    id: "actions-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .assistantActions(turnId: turn.id)
                 ))
             }
         }
@@ -1749,13 +1782,14 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Keep these snapshots separate. A single six-element actor-returned
         // tuple trips a Swift 6 compiler diagnostic-generation bug in the
         // Intel target once the Knowledge collection types are present.
-        let basePrompt = await MainActor.run {
+        let editablePrompt = await MainActor.run {
             AgentManager.shared.effectiveSystemPrompt(for: id)
         }
+        let basePrompt = IntelOrchestratorPrompt.compose(
+            agentID: id,
+            editablePrompt: editablePrompt
+        )
         let folder = folderContext
-        let toolMode = await MainActor.run {
-            AgentManager.shared.effectiveToolSelectionMode(for: id)
-        }
         let enabledToolNames = await MainActor.run {
             AgentManager.shared.effectiveEnabledToolNames(for: id)
         }
@@ -1834,7 +1868,7 @@ final class SystemPromptComposer: @unchecked Sendable {
             tools = []
         } else {
             let allSpecs = filteringWebSearchTools(
-                ToolRegistry.shared.openAISpecs(),
+                ToolRegistry.shared.openAISpecs(for: id),
                 enabled: webSearchEnabled
             )
                 .filter {
@@ -1851,7 +1885,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 .filter { spec in
                     selfSchedulingEnabled || !["schedule_next_run", "cancel_next_run", "notify"].contains(spec.function.name)
                 }
-            if toolMode == .manual, let enabled = enabledToolNames {
+            if let enabled = enabledToolNames {
                 // Folder/runtime tools (file_read, file_write, file_edit,
                 // file_search, file_tree, shell_run, git_*) are auto-mounted with
                 // the working directory and must BYPASS the manual capability
@@ -1861,9 +1895,17 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // agent the "## Working Directory" prompt but none of the actual
                 // file/shell tool specs, so it couldn't call them (Renée, native
                 // Ventura, 2026-06-12).
-                let allowed = Set(enabled).union(folderToolNames)
+                var allowed = Set(enabled).union(folderToolNames)
+                if id == Agent.defaultId {
+                    allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
+                }
                 tools = allSpecs.filter { allowed.contains($0.function.name) }
             } else {
+                // Legacy, never-opened agents have no seeded allowlist yet and
+                // retain the historical registry-wide fallback. Once the
+                // capability picker seeds a list, every item the user removes
+                // is excluded on the very next turn in both Auto and Manual
+                // modes. Auto controls discovery strategy, not authorization.
                 tools = allSpecs
             }
         }

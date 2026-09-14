@@ -1,12 +1,10 @@
 # Orchestrator on Intel — implementation plan and focused test contract
 
-**Status (corrected by Rosy QA, 2026-09-13):** Gates 1–2 pass on Intel. Gate 4's
-manual Settings sheet and Gate 5B's tool/runtime code exist and have automated
-coverage, but the Orchestrator chat receives no orchestration or delegation tools,
-so they are not promoted as a working model-facing Orchestrator. The Intel prompt
-also omits upstream's compiled-out built-in Orchestrator instructions, and its
-default agent omits the standard green avatar. Treat Gates 3–5B as implementation
-work awaiting repaired chat exposure and fresh Rosy acceptance.
+**Status (post-QA repair, 2026-09-14):** Gates 1–5B are wired into the compiled
+Intel chat path. The built-in Orchestrator receives its fixed role, green identity,
+and built-in-only configuration and bounded-delegation tools; custom agents do not.
+Focused tests cover admission, exact-pair approval, denial, bounds, and fail-closed
+paths. The feature remains Partial until the focused Rosy Ventura retest passes.
 
 **Scope:** `intel-fork`, Intel/x86_64, macOS 13 Ventura minimum. This plan is based on
 the audited `upstream/main` chain and the active Intel target, including its
@@ -474,3 +472,17 @@ complete.
   contains a thin Mach-O x86_64 executable, declares macOS 13.0 minimum, and has
   `OsaurusCanonicalData = true`. Rosy Ventura manual QA remains pending and the
   feature stays Partial until checklist items 13–17 are recorded on Rosy.
+
+## Post-QA repair validation record — 2026-09-14
+
+- The compiled Intel prompt now gives the built-in Orchestrator its fixed role
+  and appends the editable persona; custom-agent prompts remain unchanged.
+- Only the built-in Orchestrator receives `orchestrator_config` and bounded
+  delegation. Delegation admits configured custom agents/cloud models, scopes
+  approval to the exact launcher/target pair, and returns bounded inline text
+  from a fresh one-turn tool-free child.
+- Focused M4 runs pass 17 Orchestrator tests across configuration, prompt,
+  delegation, and default identity suites. They cover denial, exact-pair Always
+  Allow, unbound/custom rejection, private-value exclusion, and one-shot apply.
+- Rosy must still exercise the tools from a real chat. Until that evidence is
+  recorded, this remains a repair candidate rather than a promoted feature.

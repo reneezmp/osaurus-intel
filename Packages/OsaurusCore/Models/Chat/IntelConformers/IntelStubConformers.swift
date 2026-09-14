@@ -1160,9 +1160,14 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     private func registerIntelOrchestratorTools() {
-        let tool = IntelOrchestratorConfigurationTool()
-        toolsByName[tool.name] = tool
-        builtInToolNames.insert(tool.name)
+        let tools: [OsaurusTool] = [
+            IntelOrchestratorConfigurationTool(),
+            IntelOrchestratorDelegationTool(),
+        ]
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
     }
 
     func resolveExecutionMode(folderContext: FolderContext?, autonomousEnabled: Bool) -> ExecutionMode { .none }
@@ -1305,12 +1310,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// OpenAI-compatible specs for the currently registered tools, fed into
     /// `ComposedContext.tools` so the model sees them on the next send.
     /// Globally-disabled tools are filtered out.
-    func openAISpecs() -> [Tool] {
+    func openAISpecs(for agentID: UUID? = nil) -> [Tool] {
         toolsByName.values
-            .filter { !disabledToolNames.contains($0.name) }
+            .filter {
+                Self.orchestratorOnlyToolNames.contains($0.name)
+                    || !disabledToolNames.contains($0.name)
+            }
             .filter { tool in
-                tool.name != IntelOrchestratorConfigurationTool.toolName
-                    || ChatExecutionContext.currentAgentId == Agent.defaultId
+                !Self.orchestratorOnlyToolNames.contains(tool.name)
+                    || agentID == Agent.defaultId
             }
             .sorted { $0.name < $1.name }
             .map { $0.asOpenAITool() }
@@ -1340,7 +1348,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// submit a stale tool name. Re-check the live agent/configuration state
     /// here so a tool removed after turn one cannot run silently.
     private func runtimeCapabilityDenial(for name: String) async -> String? {
-        if disabledToolNames.contains(name) {
+        if disabledToolNames.contains(name), !Self.orchestratorOnlyToolNames.contains(name) {
             return ToolEnvelope.failure(
                 kind: .unavailable,
                 message: "This tool is disabled in the Tools settings.",
@@ -1348,7 +1356,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             )
         }
 
-        if name == IntelOrchestratorConfigurationTool.toolName,
+        if Self.orchestratorOnlyToolNames.contains(name),
             ChatExecutionContext.currentAgentId != Agent.defaultId
         {
             return ToolEnvelope.failure(
@@ -1364,6 +1372,23 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             return ToolEnvelope.failure(
                 kind: .unavailable,
                 message: "Tools are disabled for this agent.",
+                tool: name
+            )
+        }
+
+        let liveRuntimeManagedToolNames = await MainActor.run {
+            self.runtimeManagedToolNames
+        }
+        if let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
+            !Self.isAdmittedBySeededAllowlist(
+                name: name,
+                enabledToolNames: Set(enabled),
+                runtimeManagedToolNames: liveRuntimeManagedToolNames
+            )
+        {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "This tool is not assigned to the active agent.",
                 tool: name
             )
         }
@@ -1411,18 +1436,22 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             }
         }
 
-        if AgentManager.shared.effectiveToolSelectionMode(for: agentId) == .manual,
-            let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
-            !enabled.contains(name)
-        {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message: "This tool is not assigned to the active agent.",
-                tool: name
-            )
-        }
-
         return nil
+    }
+
+    static let orchestratorOnlyToolNames: Set<String> = [
+        IntelOrchestratorConfigurationTool.toolName,
+        IntelOrchestratorDelegationTool.toolName,
+    ]
+
+    static func isAdmittedBySeededAllowlist(
+        name: String,
+        enabledToolNames: Set<String>,
+        runtimeManagedToolNames: Set<String>
+    ) -> Bool {
+        enabledToolNames.contains(name)
+            || runtimeManagedToolNames.contains(name)
+            || orchestratorOnlyToolNames.contains(name)
     }
 
     /// Mirror of upstream's `invalidToolArgumentsEnvelope`. When the model

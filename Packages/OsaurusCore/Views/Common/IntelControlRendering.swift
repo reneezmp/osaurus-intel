@@ -101,16 +101,18 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
             guard let window = hostView.window else { return }
 
             // Keep native controls in the same appearance family as SwiftUI.
-            window.appearance = NSAppearance(named: isDark ? .darkAqua : .aqua)
+            window.appearance = IntelNativeWindowRendering.appearance(
+                declaredDark: isDark,
+                backgroundColor: backgroundColor
+            )
             window.backgroundColor = backgroundColor
             // `onHover` depends on mouse-move delivery in manually-created
             // settings windows.  Chat windows already set this themselves.
             window.acceptsMouseMovedEvents = true
 
-            if let editor = window.fieldEditor(false, for: nil) as? NSTextView {
-                editor.insertionPointColor = cursorColor
-            }
+            applyFieldEditor(in: window)
             applyAccent(to: window.contentView)
+            IntelNativeWindowRendering.restoreTitlebarControls(in: window)
             window.contentView?.needsDisplay = true
 
             // SwiftUI can materialize AppKit-backed controls after this bridge
@@ -118,9 +120,18 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
             // and bordered buttons are coloured before their first click.
             DispatchQueue.main.async { [weak self, weak hostView] in
                 guard let self, let hostView, hostView.window === window else { return }
+                self.applyFieldEditor(in: window)
                 self.applyAccent(to: hostView.window?.contentView)
+                IntelNativeWindowRendering.restoreTitlebarControls(in: window)
                 hostView.window?.contentView?.needsDisplay = true
             }
+        }
+
+        private func applyFieldEditor(in window: NSWindow) {
+            guard let editor = window.fieldEditor(false, for: nil) as? NSTextView else { return }
+            editor.insertionPointColor = cursorColor
+            editor.textColor = .labelColor
+            editor.needsDisplay = true
         }
 
         private func applyAccent(to view: NSView?) {
@@ -158,6 +169,36 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
             onWindowChanged?()
+        }
+    }
+}
+
+/// Shared AppKit repairs for manually-created Intel windows. Ventura can defer
+/// titlebar-button installation until after a toolbar/content view is attached,
+/// while native controls can retain the launch appearance after SwiftUI repaints.
+@MainActor
+enum IntelNativeWindowRendering {
+    static func appearance(declaredDark: Bool, backgroundColor: NSColor) -> NSAppearance? {
+        let resolvedDark = inferredDarkBackground(backgroundColor) ?? declaredDark
+        return NSAppearance(named: resolvedDark ? .darkAqua : .aqua)
+    }
+
+    static func inferredDarkBackground(_ color: NSColor) -> Bool? {
+        guard let rgb = color.usingColorSpace(.deviceRGB) else { return nil }
+        let luminance = 0.2126 * rgb.redComponent
+            + 0.7152 * rgb.greenComponent
+            + 0.0722 * rgb.blueComponent
+        return luminance < 0.5
+    }
+
+    static func restoreTitlebarControls(in window: NSWindow) {
+        guard window.styleMask.contains(.titled) else { return }
+        for kind in [NSWindow.ButtonType.closeButton, .miniaturizeButton, .zoomButton] {
+            guard let button = window.standardWindowButton(kind) else { continue }
+            button.isHidden = false
+            button.alphaValue = 1
+            button.isEnabled = true
+            button.needsDisplay = true
         }
     }
 }

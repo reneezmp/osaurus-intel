@@ -254,7 +254,8 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
             maxTokens: nil,
             isBuiltIn: true,
             createdAt: Date.distantPast,
-            updatedAt: Date.distantPast
+            updatedAt: Date.distantPast,
+            avatar: "green"
         )
     }
 

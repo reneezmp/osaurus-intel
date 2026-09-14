@@ -237,8 +237,7 @@ private struct ScheduleCard: View {
     }
 
     var body: some View {
-        Button(action: onEdit) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
                 // Header
                 HStack(alignment: .center, spacing: 12) {
                     ZStack {
@@ -361,9 +360,10 @@ private struct ScheduleCard: View {
                 x: 0,
                 y: isHovered ? 3 : 2
             )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onEdit)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Edit \(schedule.name)")
         .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .opacity(hasAppeared ? 1 : 0)

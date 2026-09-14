@@ -516,6 +516,11 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         panel.chatToolbarDelegate = toolbarDelegate
         panel.toolbar = toolbar
         panel.toolbarStyle = .unified
+        IntelNativeWindowRendering.restoreTitlebarControls(in: panel)
+        DispatchQueue.main.async { [weak panel] in
+            guard let panel else { return }
+            IntelNativeWindowRendering.restoreTitlebarControls(in: panel)
+        }
 
         // Set up delegate for lifecycle events
         let delegate = ChatWindowDelegate(windowId: windowId, manager: self)
@@ -964,6 +969,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         toolbarDelegates[info.id] = toolbarDelegate
         window.toolbar = toolbar
         window.toolbarStyle = .unified
+        IntelNativeWindowRendering.restoreTitlebarControls(in: window)
 
         // M13 follow-up (Renée 2026-06-04): host a ThemedAlertHost scoped to
         // this chat window so themed confirmations raised from inside it
@@ -976,6 +982,10 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             .themedAlertScope(.chat(info.id))
             .overlay(ThemedAlertHost(scope: .chat(info.id)))
         window.contentView = NSHostingView(rootView: chatView)
+        DispatchQueue.main.async { [weak window] in
+            guard let window else { return }
+            IntelNativeWindowRendering.restoreTitlebarControls(in: window)
+        }
         // M12 follow-up (Renée 2026-06-03 crashes): the manager owns each
         // window's lifecycle. `isReleasedWhenClosed = false` is deliberate —
         // with `true`, AppKit auto-released the window on close while our

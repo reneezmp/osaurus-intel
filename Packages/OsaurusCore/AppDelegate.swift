@@ -532,11 +532,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         )
 
         window.contentViewController = host
+        IntelNativeWindowRendering.restoreTitlebarControls(in: window)
 
         // Pre-layout to avoid jank + force-set the size again so the
         // first paint uses the intended dimensions.
         host.view.layoutSubtreeIfNeeded()
         window.setContentSize(defaultSize)
+        DispatchQueue.main.async { [weak window] in
+            guard let window else { return }
+            IntelNativeWindowRendering.restoreTitlebarControls(in: window)
+        }
 
         window.center()
         window.makeKeyAndOrderFront(nil)

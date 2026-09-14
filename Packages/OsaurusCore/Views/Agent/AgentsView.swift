@@ -1733,9 +1733,11 @@ struct AgentDetailView: View {
                     name: name,
                     tint: agentColor,
                     diameter: 28,
+                    customImageURL: currentAgent.customAvatarURL,
                     monogramFontSize: 13,
                     borderWidth: 1.5
                 )
+                .id("\(currentAgent.customAvatarFilename ?? "mascot")-\(avatarRevision)")
                 .animation(.spring(response: 0.3), value: name)
                 .animation(.spring(response: 0.3), value: avatar)
 
@@ -2191,15 +2193,16 @@ struct AgentDetailView: View {
         tabHelperText(DetailTab.configure.helperText)
         identitySection
         defaultModelSection
-        if isClaudeCodeModelSelected {
-            claudeCodeSection
-        }
+        claudeCodeSection
         systemPromptSection
         voiceSection
         if agent.id != Agent.defaultId {
             scheduleSection
         }
         advancedSettingsDisclosure
+        if !agent.isBuiltIn {
+            agentDataSection
+        }
     }
 
     /// Routed by `selectedTab` from the body. Capabilities is rendered
@@ -2281,42 +2284,43 @@ struct AgentDetailView: View {
                 }
                 .padding(.top, 2)
 
-                if !agent.isBuiltIn {
-                    Divider().padding(.vertical, 2)
-
-                    HStack {
-                        VStack(alignment: .leading, spacing: 2) {
-                            Text("Delete chats and memory", bundle: .module)
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(theme.primaryText)
-                            Text(
-                                "Keeps this agent and its settings, but permanently removes its chats, pinned facts, and episode summaries.",
-                                bundle: .module
-                            )
-                            .font(.system(size: 10))
-                            .foregroundColor(theme.tertiaryText)
-                            .fixedSize(horizontal: false, vertical: true)
-                        }
-                        Spacer(minLength: 12)
-                        Button(role: .destructive) {
-                            showDeleteAgentDataConfirmation = true
-                        } label: {
-                            Label("Delete Data", systemImage: "trash")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(theme.errorColor)
-                                .padding(.horizontal, 10)
-                                .padding(.vertical, 7)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 7)
-                                        .fill(theme.errorColor.opacity(0.12))
-                                )
-                        }
-                        .buttonStyle(.plain)
-                    }
-                }
             }
             .onChange(of: name) { _ in debouncedSave() }
             .onChange(of: description) { _ in debouncedSave() }
+        }
+    }
+
+    private var agentDataSection: some View {
+        AgentDetailSection(title: "Agent Data", icon: "externaldrive.badge.xmark") {
+            HStack {
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Delete chats and memory", bundle: .module)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                    Text(
+                        "Keeps this agent and its settings, but permanently removes its chats, pinned facts, and episode summaries.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 12)
+                Button(role: .destructive) {
+                    showDeleteAgentDataConfirmation = true
+                } label: {
+                    Label("Delete Data", systemImage: "trash")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.errorColor)
+                        .padding(.horizontal, 10)
+                        .padding(.vertical, 7)
+                        .background(
+                            RoundedRectangle(cornerRadius: 7)
+                                .fill(theme.errorColor.opacity(0.12))
+                        )
+                }
+                .buttonStyle(.plain)
+            }
         }
     }
 
@@ -2430,10 +2434,14 @@ struct AgentDetailView: View {
 
         AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
             VStack(spacing: 10) {
-                abilityLinkRow(
+                abilityToggleRow(
                     title: "Self-scheduling",
-                    description: "Configure scheduled runs and file watchers for this agent.",
+                    description: "Let the agent choose its next run within the limits configured on the Automation page.",
                     icon: "calendar.badge.clock",
+                    isOn: Binding(
+                        get: { currentAgent.settings.schedule.mode != .manual },
+                        set: { setSelfSchedulingEnabled($0) }
+                    ),
                     destination: .automation
                 )
                 abilityUnavailableRow(
@@ -3229,6 +3237,15 @@ struct AgentDetailView: View {
     private var claudeCodeSection: some View {
         AgentDetailSection(title: "Claude Code", icon: "terminal") {
             VStack(alignment: .leading, spacing: 14) {
+                if !isClaudeCodeModelSelected {
+                    Text(
+                        "These controls apply whenever this agent uses a Claude Code model. Choose Claude Code above to exercise them in chat.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
                 HStack(spacing: 0) {
                     claudeCodeModeButton(.agent, label: "Agent")
                     claudeCodeModeButton(.textOnly, label: "Text only")
@@ -3431,6 +3448,10 @@ struct AgentDetailView: View {
         current.updatedAt = Date()
         agentManager.update(current)
         showSaveIndicator()
+    }
+
+    private func setSelfSchedulingEnabled(_ enabled: Bool) {
+        selectScheduleMode(enabled ? .ambient : .manual)
     }
 
     private static func scheduleModeTitle(_ mode: AgentScheduleMode) -> String {

@@ -98,3 +98,18 @@ After the run:
   passed.
 - Rebuild only after the storage checks pass, so the delivered app and the test
   evidence refer to the same commit.
+
+## 2026-09-14 automation-test residue
+
+The first `ExecutionContextFolderActivationTests` implementation constructed a
+real `ChatSession` without `ChatHistoryTestStorage`. Focused runs passed while
+silently writing 12 synthetic schedule/watcher chats to the live sessions
+directory; a concurrent Xcode run then timed out waiting for one response. The
+files were identified by exact test-only prompts/responses and moved intact to
+`~/.osaurus/quarantine/2026-09-14-automation-test-fixtures/` rather than deleted.
+
+The test now runs inside `ChatHistoryTestStorage`, and that helper is compiled by
+the Intel SwiftPM test target. SwiftPM omits the unavailable upstream
+`ChatSessionStore` reset while retaining isolated paths, keys, locking, refresh,
+and cleanup. A passing stateful test is invalid if its log says it loaded live
+sessions or if a fixture appears under `~/.osaurus/sessions` afterward.

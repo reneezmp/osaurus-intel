@@ -368,16 +368,17 @@ final class ChatSession: ObservableObject {
                 }
             }
 
-        // Auto-persist model selection and unload unused models on switch
+        // A chat's model picker is session-local. Persisting this selection into
+        // AgentManager rewrote the agent's configured default every time a user
+        // tried a different model in one conversation (Rosy Ventura acceptance,
+        // 2026-09-13). ChatSessionData already stores `selectedModel`; the agent
+        // default changes only from Agent Settings.
         modelSelectionCancellable =
             $selectedModel
             .dropFirst()
             .removeDuplicates()
             .sink { [weak self] newModel in
                 guard let self = self, !self.isLoadingModel, let model = newModel else { return }
-                let pid = self.agentId ?? Agent.defaultId
-                AgentManager.shared.updateDefaultModel(for: pid, model: model)
-
                 self.loadActiveModelOptions(for: model)
 
                 // Clear pending image attachments when switching to a non-VLM model
@@ -624,11 +625,7 @@ final class ChatSession: ObservableObject {
             )
             let newHeaderMap = blockMemoizer.groupHeaderMap
             withAnimation(.none) {
-                visibleBlocksStore.blocks = Self.appendingAssistantActionFooters(
-                    newBlocks,
-                    turns: mockTurns,
-                    streamingTurnId: nil
-                )
+                visibleBlocksStore.blocks = newBlocks
                 visibleBlocksStore.groupHeaderMap = newHeaderMap
             }
             return
@@ -645,64 +642,9 @@ final class ChatSession: ObservableObject {
         // use withAnimation(.none) to suppress the warning about publishing during view updates
         // this wraps the changes in a proper SwiftUI transaction
         withAnimation(.none) {
-            visibleBlocksStore.blocks = Self.appendingAssistantActionFooters(
-                newBlocks,
-                turns: turns,
-                streamingTurnId: streamingTurnId
-            )
+            visibleBlocksStore.blocks = newBlocks
             visibleBlocksStore.groupHeaderMap = newHeaderMap
         }
-    }
-
-    /// Compensates for `BlockMemoizer.blocks(from:...)` (the Intel-lite
-    /// reimplementation in `IntelDataConformers.swift` — the upstream
-    /// `Managers/BlockMemoizer.swift` / `Models/Chat/ContentBlock.swift`
-    /// are excluded from this fork's build entirely, see `Package.swift`)
-    /// never emitting `.assistantActions` footer rows. That stub only
-    /// builds header/thinking/paragraph/tool-call blocks, so the
-    /// copy/regenerate/speak/delete row under a completed assistant
-    /// turn was silently never generated. Mirrors the footer-eligibility
-    /// rule the excluded upstream code used to apply inline: last turn
-    /// in its consecutive-assistant group, not currently streaming, and
-    /// carrying visible text, renderable thinking, or a tool call.
-    private static func appendingAssistantActionFooters(
-        _ blocks: [ContentBlock],
-        turns: [ChatTurn],
-        streamingTurnId: UUID?
-    ) -> [ContentBlock] {
-        let filteredTurns = turns.filter { $0.role != .tool }
-        var footerEligibleTurnIds = Set<UUID>()
-        for (index, turn) in filteredTurns.enumerated() {
-            guard turn.role == .assistant, turn.id != streamingTurnId else { continue }
-            let nextRole: MessageRole? =
-                index + 1 < filteredTurns.count ? filteredTurns[index + 1].role : nil
-            guard nextRole != turn.role else { continue }  // isLastInGroup
-            let hasVisibleContent =
-                !turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-            let hasFooterableContent =
-                hasVisibleContent || turn.hasRenderableThinking || !(turn.toolCalls ?? []).isEmpty
-            guard hasFooterableContent else { continue }
-            footerEligibleTurnIds.insert(turn.id)
-        }
-        guard !footerEligibleTurnIds.isEmpty else { return blocks }
-
-        var result: [ContentBlock] = []
-        result.reserveCapacity(blocks.count + footerEligibleTurnIds.count)
-        for (index, block) in blocks.enumerated() {
-            result.append(block)
-            let isLastBlockForTurn =
-                index + 1 == blocks.count || blocks[index + 1].turnId != block.turnId
-            if isLastBlockForTurn, footerEligibleTurnIds.contains(block.turnId) {
-                result.append(
-                    ContentBlock(
-                        id: "actions-\(block.turnId.uuidString)",
-                        turnId: block.turnId,
-                        kind: .assistantActions(turnId: block.turnId)
-                    )
-                )
-            }
-        }
-        return result
     }
 
     /// Estimated token count for current session context (~4 chars per token).

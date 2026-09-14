@@ -89,6 +89,38 @@ struct IntelAgentRuntimeLaneTests {
     }
 
     @Test
+    func dispatchRejectsToolRemovedFromLiveAgentAllowlist() async throws {
+        let agent = Agent(
+            name: "Intel live tool revocation test \(UUID().uuidString)",
+            toolSelectionMode: .auto,
+            manualToolNames: []
+        )
+        AgentManager.shared.add(agent)
+
+        let result = try await ChatExecutionContext.$currentAgentId.withValue(agent.id) {
+            try await ToolRegistry.shared.execute(name: "list_knowledge", argumentsJSON: "{}")
+        }
+        #expect(result.contains("not assigned to the active agent"))
+        _ = await AgentManager.shared.delete(id: agent.id)
+    }
+
+    @Test
+    func dispatchRejectsToolRemovedFromManualAgentAllowlist() async throws {
+        let agent = Agent(
+            name: "Intel manual tool revocation test \(UUID().uuidString)",
+            toolSelectionMode: .manual,
+            manualToolNames: []
+        )
+        AgentManager.shared.add(agent)
+
+        let result = try await ChatExecutionContext.$currentAgentId.withValue(agent.id) {
+            try await ToolRegistry.shared.execute(name: "list_knowledge", argumentsJSON: "{}")
+        }
+        #expect(result.contains("not assigned to the active agent"))
+        _ = await AgentManager.shared.delete(id: agent.id)
+    }
+
+    @Test
     func dispatchRejectsWebSearchAndKnowledgeWithoutTheirGrants() async throws {
         let agent = Agent(name: "Intel capability-grant test \(UUID().uuidString)")
         AgentManager.shared.add(agent)

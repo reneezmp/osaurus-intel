@@ -486,7 +486,7 @@ final class NativeAssistantActionsView: NSView {
     private let copyButton: HeaderCircleActionControl
     private let regenerateButton: HeaderCircleActionControl
     let speakButton: HeaderCircleActionControl
-    private let deleteButton: HeaderCircleActionControl
+    private let overflowButton: HeaderCircleActionControl
 
     private var turnId: UUID = UUID()
     private var onCopy: ((UUID) -> Void)?
@@ -504,22 +504,22 @@ final class NativeAssistantActionsView: NSView {
         let copyControl = HeaderCircleActionControl(action: {})
         let regenControl = HeaderCircleActionControl(action: {})
         let speakControl = HeaderCircleActionControl(action: {})
-        let deleteControl = HeaderCircleActionControl(action: {})
+        let overflowControl = HeaderCircleActionControl(action: {})
         self.copyButton = copyControl
         self.regenerateButton = regenControl
         self.speakButton = speakControl
-        self.deleteButton = deleteControl
+        self.overflowButton = overflowControl
         super.init(frame: frame)
         translatesAutoresizingMaskIntoConstraints = false
 
         copyButton.translatesAutoresizingMaskIntoConstraints = false
         regenerateButton.translatesAutoresizingMaskIntoConstraints = false
         speakButton.translatesAutoresizingMaskIntoConstraints = false
-        deleteButton.translatesAutoresizingMaskIntoConstraints = false
+        overflowButton.translatesAutoresizingMaskIntoConstraints = false
         addSubview(copyButton)
         addSubview(regenerateButton)
         addSubview(speakButton)
-        addSubview(deleteButton)
+        addSubview(overflowButton)
 
         copyButton.setAction { [weak self] in
             guard let self else { return }
@@ -533,9 +533,8 @@ final class NativeAssistantActionsView: NSView {
             guard let self else { return }
             self.onSpeak?(self.turnId)
         }
-        deleteButton.setAction { [weak self] in
-            guard let self else { return }
-            self.onDeleteMessage?(self.turnId)
+        overflowButton.setAction { [weak self] in
+            self?.presentOverflowMenu()
         }
 
         let size: CGFloat = 28
@@ -563,17 +562,17 @@ final class NativeAssistantActionsView: NSView {
             speakWidth,
             speakButton.heightAnchor.constraint(equalToConstant: size),
 
-            deleteButton.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 4),
-            deleteButton.centerYAnchor.constraint(equalTo: centerYAnchor),
-            deleteButton.widthAnchor.constraint(equalToConstant: size),
-            deleteButton.heightAnchor.constraint(equalToConstant: size),
+            overflowButton.leadingAnchor.constraint(equalTo: speakButton.trailingAnchor, constant: 4),
+            overflowButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+            overflowButton.widthAnchor.constraint(equalToConstant: size),
+            overflowButton.heightAnchor.constraint(equalToConstant: size),
             // Required equality (not `<=`) — with the 4th button, chaining another
             // `<=` here left this view's own trailing edge doubly unbounded (the
             // button's `<=` to us, ours `<=` to the cell in configureAsAssistantActions),
             // so nothing pinned our width to our content. Harmless while the row has
             // room, but leaves the row's own frame undefined the moment it doesn't —
             // hug the last button exactly instead.
-            deleteButton.trailingAnchor.constraint(equalTo: trailingAnchor),
+            overflowButton.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
 
         ttsObservation = NotificationCenter.default.addObserver(
@@ -639,16 +638,53 @@ final class NativeAssistantActionsView: NSView {
             theme: theme,
             iconTint: nil
         )
-        deleteButton.setSymbol(
-            SymbolImageCache.image("trash", accessibilityDescription: L("Delete message"))?
+        overflowButton.setSymbol(
+            SymbolImageCache.image("ellipsis", accessibilityDescription: L("More"))?
                 .withSymbolConfiguration(cfg),
-            toolTip: L("Delete message"),
+            toolTip: L("More"),
             theme: theme,
             iconTint: nil
         )
-        deleteButton.isHidden = onDeleteMessage == nil
         applyTTSVisibility()
         refreshSpeakIcon()
+    }
+
+    private func presentOverflowMenu() {
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let inspect = NSMenuItem(
+            title: L("Inspect response"),
+            action: #selector(inspectResponse),
+            keyEquivalent: ""
+        )
+        inspect.target = self
+        inspect.isEnabled = true
+        menu.addItem(inspect)
+
+        if onDeleteMessage != nil {
+            menu.addItem(.separator())
+            let delete = NSMenuItem(
+                title: L("Delete message"),
+                action: #selector(deleteMessage),
+                keyEquivalent: ""
+            )
+            delete.target = self
+            delete.isEnabled = true
+            menu.addItem(delete)
+        }
+
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: overflowButton)
+    }
+
+    @objc private func inspectResponse() {
+        MainActor.assumeIsolated {
+            AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+        }
+    }
+
+    @objc private func deleteMessage() {
+        onDeleteMessage?(turnId)
     }
 
     private func refreshSpeakIcon() {

@@ -81,13 +81,14 @@ public final class ExecutionContext: ObservableObject {
     /// model is re-applied in `prepare()` once picker items load.
     public init(
         reattaching existing: ChatSessionData,
-        folderBookmark: Data? = nil
+        folderBookmark: Data? = nil,
+        folderPath: String? = nil
     ) {
         self.id = existing.id
         self.agentId = existing.agentId ?? Agent.defaultId
         self.title = existing.title
         self.folderBookmark = folderBookmark
-        self.folderPath = nil
+        self.folderPath = folderPath
 
         let session = ChatSession()
         session.agentId = existing.agentId
@@ -152,14 +153,20 @@ public final class ExecutionContext: ObservableObject {
     /// Resolve the stored bookmark and set the work folder context before execution.
     private func activateFolderContextIfNeeded() async {
         #if OSAURUS_INTEL
-        // Intel app is not sandboxed: no security-scoped bookmark exists
-        // (folderBookmark is always nil — see the schedule editor's gated
-        // selectFolder), so the working directory rides along as a raw path.
-        // FolderContextService is already Intel-gated to attach without a
-        // security scope. Without this, scheduled runs ignored their folder
-        // and the agent had no local working directory to list/read.
+        // Intel app is not sandboxed, so its durable authority is a raw path.
+        // Mount it on THIS chat session rather than only in the process-global
+        // FolderContextService: prompt composition and tool execution read the
+        // session's `folderState`/TaskLocal root. A global-only mount made
+        // schedule and watcher chats look folderless, and reattached sessions
+        // dropped the path altogether.
         if let folderPath, !folderPath.isEmpty {
-            await FolderContextService.shared.setFolder(URL(fileURLWithPath: folderPath))
+            let mounted = await chatSession.folderState.restoreAndWait(
+                bookmark: nil,
+                path: folderPath
+            )
+            if mounted == nil {
+                print("[ExecutionContext] Scheduled folder is unavailable: \(folderPath)")
+            }
         }
         return
         #else

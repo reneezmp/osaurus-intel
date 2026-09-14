@@ -964,3 +964,38 @@ first returned success with zero matching tests because the new test files were
 wrapped in `#if OSAURUS_INTEL` while only the production target defines that flag.
 This is now a permanent test-manual rule: a successful build is not evidence that
 a filtered test ran.
+
+## 2026-09-14 — Rosy post-QA repair batch
+
+Direct Rosy Ventura testing, rather than commit review, exposed defects at four
+boundaries: SwiftUI state looked correct while AppKit controls rendered blank;
+stored ability choices looked correct while an open chat retained stale tools;
+background requests carried a folder path while the created session did not
+mount it; and Orchestrator code existed while its model never received the tools.
+
+The repair follows each feature end to end. Native appearance and window chrome
+are synchronized at the AppKit boundary; live dispatch rechecks the current
+seeded allowlist; background execution mounts the request folder;
+Router-qualified Memory models survive cold discovery and Qwen text parts decode;
+and the built-in Orchestrator receives its fixed role, identity, configuration,
+and bounded delegation tools. Source presence, persisted state, and a passing
+build remain insufficient without runtime exposure and Rosy UI evidence.
+
+Focused tests must run as named suites and report nonzero counts. The repair
+checklist is [`ROSY_2026-09-14_FIX_RETEST.md`](ROSY_2026-09-14_FIX_RETEST.md).
+Feature rows remain Partial until that candidate passes on Ventura. The owner
+declined the complex optional section 14 field matrix; it remains future-user
+coverage and must not silently reappear as a release blocker.
+
+During validation, the first automation regression test itself violated the
+storage contract and wrote 12 synthetic chats into the live sessions directory.
+They were moved intact to a dated quarantine, the cross-runner isolation helper
+was enabled for SwiftPM, and the focused rerun used a temporary root. This is a
+failed validation incident even though the original focused assertions passed;
+see `TEST_STORAGE_SAFETY.md`.
+
+Final M4 validation ran serially with an isolated `OSAURUS_TEST_ROOT`: **982
+tests in 149 suites passed**. The canonical Rosy build then completed with
+`BUILD SUCCEEDED`; the app is a thin x86_64 Mach-O, declares macOS 13.0 minimum,
+contains `OsaurusCanonicalData = true`, and is signed by `Osaurus Intel Code
+Signing`. Its manual promotion gate is the focused checklist linked above.

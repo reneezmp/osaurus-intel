@@ -7,18 +7,16 @@ import Testing
 struct IntelOrchestratorConfigurationToolTests {
     @Test("registry exposes the schema only to the built-in Orchestrator")
     func registryVisibilityIsScoped() async {
-        let unbound = ToolRegistry.shared.openAISpecs().map(\.function.name)
-        let custom = ChatExecutionContext.$currentAgentId.withValue(UUID()) {
-            ToolRegistry.shared.openAISpecs().map(\.function.name)
-        }
-        let orchestrator = ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
-            ToolRegistry.shared.openAISpecs().map(\.function.name)
-        }
+        let unbound = ToolRegistry.shared.openAISpecs(for: nil).map(\.function.name)
+        let custom = ToolRegistry.shared.openAISpecs(for: UUID()).map(\.function.name)
+        let orchestrator = ToolRegistry.shared.openAISpecs(for: Agent.defaultId).map(\.function.name)
 
         #expect(!unbound.contains(IntelOrchestratorConfigurationTool.toolName))
         #expect(!custom.contains(IntelOrchestratorConfigurationTool.toolName))
         #expect(orchestrator.contains(IntelOrchestratorConfigurationTool.toolName))
+        #expect(orchestrator.contains(IntelOrchestratorDelegationTool.toolName))
         #expect(ToolRegistry.shared.handlesOwnApproval(for: IntelOrchestratorConfigurationTool.toolName))
+        #expect(ToolRegistry.shared.handlesOwnApproval(for: IntelOrchestratorDelegationTool.toolName))
     }
 
     @Test("unbound and custom agents cannot execute the tool")

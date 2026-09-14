@@ -213,8 +213,7 @@ private struct WatcherCard: View {
     }
 
     var body: some View {
-        Button(action: onEdit) {
-            VStack(alignment: .leading, spacing: 12) {
+        VStack(alignment: .leading, spacing: 12) {
                 // Header
                 HStack(alignment: .center, spacing: 12) {
                     ZStack {
@@ -338,9 +337,10 @@ private struct WatcherCard: View {
                 x: 0,
                 y: isHovered ? 3 : 2
             )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
+        .contentShape(Rectangle())
+        .onTapGesture(perform: onEdit)
+        .accessibilityAddTraits(.isButton)
+        .accessibilityLabel("Edit \(watcher.name)")
         .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .opacity(hasAppeared ? 1 : 0)
@@ -860,20 +860,23 @@ struct WatcherEditorSheet: View {
                         .font(.system(size: 11, weight: .medium))
                         .foregroundColor(theme.secondaryText)
 
-                    Picker(selection: $responsiveness) {
+                    LazyVGrid(
+                        columns: [GridItem(.adaptive(minimum: 78), spacing: 8)],
+                        spacing: 8
+                    ) {
                         ForEach(Responsiveness.allCases, id: \.self) { level in
-                            Text(level.displayName)
-                                .foregroundColor(theme.primaryText)
-                                .tag(level)
+                            Button(level.displayName) {
+                                responsiveness = level
+                            }
+                            .buttonStyle(WatcherResponsivenessButtonStyle(
+                                isSelected: responsiveness == level
+                            ))
+                            .accessibilityLabel(level.displayName)
+                            .accessibilityValue(
+                                responsiveness == level ? "Selected" : "Not selected"
+                            )
                         }
-                    } label: {
-                        Text("Responsiveness", bundle: .module)
                     }
-                    .pickerStyle(.menu)
-                    .labelsHidden()
-                    .foregroundColor(theme.primaryText)
-                    .tint(theme.accentColor)
-                    .frame(maxWidth: .infinity, alignment: .leading)
 
                     Text(responsiveness.displayDescription)
                         .font(.system(size: 11))
@@ -973,6 +976,41 @@ struct WatcherEditorSheet: View {
         )
 
         onSave(watcher)
+    }
+}
+
+// MARK: - Responsiveness Button
+
+/// Ventura renders menu-backed `Picker` labels through the system control
+/// appearance, which can lose contrast under custom themes. These plain SwiftUI
+/// buttons keep every monitoring mode visible before it is selected.
+private struct WatcherResponsivenessButtonStyle: ButtonStyle {
+    @Environment(\.theme) private var theme
+
+    let isSelected: Bool
+
+    func makeBody(configuration: Configuration) -> some View {
+        configuration.label
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(isSelected ? theme.primaryBackground : theme.primaryText)
+            .frame(maxWidth: .infinity)
+            .padding(.vertical, 7)
+            .padding(.horizontal, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(
+                        isSelected
+                            ? theme.accentColor.opacity(configuration.isPressed ? 0.78 : 1)
+                            : theme.tertiaryBackground
+                    )
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(
+                        isSelected ? theme.accentColor : theme.inputBorder,
+                        lineWidth: isSelected ? 1.5 : 1
+                    )
+            )
     }
 }
 
