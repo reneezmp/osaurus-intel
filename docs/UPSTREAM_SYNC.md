@@ -999,3 +999,36 @@ tests in 149 suites passed**. The canonical Rosy build then completed with
 `BUILD SUCCEEDED`; the app is a thin x86_64 Mach-O, declares macOS 13.0 minimum,
 contains `OsaurusCanonicalData = true`, and is signed by `Osaurus Intel Code
 Signing`. Its manual promotion gate is the focused checklist linked above.
+
+## 2026-09-19 — Rosy disproved the first Ventura rendering repair
+
+The `f38bfecf1` candidate restored chat chrome but did not repair Settings on
+Ventura. Rosy showed that the standard close button still worked at its expected
+coordinate while all three traffic-light images were invisible. Opening a modal
+sheet made them reappear in grey. Settings text editors still hid insertion
+carets and untouched native controls could remain white on white, while the chat
+window rendered the same classes correctly. This is direct machine evidence that
+the failure belongs to the manually-created Settings window's appearance and
+full-size titlebar composition; it is not evidence that AppKit failed to install
+the controls.
+
+Do not treat a programmatic `standardWindowButton` presence check, clickable hit
+region, or successful SwiftUI snapshot as visual acceptance. For manually-created
+Ventura windows, test the actual non-modal window before and after focus, theme
+changes, sheet presentation/dismissal, and full relaunch. Keep Settings native
+controls independent of per-agent chat appearance unless the complete Settings
+surface is intentionally themed to match.
+
+The same pass found two parity gaps hidden by the earlier repair: the Intel Add
+Knowledge sheet had retained a reduced three-field form despite upstream's local
+form exposing labels, format help, and include/exclude globs; and completed-message
+metrics could disappear when a restored turn retained token count without TTFT or
+tok/s. Future ports must compare the whole user workflow and persisted/relaunched
+shape, not merely the presence of a sheet or footer block.
+
+The focused second-pass checklist is
+[`ROSY_2026-09-19_VENTURA_RETEST.md`](ROSY_2026-09-19_VENTURA_RETEST.md).
+M4 validation for that candidate ran **983 tests in 149 suites** against an
+isolated filesystem root. The first attempted full run also disabled the test
+Keychain and correctly broke OAuth-header tests; filesystem isolation is required,
+but the suite's in-memory Keychain substitute must remain enabled.

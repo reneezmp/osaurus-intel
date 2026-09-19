@@ -8,13 +8,34 @@ pass; the full acceptance checklist remains the final release gate.
 
 - Candidate: `build/rosy-deploy/Build/Products/Debug/osaurus.app`
 - Verified on M4 before transfer: x86_64, macOS 13.0 minimum, canonical data
-  enabled, signed by `Osaurus Intel Code Signing`; 982 tests / 149 suites pass
+  enabled, signed by `Osaurus Intel Code Signing`; 983 tests / 149 suites pass
   serially against an isolated test root.
 - [ ] Record the app commit/build identifier and copy the pre-test agent inventory.
 - [ ] Quit every older Osaurus build before opening this one.
 - [ ] Launch with Rosy's existing `~/.osaurus`; no agent or chat should be reset.
 
 ## Native Ventura controls and message chrome
+
+Rosy result from the first repair candidate (`f38bfecf1`): **failed**. The chat
+window rendered its controls, but Settings kept clickable traffic-light hit
+regions with invisible images. Settings text editors still hid the caret and
+several untouched native controls remained white on white. Presenting the
+Knowledge sheet changed the window state enough to reveal grey traffic lights,
+which isolates the defect to Settings window appearance/titlebar composition,
+not missing standard buttons. The Knowledge form itself worked but was missing
+upstream's labels, help, and include/exclude filters. Assistant actions returned,
+but the metrics row did not consistently expose TTFT, tok/s, and token count.
+
+The next candidate uses an ordinary AppKit titlebar for Settings, pins its native
+controls to Aqua independently of the active agent chat theme, reapplies field
+editor text/caret rendering on focus, restores the full local-folder Knowledge
+form including persisted globs, and renders statistics when a restored turn has
+only its persisted token count. The attached Rosy screenshots are the acceptance
+evidence for this correction; none of the items below are promoted until Rosy
+passes them.
+
+For this group's second candidate, use the smaller evidence checklist in
+[`ROSY_2026-09-19_VENTURA_RETEST.md`](ROSY_2026-09-19_VENTURA_RETEST.md).
 
 - [ ] With screen sharing stopped, both Settings and chat show clickable red,
       yellow, and green window controls.

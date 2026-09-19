@@ -164,6 +164,8 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
                 editor.window === window
             else { return }
             editor.insertionPointColor = cursorColor
+            editor.textColor = .labelColor
+            editor.needsDisplay = true
         }
 
         override func viewDidMoveToWindow() {
@@ -178,17 +180,13 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
 /// while native controls can retain the launch appearance after SwiftUI repaints.
 @MainActor
 enum IntelNativeWindowRendering {
-    static func appearance(declaredDark: Bool, backgroundColor: NSColor) -> NSAppearance? {
-        let resolvedDark = inferredDarkBackground(backgroundColor) ?? declaredDark
-        return NSAppearance(named: resolvedDark ? .darkAqua : .aqua)
-    }
-
-    static func inferredDarkBackground(_ color: NSColor) -> Bool? {
-        guard let rgb = color.usingColorSpace(.deviceRGB) else { return nil }
-        let luminance = 0.2126 * rgb.redComponent
-            + 0.7152 * rgb.greenComponent
-            + 0.0722 * rgb.blueComponent
-        return luminance < 0.5
+    static func appearance(declaredDark _: Bool, backgroundColor _: NSColor) -> NSAppearance? {
+        // The Intel Settings shell uses the upstream light paper palette even
+        // when an agent's chat theme is dark. Tying native controls to the
+        // active agent made Ventura produce dark (white) glyphs on this light
+        // surface. Keep Settings AppKit controls in Aqua; chat windows retain
+        // their independent per-agent appearance path.
+        NSAppearance(named: .aqua)
     }
 
     static func restoreTitlebarControls(in window: NSWindow) {
@@ -198,6 +196,7 @@ enum IntelNativeWindowRendering {
             button.isHidden = false
             button.alphaValue = 1
             button.isEnabled = true
+            button.contentTintColor = nil
             button.needsDisplay = true
         }
     }

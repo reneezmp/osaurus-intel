@@ -194,14 +194,22 @@ struct KnowledgeView: View {
         isCreating = true
     }
 
-    private func createCollection(name: String, summary: String, folderPath: String) {
+    private func createCollection(
+        name: String,
+        summary: String,
+        folderPath: String,
+        includeGlobs: [String],
+        excludeGlobs: [String]
+    ) {
         isCreating = false
         Task { @MainActor in
             do {
                 let collectionId = try await integration.createCollection(
                     name: name,
                     summary: summary,
-                    folderPath: folderPath
+                    folderPath: folderPath,
+                    includeGlobs: includeGlobs,
+                    excludeGlobs: excludeGlobs
                 )
                 if let projectId = createGrantProjectId,
                     var project = ProjectManager.shared.project(for: projectId)
@@ -365,17 +373,19 @@ private struct KnowledgeCollectionCard: View {
 private struct KnowledgeCollectionEditorSheet: View {
     @Environment(\.theme) private var theme
 
-    let onSave: (String, String, String) -> Void
+    let onSave: (String, String, String, [String], [String]) -> Void
     let onCancel: () -> Void
 
     @State private var name: String
     @State private var summary = ""
     @State private var folderPath = ""
+    @State private var includeGlobs = ""
+    @State private var excludeGlobs = ""
     @State private var validationMessage: String?
 
     init(
         initialName: String = "",
-        onSave: @escaping (String, String, String) -> Void,
+        onSave: @escaping (String, String, String, [String], [String]) -> Void,
         onCancel: @escaping () -> Void
     ) {
         _name = State(initialValue: initialName)
@@ -384,7 +394,7 @@ private struct KnowledgeCollectionEditorSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 18) {
+        VStack(alignment: .leading, spacing: 16) {
             Text("Add Knowledge Collection", bundle: .module)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(theme.primaryText)
@@ -396,16 +406,57 @@ private struct KnowledgeCollectionEditorSheet: View {
             .font(.system(size: 12))
             .foregroundColor(theme.secondaryText)
 
-            TextField("Name", text: $name)
-                .textFieldStyle(.roundedBorder)
+            StyledSettingsTextField(
+                label: "Name", text: $name,
+                placeholder: "WordPress Development", help: ""
+            )
 
-            TextField("What is this collection for?", text: $summary)
-                .textFieldStyle(.roundedBorder)
+            StyledSettingsTextField(
+                label: "Summary (optional)", text: $summary,
+                placeholder: "What this corpus contains, shown to agents", help: ""
+            )
 
-            HStack(spacing: 8) {
-                TextField("Folder", text: $folderPath)
-                    .textFieldStyle(.roundedBorder)
-                Button("Choose…", action: chooseFolder)
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Folder", bundle: .module)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                HStack(spacing: 10) {
+                    TextField("/path/to/knowledge-folder", text: $folderPath)
+                        .textFieldStyle(.plain)
+                        .font(.system(size: 13, design: .monospaced))
+                        .foregroundColor(theme.primaryText)
+                    Button("Choose…", action: chooseFolder)
+                        .buttonStyle(SettingsButtonStyle())
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 8)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(theme.inputBackground)
+                        .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder))
+                )
+                Text("Files in this folder are indexed in place and never modified. Markdown, plain text, code, and documents (PDF, Word, Excel, PowerPoint, CSV) are supported; YAML frontmatter (`type`, `tags`, …) in markdown is used for filtering.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+
+            VStack(alignment: .leading, spacing: 6) {
+                Text("Index filters (optional)", bundle: .module)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                StyledSettingsTextField(
+                    label: "Include", text: $includeGlobs,
+                    placeholder: "docs/**, *.md", help: ""
+                )
+                StyledSettingsTextField(
+                    label: "Exclude", text: $excludeGlobs,
+                    placeholder: "src/**, test/**", help: ""
+                )
+                Text("Junk and .gitignore files are skipped automatically. Most folders need nothing here.\n• Include: index only matching files, e.g. docs/**\n• Exclude: skip matching files. Wins over Include.\n• * matches inside a folder, ** across folders.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let validationMessage {
@@ -426,7 +477,7 @@ private struct KnowledgeCollectionEditorSheet: View {
             }
         }
         .padding(24)
-        .frame(width: 520, height: 300)
+        .frame(width: 520)
         .background(theme.primaryBackground)
         .environment(\.theme, theme)
         .intelControlRendering(theme: theme)
@@ -457,7 +508,19 @@ private struct KnowledgeCollectionEditorSheet: View {
             validationMessage = "Choose a folder for this collection."
             return
         }
-        onSave(trimmedName, summary.trimmingCharacters(in: .whitespacesAndNewlines), trimmedPath)
+        onSave(
+            trimmedName,
+            summary.trimmingCharacters(in: .whitespacesAndNewlines),
+            trimmedPath,
+            Self.parseGlobs(includeGlobs),
+            Self.parseGlobs(excludeGlobs)
+        )
+    }
+
+    private static func parseGlobs(_ raw: String) -> [String] {
+        raw.split(whereSeparator: { $0 == "," || $0.isNewline })
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }
     }
 }
 

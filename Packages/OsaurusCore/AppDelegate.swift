@@ -497,7 +497,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable],
             backing: .buffered,
             defer: false
         )
@@ -506,13 +506,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.isReleasedWhenClosed = false
         window.isRestorable = false
 
-        // Match the chat window's inline-traffic-light chrome: a transparent,
-        // title-less titlebar so the SwiftUI content paints to the top edge
-        // instead of sitting under a separate solid macOS title bar. SwiftUI
-        // still insets its content for the titlebar's safe area, so the traffic
-        // lights float over the sidebar's top without overlapping content
-        // (same contract as `ChatWindowManager.createChatPanel`).
-        window.titlebarAppearsTransparent = true
+        // Settings uses AppKit's native titlebar. On Ventura a full-size SwiftUI
+        // content view can paint over the standard button images while their
+        // hit regions remain active — exactly the invisible-but-clickable state
+        // observed on Rosy. Chat owns custom full-size chrome; Settings does not.
+        window.titlebarAppearsTransparent = false
         window.titleVisibility = .hidden
 
         // Phase 11.0-ter: mirror the appearance + opacity + background
@@ -527,8 +525,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // light/dark mode forces SwiftUI to pick the right colors.
         window.isOpaque = true
         window.backgroundColor = .windowBackgroundColor
-        window.appearance = NSAppearance(
-            named: ThemeManager.shared.currentTheme.isDark ? .darkAqua : .aqua
+        window.appearance = IntelNativeWindowRendering.appearance(
+            declaredDark: ThemeManager.shared.currentTheme.isDark,
+            backgroundColor: NSColor(ThemeManager.shared.currentTheme.primaryBackground)
         )
 
         window.contentViewController = host

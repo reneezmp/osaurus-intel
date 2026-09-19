@@ -57,7 +57,10 @@ public protocol KnowledgeUIProviding: AnyObject {
     var knowledgeUISnapshot: [KnowledgeUICollection] { get }
 
     func refresh() async throws
-    func createCollection(name: String, summary: String, folderPath: String) async throws -> UUID
+    func createCollection(
+        name: String, summary: String, folderPath: String,
+        includeGlobs: [String], excludeGlobs: [String]
+    ) async throws -> UUID
     func setCollection(_ id: UUID, enabled: Bool)
     func reindexCollection(_ id: UUID)
     func deleteCollection(_ id: UUID)
@@ -130,11 +133,14 @@ public final class KnowledgeUIIntegration: ObservableObject {
     public func createCollection(
         name: String,
         summary: String,
-        folderPath: String
+        folderPath: String,
+        includeGlobs: [String],
+        excludeGlobs: [String]
     ) async throws -> UUID {
         guard let provider else { throw KnowledgeUIIntegrationError.unavailable }
         let id = try await provider.createCollection(
-            name: name, summary: summary, folderPath: folderPath)
+            name: name, summary: summary, folderPath: folderPath,
+            includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
         adopt(provider.knowledgeUISnapshot)
         return id
     }
@@ -191,9 +197,13 @@ extension KnowledgeManager: KnowledgeUIProviding {
         await reload()
     }
 
-    public func createCollection(name: String, summary: String, folderPath: String) async throws -> UUID {
+    public func createCollection(
+        name: String, summary: String, folderPath: String,
+        includeGlobs: [String], excludeGlobs: [String]
+    ) async throws -> UUID {
         let collection = try await create(
-            name: name, summary: summary, folderPath: folderPath)
+            name: name, summary: summary, folderPath: folderPath,
+            includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
         return collection.id
     }
 
