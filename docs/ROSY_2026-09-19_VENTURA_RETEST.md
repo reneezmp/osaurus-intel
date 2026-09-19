@@ -1,12 +1,31 @@
-# Rosy Ventura Window and Message Retest
+# Rosy Build `944887838` Retest Checklist
 
-Use this short list for the candidate built after Rosy disproved `f38bfecf1`.
-It covers only the first failed group; keep the broader post-QA checklist for
-the remaining repaired features.
+Use this checklist for the exact candidate built after Rosy disproved
+`f38bfecf1`. It covers the repaired Ventura controls, Knowledge form, and
+message chrome. Keep the broader post-QA checklist for the other feature groups.
+
+## Candidate
+
+- Commit: `944887838` (`Repair Ventura settings rendering`)
+- App: `build/rosy-deploy/Build/Products/Debug/osaurus.app`
+- Architecture: thin `x86_64`
+- Minimum system: macOS 13.0
+- Data root: canonical `~/.osaurus`
+- M4 validation: 983 tests in 149 suites passed
+- Signature: strict deep verification passed
+
+Record the Rosy result here:
+
+- Date/time:
+- macOS version:
+- Tester:
+- Copied app hash or commit confirmation:
+- Overall result: [ ] Pass  [ ] Fail  [ ] Partial
 
 ## Preflight
 
-- [ ] Quit every Osaurus process, replace the app, and record the candidate commit.
+- [ ] Quit every Osaurus process and replace the previous app with this candidate.
+- [ ] Confirm the candidate commit/build identifier is `944887838`.
 - [ ] Confirm Rosy is running macOS Ventura and screen sharing is stopped.
 - [ ] Launch Settings directly from a fresh app launch before opening a sheet.
 
@@ -53,3 +72,18 @@ the remaining repaired features.
 - [ ] Save one screenshot of a fresh completed response showing all three metrics.
 - [ ] Record every failure against the exact candidate commit; do not promote the
       Ventura parity row from Partial from automated evidence alone.
+
+## Result notes
+
+### Failures
+
+- None recorded yet.
+
+### Unexpected differences from upstream
+
+- None recorded yet.
+
+### Final decision
+
+- [ ] Accept this repaired group on Rosy.
+- [ ] Keep the group Partial and return the failures to the repair log.
