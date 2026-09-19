@@ -1057,6 +1057,10 @@ AppKit control's post-click appearance are not evidence of its untouched
 Ventura rendering. Check the actual Settings window before interaction, and
 compare management surfaces against current upstream behavior while preserving
 Intel's compiled dependency boundary.
+
+The exact post-fix Rosy gate is
+[`ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md`](ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md),
+pinned to code commit `5419bf4cb`.
 M4 validation for that candidate ran **983 tests in 149 suites** against an
 isolated filesystem root. The first attempted full run also disabled the test
 Keychain and correctly broke OAuth-header tests; filesystem isolation is required,
