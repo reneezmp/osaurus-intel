@@ -1061,6 +1061,15 @@ Intel's compiled dependency boundary.
 The exact post-fix Rosy gate is
 [`ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md`](ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md),
 pinned to code commit `5419bf4cb`.
+
+Rosy's result for that candidate is Partial. Themes and the previously broken
+Ventura controls now render correctly. Settings has a readable light native
+titlebar, although it does not yet use chat's integrated full-size chrome.
+Knowledge details now expose the real location, dates, counts, agents, and
+indexed documents, but clicking an Agents with Access switch does not update
+the visible or global grant state. Collection cards also still lack upstream's
+inline Edit action and categorized/uncategorized badge. These are release-known
+gaps, not accepted parity.
 M4 validation for that candidate ran **983 tests in 149 suites** against an
 isolated filesystem root. The first attempted full run also disabled the test
 Keychain and correctly broke OAuth-header tests; filesystem isolation is required,

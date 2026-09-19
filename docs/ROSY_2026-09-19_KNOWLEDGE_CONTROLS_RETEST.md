@@ -20,13 +20,15 @@ Record the Rosy result here:
 - Date/time:
 - macOS version:
 - Tester:
-- Overall result: [ ] Pass  [ ] Fail  [ ] Partial
+- Overall result: [ ] Pass  [ ] Fail  [x] Partial
 
 ## 1. Settings titlebar and untouched native controls
 
-- [ ] Launch Settings directly after a complete quit. Red, yellow, and green
+- [x] Launch Settings directly after a complete quit. Red, yellow, and green
       controls are visible, clickable, and sit on a light titlebar that blends
-      with Settings instead of a large dark-grey strip.
+      with Settings instead of a large dark-grey strip. **Difference:** the
+      separate light titlebar remains; upstream-style full-size chrome is still
+      pending.
 - [ ] Before clicking any control, inspect a normal and disabled button, switch,
       selector, menu, and numeric stepper. Every label/icon is readable; none is
       white on white or blank.
@@ -34,27 +36,31 @@ Record the Rosy result here:
       are visible before interaction.
 - [ ] Navigate between several Settings pages, open and dismiss a sheet, then
       repeat the checks.
-- [ ] Switch to an agent with a dark **chat** theme. Its chat becomes dark while
+- [x] Switch to an agent with a dark **chat** theme. Its chat becomes dark while
       the separate Settings window remains consistently readable.
 - [ ] Quit completely, relaunch, and repeat the titlebar and untouched-control
       checks once.
 
 ## 2. Knowledge cards
 
-- [ ] Each populated collection card shows its name and summary, enabled switch,
+- [ ] **Partial:** each populated collection card shows its name and summary, enabled switch,
       agent-access count/avatars where applicable, project usage where applicable,
-      document/chunk status, and Re-index/Delete actions.
+      document/chunk status, and Re-index/Delete actions. It still lacks the
+      upstream inline Edit action and categorized/uncategorized status badge.
 - [ ] A collection with no agent grant says that no agents have access.
 - [ ] Toggle a collection off and on before opening its details; colour and state
       are correct immediately and persist after navigation.
 
 ## 3. Knowledge details and real data
 
-- [ ] Open a populated collection. The sheet shows name, summary, enabled switch,
+- [x] Open a populated collection. The sheet shows name, summary, enabled switch,
       Location, created/updated dates, Status, project usage where applicable,
       Agents with Access, Documents, and Delete/Edit/Re-index/Done.
-- [ ] Document rows show name, relative path, and category where the index has one.
+- [x] Document rows show name, relative path, and category where the index has one.
       Counts agree with the collection card.
+- [ ] **Failed:** toggling a custom agent's access does not visibly change the
+      switch and does not establish a globally reflected grant. Fix the
+      observable grant-state update before retesting persistence or runtime denial.
 - [ ] Toggle one custom agent's access off, close the sheet, reopen it, and confirm
       the grant remains off. Confirm that agent cannot search the collection.
 - [ ] Toggle access back on, reopen the sheet, and confirm the grant remains on.
@@ -86,8 +92,10 @@ Record the Rosy result here:
 
 ### Failures
 
-- None recorded yet.
+- Agents with Access switches do not change state when clicked.
+- Knowledge cards still lack inline Edit and categorized/uncategorized status.
 
 ### Unexpected differences from upstream
 
-- None recorded yet.
+- Settings still uses a separate light native titlebar instead of the chat
+  window's full-size integrated chrome.

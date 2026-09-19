@@ -5,6 +5,15 @@ on Rosy only after the planned feature work for the candidate release is complet
 Do not promote a feature from Partial to Working and tested from M4 compilation,
 automated tests, or isolated screenshots alone.
 
+> **Status note, 2026-09-19:** the historical failed wording below records the
+> original Rosy run. Later focused passes repaired themes, traffic lights,
+> carets, native-control readability, Knowledge creation/details, and completed
+> message statistics. The remaining repair and test map is
+> [`M4_PREFORMAT_HANDOFF_2026-09-19.md`](M4_PREFORMAT_HANDOFF_2026-09-19.md),
+> with the latest focused evidence in
+> [`ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md`](ROSY_2026-09-19_KNOWLEDGE_CONTROLS_RETEST.md).
+> Preserve the historical failures; use those two files for current status.
+
 Fill in before testing:
 
 - Candidate commit:

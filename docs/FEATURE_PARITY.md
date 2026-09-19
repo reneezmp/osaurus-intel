@@ -63,7 +63,7 @@ final Intel release is tested as one integrated product.
 | Area | Product state | Evidence and remaining work |
 |---|---|---|
 | OpenAI ChatGPT/Codex OAuth | Working and tested | Login, catalog filtering, Responses Lite streaming, follow-up context, and cancellation passed Rosy acceptance. |
-| Knowledge | Working and tested | Local collections, indexing, search, refresh, unavailable-folder reporting, and project attachment passed Rosy acceptance. |
+| Knowledge | Partial | Local collections, indexing, search, refresh, unavailable-folder reporting, project attachment, richer details, and indexed document/category rows work on Rosy. The 2026-09-19 retest found that Agents with Access switches do not visibly or globally apply grants, and collection cards still lack upstream's inline Edit and categorized/uncategorized badge. |
 | Projects and working folders | Working and tested | Instructions, Knowledge attachment, shared memory, default agent, per-chat folder ownership, persistence, and relaunch passed Rosy acceptance. |
 | Claude Code | Working and tested | CLI auth, streaming, cancellation, progress, folder access, and opt-in file/shell execution passed Rosy acceptance. Osaurus MCP configuration remains dependency-blocked. |
 | Agent Settings — General and Appearance | Partial | The 2026-09-13 Rosy defects now have code and focused regression fixes: chat-local model changes no longer rewrite agent defaults; Claude controls and Agent Data are discoverable; and the header observes custom-avatar revisions. Rosy Ventura retest is still required before promotion. |
@@ -73,7 +73,7 @@ final Intel release is tested as one integrated product.
 | Agent Settings — Memory | Partial | The Router-qualified model survives cold discovery and Qwen text content parts decode into distillation; malformed/non-text payloads still fail with bounded redacted diagnostics. Focused tests pass. Rosy must rerun distillation before pinned facts, episodes, empty state, and Memory off/on can be accepted. |
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Working and tested | Rosy retest on 2026-09-13 confirms ordinary and tool-using chat records, model, duration, request/output, token and completion data, offered/executed tools, useful provider failures, and non-empty list rendering. Newer per-message diagnostics remain deliberately assigned to the later chat-interface revamp. |
-| Ventura native controls | Partial | Rosy's `944887838` retest confirmed visible/clickable traffic lights, field-editor carets, the complete Knowledge creation form, and TTFT/tok-s/token message chrome. It also exposed a dark native titlebar strip plus remaining white-on-white AppKit buttons, switches, and selectors. The next candidate blends the real titlebar into Settings and stops globally tinting text-bearing AppKit controls; only another Rosy Ventura retest can promote this row. |
+| Ventura native controls | Partial | Rosy's `5419bf4cb` retest confirms themes, visible/clickable traffic lights, field-editor carets, readable controls, the complete Knowledge form, and TTFT/tok-s/token message chrome. Settings now has a readable light native titlebar, but still differs from upstream/chat's integrated full-size chrome. Reuse of chat-window chrome needs a dedicated window-lifecycle pass so it does not revive Ventura's invisible traffic lights. |
 | Web Search | Working and tested | Rosy acceptance on 2026-09-13 covers default-off per-agent runtime gating, keyless built-ins, web/news/image categories, provider failure/fallback/cancellation, credential lifecycle and secrecy, ordering, category preferences, custom REST providers, bounded safe extraction, legacy-plugin suppression, and Premium consent boundaries. Image search returns structured image/thumbnail URLs; inline gallery rendering is outside the current tool contract. Funded Router accounting remains tracked under Credits and Router. |
 | Credits and Router | Partial | Signed hosted inference, balance, Checkout, usage, activity, and metadata-only diagnostics compile on Intel. Gates C1-C3 add an explicit Router opt-out, bounded top-up parsing, credit-unit presentation, Credits-only code redemption, an account usage center, Premium Web Search consent, a separate wallet auto-pay switch, and safe billing status. Onboarding redemption, Insights correlation, and Rosy Ventura acceptance remain pending; commit coverage alone is not parity. |
 | Orchestrator | Partial | The built-in agent now has the upstream green identity, an Intel-safe built-in role extended by the editable prompt, and built-in-only model-callable `orchestrator_config` and bounded delegation tools. Admission, exact-pair approval, denial, fresh tool-free child execution, output bounds, and fail-closed behavior have focused coverage. Rosy chat acceptance remains the promotion gate; see `ORCHESTRATOR_INTEL_PLAN.md`. |
@@ -83,7 +83,14 @@ final Intel release is tested as one integrated product.
 These are explicit product priorities, not promises that their current upstream
 implementations compile unchanged on Intel.
 
-1. **Orchestrator** — restore the built-in configuration/delegation agent in
+1. **Rosy acceptance repairs** — make Knowledge agent-grant toggles observable
+   and globally persistent; add card Edit plus categorized/uncategorized status;
+   then evaluate sharing chat's integrated titlebar implementation without
+   reviving Ventura's invisible traffic-light regression.
+2. **Complete the remaining main acceptance pass** — rerun the still-open Agent
+   General/Appearance, Abilities/Tools, Automation, Memory, Orchestrator, and
+   declarative-configuration gates in `ROSY_FINAL_ACCEPTANCE_CHECKLIST.md`.
+3. **Orchestrator** — restore the built-in configuration/delegation agent in
    dependency order. Separate configuration features that can use current Intel
    managers from delegation features that require the subagent runtime.
    The dependency gates, cloud/custom-agent spike, unavailable target boundary,
@@ -93,28 +100,28 @@ implementations compile unchanged on Intel.
    bounded declarative configuration Gates 5A–5B are implemented. Child tools, durable or
    background execution, and model-owned autonomous delegation remain later
    dependency work.
-2. **Revamped Credits** — audit wallet, activity, redemption, premium-search,
+4. **Revamped Credits** — audit wallet, activity, redemption, premium-search,
    Router, and diagnostics paths. Never expose balance-changing controls without
    the real remote service and error handling.
-3. **Channels** — Discord, Slack, Telegram, iMessage, WhatsApp, incoming-agent
+5. **Channels** — Discord, Slack, Telegram, iMessage, WhatsApp, incoming-agent
    assignment, outbox, activity, allowlists, credentials, and send approvals.
    The Agent Settings attachment points are tracked in
    `INTEL_AGENT_SETTINGS_BACKLOG.md` B3.
-4. **Browser Use and Computer Use** — run a capability spike before porting.
+6. **Browser Use and Computer Use** — run a capability spike before porting.
    Record an Intel/macOS support matrix for Ventura and newer releases,
    Accessibility and Screen Recording behavior, browser-engine availability,
    model requirements, and approval/cancellation semantics. Do not assume these
    are Apple-Silicon-only or universally Intel-compatible.
-5. **Web Search — free/custom and Premium C3 implemented** — complete Rosy
+7. **Web Search — free/custom and Premium C3 implemented** — complete Rosy
    acceptance for provider ordering, hosted/native fallback, test search,
    custom REST providers, Keychain credentials, extraction, billing consent,
    and per-agent opt-in gating. Premium remains Partial until the real Router
    endpoints and funded/test-account paths pass on Rosy.
-6. **Media, cloud models only** — implement remote image/video model discovery,
+8. **Media, cloud models only** — implement remote image/video model discovery,
    defaults, permissions, quoting, job recovery, and results. Exclude local MLX
    generation/editing from the Intel scope unless a separate compatible runtime
    is proven.
-7. **Privacy** — audit telemetry controls and implement cloud-bound PII
+9. **Privacy** — audit telemetry controls and implement cloud-bound PII
    redaction/review, provider/model policy, placeholder lifecycle, storage, and
    “forget redactions” behavior against the Intel cloud engine.
 
