@@ -510,8 +510,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // content view can paint over the standard button images while their
         // hit regions remain active — exactly the invisible-but-clickable state
         // observed on Rosy. Chat owns custom full-size chrome; Settings does not.
-        window.titlebarAppearsTransparent = false
+        // Keep the titlebar as a real AppKit titlebar so Ventura installs and
+        // paints the traffic lights, but blend it into Settings' light paper
+        // instead of leaving the large dark system strip seen on Rosy.
+        window.titlebarAppearsTransparent = true
         window.titleVisibility = .hidden
+        window.titlebarSeparatorStyle = .none
 
         // Phase 11.0-ter: mirror the appearance + opacity + background
         // contract that `ChatWindowManager.createChatPanel` sets on the

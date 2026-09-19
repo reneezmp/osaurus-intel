@@ -113,6 +113,12 @@ struct KnowledgeCoreTests {
             )
             #expect(firstHits.count == 1)
             #expect(firstHits.first?.relPath == "guides/recovery.md")
+            let listedDocuments = try KnowledgeDatabase.shared.listDocuments(
+                collectionId: "collection-a")
+            #expect(listedDocuments.count == 1)
+            #expect(listedDocuments.first?.title == "Recovery")
+            #expect(listedDocuments.first?.docType == "guide")
+            #expect(listedDocuments.first?.tags == ["storage", "migration"])
 
             let databaseURL = root.appendingPathComponent("knowledge/knowledge.sqlite")
             let header = try Data(contentsOf: databaseURL).prefix(15)

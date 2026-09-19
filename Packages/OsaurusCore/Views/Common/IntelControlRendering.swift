@@ -142,7 +142,12 @@ private struct IntelControlRenderingBridge: NSViewRepresentable {
             // colours while buttons, switches, and image-backed controls pick
             // up the active agent accent before first interaction.
             if let button = view as? NSButton {
-                button.contentTintColor = accentColor
+                // Do not force an accent tint onto text-bearing AppKit controls.
+                // On Ventura that tint is also applied to switch labels, menu
+                // titles, and disabled button text; the result is white glyphs
+                // on the Settings paper background until the control is used.
+                // SwiftUI's explicit button/toggle styles own accent colour.
+                button.contentTintColor = nil
                 button.needsDisplay = true
             } else if let imageView = view as? NSImageView {
                 imageView.contentTintColor = accentColor

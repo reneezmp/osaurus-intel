@@ -149,6 +149,40 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         }
     }
 
+    /// Documents shown by the Knowledge management surface. The database owns
+    /// its serial queue, so callers may safely load these off the main actor.
+    public func listDocuments(collectionId: String, limit: Int = 2_000) throws -> [KnowledgeDocument] {
+        try sync { connection in
+            var result: [KnowledgeDocument] = []
+            try query(connection, """
+                SELECT id,collection_id,rel_path,title,doc_type,summary,tags_csv,
+                       content_hash,size_bytes,modified_at,indexed_at
+                FROM documents WHERE collection_id=?1
+                ORDER BY rel_path COLLATE NOCASE LIMIT ?2
+                """, bind: { statement in
+                    bindText(statement, 1, collectionId)
+                    sqlite3_bind_int(statement, 2, Int32(max(0, limit)))
+                }) { statement in
+                    while sqlite3_step(statement) == SQLITE_ROW {
+                        result.append(KnowledgeDocument(
+                            id: Int(sqlite3_column_int64(statement, 0)),
+                            collectionId: columnText(statement, 1),
+                            relPath: columnText(statement, 2),
+                            title: columnText(statement, 3),
+                            docType: columnText(statement, 4),
+                            summary: columnText(statement, 5),
+                            tagsCSV: columnText(statement, 6),
+                            contentHash: columnText(statement, 7),
+                            sizeBytes: Int(sqlite3_column_int64(statement, 8)),
+                            modifiedAt: columnText(statement, 9),
+                            indexedAt: columnText(statement, 10)
+                        ))
+                    }
+                }
+            return result
+        }
+    }
+
     public func upsertDocument(collectionId: String, relPath: String, title: String, docType: String, summary: String, tagsCSV: String, contentHash: String, sizeBytes: Int, modifiedAt: String) throws -> Int {
         try sync { connection in
             var id = 0

@@ -1028,6 +1028,35 @@ shape, not merely the presence of a sheet or footer block.
 
 The focused second-pass checklist is
 [`ROSY_2026-09-19_VENTURA_RETEST.md`](ROSY_2026-09-19_VENTURA_RETEST.md).
+
+## 2026-09-19 — Rosy second-pass evidence and Knowledge parity follow-up
+
+Rosy's direct test of `944887838` confirmed that Settings now paints working
+traffic lights, text fields show their carets, the complete Knowledge creation
+form works with persisted include/exclude filters, and completed messages show
+TTFT, throughput, and token count. Preserve the tester's annotations in
+[`ROSY_2026-09-19_VENTURA_RETEST.md`](ROSY_2026-09-19_VENTURA_RETEST.md); they
+are product evidence, not disposable working-tree changes.
+
+The same run found two remaining gaps. Settings used a conspicuous dark native
+titlebar strip, and the Ventura rendering bridge applied the active accent to
+every `NSButton`, turning labels in switches, selectors, normal buttons, and
+disabled controls white on the light Settings surface. The follow-up keeps a
+real AppKit titlebar but makes it transparent over the Settings background, and
+leaves text-bearing controls to Aqua plus their explicit SwiftUI styles.
+
+Rosy also showed that Intel's Knowledge detail sheet and cards lagged upstream.
+The follow-up ports the parts backed by Intel's real data: editable metadata and
+globs, collection dates, document/chunk status, project usage, persisted custom
+agent grants, and indexed documents with relative paths and categories. The
+document list comes from the encrypted derived Knowledge index; it does not
+invent an upstream-only service or expose a dead action.
+
+Permanent lesson: native window hit regions, a successful M4 build, and an
+AppKit control's post-click appearance are not evidence of its untouched
+Ventura rendering. Check the actual Settings window before interaction, and
+compare management surfaces against current upstream behavior while preserving
+Intel's compiled dependency boundary.
 M4 validation for that candidate ran **983 tests in 149 suites** against an
 isolated filesystem root. The first attempted full run also disabled the test
 Keychain and correctly broke OAuth-header tests; filesystem isolation is required,

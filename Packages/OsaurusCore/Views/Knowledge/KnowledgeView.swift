@@ -21,6 +21,7 @@ struct KnowledgeView: View {
     @State private var createPrefillName = ""
     @State private var createGrantProjectId: UUID?
     @State private var selectedCollection: KnowledgeUICollection?
+    @State private var editingCollection: KnowledgeUICollection?
     @State private var toastMessage: String?
     @State private var toastIsError = false
 
@@ -77,6 +78,24 @@ struct KnowledgeView: View {
                 onCancel: { isCreating = false }
             )
         }
+        .sheet(item: $editingCollection) { collection in
+            KnowledgeCollectionEditorSheet(
+                title: "Edit Knowledge Collection",
+                initialName: collection.name,
+                initialSummary: collection.summary,
+                initialFolderPath: collection.folderPath,
+                initialIncludeGlobs: collection.includeGlobs,
+                initialExcludeGlobs: collection.excludeGlobs,
+                saveTitle: "Save",
+                onSave: { name, summary, folderPath, includeGlobs, excludeGlobs in
+                    updateCollection(
+                        collection.id, name: name, summary: summary,
+                        folderPath: folderPath, includeGlobs: includeGlobs,
+                        excludeGlobs: excludeGlobs)
+                },
+                onCancel: { editingCollection = nil }
+            )
+        }
         .sheet(item: $selectedCollection) { collection in
             KnowledgeCollectionDetailSheet(
                 collection: collection,
@@ -87,6 +106,10 @@ struct KnowledgeView: View {
                 onReindex: {
                     integration.reindexCollection(collection.id)
                     showToast("Re-indexing \"\(collection.name)\"")
+                },
+                onEdit: {
+                    selectedCollection = nil
+                    DispatchQueue.main.async { editingCollection = collection }
                 },
                 onDelete: {
                     selectedCollection = nil
@@ -221,10 +244,29 @@ struct KnowledgeView: View {
                 }
                 createPrefillName = ""
                 createGrantProjectId = nil
-                showToast("Added \"(name)\"")
+                showToast("Added \"\(name)\"")
             } catch {
                 showToast(error.localizedDescription, isError: true)
             }
+        }
+    }
+
+    private func updateCollection(
+        _ id: UUID,
+        name: String,
+        summary: String,
+        folderPath: String,
+        includeGlobs: [String],
+        excludeGlobs: [String]
+    ) {
+        do {
+            try integration.updateCollection(
+                id, name: name, summary: summary, folderPath: folderPath,
+                includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
+            editingCollection = nil
+            showToast("Saved \"\(name)\"")
+        } catch {
+            showToast(error.localizedDescription, isError: true)
         }
     }
 
@@ -255,6 +297,8 @@ struct KnowledgeView: View {
 
 private struct KnowledgeCollectionCard: View {
     @Environment(\.theme) private var theme
+    @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var projectManager = ProjectManager.shared
 
     let collection: KnowledgeUICollection
     let animationDelay: Double
@@ -295,7 +339,7 @@ private struct KnowledgeCollectionCard: View {
                     )
                 )
                 .labelsHidden()
-                .toggleStyle(.switch)
+                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
                 .controlSize(.mini)
             }
 
@@ -304,6 +348,45 @@ private struct KnowledgeCollectionCard: View {
                     .font(.system(size: 12))
                     .foregroundColor(theme.secondaryText)
                     .lineLimit(2)
+            }
+
+
+            let grantedAgents = agentManager.agents.filter {
+                !$0.isBuiltIn && agentManager.knowledgeCollectionIds(for: $0.id).contains(collection.id)
+            }
+            if grantedAgents.isEmpty {
+                Label("No agents with access", systemImage: "person.2.slash")
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+            } else {
+                HStack(spacing: 6) {
+                    HStack(spacing: -6) {
+                        ForEach(Array(grantedAgents.prefix(4))) { agent in
+                            AgentAvatarView(
+                                mascotId: agent.avatar,
+                                name: agent.name,
+                                tint: theme.accentColor,
+                                diameter: 22,
+                                customImageURL: agent.customAvatarURL,
+                                monogramFontSize: 9,
+                                borderWidth: 1
+                            )
+                        }
+                    }
+                    Text("\(grantedAgents.count) \(grantedAgents.count == 1 ? "agent" : "agents")")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                }
+            }
+
+            let projects = projectManager.projects.filter { $0.knowledgeCollectionIds.contains(collection.id) }
+            if let project = projects.first {
+                Label(
+                    projects.count == 1 ? "Used by project \(project.name)" : "Used by \(projects.count) projects",
+                    systemImage: "folder"
+                )
+                .font(.system(size: 10))
+                .foregroundColor(theme.secondaryText)
             }
 
             HStack(spacing: 8) {
@@ -382,20 +465,34 @@ private struct KnowledgeCollectionEditorSheet: View {
     @State private var includeGlobs = ""
     @State private var excludeGlobs = ""
     @State private var validationMessage: String?
+    let title: String
+    let saveTitle: String
 
     init(
+        title: String = "Add Knowledge Collection",
         initialName: String = "",
+        initialSummary: String = "",
+        initialFolderPath: String = "",
+        initialIncludeGlobs: [String] = [],
+        initialExcludeGlobs: [String] = [],
+        saveTitle: String = "Add",
         onSave: @escaping (String, String, String, [String], [String]) -> Void,
         onCancel: @escaping () -> Void
     ) {
         _name = State(initialValue: initialName)
+        _summary = State(initialValue: initialSummary)
+        _folderPath = State(initialValue: initialFolderPath)
+        _includeGlobs = State(initialValue: initialIncludeGlobs.joined(separator: ", "))
+        _excludeGlobs = State(initialValue: initialExcludeGlobs.joined(separator: ", "))
+        self.title = title
+        self.saveTitle = saveTitle
         self.onSave = onSave
         self.onCancel = onCancel
     }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            Text("Add Knowledge Collection", bundle: .module)
+            Text(LocalizedStringKey(title), bundle: .module)
                 .font(.system(size: 20, weight: .semibold))
                 .foregroundColor(theme.primaryText)
 
@@ -471,8 +568,8 @@ private struct KnowledgeCollectionEditorSheet: View {
                 Spacer()
                 Button("Cancel", action: onCancel)
                     .keyboardShortcut(.cancelAction)
-                Button("Add", action: save)
-                    .buttonStyle(.borderedProminent)
+                Button(LocalizedStringKey(saveTitle), action: save)
+                    .buttonStyle(SettingsButtonStyle(isPrimary: true))
                     .keyboardShortcut(.defaultAction)
             }
         }
@@ -526,85 +623,274 @@ private struct KnowledgeCollectionEditorSheet: View {
 
 private struct KnowledgeCollectionDetailSheet: View {
     @Environment(\.theme) private var theme
+    @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var projectManager = ProjectManager.shared
+    @ObservedObject private var integration = KnowledgeUIIntegration.shared
 
     let collection: KnowledgeUICollection
     let onEnableChanged: (Bool) -> Void
     let onReindex: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
     let onClose: () -> Void
 
+    @State private var documents: [KnowledgeDocument] = []
+    @State private var documentsLoaded = false
+    @State private var confirmingDelete = false
+
+    private var live: KnowledgeUICollection {
+        integration.collection(for: collection.id) ?? collection
+    }
+
+    private var editableAgents: [Agent] {
+        agentManager.agents.filter { !$0.isBuiltIn }
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 16) {
-            HStack {
+        VStack(alignment: .leading, spacing: 0) {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: "books.vertical.fill")
+                    .font(.system(size: 20))
+                    .foregroundColor(theme.accentColor)
                 VStack(alignment: .leading, spacing: 4) {
-                    Text(collection.name)
-                        .font(.system(size: 20, weight: .semibold))
+                    Text(live.name)
+                        .font(.system(size: 16, weight: .semibold))
                         .foregroundColor(theme.primaryText)
-                    Text("Knowledge collection", bundle: .module)
-                        .font(.system(size: 12))
-                        .foregroundColor(theme.secondaryText)
+                    if !live.summary.isEmpty {
+                        Text(live.summary)
+                            .font(.system(size: 12))
+                            .foregroundColor(theme.secondaryText)
+                    }
                 }
                 Spacer()
                 Toggle(
-                    "Enabled",
+                    "",
                     isOn: Binding(
-                        get: { collection.isEnabled },
+                        get: { live.isEnabled },
                         set: onEnableChanged
                     )
                 )
-                .toggleStyle(.switch)
+                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
+                .labelsHidden()
+            }
+            .padding(20)
+
+            Divider()
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 22) {
+                    locationSection
+                    statusSection
+                    projectsSection
+                    accessSection
+                    documentsSection
+                }
+                .padding(20)
             }
 
-            if !collection.summary.isEmpty {
-                Text(collection.summary)
-                    .font(.system(size: 13))
-                    .foregroundColor(theme.secondaryText)
-            }
+            Divider()
 
-            VStack(alignment: .leading, spacing: 8) {
-                Text("Folder", bundle: .module)
-                    .font(.system(size: 11, weight: .semibold))
-                    .foregroundColor(theme.secondaryText)
-                Text(collection.folderPath)
-                    .font(.system(size: 11, design: .monospaced))
-                    .foregroundColor(theme.primaryText)
-                    .textSelection(.enabled)
-            }
-            .padding(12)
-            .frame(maxWidth: .infinity, alignment: .leading)
-            .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
-
-            if !collection.isAvailable {
-                Label(collection.statusMessage ?? "Source folder unavailable", systemImage: "exclamationmark.triangle.fill")
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.errorColor)
-            } else if let documentCount = collection.documentCount, let chunkCount = collection.chunkCount {
-                Label(
-                    "\(documentCount) indexed \(documentCount == 1 ? "document" : "documents") · \(chunkCount) \(chunkCount == 1 ? "chunk" : "chunks")",
-                    systemImage: "doc.text"
-                )
-                .font(.system(size: 12))
-                .foregroundColor(theme.secondaryText)
-            } else {
-                Label(collection.statusMessage ?? "Not indexed yet", systemImage: "clock")
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryText)
-            }
-
-            Spacer()
-
-            HStack {
-                Button("Delete", role: .destructive, action: onDelete)
+            HStack(spacing: 10) {
+                Button("Delete") { confirmingDelete = true }
+                    .buttonStyle(SettingsButtonStyle(isDestructive: true))
+                    .confirmationDialog(
+                        "Delete \"\(live.name)\"?",
+                        isPresented: $confirmingDelete,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Delete Collection", role: .destructive, action: onDelete)
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text("This removes the collection and search index. Files in its folder are not changed.", bundle: .module)
+                    }
+                Button("Edit", action: onEdit)
+                    .buttonStyle(SettingsButtonStyle())
                 Spacer()
                 Button("Re-index", action: onReindex)
+                    .buttonStyle(SettingsButtonStyle())
                 Button("Done", action: onClose)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(SettingsButtonStyle(isPrimary: true))
                     .keyboardShortcut(.cancelAction)
             }
+            .padding(20)
         }
-        .padding(24)
-        .frame(width: 560, height: 340)
+        .frame(width: 560, height: 640)
         .background(theme.primaryBackground)
         .environment(\.theme, theme)
+        .intelControlRendering(theme: theme)
+        .onAppear(perform: loadDocuments)
+    }
+
+    private func sectionHeader(_ title: LocalizedStringKey) -> some View {
+        Text(title, bundle: .module)
+            .font(.system(size: 12, weight: .semibold))
+            .foregroundColor(theme.secondaryText)
+            .textCase(.uppercase)
+    }
+
+    private var locationSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Location")
+            Label {
+                Text(live.folderPath)
+                    .font(.system(size: 12, design: .monospaced))
+                    .lineLimit(2)
+                    .truncationMode(.middle)
+                    .textSelection(.enabled)
+            } icon: { Image(systemName: "folder.fill") }
+            .foregroundColor(theme.secondaryText)
+            Text("Created \(live.createdAt.formatted(date: .abbreviated, time: .shortened)) · Updated \(live.updatedAt.formatted(date: .abbreviated, time: .shortened))")
+                .font(.system(size: 11))
+                .foregroundColor(theme.tertiaryText)
+        }
+    }
+
+    private var statusSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Status")
+            HStack(spacing: 8) {
+                statusPill(
+                    icon: "doc.text",
+                    text: "\(live.documentCount ?? documents.count) \((live.documentCount ?? documents.count) == 1 ? "document" : "documents")",
+                    color: theme.secondaryText)
+                statusPill(
+                    icon: "square.stack.3d.up",
+                    text: "\(live.chunkCount ?? 0) \((live.chunkCount ?? 0) == 1 ? "chunk" : "chunks")",
+                    color: theme.secondaryText)
+                if live.isIndexing {
+                    statusPill(icon: "arrow.triangle.2.circlepath", text: "Indexing…", color: theme.accentColor)
+                }
+            }
+            if !live.isAvailable {
+                Label(live.statusMessage ?? "Source folder unavailable", systemImage: "exclamationmark.triangle.fill")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.errorColor)
+            }
+        }
+    }
+
+    private func statusPill(icon: String, text: String, color: Color) -> some View {
+        Label(text, systemImage: icon)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(color)
+            .padding(.horizontal, 8)
+            .padding(.vertical, 4)
+            .background(Capsule().fill(color.opacity(0.12)))
+    }
+
+    @ViewBuilder private var projectsSection: some View {
+        let projects = projectManager.projects.filter { $0.knowledgeCollectionIds.contains(collection.id) }
+        if !projects.isEmpty {
+            VStack(alignment: .leading, spacing: 8) {
+                sectionHeader("Projects using this collection")
+                ForEach(projects) { project in
+                    Label(project.name, systemImage: "folder")
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                }
+            }
+        }
+    }
+
+    private var accessSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Agents with access")
+            if editableAgents.isEmpty {
+                Text("No custom agents available", bundle: .module)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.tertiaryText)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(editableAgents) { agent in
+                        let granted = agentManager.knowledgeCollectionIds(for: agent.id).contains(collection.id)
+                        HStack(spacing: 10) {
+                            AgentAvatarView(
+                                mascotId: agent.avatar, name: agent.name,
+                                tint: theme.accentColor, diameter: 24,
+                                customImageURL: agent.customAvatarURL,
+                                monogramFontSize: 10, borderWidth: 0)
+                            Text(agent.name)
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(theme.primaryText)
+                            Spacer()
+                            Toggle("", isOn: Binding(
+                                get: { granted },
+                                set: { _ in toggleAccess(agent) }
+                            ))
+                            .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
+                            .labelsHidden()
+                        }
+                        .padding(10)
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
+            }
+        }
+    }
+
+    private var documentsSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            sectionHeader("Documents")
+            if !documentsLoaded {
+                ProgressView().controlSize(.small)
+            } else if documents.isEmpty {
+                Text("No documents indexed yet", bundle: .module)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.tertiaryText)
+            } else {
+                VStack(spacing: 0) {
+                    ForEach(documents) { document in
+                        HStack(spacing: 10) {
+                            Image(systemName: "doc.text")
+                                .foregroundColor(theme.tertiaryText)
+                            VStack(alignment: .leading, spacing: 2) {
+                                Text(document.title.isEmpty ? URL(fileURLWithPath: document.relPath).deletingPathExtension().lastPathComponent : document.title)
+                                    .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(theme.primaryText)
+                                    .lineLimit(1)
+                                Text(document.relPath)
+                                    .font(.system(size: 10, design: .monospaced))
+                                    .foregroundColor(theme.tertiaryText)
+                                    .lineLimit(1)
+                                    .truncationMode(.middle)
+                            }
+                            Spacer()
+                            if !document.docType.isEmpty {
+                                Text(document.docType)
+                                    .font(.system(size: 9, weight: .bold))
+                                    .foregroundColor(theme.accentColor)
+                                    .padding(.horizontal, 7)
+                                    .padding(.vertical, 3)
+                                    .background(Capsule().fill(theme.accentColor.opacity(0.14)))
+                            }
+                        }
+                        .padding(10)
+                    }
+                }
+                .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
+            }
+        }
+    }
+
+    private func toggleAccess(_ agent: Agent) {
+        var ids = agentManager.knowledgeCollectionIds(for: agent.id)
+        if ids.contains(collection.id) {
+            ids.removeAll { $0 == collection.id }
+        } else {
+            ids.append(collection.id)
+        }
+        agentManager.updateKnowledgeSettings(enabled: !ids.isEmpty, collectionIds: ids, for: agent.id)
+    }
+
+    private func loadDocuments() {
+        let id = collection.id.uuidString
+        Task.detached(priority: .userInitiated) {
+            if !KnowledgeDatabase.shared.isOpen { try? KnowledgeDatabase.shared.open() }
+            let values = (try? KnowledgeDatabase.shared.listDocuments(collectionId: id)) ?? []
+            await MainActor.run {
+                documents = values
+                documentsLoaded = true
+            }
+        }
     }
 }

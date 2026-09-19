@@ -23,6 +23,10 @@ public struct KnowledgeUICollection: Identifiable, Equatable, Sendable {
     public var statusMessage: String?
     public var isIndexing: Bool
     public var gitRemoteURL: String?
+    public var includeGlobs: [String]
+    public var excludeGlobs: [String]
+    public var createdAt: Date
+    public var updatedAt: Date
 
     public init(
         id: UUID,
@@ -35,7 +39,11 @@ public struct KnowledgeUICollection: Identifiable, Equatable, Sendable {
         isAvailable: Bool = true,
         statusMessage: String? = nil,
         isIndexing: Bool = false,
-        gitRemoteURL: String? = nil
+        gitRemoteURL: String? = nil,
+        includeGlobs: [String] = [],
+        excludeGlobs: [String] = [],
+        createdAt: Date = Date(),
+        updatedAt: Date = Date()
     ) {
         self.id = id
         self.name = name
@@ -48,6 +56,10 @@ public struct KnowledgeUICollection: Identifiable, Equatable, Sendable {
         self.statusMessage = statusMessage
         self.isIndexing = isIndexing
         self.gitRemoteURL = gitRemoteURL
+        self.includeGlobs = includeGlobs
+        self.excludeGlobs = excludeGlobs
+        self.createdAt = createdAt
+        self.updatedAt = updatedAt
     }
 }
 
@@ -61,6 +73,10 @@ public protocol KnowledgeUIProviding: AnyObject {
         name: String, summary: String, folderPath: String,
         includeGlobs: [String], excludeGlobs: [String]
     ) async throws -> UUID
+    func updateCollection(
+        _ id: UUID, name: String, summary: String, folderPath: String,
+        includeGlobs: [String], excludeGlobs: [String]
+    ) throws
     func setCollection(_ id: UUID, enabled: Bool)
     func reindexCollection(_ id: UUID)
     func deleteCollection(_ id: UUID)
@@ -151,6 +167,21 @@ public final class KnowledgeUIIntegration: ObservableObject {
         adopt(provider.knowledgeUISnapshot)
     }
 
+    public func updateCollection(
+        _ id: UUID,
+        name: String,
+        summary: String,
+        folderPath: String,
+        includeGlobs: [String],
+        excludeGlobs: [String]
+    ) throws {
+        guard let provider else { throw KnowledgeUIIntegrationError.unavailable }
+        try provider.updateCollection(
+            id, name: name, summary: summary, folderPath: folderPath,
+            includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
+        adopt(provider.knowledgeUISnapshot)
+    }
+
     public func reindexCollection(_ id: UUID) {
         provider?.reindexCollection(id)
         if let provider { adopt(provider.knowledgeUISnapshot) }
@@ -188,7 +219,11 @@ extension KnowledgeManager: KnowledgeUIProviding {
                 isAvailable: indexStatuses[collection.id]?.isAvailable ?? true,
                 statusMessage: indexStatuses[collection.id]?.message,
                 isIndexing: indexingCollectionIds.contains(collection.id),
-                gitRemoteURL: nil
+                gitRemoteURL: nil,
+                includeGlobs: collection.includeGlobs,
+                excludeGlobs: collection.excludeGlobs,
+                createdAt: collection.createdAt,
+                updatedAt: collection.updatedAt
             )
         }
     }
@@ -217,6 +252,24 @@ extension KnowledgeManager: KnowledgeUIProviding {
                 "Could not update Knowledge collection \(collection.name, privacy: .public): \(error)"
             )
         }
+    }
+
+    public func updateCollection(
+        _ id: UUID,
+        name: String,
+        summary: String,
+        folderPath: String,
+        includeGlobs: [String],
+        excludeGlobs: [String]
+    ) throws {
+        guard var collection = collection(for: id) else { return }
+        collection.name = name
+        collection.summary = summary
+        collection.folderPath = folderPath
+        collection.includeGlobs = includeGlobs
+        collection.excludeGlobs = excludeGlobs
+        try update(collection)
+        scheduleIndex(of: collection, force: true)
     }
 
     public func reindexCollection(_ id: UUID) {
