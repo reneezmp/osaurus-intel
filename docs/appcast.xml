@@ -6,6 +6,22 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.36</title>
+      <pubDate>Sat, 19 Sep 2026 14:44:50 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>37</sparkle:version>
+      <sparkle:shortVersionString>1.0.36</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.36/Osaurus-Intel-1.0.36.zip" length="60211927" type="application/octet-stream" sparkle:edSignature="Zus3PVKLXxYLh2dpDdKgbRx+CEi7vELA9o4/yRsUL+gRbLvJjh1XzGozl7E62XDLjzMSIWIkWICMh+baN9OtBQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.36
+
+Improves Ventura Settings rendering, restores visible native controls and message statistics, and expands Intel Knowledge management with editable collection details, project usage, agent access, and indexed documents. Known partial items remain tracked: Knowledge access toggles, card edit/category status, integrated Settings titlebar, and the unfinished Rosy acceptance groups.
+
+_Intel fork · synced to upstream Osaurus 0.24.7 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.35</title>
       <pubDate>Wed, 09 Sep 2026 17:41:53 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
