@@ -574,6 +574,26 @@ final class ChatWindowState: ObservableObject {
     /// non-optional stored property to a persisted Codable type" rule guards.
     @Published public var openProjectId: UUID?
 
+    // MARK: Minimum window size (upstream 3a17bc04d, #2728)
+
+    /// The chat layout's design floor. Screens that can show it use it
+    /// verbatim; smaller ones clamp it so the composer never hangs off the
+    /// bottom (e.g. a scaled 1024x640 display).
+    static let designMinimumContentSize = CGSize(width: 800, height: 575)
+    @Published private(set) var minimumContentSize: CGSize = ChatWindowState.designMinimumContentSize
+
+    /// Clamp the design floor to `available` (the root view's largest area
+    /// on this window's screen). A non-positive axis means "no screen known"
+    /// and keeps the design value.
+    func updateMinimumContentSize(availableContentSize available: CGSize) {
+        let design = Self.designMinimumContentSize
+        var next = design
+        if available.width > 0 { next.width = min(design.width, floor(available.width)) }
+        if available.height > 0 { next.height = min(design.height, floor(available.height)) }
+        guard next != minimumContentSize else { return }
+        minimumContentSize = next
+    }
+
     /// Holds the `.globalThemeChanged` notification observer so it can be
     /// torn down in `cleanup()`. M11 Phase 11.A.1.x bug fix: prior to this,
     /// the Intel `ChatWindowState` stub set `theme` once in init and never

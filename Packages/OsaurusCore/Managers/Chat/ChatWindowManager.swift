@@ -997,6 +997,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         // window cleanly after the close stack unwinds.
         window.isReleasedWhenClosed = false
         window.delegate = self
+        fitToScreen(window, state: state)
         window.center()
         nsWindows[info.id] = window
         // Activate + front (works when summoned via hotkey from another app).
@@ -1202,6 +1203,35 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// app is what makes a global-hotkey summon work from the background;
     /// `.moveToActiveSpace` makes the window follow to the current Space instead
     /// of appearing on its original (possibly hidden) one.
+    /// Height the unified titlebar + toolbar strip adds above the root view.
+    static let chatChromeHeight: CGFloat = 66
+
+    /// Largest root-view area the chat window can show on `screen`.
+    static func chatAvailableContentSize(on screen: NSScreen?) -> CGSize {
+        guard let visible = screen?.visibleFrame else { return .zero }
+        return CGSize(width: visible.width, height: visible.height - chatChromeHeight)
+    }
+
+    /// Clamp the chat floor to the window's screen and shrink an oversized
+    /// frame to fit (upstream 3a17bc04d).
+    private func fitToScreen(_ window: NSWindow, state: ChatWindowState) {
+        let screen = window.screen ?? NSScreen.main
+        state.updateMinimumContentSize(availableContentSize: Self.chatAvailableContentSize(on: screen))
+        guard let visible = screen?.visibleFrame else { return }
+        var frame = window.frame
+        frame.size.width = min(frame.size.width, visible.width)
+        frame.size.height = min(frame.size.height, visible.height)
+        if frame.size != window.frame.size { window.setFrame(frame, display: false) }
+    }
+
+    public func windowDidChangeScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow,
+            let id = windowId(for: window),
+            let state = windowStates[id]
+        else { return }
+        fitToScreen(window, state: state)
+    }
+
     private func bringToFront(_ window: NSWindow) {
         SparkleChatGate.markChatVisible()
         NSApp.activate(ignoringOtherApps: true)

@@ -370,7 +370,14 @@ struct ChatContentView: View {
                 .onPreferenceChange(ChatComposerHeightKey.self) { measuredComposerHeight = $0 }
             }
         }
-        .frame(minWidth: 800, idealWidth: 950, maxWidth: .infinity, minHeight: 575, idealHeight: 610, maxHeight: .infinity)
+        .frame(
+            minWidth: windowState.minimumContentSize.width,
+            idealWidth: 950,
+            maxWidth: .infinity,
+            minHeight: windowState.minimumContentSize.height,
+            idealHeight: 610,
+            maxHeight: .infinity
+        )
         // The native Intel chat window already supplies the real macOS corner
         // mask. A second SwiftUI mask here cuts the content inward and leaves
         // the window background visible as gray wedges at all four corners.

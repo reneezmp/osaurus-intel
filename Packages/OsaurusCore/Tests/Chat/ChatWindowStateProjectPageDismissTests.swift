@@ -23,3 +23,28 @@ struct ChatWindowStateProjectPageDismissTests {
         #expect(window.isProjectPageVisible == false)
     }
 }
+
+/// Upstream 3a17bc04d (#2728), Intel adaptation: the chat floor clamps to
+/// what the window's screen can show.
+@MainActor
+struct ChatWindowMinimumSizeTests {
+
+    @Test func floorClampsToASmallScreenAndKeepsDesignOtherwise() {
+        let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+        let design = ChatWindowState.designMinimumContentSize
+
+        window.updateMinimumContentSize(availableContentSize: CGSize(width: 1024, height: 573))
+        #expect(window.minimumContentSize == CGSize(width: design.width, height: 573))
+
+        window.updateMinimumContentSize(availableContentSize: CGSize(width: 1440, height: 800))
+        #expect(window.minimumContentSize == design)
+
+        // Unknown screen keeps the design floor.
+        window.updateMinimumContentSize(availableContentSize: .zero)
+        #expect(window.minimumContentSize == design)
+    }
+
+    @Test func availableSizeSubtractsTheToolbarStrip() {
+        #expect(ChatWindowManager.chatAvailableContentSize(on: nil) == .zero)
+    }
+}
