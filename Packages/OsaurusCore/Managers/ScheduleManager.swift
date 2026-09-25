@@ -15,6 +15,13 @@ extension Notification.Name {
 }
 
 /// Manages scheduled AI tasks with precise timer-based execution
+/// Outcome of a manual `runNow` press (upstream `7666cc6ba`).
+public enum ScheduleRunNowResult: Sendable, Equatable {
+    case started
+    case alreadyRunning
+    case notFound
+}
+
 @MainActor
 public final class ScheduleManager: ObservableObject {
     public static let shared = ScheduleManager()
@@ -189,10 +196,22 @@ public final class ScheduleManager: ObservableObject {
         runningTasks[scheduleId] != nil
     }
 
-    /// Manually trigger a schedule to run now
-    public func runNow(_ scheduleId: UUID) {
-        guard let schedule = schedules.first(where: { $0.id == scheduleId }) else { return }
-        executeSchedule(schedule)
+    /// Manually trigger a schedule to run now. Overlapping a scheduled run
+    /// is a deliberate refuse — the UI should surface `.alreadyRunning`
+    /// rather than start a second turn or toast a fake Started.
+    @discardableResult
+    public func runNow(_ scheduleId: UUID) -> ScheduleRunNowResult {
+        guard let schedule = schedules.first(where: { $0.id == scheduleId }) else {
+            return .notFound
+        }
+        if isInFlight(schedule.id) { return .alreadyRunning }
+        return executeSchedule(schedule) ? .started : .notFound
+    }
+
+    /// In flight from the moment of dispatch, not only once the dispatcher
+    /// returns a handle — otherwise a second trigger during dispatch overlaps.
+    private func isInFlight(_ scheduleId: UUID) -> Bool {
+        runningTasks[scheduleId] != nil || executionTasks[scheduleId] != nil
     }
 
     // MARK: - Plugin Grouping
@@ -292,13 +311,16 @@ public final class ScheduleManager: ObservableObject {
         // Find all schedules that should run now
         let schedulesToRun = schedules.filter { schedule in
             guard schedule.isEnabled else { return false }
-            guard !runningTasks.keys.contains(schedule.id) else { return false }  // Already running
+            guard !isInFlight(schedule.id) else { return false }
             return schedule.shouldRunNow(asOf: now)
         }
 
-        // Execute all due schedules
+        // Stamp each schedule with its own slot — the shared soonest
+        // fireDate is only the wake time, not the identity of every due row.
+        // An early Task.sleep wake must not stamp a second before the slot
+        // (that re-armed the same slot and replayed it on launch).
         for schedule in schedulesToRun {
-            executeSchedule(schedule)
+            executeSchedule(schedule, scheduledFireTime: schedule.scheduledFireTime(asOf: now))
         }
 
         // Schedule the next timer
@@ -310,39 +332,44 @@ public final class ScheduleManager: ObservableObject {
         let now = Date()
 
         for schedule in schedules where schedule.isEnabled {
-            // Skip if already running
-            guard !runningTasks.keys.contains(schedule.id) else { continue }
+            guard !isInFlight(schedule.id) else { continue }
 
-            // For "once" schedules, check if the time has passed
             if case .once(let date) = schedule.frequency {
-                // If the once date is in the past but hasn't run yet
                 if date <= now && schedule.executionAnchor == nil {
                     print("[Osaurus] Found missed once schedule: \(schedule.name)")
-                    executeSchedule(schedule)
+                    executeSchedule(schedule, scheduledFireTime: date)
                 }
-            } else {
-                // For recurring schedules, check if we missed the last run
-                // Only run if an execution anchor exists and the next run after it is in the past.
-                if let anchor = schedule.executionAnchor {
-                    if let nextAfterAnchor = schedule.frequency.nextRunDate(after: anchor),
-                        nextAfterAnchor <= now
-                    {
-                        print("[Osaurus] Found missed recurring schedule: \(schedule.name)")
-                        executeSchedule(schedule)
-                    }
-                }
+            } else if schedule.executionAnchor != nil,
+                let slot = schedule.latestDueSlot(asOf: now)
+            {
+                // Catch up once, stamped with the latest due slot, so a long
+                // absence does not replay one skipped slot per launch.
+                print("[Osaurus] Found missed recurring schedule: \(schedule.name)")
+                executeSchedule(schedule, scheduledFireTime: slot)
             }
         }
     }
 
     // MARK: - Execution
 
-    /// Execute a schedule by dispatching to TaskDispatcher
-    private func executeSchedule(_ schedule: Schedule) {
+    /// Execute a schedule by dispatching to TaskDispatcher.
+    /// `scheduledFireTime` is the slot the timer or missed path was armed
+    /// for. `runNow` leaves it nil and stamps wall clock.
+    @discardableResult
+    private func executeSchedule(_ schedule: Schedule, scheduledFireTime: Date? = nil) -> Bool {
+        if isInFlight(schedule.id) { return false }
+
         var triggeredSchedule = schedule
-        triggeredSchedule.lastTriggeredAt = Date()
+        triggeredSchedule.lastTriggeredAt = scheduledFireTime ?? Date()
         ScheduleStore.save(triggeredSchedule)
         refresh()
+
+        runningTasks[triggeredSchedule.id] = ScheduleRunInfo(
+            scheduleId: triggeredSchedule.id,
+            scheduleName: triggeredSchedule.name,
+            agentId: triggeredSchedule.agentId,
+            chatSessionId: UUID()
+        )
 
         let request = DispatchRequest(
             prompt: triggeredSchedule.instructions,
@@ -361,21 +388,16 @@ public final class ScheduleManager: ObservableObject {
             guard let handle = await TaskDispatcher.shared.dispatch(request) else {
                 print("[Osaurus] Failed to dispatch schedule: \(triggeredSchedule.name)")
                 self.executionTasks.removeValue(forKey: triggeredSchedule.id)
+                self.runningTasks.removeValue(forKey: triggeredSchedule.id)
                 return
             }
-
-            self.runningTasks[triggeredSchedule.id] = ScheduleRunInfo(
-                scheduleId: triggeredSchedule.id,
-                scheduleName: triggeredSchedule.name,
-                agentId: triggeredSchedule.agentId,
-                chatSessionId: UUID()
-            )
 
             let result = await TaskDispatcher.shared.awaitCompletion(handle)
             self.handleResult(result, schedule: triggeredSchedule, request: handle.request)
         }
 
         executionTasks[triggeredSchedule.id] = task
+        return true
     }
 
     // MARK: - Result Handling
@@ -392,8 +414,11 @@ public final class ScheduleManager: ObservableObject {
         case .completed(let sessionId):
             let chatSessionId = sessionId ?? UUID()
 
-            var updatedSchedule = schedule
-            updatedSchedule.lastRunAt = Date()
+            // Start from the live row (edits during the run survive) and never
+            // record a completion earlier than the slot it consumed.
+            var updatedSchedule = schedules.first(where: { $0.id == schedule.id }) ?? schedule
+            let completionTime = Date()
+            updatedSchedule.lastRunAt = max(completionTime, updatedSchedule.lastTriggeredAt ?? completionTime)
             updatedSchedule.lastChatSessionId = chatSessionId
             if case .once = schedule.frequency { updatedSchedule.isEnabled = false }
 

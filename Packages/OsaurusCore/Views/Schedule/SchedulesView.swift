@@ -84,8 +84,15 @@ struct SchedulesView: View {
                                         scheduleManager.setEnabled(schedule.id, enabled: enabled)
                                     },
                                     onRunNow: {
-                                        scheduleManager.runNow(schedule.id)
-                                        showSuccess("Started \"\(schedule.name)\"")
+                                        switch scheduleManager.runNow(schedule.id) {
+                                        case .started:
+                                            scheduleManager.refresh()
+                                            showSuccess("Started \"\(schedule.name)\"")
+                                        case .alreadyRunning:
+                                            showSuccess("\"\(schedule.name)\" is already running")
+                                        case .notFound:
+                                            break
+                                        }
                                     },
                                     onEdit: {
                                         editingSchedule = schedule

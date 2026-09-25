@@ -5008,8 +5008,14 @@ struct AgentDetailView: View {
                                 isRunning: scheduleManager.isRunning(schedule.id),
                                 onEdit: { editingSchedule = schedule },
                                 onRunNow: {
-                                    scheduleManager.runNow(schedule.id)
-                                    showSuccess("Started \"\(schedule.name)\"")
+                                    switch scheduleManager.runNow(schedule.id) {
+                                    case .started:
+                                        showSuccess("Started \"\(schedule.name)\"")
+                                    case .alreadyRunning:
+                                        showSuccess("\"\(schedule.name)\" is already running")
+                                    case .notFound:
+                                        break
+                                    }
                                 },
                                 onToggle: { enabled in
                                     scheduleManager.setEnabled(schedule.id, enabled: enabled)
