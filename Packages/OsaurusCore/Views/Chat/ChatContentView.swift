@@ -340,7 +340,13 @@ struct ChatContentView: View {
                             },
                             autoSpeakAssistant: $observedSession.autoSpeakAssistant,
                             queuedSend: $observedSession.queuedSend,
-                            folderState: observedSession.folderState
+                            folderState: observedSession.folderState,
+                            onDraftChange: { [weak observedSession] in
+                                observedSession?.noteComposerDraft($0)
+                            },
+                            onWillRehydrate: { [weak observedSession] in
+                                observedSession?.promoteComposerDraft()
+                            }
                         )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)

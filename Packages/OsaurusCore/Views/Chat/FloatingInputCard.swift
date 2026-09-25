@@ -59,6 +59,13 @@ struct FloatingInputCard: View {
     /// Discard the queued send without sending it. Called by the chip's ×.
     var onCancelQueued: (() -> Void)?
     @ObservedObject var folderState: ChatFolderState
+    /// Fired on every keystroke with the composer's current text, so the
+    /// session can keep a draft mirror for stash/restore across chat and
+    /// agent switches without re-rendering per key (upstream 65cbb73e0).
+    var onDraftChange: ((String) -> Void)? = nil
+    /// Called when the card (re)appears so the owner can surface any unsent
+    /// draft into `text` before the card rehydrates from it.
+    var onWillRehydrate: (() -> Void)? = nil
 
     init(
         text: Binding<String>,
@@ -87,8 +94,12 @@ struct FloatingInputCard: View {
         queuedSend: Binding<QueuedSend?> = .constant(nil),
         onSendNow: (() -> Void)? = nil,
         onCancelQueued: (() -> Void)? = nil,
-        folderState: ChatFolderState? = nil
+        folderState: ChatFolderState? = nil,
+        onDraftChange: ((String) -> Void)? = nil,
+        onWillRehydrate: (() -> Void)? = nil
     ) {
+        self.onDraftChange = onDraftChange
+        self.onWillRehydrate = onWillRehydrate
         self._text = text
         self._selectedModel = selectedModel
         self._pendingAttachments = pendingAttachments
@@ -406,6 +417,7 @@ struct FloatingInputCard: View {
         mainContent
             .onAppear {
                 let isReappear = !localText.isEmpty || voiceInputState != .idle
+                onWillRehydrate?()
                 localText = text
                 print("[VoiceDebug] FloatingInputCard onAppear (reappear=\(isReappear))")
 
@@ -518,7 +530,8 @@ struct FloatingInputCard: View {
                     localText = newValue
                 }
             }
-            .onChange(of: localText) { _ in
+            .onChange(of: localText) { newValue in
+                onDraftChange?(newValue)
                 // Reset popup selection whenever the typed query changes
                 slashSelectedIndex = 0
                 // Typing after an Escape-dismissal re-arms the slash popup

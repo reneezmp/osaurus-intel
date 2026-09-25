@@ -116,6 +116,15 @@ final class ChatSession: ObservableObject {
     /// Lives on the session so state survives NSTableView cell reuse.
     let expandedBlocksStore = ExpandedBlocksStore()
     @Published var input: String = ""
+    /// Mirror of what the composer currently shows. The card keeps
+    /// keystrokes local and only writes `input` on send, so this is the
+    /// only place the unsent draft is visible to the session. Deliberately
+    /// not `@Published`: a keystroke must not re-render the chat.
+    /// Upstream `65cbb73e0` (#2708).
+    private(set) var composerDraft: String = ""
+    /// True once the composer has reported a keystroke since `input` was
+    /// last assigned by the draft machinery.
+    private var composerDraftIsAuthoritative = false
     @Published var pendingAttachments: [Attachment] = []
     @Published var selectedModel: String? = nil
     @Published var pickerItems: [ModelPickerItem] = []
@@ -1131,6 +1140,7 @@ final class ChatSession: ObservableObject {
     }
 
     func reset() {
+        stashDraft()
         stop()
         turns.removeAll()
         input = ""
@@ -1177,6 +1187,7 @@ final class ChatSession: ObservableObject {
 
         applyEffectiveModel(for: agentId)
         rebuildVisibleBlocks()
+        restoreDraft()
     }
 
     /// Reset for a specific agent
@@ -1185,11 +1196,68 @@ final class ChatSession: ObservableObject {
         // stop() → completeRunCleanup() preserves the current session's
         // identity instead of stamping the new agent on it. See #1005.
         reset()
+        // reset() brought back the OLD agent's new-chat draft; put it back
+        // and pick up the one typed under the incoming agent instead.
+        stashDraft()
+        input = ""
         agentId = newAgentId
+        restoreDraft()
         // reset() picked a model for the OLD agent; re-resolve for the
         // new one now that turns/sessionId are cleared.
         applyEffectiveModel(for: newAgentId)
         Task { [weak self] in await self?.refreshContextEstimates() }
+    }
+
+    // MARK: - Composer Drafts
+
+    /// Key under which this session's unsent composer text is remembered
+    /// while another chat or agent is shown in its place.
+    var draftKey: ChatDraftStore.Key {
+        if let sessionId { return .session(sessionId) }
+        return .newChat(agentId: agentId)
+    }
+
+    /// Remember the current composer text for `draftKey` so it can come
+    /// back when the user returns to this chat.
+    func stashDraft() {
+        ChatDraftStore.shared.stash(unsentComposerText, for: draftKey)
+        composerDraft = ""
+        composerDraftIsAuthoritative = false
+    }
+
+    /// The text the composer currently shows: the keystroke mirror once the
+    /// card has typed into it, otherwise the published `input` (including a
+    /// programmatic clear).
+    var unsentComposerText: String {
+        composerDraftIsAuthoritative ? composerDraft : input
+    }
+
+    /// Composer callback: record the card's current text without touching
+    /// `input`, so a keystroke never re-renders the chat.
+    func noteComposerDraft(_ text: String) {
+        composerDraft = text
+        composerDraftIsAuthoritative = true
+    }
+
+    /// Bring `input` up to date with the keystroke mirror so a composer that
+    /// remounts rehydrates with the current unsent text.
+    func promoteComposerDraft() {
+        let text = unsentComposerText
+        guard input != text else { return }
+        input = text
+        composerDraft = text
+        composerDraftIsAuthoritative = false
+    }
+
+    /// Bring back the composer text remembered for `draftKey`, if any.
+    /// Never overwrites text the user has already typed.
+    func restoreDraft() {
+        guard unsentComposerText.isEmpty,
+            let draft = ChatDraftStore.shared.take(for: draftKey)
+        else { return }
+        input = draft
+        composerDraft = draft
+        composerDraftIsAuthoritative = false
     }
 
     // MARK: - Generative Greeting
@@ -1387,6 +1455,7 @@ final class ChatSession: ObservableObject {
 
     /// Load session from persisted data
     func load(from data: ChatSessionData) {
+        stashDraft()
         stop()
         sessionId = data.id
         title = data.title
@@ -1423,6 +1492,7 @@ final class ChatSession: ObservableObject {
         voiceInputState = .idle
         showVoiceOverlay = false
         input = ""
+        restoreDraft()
         pendingAttachments = []
         isDirty = false  // Fresh load, not dirty
         // Clear caches to force a clean block rebuild for the new session
