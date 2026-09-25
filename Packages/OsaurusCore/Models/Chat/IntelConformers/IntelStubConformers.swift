@@ -1348,6 +1348,18 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         (toolsByName[name] as? any PermissionedTool)?.handlesOwnApproval == true
     }
 
+    /// Exposed (prefixed) names of registered MCP tools whose server-side
+    /// name is `canonical`. A registered tool literally named `canonical`
+    /// always wins, so nothing is resolved for it.
+    func mcpExposedNames(forCanonical canonical: String) -> [String] {
+        guard toolsByName[canonical] == nil else { return [] }
+        return toolsByName.values
+            .compactMap { $0 as? MCPProviderTool }
+            .filter { $0.mcpToolName == canonical }
+            .map(\.name)
+            .sorted()
+    }
+
     /// Dispatch is the final capability boundary. Prompt filtering keeps the
     /// model's schema honest, but restored sessions and older models can still
     /// submit a stale tool name. Re-check the live agent/configuration state

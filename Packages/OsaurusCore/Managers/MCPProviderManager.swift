@@ -1204,12 +1204,14 @@ public final class MCPProviderManager: ObservableObject {
         // collisions, not collisions against native/plugin tools).
         var reservedNames = Set(registeredTools.values.flatMap { $0.map(\.name) })
         var tools: [MCPProviderTool] = []
+        let siblingToolNames = mcpTools.map(\.name)
         for mcpTool in mcpTools {
             let tool = MCPProviderTool(
                 mcpTool: mcpTool,
                 providerId: providerId,
                 providerName: provider.name,
-                reservedNames: reservedNames
+                reservedNames: reservedNames,
+                siblingToolNames: siblingToolNames
             )
             tools.append(tool)
             reservedNames.insert(tool.name)

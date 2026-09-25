@@ -351,12 +351,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
     /// OpenAI-compatible `tools` array from the request's tool specs. The
     /// JSON-Schema `parameters` come through `JSONValue.anyValue`.
-    private func encodeTools(_ tools: [Tool]?) -> [[String: Any]]? {
+    static func encodeTools(_ tools: [Tool]?) -> [[String: Any]]? {
         guard let tools, !tools.isEmpty else { return nil }
         return tools.map { tool in
             var fn: [String: Any] = ["name": tool.function.name]
             if let desc = tool.function.description { fn["description"] = desc }
-            if let params = tool.function.parameters { fn["parameters"] = params.anyValue }
+            let params =
+                tool.function.parameters?.withEmptyPropertiesIfMissing
+                ?? .object(["type": .string("object"), "properties": .object([:])])
+            fn["parameters"] = params.anyValue
             return ["type": "function", "function": fn]
         }
     }
@@ -587,7 +590,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if IntelClaudeCodeService.handles(resolvedModel) {
             return try await IntelClaudeCodeService.shared.streamChat(request: request)
         }
-        let toolSpecs = encodeTools(request.tools)
+        let toolSpecs = Self.encodeTools(request.tools)
 
         guard let endpoint = try await resolveEndpoint(forModel: resolvedModel) else {
             throw EngineError(
@@ -777,8 +780,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
 
                             var results: [IntelCodexResponsesToolResult] = []
-                            for call in finalized.completion.toolCalls {
+                            for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
+                                let call = IntelCodexResponsesToolCall(
+                                    callID: rawCall.callID,
+                                    name: Self.resolvedOfferedToolName(rawCall.name, offered: request.tools),
+                                    arguments: rawCall.arguments
+                                )
                                 guard request.tools?.contains(where: { $0.function.name == call.name }) == true else {
                                     continuation.yield(
                                         StreamingToolHint.encodeDone(
@@ -942,7 +950,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         // Echo the assistant's tool-call message into the
                         // continuation context.
-                        let orderedCalls = partials.sorted { $0.key < $1.key }.map { $0.value }
+                        let orderedCalls = partials.sorted { $0.key < $1.key }.map { entry in
+                            var call = entry.value
+                            call.name = Self.resolvedOfferedToolName(call.name, offered: request.tools)
+                            return call
+                        }
                         wireMessages.append([
                             "role": "assistant",
                             "content": assistantContent,
@@ -1263,6 +1275,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             )],
             usage: usage
         )
+    }
+
+    /// An MCP server's own descriptions name its tools canonically (`abc`),
+    /// while Intel offers them prefixed (`xyz_abc`). When the model follows
+    /// the server's documented workflow, map the canonical name to the one
+    /// OFFERED tool publishing it (upstream `fb2efe4db`). Only offered tools
+    /// can match, so the not-offered rejection, permission policy, and
+    /// approval prompt all still run — on the resolved name. A name that is
+    /// itself offered, or ambiguous across offered providers, is unchanged.
+    nonisolated static func resolvedOfferedToolName(_ name: String, offered: [Tool]?) -> String {
+        guard let offered, !offered.contains(where: { $0.function.name == name }) else { return name }
+        let offeredNames = Set(offered.map(\.function.name))
+        let candidates = ToolRegistry.shared.mcpExposedNames(forCanonical: name)
+            .filter { offeredNames.contains($0) }
+        return candidates.count == 1 ? candidates[0] : name
     }
 
     nonisolated static func unofferedToolResult(_ name: String) -> String {

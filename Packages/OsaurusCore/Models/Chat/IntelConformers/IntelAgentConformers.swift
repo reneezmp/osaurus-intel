@@ -411,6 +411,24 @@ public enum JSONValue: Codable, Sendable, Equatable {
 }
 
 extension JSONValue {
+    /// MCP allows an object schema to omit `properties` (common for no-arg
+    /// tools), but OpenAI-style validators reject a tool whose
+    /// `parameters.properties` is missing. Fills in `properties: {}` on a
+    /// top-level object schema; every other shape is returned unchanged.
+    /// Upstream `19c6786e7` / `ffbd07bf6`.
+    var withEmptyPropertiesIfMissing: JSONValue {
+        guard case .object(var schema) = self,
+            case .string("object")? = schema["type"]
+        else { return self }
+        switch schema["properties"] {
+        case nil, .null?:
+            schema["properties"] = .object([:])
+            return .object(schema)
+        default:
+            return self
+        }
+    }
+
     var sendableValue: any Sendable {
         switch self {
         case .null: return NSNull()
