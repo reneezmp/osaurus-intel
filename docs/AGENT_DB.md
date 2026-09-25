@@ -4,6 +4,10 @@ Every Osaurus agent can opt into its own private, encrypted SQLite database **an
 
 This is distinct from [Memory](MEMORY.md). Memory is a global, app-wide system that distills conversational context across all your chats; Agent DB is **per-agent** structured storage the agent decides on, schemas and queries via dedicated tools. You can run an agent with one, both, or neither.
 
+> **Intel fork:** this document describes upstream. The Intel port, its
+> adaptations and staging (no self-scheduling on Intel) are in
+> [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md).
+
 This doc is the reference for developers and power users. It covers the on-disk layout, the `db_*` tool surface, the next-run scheduler, the four schedule-mode presets, and the detail-view tabs that surface all of it.
 
 ---

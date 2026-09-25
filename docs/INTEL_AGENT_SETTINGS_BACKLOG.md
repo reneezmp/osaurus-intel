@@ -49,6 +49,8 @@ connected merely because upstream has a Settings card.
 
 ## B4 — Private Agent Database
 
+**Plan (2026-09-25):** [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md) — staged in three releases, covers B5 too.
+
 **Current UI:** Database exposes Overview, Tables, Saved Views, and History without pretending storage exists. Historical deep links already migrate to these sections.
 
 **Required backend:** restore `AgentDatabase`, `AgentDatabaseStore`, schema/database tools, saved-view persistence, write audit history, encrypted bundle import/export, and delete/reset behavior. Define and test Intel migration from any legacy `dbEnabled` records before enabling writes.
