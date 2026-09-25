@@ -2066,6 +2066,9 @@ version.
   in Renée's login Keychain + backed up at `~/Desktop/sparkle_private_key.txt` —
   KEEP SECRET, never commit**). Re-enabled the Intel updater (it was hard-disabled
   to avoid pulling upstream's arm64 builds — safe now that the feed is ours).
+  **Superseded 2026-09-25:** that private key was lost in a Mac format; from
+  `1.0.55` the key is `bYYJJqFxkzbL190wyzy+wAvnkvmJFyEwf1CUH5WRljg=`. See
+  `docs/UPSTREAM_SYNC.md` → *Public release 1.0.55*.
 - **`scripts/release/cut_intel_release.sh <ver> "notes"`** — one command: builds,
   auto-increments `CFBundleVersion` from the appcast, ad-hoc signs, Sparkle-signs
   the zip, prepends the appcast item, `gh release create`, pushes the feed. Refuses

@@ -878,7 +878,7 @@ these Intel-owned customizations survived:**
 | `README.md` | `🦕 Osaurus (Intel)` header, "Run a model locally" | `Own your AI`, `brew install --cask osaurus` |
 | `Packages/OsaurusCore/Services/Provider/RemoteProviderKeychain.swift` | `ai.osaurus.remote.intel` (`#if OSAURUS_INTEL`) | bare `ai.osaurus.remote` only |
 | `Packages/OsaurusCore/Services/MCP/MCPProviderKeychain.swift` | `ai.osaurus.mcp.intel` | bare `ai.osaurus.mcp` only |
-| `App/osaurus/Info.plist` | `SUFeedURL` → `reneezmp/osaurus-intel`, `SUPublicEDKey` `7Nh8jSxF…` | `osaurus-ai` / missing |
+| `App/osaurus/Info.plist` | `SUFeedURL` → `reneezmp/osaurus-intel`, `SUPublicEDKey` `bYYJJqFx…` (was `7Nh8jSxF…` until 1.0.36) | `osaurus-ai` / missing |
 | `scripts/release/cut_intel_release.sh` | `REPO="reneezmp/osaurus-intel"` | upstream repo |
 | `scripts/build/build_rosy.sh` | bakes `OsaurusCanonicalData` | — |
 | `Packages/OsaurusCore/Identity/MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
@@ -1579,7 +1579,7 @@ self-signed certificate is not installed as a system trust anchor here.
 ### Public release 1.0.55 — 2026-09-25
 
 The accumulated RC work (candidates `1.0.37`–`1.0.54`, shipped to Rosy only as
-transfer ZIPs) is published through Sparkle as `1.0.55` build `56`. Two release-
+transfer ZIPs) is being released through Sparkle as `1.0.55` build `56`. Two release-
 path facts: `cut_intel_release.sh` must pass `VERSION`/`BUILD_NUMBER` to
 `build_rosy.sh` (which now refuses implicit defaults), and Rosy candidates
 consume build numbers the appcast never sees. Auto-incrementing from the
@@ -1588,3 +1588,20 @@ installed candidate `55`, so Sparkle would never offer it. Set `BUILD_NUMBER`
 past the newest installed candidate when cutting a release after a candidate
 series. The Qwen 4,096-token distillation retest in
 `ROSY_2026-09-24_RC_RETEST.md` remains an open manual check.
+
+**Sparkle key loss (2026-09-25).** The EdDSA private key behind public key
+`7Nh8jSxFmE2DGw3BGQ9YdIpM115AU743EXUuMA9fN3c=` (every release through `1.0.36`)
+was destroyed when the release Mac was formatted; no backup exists. Sparkle only
+allows key rotation for Apple Developer ID–signed apps, and the Intel fork uses a
+self-signed identity, so installed copies can never accept an update signed by a
+new key. Recovery: generate a new key (`generate_keys`), replace `SUPublicEDKey`
+in `App/osaurus/Info.plist`, cut the release, and install that build **manually**
+once on Rosy; Sparkle updates resume from it. New public key (from `1.0.55`):
+`bYYJJqFxkzbL190wyzy+wAvnkvmJFyEwf1CUH5WRljg=`. The self-signed code-signing
+identity was also recreated, so expect one more Keychain "Always Allow" prompt.
+
+**Back up the key immediately after creating it:** `generate_keys -x <file>`
+and store the file in a password manager, then delete the file. A formatted or
+erased keychain erases the key (Sparkle warns about this). Restore on a new Mac
+with `generate_keys -f <file>`, or pass it to `cut_intel_release.sh` via
+`SPARKLE_PRIVATE_KEY`.
