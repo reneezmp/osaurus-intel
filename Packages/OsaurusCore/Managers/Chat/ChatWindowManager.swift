@@ -1203,6 +1203,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// `.moveToActiveSpace` makes the window follow to the current Space instead
     /// of appearing on its original (possibly hidden) one.
     private func bringToFront(_ window: NSWindow) {
+        SparkleChatGate.markChatVisible()
         NSApp.activate(ignoringOtherApps: true)
         window.collectionBehavior.insert(.moveToActiveSpace)
         if window.isMiniaturized { window.deminiaturize(nil) }

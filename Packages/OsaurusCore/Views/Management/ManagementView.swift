@@ -291,7 +291,8 @@ private extension ManagementView {
                 hasAppeared = true
             }
         }
-        updater.checkForUpdatesInBackground()
+        // Update checks start from launch once chat is visible
+        // (AppDelegate, upstream 66ea84b91), not from Settings.
     }
 
     func handleTabChange(to newTab: ManagementTab) {

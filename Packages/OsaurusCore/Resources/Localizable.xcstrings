@@ -70,6 +70,22 @@
         }
       }
     },
+    "Adding a provider switches to the Providers tab and closes this window. Create the agent first to keep what you entered." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beim Hinzufügen eines Anbieters wird zum Tab „Anbieter“ gewechselt und dieses Fenster geschlossen. Erstelle zuerst den Agenten, um deine Eingaben zu behalten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加提供商会切换到“提供商”标签页并关闭此窗口。请先创建智能体以保留你输入的内容。"
+          }
+        }
+      }
+    },
     "Already have an identity on another Mac?" : {
       "localizations" : {
         "de" : {
@@ -184,6 +200,22 @@
         }
       }
     },
+    "Discard and Add Provider" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verwerfen und Anbieter hinzufügen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "放弃并添加提供商"
+          }
+        }
+      }
+    },
     "Enter a valid phrase" : {
       "localizations" : {
         "de" : {
@@ -252,6 +284,62 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我明白：代理将获得新地址，现有的访问密钥将被吊销，并且当前身份的恢复短语将无法再恢复此 Mac，除非我已保存它。"
+          }
+        }
+      }
+    },
+    "Keep Editing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Weiter bearbeiten"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "계속 편집"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Продолжить редактирование"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "继续编辑"
+          }
+        }
+      }
+    },
+    "Leave without creating this agent?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verlassen, ohne diesen Agenten zu erstellen?"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 에이전트를 만들지 않고 나가시겠습니까?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выйти, не создав этого агента?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "不创建此智能体就离开吗？"
           }
         }
       }

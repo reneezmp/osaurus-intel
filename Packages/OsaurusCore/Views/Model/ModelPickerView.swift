@@ -464,6 +464,10 @@ struct ModelPickerView: View {
     @Binding var selectedModel: String?
     let agentId: UUID?
     let onDismiss: () -> Void
+    /// Replaces the default "Add Provider" action (dismiss + jump to the
+    /// Providers tab). Hosts that would lose unsaved state on that tab
+    /// switch confirm first (upstream 8ef1a9418).
+    var onAddProvider: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @State private var searchText = ""
@@ -584,6 +588,10 @@ struct ModelPickerView: View {
 
     private var addProviderButton: some View {
         Button(action: {
+            if let onAddProvider {
+                onAddProvider()
+                return
+            }
             onDismiss()
             Task { @MainActor in
                 try? await Task.sleep(for: .milliseconds(120))

@@ -271,6 +271,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 }
             }
         }
+
+        // Launch update check (upstream 66ea84b91). Intel previously checked
+        // only when Settings opened, so Sparkle's 24h cycle never armed on a
+        // chat-only session. After a settle delay, wait for a real chat
+        // window (or 60 s) so the update alert appears over chat.
+        Task { @MainActor [updater] in
+            try? await Task.sleep(nanoseconds: 5_000_000_000)
+            var waited: TimeInterval = 0
+            while !SparkleChatGate.chatHasBeenShown && waited < 60 {
+                try? await Task.sleep(nanoseconds: 1_000_000_000)
+                waited += 1
+            }
+            updater.checkForUpdatesInBackground()
+        }
     }
 
     // MARK: - Settings Placeholder Suppression
