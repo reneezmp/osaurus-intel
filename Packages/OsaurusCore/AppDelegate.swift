@@ -26,6 +26,18 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     /// titlebar after the SwiftUI host and toolbar are attached, so installing
     /// replacement controls only during construction is not sufficient.
     private var managementWindowLifecycle: IntelManagementWindowLifecycle?
+    private var managementScreenObserver: NSObjectProtocol?
+
+    /// Largest content area a titled window can show on `screen` (visible
+    /// frame minus titlebar chrome). `.zero` when no screen is known, which
+    /// `ManagementStateManager` treats as "keep the design minimum".
+    static func managementAvailableContentSize(on screen: NSScreen?) -> CGSize {
+        guard let screen else { return .zero }
+        return NSWindow.contentRect(
+            forFrameRect: screen.visibleFrame,
+            styleMask: [.titled, .closable, .miniaturizable, .resizable]
+        ).size
+    }
     private var cancellables: Set<AnyCancellable> = []
     let updater = UpdaterViewModel()
     private let server = OsaurusServer()
@@ -500,7 +512,16 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // launch). See `Packages/OsaurusCore/Managers/WindowManager.swift`
         // L257-326 for the upstream reference (excluded on Intel but
         // readable on disk).
-        let defaultSize = NSSize(width: 1000, height: 700)
+        // Fit the window to small screens (upstream 210685eb9, #2761): clamp
+        // both the design minimum and the default size to the screen's
+        // visible area so the title bar never hides under the menu bar.
+        let available = Self.managementAvailableContentSize(on: NSScreen.main)
+        ManagementStateManager.shared.updateMinimumContentSize(availableContentSize: available)
+        let minimum = ManagementStateManager.shared.minimumContentSize
+        let defaultSize = NSSize(
+            width: available.width > 0 ? min(1000, available.width) : 1000,
+            height: available.height > 0 ? min(700, available.height) : 700
+        )
         let host = NSHostingController(rootView: root)
 
         let window = NSWindow(
@@ -510,7 +531,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             defer: false
         )
         window.title = "Osaurus Settings"
-        window.minSize = NSSize(width: 900, height: 640)
+        window.contentMinSize = NSSize(width: min(900, minimum.width), height: minimum.height)
         window.isReleasedWhenClosed = false
         window.isRestorable = false
 
@@ -557,6 +578,21 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.center()
         window.makeKeyAndOrderFront(nil)
         managementWindow = window
+        // Re-fit after the window moves to another display.
+        if let previous = managementScreenObserver {
+            NotificationCenter.default.removeObserver(previous)
+        }
+        managementScreenObserver = NotificationCenter.default.addObserver(
+            forName: NSWindow.didChangeScreenNotification, object: window, queue: .main
+        ) { [weak window] _ in
+            MainActor.assumeIsolated {
+                guard let window else { return }
+                let size = AppDelegate.managementAvailableContentSize(on: window.screen)
+                ManagementStateManager.shared.updateMinimumContentSize(availableContentSize: size)
+                let floor = ManagementStateManager.shared.minimumContentSize
+                window.contentMinSize = NSSize(width: min(900, floor.width), height: floor.height)
+            }
+        }
         windowLifecycle.repairAfterPresentation(reason: "initial-presentation")
     }
 
