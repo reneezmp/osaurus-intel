@@ -16,7 +16,56 @@ enum ToolPermissionPromptService {
     private static var globalKeyMonitor: Any?
     private static var closeObserver: NSObjectProtocol?
 
+    // MARK: FIFO presentation (upstream e4734a216)
+    //
+    // The panel, key monitors, and close observer are single static slots.
+    // Two concurrent requests (two chats, or the Orchestrator and a chat)
+    // used to overwrite each other: the first request's key monitor leaked
+    // and stayed live, so one Enter could approve both tools, and a
+    // continuation could be stranded. Requests now present one at a time.
+
+    private static var isPresenting = false
+    private static var waiters: [CheckedContinuation<Void, Never>] = []
+
+    static func acquirePresentationSlot() async {
+        guard isPresenting else {
+            isPresenting = true
+            return
+        }
+        await withCheckedContinuation { waiters.append($0) }
+    }
+
+    static func releasePresentationSlot() {
+        if waiters.isEmpty {
+            isPresenting = false
+        } else {
+            waiters.removeFirst().resume()
+        }
+    }
+
     static func requestApproval(
+        toolName: String,
+        description: String,
+        argumentsJSON: String
+    ) async -> Bool {
+        await acquirePresentationSlot()
+        defer { releasePresentationSlot() }
+        // Revalidate after waiting: a sibling prompt may have chosen Always
+        // Allow (or the user changed the policy) while this one was queued.
+        switch ToolRegistry.shared.policyInfo(for: toolName)?.effectivePolicy {
+        case .auto?: return true
+        case .deny?: return false
+        default: break
+        }
+        if Task.isCancelled { return false }
+        return await presentApproval(
+            toolName: toolName,
+            description: description,
+            argumentsJSON: argumentsJSON
+        )
+    }
+
+    private static func presentApproval(
         toolName: String,
         description: String,
         argumentsJSON: String
