@@ -71,6 +71,11 @@ the shared storage-path lock.
 
    `--disable-xctest` also avoids the unrelated empty XCTest runner attempting
    to load the wrong architecture. This package currently uses Swift Testing.
+   In the Codex workspace sandbox, SwiftPM's nested macOS sandbox can fail
+   before manifest compilation with `sandbox_apply: Operation not permitted`
+   (or a denied Clang module cache). Run the same isolated command with
+   approved unsandboxed execution; do not remove `OSAURUS_TEST_ROOT` or the
+   serial-test flags to work around that failure.
 8. **Check for residue after stateful tests.** Confirm the live configuration
    checksum is unchanged, no test-named agent remains under `~/.osaurus/agents`,
    and no test fixture appeared in another live store.

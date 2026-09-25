@@ -9,14 +9,25 @@ set -euo pipefail
 # `~/.osaurus` instead of the dev-isolated `~/.osaurus-intel`. On Rosy the fork
 # is the ONLY Osaurus, so there's no production install to protect.
 #
-# Usage:   scripts/build/build_rosy.sh            # Debug (matches what we tested)
-#          CONFIG=Release scripts/build/build_rosy.sh
+# Usage:   VERSION=1.0.41 BUILD_NUMBER=42 scripts/build/build_rosy.sh
+#          CONFIG=Release VERSION=1.0.41 BUILD_NUMBER=42 scripts/build/build_rosy.sh
 
 ROOT="$(cd "$(dirname "$0")/../.." && pwd)"
 cd "$ROOT"
 
 CONFIG="${CONFIG:-Debug}"
 DERIVED="build/rosy-deploy"
+: "${VERSION:?Set VERSION to the intended marketing version (for example 1.0.49)}"
+: "${BUILD_NUMBER:?Set BUILD_NUMBER to the intended integer build number}"
+
+[[ "$VERSION" =~ ^[0-9]+(\.[0-9]+){1,2}$ ]] || {
+  echo "✗ VERSION must contain 2 or 3 numeric components (got '$VERSION')" >&2
+  exit 2
+}
+[[ "$BUILD_NUMBER" =~ ^[1-9][0-9]*$ ]] || {
+  echo "✗ BUILD_NUMBER must be a positive integer (got '$BUILD_NUMBER')" >&2
+  exit 2
+}
 
 echo "→ Building osaurus.app (Intel x86_64, $CONFIG)…"
 # -skipPackagePluginValidation: swift-secp256k1 0.23.2 (which this fork pins so
@@ -33,6 +44,7 @@ xcodebuild \
   -skipMacroValidation \
   -derivedDataPath "$DERIVED" \
   ONLY_ACTIVE_ARCH=NO \
+  MARKETING_VERSION="$VERSION" CURRENT_PROJECT_VERSION="$BUILD_NUMBER" \
   CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
   build | tail -3
 

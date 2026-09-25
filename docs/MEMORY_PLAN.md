@@ -51,7 +51,14 @@ warning does not apply.
   injected as its own system message before the last user turn.
 - Memory settings UI: a 268-line four-card panel (`MemoryView.swift:1077-1345`).
 
-### Genuinely missing
+### Historical gap inventory (resolved unless explicitly noted)
+
+This table described the 2026-09-05 baseline. It is retained as provenance, not
+as current status: consolidation, visibility, context estimation, scoped recall,
+project namespaces, and confirmation were implemented and accepted in the later
+sections of this document. The low-priority recall cache remains a documented
+performance difference; the relevance gate is now live and tested.
+
 | Gap | Nature | Severity |
 |---|---|---|
 | Consolidation never runs | `MemoryConsolidator` excluded, no Intel equivalent. Decay, dedup-merge, promotion, eviction and transcript pruning **never execute**. Facts accumulate forever. | **High** — unbounded growth, recall quality decays over time |
@@ -498,3 +505,101 @@ foreign, disabled, and ordinary providers do not inherit that exception. Raw
 failure diagnostics are bounded and redact authorization values. Five focused
 tests pass. This is implementation evidence only: Memory stays Partial until
 Rosy successfully distills, renders facts/episodes, and verifies Memory off/on.
+
+### 2026-09-23 pre-Rosy Memory gate
+
+The repaired paths are included unchanged in reviewed candidate `1.0.49` build
+`50`. The exact focused gate passes 10/10 tests: five
+`IntelMemoryDistillationRegressionTests` cover Router-qualified cold discovery,
+Qwen text-part decoding, non-text rejection, and bounded/redacted diagnostics;
+five `IdentityOverrideTests` cover pinned-identity deduplication and metadata
+preservation. This count intentionally excludes suite-name filters that match no
+tests.
+
+Section 8 of `ROSY_2026-09-22_AGENT_GENERAL_RETEST.md` is now the authoritative
+manual gate. It starts distillation immediately after a cold relaunch—before an
+ordinary chat can warm provider discovery—then separately verifies rendering,
+Memory off/on enforcement, paid-distillation consent, pending-work recovery,
+relaunch persistence, and namespace-scoped cleanup. No replacement archive is
+needed because this phase changed documentation only and build `50` already
+contains the reviewed repairs. Memory remains **Partial** until that Rosy gate
+passes.
+
+### 2026-09-23 completion and code review
+
+The final implementation audit found one real compiled-feature gap hidden by the
+old test exclusion list: Intel had no `backfillFromChatHistory` even though the
+upstream Memory diagnostics and database contracts supported it. Intel now
+backfills its persisted JSON sessions with duplicate avoidance, original dates,
+project membership, cancellation, progress, and explicit global/per-agent/cloud
+consent enforcement. The Diagnostics tab exposes the action behind a warning
+that it invokes cloud distillation.
+
+`MemoryTests.swift` and `MemoryServiceBackfillTests.swift` are no longer excluded.
+The complete package passes 1,054/1,054 tests in 159 suites; the enumerated Memory
+gate passes 74/74 in 12 suites. Review findings and manual residual risk are in
+`RC_MEMORY_CODE_REVIEW_2026-09-23.md`.
+
+Candidate `1.0.50` build `51` is packaged as
+`Osaurus-Intel-Memory-2026-09-23.zip` with SHA-256
+`40609fb2cf505d6bd4b6e23c1cb1b93fd2f5a71e93840ad3f398a431e0fcc930`.
+Memory remains **Partial** only until Rosy completes section 8 of the cumulative
+acceptance checklist.
+
+### 2026-09-24 Rosy result and correction
+
+Rosy verified the Memory enable/disable boundary, paid-distillation consent,
+historical backfill, persistence, empty state, and namespace-scoped cleanup.
+Two candidate defects remain in the focused retest: Router Qwen may return an
+SSE `data:` body even for a non-streaming completion, and Ventura rendered the
+Memory console's native segmented/agent pickers blank while expanding the
+episode inspector nearly to the parent-window size. The decoder now folds valid
+SSE text/reasoning/usage into the normal completion envelope and rejects
+textless streams. The console uses explicit themed SwiftUI controls and caps the
+inspector at 720×500 with internal scrolling.
+
+The `search_memory` name observed during Rosy QA is **not** this subsystem's
+built-in search tool. It belongs to Renée's personal `renee.rag` plugin for her
+Obsidian vault. Its post-disable call is a live plugin-tool revocation test and
+must terminate as rejected without accessing the vault; it is not a reason to
+port or expose upstream `SearchMemoryTool` on Intel.
+
+### 2026-09-25 Rosy retest — UI accepted, Qwen still open
+
+Build `1.0.52` (`53`) passed the Ventura Memory scope/agent filters and compact
+internally scrollable episode inspector. DeepSeek distillation continues to
+work, but a fresh `osaurus/qwen-3-8-max` attempt still returned an unsupported
+completion response. The visible, capped diagnostic begins with an SSE `data:`
+frame whose first `delta` is empty. That screenshot does not show enough of
+the body to distinguish a later text-bearing frame from a truly textless or
+different envelope; the synthetic text-bearing SSE test is not live-provider
+evidence. Do not silently treat the Qwen result as successful or make a broad
+decoder change from the first frame alone. Preserve the pending item, capture a
+privacy-redacted full frame sequence, and add the failing envelope as a focused
+fixture before the next Qwen repair. DeepSeek is an interim working model, not
+proof of Qwen parity. The exact manual evidence is in
+[`ROSY_2026-09-24_RC_RETEST.md`](ROSY_2026-09-24_RC_RETEST.md).
+
+The next candidate changes **diagnostics, not Qwen decoding**: an SSE failure
+now records frame count, recognized delta keys, content kinds, and finish
+reasons without including generated Memory text. The Intel Recent Activity row
+offers **Copy response shape** for that safe summary. The synthetic Qwen and
+textless-SSE tests still pass; a live Qwen result (or sanitized frame-shape
+report) is required before choosing a decoder change. Do not reinterpret a
+textless response as a successful distillation.
+
+### 2026-09-25 build 54 Rosy evidence — Qwen exhausted its allowance
+
+Rosy's **Copy response shape** reported `frames=2, choices=1,
+invalidFrames=0, deltaKeys=[], unknownDeltaKeys=0, contentKinds=[],
+finishReasons=["length"]`. There is no text-bearing frame for a decoder to
+recover: the one completion choice ended at the output-token limit without
+assistant text. The previous "unsupported completion response" label was
+misleading for this case. The Intel distiller had requested only 1,024 output
+tokens, while upstream's Router contract explicitly warns that 1,024-token
+caps can yield billed empty/truncated responses. The next candidate raises
+only `osaurus/qwen-3-8-max` distillation to 4,096 output tokens and reports a
+specific output-limit error if it still ends textless. It does **not** retry
+automatically, because a second Router request could incur another charge.
+The change is a bounded hypothesis, not live Qwen acceptance; keep this row
+open until Rosy gets a nonempty, parsed episode.

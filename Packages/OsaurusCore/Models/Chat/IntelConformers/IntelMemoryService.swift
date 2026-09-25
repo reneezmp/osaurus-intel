@@ -236,6 +236,7 @@ public actor MemoryService {
         }
 
         for conv in conversations {
+            guard !Task.isCancelled else { return }
             await performDistillSession(
                 agentId: conv.agentId,
                 conversationId: conv.conversationId
@@ -247,6 +248,146 @@ public actor MemoryService {
     /// previous launch was killed.
     public func recoverOrphanedSignals() async {
         await syncNow()
+    }
+
+    /// Buffer pre-existing Intel JSON chat sessions into the same pending-
+    /// signal pipeline used by live chats. The upstream implementation reads
+    /// `ChatHistoryDatabase`; Intel persists `ChatSessionData` through
+    /// `ChatSessionsManager`, so the storage adapter differs while the
+    /// idempotency, pairing, cancellation, and progress contract stays the
+    /// same.
+    @discardableResult
+    public func backfillFromChatHistory(
+        distillAfterBuffering: Bool = true,
+        progress: @escaping @Sendable @MainActor (MemoryBackfillProgress) -> Void
+    ) async -> MemoryBackfillProgress {
+        guard MemoryConfigurationStore.load().enabled else {
+            let snapshot = MemoryBackfillProgress(stage: .done)
+            await MainActor.run { progress(snapshot) }
+            return snapshot
+        }
+
+        let sessions = await MainActor.run {
+            Array(ChatSessionsManager.shared.sessions.values)
+                .sorted { $0.createdAt < $1.createdAt }
+        }
+        let alreadyDistilled = (try? db.distilledConversationIds()) ?? []
+        let alreadyBuffered = (try? db.bufferedConversationIds()) ?? []
+
+        var snapshot = MemoryBackfillProgress(
+            stage: .buffering,
+            sessionsTotal: sessions.count
+        )
+        await MainActor.run { progress(snapshot) }
+
+        for session in sessions {
+            if Task.isCancelled {
+                snapshot.stage = .cancelled
+                await MainActor.run { progress(snapshot) }
+                return snapshot
+            }
+
+            let conversationId = session.id.uuidString
+            let personalEnabled = !AgentManager.shared.effectiveMemoryDisabled(for: session.agentId)
+                && !AgentManager.shared.effectiveDistillationDisabled(for: session.agentId)
+            guard personalEnabled || session.projectId != nil,
+                  !alreadyDistilled.contains(conversationId),
+                  !alreadyBuffered.contains(conversationId)
+            else {
+                snapshot.sessionsSkipped += 1
+                snapshot.lastSessionTitle = session.title
+                await MainActor.run { progress(snapshot) }
+                continue
+            }
+
+            let pairs = Self.pairTurnsForBackfill(session.turns)
+            guard !pairs.isEmpty else {
+                snapshot.sessionsSkipped += 1
+                snapshot.lastSessionTitle = session.title
+                await MainActor.run { progress(snapshot) }
+                continue
+            }
+
+            let sessionDate = Self.iso8601Formatter.string(from: session.createdAt)
+            var buffered = 0
+            for pair in pairs {
+                do {
+                    try db.insertPendingSignal(
+                        PendingSignal(
+                            agentId: session.agentId.uuidString,
+                            conversationId: conversationId,
+                            userMessage: pair.user,
+                            assistantMessage: pair.assistant,
+                            createdAt: sessionDate
+                        )
+                    )
+                    buffered += 1
+                } catch {
+                    MemoryLogger.service.error(
+                        "backfill: insertPendingSignal failed for \(conversationId): \(error)"
+                    )
+                }
+            }
+
+            if buffered > 0 {
+                conversationSessionDates[conversationId] = sessionDate
+                conversationProjectIds[conversationId] = session.projectId
+            }
+            if buffered > 0 {
+                snapshot.sessionsProcessed += 1
+                snapshot.turnsBuffered += buffered
+            } else {
+                snapshot.sessionsSkipped += 1
+            }
+            snapshot.lastSessionTitle = session.title
+            await MainActor.run { progress(snapshot) }
+        }
+
+        guard distillAfterBuffering else {
+            snapshot.stage = .done
+            await MainActor.run { progress(snapshot) }
+            return snapshot
+        }
+
+        snapshot.stage = .distilling
+        await MainActor.run { progress(snapshot) }
+        await syncNow(force: true)
+        snapshot.stage = Task.isCancelled ? .cancelled : .done
+        await MainActor.run { progress(snapshot) }
+        return snapshot
+    }
+
+    /// Convert persisted turns into the user/assistant pairs accepted by the
+    /// distiller. System/tool turns and blank content are intentionally not
+    /// sent to the provider; unmatched user turns remain recoverable.
+    nonisolated static func pairTurnsForBackfill(
+        _ turns: [ChatTurnData]
+    ) -> [(user: String, assistant: String?)] {
+        var pairs: [(user: String, assistant: String?)] = []
+        var pendingUser: String?
+
+        for turn in turns {
+            let trimmed = turn.content.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty else { continue }
+            switch turn.role {
+            case .user:
+                if let previous = pendingUser {
+                    pairs.append((user: previous, assistant: nil))
+                }
+                pendingUser = trimmed
+            case .assistant:
+                if let user = pendingUser {
+                    pairs.append((user: user, assistant: trimmed))
+                    pendingUser = nil
+                }
+            case .system, .tool:
+                continue
+            }
+        }
+        if let pendingUser {
+            pairs.append((user: pendingUser, assistant: nil))
+        }
+        return pairs
     }
 
     // MARK: - Distillation (one LLM call per session)
@@ -585,10 +726,18 @@ public actor MemoryService {
                 ChatMessage(role: "user", content: prompt),
             ],
             temperature: 0.2,
-            max_tokens: 1024
+            // The managed Router's Qwen can spend the entire 1,024-token
+            // allowance without emitting assistant text (finish_reason=length).
+            // Give this exact model a bounded reasoning + JSON allowance;
+            // do not add an immediate retry of a potentially billed empty response.
+            max_tokens: Self.distillationOutputTokenLimit(for: model)
         )
         let response = try await engine.completeChat(request: request)
         return response.choices.first?.message?.content ?? ""
+    }
+
+    nonisolated static func distillationOutputTokenLimit(for model: String) -> Int {
+        model.lowercased() == "osaurus/qwen-3-8-max" ? 4_096 : 1_024
     }
 
     // MARK: - Project Memory Mirror

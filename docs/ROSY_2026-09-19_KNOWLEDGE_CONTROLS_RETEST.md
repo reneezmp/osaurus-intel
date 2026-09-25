@@ -73,6 +73,37 @@ Record the Rosy result here:
 - [ ] Verify Delete opens a confirmation and cancel it. Do not delete a real
       collection for this focused pass.
 
+### Automated pre-Rosy gate
+
+The current source diagnosis is that `AgentManager.updateKnowledgeSettings`
+mutated its private `knowledgeGrants` sidecar and posted `.agentUpdated`, but
+did not publish an observed-object change. The detail-sheet switch and card
+access summary therefore could remain stale even when
+`knowledge/agent-grants.json` was written. The implementation now has a
+focused automated guard,
+`IntelAgentRuntimeLaneTests.knowledgeGrantPublishesPersistsAndRevokesRuntimeAccess`,
+covering publication, sidecar writes, capability revision, positive direct
+dispatch, and revocation denial. The older
+`IntelAgentRuntimeLaneTests.dispatchRejectsWebSearchAndKnowledgeWithoutTheirGrants`
+still covers denial with no grant.
+
+The card parity repair is also implemented in source: each card now exposes an
+inline Edit action and asynchronously derives a categorized/uncategorized badge
+from the Intel Knowledge index. These remain unchecked above until the same
+x86_64 candidate is inspected on Rosy.
+
+Before checking any box above, complete the remaining focused regression lane
+covering:
+
+- sidecar persistence across the manager's reload/relaunch boundary;
+- allowed Knowledge search from a fresh chat and a restored chat whose
+  `ChatSessionData.agentId` is rehydrated; and
+- denial after revocation in both fresh and restored chats.
+
+Keep these Rosy checks pending until that lane passes and the same behavior is
+confirmed in the signed x86_64 candidate. Automated success is not manual
+acceptance.
+
 ## 4. Regression guard
 
 - [ ] Add Knowledge Collection still shows the complete labelled form and readable

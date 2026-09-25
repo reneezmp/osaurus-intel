@@ -138,7 +138,10 @@ struct MemoryManagementConsoleView: View {
         }
         .sheet(item: $selectedItem) { item in
             MemoryConsoleInspectSheet(item: item)
-                .frame(minWidth: 560, minHeight: 520)
+                // A minimum-only size lets Ventura expand this sheet to the
+                // parent window's full content area. Keep the inspector
+                // compact and scroll its detail content instead.
+                .frame(width: 720, height: 500)
         }
         .themedAlert(
             L("Forget Memory?"),
@@ -238,29 +241,88 @@ struct MemoryManagementConsoleView: View {
     // `includeDisabled` and this row gets its `Toggle`.
     private var filtersRow: some View {
         HStack(spacing: 12) {
-            Picker("", selection: $scope) {
+            HStack(spacing: 2) {
                 ForEach(MemoryConsoleScope.allCases) { value in
-                    Text(LocalizedStringKey(value.displayName), bundle: .module).tag(value)
+                    let selected = scope == value
+                    Button {
+                        scope = value
+                        refresh()
+                    } label: {
+                        Text(LocalizedStringKey(value.displayName), bundle: .module)
+                            .font(.system(size: 11, weight: selected ? .semibold : .medium))
+                            .foregroundColor(selected ? theme.primaryBackground : theme.secondaryText)
+                            .frame(maxWidth: .infinity)
+                            .padding(.vertical, 6)
+                            .background(
+                                RoundedRectangle(cornerRadius: 6)
+                                    .fill(selected ? theme.accentColor : Color.clear)
+                            )
+                    }
+                    .buttonStyle(.plain)
                 }
             }
-            .labelsHidden()
-            .pickerStyle(.segmented)
-            .frame(maxWidth: 320)
-            .onChange(of: scope) { _ in refresh() }
+            .padding(3)
+            .frame(width: 320)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.tertiaryBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 8)
+                            .stroke(theme.inputBorder, lineWidth: 1)
+                    )
+            )
 
-            Picker("", selection: $agentFilter) {
-                Text("All agents", bundle: .module).tag(MemoryAgentFilter.all)
-                Text(Agent.default.displayName).tag(MemoryAgentFilter.defaultAgent)
+            Menu {
+                Button(L("All agents")) { selectAgentFilter(.all) }
+                Button(Agent.default.displayName) { selectAgentFilter(.defaultAgent) }
                 ForEach(agents) { agent in
-                    Text(agent.displayName).tag(MemoryAgentFilter.agent(agent.id.uuidString))
+                    Button(agent.displayName) {
+                        selectAgentFilter(.agent(agent.id.uuidString))
+                    }
                 }
+            } label: {
+                HStack(spacing: 8) {
+                    Text(selectedAgentFilterName)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(1)
+                    Spacer(minLength: 4)
+                    Image(systemName: "chevron.down")
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(theme.secondaryText)
+                }
+                .padding(.horizontal, 10)
+                .frame(width: 200, height: 34)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.inputBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(theme.inputBorder, lineWidth: 1)
+                        )
+                )
             }
-            .labelsHidden()
-            .frame(width: 200)
-            .onChange(of: agentFilter) { _ in refresh() }
+            .buttonStyle(.plain)
+            .menuIndicator(.hidden)
 
             Spacer(minLength: 0)
         }
+    }
+
+    private var selectedAgentFilterName: String {
+        switch agentFilter {
+        case .all:
+            return L("All agents")
+        case .defaultAgent:
+            return Agent.default.displayName
+        case .agent(let id):
+            return agents.first(where: { $0.id.uuidString == id })?.displayName ?? L("Agent")
+        }
+    }
+
+    private func selectAgentFilter(_ filter: MemoryAgentFilter) {
+        agentFilter = filter
+        refresh()
     }
 
     private func consoleToggleButton(

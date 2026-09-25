@@ -6,6 +6,13 @@ and built-in-only configuration and bounded-delegation tools; custom agents do n
 Focused tests cover admission, exact-pair approval, denial, bounds, and fail-closed
 paths. The feature remains Partial until the focused Rosy Ventura retest passes.
 
+**2026-09-23 resumed gate:** the exact compiled Orchestrator surface passes
+47/47 tests in eight suites, covering Gates 1–5B. Section 9 of
+`ROSY_2026-09-22_AGENT_GENERAL_RETEST.md` supersedes the historical blocked
+wording in the final checklist for candidate `1.0.50` build `51`. The next action
+is accumulated-code review and Rosy chat acceptance, not speculative expansion
+into the explicitly deferred targets below.
+
 **Scope:** `intel-fork`, Intel/x86_64, macOS 13 Ventura minimum. This plan is based on
 the audited `upstream/main` chain and the active Intel target, including its
 `Packages/OsaurusCore/Package.swift` exclusions and Intel conformer replacements.
@@ -486,3 +493,59 @@ complete.
   Allow, unbound/custom rejection, private-value exclusion, and one-shot apply.
 - Rosy must still exercise the tools from a real chat. Until that evidence is
   recorded, this remains a repair candidate rather than a promoted feature.
+
+## Post-Rosy target-discovery repair — 2026-09-24
+
+Rosy proved that bounded delegation could enforce a supplied target, but the
+built-in Orchestrator had no model-visible way to discover the admitted roster
+and truthfully reported that limitation. Its fixed prompt now receives a
+private, request-time snapshot of only currently admitted custom agents whose
+effective remote model is also admitted. Each entry includes display name,
+exact target UUID, and model id. An empty snapshot explicitly says no target is
+callable and directs configuration to Settings; custom agents receive no roster.
+Admission is still rechecked immediately before dispatch, so prompt grounding
+does not replace the runtime security gate.
+
+## 2026-09-25 Rosy retest — empty roster and presentation gaps
+
+On candidate `1.0.52` (`53`), the built-in chat printed the fixed prompt's
+truthful **empty-roster** state despite Renée confirming that both the custom
+agent and cloud-model toggles were on. This is a positive-path defect, not a
+missing-toggle explanation. The compiled settings and prompt paths require
+the model admission to match **that agent's exact effective remote model**.
+Trace the agent UUID/model ID shown in the settings row through
+`DefaultAgentConfigurationStore.save/load`, `AgentManager.effectiveModel`, and
+the request-time `SystemPromptComposer` roster. Do not log private prompts or
+credentials. Current `IntelOrchestratorPromptTests` supplies a fabricated
+target directly to the formatter; it lacks a stateful settings → persistence
+→ composed-chat regression and so could not catch this. The remove-target/
+fail-closed half cannot close until a positive target first appears.
+
+`Run One Turn…` is disabled by `runnableAgents.isEmpty`; when that is why it
+does nothing, the Settings surface needs a visible explanation rather than an
+apparently broken button. The chat selector and empty state render a generic
+grey person for every built-in agent, even though `Agent.default.avatar` is
+green and the transcript renders the dinosaur. This is a separate UI defect;
+the model's Orchestrator-role response shows the fixed prompt did reach chat.
+See [`ROSY_2026-09-24_RC_RETEST.md`](ROSY_2026-09-24_RC_RETEST.md) for the
+manual screenshots and remaining acceptance steps.
+
+### Follow-up implementation awaiting Rosy retest
+
+Settings, the manual launcher, and the chat prompt now use the same
+`IntelOrchestratorAdmission.evaluate` calculation. Settings shows the exact
+reason a target is not runnable (missing agent, no effective model, exact model
+not admitted, or remote model unavailable) below the disabled Run button.
+The built-in agent additionally receives a read-only `orchestrator_targets`
+tool that rebuilds the live roster and reports those reasons; it does not
+launch a child and cannot be called by custom agents. The one-turn runtime
+still independently revalidates all gates before dispatch. Settings writes
+now surface a failure and restore the previous switch state instead of
+silently appearing saved. Focused serialization/admission, prompt, registry,
+and tool tests pass, but this does **not** prove why Rosy's build 53 switches
+showed on while the prompt roster was empty. Her next live retest should check
+the new Settings status and live tool result before claiming parity.
+
+The built-in chat selector and empty state now render `Agent.default.avatar`
+through the same mascot view used by custom agents, instead of hardcoding a
+grey person. Visual acceptance on Rosy remains pending.

@@ -24,8 +24,7 @@ fileprivate func agentColorFor(_ name: String) -> Color {
 
 /// Diameter for hero-sized agent avatars in the empty-state surfaces.
 private let heroAvatarDiameter: CGFloat = 64
-/// Font size for the icon/monogram inside a hero avatar (built-in `person.fill`
-/// placeholder and `AgentAvatarView` monogram fallback).
+/// Font size for the `AgentAvatarView` monogram fallback.
 private let heroAvatarIconFontSize: CGFloat = 28
 /// Font size for the SF Symbol inside the remote-hero avatar (relay / discovered).
 private let heroAvatarRemoteIconFontSize: CGFloat = 24
@@ -97,36 +96,23 @@ extension View {
 
 // MARK: - Hero Agent Avatar
 
-/// Renders a hero-sized avatar for a given agent: either the built-in
-/// placeholder (theme-tinted circle + `person.fill`) or the mascot
-/// illustration via `AgentAvatarView` with `bleedsToEdge: true`.
+/// Renders the selected agent's mascot or custom image at hero size.
 /// Shared by `ChatEmptyState.heroAvatar` and `ChatEmptyStateNoModels.welcomeAvatar`.
 private struct HeroAgentAvatar: View {
     let agent: Agent
     @Environment(\.theme) private var theme
 
     var body: some View {
-        if agent.isBuiltIn {
-            ZStack {
-                Circle()
-                    .fill(theme.secondaryText.opacity(theme.isDark ? 0.12 : 0.08))
-                Image(systemName: "person.fill")
-                    .font(.system(size: heroAvatarIconFontSize, weight: .medium))
-                    .foregroundColor(theme.secondaryText.opacity(0.85))
-            }
-            .frame(width: heroAvatarDiameter, height: heroAvatarDiameter)
-        } else {
-            AgentAvatarView(
-                mascotId: agent.avatar,
-                name: agent.name,
-                tint: agentColorFor(agent.name),
-                diameter: heroAvatarDiameter,
-                customImageURL: agent.customAvatarURL,
-                monogramFontSize: heroAvatarIconFontSize,
-                borderWidth: 0,
-                bleedsToEdge: true
-            )
-        }
+        AgentAvatarView(
+            mascotId: agent.avatar,
+            name: agent.name,
+            tint: agentColorFor(agent.name),
+            diameter: heroAvatarDiameter,
+            customImageURL: agent.customAvatarURL,
+            monogramFontSize: heroAvatarIconFontSize,
+            borderWidth: 0,
+            bleedsToEdge: true
+        )
     }
 }
 

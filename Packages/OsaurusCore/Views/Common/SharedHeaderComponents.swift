@@ -306,26 +306,15 @@ struct AgentPill: View {
 
     @ViewBuilder
     private func monogramAvatar(for agent: Agent, size: CGFloat) -> some View {
-        if agent.isBuiltIn {
-            ZStack {
-                Circle()
-                    .fill(theme.secondaryText.opacity(theme.isDark ? 0.12 : 0.08))
-                Image(systemName: "person.fill")
-                    .font(.system(size: size * 0.42, weight: .medium))
-                    .foregroundColor(theme.secondaryText.opacity(0.85))
-            }
-            .frame(width: size, height: size)
-        } else {
-            AgentAvatarView(
-                mascotId: agent.avatar,
-                name: agent.name,
-                tint: agentColorFor(agent.name),
-                diameter: size,
-                customImageURL: agent.customAvatarURL,
-                monogramFontSize: size * 0.45,
-                borderWidth: 0
-            )
-        }
+        AgentAvatarView(
+            mascotId: agent.avatar,
+            name: agent.name,
+            tint: agentColorFor(agent.name),
+            diameter: size,
+            customImageURL: agent.customAvatarURL,
+            monogramFontSize: size * 0.45,
+            borderWidth: 0
+        )
     }
 
     @ViewBuilder

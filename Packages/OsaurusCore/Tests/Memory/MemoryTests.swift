@@ -490,7 +490,7 @@ struct MemoryContextAssemblerTests {
         var config = MemoryConfiguration()
         config.enabled = false
         let context = await MemoryContextAssembler.assembleContext(agentId: "test", config: config)
-        #expect(context.isEmpty)
+        #expect(context == nil)
     }
 }
 

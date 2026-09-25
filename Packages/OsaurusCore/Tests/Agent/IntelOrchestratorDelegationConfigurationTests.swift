@@ -92,6 +92,45 @@ struct IntelOrchestratorDelegationConfigurationTests {
         #expect(policy.timeoutSeconds == 1)
     }
 
+    @Test("admitted agent and exact persisted model resolve to one target; mismatch is diagnosed")
+    func admittedPairResolvesAfterSerialization() throws {
+        let agent = Agent(name: "Rosy Helper", defaultModel: "router/helper")
+        let configuration = DefaultAgentConfiguration(delegation: .init(
+            customAgentAllowlist: [agent.id],
+            admittedCloudModelIDs: ["router/helper"]
+        ))
+        let saved = try JSONDecoder().decode(
+            DefaultAgentConfiguration.self,
+            from: JSONEncoder().encode(configuration)
+        )
+        let ready = IntelOrchestratorAdmission.evaluate(
+            configuration: saved.delegation,
+            agents: [Agent.default, agent],
+            effectiveModel: { $0 == agent.id ? agent.defaultModel : nil },
+            availableModelIDs: ["router/helper"]
+        )
+        #expect(ready.targets.map(\.id) == [agent.id])
+        #expect(ready.targets.first?.modelID == "router/helper")
+
+        let mismatched = IntelOrchestratorAdmission.evaluate(
+            configuration: saved.delegation,
+            agents: [agent],
+            effectiveModel: { _ in "router/other" },
+            availableModelIDs: ["router/helper", "router/other"]
+        )
+        #expect(mismatched.targets.isEmpty)
+        #expect(mismatched.blocked.contains { $0.contains("not an admitted model") })
+
+        let duplicate = IntelOrchestratorAdmission.evaluate(
+            configuration: saved.delegation,
+            agents: [agent, agent],
+            effectiveModel: { _ in "router/helper" },
+            availableModelIDs: ["router/helper"]
+        )
+        #expect(duplicate.targets.isEmpty)
+        #expect(duplicate.blocked.contains { $0.contains("duplicate identity") })
+    }
+
     @Test
     func malformedDelegationEntriesFailClosedWithoutDiscardingParentConfiguration() throws {
         let decoded = try JSONDecoder().decode(

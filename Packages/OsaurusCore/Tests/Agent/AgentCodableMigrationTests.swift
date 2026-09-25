@@ -119,10 +119,19 @@ struct IntelAgentPresentationPersistenceTests {
                 #expect(stored.avatar == nil)
                 #expect(try Data(contentsOf: avatarURL) == bytes)
 
+                let replacement = Data([0x89, 0x50, 0x4E, 0x47, 0x02])
+                #expect(AgentManager.shared.setCustomAvatar(replacement, ext: "PNG", for: agent.id))
+                AgentManager.shared.refresh()
+                let replaced = try #require(AgentManager.shared.agent(for: agent.id))
+                let replacementURL = try #require(replaced.customAvatarURL)
+                #expect(replacementURL != avatarURL)
+                #expect(try Data(contentsOf: replacementURL) == replacement)
+                #expect(!FileManager.default.fileExists(atPath: avatarURL.path))
+
                 AgentManager.shared.clearCustomAvatar(for: agent.id)
                 AgentManager.shared.refresh()
                 #expect(AgentManager.shared.agent(for: agent.id)?.customAvatarFilename == nil)
-                #expect(!FileManager.default.fileExists(atPath: avatarURL.path))
+                #expect(!FileManager.default.fileExists(atPath: replacementURL.path))
             }
         }
     }

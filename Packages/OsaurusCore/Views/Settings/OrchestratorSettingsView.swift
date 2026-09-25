@@ -20,6 +20,7 @@ struct OrchestratorSettingsView: View {
     @State private var showDelegationSheet = false
     @State private var showDeclarativeConfigurationSheet = false
     @State private var loaded = false
+    @State private var saveError: String?
     @State private var saveTask: Task<Void, Never>?
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -167,12 +168,20 @@ struct OrchestratorSettingsView: View {
 
     private var delegationSection: some View {
         SettingsSection(title: "Delegation", icon: "point.3.connected.trianglepath.dotted") {
-            OrchestratorDelegationSettings(
-                configuration: $delegation,
-                pickerItems: pickerItems,
-                onPersist: saveDelegation,
-                onRun: { showDelegationSheet = true }
-            )
+            VStack(alignment: .leading, spacing: 8) {
+                OrchestratorDelegationSettings(
+                    configuration: $delegation,
+                    pickerItems: pickerItems,
+                    onPersist: saveDelegation,
+                    onRun: { showDelegationSheet = true }
+                )
+                if let saveError {
+                    Text(saveError)
+                        .font(.system(size: 11))
+                        .foregroundColor(.red)
+                        .accessibilityIdentifier("orchestrator-save-error")
+                }
+            }
         }
     }
 
@@ -222,6 +231,7 @@ struct OrchestratorSettingsView: View {
         temperature = config.temperature.map { String($0) } ?? ""
         maxTokens = config.maxTokens.map { String($0) } ?? ""
         delegation = config.delegation
+        saveError = nil
         loaded = true
         Task { await ModelPickerItemCache.shared.prewarmModelCache() }
     }
@@ -249,21 +259,32 @@ struct OrchestratorSettingsView: View {
         config.temperature = temp
         config.maxTokens = tokens
         config.delegation = delegation
-        AgentManager.shared.updateDefaultAgentConfiguration(config)
+        saveError = AgentManager.shared.updateDefaultAgentConfiguration(config)
+            ? nil : "Orchestrator settings could not be saved. The previous configuration remains active."
     }
 
     private func saveDelegation(_ delegation: OrchestratorDelegationConfiguration) {
         self.delegation = delegation
         var config = DefaultAgentConfigurationStore.load()
         config.delegation = delegation
-        AgentManager.shared.updateDefaultAgentConfiguration(config)
+        if AgentManager.shared.updateDefaultAgentConfiguration(config) {
+            saveError = nil
+        } else {
+            self.delegation = DefaultAgentConfigurationStore.load().delegation
+            saveError = "Delegation admission could not be saved. The switches were restored to the previous configuration."
+        }
     }
 
     private func restoreDefaults() {
         loaded = false
         displayName = ""; systemPrompt = ""; selectedModel = nil; temperature = ""; maxTokens = ""
         delegation = .default
-        AgentManager.shared.updateDefaultAgentConfiguration(.default)
+        if AgentManager.shared.updateDefaultAgentConfiguration(.default) {
+            saveError = nil
+        } else {
+            load()
+            saveError = "Orchestrator defaults could not be saved. The previous configuration remains active."
+        }
         loaded = true
     }
 

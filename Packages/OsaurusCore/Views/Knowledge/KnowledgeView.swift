@@ -113,8 +113,7 @@ struct KnowledgeView: View {
                 },
                 onDelete: {
                     selectedCollection = nil
-                    integration.deleteCollection(collection.id)
-                    showToast("Deleted \"\(collection.name)\"")
+                    presentDeleteConfirmation(for: collection)
                 },
                 onClose: { selectedCollection = nil }
             )
@@ -138,8 +137,12 @@ struct KnowledgeView: View {
             Button(action: beginCreate) {
                 Label("Add Collection", systemImage: "plus")
             }
-            .buttonStyle(.borderedProminent)
-            .controlSize(.small)
+            .buttonStyle(.plain)
+            .foregroundColor(.white)
+            .font(.system(size: 13, weight: .semibold))
+            .padding(.horizontal, 14)
+            .padding(.vertical, 8)
+            .background(RoundedRectangle(cornerRadius: 8).fill(theme.accentColor))
         }
     }
 
@@ -198,10 +201,8 @@ struct KnowledgeView: View {
                             integration.reindexCollection(collection.id)
                             showToast("Re-indexing \"\(collection.name)\"")
                         },
-                        onDelete: {
-                            integration.deleteCollection(collection.id)
-                            showToast("Deleted \"\(collection.name)\"")
-                        },
+                        onEdit: { editingCollection = collection },
+                        onDelete: { presentDeleteConfirmation(for: collection) },
                         onOpenDetail: { selectedCollection = collection }
                     )
                 }
@@ -209,6 +210,13 @@ struct KnowledgeView: View {
             .padding(24)
         }
         .opacity(hasAppeared ? 1 : 0)
+    }
+
+    private func presentDeleteConfirmation(for collection: KnowledgeUICollection) {
+        KnowledgeDeleteConfirmation.present(collectionName: collection.name) {
+            integration.deleteCollection(collection.id)
+            showToast("Deleted \"\(collection.name)\"")
+        }
     }
 
     private func beginCreate() {
@@ -295,6 +303,34 @@ struct KnowledgeView: View {
     }
 }
 
+@MainActor
+enum KnowledgeDeleteConfirmation {
+    static func present(
+        collectionName: String,
+        scope: ThemedAlertScope = .management,
+        onConfirm: @escaping () -> Void
+    ) {
+        let requestId = UUID()
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: "Delete \"\(collectionName)\"?",
+                message: L(
+                    "This removes the collection and search index. Files in its folder are not changed."
+                ),
+                buttons: [
+                    .cancel(L("Cancel")),
+                    .destructive(L("Delete Collection"), action: onConfirm),
+                ],
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
+    }
+}
+
 private struct KnowledgeCollectionCard: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var agentManager = AgentManager.shared
@@ -305,8 +341,43 @@ private struct KnowledgeCollectionCard: View {
     let hasAppeared: Bool
     let onToggle: (Bool) -> Void
     let onReindex: () -> Void
+    let onEdit: () -> Void
     let onDelete: () -> Void
     let onOpenDetail: () -> Void
+
+    private enum CategoryStatus: Equatable {
+        case checking
+        case allCategorized
+        case uncategorized(Int)
+    }
+
+    @State private var categoryStatus: CategoryStatus = .checking
+
+    private var categoryLabel: String {
+        switch categoryStatus {
+        case .checking:
+            return "Checking categories…"
+        case .allCategorized:
+            return "All categorized"
+        case .uncategorized(let count):
+            return count == 1 ? "1 doc uncategorized" : "\(count) docs uncategorized"
+        }
+    }
+
+    private var categoryIcon: String {
+        switch categoryStatus {
+        case .checking: return "checkmark.seal"
+        case .allCategorized: return "checkmark.seal.fill"
+        case .uncategorized: return "tag.slash"
+        }
+    }
+
+    private var categoryColor: Color {
+        switch categoryStatus {
+        case .allCategorized: return .green
+        case .checking, .uncategorized: return theme.secondaryText
+        }
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 12) {
@@ -389,6 +460,21 @@ private struct KnowledgeCollectionCard: View {
                 .foregroundColor(theme.secondaryText)
             }
 
+            HStack(spacing: 4) {
+                Image(systemName: categoryIcon)
+                    .font(.system(size: 9))
+                Text(verbatim: categoryLabel)
+                    .font(.system(size: 9, weight: .bold))
+            }
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(categoryColor.opacity(0.15)))
+            .foregroundColor(categoryColor)
+            .task(id: collection.updatedAt) { await refreshCategoryStatus() }
+            .onChange(of: collection.isIndexing) { indexing in
+                if !indexing { Task { await refreshCategoryStatus() } }
+            }
+
             HStack(spacing: 8) {
                 if !collection.isAvailable {
                     Label(collection.statusMessage ?? "Source folder unavailable", systemImage: "exclamationmark.triangle.fill")
@@ -427,6 +513,10 @@ private struct KnowledgeCollectionCard: View {
                     Label("Re-index", systemImage: "arrow.clockwise")
                 }
                 .buttonStyle(.borderless)
+                Button(action: onEdit) {
+                    Label("Edit", systemImage: "pencil")
+                }
+                .buttonStyle(.borderless)
                 Button(role: .destructive, action: onDelete) {
                     Image(systemName: "trash")
                 }
@@ -450,6 +540,23 @@ private struct KnowledgeCollectionCard: View {
             .spring(response: 0.4, dampingFraction: 0.8).delay(animationDelay),
             value: hasAppeared
         )
+    }
+
+    private func refreshCategoryStatus() async {
+        let collectionId = collection.id.uuidString
+        let documents = await Task.detached(priority: .utility) {
+            if !KnowledgeDatabase.shared.isOpen { try? KnowledgeDatabase.shared.open() }
+            return (try? KnowledgeDatabase.shared.listDocuments(collectionId: collectionId)) ?? []
+        }.value
+        let uncategorized = documents.filter {
+            $0.docType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }.count
+        await MainActor.run {
+            categoryStatus =
+                uncategorized == 0
+                ? .allCategorized
+                : .uncategorized(uncategorized)
+        }
     }
 }
 
@@ -636,7 +743,6 @@ private struct KnowledgeCollectionDetailSheet: View {
 
     @State private var documents: [KnowledgeDocument] = []
     @State private var documentsLoaded = false
-    @State private var confirmingDelete = false
 
     private var live: KnowledgeUICollection {
         integration.collection(for: collection.id) ?? collection
@@ -691,18 +797,8 @@ private struct KnowledgeCollectionDetailSheet: View {
             Divider()
 
             HStack(spacing: 10) {
-                Button("Delete") { confirmingDelete = true }
+                Button("Delete", action: onDelete)
                     .buttonStyle(SettingsButtonStyle(isDestructive: true))
-                    .confirmationDialog(
-                        "Delete \"\(live.name)\"?",
-                        isPresented: $confirmingDelete,
-                        titleVisibility: .visible
-                    ) {
-                        Button("Delete Collection", role: .destructive, action: onDelete)
-                        Button("Cancel", role: .cancel) {}
-                    } message: {
-                        Text("This removes the collection and search index. Files in its folder are not changed.", bundle: .module)
-                    }
                 Button("Edit", action: onEdit)
                     .buttonStyle(SettingsButtonStyle())
                 Spacer()

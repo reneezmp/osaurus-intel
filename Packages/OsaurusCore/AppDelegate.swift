@@ -19,6 +19,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     private var statusItem: NSStatusItem?
     private var popover: NSPopover?
     private var managementWindow: NSWindow?
+    /// `NSToolbar` holds its delegate weakly. Keep the Settings delegate alive
+    /// exactly as `ChatWindowManager` retains each chat toolbar delegate.
+    private var managementToolbarDelegate: IntelManagementToolbarDelegate?
+    /// Own the Settings window's AppKit lifecycle. Ventura can rebuild its
+    /// titlebar after the SwiftUI host and toolbar are attached, so installing
+    /// replacement controls only during construction is not sufficient.
+    private var managementWindowLifecycle: IntelManagementWindowLifecycle?
     private var cancellables: Set<AnyCancellable> = []
     let updater = UpdaterViewModel()
     private let server = OsaurusServer()
@@ -465,6 +472,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 ManagementStateManager.shared.selectedTab = tab
             }
             existing.makeKeyAndOrderFront(nil)
+            managementWindowLifecycle?.repairAfterPresentation(reason: "reuse")
             return
         }
 
@@ -497,7 +505,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),
-            styleMask: [.titled, .closable, .miniaturizable, .resizable],
+            styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
@@ -506,16 +514,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         window.isReleasedWhenClosed = false
         window.isRestorable = false
 
-        // Settings uses AppKit's native titlebar. On Ventura a full-size SwiftUI
-        // content view can paint over the standard button images while their
-        // hit regions remain active — exactly the invisible-but-clickable state
-        // observed on Rosy. Chat owns custom full-size chrome; Settings does not.
-        // Keep the titlebar as a real AppKit titlebar so Ventura installs and
-        // paints the traffic lights, but blend it into Settings' light paper
-        // instead of leaving the large dark system strip seen on Rosy.
-        window.titlebarAppearsTransparent = true
-        window.titleVisibility = .hidden
-        window.titlebarSeparatorStyle = .none
+        // Use the complete chat-window titlebar contract: full-size content
+        // plus a real unified NSToolbar. The earlier Settings experiment used
+        // full-size content alone, which let SwiftUI paint over Ventura's
+        // traffic-light images while leaving their hit regions active.
+        let toolbarDelegate = IntelManagementToolbarDelegate()
+        managementToolbarDelegate = toolbarDelegate
+        IntelNativeWindowRendering.configureUnifiedTitlebar(
+            in: window,
+            toolbarIdentifier: "IntelManagementToolbar",
+            delegate: toolbarDelegate
+        )
 
         // Phase 11.0-ter: mirror the appearance + opacity + background
         // contract that `ChatWindowManager.createChatPanel` sets on the
@@ -535,20 +544,20 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         )
 
         window.contentViewController = host
-        IntelNativeWindowRendering.restoreTitlebarControls(in: window)
+        IntelNativeWindowRendering.restoreManagementTitlebarControls(in: window)
+
+        let windowLifecycle = IntelManagementWindowLifecycle(window: window)
+        managementWindowLifecycle = windowLifecycle
 
         // Pre-layout to avoid jank + force-set the size again so the
         // first paint uses the intended dimensions.
         host.view.layoutSubtreeIfNeeded()
         window.setContentSize(defaultSize)
-        DispatchQueue.main.async { [weak window] in
-            guard let window else { return }
-            IntelNativeWindowRendering.restoreTitlebarControls(in: window)
-        }
 
         window.center()
         window.makeKeyAndOrderFront(nil)
         managementWindow = window
+        windowLifecycle.repairAfterPresentation(reason: "initial-presentation")
     }
 
     // MARK: - NSPopoverDelegate

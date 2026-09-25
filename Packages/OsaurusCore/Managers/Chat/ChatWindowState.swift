@@ -566,7 +566,7 @@ final class ChatWindowState: ObservableObject {
     @Published var cachedActiveAgent: Agent = .default
     @Published var cachedAgentDisplayName: String = "Assistant"
     @Published var selectedModel: String = "deepseek-v4-pro"
-    @Published var availableModels: [String] = ["deepseek-v4-pro", "deepseek-v4-flash"]
+    @Published var availableModels: [String] = ["deepseek-flash", "deepseek-v4-pro"]
     /// Non-nil while the window's main content area is showing a project
     /// page instead of the chat thread/composer. In-memory window state only
     /// (not persisted `Codable`), so a plain stored property is safe here —

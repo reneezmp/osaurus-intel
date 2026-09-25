@@ -1152,6 +1152,10 @@ public struct ClaudePluginInstallReport: Sendable {
 final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let shared = ToolRegistry()
 
+    static let knowledgeToolNames: Set<String> = [
+        "list_knowledge", "read_knowledge", "search_knowledge",
+    ]
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
@@ -1163,6 +1167,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let tools: [OsaurusTool] = [
             IntelOrchestratorConfigurationTool(),
             IntelOrchestratorDelegationTool(),
+            IntelOrchestratorTargetsTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -1379,7 +1384,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let liveRuntimeManagedToolNames = await MainActor.run {
             self.runtimeManagedToolNames
         }
-        if let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
+        let isKnowledgeTool = Self.knowledgeToolNames.contains(name)
+        if !isKnowledgeTool,
+            let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
             !Self.isAdmittedBySeededAllowlist(
                 name: name,
                 enabledToolNames: Set(enabled),
@@ -1414,7 +1421,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             )
         }
 
-        if ["list_knowledge", "read_knowledge", "search_knowledge"].contains(name) {
+        if isKnowledgeTool {
             let allowed = await MainActor.run {
                 var collections = AgentManager.shared.effectiveKnowledgeCollections(for: agentId)
                 if let projectId = ChatExecutionContext.currentProjectId,
@@ -1442,6 +1449,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let orchestratorOnlyToolNames: Set<String> = [
         IntelOrchestratorConfigurationTool.toolName,
         IntelOrchestratorDelegationTool.toolName,
+        IntelOrchestratorTargetsTool.toolName,
     ]
 
     static func isAdmittedBySeededAllowlist(

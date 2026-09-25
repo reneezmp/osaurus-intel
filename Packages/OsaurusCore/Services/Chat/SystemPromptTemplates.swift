@@ -533,7 +533,10 @@ public enum SystemPromptTemplates {
     /// path rule + tool dispatch + mode-specific framing + optional
     /// project context. Returns `""` when no folder is mounted so the
     /// composer can append unconditionally.
-    public static func folderContext(from folderContext: FolderContext?) -> String {
+    public static func folderContext(
+        from folderContext: FolderContext?,
+        toolsAvailable: Bool = true
+    ) -> String {
         guard let folder = folderContext else { return "" }
 
         var lines: [String] = ["## Working Directory"]
@@ -554,15 +557,23 @@ public enum SystemPromptTemplates {
             }
         }
 
-        section += """
+        if toolsAvailable {
+            section += """
 
-            \(folderPathRule)
+                \(folderPathRule)
 
-            \(folderToolGuide)
+                \(folderToolGuide)
 
-            \(folderArtifactReminder)
+                \(folderArtifactReminder)
 
-            """
+                """
+        } else {
+            section += """
+
+                Folder tools are disabled for this turn. The root summary above is a cached hint, not a live inspection. Do not emit tool-call syntax as text, claim to have read files, or invent file contents. Ask the user to enable the needed tool if a live inspection is required.
+
+                """
+        }
 
         // Project-level guidance file (first-found-wins across AGENTS.md,
         // CLAUDE.md, .hermes.md, .cursorrules). Loaded once at folder-mount

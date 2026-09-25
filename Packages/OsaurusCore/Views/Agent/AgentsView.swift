@@ -2434,15 +2434,10 @@ struct AgentDetailView: View {
 
         AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
             VStack(spacing: 10) {
-                abilityToggleRow(
+                abilityUnavailableRow(
                     title: "Self-scheduling",
-                    description: "Let the agent choose its next run within the limits configured on the Automation page.",
-                    icon: "calendar.badge.clock",
-                    isOn: Binding(
-                        get: { currentAgent.settings.schedule.mode != .manual },
-                        set: { setSelfSchedulingEnabled($0) }
-                    ),
-                    destination: .automation
+                    description: "Model-chosen next runs require scheduler tools that are not available in this Intel build. User-created schedules and folder watchers remain available under Automation.",
+                    icon: "calendar.badge.clock"
                 )
                 abilityUnavailableRow(
                     title: "Database",
@@ -3354,138 +3349,16 @@ struct AgentDetailView: View {
 
     // MARK: - Scheduling
 
-    /// Schedule-mode picker. Lives in Configure (not the top banner)
-    /// so each option can carry its own description of what it actually
-    /// changes — picking a mode rewrites the agent's `schedule`
-    /// preset via `AgentScheduleSettings.defaults(for:)`. The read-only
-    /// chip in the Next Run banner deep-links here.
+    /// Model-callable scheduling is not compiled into the Intel target. Keep
+    /// this surface explanatory and non-mutating; conventional user-created
+    /// schedules and folder watchers remain available in Automation.
     private var scheduleSection: some View {
         AgentDetailSection(title: L("Scheduling"), icon: "calendar.badge.clock") {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(
-                    "How often this agent is allowed to run itself in the background. The agent picks its own next time within these bounds.",
-                    bundle: .module
-                )
-                .font(.system(size: 11))
-                .foregroundColor(theme.tertiaryText)
-                .fixedSize(horizontal: false, vertical: true)
-
-                VStack(spacing: 8) {
-                    ForEach(AgentScheduleMode.allCases, id: \.self) { mode in
-                        scheduleModeCard(mode: mode)
-                    }
-                }
-            }
-        }
-    }
-
-    /// One radio-card in the schedule-mode list. Filled circle when
-    /// selected; the body lays out title + tagline + concrete preset
-    /// numbers so the user sees exactly what changing the mode does.
-    @ViewBuilder
-    private func scheduleModeCard(mode: AgentScheduleMode) -> some View {
-        let isSelected = (currentAgent.settings.schedule.mode == mode)
-        Button {
-            selectScheduleMode(mode)
-        } label: {
-            HStack(alignment: .top, spacing: 12) {
-                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
-                    .font(.system(size: 16))
-                    .foregroundColor(isSelected ? theme.accentColor : theme.tertiaryText)
-                    .padding(.top, 1)
-                VStack(alignment: .leading, spacing: 4) {
-                    HStack(spacing: 6) {
-                        Text(Self.scheduleModeTitle(mode))
-                            .font(.system(size: 13, weight: .semibold))
-                            .foregroundColor(theme.primaryText)
-                        Text(Self.scheduleModeTagline(mode))
-                            .font(.system(size: 11))
-                            .foregroundColor(theme.secondaryText)
-                    }
-                    Text(Self.scheduleModePresetSummary(mode))
-                        .font(.system(size: 11))
-                        .foregroundColor(theme.tertiaryText)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-                Spacer(minLength: 0)
-            }
-            .padding(12)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(isSelected ? theme.accentColor.opacity(0.08) : theme.inputBackground)
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(
-                                isSelected ? theme.accentColor.opacity(0.6) : theme.inputBorder,
-                                lineWidth: 1
-                            )
-                    )
+            abilityUnavailableRow(
+                title: "Self-scheduling",
+                description: "This Intel build cannot expose schedule_next_run, cancel_next_run, or notify to the model. Create explicit schedules or folder watchers in Automation instead.",
+                icon: "calendar.badge.exclamationmark"
             )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(.plain)
-    }
-
-    // TODO(mode-merge): the spec (§9.4 / §13) allows per-field overrides
-    // — horizon, interval, quiet hours — to coexist with the mode preset.
-    // Once those override controls land, change the setter below to MERGE
-    // `AgentScheduleSettings.defaults(for:)` with the user's preserved
-    // overrides instead of overwriting the whole struct. Today the radio
-    // cards are the only authoring surface so the destructive overwrite
-    // is intentional; a no-op review-then-replace once finer-grained
-    // controls ship.
-    private func selectScheduleMode(_ newMode: AgentScheduleMode) {
-        guard var current = agentManager.agent(for: agent.id) else { return }
-        guard current.settings.schedule.mode != newMode else { return }
-        current.settings = AgentSettings(
-            dbEnabled: current.settings.dbEnabled,
-            schedule: AgentScheduleSettings.defaults(for: newMode),
-            limits: current.settings.limits,
-            generativeGreetingsEnabled: current.settings.generativeGreetingsEnabled,
-            greetingPersona: current.settings.greetingPersona,
-            webSearchEnabled: current.settings.webSearchEnabled
-        )
-        current.updatedAt = Date()
-        agentManager.update(current)
-        showSaveIndicator()
-    }
-
-    private func setSelfSchedulingEnabled(_ enabled: Bool) {
-        selectScheduleMode(enabled ? .ambient : .manual)
-    }
-
-    private static func scheduleModeTitle(_ mode: AgentScheduleMode) -> String {
-        switch mode {
-        case .ambient: return "Ambient"
-        case .reactive: return "Reactive"
-        case .project: return "Project"
-        case .manual: return "Manual"
-        }
-    }
-
-    private static func scheduleModeTagline(_ mode: AgentScheduleMode) -> String {
-        switch mode {
-        case .ambient: return "Background helper"
-        case .reactive: return "Quick reflexes"
-        case .project: return "Deep work"
-        case .manual: return "Self-scheduling off"
-        }
-    }
-
-    /// Plain-English summary of the values written by
-    /// `AgentScheduleSettings.defaults(for:)` so the user knows what
-    /// changing modes actually does. Keep in sync with the presets in
-    /// `Agent.swift`.
-    private static func scheduleModePresetSummary(_ mode: AgentScheduleMode) -> String {
-        switch mode {
-        case .ambient:
-            return "Up to 6 runs/day · at most once an hour · quiet 10pm–7am."
-        case .reactive:
-            return "Up to 48 runs/day · as often as every 5 min · no quiet hours."
-        case .project:
-            return "Up to 4 runs/day · at most once an hour · quiet 10pm–7am."
-        case .manual:
-            return "The agent only runs when you ask. Scheduled API calls from the agent are rejected."
         }
     }
 

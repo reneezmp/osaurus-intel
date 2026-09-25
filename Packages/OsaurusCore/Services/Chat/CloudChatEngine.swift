@@ -112,6 +112,7 @@ struct ChatCompletionResponse: Codable, Sendable {
 /// finished silently — the user saw an empty "poof" turn with no explanation.
 enum CloudChatError: LocalizedError {
     case httpError(provider: String, status: Int, message: String)
+    case outputLimit(provider: String, diagnostic: String)
     case responseDecoding(provider: String, message: String, diagnostic: String)
 
     var errorDescription: String? {
@@ -119,8 +120,10 @@ enum CloudChatError: LocalizedError {
         case let .httpError(provider, status, message):
             let detail = message.isEmpty ? "no details returned" : message
             return "\(provider) API error \(status): \(detail)"
+        case let .outputLimit(provider, diagnostic):
+            return "\(provider) exhausted its output-token limit before returning assistant text. Response diagnostic (metadata only): \(diagnostic)"
         case let .responseDecoding(provider, message, diagnostic):
-            return "\(provider) returned an unsupported completion response (\(message)). Raw response (redacted, capped): \(diagnostic)"
+            return "\(provider) returned an unsupported completion response (\(message)). Response diagnostic (privacy-filtered, capped): \(diagnostic)"
         }
     }
 }
@@ -777,6 +780,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             for call in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
                                 guard request.tools?.contains(where: { $0.function.name == call.name }) == true else {
+                                    continuation.yield(
+                                        StreamingToolHint.encodeDone(
+                                            callId: call.callID,
+                                            name: call.name,
+                                            arguments: call.arguments,
+                                            result: Self.unofferedToolResult(call.name)
+                                        )
+                                    )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
                                 let policy = ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
@@ -948,10 +959,24 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // the result back as a tool message.
                         for call in orderedCalls {
                             try Task.checkCancellation()
+                            let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
                             guard request.tools?.contains(where: { $0.function.name == call.name }) == true else {
+                                // A stale provider-side tool choice is still a
+                                // security rejection, but the card already
+                                // exists because its name/arguments streamed
+                                // earlier. Terminate that card before failing
+                                // the turn so Ventura does not display an
+                                // eternal in-progress call.
+                                continuation.yield(
+                                    StreamingToolHint.encodeDone(
+                                        callId: callId,
+                                        name: call.name,
+                                        arguments: call.arguments,
+                                        result: Self.unofferedToolResult(call.name)
+                                    )
+                                )
                                 throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                             }
-                            let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
                             let result: String
                             let toolStart = Date()
 
@@ -1128,7 +1153,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 provider: endpoint.providerLabel, status: statusCode, message: message)
         }
         do {
-            return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+            return try Self.decodeCompletionResponse(data)
+        } catch DecodingError.dataCorrupted(let context)
+            where context.debugDescription == "Completion SSE reached its output-token limit before assistant text" {
+            throw CloudChatError.outputLimit(
+                provider: endpoint.providerLabel,
+                diagnostic: Self.safeResponseDiagnostic(data)
+            )
         } catch {
             throw CloudChatError.responseDecoding(
                 provider: endpoint.providerLabel,
@@ -1138,11 +1169,172 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
+    /// Decode a nominally non-streaming completion. Some managed Router models
+    /// ignore `"stream": false` and still return an SSE body. Accept that wire
+    /// format by folding its text deltas into the same response shape used by
+    /// Memory, titles, and bounded delegation. A malformed or textless stream
+    /// remains a visible failure; it must never become an empty successful
+    /// distillation.
+    nonisolated static func decodeCompletionResponse(_ data: Data) throws -> ChatCompletionResponse {
+        if let response = try? JSONDecoder().decode(ChatCompletionResponse.self, from: data) {
+            return response
+        }
+
+        let raw = String(decoding: data, as: UTF8.self)
+        let lines = raw.split(whereSeparator: \Character.isNewline)
+        guard lines.contains(where: { $0.trimmingCharacters(in: .whitespaces).hasPrefix("data:") }) else {
+            return try JSONDecoder().decode(ChatCompletionResponse.self, from: data)
+        }
+
+        var id: String?
+        var object: String?
+        var created: Int?
+        var model: String?
+        var role: String?
+        var content = ""
+        var reasoning = ""
+        var finishReason: String?
+        var usage: ChatCompletionResponse.Usage?
+        var sawChoice = false
+
+        for rawLine in lines {
+            let line = rawLine.trimmingCharacters(in: .whitespaces)
+            guard line.hasPrefix("data:") else { continue }
+            let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+            guard payload != "[DONE]", !payload.isEmpty else { continue }
+            guard let frameData = payload.data(using: .utf8),
+                  let frame = try JSONSerialization.jsonObject(with: frameData) as? [String: Any]
+            else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [],
+                    debugDescription: "Invalid JSON in completion SSE frame"
+                ))
+            }
+
+            id = frame["id"] as? String ?? id
+            object = frame["object"] as? String ?? object
+            created = frame["created"] as? Int ?? created
+            model = frame["model"] as? String ?? model
+            if let rawUsage = frame["usage"] as? [String: Any] {
+                usage = .init(
+                    prompt_tokens: rawUsage["prompt_tokens"] as? Int,
+                    completion_tokens: rawUsage["completion_tokens"] as? Int,
+                    total_tokens: rawUsage["total_tokens"] as? Int
+                )
+            }
+
+            guard let choice = (frame["choices"] as? [[String: Any]])?.first else { continue }
+            sawChoice = true
+            finishReason = choice["finish_reason"] as? String ?? finishReason
+            let message = choice["delta"] as? [String: Any]
+                ?? choice["message"] as? [String: Any]
+                ?? [:]
+            role = message["role"] as? String ?? role
+            if let text = try completionText(from: message["content"]) {
+                content += text
+            }
+            if let text = message["reasoning_content"] as? String {
+                reasoning += text
+            }
+        }
+
+        guard sawChoice, !content.isEmpty else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: finishReason == "length"
+                    ? "Completion SSE reached its output-token limit before assistant text"
+                    : "Completion SSE contained no assistant text"
+            ))
+        }
+        return ChatCompletionResponse(
+            id: id,
+            object: object,
+            created: created,
+            model: model,
+            choices: [.init(
+                index: 0,
+                message: .init(
+                    role: role ?? "assistant",
+                    content: content,
+                    tool_calls: nil,
+                    reasoning_content: reasoning.isEmpty ? nil : reasoning
+                ),
+                finish_reason: finishReason
+            )],
+            usage: usage
+        )
+    }
+
+    nonisolated static func unofferedToolResult(_ name: String) -> String {
+        "⛔️ “\(name)” was not run — it is not offered in this turn."
+    }
+
+    private nonisolated static func completionText(from value: Any?) throws -> String? {
+        if value == nil || value is NSNull { return nil }
+        if let text = value as? String { return text }
+        guard let parts = value as? [[String: Any]] else {
+            throw DecodingError.dataCorrupted(.init(
+                codingPath: [],
+                debugDescription: "Completion content was neither text nor text parts"
+            ))
+        }
+        return try parts.map { part in
+            guard part["type"] as? String == "text", let text = part["text"] as? String else {
+                throw DecodingError.dataCorrupted(.init(
+                    codingPath: [],
+                    debugDescription: "Only text content parts are supported in completion SSE"
+                ))
+            }
+            return text
+        }.joined()
+    }
+
     /// Retain enough raw response data to diagnose an envelope mismatch while
     /// preventing credentials or an unbounded payload from entering the local
     /// Memory processing log.
     nonisolated static func safeResponseDiagnostic(_ data: Data) -> String {
         let raw = String(decoding: data, as: UTF8.self)
+        let sseLines = raw.split(whereSeparator: \.isNewline).map {
+            $0.trimmingCharacters(in: .whitespaces)
+        }.filter { $0.hasPrefix("data:") }
+        if !sseLines.isEmpty {
+            var frames = 0
+            var choices = 0
+            var invalid = 0
+            var deltaKeys = Set<String>()
+            var contentKinds = Set<String>()
+            var finishReasons = Set<String>()
+            var unknownDeltaKeys = 0
+            let knownKeys: Set<String> = ["role", "content", "reasoning_content", "tool_calls", "function_call", "refusal"]
+            for line in sseLines {
+                let payload = line.dropFirst(5).trimmingCharacters(in: .whitespaces)
+                guard payload != "[DONE]", !payload.isEmpty else { continue }
+                frames += 1
+                guard let frameData = payload.data(using: .utf8),
+                      let frame = try? JSONSerialization.jsonObject(with: frameData) as? [String: Any]
+                else {
+                    invalid += 1
+                    continue
+                }
+                guard let choice = (frame["choices"] as? [[String: Any]])?.first else { continue }
+                choices += 1
+                if let reason = choice["finish_reason"] as? String {
+                    finishReasons.insert(["stop", "length", "tool_calls", "content_filter"].contains(reason) ? reason : "other")
+                }
+                let delta = choice["delta"] as? [String: Any] ?? choice["message"] as? [String: Any] ?? [:]
+                for key in delta.keys {
+                    if knownKeys.contains(key) { deltaKeys.insert(key) }
+                    else { unknownDeltaKeys += 1 }
+                }
+                if let content = delta["content"] {
+                    if content is String { contentKinds.insert("string") }
+                    else if content is [[String: Any]] { contentKinds.insert("parts") }
+                    else if content is NSNull { contentKinds.insert("null") }
+                    else { contentKinds.insert("other") }
+                }
+            }
+            return "SSE shape: frames=\(frames), choices=\(choices), invalidFrames=\(invalid), deltaKeys=\(deltaKeys.sorted()), unknownDeltaKeys=\(unknownDeltaKeys), contentKinds=\(contentKinds.sorted()), finishReasons=\(finishReasons.sorted())"
+        }
         let redacted = InsightsService.redactCredentials(raw)
         let limit = 4_096
         guard redacted.count > limit else { return redacted }

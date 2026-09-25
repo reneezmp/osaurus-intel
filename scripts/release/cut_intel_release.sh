@@ -10,9 +10,13 @@
 # Usage:
 #   scripts/release/cut_intel_release.sh <shortVersion> ["release notes"]
 #   scripts/release/cut_intel_release.sh 1.0.2 "Fixes the global hotkey + budget popover."
+#   BUILD_NUMBER=56 scripts/release/cut_intel_release.sh 1.0.55 "…"
 #
 # The CFBundleVersion (Sparkle's comparison key) is auto-incremented from the
 # highest <sparkle:version> already in the appcast, so it always moves forward.
+# Rosy candidates are built outside the appcast and consume build numbers too;
+# set BUILD_NUMBER to jump past the newest installed candidate (it must still
+# exceed the appcast's highest build), or Sparkle will not offer the release.
 #
 # Signing key: read from the macOS Keychain by default (the key created by
 # `generate_keys`). To use an exported key instead, set SPARKLE_PRIVATE_KEY.
@@ -70,12 +74,17 @@ fi
 # 1) Next build number = (highest sparkle:version in appcast) + 1.
 LAST_BUILD="$(grep -oE '<sparkle:version>[0-9]+' "$APPCAST" | grep -oE '[0-9]+' | sort -n | tail -1 || true)"
 LAST_BUILD="${LAST_BUILD:-1}"
-BUILD=$(( LAST_BUILD + 1 ))
+BUILD="${BUILD_NUMBER:-$(( LAST_BUILD + 1 ))}"
+[[ "$BUILD" =~ ^[1-9][0-9]*$ ]] || { echo "✗ BUILD_NUMBER must be a positive integer (got '$BUILD')" >&2; exit 2; }
+if (( BUILD <= LAST_BUILD )); then
+  echo "✗ build ${BUILD} must exceed the appcast's highest build ${LAST_BUILD}." >&2
+  exit 2
+fi
 echo "→ Releasing Osaurus (Intel) ${SHORT_VERSION}  (build ${BUILD})"
 
 # 2) Build the Intel app (canonical ~/.osaurus, ad-hoc signed).
 echo "→ Building…"
-CONFIG=Debug scripts/build/build_rosy.sh >/dev/null
+CONFIG=Debug VERSION="$SHORT_VERSION" BUILD_NUMBER="$BUILD" scripts/build/build_rosy.sh >/dev/null
 [[ -d "$APP" ]] || { echo "✗ build product missing at $APP"; exit 1; }
 
 # 3) Stamp the version and re-sign (editing Info.plist invalidates the signature).

@@ -1785,9 +1785,20 @@ final class SystemPromptComposer: @unchecked Sendable {
         let editablePrompt = await MainActor.run {
             AgentManager.shared.effectiveSystemPrompt(for: id)
         }
+        let delegationTargets = await MainActor.run {
+            guard id == Agent.defaultId else { return [IntelOrchestratorPrompt.DelegationTarget]() }
+            let manager = AgentManager.shared
+            let delegation = DefaultAgentConfigurationStore.load().delegation
+            return IntelOrchestratorAdmission.evaluate(
+                configuration: delegation,
+                agents: manager.agents,
+                effectiveModel: { manager.effectiveModel(for: $0) }
+            ).targets
+        }
         let basePrompt = IntelOrchestratorPrompt.compose(
             agentID: id,
-            editablePrompt: editablePrompt
+            editablePrompt: editablePrompt,
+            delegationTargets: delegationTargets
         )
         let folder = folderContext
         let enabledToolNames = await MainActor.run {
@@ -1822,7 +1833,11 @@ final class SystemPromptComposer: @unchecked Sendable {
         // of emitting a real call (Renée 2026-06-03). The section carries the
         // path, project type, root contents, git status, the path rule, and
         // the per-tool dispatch guide that primes actual tool calls.
-        let folderSection = SystemPromptTemplates.folderContext(from: folder)
+        let folderToolsAvailable = !toolsDisabled && !agentToolsDisabled
+        let folderSection = SystemPromptTemplates.folderContext(
+            from: folder,
+            toolsAvailable: folderToolsAvailable
+        )
         // M12 Gap 3: DeepSeek V4 Flash is an inconsistent tool-caller — with
         // only the (descriptive) folder guide it sometimes role-plays tool use
         // in prose and fabricates listings/contents/`ls` output instead of
@@ -1830,7 +1845,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         // tool directives that anchor this on Apple Silicon live in excluded
         // files, so we add a firm, recency-positioned directive here.
         let toolDirective: String
-        if folder != nil {
+        if folder != nil && folderToolsAvailable {
             toolDirective = """
 
                 ## Tool Use (MANDATORY)
@@ -1848,6 +1863,14 @@ final class SystemPromptComposer: @unchecked Sendable {
             toolDirective = ""
         }
         var prompt = basePrompt + folderSection + toolDirective
+        if !folderToolsAvailable {
+            prompt += """
+
+
+                ## Tool availability for this turn
+                No tools are offered in this request. Do not print XML, DSML, JSON, or other simulated tool-call markup as a substitute for a real call. If the user asks for an action requiring a tool, explain that it is unavailable and ask them to enable it.
+                """
+        }
         // Track each slice of the prompt so the budget popover can show them as
         // distinct rails (Persona / Grounding / Agent Loop / …).
         var sections: [PromptSection] = []
@@ -1872,8 +1895,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 enabled: webSearchEnabled
             )
                 .filter {
-                    knowledgeAllowed || !["list_knowledge", "read_knowledge", "search_knowledge"]
-                        .contains($0.function.name)
+                    knowledgeAllowed || !ToolRegistry.knowledgeToolNames.contains($0.function.name)
                 }
                 .filter { spec in
                     folderToolIsVisible(
@@ -1896,6 +1918,13 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // file/shell tool specs, so it couldn't call them (Renée, native
                 // Ventura, 2026-06-12).
                 var allowed = Set(enabled).union(folderToolNames)
+                // Knowledge assignment is its own explicit capability grant,
+                // independent of the discretionary Tools-tab allowlist. A
+                // seeded agent therefore receives the Knowledge schemas when
+                // (and only when) that live grant/project scope is non-empty.
+                if knowledgeAllowed {
+                    allowed.formUnion(ToolRegistry.knowledgeToolNames)
+                }
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }

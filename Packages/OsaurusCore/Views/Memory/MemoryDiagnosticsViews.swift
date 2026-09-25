@@ -764,6 +764,7 @@ extension MemoryView {
 //     unconditional in `Views/Agent/AgentCapabilityManagerView.swift`.
 //
 
+import AppKit
 import SwiftUI
 
 // Internal (not `private`/`fileprivate`), unlike its sibling tab-content
@@ -777,6 +778,11 @@ struct MemoryDiagnosticsTabContent: View {
     @ObservedObject private var diagnostics = MemoryDiagnostics.shared
 
     @State private var isRefreshing = false
+    @State private var backfillRunning = false
+    @State private var backfillProgress = MemoryBackfillProgress()
+    @State private var backfillTask: Task<Void, Never>?
+    @State private var backfillSummary: String?
+    @State private var showBackfillConfirm = false
     /// Backs the per-agent Enable button's instant re-render: mutating
     /// `MemoryConfigurationStore` (plain JSON-on-disk storage, not an
     /// `ObservableObject`) doesn't itself trigger a SwiftUI update, so the
@@ -813,6 +819,15 @@ struct MemoryDiagnosticsTabContent: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .onAppear { refresh() }
+        .themedAlert(
+            L("Backfill chat history?"),
+            isPresented: $showBackfillConfirm,
+            message: L(
+                "This walks eligible chat sessions, buffers their conversational turns, then runs cloud distillation. Already-distilled sessions and agents without distillation consent are skipped."
+            ),
+            primaryButton: .primary(L("Start backfill")) { runBackfill() },
+            secondaryButton: .cancel(L("Cancel"))
+        )
     }
 
     // MARK: - Loading
@@ -837,6 +852,14 @@ struct MemoryDiagnosticsTabContent: View {
     /// calling an unhealthy model.
     private func pipelineCard(_ s: MemoryDiagnosticsSnapshot) -> some View {
         MemorySectionCard(title: "Pipeline", icon: "waveform.path.ecg") {
+            MemorySectionActionButton(
+                backfillRunning ? backfillButtonTitle : "Backfill history",
+                icon: "tray.and.arrow.down"
+            ) {
+                showBackfillConfirm = true
+            }
+            .disabled(backfillRunning || !s.memoryEnabled)
+
             MemorySectionActionButton(isRefreshing ? "Refreshing..." : "Refresh", icon: "arrow.clockwise") {
                 refresh()
             }
@@ -844,6 +867,11 @@ struct MemoryDiagnosticsTabContent: View {
         } content: {
             VStack(alignment: .leading, spacing: 14) {
                 headlineBanner(s)
+                if backfillRunning {
+                    backfillProgressBanner
+                } else if let backfillSummary {
+                    backfillSummaryBanner(backfillSummary)
+                }
                 bufferAttemptsRow(s)
 
                 Divider().opacity(0.4)
@@ -884,6 +912,73 @@ struct MemoryDiagnosticsTabContent: View {
                     activityRows(s)
                 }
             }
+        }
+    }
+
+    private var backfillButtonTitle: String {
+        switch backfillProgress.stage {
+        case .buffering: return "Buffering..."
+        case .distilling: return "Distilling..."
+        case .done, .cancelled: return "Backfilling..."
+        }
+    }
+
+    private var backfillProgressBanner: some View {
+        HStack(alignment: .top, spacing: 10) {
+            ProgressView().controlSize(.small)
+            VStack(alignment: .leading, spacing: 3) {
+                Text(backfillProgress.stage == .distilling ? "Distilling buffered sessions..." : "Buffering chat history...")
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                Text("\(backfillProgress.sessionsProcessed + backfillProgress.sessionsSkipped)/\(backfillProgress.sessionsTotal) sessions · \(backfillProgress.turnsBuffered) turns buffered")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            Spacer()
+            Button("Cancel") { backfillTask?.cancel() }
+                .buttonStyle(.plain)
+                .foregroundColor(theme.errorColor)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(theme.accentColor.opacity(0.08)))
+    }
+
+    private func backfillSummaryBanner(_ message: String) -> some View {
+        HStack(alignment: .top, spacing: 8) {
+            Image(systemName: "checkmark.circle.fill")
+                .foregroundColor(.green)
+            Text(message)
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button { backfillSummary = nil } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 9, weight: .semibold))
+            }
+            .buttonStyle(.plain)
+            .foregroundColor(theme.tertiaryText)
+        }
+        .padding(10)
+        .background(RoundedRectangle(cornerRadius: 8).fill(Color.green.opacity(0.08)))
+    }
+
+    private func runBackfill() {
+        guard !backfillRunning else { return }
+        backfillRunning = true
+        backfillSummary = nil
+        backfillProgress = MemoryBackfillProgress()
+        backfillTask = Task {
+            let final = await MemoryService.shared.backfillFromChatHistory(
+                distillAfterBuffering: true
+            ) { snapshot in
+                backfillProgress = snapshot
+            }
+            backfillSummary = final.stage == .cancelled
+                ? "Backfill cancelled after \(final.sessionsProcessed) session(s); pending turns remain recoverable."
+                : "Backfill complete: \(final.sessionsProcessed) session(s), \(final.turnsBuffered) turns buffered, \(final.sessionsSkipped) skipped."
+            backfillRunning = false
+            refresh()
         }
     }
 
@@ -1108,6 +1203,17 @@ struct MemoryDiagnosticsTabContent: View {
                         .font(.system(size: 10))
                         .foregroundColor(theme.tertiaryText)
                         .lineLimit(2)
+                    if let shapeRange = details.range(of: "SSE shape:") {
+                        Button("Copy response shape") {
+                            let shape = String(details[shapeRange.lowerBound...])
+                            NSPasteboard.general.clearContents()
+                            NSPasteboard.general.setString(shape, forType: .string)
+                        }
+                        .buttonStyle(.plain)
+                        .font(.system(size: 10))
+                        .foregroundColor(theme.accentColor)
+                        .accessibilityLabel("Copy privacy-safe response shape")
+                    }
                 }
             }
             Spacer()

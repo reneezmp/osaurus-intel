@@ -223,7 +223,6 @@ private struct ScheduleCard: View {
     let onDelete: () -> Void
 
     @State private var isHovered = false
-    @State private var showDeleteConfirm = false
 
     private var agent: Agent? {
         guard let agentId = schedule.agentId else { return nil }
@@ -284,54 +283,6 @@ private struct ScheduleCard: View {
 
                     Spacer(minLength: 8)
 
-                    Menu {
-                        Button(action: onEdit) {
-                            Label {
-                                Text("Edit", bundle: .module)
-                            } icon: {
-                                Image(systemName: "pencil")
-                            }
-                        }
-                        Button(action: onRunNow) {
-                            Label {
-                                Text("Run Now", bundle: .module)
-                            } icon: {
-                                Image(systemName: "play.fill")
-                            }
-                        }
-                        .disabled(isRunning)
-                        Divider()
-                        Button {
-                            onToggle(!schedule.isEnabled)
-                        } label: {
-                            Label(
-                                schedule.isEnabled ? "Pause" : "Resume",
-                                systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
-                            )
-                        }
-                        Divider()
-                        Button(role: .destructive) {
-                            showDeleteConfirm = true
-                        } label: {
-                            Label {
-                                Text("Delete", bundle: .module)
-                            } icon: {
-                                Image(systemName: "trash")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis")
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundColor(theme.secondaryText)
-                            .frame(width: 24, height: 24)
-                            .background(
-                                Circle()
-                                    .fill(theme.tertiaryBackground)
-                            )
-                    }
-                    .menuStyle(.borderlessButton)
-                    .menuIndicator(.hidden)
-                    .frame(width: 24)
                 }
 
                 // Instructions excerpt
@@ -347,6 +298,15 @@ private struct ScheduleCard: View {
                 Spacer(minLength: 0)
 
                 compactStats
+
+                AgentScheduleActionMenu(
+                    schedule: schedule,
+                    isRunning: isRunning,
+                    onEdit: onEdit,
+                    onRunNow: onRunNow,
+                    onToggle: onToggle,
+                    onDelete: onDelete
+                )
             }
             .padding(16)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -372,13 +332,6 @@ private struct ScheduleCard: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { isHovered = hovering }
         }
-        .themedAlert(
-            "Delete Schedule",
-            isPresented: $showDeleteConfirm,
-            message: "Are you sure you want to delete \"\(schedule.name)\"? This action cannot be undone.",
-            primaryButton: .destructive("Delete", action: onDelete),
-            secondaryButton: .cancel("Cancel")
-        )
     }
 
     // MARK: - Card Background

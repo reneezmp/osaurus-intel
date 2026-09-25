@@ -1318,17 +1318,18 @@ private struct SessionRow: View {
         }
     }
 
-    /// Default agent indicator with person icon
+    /// Built-in agent indicator uses its configured mascot, like the header
+    /// and transcript, instead of a separate generic-person placeholder.
     private var defaultAgentIndicator: some View {
-        ZStack {
-            Circle()
-                .fill(theme.secondaryText.opacity(theme.isDark ? 0.12 : 0.08))
-                .frame(width: 24, height: 24)
-
-            Image(systemName: "person.fill")
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(theme.secondaryText.opacity(0.8))
-        }
+        AgentAvatarView(
+            mascotId: (agent ?? Agent.default).avatar,
+            name: (agent ?? Agent.default).name,
+            tint: agentColor,
+            diameter: 24,
+            customImageURL: (agent ?? Agent.default).customAvatarURL,
+            monogramFontSize: 10,
+            borderWidth: 1
+        )
         .localizedHelp("Default")
     }
 

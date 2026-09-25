@@ -21,6 +21,63 @@ struct IntelMemoryDistillationRegressionTests {
         }
     }
 
+    @Test func routerQwenSSEBodyIsFoldedForNonStreamingDistillation() throws {
+        let wire = #"""
+        data: {"id":"router-qwen","model":"qwen-3-8-max","choices":[{"index":0,"delta":{"role":"assistant","content":"{\"episode\":{"},"finish_reason":null}]}
+
+        data: {"id":"router-qwen","model":"qwen-3-8-max","choices":[{"index":0,"delta":{"content":"\"summary\":\"Rosy SSE\",\"topics\":[\"Router\"]},\"facts\":[],\"entities\":[]}"},"finish_reason":null}]}
+
+        data: {"id":"router-qwen","model":"qwen-3-8-max","choices":[{"index":0,"delta":{},"finish_reason":"stop"}],"usage":{"prompt_tokens":10,"completion_tokens":12,"total_tokens":22}}
+
+        data: [DONE]
+        """#
+        let response = try ChatEngine.decodeCompletionResponse(Data(wire.utf8))
+        let content = try #require(response.choices.first?.message?.content)
+        let distilled = MemoryService.shared.parseDistillResponse(content)
+
+        #expect(distilled.episode?.summary == "Rosy SSE")
+        #expect(distilled.episode?.topics == ["Router"])
+        #expect(response.usage?.total_tokens == 22)
+    }
+
+    @Test func textlessRouterSSEBodyRemainsRejected() {
+        let wire = """
+        data: {"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]}
+
+        data: [DONE]
+        """
+        #expect(throws: DecodingError.self) {
+            try ChatEngine.decodeCompletionResponse(Data(wire.utf8))
+        }
+    }
+
+    @Test func liveQwenLengthShapeIsAnOutputLimitNotMissingDecoderSupport() {
+        let wire = """
+        data: {"choices":[]}
+
+        data: {"choices":[{"index":0,"delta":{},"finish_reason":"length"}]}
+
+        data: [DONE]
+        """
+        do {
+            _ = try ChatEngine.decodeCompletionResponse(Data(wire.utf8))
+            Issue.record("A textless length-limited completion must fail")
+        } catch DecodingError.dataCorrupted(let context) {
+            #expect(context.debugDescription.contains("output-token limit"))
+        } catch {
+            Issue.record("Unexpected decoding error: \(error)")
+        }
+        let diagnostic = ChatEngine.safeResponseDiagnostic(Data(wire.utf8))
+        #expect(diagnostic.contains("frames=2, choices=1"))
+        #expect(diagnostic.contains("finishReasons=[\"length\"]"))
+    }
+
+    @Test func qwenDistillationGetsBoundedLargerOutputAllowance() {
+        #expect(MemoryService.distillationOutputTokenLimit(for: "osaurus/qwen-3-8-max") == 4_096)
+        #expect(MemoryService.distillationOutputTokenLimit(for: "osaurus/deepseek-flash") == 1_024)
+        #expect(MemoryService.distillationOutputTokenLimit(for: "qwen-3-8-max") == 1_024)
+    }
+
     @Test func coldDiscoveryExceptionIsNarrowlyScoped() {
         let router = RemoteProvider(name: "Osaurus", host: "router.osaurus.ai",
                                     providerType: .osaurusRouter, enabled: true, autoConnect: false)
@@ -66,5 +123,36 @@ struct IntelMemoryDistillationRegressionTests {
         #expect(diagnostic.hasSuffix("[truncated]"))
         #expect(!diagnostic.contains(secret))
         #expect(diagnostic.count < 4_200)
+    }
+
+    @Test func sseDiagnosticReportsShapeWithoutGeneratedText() {
+        let wire = """
+        data: {"choices":[{"delta":{},"finish_reason":null}]}
+
+        data: {"choices":[{"delta":{"content":"private memory text"},"finish_reason":"stop"}]}
+
+        data: [DONE]
+        """
+        let diagnostic = ChatEngine.safeResponseDiagnostic(Data(wire.utf8))
+        #expect(diagnostic.contains("frames=2"))
+        #expect(diagnostic.contains("contentKinds=[\"string\"]"))
+        #expect(diagnostic.contains("deltaKeys=[\"content\"]"))
+        #expect(!diagnostic.contains("private memory text"))
+    }
+
+    @Test func staleUnofferedToolGetsTerminalFailureText() {
+        let result = ChatEngine.unofferedToolResult("search_memory")
+        let encoded = StreamingToolHint.encodeDone(
+            callId: "stale-call",
+            name: "search_memory",
+            arguments: #"{"query":"Apple"}"#,
+            result: result
+        )
+        let terminal = StreamingToolHint.decodeDone(encoded)
+
+        #expect(terminal?.callId == "stale-call")
+        #expect(terminal?.name == "search_memory")
+        #expect(terminal?.result == result)
+        #expect(result.contains("not offered"))
     }
 }

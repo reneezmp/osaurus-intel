@@ -53,8 +53,18 @@ enum ModelFamilyNames {
     /// DeepSeek-V3 / R1 / generic DeepSeek matches.
     static func isDSV4Family(_ modelId: String) -> Bool {
         let lower = modelId.lowercased()
-        return lower.range(
+        if lower.range(
             of: #"(^|/|[\-_])(dsv4|deepseek[\-_]?v4|deepseekv4)($|[\-_/\.])"#,
+            options: .regularExpression
+        ) != nil {
+            return true
+        }
+        // DeepSeek's hosted API renamed V4.1-Flash to the versionless
+        // `deepseek-flash` (2026-09-10; `deepseek-v4-flash` is a retired
+        // alias). It keeps the DSV4 reasoning contract, so preserve the
+        // thinking toggle and direct-rail translation for the new slug.
+        return lower.range(
+            of: #"(^|/)deepseek[\-_]flash($|[\-_/\.])"#,
             options: .regularExpression
         ) != nil
     }

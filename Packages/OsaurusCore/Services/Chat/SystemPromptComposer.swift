@@ -1739,7 +1739,7 @@ public struct SystemPromptComposer: Sendable {
         // composer also skips the DB onboarding block when `dbEnabled` is
         // false (both read `AgentConfigSnapshot.dbEnabled`).
         //
-        // All gates honor the same two carve-outs uniformly:
+        // Most gates honor the same two carve-outs uniformly:
         //   - Manual tool-selection mode is left untouched: there the user
         //     curates the list, so the baseline built-ins they see stay
         //     (db_* included — consistency with the other gated built-ins).
@@ -1762,10 +1762,17 @@ public struct SystemPromptComposer: Sendable {
             if !snapshot.searchMemoryEnabled, !keep.contains("search_memory") {
                 byName.removeValue(forKey: "search_memory")
             }
-            if !snapshot.selfSchedulingEnabled {
-                for name in schedulerToolNames where !keep.contains(name) {
-                    byName.removeValue(forKey: name)
-                }
+        }
+
+        // Self-scheduling is a master ability gate, not merely an automatic-
+        // discovery preference. Manual selection must not advertise scheduler
+        // tools while the ability is off: dispatch rejects them regardless of
+        // selection mode, and exposing them would give the model a tool it can
+        // never call successfully. A capabilities_load request cannot override
+        // an explicit ability denial either.
+        if !snapshot.selfSchedulingEnabled {
+            for name in schedulerToolNames {
+                byName.removeValue(forKey: name)
             }
         }
 

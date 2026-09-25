@@ -53,7 +53,7 @@ enum ProviderPreset: String, CaseIterable, Identifiable {
         case .openai: return L("ChatGPT/Codex or Platform API")
         case .google: return L("Gemini models")
         case .xai: return L("Grok models")
-        case .deepseek: return "deepseek-v4-pro / v4-flash"
+        case .deepseek: return "deepseek-flash / deepseek-v4-pro"
         case .minimax: return L("MiniMax M-series models")
         case .venice: return L("Privacy-first AI")
         case .openrouter: return L("Multi-provider")

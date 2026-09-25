@@ -294,8 +294,6 @@ let package = Package(
                 "Plugin/PluginRelayReconnectRedeliveryTests.swift",
                 "Memory/DistillationCoordinatorTests.swift",
                 "Memory/MemorySearchServiceTests.swift",
-                "Memory/MemoryServiceBackfillTests.swift",
-                "Memory/MemoryTests.swift",
                 "Memory/PrefixHashTests.swift",
                 "Method/MethodDatabaseTests.swift",
                 "Method/MethodSearchServiceTests.swift",

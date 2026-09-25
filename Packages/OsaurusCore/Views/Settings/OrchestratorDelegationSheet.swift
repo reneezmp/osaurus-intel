@@ -44,11 +44,18 @@ struct OrchestratorDelegationSettings: View {
         eligibleAgents.filter { configuration.customAgentAllowlist.contains($0.id) }
     }
 
+    private var admissionEvaluation: IntelOrchestratorAdmission.Evaluation {
+        IntelOrchestratorAdmission.evaluate(
+            configuration: configuration,
+            agents: agentManager.agents,
+            effectiveModel: { agentManager.effectiveModel(for: $0) },
+            availableModelIDs: Set(remoteModels.map(\.id))
+        )
+    }
+
     private var runnableAgents: [Agent] {
-        admittedAgents.filter { agent in
-            guard let modelID = agentManager.effectiveModel(for: agent.id) else { return false }
-            return configuration.admits(modelID: modelID)
-        }
+        let ids = Set(admissionEvaluation.targets.map(\.id))
+        return admittedAgents.filter { ids.contains($0.id) }
     }
 
     var body: some View {
@@ -75,15 +82,19 @@ struct OrchestratorDelegationSettings: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(eligibleAgents) { agent in
-                            Toggle(isOn: admissionBinding(for: agent.id)) {
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName)
+                                        .foregroundColor(theme.primaryText)
                                     Text(agentManager.effectiveModel(for: agent.id) ?? "")
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundColor(theme.tertiaryText)
                                 }
+                                Spacer()
+                                Toggle("", isOn: admissionBinding(for: agent.id))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
                             }
-                            .toggleStyle(.switch)
                         }
                     }
                 }
@@ -97,15 +108,19 @@ struct OrchestratorDelegationSettings: View {
                 } else {
                     VStack(spacing: 8) {
                         ForEach(remoteModels) { item in
-                            Toggle(isOn: modelAdmissionBinding(for: item.id)) {
+                            HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(item.displayName)
+                                        .foregroundColor(theme.primaryText)
                                     Text(item.id)
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundColor(theme.tertiaryText)
                                 }
+                                Spacer()
+                                Toggle("", isOn: modelAdmissionBinding(for: item.id))
+                                    .labelsHidden()
+                                    .toggleStyle(.switch)
                             }
-                            .toggleStyle(.switch)
                         }
                     }
                 }
@@ -118,14 +133,9 @@ struct OrchestratorDelegationSettings: View {
                             HStack {
                                 Text(agent.displayName)
                                     .font(.system(size: 12, weight: .medium))
+                                    .foregroundColor(theme.primaryText)
                                 Spacer()
-                                Picker("Permission for \(agent.displayName)", selection: permissionBinding(for: agent.id)) {
-                                    Text("Ask", bundle: .module).tag(OrchestratorDelegationPermission.ask)
-                                    Text("Deny", bundle: .module).tag(OrchestratorDelegationPermission.deny)
-                                    Text("Always Allow", bundle: .module).tag(OrchestratorDelegationPermission.alwaysAllow)
-                                }
-                                .labelsHidden()
-                                .frame(width: 140)
+                                permissionMenu(for: agent)
                             }
                         }
                     }
@@ -134,14 +144,14 @@ struct OrchestratorDelegationSettings: View {
 
             SettingsSubsection(label: "Bounds") {
                 HStack(spacing: 16) {
-                    boundedNumberField(
+                    boundedNumberControl(
                         label: "Max child tokens",
                         value: configuration.maximumChildTokens,
                         range: 1 ... 65_536
                     ) { update in
                         mutate { $0.maximumChildTokens = update }
                     }
-                    boundedNumberField(
+                    boundedNumberControl(
                         label: "Timeout (seconds)",
                         value: Int(configuration.timeoutSeconds),
                         range: 1 ... 600
@@ -160,10 +170,61 @@ struct OrchestratorDelegationSettings: View {
                     .buttonStyle(SettingsButtonStyle())
                     .disabled(runnableAgents.isEmpty)
             }
+            if runnableAgents.isEmpty {
+                Text(admissionEvaluation.blocked.joined(separator: " "))
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("orchestrator-delegation-status")
+            } else {
+                Text("\(runnableAgents.count) admitted target(s) ready for one-turn delegation.")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .accessibilityIdentifier("orchestrator-delegation-status")
+            }
         }
     }
 
-    private func boundedNumberField(
+    private func permissionMenu(for agent: Agent) -> some View {
+        let binding = permissionBinding(for: agent.id)
+        return Menu {
+            Button("Ask") { binding.wrappedValue = .ask }
+            Button("Deny") { binding.wrappedValue = .deny }
+            Button("Always Allow") { binding.wrappedValue = .alwaysAllow }
+        } label: {
+            HStack(spacing: 8) {
+                Text(permissionTitle(binding.wrappedValue))
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                Spacer(minLength: 8)
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            .padding(.horizontal, 10)
+            .frame(width: 140, height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(theme.inputBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(theme.inputBorder, lineWidth: 1)
+                    )
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .accessibilityLabel("Permission for \(agent.displayName)")
+    }
+
+    private func permissionTitle(_ permission: OrchestratorDelegationPermission) -> LocalizedStringKey {
+        switch permission {
+        case .ask: return "Ask"
+        case .deny: return "Deny"
+        case .alwaysAllow: return "Always Allow"
+        }
+    }
+
+    private func boundedNumberControl(
         label: String,
         value: Int,
         range: ClosedRange<Int>,
@@ -173,12 +234,35 @@ struct OrchestratorDelegationSettings: View {
             Text(label)
                 .font(.system(size: 11))
                 .foregroundColor(theme.secondaryText)
-            TextField(label, value: Binding(
-                get: { value },
-                set: { onCommit(min(range.upperBound, max(range.lowerBound, $0))) }
-            ), formatter: NumberFormatter())
-            .textFieldStyle(.roundedBorder)
-            .frame(width: 150)
+            HStack(spacing: 0) {
+                Text(value.formatted())
+                    .font(.system(size: 12, design: .monospaced))
+                    .foregroundColor(theme.primaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .padding(.leading, 10)
+                Button { onCommit(max(range.lowerBound, value - 1)) } label: {
+                    Image(systemName: "minus")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(value <= range.lowerBound)
+                Button { onCommit(min(range.upperBound, value + 1)) } label: {
+                    Image(systemName: "plus")
+                        .frame(width: 28, height: 28)
+                }
+                .buttonStyle(.plain)
+                .disabled(value >= range.upperBound)
+            }
+            .foregroundColor(theme.secondaryText)
+            .frame(width: 170, height: 30)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(theme.inputBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 7)
+                            .stroke(theme.inputBorder, lineWidth: 1)
+                    )
+            )
         }
     }
 
@@ -254,11 +338,13 @@ struct OrchestratorDelegationSheet: View {
 
     private var selectableAgents: [Agent] {
         let config = DefaultAgentConfigurationStore.load().delegation
-        return agentManager.agents.filter { agent in
-            guard !agent.isBuiltIn, config.customAgentAllowlist.contains(agent.id),
-                  let modelID = agentManager.effectiveModel(for: agent.id) else { return false }
-            return config.admits(modelID: modelID) && remoteModelIDs.contains(modelID)
-        }
+        let ids = Set(IntelOrchestratorAdmission.evaluate(
+            configuration: config,
+            agents: agentManager.agents,
+            effectiveModel: { agentManager.effectiveModel(for: $0) },
+            availableModelIDs: remoteModelIDs
+        ).targets.map(\.id))
+        return agentManager.agents.filter { ids.contains($0.id) }
         .sorted { $0.displayName.localizedCaseInsensitiveCompare($1.displayName) == .orderedAscending }
     }
 

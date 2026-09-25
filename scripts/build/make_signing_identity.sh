@@ -52,9 +52,14 @@ EOF
 
 openssl req -x509 -newkey rsa:2048 -keyout key.pem -out cert.pem -days 3650 -nodes -config cert.conf >/dev/null 2>&1
 
-# `-legacy`: OpenSSL 3.x defaults to a PBKDF2/AES p12 that macOS `security`
-# cannot import; the legacy PBE is what the Keychain accepts.
-openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -out id.p12 \
+# OpenSSL 3.x defaults to a PBKDF2/AES p12 that macOS `security` cannot
+# import, so it needs `-legacy`. Apple's LibreSSL has no such flag and already
+# emits the compatible older PBE format.
+PKCS12_ARGS=(pkcs12 -export)
+if ! openssl version 2>/dev/null | grep -q '^LibreSSL '; then
+  PKCS12_ARGS+=(-legacy)
+fi
+openssl "${PKCS12_ARGS[@]}" -inkey key.pem -in cert.pem -out id.p12 \
   -passout pass:transit -name "$IDENTITY_NAME" >/dev/null 2>&1
 
 # `-T /usr/bin/codesign`: pre-authorize codesign to use the private key so

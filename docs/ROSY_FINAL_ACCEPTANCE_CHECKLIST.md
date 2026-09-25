@@ -137,6 +137,10 @@ selected setting, the visible result, and whether a full relaunch changed it.
 
 ## 7. Automation
 
+> Historical 2026-09-13 results follow. The repaired current candidate is tested
+> by section 7 of `ROSY_2026-09-22_AGENT_GENERAL_RETEST.md`; do not treat the old
+> failure wording below as the current source state.
+
 - [ ] **Failed:** a schedule can be created and survives relaunch, but its card
       exposes no visible ellipsis/menu for edit, pause, resume, run now, or
       delete. Those actions exist in source but are unreachable on Rosy.
@@ -150,6 +154,10 @@ selected setting, the visible result, and whether a full relaunch changed it.
       delete, so those operations and their relaunch state cannot be accepted.
 
 ## 8. Agent Memory and Database boundary
+
+> Historical 2026-09-13 blocked results follow. The repaired current candidate
+> is tested by section 8 of `ROSY_2026-09-22_AGENT_GENERAL_RETEST.md`; do not
+> treat the old blocked wording below as the current source state.
 
 - [x] Recent chats open and New Chat retains the current agent.
 - [ ] **Blocked:** known pinned-fact text, tags, use counts, and scores cannot be
@@ -198,6 +206,10 @@ selected setting, the visible result, and whether a full relaunch changed it.
       off, and never turns on merely because Router is enabled.
 
 ## 11. Orchestrator settings and bounded delegation
+
+> Historical 2026-09-13 blocked results follow. Gates 1–5B are compiled and the
+> exact 47-test gate passes; use section 9 of
+> `ROSY_2026-09-22_AGENT_GENERAL_RETEST.md` for the current candidate.
 
 - [x] The Orchestrator route stays selected across Settings navigation.
 - [x] Name, prompt, model, temperature, and maximum tokens persist after relaunch

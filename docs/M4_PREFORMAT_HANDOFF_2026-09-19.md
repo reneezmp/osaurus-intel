@@ -15,16 +15,54 @@ Known remaining fixes:
 
 1. Settings uses a separate light native titlebar. Evaluate reusing chat's
    integrated full-size chrome, preserving visible/clickable Ventura controls.
-2. Knowledge Agents with Access switches do not visibly or globally apply the
-   grant. Repair the observable store update and verify runtime access in fresh
-   and restored chats.
-3. Knowledge collection cards need an inline Edit action and
-   categorized/uncategorized status matching upstream.
+2. Knowledge Agents with Access switches did not visibly or globally apply the
+   grant. The observable-store repair is implemented; verify persistence and
+   runtime access in fresh and restored chats, then retest the shipped build on
+   Rosy.
+3. Knowledge collection cards now have inline Edit and indexed
+   categorized/uncategorized status; verify both on Rosy.
+
+### Knowledge grant diagnosis and automated gate (2026-09-21)
+
+The source-level cause of the failed Agents with Access interaction is now
+identified. Intel stores the per-agent Knowledge grant in the private
+`AgentManager.knowledgeGrants` sidecar. `updateKnowledgeSettings` writes that
+dictionary, persists `knowledge/agent-grants.json`, bumps the capability
+revision, and posts `.agentUpdated`, but previously did not publish an
+`AgentManager` object change. The Knowledge detail sheet and collection cards
+observe `AgentManager.shared`; their grant values are derived inside SwiftUI
+bindings/body evaluation, so the write can succeed while the visible switch
+and card count remain stale. This is a UI-observability defect in addition to
+the runtime/persistence acceptance gap; it is not evidence that a grant should
+be moved into collection storage.
+
+The focused implementation test
+`IntelAgentRuntimeLaneTests.knowledgeGrantPublishesPersistsAndRevokesRuntimeAccess`
+now covers observed-object publication, sidecar-file writes, capability
+revision advancement, positive direct dispatch, and revocation denial. The
+older
+`IntelAgentRuntimeLaneTests.dispatchRejectsWebSearchAndKnowledgeWithoutTheirGrants`
+continues to cover the no-grant denial envelope. Before Rosy retest, the
+focused Knowledge lane must still prove: (1) the sidecar survives a manager
+reload/relaunch boundary, and (2) a granted collection is searchable from both
+a new session and a session restored from `ChatSessionData.agentId`, while
+revocation denies both paths. Tests that override `OsaurusPaths` must hold
+`StoragePathsTestLock` for the complete setup, execution, and cleanup. These
+automated gates are implementation evidence only; the Rosy items below remain
+unchecked until the shipped x86_64 candidate is retested.
+
+Validation on 2026-09-21 passed all **9 tests in 1 suite** selected by
+`--filter IntelAgentRuntimeLaneTests` with an isolated `OSAURUS_TEST_ROOT`.
+The package runner reported an ARM target despite the `arch -x86_64` wrapper,
+so Intel compilation was verified separately with the explicit repository gate
+`swift build --package-path Packages/OsaurusCore --arch x86_64`, which passed.
 
 ## Main acceptance work still open
 
 The authoritative item-level list remains
 [`ROSY_FINAL_ACCEPTANCE_CHECKLIST.md`](ROSY_FINAL_ACCEPTANCE_CHECKLIST.md).
+The focused Knowledge repair gate is
+[`ROSY_2026-09-21_KNOWLEDGE_PARITY_RETEST.md`](ROSY_2026-09-21_KNOWLEDGE_PARITY_RETEST.md).
 Resume these groups after the machine is restored:
 
 - Agent model isolation: a chat-local model change must not rewrite Settings.

@@ -40,6 +40,7 @@ struct ConfigurationView: View {
     @State private var tempCoreModelProvider: String = ""
     @State private var tempCoreModelName: String = ""
     @State private var coreModelPickerItems: [ModelPickerItem] = []
+    @State private var isCoreModelMenuPresented = false
     @State private var tempEnableClipboardMonitoring: Bool = false
     @State private var tempAutoGenerateChatTitles: Bool = true
     /// Make ⌘N start a new chat in the frontmost chat window (the sidebar
@@ -1093,26 +1094,118 @@ struct ConfigurationView: View {
     }
 
     private var coreModelPicker: some View {
-        Picker("", selection: coreModelIdentifierBinding) {
-            // Empty tag = "use chat model fallback". Renamed from the
-            // previous "None" footgun (GitHub issue #823).
-            Text("Use chat model (default)", bundle: .module).tag("")
-            // Surface persisted-but-uninstalled values (e.g. "foundation"
-            // on macOS < 26, a disconnected remote model) with an
-            // "(unavailable)" hint so the row isn't an unlabelled orphan.
-            if !coreModelIdentifierBinding.wrappedValue.isEmpty,
-                !coreModelPickerItems.contains(where: { $0.id == coreModelIdentifierBinding.wrappedValue })
-            {
-                Text("\(coreModelIdentifierBinding.wrappedValue) (unavailable)", bundle: .module)
-                    .tag(coreModelIdentifierBinding.wrappedValue)
+        let selectedIdentifier = coreModelIdentifierBinding.wrappedValue
+
+        return Button {
+            isCoreModelMenuPresented.toggle()
+        } label: {
+            HStack(spacing: 10) {
+                Text(
+                    CoreModelSelectionPresentation.title(
+                        identifier: selectedIdentifier,
+                        items: coreModelPickerItems
+                    )
+                )
+                .font(.system(size: 13, weight: .medium))
+                .foregroundColor(theme.primaryText)
+                .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                Image(systemName: "chevron.down")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
             }
-            ForEach(coreModelPickerItems) { option in
-                Text(option.displayName)
-                    .tag(option.id)
-            }
+            .padding(.horizontal, 12)
+            .frame(height: 36)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.inputBackground)
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 8)
+                    .stroke(theme.inputBorder, lineWidth: 1)
+            )
+            .contentShape(Rectangle())
         }
-        .labelsHidden()
-        .frame(maxWidth: 280)
+        .buttonStyle(.plain)
+        .frame(width: 280)
+        .popover(isPresented: $isCoreModelMenuPresented, arrowEdge: .bottom) {
+            ScrollView {
+                VStack(alignment: .leading, spacing: 4) {
+                    coreModelOption(
+                        title: "Use chat model (default)",
+                        identifier: "",
+                        selectedIdentifier: selectedIdentifier
+                    )
+
+                    if !selectedIdentifier.isEmpty,
+                        !coreModelPickerItems.contains(where: { $0.id == selectedIdentifier })
+                    {
+                        Divider().padding(.vertical, 2)
+                        coreModelOption(
+                            title: "\(selectedIdentifier) (unavailable)",
+                            identifier: selectedIdentifier,
+                            selectedIdentifier: selectedIdentifier
+                        )
+                    }
+
+                    if !coreModelPickerItems.isEmpty { Divider().padding(.vertical, 2) }
+                    ForEach(coreModelPickerItems) { option in
+                        coreModelOption(
+                            title: option.displayName,
+                            identifier: option.id,
+                            selectedIdentifier: selectedIdentifier
+                        )
+                    }
+                }
+                .padding(8)
+            }
+            .frame(width: 280)
+            .frame(maxHeight: 320)
+            .background(theme.cardBackground)
+            .environment(\.theme, themeManager.currentTheme)
+        }
+    }
+
+    private func coreModelOption(
+        title: String,
+        identifier: String,
+        selectedIdentifier: String
+    ) -> some View {
+        Button {
+            coreModelIdentifierBinding.wrappedValue = identifier
+            isCoreModelMenuPresented = false
+        } label: {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+
+                Spacer(minLength: 8)
+
+                if selectedIdentifier == identifier {
+                    Image(systemName: "checkmark")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.accentColor)
+                }
+            }
+            .padding(.horizontal, 10)
+            .frame(height: 30)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+}
+
+enum CoreModelSelectionPresentation {
+    static func title(identifier: String, items: [ModelPickerItem]) -> String {
+        guard !identifier.isEmpty else { return "Use chat model (default)" }
+        if let selected = items.first(where: { $0.id == identifier }) {
+            return selected.displayName
+        }
+        return "\(identifier) (unavailable)"
     }
 }
 

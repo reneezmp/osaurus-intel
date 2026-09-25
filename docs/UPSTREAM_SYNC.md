@@ -22,7 +22,74 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Commit-coverage status:** 🟢 **Classified through `7e109ade`**. This does not claim feature parity. All 53 commits after the 0.24.3 checkpoint received a verdict; applicable Intel slices were hand-ported, while the feature ledger records what is still partial, dependency-blocked, absent, or intentionally omitted. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
+**Last full upstream audit:** `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
+
+---
+
+## 2026-09-25 — Full upstream feasibility audit through `a4daf94c4`
+
+Fetched `upstream/main` and classified every commit in
+[`7e109ade6..a4daf94c4`](https://github.com/osaurus-ai/osaurus/compare/7e109ade6...a4daf94c4):
+**171 of 171**, in ancestry order. The complete per-commit evidence, Intel
+slice, dependency, and verdict are in
+[`UPSTREAM_AUDIT_2026-09-25.md`](UPSTREAM_AUDIT_2026-09-25.md). Counts: 40 Port,
+37 Stage, 24 Split, 2 Covered, 5 Superseded, and 63 Omit. A Stage verdict
+means feasible after named Intel dependencies, not rejected. An Omit verdict
+requires a specific product reason, generally upstream-only MLX/vMLX runtime,
+arm64 release metadata, or optional telemetry/marketing.
+
+The near-term implementation queue is MCP argument and canonical-name safety,
+chat-history migration, schedule slot accounting, Core Model fallback,
+theme/attachment/window fixes, and remaining hosted-model catalog/profile
+work. Rich folder formats, native Apple app tools, n8n/Channels, Workspaces,
+native subagents, and computer use remain feasible staged projects with
+explicit backend and Ventura gates. Their product states and order are in
+[`FEATURE_PARITY.md`](FEATURE_PARITY.md) and
+[`INTEL_AGENT_SETTINGS_BACKLOG.md`](INTEL_AGENT_SETTINGS_BACKLOG.md).
+
+This audit did not port code, build a new candidate, or change Rosy's current
+`1.0.52` (`53`) acceptance state. The targeted DeepSeek update immediately
+below remains the only implemented slice from the new range.
+
+---
+
+## 2026-09-25 — DeepSeek hosted V4.1 Flash slug update
+
+Reviewed upstream through `535ea3557` specifically for the latest DeepSeek
+hosted-model implementation. Commit `a0aaa945d` records DeepSeek's 2026-09-10
+rename of hosted V4.1 Flash from the retired `deepseek-v4-flash` alias to
+`deepseek-flash`; `deepseek-v4-pro` remains unchanged. This is a targeted port,
+not a claim that all intervening upstream commits have been classified.
+
+Intel now recognizes `deepseek-flash` as the DSV4 family so its reasoning
+profile and remote `thinking: {"type":"disabled"}` translation remain active
+for the direct/instruct rail. The DeepSeek provider description, Intel chat
+fallback catalog, local OpenAI-compatible `/models` response, and title-model
+fallback advertise the new hosted slug. Matching for the retired V4-prefixed
+form remains intentionally supported for local bundles and saved historical
+configuration; AtlasCloud's provider-specific model id is likewise unchanged.
+Focused compiled registry tests cover the versionless and provider-qualified
+slugs, the unchanged Pro slug, negative DeepSeek V3/chat cases, and the preset
+description. The upstream reasoning-policy test was also copied for parity,
+although that upstream-only service/suite is excluded from Intel's package
+target; Intel's compiled cloud engine already applies the same DSV4 request
+translation directly.
+
+Validation passed the focused `IntelDeepSeekHostedModelTests` suite (2 tests)
+and an explicit `swift build --package-path Packages/OsaurusCore --arch x86_64`.
+The build emits the repository's existing warnings, but no new error. A
+residual-source audit leaves `deepseek-v4-flash` only in backward-compatible
+local/model tests, a local-server diagnostic comment, and AtlasCloud's distinct
+provider-specific model id.
+
+**Rosy result, 2026-09-25:** build `1.0.52` (`53`) passed all four hosted
+DeepSeek checks: current Flash/Pro catalog, direct/instruct versus reasoning
+rails, Pro replies, and saved/local V4 compatibility. This accepts the
+DeepSeek slice only, not the rest of `a0aaa945d` or the 171-commit audit range.
+The same candidate still has open Qwen Memory, live stale-tool-call, and
+Orchestrator acceptance gates, recorded in
+[`ROSY_2026-09-24_RC_RETEST.md`](ROSY_2026-09-24_RC_RETEST.md).
 
 ---
 
@@ -1074,3 +1141,450 @@ M4 validation for that candidate ran **983 tests in 149 suites** against an
 isolated filesystem root. The first attempted full run also disabled the test
 Keychain and correctly broke OAuth-header tests; filesystem isolation is required,
 but the suite's in-memory Keychain substitute must remain enabled.
+
+## 2026-09-21 — Knowledge grant observability gate
+
+The remaining Knowledge defect has a concrete Intel-side diagnosis. The
+per-agent grant is intentionally kept in `AgentManager`'s private
+`knowledgeGrants` sidecar and written atomically to
+`OsaurusPaths.knowledgeAgentGrantsFile()` (`knowledge/agent-grants.json`).
+`updateKnowledgeSettings` updates that dictionary, bumps the capability
+revision, and posts `.agentUpdated`, but the `AgentManager` observed object was
+not otherwise invalidated. `KnowledgeCollectionDetailSheet.accessSection` and
+`KnowledgeCollectionCard` read grant state through SwiftUI bindings/body
+derivations on `AgentManager.shared`; without an observed-object publication,
+Rosy can show an unchanged switch/count even though the sidecar write and
+runtime ledger have changed. Treat the observed-state repair and the runtime
+boundary as separate gates.
+
+The implementation lane now includes
+`IntelAgentRuntimeLaneTests.knowledgeGrantPublishesPersistsAndRevokesRuntimeAccess`.
+It proves observed-object publication, sidecar-file writes, capability revision
+advancement, positive direct dispatch, and revocation denial. The existing
+`IntelAgentRuntimeLaneTests.dispatchRejectsWebSearchAndKnowledgeWithoutTheirGrants`
+continues to prove denial when an agent has no Knowledge grant. Neither test
+yet proves persistence across a manager reload/relaunch boundary or access
+from fresh and restored chats; those remain required before the Rosy checklist
+is rerun. Any test that changes `OsaurusPaths.overrideRoot` or the storage key
+must use `StoragePathsTestLock` across the entire critical section, as required
+by [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).
+
+This entry records source/test-contract evidence only. It does not promote
+Knowledge beyond **Partial**, and the Rosy manual result remains pending.
+
+The same repair ports the two card affordances identified in Rosy's partial
+result without importing upstream-only services: inline Edit reuses Intel's
+existing editor sheet, while the categorized/uncategorized badge reads the
+derived Intel Knowledge document index and refreshes after indexing. Both are
+implemented source state, not manual acceptance evidence.
+
+Focused validation on 2026-09-21 passed **9 tests in 1 suite** for
+`IntelAgentRuntimeLaneTests` under an isolated filesystem root. Because this
+host's Swift test runner still identified its target as ARM under an
+`arch -x86_64` wrapper, the separate explicit gate
+`swift build --package-path Packages/OsaurusCore --arch x86_64` was run and
+passed. Existing package warnings remain; no new compile error was accepted as
+evidence.
+
+The restored build host exposed Apple LibreSSL rather than OpenSSL 3. The
+stable-signing bootstrap previously passed OpenSSL 3's `pkcs12 -legacy` flag
+unconditionally, so identity creation stopped before Keychain import. The
+script now detects LibreSSL (whose default PKCS#12 output is already compatible)
+and reserves `-legacy` for OpenSSL implementations that support and require it.
+
+The Rosy test candidate was then built successfully as version `1.0.37` build
+`38`: a thin `x86_64` app with macOS 13.0 minimum deployment, canonical
+`~/.osaurus` storage, and the stable self-signed `Osaurus Intel Code Signing`
+identity. As expected for that sovereign identity, strict trust evaluation on
+the M4 reports `CSSMERR_TP_NOT_TRUSTED`; first-open Gatekeeper behavior remains
+a Rosy manual gate. The metadata-preserving transfer archive and focused test
+steps are recorded in
+[`ROSY_2026-09-21_KNOWLEDGE_PARITY_RETEST.md`](ROSY_2026-09-21_KNOWLEDGE_PARITY_RETEST.md).
+
+Rosy's 2026-09-22 run passed installation, immediate grant visibility, and
+grant persistence across relaunch, but disproved runtime access. In real agents
+whose Tools page had already seeded `manualToolNames`, prompt composition first
+recognized the Knowledge grant and then removed all three Knowledge schemas
+because they were absent from that separate discretionary allowlist. Dispatch
+could reject the same calls before reaching the Knowledge-specific grant gate.
+The repair makes Knowledge assignment/project scope authoritative at both
+boundaries: a live non-empty scope adds `list_knowledge`, `read_knowledge`, and
+`search_knowledge` regardless of the seeded Tools list, while revocation removes
+their schemas and execution permission. Focused coverage now composes the tool
+list for a seeded manual agent before and after revocation instead of testing
+registry execution alone.
+
+Replacement Rosy candidate `1.0.38` build `39` was built as thin `x86_64`,
+signed with the stable Intel identity, and packaged with metadata preservation
+as `Osaurus-Intel-Knowledge-Runtime-2026-09-22.zip` (SHA-256
+`a72a79cfdee9c376911fae419d85b420b1e5938527f59ac7f035446161186f14`).
+The archive passed `unzip -t`; runtime acceptance remains pending on Rosy.
+
+Rosy completed the replacement checklist: fresh and restored chats received
+Knowledge tools, open-chat revocation removed access on the next turn, fresh
+chats remained denied, re-grant restored access, and the new card affordances
+worked. Runtime acceptance therefore passed on `1.0.38` build `39`.
+
+The same run found three UI defects. The card rubbish-bin deletes immediately
+because only the detail sheet owns a confirmation dialog; card and detail
+deletion must converge on one confirmation path. When Settings resigns key to
+another Osaurus window, its AppKit-backed controls enter an inactive rendering
+state that washes buttons, toggles, and some labels toward white on the light
+paper theme. Finally, Settings still uses a separate non-full-size native
+titlebar, producing a white top band. Chat avoids that band with
+`.fullSizeContentView` plus a real unified `NSToolbar`; merely restoring the
+full-size style without the toolbar previously allowed SwiftUI content to paint
+over Ventura's traffic-light images. Any Settings unification must port the
+complete chat chrome lifecycle—toolbar attachment and post-attachment traffic-
+light restoration—not only the style-mask flag.
+
+The follow-up implements that complete contract for Settings: the window now
+uses `.fullSizeContentView`, a real unified `NSToolbar`, transparent titlebar,
+and post-attachment native traffic-light restoration. The Settings root forces
+SwiftUI's control-active environment to remain active while another Osaurus
+window is key, and Knowledge's Add Collection action uses explicit theme-owned
+foreground/background rendering rather than AppKit's inactive bordered-button
+palette. Both the card rubbish-bin and detail-sheet Delete now enter one themed
+management-window confirmation; deletion occurs only from its destructive
+action.
+
+Focused validation passed **14 tests in 2 suites** for Intel Ventura rendering
+and the agent runtime lane; the expanded rendering suite then passed **6 tests**
+including unified chrome and deferred deletion. Rosy candidate `1.0.39` build
+`40` is packaged as `Osaurus-Intel-Window-Safety-2026-09-22.zip` (SHA-256
+`79a9e5423a9d4142465b1b59ff5b7f6dc614a9c1b01180b5c11867605fda9efe`).
+Manual acceptance is tracked in
+[`ROSY_2026-09-22_WINDOW_SAFETY_RETEST.md`](ROSY_2026-09-22_WINDOW_SAFETY_RETEST.md).
+
+Rosy immediately disproved the first unified-chrome candidate: `1.0.39` removed
+the white titlebar band and preserved active control colors, but the traffic
+lights disappeared. The `NSToolbar` object existed, and the standard buttons
+reported `isHidden == false`; that was insufficient evidence. With no retained
+delegate and no default item, Ventura collapsed the toolbar's native chrome
+region and painted those logically-present buttons outside the visible area.
+The repair explicitly inserts a flexible-space item after attaching the toolbar,
+and the focused contract now asserts materialized toolbar content. AppKit clears
+the delegate for this standard-item-only toolbar, so delegate retention is not
+used as a false proxy for visible chrome.
+
+The corrected Rosy candidate is `1.0.40` build `41`, packaged as
+`Osaurus-Intel-Traffic-Lights-2026-09-22.zip` with SHA-256
+`f351769946f9414b8962f1f85ce9771a585f463a4165a8be508be06f57509f26`.
+The focused materialized-toolbar contract passed and the archive passed
+integrity validation; visible traffic lights remain a Rosy-only acceptance
+observation.
+
+Rosy disproved that repair too: `1.0.40` still had no visible traffic lights,
+and its Core Model picker rendered an empty selected title. A standard flexible
+space does not reproduce chat's actual toolbar contract. Settings now retains a
+real `NSToolbarDelegate` for the window lifetime and that delegate supplies a
+non-zero-height custom anchor item. The global forced-active control environment
+was removed because it affected every AppKit-backed control, and Core Model now
+uses a theme-owned menu with an explicit visible label for default, available,
+and unavailable selections. The strengthened rendering suite passes 7 tests;
+the combined rendering/runtime gate passes 16 tests. Rosy candidate `1.0.41`
+build `42` is packaged as `Osaurus-Intel-Settings-Chrome-2026-09-22.zip`
+(SHA-256 `518db96b34b6f1da4fe23c8de2f4cea5b662ce92f7b1ce6686f24ccdc224198d`).
+The extracted archive remains a thin x86_64 app with macOS 13.0 minimum,
+canonical `~/.osaurus`, and intact framework symlinks.
+
+Rosy then showed that `1.0.41` build `42` still could not depend on Ventura's
+standard button drawing underneath full-size SwiftUI content: Settings had no
+traffic lights, and an inactive chat window hid its traffic lights rather than
+showing the normal grey state. The Core Model text was fixed, but the borderless
+custom `Menu` label lost its border and disclosure affordance. The shared Intel
+window repair now deliberately hides AppKit's unreliable copies and installs
+one topmost three-button strip into both Settings and chat content. It preserves
+close/minimize/zoom actions, uses red/yellow/green while key, and muted grey
+while inactive. Core Model now uses AppKit's standard button-menu style.
+Candidate `1.0.42` build `43` is the next Rosy acceptance target.
+
+The signed candidate is packaged as
+`Osaurus-Intel-Shared-Traffic-Lights-2026-09-22.zip` (SHA-256
+`b29a60c275b9964d888b73aef07a1114495f21904604546e2c884f3afe22cc79`).
+The combined rendering/runtime gate passes 16 tests. Archive extraction
+preserves all six framework symlinks and confirms thin x86_64, macOS 13.0
+minimum, version `1.0.42` build `43`, and canonical `~/.osaurus`.
+
+Rosy exposed a placement error in that candidate: `1.0.42` hid the standard
+buttons, but its replacement strip was a child of the full-size content view.
+Ventura's titlebar is a separate frame layer above that content, so both
+Settings and chat showed no controls at all. The strip now uses a real
+`NSTitlebarAccessoryViewController`. Focused coverage requires the accessory
+controller and explicitly rejects the failed content-overlay arrangement.
+Candidate `1.0.43` build `44` is the next Rosy target.
+
+The signed candidate is packaged as
+`Osaurus-Intel-Titlebar-Accessory-2026-09-22.zip` (SHA-256
+`303b5aeaf7c7df8c668631dae4001799283d0b038ff230846db6be1bb870486f`).
+The extracted archive confirms thin x86_64, macOS 13.0 minimum, canonical
+`~/.osaurus`, version `1.0.43` build `44`, and all six framework symlinks.
+
+Rosy showed `1.0.43`'s titlebar accessory in chat, proving the custom controls
+and grey inactive state, but AppKit positioned it in toolbar flow rather than at
+the traffic-light coordinates; Settings displayed no accessory. Its standard
+button-style Core Model `Menu` also kept the box but lost the selected text.
+The strip is now installed directly beside the hidden native close button in
+that button's real titlebar superview, with its origin derived from the native
+close frame. Core Model now avoids both failing native selection controls: a
+plain themed SwiftUI button owns its text/border/chevron and opens a SwiftUI
+popover. Candidate `1.0.44` build `45` is the next Rosy target.
+
+The signed candidate is packaged as
+`Osaurus-Intel-Native-Frame-Lights-2026-09-22.zip` (SHA-256
+`b26cc8a5520b9f990a368b58e71775e2ac1a868f8b2fcbe43127b198fe8d8e23`).
+Archive extraction confirms thin x86_64, version `1.0.44` build `45`, canonical
+`~/.osaurus`, and all six framework symlinks.
+
+Rosy narrowed `1.0.44` to a Settings-only lifecycle defect. The chat traffic
+lights are now correctly positioned and switch between colored/key and
+grey/inactive states, and the Core Model button/popover works. Settings still
+shows no traffic lights. The shared renderer is therefore not the remaining
+failure: Settings installs the strip into the native close button's private
+superview before order-front/key finalization, has no retained `NSWindowDelegate`
+to repair it afterwards, and does not repair on the existing-window reuse path.
+Ventura may replace or retire that titlebar container after the installation.
+The focused test currently checks only an off-screen window immediately after
+configuration, so it cannot catch loss during the real window lifecycle. Keep
+the working chat and picker unchanged; the next candidate must own a
+Settings-specific post-key/post-layout repair lifecycle and test survival, not
+merely initial strip installation.
+
+Candidate `1.0.45` build `46` implements that Settings-specific lifecycle
+owner. It repairs immediately after initial presentation, on `didBecomeKey`,
+after resize and visibility changes, and whenever an existing Settings window
+is brought forward. Each repair forces titlebar layout and logs a
+`[SettingsChrome]` diagnostic containing the close-button parent identity,
+frames, visibility, and strip attachment. Chat and Core Model rendering are
+unchanged. The focused regression suite now deliberately removes the first
+strip and requires the lifecycle owner to recreate it; 8 rendering tests and 9
+agent-runtime tests pass.
+
+The signed candidate is packaged as
+`Osaurus-Intel-Settings-Lifecycle-2026-09-22.zip` (SHA-256
+`e3cbb9c5e33d75302d9b75b73e111f2141d52523ab405ef506ccf0cd7f7db4be`).
+Archive validation confirms thin x86_64, macOS 13.0 minimum, version `1.0.45`
+build `46`, canonical `~/.osaurus`, six preserved framework symlinks, and no
+compressed-data errors.
+
+Rosy's `1.0.45` diagnostics disproved the stale-container hypothesis. Across
+`did-become-key`, reuse, settled, and visibility callbacks, the window was key
+and visible, the native parent identity remained stable and visible, and the
+strip remained attached with canonical frames. Since no pixels appeared, the
+native-button plane itself is below a later Settings composition/clipping layer.
+The next implementation leaves chat untouched and installs only Settings'
+strip in the persistent window frame root (`contentView.superview`), converting
+the native close position through window coordinates and ordering the strip
+above all frame children. Local diagnostics place it at `{{19, 615}, {52, 18}}`
+for a 650-point test window, and all 8 focused rendering tests pass with explicit
+frame-root ownership and forced-loss recovery coverage.
+
+Candidate `1.0.46` build `47` is packaged as
+`Osaurus-Intel-Settings-Frame-Root-2026-09-22.zip` (SHA-256
+`0a4803abe815984b41121e9b533baf2c9d252a25566ef09c0a88a6eb1982958a`).
+Archive validation confirms thin x86_64, macOS 13.0 minimum, canonical
+`~/.osaurus`, six preserved framework symlinks, and no compressed-data errors.
+
+**Rosy acceptance — 2026-09-22:** Renée confirmed that `1.0.46` build `47`
+finally renders the Settings traffic lights correctly. The chat window remains
+normal and its inactive controls remain grey; the Core Model picker remains
+functional. This phase is complete with success. Preserve the deliberate split
+between the two windows: chat installs in the native close-button parent, while
+Settings installs in the persistent frame root and uses the native button only
+to derive system coordinates. Reusing chat's native-parent installation for
+Settings will recreate the invisible-but-attached Ventura failure.
+
+### Agent General and Appearance acceptance start — 2026-09-22
+
+The next main-acceptance slice is Agent Settings — General and Appearance. A
+source audit confirmed that the accepted `1.0.46` build `47` already contains
+the intended repairs: chat model selection is session-local, Claude Code and
+Agent Data controls are directly discoverable, Delete Data preserves the agent
+configuration while removing its chats and memory, and custom-avatar views
+observe avatar revisions. No replacement build is required for this manual
+pass by itself; the later Abilities/Tools repair below supersedes the candidate.
+
+Focused automated evidence is green: `IntelAgentRuntimeLaneTests` passes 10/10
+(including the new chat-local model isolation regression),
+`IntelClaudeCodeTests` passes 10/10, and
+`IntelAgentPresentationPersistenceTests` passes 1/1. The remaining gate is live
+Rosy behavior across navigation and relaunch. Use
+`ROSY_2026-09-22_AGENT_GENERAL_RETEST.md`; do not promote the feature from
+Partial until its sections 1–4 pass.
+
+### Abilities and Tools acceptance start — 2026-09-22
+
+The cumulative Rosy checklist now continues with Agent Settings — Abilities
+and Tools in section 6. The source audit confirmed live dispatch enforcement
+for the Tools master switch, Auto and Manual allowlists, Web Search, Knowledge,
+and Self-scheduling, plus truthful Intel-unavailable rows for Database,
+Autonomous Execution, native subagents, and Sandbox.
+
+The audit also found and repaired an offer/dispatch mismatch: Manual tool-
+selection mode could retain `schedule_next_run`, `cancel_next_run`, and `notify`
+in the composed schema while Self-scheduling was off, although dispatch would
+deny every call. `SystemPromptComposer` now treats Self-scheduling as a master
+ability gate in every selection mode and never lets capability loading override
+an explicit denial. The new regression passes in `IntelAgentRuntimeLaneTests`,
+which is green 11/11; `WebSearchToolTests` is green 11/11. Positive scheduler
+schema restoration still requires the real registered runtime and remains an
+explicit Rosy integration check.
+
+Memory remains a separate later acceptance slice because its outstanding
+distillation failures are independent. Unavailable Intel features pass this
+slice only when their explanations are readable and non-actionable; this work
+does not claim their missing backends exist.
+
+Candidate `1.0.47` build `48` packages this repair as
+`Osaurus-Intel-Abilities-Tools-2026-09-22.zip` (SHA-256
+`1d7e80b40aec915fc66ed0ed1546bad6a535c9310f622bccf2606a6a765876d0`).
+Archive and bundle validation confirm thin x86_64, macOS 13.0 minimum,
+canonical `~/.osaurus`, six preserved framework symlinks, valid signing, and no
+compressed-data errors. It supersedes `1.0.46` build `47` for the cumulative
+Agent General/Appearance plus Abilities/Tools Rosy checklist.
+
+### Automation acceptance start — 2026-09-23
+
+The cumulative Rosy checklist now includes section 7 for conventional schedules
+and watchers. Source audit confirms folder/bookmark propagation from both
+managers through `BackgroundTaskManager` into fresh and reattached execution
+contexts, plus Ventura-safe watcher responsiveness controls. Focused validation
+passes 16/16 tests across `IntelAgentRuntimeLaneTests`,
+`ScheduleExecutionAnchorTests`, and `ExecutionContextFolderActivationTests`.
+Those tests use model/folder fakes and do not establish live FSEvents, provider
+completion, CRUD persistence, or real file access; Automation remains Partial.
+
+The per-agent Automation cards still used the original borderless ellipsis
+menus despite the 2026-09-13 Ventura failure. They now expose four direct themed
+buttons—Edit, Run Now, Pause/Resume, and Delete—with tooltips, accessibility
+labels, running-state disablement, and destructive confirmation. Rosy must test
+the complete schedule and watcher lifecycles before promotion.
+
+The audit also corrected an overclaim in Abilities/Tools: the Intel registry
+does not register `schedule_next_run`, `cancel_next_run`, or `notify`, and the
+upstream scheduler implementations are excluded from the Intel target. The
+off-state gate is real and tested; positive model-callable Self-scheduling is a
+declared dependency blocker. Conventional schedules and watchers use separate
+manager paths and remain testable in this Automation slice.
+
+Candidate `1.0.48` build `49` packages the direct Automation actions as
+`Osaurus-Intel-Automation-2026-09-23.zip` (SHA-256
+`65cf38ec3cd1c9e6e8ddfde927272258ef4b92481b74f5f0d7960a51363435b1`).
+Archive and bundle validation confirm thin x86_64, macOS 13.0 minimum,
+canonical `~/.osaurus`, six preserved framework symlinks, valid signing, and no
+compressed-data errors. It supersedes `1.0.47` build `48` for the cumulative
+General/Appearance, Abilities/Tools, and Automation Rosy pass.
+
+### Pre-Rosy release-candidate review — 2026-09-23
+
+The mandatory accumulated-diff review placed `1.0.48` build `49` on **HOLD**.
+Although the artifact validates, Intel exposes Self-scheduling as an enabled
+ability without registering `schedule_next_run`, `cancel_next_run`, or `notify`;
+the off-state policy test does not prove the missing positive runtime. The
+review also flags unsafe implicit `1.0`/`1` defaults in `build_rosy.sh` and the
+expected limitation that local Automation tests do not exercise Rosy's
+x86_64/FSEvents/provider stack. Full findings and the replacement-build gate are
+in `RC_CODE_REVIEW_2026-09-23.md`.
+
+### Release-review resolution — 2026-09-23
+
+Build `1.0.49` (`50`) resolves both code findings without expanding the release
+into a scheduler-backend port. Self-scheduling is explicitly unavailable in
+Abilities and General/Scheduling, exposes no mutating control, and resolves
+false at runtime even for legacy enabled records; conventional schedules and
+watchers remain supported. `build_rosy.sh` now requires and validates explicit
+version/build metadata.
+
+The replacement artifact is
+`Osaurus-Intel-Reviewed-Automation-2026-09-23.zip` (SHA-256
+`c052d760f7d92f3f7926192098fa44952ed3833229373639b74d262f6a1e2861`).
+Validation passes 38/38 focused General/Abilities/Automation tests and 8/8
+Ventura rendering tests. The bundle is thin x86_64, targets macOS 13.0, uses the
+canonical data root, preserves six framework symlinks, has a valid signature,
+and passes ZIP integrity. The code-review hold is lifted; manual Rosy gates
+remain. Build `49` is superseded.
+
+### Memory acceptance resumed — 2026-09-23
+
+Memory is the next cumulative Rosy slice. Build `1.0.49` (`50`) already contains
+the reviewed Qwen content-array and managed-Router cold-discovery repairs, so no
+new archive was produced for this documentation-only phase. The exact Memory
+gate adds 10/10 passing tests (five distillation regressions and five pinned-
+identity override tests), bringing the cumulative focused evidence to 56/56.
+
+The authoritative manual steps are section 8 of
+`ROSY_2026-09-22_AGENT_GENERAL_RETEST.md`. They deliberately exercise explicit
+distillation before ordinary chat warms discovery, then cover facts, episodes,
+empty state, Memory off/on, paid-operation consent, retry preservation,
+persistence, and scoped deletion. Keep the feature at **Partial** until those
+checks pass on Rosy.
+
+### Memory completion build — 2026-09-23
+
+The implementation audit found and closed the missing Intel historical-chat
+backfill path. Unlike upstream's SQLite chat-history adapter, Intel reads its
+persisted JSON `ChatSessionsManager` records, but retains the same turn pairing,
+idempotency, original-date, cancellation, progress, and pending-work recovery
+contract. Intel additionally enforces its deliberate per-agent paid-cloud
+distillation consent and project-only namespace exception.
+
+The review resolved cancellation and failed-insert accounting findings, re-
+enabled the Memory implementation/database/backfill tests, and passed 1,054/1,054
+package tests plus the 74/74 enumerated Memory gate. Candidate `1.0.50` (`51`) is
+`Osaurus-Intel-Memory-2026-09-23.zip`, SHA-256
+`40609fb2cf505d6bd4b6e23c1cb1b93fd2f5a71e93840ad3f398a431e0fcc930`.
+It is thin x86_64, macOS 13.0 minimum, canonical-root enabled, strictly signed,
+ZIP-valid, and retains six framework symlinks. It supersedes build `50` for Rosy.
+
+### Rosy cumulative findings and RC repair — 2026-09-24
+
+The completed Rosy pass for build `51` is preserved in Renée's execution copy;
+the repository's focused repair/retest is
+`docs/ROSY_2026-09-24_RC_RETEST.md`. Durable findings: deleted Intel JSON chats
+need process-local tombstones because an open chat can save after deletion;
+custom-avatar replacements need revisioned filenames to invalidate live image
+caches; Router non-streaming responses may still arrive as SSE; standalone
+Automation cards need the same direct actions as per-agent cards; Memory's
+native pickers are not reliable under the themed Ventura Settings host; and the
+built-in Orchestrator needs a private admitted-target roster in its fixed prompt.
+
+`search_memory` in that pass is owned by the personal `renee.rag` Obsidian-vault
+plugin, not upstream Osaurus Memory. Its stale post-disable invocation is a
+revocation/UI-completion regression and must remain rejected. Do not add the
+excluded upstream `SearchMemoryTool` to make that test pass.
+
+Candidate `1.0.51` (`52`) packages these cumulative repairs as
+`Osaurus-Intel-RC-2026-09-24.zip`, SHA-256
+`30b7e1f397faf70123f532d047908a17b3f11c42ab543a0791b2595cefdb791c`.
+The final package gate passes 1,060 tests in 159 suites and `git diff --check`.
+The archive round-trip is ZIP-valid, thin x86_64, macOS 13.0 minimum,
+canonical-root enabled, strictly signed, and retains six framework symlinks.
+The remaining manual scope is exactly `ROSY_2026-09-24_RC_RETEST.md`.
+
+### DeepSeek refresh candidate — 2026-09-25
+
+Candidate `1.0.52` (`53`) adds the selective upstream DeepSeek hosted-model
+refresh described above and supersedes build `52`. The transfer archive is
+`build/rosy-deploy/Osaurus-Intel-RC-DeepSeek-2026-09-25.zip`, SHA-256
+`3fbb3fb456c76d6adf4a805780a9c372691fe7f2b8110c9dcfa6f37ba99cbc79`.
+
+The DeepSeek delta passes 2/2 focused tests and explicit arm64 and x86_64
+package builds; the preceding cumulative candidate passed 1,060 tests in 159
+suites. ZIP integrity and round-trip extraction pass. The extracted app is thin
+x86_64, targets macOS 13.0, uses canonical `~/.osaurus`, preserves six framework
+symlinks, and carries the stable Intel certificate designated requirement. The
+M4 host reports the expected `CSSMERR_TP_NOT_TRUSTED` because that sovereign
+self-signed certificate is not installed as a system trust anchor here.
+
+### Public release 1.0.55 — 2026-09-25
+
+The accumulated RC work (candidates `1.0.37`–`1.0.54`, shipped to Rosy only as
+transfer ZIPs) is published through Sparkle as `1.0.55` build `56`. Two release-
+path facts: `cut_intel_release.sh` must pass `VERSION`/`BUILD_NUMBER` to
+`build_rosy.sh` (which now refuses implicit defaults), and Rosy candidates
+consume build numbers the appcast never sees. Auto-incrementing from the
+appcast (last public build `37`) would have produced build `38`, below Rosy's
+installed candidate `55`, so Sparkle would never offer it. Set `BUILD_NUMBER`
+past the newest installed candidate when cutting a release after a candidate
+series. The Qwen 4,096-token distillation retest in
+`ROSY_2026-09-24_RC_RETEST.md` remains an open manual check.

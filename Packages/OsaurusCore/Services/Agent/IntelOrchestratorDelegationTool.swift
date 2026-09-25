@@ -253,4 +253,66 @@ struct IntelOrchestratorDelegationTool: OsaurusTool, PermissionedTool {
     }
 }
 
+/// Live, read-only discovery avoids treating a cached prompt or a pair of
+/// switches as proof that a target can actually run. Dispatch still performs
+/// its own fresh admission and availability checks.
+struct IntelOrchestratorTargetsTool: OsaurusTool, PermissionedTool {
+    static let toolName = "orchestrator_targets"
+    typealias SnapshotBuilder = @Sendable () async -> IntelOrchestratorAdmission.Evaluation
+
+    let name = Self.toolName
+    let description = "List currently runnable, admitted Orchestrator delegation targets and explain why allowed agents are blocked. Read-only; never launches a child."
+    let requirements: [String] = []
+    let defaultPermissionPolicy: ToolPermissionPolicy = .auto
+    let parameters: JSONValue? = .object([
+        "type": .string("object"),
+        "additionalProperties": .bool(false),
+        "properties": .object([:]),
+    ])
+
+    private let snapshotBuilder: SnapshotBuilder
+
+    init(snapshotBuilder: @escaping SnapshotBuilder = Self.liveSnapshot) {
+        self.snapshotBuilder = snapshotBuilder
+    }
+
+    func execute(argumentsJSON: String) async throws -> String {
+        guard ChatExecutionContext.currentAgentId == Agent.defaultId else {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "Target discovery is available only to the built-in Orchestrator.",
+                tool: name
+            )
+        }
+        let requirement = requireArgumentsDictionary(argumentsJSON, tool: name)
+        guard case .value = requirement else { return requirement.failureEnvelope ?? "" }
+        let snapshot = await snapshotBuilder()
+        return ToolEnvelope.success(tool: name, result: [
+            "targets": snapshot.targets.map { target in
+                ["name": target.name, "target_agent_id": target.id.uuidString, "model": target.modelID]
+            },
+            "blocked": snapshot.blocked,
+        ])
+    }
+
+    private static func liveSnapshot() async -> IntelOrchestratorAdmission.Evaluation {
+        await ModelPickerItemCache.shared.prewarmModelCache()
+        return await MainActor.run {
+            let manager = AgentManager.shared
+            let available = Set(ModelPickerItemCache.shared.items.compactMap { item -> String? in
+                guard case .remote = item.source,
+                      item.isLikelyChatCapable,
+                      !item.id.hasPrefix("claude-code/") else { return nil }
+                return item.id
+            })
+            return IntelOrchestratorAdmission.evaluate(
+                configuration: DefaultAgentConfigurationStore.load().delegation,
+                agents: manager.agents,
+                effectiveModel: { manager.effectiveModel(for: $0) },
+                availableModelIDs: available
+            )
+        }
+    }
+}
+
 #endif

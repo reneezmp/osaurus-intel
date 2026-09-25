@@ -888,7 +888,7 @@ final class ChatSession: ObservableObject {
     /// off the send path; any failure leaves the first-line fallback title.
     private func generateLLMTitle(userText: String, assistantText: String, sessionId: UUID) {
         let titleModel =
-            ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-v4-flash"
+            ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
         let sys = ChatMessage(
             role: "system",
@@ -963,7 +963,7 @@ final class ChatSession: ObservableObject {
         // name the user just asked for.
         llmTitleAttempted = true
 
-        let titleModel = ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-v4-flash"
+        let titleModel = ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
         let sys = ChatMessage(
             role: "system",

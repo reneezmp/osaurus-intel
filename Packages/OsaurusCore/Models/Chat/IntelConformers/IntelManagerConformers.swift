@@ -43,7 +43,11 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         var collectionIds: [UUID] = []
     }
 
-    private var knowledgeGrants: [UUID: IntelKnowledgeGrantRecord] = [:]
+    /// The grant ledger drives both runtime admission and the Knowledge
+    /// management UI. Keep it published: collection cards and the detail
+    /// sheet derive their switch state from this manager rather than keeping
+    /// a duplicate local grant cache.
+    @Published private var knowledgeGrants: [UUID: IntelKnowledgeGrantRecord] = [:]
 
     struct AgentInfo: Identifiable, Sendable {
         let id: UUID
@@ -258,23 +262,26 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         let dir = OsaurusPaths.agents().appendingPathComponent("avatars", isDirectory: true)
         OsaurusPaths.ensureExistsSilent(dir)
         let safeExt = ext.lowercased().trimmingCharacters(in: CharacterSet.alphanumerics.inverted)
-        let filename = "\(agentId.uuidString).\(safeExt.isEmpty ? "png" : safeExt)"
+        // Every replacement gets a new URL. Reusing `<agent-id>.png` leaves
+        // SwiftUI's image pipeline free to serve the bytes cached for that
+        // URL until relaunch, even though the file itself changed on disk.
+        let filename = "\(agentId.uuidString)-\(UUID().uuidString).\(safeExt.isEmpty ? "png" : safeExt)"
         let destination = dir.appendingPathComponent(filename)
         do {
-            if let files = try? FileManager.default.contentsOfDirectory(
-                at: dir, includingPropertiesForKeys: nil
-            ) {
-                for file in files
-                where file.deletingPathExtension().lastPathComponent == agentId.uuidString
-                    && file.lastPathComponent != filename
-                {
-                    try? FileManager.default.removeItem(at: file)
-                }
-            }
             try data.write(to: destination, options: [.atomic])
             agent.customAvatarFilename = filename
             agent.avatar = nil
             update(agent)
+
+            if let files = try? FileManager.default.contentsOfDirectory(
+                at: dir, includingPropertiesForKeys: nil
+            ) {
+                for file in files
+                where isAvatarFile(file, for: agentId) && file.lastPathComponent != filename
+                {
+                    try? FileManager.default.removeItem(at: file)
+                }
+            }
             return true
         } catch {
             print("[Osaurus Intel] Failed to save avatar for \(agentId): \(error)")
@@ -289,13 +296,19 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
             at: dir, includingPropertiesForKeys: nil
         ) {
             for file in files
-            where file.deletingPathExtension().lastPathComponent == agentId.uuidString
+            where isAvatarFile(file, for: agentId)
             {
                 try? FileManager.default.removeItem(at: file)
             }
         }
         agent.customAvatarFilename = nil
         update(agent)
+    }
+
+    private func isAvatarFile(_ file: URL, for agentId: UUID) -> Bool {
+        let stem = file.deletingPathExtension().lastPathComponent
+        let id = agentId.uuidString
+        return stem == id || stem.hasPrefix("\(id)-")
     }
 
     // MARK: - Cryptographic agent addresses (M11 Phase 11.A.5 — Identity)
@@ -476,11 +489,18 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 
     /// Save built-in Orchestrator settings and make an already-open Intel chat
     /// re-evaluate its cached capabilities and presentation immediately.
-    func updateDefaultAgentConfiguration(_ configuration: DefaultAgentConfiguration) {
-        DefaultAgentConfigurationStore.save(configuration)
-        reload()
-        bumpCapabilityRevision()
-        NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
+    @discardableResult
+    func updateDefaultAgentConfiguration(_ configuration: DefaultAgentConfiguration) -> Bool {
+        do {
+            try DefaultAgentConfigurationStore.saveChecked(configuration)
+            reload()
+            bumpCapabilityRevision()
+            NotificationCenter.default.post(name: .agentUpdated, object: Agent.defaultId)
+            return true
+        } catch {
+            print("[Osaurus] Failed to save default-agent.json: \(error)")
+            return false
+        }
     }
     func effectiveToolsDisabled(for agentId: UUID) -> Bool {
         let globalDisabled = ChatConfigurationStore.load().disableTools
@@ -503,9 +523,10 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     /// tool file is excluded from the Intel target, so runtime policy must be
     /// available here for both prompt composition and dispatch enforcement.
     func effectiveSelfSchedulingEnabled(for agentId: UUID) -> Bool {
-        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
-        let schedule = agent.settings.schedule
-        return schedule.mode != .manual && schedule.dailyRunCap > 0
+        // SchedulerTools.swift is excluded from the Intel target. Persisted
+        // upstream/legacy modes must not make prompt composition advertise a
+        // capability this build cannot execute.
+        false
     }
 
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a
@@ -919,6 +940,12 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     /// `internal` so observers can read it.
     @Published var sessions: [UUID: ChatSessionData] = [:]
 
+    // An open ChatSession can still emit a final save after its sidebar row
+    // has been deleted. Keep process-local tombstones so that stale owners
+    // cannot recreate the JSON file (or reinsert the row) after deletion.
+    private let deletionLock = NSLock()
+    private var deletedSessionIDs: Set<UUID> = []
+
     // M13 follow-up (Renée 2026-06-04): persist chat sessions across launches.
     // Upstream persists via the excluded ChatHistoryDatabase/ChatSessionStore
     // (SQLite); Intel had only this in-memory dict, so every relaunch lost all
@@ -931,12 +958,21 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     }
 
     func save(_ data: ChatSessionData) {
+        guard !isDeleted(data.id) else { return }
         sessions[data.id] = data
         persist(data)
     }
     func delete(id: UUID) {
+        deletionLock.lock()
+        deletedSessionIDs.insert(id)
+        deletionLock.unlock()
         sessions.removeValue(forKey: id)
-        removeFromDisk(id: id)
+        let fileURL = OsaurusPaths.sessionFile(for: id)
+        // Serialize removal behind any metadata writes already submitted for
+        // this session. Those writes also consult the tombstone before disk.
+        Self.persistQueue.async { [self] in
+            removeFromDisk(at: fileURL)
+        }
     }
     func rename(id: UUID, title: String) {
         if var s = sessions[id] {
@@ -1021,7 +1057,8 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         for file in files where file.pathExtension == "json" {
             guard
                 let data = try? Data(contentsOf: file),
-                let session = try? decoder.decode(ChatSessionData.self, from: data)
+                let session = try? decoder.decode(ChatSessionData.self, from: data),
+                !isDeleted(session.id)
             else { continue }
             loaded[session.id] = session
         }
@@ -1029,14 +1066,16 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         print("[Osaurus Intel] Loaded \(loaded.count) chat session(s) from disk")
     }
 
-    private func persist(_ data: ChatSessionData) {
-        let dir = OsaurusPaths.sessions()
+    private func persist(_ data: ChatSessionData, to destination: URL? = nil) {
+        guard !isDeleted(data.id) else { return }
+        let fileURL = destination ?? OsaurusPaths.sessionFile(for: data.id)
+        let dir = fileURL.deletingLastPathComponent()
         OsaurusPaths.ensureExistsSilent(dir)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         guard let encoded = try? encoder.encode(data) else { return }
-        try? encoded.write(to: OsaurusPaths.sessionFile(for: data.id), options: .atomic)
+        try? encoded.write(to: fileURL, options: .atomic)
     }
 
     /// Same encode-and-write as `persist`, off the calling thread. For
@@ -1046,13 +1085,23 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     private static let persistQueue = DispatchQueue(
         label: "ai.osaurus.chatSessionsManager.persist", qos: .utility)
     private func persistAsync(_ data: ChatSessionData) {
+        // Resolve the root now. Tests and migration tools can swap the storage
+        // override while queued work is pending; a delayed path lookup must not
+        // write the old session into the newly selected root.
+        let fileURL = OsaurusPaths.sessionFile(for: data.id)
         Self.persistQueue.async { [self] in
-            persist(data)
+            persist(data, to: fileURL)
         }
     }
 
-    private func removeFromDisk(id: UUID) {
-        try? FileManager.default.removeItem(at: OsaurusPaths.sessionFile(for: id))
+    private func removeFromDisk(at fileURL: URL) {
+        try? FileManager.default.removeItem(at: fileURL)
+    }
+
+    private func isDeleted(_ id: UUID) -> Bool {
+        deletionLock.lock()
+        defer { deletionLock.unlock() }
+        return deletedSessionIDs.contains(id)
     }
 
     func createNew(selectedModel: String? = nil, agentId: UUID? = nil) -> UUID {

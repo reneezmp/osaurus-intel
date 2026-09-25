@@ -5,6 +5,24 @@ import Testing
 
 @Suite("Intel Orchestrator delegation tool", .serialized)
 struct IntelOrchestratorDelegationToolTests {
+    @Test("live target discovery is read-only and built-in only")
+    func targetDiscoveryIsScoped() async throws {
+        let id = Self.targetID
+        let tool = IntelOrchestratorTargetsTool(snapshotBuilder: {
+            .init(targets: [.init(id: id, name: "Rosy Helper", modelID: "cloud/child")], blocked: [])
+        })
+        #expect(ToolEnvelope.isError(try await tool.execute(argumentsJSON: "{}")))
+        let result = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
+            try await tool.execute(argumentsJSON: "{}")
+        }
+        #expect(!ToolEnvelope.isError(result))
+        let envelope = try #require(JSONSerialization.jsonObject(with: Data(result.utf8)) as? [String: Any])
+        let payload = try #require(envelope["result"] as? [String: Any])
+        let targets = try #require(payload["targets"] as? [[String: String]])
+        #expect(targets.first?["target_agent_id"] == id.uuidString)
+        #expect(targets.first?["model"] == "cloud/child")
+    }
+
     @Test("custom and unbound contexts fail before constructing a child")
     func contextFailsClosed() async throws {
         let builds = DelegationBuildCounter()

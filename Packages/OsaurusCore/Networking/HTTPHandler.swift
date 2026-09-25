@@ -281,8 +281,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     private func serveModels(context: ChannelHandlerContext) {
         let models = [
+            "deepseek-flash",
             "deepseek-v4-pro",
-            "deepseek-v4-flash",
         ].map { OpenAIModel(id: $0) }
         let resp = ModelsResponse(object: "list", data: models)
         if let data = try? jsonEncoder.encode(resp), let json = String(data: data, encoding: .utf8) {

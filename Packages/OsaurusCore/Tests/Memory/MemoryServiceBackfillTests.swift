@@ -146,6 +146,6 @@ struct MemoryServiceBackfillTests {
     // MARK: - Helpers
 
     private func turn(_ role: MessageRole, _ content: String) -> ChatTurnData {
-        ChatTurnData(role: role, content: content)
+        ChatTurnData(id: UUID(), role: role, content: content, createdAt: Date())
     }
 }

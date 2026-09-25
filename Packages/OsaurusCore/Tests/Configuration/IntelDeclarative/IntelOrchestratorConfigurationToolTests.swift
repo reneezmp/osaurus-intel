@@ -15,6 +15,9 @@ struct IntelOrchestratorConfigurationToolTests {
         #expect(!custom.contains(IntelOrchestratorConfigurationTool.toolName))
         #expect(orchestrator.contains(IntelOrchestratorConfigurationTool.toolName))
         #expect(orchestrator.contains(IntelOrchestratorDelegationTool.toolName))
+        #expect(orchestrator.contains(IntelOrchestratorTargetsTool.toolName))
+        #expect(!unbound.contains(IntelOrchestratorTargetsTool.toolName))
+        #expect(!custom.contains(IntelOrchestratorTargetsTool.toolName))
         #expect(ToolRegistry.shared.handlesOwnApproval(for: IntelOrchestratorConfigurationTool.toolName))
         #expect(ToolRegistry.shared.handlesOwnApproval(for: IntelOrchestratorDelegationTool.toolName))
     }

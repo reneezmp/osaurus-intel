@@ -22,39 +22,19 @@ struct AgentScheduleActionMenu: View {
     @State private var showingDeleteConfirmation = false
 
     var body: some View {
-        Menu {
-            Button(action: onEdit) {
-                Label("Edit", systemImage: "pencil")
-            }
-            Button(action: onRunNow) {
-                Label("Run Now", systemImage: "play.fill")
-            }
-            .disabled(isRunning)
-            Divider()
-            Button {
+        HStack(spacing: 4) {
+            actionButton("Edit", icon: "pencil", action: onEdit)
+            actionButton("Run Now", icon: "play.fill", disabled: isRunning, action: onRunNow)
+            actionButton(
+                schedule.isEnabled ? "Pause" : "Resume",
+                icon: schedule.isEnabled ? "pause.fill" : "play.fill"
+            ) {
                 onToggle(!schedule.isEnabled)
-            } label: {
-                Label(
-                    schedule.isEnabled ? "Pause" : "Resume",
-                    systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
-                )
             }
-            Divider()
-            Button(role: .destructive) {
+            actionButton("Delete", icon: "trash", destructive: true) {
                 showingDeleteConfirmation = true
-            } label: {
-                Label("Delete", systemImage: "trash")
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(theme.secondaryText)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(theme.tertiaryBackground))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 24)
         .confirmationDialog(
             "Delete this schedule?",
             isPresented: $showingDeleteConfirmation,
@@ -63,6 +43,35 @@ struct AgentScheduleActionMenu: View {
             Button("Delete", role: .destructive, action: onDelete)
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private func actionButton(
+        _ title: LocalizedStringKey,
+        icon: String,
+        disabled: Bool = false,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(title, bundle: .module)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundColor(destructive ? theme.errorColor : theme.secondaryText)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(theme.tertiaryBackground)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
+        .help(Text(title, bundle: .module))
+        .accessibilityLabel(Text(title, bundle: .module))
     }
 }
 
@@ -79,39 +88,19 @@ struct AgentWatcherActionMenu: View {
     @State private var showingDeleteConfirmation = false
 
     var body: some View {
-        Menu {
-            Button(action: onEdit) {
-                Label("Edit", systemImage: "pencil")
-            }
-            Button(action: onRunNow) {
-                Label("Run Now", systemImage: "play.fill")
-            }
-            .disabled(isRunning)
-            Divider()
-            Button {
+        HStack(spacing: 4) {
+            actionButton("Edit", icon: "pencil", action: onEdit)
+            actionButton("Run Now", icon: "play.fill", disabled: isRunning, action: onRunNow)
+            actionButton(
+                watcher.isEnabled ? "Pause" : "Resume",
+                icon: watcher.isEnabled ? "pause.fill" : "play.fill"
+            ) {
                 onToggle(!watcher.isEnabled)
-            } label: {
-                Label(
-                    watcher.isEnabled ? "Pause" : "Resume",
-                    systemImage: watcher.isEnabled ? "pause.circle" : "play.circle"
-                )
             }
-            Divider()
-            Button(role: .destructive) {
+            actionButton("Delete", icon: "trash", destructive: true) {
                 showingDeleteConfirmation = true
-            } label: {
-                Label("Delete", systemImage: "trash")
             }
-        } label: {
-            Image(systemName: "ellipsis")
-                .font(.system(size: 11, weight: .medium))
-                .foregroundColor(theme.secondaryText)
-                .frame(width: 24, height: 24)
-                .background(Circle().fill(theme.tertiaryBackground))
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .frame(width: 24)
         .confirmationDialog(
             "Delete this watcher?",
             isPresented: $showingDeleteConfirmation,
@@ -120,5 +109,34 @@ struct AgentWatcherActionMenu: View {
             Button("Delete", role: .destructive, action: onDelete)
             Button("Cancel", role: .cancel) {}
         }
+    }
+
+    private func actionButton(
+        _ title: LocalizedStringKey,
+        icon: String,
+        disabled: Bool = false,
+        destructive: Bool = false,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            HStack(spacing: 4) {
+                Image(systemName: icon)
+                    .font(.system(size: 9, weight: .semibold))
+                Text(title, bundle: .module)
+                    .font(.system(size: 10, weight: .medium))
+            }
+            .foregroundColor(destructive ? theme.errorColor : theme.secondaryText)
+            .padding(.horizontal, 8)
+            .frame(height: 26)
+            .background(
+                RoundedRectangle(cornerRadius: 6)
+                    .fill(theme.tertiaryBackground)
+            )
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.45 : 1)
+        .help(Text(title, bundle: .module))
+        .accessibilityLabel(Text(title, bundle: .module))
     }
 }
