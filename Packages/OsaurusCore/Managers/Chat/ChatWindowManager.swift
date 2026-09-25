@@ -1069,6 +1069,35 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         return id
     }
 
+    // MARK: Last chat restore (Intel analogue of upstream c240123ed)
+
+    /// Record the saved chat a closing window was showing, if any.
+    private func rememberLastChat(of windowId: UUID) {
+        guard let sessionId = windowStates[windowId]?.session.sessionId,
+            ChatSessionsManager.shared.session(for: sessionId) != nil
+        else { return }
+        IntelLastChatStore.shared.record(sessionId)
+    }
+
+    /// Create a chat window that reopens the most recently closed saved
+    /// chat, used when the dock, menu, or hotkey summons chat and no window
+    /// exists. Falls back to a blank chat when the chat was since deleted,
+    /// or reveals the owner when it is already open elsewhere.
+    @discardableResult
+    func createWindowRestoringLastChat(
+        store: IntelLastChatStore = .shared
+    ) -> UUID {
+        if let data = Self.restorableLastChat(from: store) {
+            return createWindow(agentId: data.agentId, sessionData: data)
+        }
+        return createWindow()
+    }
+
+    /// The remembered chat, consumed once, if it still exists.
+    static func restorableLastChat(from store: IntelLastChatStore) -> ChatSessionData? {
+        store.take().flatMap { ChatSessionsManager.shared.session(for: $0) }
+    }
+
     #if DEBUG
         /// Exercise ownership routing without constructing an NSWindow.
         func withRegisteredWindowStateForTesting<T>(
@@ -1109,7 +1138,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             bringToFront(window)
         } else {
             NSLog("[ChatWindowManager] toggleLastFocused → no windows, creating one")
-            _ = createWindow()
+            _ = createWindowRestoringLastChat()
         }
     }
 
@@ -1182,6 +1211,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     }
 
     public func closeWindow(id: UUID) {
+        rememberLastChat(of: id)
         windows.removeValue(forKey: id)
         nsWindows[id]?.close()
         nsWindows.removeValue(forKey: id)
@@ -1206,6 +1236,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         guard let window = notification.object as? NSWindow,
             let id = windowId(for: window)
         else { return }
+        rememberLastChat(of: id)
         windows.removeValue(forKey: id)
         nsWindows.removeValue(forKey: id)
         windowStates[id]?.cleanup()
@@ -1242,6 +1273,8 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     public func setWindowPinned(id: UUID, pinned: Bool) {}
 
     public func stopAllSessions() {
+        // Quit teardown: remember the focused window's chat before cleanup.
+        if let id = lastFocusedWindowId ?? windowStates.keys.first { rememberLastChat(of: id) }
         windowStates.values.forEach { $0.cleanup() }
         windows.removeAll()
         nsWindows.removeAll()

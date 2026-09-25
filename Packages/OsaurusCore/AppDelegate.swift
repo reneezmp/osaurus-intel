@@ -324,7 +324,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         } else if let firstId = manager.windows.keys.first {
             manager.showWindow(id: firstId)
         } else {
-            _ = manager.createWindow()
+            _ = manager.createWindowRestoringLastChat()
         }
     }
 
