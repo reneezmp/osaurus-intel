@@ -232,6 +232,22 @@
         }
       }
     },
+    "Folder not found" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner nicht gefunden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "找不到文件夹"
+          }
+        }
+      }
+    },
     "Follow System Accent" : {
       "localizations" : {
         "de" : {
@@ -284,6 +300,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我明白：代理将获得新地址，现有的访问密钥将被吊销，并且当前身份的恢复短语将无法再恢复此 Mac，除非我已保存它。"
+          }
+        }
+      }
+    },
+    "It was moved or deleted, so it was removed from Recent Folders." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Er wurde verschoben oder gelöscht und daher aus den zuletzt verwendeten Ordnern entfernt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该文件夹已被移动或删除，因此已从最近的文件夹中移除。"
           }
         }
       }
@@ -492,6 +524,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "粘贴您想要切换到的身份的 24 个单词恢复短语。这将替换此 Mac 上当前的身份。"
+          }
+        }
+      }
+    },
+    "Recent Folders" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Zuletzt verwendete Ordner"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "최근 폴더"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Недавние папки"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "最近的文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "最近的資料夾"
           }
         }
       }

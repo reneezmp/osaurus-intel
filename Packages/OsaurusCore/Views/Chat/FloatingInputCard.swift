@@ -59,6 +59,7 @@ struct FloatingInputCard: View {
     /// Discard the queued send without sending it. Called by the chip's ×.
     var onCancelQueued: (() -> Void)?
     @ObservedObject var folderState: ChatFolderState
+    @ObservedObject private var recentFolders = RecentFoldersStore.shared
     /// Fired on every keystroke with the composer's current text, so the
     /// session can keep a draft mirror for stash/restore across chat and
     /// agent switches without re-rendering per key (upstream 65cbb73e0).
@@ -2409,6 +2410,7 @@ extension FloatingInputCard {
                         }
                     }
                 }
+                recentFolderMenuItems
             }
 
             if hasFolder {
@@ -2428,6 +2430,50 @@ extension FloatingInputCard {
             }
         }
         .animation(.easeOut(duration: 0.15), value: hasFolder)
+    }
+
+    /// Recent working folders (upstream 3034800ef), excluding the current
+    /// one. Intel shows them in the folder chip's context menu.
+    @ViewBuilder
+    private var recentFolderMenuItems: some View {
+        let current = folderState.persistedPath
+        let recents = recentFolders.entries.filter { $0.path != current }
+        if !recents.isEmpty {
+            Divider()
+            Section {
+                ForEach(recents) { entry in
+                    Button {
+                        useRecentFolder(entry)
+                    } label: {
+                        Label {
+                            Text(verbatim: entry.name)
+                        } icon: {
+                            Image(systemName: "folder")
+                        }
+                    }
+                    .help(Text(verbatim: entry.path))
+                }
+            } header: {
+                Text("Recent Folders", bundle: .module)
+            }
+        }
+    }
+
+    private func useRecentFolder(_ entry: RecentFoldersStore.Entry) {
+        Task {
+            guard let url = await RecentFoldersStore.resolveURL(for: entry) else {
+                RecentFoldersStore.shared.remove(path: entry.path)
+                ToastManager.shared.error(
+                    L("Folder not found"),
+                    message: L("It was moved or deleted, so it was removed from Recent Folders.")
+                )
+                return
+            }
+            await disableSandboxIfEnabled()
+            if await folderState.setFolder(url) != nil {
+                RecentFoldersStore.shared.record(path: url.standardizedFileURL.path)
+            }
+        }
     }
 
     @ViewBuilder

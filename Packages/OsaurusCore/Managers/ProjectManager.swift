@@ -87,6 +87,7 @@ public final class ProjectManager: ObservableObject {
         #endif
         project.folderPath = path
         update(project)
+        RecentFoldersStore.shared.record(path: path)
         return path
     }
 

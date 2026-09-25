@@ -49,7 +49,9 @@ public final class ChatFolderState: ObservableObject {
             response = panel.runModal()
         }
         guard response == .OK, let url = panel.url else { return nil }
-        return await setFolder(url)
+        let built = await setFolder(url)
+        if built != nil { RecentFoldersStore.shared.record(path: url.standardizedFileURL.path) }
+        return built
     }
 
     @discardableResult
