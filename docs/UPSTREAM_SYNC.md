@@ -1639,3 +1639,30 @@ Durable lessons from this batch:
 - **`Localizable.xcstrings` merges:** keep Intel's file and insert only the
   commit's new keys; preserve Xcode's key order and the missing final newline,
   or the diff rewrites the whole catalog.
+
+### Upstream provider/chat batch — 2026-09-25
+
+Row-level outcomes are in `UPSTREAM_AUDIT_2026-09-25.md`. Gate: 1,141 tests in
+171 suites (isolated root, no live-data or defaults writes) plus an explicit
+x86_64 package build.
+
+Durable facts from this batch:
+
+- **Intel chat windows hold one session; there are no tabs.** Upstream tab
+  features map to per-window equivalents: single-owner routing reveals the
+  window already showing a chat; "restore open tabs" became reopening the
+  last saved chat (`IntelLastChatStore`, key `intelLastOpenChat.v1`).
+- **Intel's composer keeps keystrokes in `localText`**; the draft mirror
+  hooks (`onDraftChange`, `onWillRehydrate`) live on `FloatingInputCard`
+  and are wired in `ChatContentView`.
+- **Intel chat is text-only.** Anything that would carry media to the model
+  must become text; raw MCP image/audio base64 was being billed as text.
+- **The Router's per-reply billing frame is not surfaced in Intel chat**
+  (`CloudChatEngine` logs it). Cache telemetry therefore appears in the
+  Credits usage center and ledger, not on a reply chip.
+- **Router billing ledger is now SQLite v3** (additive cache columns; v2
+  rows read as zero). `RouterBillingSummary` decodes legacy payloads.
+- **Intel's local HTTP server has no access-key authentication.** Do not add
+  account-bearing routes (e.g. `/credits/balance`) until it does.
+- **Intel already sends the Codex CLI user agent**, so Codex models gated on
+  it (e.g. `gpt-5.6-luna`) are usable.
