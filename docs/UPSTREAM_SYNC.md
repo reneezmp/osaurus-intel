@@ -1605,3 +1605,37 @@ and store the file in a password manager, then delete the file. A formatted or
 erased keychain erases the key (Sparkle warns about this). Restore on a new Mac
 with `generate_keys -f <file>`, or pass it to `cut_intel_release.sh` via
 `SPARKLE_PRIVATE_KEY`.
+
+### Upstream quick correctness batch — 2026-09-25
+
+Ported the audit's quick correctness batch (see
+[`UPSTREAM_AUDIT_2026-09-25.md`](UPSTREAM_AUDIT_2026-09-25.md) row notes):
+MCP 0/1 integer bridging, missing-`properties` schemas, non-container
+argument validation, canonical MCP names with naming hints, theme hex/picker
+fixes, attachment text types, off-main link opening, schedule consumed-slot
+anchor and overlap guard, a Core Model breaker, write-only EventKit, and an
+Intel chat-store stale-write fix. Gate: 1,108 tests in 164 suites, isolated
+root, no live-data writes.
+
+Durable lessons from this batch:
+
+- **Check the exclude list before cherry-picking.** `OpenAIAPI.swift`,
+  `RemoteProviderService.swift`, `RemoteToolDetection.swift`,
+  `ToolRegistry.swift`, `ChatEngine.swift`, `CoreModelService.swift`,
+  `HostAPIBridgeServer.swift` and `SandboxPluginTool.swift` are not compiled
+  on Intel. Their Intel seams are `CloudChatEngine` (tool encoding and
+  dispatch), `IntelStubConformers.ToolRegistry`, `IntelAgentConformers.JSONValue`,
+  and `IntelMemoryService`. A clean cherry-pick into an excluded file is dead
+  code. The abandoned raw cherry-pick of `ff92720ee`/`19c6786e7`/`ffbd07bf6`
+  is kept as a git stash for reference only.
+- **Intel's offered-tool check is the security boundary.** Any tool-name
+  rewriting (e.g. canonical MCP names) must happen before it and resolve only
+  to a tool offered in this turn, so approval and policy run on the real name.
+- **macOS 13 target:** upstream's two-value `onChange(of:) { old, new in }`
+  does not compile; use the single-value form and track the previous value.
+  The compiler reports these, so build before trusting a clean apply.
+- **No automatic paid retries** extends to fallbacks: only a failure that
+  cannot have been billed (no endpoint, HTTP 404) may be retried immediately.
+- **`Localizable.xcstrings` merges:** keep Intel's file and insert only the
+  commit's new keys; preserve Xcode's key order and the missing final newline,
+  or the diff rewrites the whole catalog.
