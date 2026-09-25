@@ -946,6 +946,16 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     private let deletionLock = NSLock()
     private var deletedSessionIDs: Set<UUID> = []
 
+    // Every mutation snapshots the WHOLE session, and metadata mutations
+    // (rename, archive, pin, project) write it off-thread. A queued metadata
+    // write could land after a newer synchronous turn save and overwrite the
+    // file with the older snapshot, dropping the latest turn — Intel's JSON
+    // analogue of upstream's "later turns do not persist" (#2736). Each
+    // snapshot takes a per-session generation at call time; a write reaches
+    // disk only if no newer snapshot has been taken since.
+    private let writeLock = NSLock()
+    private var writeGenerations: [UUID: UInt64] = [:]
+
     // M13 follow-up (Renée 2026-06-04): persist chat sessions across launches.
     // Upstream persists via the excluded ChatHistoryDatabase/ChatSessionStore
     // (SQLite); Intel had only this in-memory dict, so every relaunch lost all
@@ -960,7 +970,7 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     func save(_ data: ChatSessionData) {
         guard !isDeleted(data.id) else { return }
         sessions[data.id] = data
-        persist(data)
+        persist(data, generation: nextWriteGeneration(for: data.id))
     }
     func delete(id: UUID) {
         deletionLock.lock()
@@ -1066,7 +1076,7 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         print("[Osaurus Intel] Loaded \(loaded.count) chat session(s) from disk")
     }
 
-    private func persist(_ data: ChatSessionData, to destination: URL? = nil) {
+    private func persist(_ data: ChatSessionData, generation: UInt64, to destination: URL? = nil) {
         guard !isDeleted(data.id) else { return }
         let fileURL = destination ?? OsaurusPaths.sessionFile(for: data.id)
         let dir = fileURL.deletingLastPathComponent()
@@ -1075,7 +1085,20 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         encoder.dateEncodingStrategy = .iso8601
         guard let encoded = try? encoder.encode(data) else { return }
+        // Check and write under one lock so a newer snapshot cannot be
+        // overtaken between the staleness check and the disk write.
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        guard writeGenerations[data.id] == generation else { return }
         try? encoded.write(to: fileURL, options: .atomic)
+    }
+
+    private func nextWriteGeneration(for id: UUID) -> UInt64 {
+        writeLock.lock()
+        defer { writeLock.unlock() }
+        let next = (writeGenerations[id] ?? 0) &+ 1
+        writeGenerations[id] = next
+        return next
     }
 
     /// Same encode-and-write as `persist`, off the calling thread. For
@@ -1089,10 +1112,21 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         // override while queued work is pending; a delayed path lookup must not
         // write the old session into the newly selected root.
         let fileURL = OsaurusPaths.sessionFile(for: data.id)
+        let generation = nextWriteGeneration(for: data.id)
         Self.persistQueue.async { [self] in
-            persist(data, to: fileURL)
+            persist(data, generation: generation, to: fileURL)
         }
     }
+
+    #if DEBUG
+        /// Holds queued metadata writes so a test can interleave a newer save.
+        static func _suspendBackgroundWritesForTesting() { persistQueue.suspend() }
+        /// Releases and drains queued metadata writes.
+        static func _resumeBackgroundWritesForTesting() {
+            persistQueue.resume()
+            persistQueue.sync {}
+        }
+    #endif
 
     private func removeFromDisk(at fileURL: URL) {
         try? FileManager.default.removeItem(at: fileURL)

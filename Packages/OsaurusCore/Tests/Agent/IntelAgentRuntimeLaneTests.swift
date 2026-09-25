@@ -103,6 +103,48 @@ struct IntelAgentRuntimeLaneTests {
         }
     }
 
+    /// Intel analogue of upstream #2736 ("later turns do not persist"): a
+    /// queued metadata write carrying an older snapshot must not overwrite a
+    /// newer synchronous turn save.
+    @Test
+    func staleQueuedMetadataWriteCannotDropANewerTurn() async throws {
+        try await StoragePathsTestLock.shared.run {
+            let root = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-stale-write-tests-\(UUID().uuidString)"
+            )
+            try FileManager.default.createDirectory(at: root, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: root) }
+
+            let previousRoot = OsaurusPaths.overrideRoot
+            OsaurusPaths.overrideRoot = root
+            defer {
+                OsaurusPaths.overrideRoot = previousRoot
+                ChatSessionsManager.shared.refresh()
+            }
+
+            let manager = ChatSessionsManager.shared
+            let id = manager.createNew()
+            var session = try #require(manager.session(for: id))
+            session.turns = [ChatTurnData(from: ChatTurn(role: .user, content: "first"))]
+            manager.save(session)
+
+            // The rename snapshot (one turn) is queued but held back...
+            ChatSessionsManager._suspendBackgroundWritesForTesting()
+            manager.rename(id: id, title: "Renamed")
+            // ...while a newer turn is saved synchronously.
+            var newer = try #require(manager.session(for: id))
+            newer.turns.append(ChatTurnData(from: ChatTurn(role: .assistant, content: "second")))
+            manager.save(newer)
+            ChatSessionsManager._resumeBackgroundWritesForTesting()
+
+            manager.refresh()
+            let reloaded = try #require(manager.session(for: id))
+            #expect(reloaded.turns.map(\.content) == ["first", "second"])
+            #expect(reloaded.title == "Renamed")
+            manager.delete(id: id)
+        }
+    }
+
     @Test
     func chatLocalModelSelectionDoesNotRewriteAgentDefault() async throws {
         let configuredModel = "intel-agent-default-\(UUID().uuidString)"
