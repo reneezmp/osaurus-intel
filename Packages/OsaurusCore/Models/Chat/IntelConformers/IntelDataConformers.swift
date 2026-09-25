@@ -1554,7 +1554,12 @@ final class BlockMemoizer: @unchecked Sendable {
                 blocks.append(ContentBlock(
                     id: "user-\(turn.id.uuidString)",
                     turnId: turn.id,
-                    kind: .userMessage(text: turn.content, attachments: turn.attachments)
+                    // Watcher runs render their instructions, not the framing
+                    // (upstream 13cc78ae3); the stored turn is unchanged.
+                    kind: .userMessage(
+                        text: IntelDispatchEnvelope.displayText(for: turn.content),
+                        attachments: turn.attachments
+                    )
                 ))
             }
 
