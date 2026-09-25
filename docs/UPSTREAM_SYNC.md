@@ -1696,3 +1696,7 @@ Durable facts from this batch:
 - New per-user settings live in `UserDefaults`: `RecentWorkingFolders`,
   `chatComposerSpellCheckEnabled`, `intelLastOpenChat.v1`. Tests use private
   suites and never the live domain.
+
+**Manual acceptance for all three 2026-09-25 batches:**
+[`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md).
+Record the candidate build there when it is cut.
