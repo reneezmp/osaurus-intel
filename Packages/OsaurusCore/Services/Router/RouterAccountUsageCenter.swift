@@ -3,6 +3,9 @@ import Foundation
 struct RouterAccountUsageSnapshot: Equatable, Sendable {
     let requestCount: Int
     let inputTokens: Int
+    /// Input tokens the upstream served from its prompt cache (billed at the
+    /// cached rate). Subset of `inputTokens`; 0 on pre-cache routers.
+    let cachedInputTokens: Int
     let outputTokens: Int
     let spentMicro: Int64
     let creditedMicro: Int64
@@ -22,6 +25,7 @@ enum RouterAccountUsageCenter {
         return RouterAccountUsageSnapshot(
             requestCount: usage.count,
             inputTokens: saturatingSum(usage.map(\.inputTokens)),
+            cachedInputTokens: saturatingSum(usage.map(\.cachedInputTokens)),
             outputTokens: saturatingSum(usage.map(\.outputTokens)),
             spentMicro: spent,
             creditedMicro: credited,

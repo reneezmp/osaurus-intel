@@ -692,6 +692,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Ask for a final usage chunk so the prompt-cache hit/miss
                             // split is observable per request (logged below).
                             body["stream_options"] = ["include_usage": true]
+                            Self.applyPromptCacheRouting(
+                                provider: endpoint.provider,
+                                sessionId: request.session_id,
+                                into: &body
+                            )
                             self.applyReasoningMode(request, into: &body)
                         }
 
@@ -1141,6 +1146,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
         if let temperature = request.temperature { body["temperature"] = temperature }
         applyReasoningMode(request, into: &body)
+        Self.applyPromptCacheRouting(provider: endpoint.provider, sessionId: request.session_id, into: &body)
 
         // CANONICAL (sorted-key) serialization — bare JSONSerialization emits
         // keys in hash order, which differs across app launches (and can differ
@@ -1290,6 +1296,55 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let candidates = ToolRegistry.shared.mcpExposedNames(forCanonical: name)
             .filter { offeredNames.contains($0) }
         return candidates.count == 1 ? candidates[0] : name
+    }
+
+    // MARK: Prompt-cache routing (upstream 9b3336d68)
+
+    /// Whether a provider accepts `prompt_cache_key`. Allowlisted only:
+    /// third-party OpenAI-compatible gateways can reject unknown fields.
+    /// The Router forwards the key to keyed upstream caches; genuine OpenAI
+    /// hosts, Azure, and OpenRouter accept it directly.
+    nonisolated static func supportsPromptCacheKey(providerType: RemoteProviderType, host: String) -> Bool {
+        switch providerType {
+        case .osaurusRouter, .azureOpenAI:
+            return true
+        case .openaiLegacy, .openResponses:
+            let normalizedHost = host.lowercased()
+            return normalizedHost == "api.openai.com" || normalizedHost.hasSuffix(".openai.com")
+                || isOpenRouterHost(normalizedHost)
+        case .anthropic, .gemini, .openAICodex, .osaurus:
+            return false
+        }
+    }
+
+    /// Stable per conversation so every turn and tool round of one chat hits
+    /// the same upstream cache shard. The Router validates
+    /// `[A-Za-z0-9._:-]{1,200}`; chat ids are UUIDs.
+    nonisolated static func promptCacheKey(forSession sessionId: String) -> String {
+        "osaurus-session-\(sessionId)"
+    }
+
+    nonisolated static func isOpenRouterHost(_ host: String) -> Bool {
+        let normalizedHost = host.lowercased()
+        return normalizedHost == OpenRouterOAuthService.Attribution.host
+            || normalizedHost.hasSuffix("." + OpenRouterOAuthService.Attribution.host)
+    }
+
+    /// Adds the session cache key (allowlisted providers) and OpenRouter's
+    /// `session_id` sticky routing. No field is added without a chat id, so
+    /// one-off requests (titles, Memory) stay byte-identical to before.
+    nonisolated static func applyPromptCacheRouting(
+        provider: RemoteProvider?,
+        sessionId: String?,
+        into body: inout [String: Any]
+    ) {
+        guard let provider, let sessionId, !sessionId.isEmpty else { return }
+        if supportsPromptCacheKey(providerType: provider.providerType, host: provider.host) {
+            body["prompt_cache_key"] = promptCacheKey(forSession: sessionId)
+        }
+        if provider.providerType == .openaiLegacy, isOpenRouterHost(provider.host) {
+            body["session_id"] = sessionId
+        }
     }
 
     nonisolated static func unofferedToolResult(_ name: String) -> String {

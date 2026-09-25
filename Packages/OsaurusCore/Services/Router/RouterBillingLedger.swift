@@ -78,6 +78,8 @@ public final class RouterBillingLedger: @unchecked Sendable {
             tokenSource: summary.tokenSource,
             inputTokens: summary.inputTokens,
             outputTokens: summary.outputTokens,
+            cachedInputTokens: summary.cachedInputTokens,
+            cacheWriteTokens: summary.cacheWriteTokens,
             costMicro: summary.costMicro,
             status: summary.status,
             outcome: outcome,

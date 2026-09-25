@@ -30,6 +30,14 @@ struct RouterAccountUsageCenterView: View {
                     LazyVGrid(columns: [GridItem(.adaptive(minimum: 170))], spacing: 12) {
                         metric("Requests", String(snapshot.requestCount))
                         metric("Input tokens", snapshot.inputTokens.formatted())
+                        // Shown only once the router reports cache hits, so a
+                        // pre-cache router keeps the original metrics.
+                        if let cached = OsaurusRouter.formatCachedInputLabel(
+                            cachedTokens: snapshot.cachedInputTokens,
+                            inputTokens: snapshot.inputTokens
+                        ) {
+                            metric("Cached input", cached)
+                        }
                         metric("Output tokens", snapshot.outputTokens.formatted())
                         metric("Usage cost", OsaurusRouter.formatMicroAsCredits(String(snapshot.spentMicro)))
                         metric("Credits added", OsaurusRouter.formatMicroAsCredits(String(snapshot.creditedMicro)))
@@ -73,11 +81,19 @@ struct RouterAccountUsageCenterView: View {
         }
     }
 
+    private func usageTokenLine(_ item: OsaurusRouterUsageItem) -> String {
+        var line = "\(item.inputTokens.formatted()) in · \(item.outputTokens.formatted()) out"
+        if let cached = OsaurusRouter.formatCachedInputLabel(cachedTokens: item.cachedInputTokens) {
+            line += " · \(cached)"
+        }
+        return line
+    }
+
     private func usageRow(_ item: OsaurusRouterUsageItem) -> some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 Text(verbatim: item.model).font(.system(size: 12, weight: .semibold))
-                Text(verbatim: "\(item.inputTokens.formatted()) in · \(item.outputTokens.formatted()) out")
+                Text(verbatim: usageTokenLine(item))
                     .font(.system(size: 11)).foregroundColor(theme.secondaryText)
             }
             Spacer()
