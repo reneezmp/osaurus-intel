@@ -30,7 +30,7 @@ display a terminal failed tool result, and perform no side effect. Do not
       genuinely offered to the disposable agent.
 - [x] Disable the plugin/tool while keeping the chat open, then explicitly ask
       for `search_memory` again.
-- [ ] The stale request ends with a visible failed/rejected tool card and a
+- [x] The stale request ends with a visible failed/rejected tool card and a
       concise security error. It must not spin forever or query the vault.
 - [x] Re-enable the plugin, start a fresh chat, and verify the tool works again.
 
@@ -75,7 +75,7 @@ behavior passed; the all-tools-off output is not an executed plugin call.
 
 ### 5. Memory provider and Ventura UI
 
-- [ ] Distill once with `osaurus/qwen-3-8-max`. OpenAI-compatible SSE returned
+- [x] Distill once with `osaurus/qwen-3-8-max`. OpenAI-compatible SSE returned
       despite `stream: false` and content arrays of text parts both decode into
       non-empty text; malformed/textless responses still fail visibly and keep
       pending work recoverable.
@@ -97,10 +97,10 @@ realistic failing fixture before changing the decoder.
 
 - [x] Admit exactly one disposable target and model. In a fresh Orchestrator
       chat ask which agents it can delegate to.
-- [ ] It names the admitted target and model and can use the exact target UUID
+- [x] It names the admitted target and model and can use the exact target UUID
       supplied in its private fixed prompt; it does not claim there is no roster
       or ask the user to discover an internal UUID.
-- [ ] Remove the target, start a fresh chat, and verify the roster is empty and
+- [x] Remove the target, start a fresh chat, and verify the roster is empty and
       delegation fails closed.
 
 **Observed:** the fresh built-in chat's private prompt reported an empty
@@ -165,11 +165,11 @@ paid retry is added.
 
 #### Next Qwen output-budget retest
 
-- [ ] Install the next Intel candidate and distill one short pending session
+- [x] Install the next Intel candidate and distill one short pending session
       with `osaurus/qwen-3-8-max`. Confirm a parsed episode is stored, not merely
       a successful HTTP response. This can spend Router credits; no automatic
       second request should occur.
-- [ ] If it remains empty, copy only the new metadata-only `SSE shape:` line
+- [x] If it remains empty, copy only the new metadata-only `SSE shape:` line
       and the error label. A repeated `finish_reason=length` at 4,096 means
       this model/provider may need a different reasoning control or a larger
       explicitly approved budget; do not silently retry or accept an empty
@@ -186,6 +186,10 @@ paid retry is added.
       from the visible answer. Repeat a normal reply with `deepseek-v4-pro`.
 - [x] Existing local DeepSeek V4 bundles or historical saved configuration still
       resolve instead of being invalidated by the hosted-API rename.
+
+**Rosy result, 2026-09-25 (build `1.0.55`/`56`):** Renée reports every
+remaining check in this retest passed, including the Qwen 4,096-token
+distillation. This retest is closed.
 
 ## Automated evidence
 
