@@ -50,6 +50,34 @@ func ensureHighlightrTheme(for theme: any ThemeProtocol) {
     currentHighlightrTheme = resolved
 }
 
+/// Background colors keyed by resolved Highlightr theme name. Reading the
+/// background for a theme other than the active one requires switching the
+/// shared highlighter (a JavaScriptCore call), so callers that only need the
+/// color, like the theme editor preview, should not pay that on every body
+/// evaluation. Upstream `11f26f9a8`.
+nonisolated(unsafe) private var highlightrBackgroundColorCache: [String: NSColor] = [:]
+
+/// Returns the background color of the Highlightr theme `theme` resolves to,
+/// without leaving the shared highlighter switched away from whatever theme
+/// it was on. Memoized per theme name after the first lookup.
+func highlightrThemeBackgroundColor(for theme: any ThemeProtocol) -> Color {
+    let resolved =
+        theme.codeHighlightTheme
+        ?? (theme.isDark ? defaultDarkHighlightTheme : defaultLightHighlightTheme)
+    if let cached = highlightrBackgroundColorCache[resolved] {
+        return Color(cached)
+    }
+    let previous = currentHighlightrTheme
+    ensureHighlightrTheme(for: theme)
+    let bg = sharedHighlightr?.theme.themeBackgroundColor ?? NSColor(white: 0.1, alpha: 1)
+    highlightrBackgroundColorCache[resolved] = bg
+    if previous != currentHighlightrTheme {
+        sharedHighlightr?.setTheme(to: previous)
+        currentHighlightrTheme = previous
+    }
+    return Color(bg)
+}
+
 /// Returns the background color from the current Highlightr theme as a SwiftUI Color.
 /// Falls back to a sensible default if unavailable.
 func highlightrThemeBackgroundColor() -> Color {

@@ -1116,8 +1116,8 @@ private struct ThemePreviewArt: View, Equatable {
         switch background.kind {
         case .solid(let color):
             color
-        case .gradient(let colors):
-            LinearGradient(colors: colors, startPoint: .top, endPoint: .bottom)
+        case .gradient(let colors, let start, let end):
+            LinearGradient(colors: colors, startPoint: start, endPoint: end)
         case .image:
             if let cachedImage {
                 Image(nsImage: cachedImage)
@@ -1138,7 +1138,7 @@ private struct ThemePreviewArt: View, Equatable {
     struct BackgroundDescriptor: Equatable {
         enum Kind: Equatable {
             case solid(Color)
-            case gradient([Color])
+            case gradient([Color], start: UnitPoint, end: UnitPoint)
             case image
         }
 
@@ -1155,7 +1155,8 @@ private struct ThemePreviewArt: View, Equatable {
                 let hexes =
                     theme.background.gradientColors
                     ?? [theme.colors.primaryBackground, theme.colors.secondaryBackground]
-                self.kind = .gradient(hexes.map { Color(themeHex: $0) })
+                let points = theme.background.gradientUnitPoints
+                self.kind = .gradient(hexes.map { Color(themeHex: $0) }, start: points.start, end: points.end)
             case .image:
                 self.kind = .image
             }
