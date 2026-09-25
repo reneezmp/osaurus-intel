@@ -102,6 +102,40 @@
         }
       }
     },
+    "Check Spelling While Typing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Rechtschreibung während der Eingabe prüfen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "입력 중 맞춤법 검사"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Проверять орфографию при вводе"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入时检查拼写"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "輸入時檢查拼字"
+          }
+        }
+      }
+    },
     "Color %lld" : {
       "comment" : "Auto-extracted format-string key (Apple String.LocalizationValue canonical form).",
       "extractionState" : "manual",
@@ -774,6 +808,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "關閉「跟隨系統強調色」以選擇自訂強調色。"
+          }
+        }
+      }
+    },
+    "Typing" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eingabe"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入"
+          }
+        }
+      }
+    },
+    "Underline misspelled words in the chat input and offer suggestions on right-click. Text is never corrected automatically." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Falsch geschriebene Wörter in der Chat-Eingabe unterstreichen und per Rechtsklick Vorschläge anbieten. Text wird nie automatisch korrigiert."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键时提供建议。文本永远不会被自动更正。"
           }
         }
       }

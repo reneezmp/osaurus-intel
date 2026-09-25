@@ -49,6 +49,9 @@ struct ConfigurationView: View {
     /// it's excluded from the debounced save baseline. Upstream e0eeba12.
     @AppStorage(NewChatShortcutSetting.defaultsKey)
     private var cmdNStartsNewChatInCurrentWindow: Bool = false
+    /// Spell checking in the chat composer, applied live (upstream 4680ce594).
+    @AppStorage(ComposerSpellCheckSetting.defaultsKey)
+    private var composerSpellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
     /// Master switch for AI-generated empty-state greetings. Defaults to
     /// OFF; users opt in here. Per-agent overrides on
     /// `AgentSettings.generativeGreetingsEnabled` still win when set.
@@ -420,6 +423,18 @@ struct ConfigurationView: View {
                                                 isOn: $cmdNStartsNewChatInCurrentWindow
                                             )
                                         }
+                                    }
+
+                                    SettingsDivider()
+
+                                    SettingsSubsection(label: "Typing") {
+                                        SettingsToggle(
+                                            title: L("Check Spelling While Typing"),
+                                            description: L(
+                                                "Underline misspelled words in the chat input and offer suggestions on right-click. Text is never corrected automatically."
+                                            ),
+                                            isOn: $composerSpellCheckEnabled
+                                        )
                                     }
 
                                     SettingsDivider()

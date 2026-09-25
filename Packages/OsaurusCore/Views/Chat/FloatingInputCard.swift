@@ -60,6 +60,8 @@ struct FloatingInputCard: View {
     var onCancelQueued: (() -> Void)?
     @ObservedObject var folderState: ChatFolderState
     @ObservedObject private var recentFolders = RecentFoldersStore.shared
+    @AppStorage(ComposerSpellCheckSetting.defaultsKey)
+    private var spellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
     /// Fired on every keystroke with the composer's current text, so the
     /// session can keep a draft mirror for stash/restore across chat and
     /// agent switches without re-rendering per key (upstream 65cbb73e0).
@@ -2927,6 +2929,7 @@ extension FloatingInputCard {
             isComposing: $isComposing,
             maxHeight: maxHeight,
             focusController: textViewFocusController,
+            spellCheckEnabled: spellCheckEnabled,
             onCommit: {
                 if showSlashPopup {
                     let cmds = slashFilteredCommands
