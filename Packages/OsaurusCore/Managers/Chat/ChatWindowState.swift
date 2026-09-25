@@ -674,6 +674,10 @@ final class ChatWindowState: ObservableObject {
     /// stop any speech, persist the current turns, repoint every per-agent
     /// piece of window state, then reset the session under the new agent.
     func switchAgent(to newAgentId: UUID) {
+        // Picking an agent means "show me this agent's chats": dismiss the
+        // project page even when the agent is already active, otherwise the
+        // early return leaves the page covering the chat (upstream ee9adf6ae).
+        openProjectId = nil
         guard newAgentId != agentId else { return }
         TTSService.shared.stop()
         if !session.turns.isEmpty { session.save() }
