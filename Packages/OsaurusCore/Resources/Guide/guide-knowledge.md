@@ -10,7 +10,7 @@ Knowledge is what you teach your agents: a library of your own documents (SOPs, 
 
 ## Setup
 
-1. Management (⌘⇧M) → Knowledge → **Add Collection** — point it at any folder of guides, templates, standards, or an exported wiki.
+1. Settings… (⌘,) → Knowledge → **Add Collection** — point it at any folder of guides, templates, standards, or an exported wiki.
 2. Open a custom agent → Abilities → Overview → **Knowledge** — enable the toggle and choose the collections that agent may use.
 3. Chat. The agent can search, list, and read the granted library when a task calls for it.
 
