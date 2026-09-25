@@ -89,3 +89,19 @@ struct MCPArgumentsErrorTests {
         }
     }
 }
+
+/// Intel is text-only: MCP image/audio results must not paste base64 into
+/// the model-visible tool result (upstream 0901780cc routes them as media).
+struct MCPMediaResultTextOnlyTests {
+    @Test func imageResultOmitsBase64Payload() throws {
+        let payload = String(repeating: "A", count: 40_000)
+        let text = MCPProviderTool.convertMCPContent([
+            .text(text: "caption", annotations: nil, _meta: nil),
+            .image(data: payload, mimeType: "image/png", annotations: nil, _meta: nil),
+        ])
+        #expect(!text.contains(payload))
+        #expect(text.contains("png"))
+        #expect(text.contains("caption"))
+        #expect(text.count < 1_000)
+    }
+}

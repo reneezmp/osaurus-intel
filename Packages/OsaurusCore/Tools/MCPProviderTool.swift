@@ -364,6 +364,14 @@ extension MCPProviderTool {
 // MARK: - MCP Content to String Conversion
 
 extension MCPProviderTool {
+    /// Placeholder for an MCP media result Intel cannot show to the model.
+    static func mediaOmittedNote(kind: String, base64: String, mimeType: String) -> String {
+        let bytes = base64.count * 3 / 4
+        let size = ByteCountFormatter.string(fromByteCount: Int64(bytes), countStyle: .file)
+        return "The tool returned \(kind) content (\(mimeType), about \(size)). "
+            + "Media is not passed to the model in this build; describe the result without it."
+    }
+
     /// Convert MCP tool call result content to string response
     static func convertMCPContent(_ content: [MCP.Tool.Content]) -> String {
         var results: [[String: Any]] = []
@@ -372,17 +380,22 @@ extension MCPProviderTool {
             switch item {
             case .text(let text, _, _):
                 results.append(["type": "text", "content": text])
+            // Intel chat is text-only (no multimodal attachments), so raw
+            // base64 media must never be pasted into the tool result: one
+            // screenshot is ~1 MB of text the model would be billed for.
+            // Keep a compact, truthful placeholder instead. Upstream routes
+            // these through its multimodal bridge (0901780cc).
             case .image(let data, let mimeType, _, _):
                 results.append([
                     "type": "image",
-                    "data": data,
                     "mimeType": mimeType,
+                    "note": mediaOmittedNote(kind: "image", base64: data, mimeType: mimeType),
                 ])
             case .audio(let data, let mimeType, _, _):
                 results.append([
                     "type": "audio",
-                    "data": data,
                     "mimeType": mimeType,
+                    "note": mediaOmittedNote(kind: "audio", base64: data, mimeType: mimeType),
                 ])
             case .resource(let resource, _, _):
                 var result: [String: Any] = [
