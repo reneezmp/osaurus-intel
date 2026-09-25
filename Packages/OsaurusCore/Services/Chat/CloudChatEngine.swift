@@ -1144,7 +1144,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // model-generated chat titles came back blank. With no modelOptions,
         // applyReasoningMode disables thinking (fast, deterministic for titles).
         if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
-        if let temperature = request.temperature { body["temperature"] = temperature }
+        // OpenAI reasoning models (o-series, gpt-5*, gpt-6*) reject
+        // `temperature`; upstream strips it on the same predicate.
+        if let temperature = request.temperature, !Self.rejectsSamplingTemperature(modelId: endpoint.modelId) {
+            body["temperature"] = temperature
+        }
         applyReasoningMode(request, into: &body)
         Self.applyPromptCacheRouting(provider: endpoint.provider, sessionId: request.session_id, into: &body)
 
@@ -1296,6 +1300,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let candidates = ToolRegistry.shared.mcpExposedNames(forCanonical: name)
             .filter { offeredNames.contains($0) }
         return candidates.count == 1 ? candidates[0] : name
+    }
+
+    nonisolated static func rejectsSamplingTemperature(modelId: String) -> Bool {
+        OpenAIGPT6ReasoningProfile.matches(modelId: modelId)
+            || OpenAIReasoningProfile.matches(modelId: modelId)
     }
 
     // MARK: Prompt-cache routing (upstream 9b3336d68)

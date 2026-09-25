@@ -83,19 +83,20 @@ struct OpenAICodexOAuthServiceTests {
 
     @Test func supportedModels_allUseCodexSlugFormat() {
         // Mirrors the live `/models` filter: Codex-compatible slugs use a
-        // dotted version ("gpt-5.4-codex"), chat-only slugs use dashes
-        // ("gpt-5-4-thinking") and would 400 if invoked.
+        // dotted version ("gpt-5.4-codex") or a GPT-6 codename
+        // ("gpt-6-astra"); chat-only slugs ("gpt-5-4-thinking") would 400.
         for slug in OpenAICodexOAuthService.supportedModels {
-            let matches = slug.range(of: #"^gpt-\d+\.\d+"#, options: .regularExpression) != nil
+            let matches =
+                slug.range(of: OpenAICodexOAuthService.codexSlugPattern, options: .regularExpression) != nil
             #expect(matches, "static fallback slug \(slug) does not use Codex naming")
         }
     }
 
     @Test func catalogUsesCodexEndpointAndClientIdentity() {
         #expect(OpenAICodexOAuthService.modelsURL.path == "/backend-api/codex/models")
-        #expect(OpenAICodexOAuthService.codexClientVersion == "0.144.1")
+        #expect(OpenAICodexOAuthService.codexClientVersion == "0.155.1")
         let userAgent = OpenAICodexOAuthService.codexUserAgent()
-        #expect(userAgent.hasPrefix("codex_cli_rs/0.144.1 (Mac OS "))
+        #expect(userAgent.hasPrefix("codex_cli_rs/0.155.1 (Mac OS "))
         #expect(userAgent.hasSuffix(") unknown"))
     }
 

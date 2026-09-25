@@ -77,6 +77,7 @@ extension ModelProfile {
 enum ModelProfileRegistry {
     static let profiles: [any ModelProfile.Type] = [
         VeniceModelProfile.self,
+        OpenAIGPT6ReasoningProfile.self,
         OpenAIReasoningProfile.self,
         QwenThinkingProfile.self,
         NemotronThinkingProfile.self,
@@ -186,6 +187,43 @@ struct DSV4ReasoningProfile: ModelProfile {
             return "instruct"
         }
     }
+}
+
+// MARK: - OpenAI GPT-6 Reasoning Profile
+
+/// GPT-6 family (Astra) — `low` through `xhigh`, default `medium`. Astra
+/// rejects `none` and `minimal`, so the generic OpenAI profile's Minimal
+/// segment would 400 the request. `max` needs the documented official-route
+/// profile or live Codex catalog, which Intel does not carry. Upstream
+/// a0aaa945d.
+struct OpenAIGPT6ReasoningProfile: ModelProfile {
+    static let displayName = "Reasoning"
+
+    static func matches(modelId: String) -> Bool {
+        let bare = (modelId.split(separator: "/").last.map(String.init) ?? modelId).lowercased()
+        guard bare.hasPrefix("gpt-6") else { return false }
+        // Reject fused suffixes like a hypothetical "gpt-60".
+        let rest = bare.dropFirst("gpt-6".count)
+        return rest.isEmpty || rest.hasPrefix("-") || rest.hasPrefix(".")
+    }
+
+    static let options: [ModelOptionDefinition] = [
+        ModelOptionDefinition(
+            id: "reasoningEffort",
+            label: "Reasoning Effort",
+            icon: "brain",
+            kind: .segmented([
+                ModelOptionSegment(id: "low", label: "Low"),
+                ModelOptionSegment(id: "medium", label: "Medium"),
+                ModelOptionSegment(id: "high", label: "High"),
+                ModelOptionSegment(id: "xhigh", label: "Extra High"),
+            ])
+        )
+    ]
+
+    static let defaults: [String: ModelOptionValue] = [
+        "reasoningEffort": .string("medium")
+    ]
 }
 
 // MARK: - OpenAI Reasoning Profile

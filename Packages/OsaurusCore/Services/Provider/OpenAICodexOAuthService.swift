@@ -72,7 +72,7 @@ public enum OpenAICodexOAuthService {
     public static let codexBasePath = "/backend-api"
     public static let codexAPIBasePath = "\(codexBasePath)/codex"
     public static let modelsURL = URL(string: "https://\(codexBaseHost)\(codexAPIBasePath)/models")!
-    public static let codexClientVersion = "0.144.1"
+    public static let codexClientVersion = "0.155.1"
 
     private static let responsesLiteModels = OSAllocatedUnfairLock<Set<String>>(initialState: [])
 
@@ -140,6 +140,10 @@ public enum OpenAICodexOAuthService {
     /// available, but this list keeps the UI usable before sign-in and when the
     /// `/models` endpoint cannot be reached.
     public static let supportedModels: [String] = [
+        "gpt-6-astra",
+        "gpt-5.6",
+        "gpt-5.6-terra",
+        "gpt-5.6-luna",
         "gpt-5.5",
         "gpt-5.5-pro",
         "gpt-5.4",
@@ -208,11 +212,16 @@ public enum OpenAICodexOAuthService {
             return false
         }
 
-        // Codex slugs always use a dotted version (e.g. "gpt-5.4-codex").
-        // Chat-only slugs use dashes throughout (e.g. "gpt-5-4-thinking",
-        // "gpt-4o"). Match the dotted "<family>-<major>.<minor>" prefix.
-        return entry.slug.range(of: #"^gpt-\d+\.\d+"#, options: .regularExpression) != nil
+        // Codex slugs use either a dotted version ("gpt-5.4-codex",
+        // "gpt-5.6-terra") or, starting with GPT-6, a major version followed
+        // by a codename ("gpt-6-astra"). Chat-only slugs use a dashed minor
+        // version ("gpt-5-4-thinking") or a fused suffix ("gpt-4o"), neither
+        // of which matches. Upstream a0aaa945d.
+        return entry.slug.range(of: codexSlugPattern, options: .regularExpression) != nil
     }
+
+    /// Slug shape accepted by the Codex Responses backend.
+    static let codexSlugPattern = #"^gpt-\d+(\.\d+|-[a-z])"#
 
     /// Convenience wrapper used by call sites that want a single "best
     /// available" list: prefer the live catalog when we have tokens, otherwise
