@@ -773,6 +773,14 @@ final class ChatWindowState: ObservableObject {
 
     var isProjectPageVisible: Bool { openProjectId != nil }
     func loadSession(_ sessionData: ChatSessionData) {
+        guard sessionData.id != session.sessionId else { return }
+        // One mutable owner per saved chat (upstream 979d53b40): if another
+        // window already shows it, bring that window forward instead of
+        // loading a competing copy here. Checked before touching this
+        // window's session so neither transcript is mutated.
+        if ChatWindowManager.shared.revealOpenSession(
+            sessionData.id, excludingWindowId: windowId
+        ) != nil { return }
         // Some UI surfaces may hand us a metadata-only row. Resolve the full
         // Intel session from its durable manager before loading so a later
         // incremental save cannot replace a stored transcript with an empty

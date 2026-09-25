@@ -1034,6 +1034,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         sessionData: ChatSessionData?,
         showImmediately: Bool = true
     ) -> UUID {
+        if let sessionId = sessionData?.id,
+            let owner = revealOpenSession(sessionId, showImmediately: showImmediately)
+        {
+            return owner
+        }
         let id = createWindow(agentId: agentId)
         if let sessionData, let state = windowStates[id] {
             state.loadSession(sessionData)
@@ -1044,6 +1049,37 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     func windowState(id: UUID) -> ChatWindowState? {
         windowStates[id]
     }
+
+    /// A persisted conversation has one mutable window owner. Hydrating a
+    /// second copy in another window lets either copy's saves overwrite the
+    /// other's later turns. Upstream `979d53b40`; Intel windows hold one
+    /// session each (no tabs), so ownership is the window's live session.
+    @discardableResult
+    func revealOpenSession(
+        _ sessionId: UUID,
+        excludingWindowId: UUID? = nil,
+        showImmediately: Bool = true
+    ) -> UUID? {
+        guard
+            let (id, _) = windowStates.first(where: {
+                $0.key != excludingWindowId && $0.value.session.sessionId == sessionId
+            })
+        else { return nil }
+        if showImmediately { showWindow(id: id) }
+        return id
+    }
+
+    #if DEBUG
+        /// Exercise ownership routing without constructing an NSWindow.
+        func withRegisteredWindowStateForTesting<T>(
+            _ state: ChatWindowState, _ body: () throws -> T
+        ) rethrows -> T {
+            let previous = windowStates[state.windowId]
+            windowStates[state.windowId] = state
+            defer { windowStates[state.windowId] = previous }
+            return try body()
+        }
+    #endif
 
     public func focusAllWindows() {
         for (_, window) in nsWindows {
