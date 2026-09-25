@@ -98,10 +98,10 @@ as of this audit**, unless the row explicitly says otherwise.
 | 7 | `6e26730bb` | Omit | Local-model residency/predicted memory warnings; no Intel local loader. |
 | 8 | `940d86a31` | Stage | Workspaces, shared agents, team billing: B1/B2 relay, identity, host grants, Router workspace schema 0041, billing. |
 | 9 | `f79b88a1c` | Stage | Native Seatbelt runner exit safety if an Intel sandbox runner is introduced. |
-| 10 | `4bf6ff744` | Split | Settings menu responsiveness can port; idle local-model residency is out of scope. |
+| 10 | `4bf6ff744` | Split | Settings menu responsiveness can port; idle local-model residency is out of scope. **N/A 2026-09-25**: local idle residency / server settings. |
 | 11 | `92fb38a15` | Stage | iMessage helper process-generation guard after B3 channel helper exists. |
 | 12 | `c44eb3b2d` | Omit | Spark local runtime/template pin; inspect generic HTTP slice only if local model API returns. |
-| 13 | `aaa359852` | Port | Show inherited sampling values honestly in Intel settings. |
+| 13 | `aaa359852` | Port | Show inherited sampling values honestly in Intel settings. **N/A 2026-09-25**: Intel's cloud stream does not send those sampling settings. |
 | 14 | `c6bb483e5` | Stage | Preserve unknown versus zero child-token telemetry when native subagent sessions land. |
 | 15 | `d8e9cd60c` | Stage | Workspace UX/roster improvements follow #8 backend. |
 | 16 | `ff92720ee` | Port | Fix MCP `NSNumber` 0/1 boolean bridging and floating-point distinction; directly applicable. **Ported 2026-09-25** (`e84a7ba21`). |
@@ -119,21 +119,21 @@ as of this audit**, unless the row explicitly says otherwise.
 | 28 | `a48a58cf4` | Stage | Delegated child file writes only after native child lifecycle, folder grants, and per-child permission policy. |
 | 29 | `00c613e1b` | Omit | Flash QSA vMLX pin only. |
 | 30 | `2e8e57d8d` | Omit | Flash Next vMLX pin only. |
-| 31 | `7e90a7269` | Port | History modal filters can use Intel session-source/agent metadata. |
-| 32 | `ee9adf6ae` | Port | Dismiss Projects page when selecting an agent from sidebar. |
+| 31 | `7e90a7269` | Port | History modal filters can use Intel session-source/agent metadata. **N/A 2026-09-25**: Intel has no chat-history dialog. |
+| 32 | `ee9adf6ae` | Port | Dismiss Projects page when selecting an agent from sidebar. **Ported 2026-09-25** (`4f1368b11`). |
 | 33 | `f0c6f8e9a` | Omit | Native local-model MTP controls and server runtime setting. |
-| 34 | `d9d68157a` | Split | Restore small-screen chat minimum; obsolete workspace intro sizing follows #27. |
+| 34 | `d9d68157a` | Split | Restore small-screen chat minimum; obsolete workspace intro sizing follows #27. **Ported 2026-09-25** with #43 (`4e90ed017`). |
 | 35 | `65cbb73e0` | Port | Persist unsent composer drafts across chat/agent switches in Intel chat state. **Ported 2026-09-25** (`ffb1dc65a`) to Intel's local-text composer; in-memory as upstream. |
 | 36 | `51c8c1ba5` | Omit | Qwen Flash vMLX cache pin only. |
-| 37 | `e4734a216` | Split | Queue permission dialogs in Intel tool loop; sibling spawn-wave semantics need native child runtime. |
+| 37 | `e4734a216` | Split | Queue permission dialogs in Intel tool loop; sibling spawn-wave semantics need native child runtime. **Intel slice 2026-09-25** (`e3bb2c82b`): FIFO approval prompts with post-wait policy revalidation; fixes one Enter approving two concurrent prompts. Spawn waves N/A. |
 | 38 | `80e1e3d13` | Omit | Upstream 0.25.1 appcast. |
 | 39 | `74b326f22` | Omit | Flash Next local runtime pin and local token-rate memoizer. |
-| 40 | `4680ce594` | Split | Per-agent drafts, badges, spell check, sidebar highlights can port; subagent labels need native children. |
+| 40 | `4680ce594` | Split | Per-agent drafts, badges, spell check, sidebar highlights can port; subagent labels need native children. **Spell-check slice 2026-09-25** (`8a52c3929`); per-agent drafts covered by #35; rest targets tabs/workspaces/subagents. |
 | 41 | `8fcd06156` | Omit | Freed GPU-buffer admission for local child models. |
 | 42 | `246609942` | Stage | Computer Use audit/readiness/verified completion needs Intel Ventura Accessibility and capture capability spike. |
-| 43 | `3a17bc04d` | Port | Orchestrator row selection and small-screen chat geometry fit current Intel UI. |
-| 44 | `b2bffc63b` | Split | Label current native-Mac tool approval surface; VM label only after sandbox. |
-| 45 | `f158416e2` | Port | Right-click chat tab actions and project naming UI. |
+| 43 | `3a17bc04d` | Port | Orchestrator row selection and small-screen chat geometry fit current Intel UI. **Ported 2026-09-25** (`4e90ed017`): per-window chat floor clamp; the Orchestrator gesture bug is absent on Intel. |
+| 44 | `b2bffc63b` | Split | Label current native-Mac tool approval surface; VM label only after sandbox. **N/A 2026-09-25**: Intel runs tools on one surface (native Mac); nothing to disambiguate. |
+| 45 | `f158416e2` | Port | Right-click chat tab actions and project naming UI. **N/A 2026-09-25**: tab-strip only; Intel has no tabs. |
 | 46 | `40be05cb8` | Stage | Claude plugin GitHub import after Intel plugin/skill installer route is restored; CLI integration already works. |
 | 47 | `879a6a6a9` | Omit | Qwen AR vMLX scheduling pin. |
 | 48 | `dec325484` | Stage | Osaurus ID/Workspace refresh depends on Router identity and Workspaces service. |
@@ -142,28 +142,28 @@ as of this audit**, unless the row explicitly says otherwise.
 | 51 | `9beb51ef7` | Omit | Upstream 0.25.2 appcast. |
 | 52 | `219640c82` | Port | Repair incomplete chat-history schema/turn persistence in Intel's compiled session store; do not copy upstream SQL migration blindly. **Intel analogue fixed 2026-09-25** (`5bccc4bef`): no SQLite open path on Intel, but queued whole-session metadata writes could overwrite a newer turn; per-session write generations now drop stale snapshots. |
 | 53 | `c240123ed` | Port | Persist open chat tabs through window close/relaunch using Intel chat store. **Intel analogue 2026-09-25** (`4abd1671f`): no tabs, so the last saved chat a window showed reopens once when chat is summoned with no window. |
-| 54 | `7842b4713` | Split | Provider/sidebar QoL can port; keep Intel provider editor and scoped-tab differences. |
-| 55 | `83eac58f0` | Split | Main-thread theme/content/agent work can port; MLX model and sandbox-only parts wait or omit. |
+| 54 | `7842b4713` | Split | Provider/sidebar QoL can port; keep Intel provider editor and scoped-tab differences. **N/A 2026-09-25**: Intel sidebar has no agent rows; provider-picker regrouping not pursued. |
+| 55 | `83eac58f0` | Split | Main-thread theme/content/agent work can port; MLX model and sandbox-only parts wait or omit. **Theme slice 2026-09-25** (`09c433587`). ModelProfileRegistry memo deliberately not ported (AutoThinkingProfile is runtime-dependent; see #119). |
 | 56 | `dc1a250f7` | Omit | Installed local vision/MLX bundle evidence and admission. |
 | 57 | `fb043ae7d` | Stage | LAN-discovered shared agents in sidebar after B1/B2 peer identity and grants. |
 | 58 | `a6554f94b` | Superseded | Intro sequencing belongs to removed dialog; inline replacement `16ec3a7a3` is the workspace UX source. |
 | 59 | `94af9d41a` | Stage | n8n secure pairing code requires B3 ingress, pairing, local network address, and credential store. |
 | 60 | `2ad1d93dc` | Stage | Disable folder attachment for shared-agent chats after shared-session ownership exists. |
-| 61 | `210685eb9` | Port | Fit Intel Settings window to Rosy's smaller Ventura displays; preserve traffic-light frame-root rule. |
+| 61 | `210685eb9` | Port | Fit Intel Settings window to Rosy's smaller Ventura displays; preserve traffic-light frame-root rule. **Ported 2026-09-25** (`edfa4d64f`) into Intel's AppDelegate Settings window (WindowManager excluded). |
 | 62 | `d18c54278` | Omit | Upstream 0.25.3 appcast. |
-| 63 | `3034800ef` | Port | Recent folders and agent working-folder setting; keep explicit chat/project folder precedence. |
+| 63 | `3034800ef` | Port | Recent folders and agent working-folder setting; keep explicit chat/project folder precedence. **Adapted 2026-09-25** (`c38cbc96f`): path-only store; recents in the folder chip context menu. Agent-editor list waits for #25. |
 | 64 | `ad4de6abd` | Omit | MLX 0.32.2/MTP local-runtime policy. |
 | 65 | `6e67eec21` | Omit | Local embedding-model endpoint substitutes Potion; Intel has no compiled local embeddings endpoint. Revisit if exposed. |
 | 66 | `7666cc6ba` | Port | Daily/cron consumed-slot anchor, catch-up and overlap protection in compiled `ScheduleManager`. **Ported 2026-09-25** (`ae337cc0f`): consumed-slot anchor, latest-due catch-up, dispatch-time overlap guard, honest Run Now result. Run-history test omitted (no Intel run history). |
 | 67 | `4a78f169d` | Stage | Multi-device agent addresses/owner redeem need B1/B2 identity, relay, Keychain migration. |
 | 68 | `163a97552` | Port | Centered themed declarative-config approval modal fits Intel Gate 5B. |
 | 69 | `3fd0e69a3` | Omit | Installed MLX vision-bundle discovery/admission and local model-format checks. |
-| 70 | `ac96bcbb4` | Split | History/tab/agent QoL can port; ModelManager suggested local-model changes do not. |
+| 70 | `ac96bcbb4` | Split | History/tab/agent QoL can port; ModelManager suggested local-model changes do not. **N/A 2026-09-25**: tabs, history dialog, workspaces. |
 | 71 | `338425936` | Stage | n8n setup readiness follows B3 ingress and #59 pairing; prevent unusable codes. |
 | 72 | `9b3336d68` | Port | Provider-specific prompt-cache keys/TTL and cached token accounting in Intel CloudChatEngine, Router ledger, Credits UI; never send unknown fields to generic gateways. **Intel slice 2026-09-25** (`76f906f8d`): per-chat `prompt_cache_key` (Router, Azure, OpenAI hosts, OpenRouter + `session_id`), Router cache split in usage rows/summary/ledger v3, usage-center Cached input. Anthropic/Gemini wires and the BYOK turn chip do not apply (Intel never surfaces the Router summary frame in chat). |
 | 73 | `6cf600fce` | Split | Xcode 27 theme/crypto compile corrections are feasible where Intel compiles the paths; package pin is not. Verify with Intel toolchain. |
 | 74 | `922bf3cfd` | Omit | Upstream arm64 release script plugin trust; Intel Rosy build has separate script. |
-| 75 | `ccab67125` | Port | Menu-bar Ask AI can open an Intel chat tab in the existing window. |
+| 75 | `ccab67125` | Port | Menu-bar Ask AI can open an Intel chat tab in the existing window. **Covered 2026-09-25**: Intel's Ask AI already focuses the existing chat window. |
 | 76 | `abfef96fa` | Omit | Upstream 0.25.4 appcast. |
 | 77 | `0b33e116e` | Omit | Raptor 0.6 local-model onboarding default. |
 | 78 | `417da91f0` | Superseded | SSD cache popup replaced by settings-only notice/clear flow in `5c674f087`; local cache itself absent. |
@@ -172,7 +172,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 81 | `05d291a5c` | Omit | Local vision processor, image/cache input, and vMLX admission. |
 | 82 | `225f102ab` | Omit | Resident local child RAM and external local-model tracking. |
 | 83 | `1bf922253` | Omit | MTP opt-in and native local runtime settings. |
-| 84 | `d73fd0939` | Split | Generic image chat completion/usage safety can port to Intel cloud Chat/API; native local usage math does not. |
+| 84 | `d73fd0939` | Split | Generic image chat completion/usage safety can port to Intel cloud Chat/API; native local usage math does not. **N/A 2026-09-25**: local runtime usage accounting. |
 | 85 | `39fc21b58` | Omit | Local model repair/download integrity and progress in removed model manager. |
 | 86 | `e20ffcfb0` | Split | Bounded Orchestrator UX and declarative approval polish can port; native spawn/sandbox/workspace simplification belongs to their later clusters. |
 | 87 | `156c5eee4` | Omit | Upstream 0.25.5 appcast. |
@@ -183,13 +183,13 @@ as of this audit**, unless the row explicitly says otherwise.
 | 92 | `ebabfb72a` | Omit | Complete native MLX tool-call batch mapping; Intel cloud engine owns remote batches separately. |
 | 93 | `437ca4257` | Stage | Privacy redaction fixes require an Intel cloud-path filter and compatible detector before enabling; portable span/skip fixes are reusable. |
 | 94 | `51ee70e3e` | Stage | Computer Use/AppleScript privacy and trace repair after those engines and privacy filter exist. |
-| 95 | `66ea84b91` | Port | Delay Sparkle check until chat readiness rather than Settings, adapting Intel window lifecycle. |
-| 96 | `a188a57e4` | Port | Only show the stuck composer chip when Intel run progress is actually silent. |
-| 97 | `1bbc984f9` | Port | Prevent repeated toolbar taps from stacking chat-history dialogs. |
-| 98 | `8ef1a9418` | Port | Warn before Add Model discards an agent-creation draft. |
+| 95 | `66ea84b91` | Port | Delay Sparkle check until chat readiness rather than Settings, adapting Intel window lifecycle. **Ported 2026-09-25** (`439b2de28`): Intel previously checked for updates only when Settings opened. |
+| 96 | `a188a57e4` | Port | Only show the stuck composer chip when Intel run progress is actually silent. **N/A 2026-09-25**: Intel has no composer stuck chip. |
+| 97 | `1bbc984f9` | Port | Prevent repeated toolbar taps from stacking chat-history dialogs. **N/A 2026-09-25**: Intel has no chat-history dialog. |
+| 98 | `8ef1a9418` | Port | Warn before Add Model discards an agent-creation draft. **Adapted 2026-09-25** (`439b2de28`): Intel's picker offers Add Provider → Providers tab; the editor confirms before discarding a draft. |
 | 99 | `78396083b` | Omit | Upstream 0.25.6 appcast. |
 | 100 | `4c17cba54` | Superseded | SSD-cache popup preference retired by `5c674f087`; no Intel cache surface. |
-| 101 | `4a329449b` | Port | Keep tab strip stable and clear of sidebar during window resize. |
+| 101 | `4a329449b` | Port | Keep tab strip stable and clear of sidebar during window resize. **N/A 2026-09-25**: Intel has no tab strip. |
 | 102 | `0901780cc` | Port | Preserve MCP image result payloads in Intel chat/history; account for cloud-provider image wire formats. **Intel analogue 2026-09-25** (`1b3104f92`): Intel is text-only; MCP image/audio base64 is replaced by a size/type placeholder instead of being billed as text. |
 | 103 | `61ba32da8` | Omit | New agent-count product telemetry is not an Intel feature; no user benefit or requested cohort analytics. |
 | 104 | `2d715b51a` | Omit | Bonsai2/native Qwen tokenizer runtime pin. |
@@ -198,26 +198,26 @@ as of this audit**, unless the row explicitly says otherwise.
 | 107 | `97a390380` | Omit | Buffered native vMLX tool-stream cancellation; Intel cloud stream cancellation needs separate audit. |
 | 108 | `fabd1f043` | Omit | Explicit Gemma native-media tool selection/pin. |
 | 109 | `9222379e3` | Stage | Unified parent handoff after native text/image/other child kinds; preserve bounded Intel delegation separately. |
-| 110 | `ac169df39` | Port | Extend compiled `ChatToolChoicePolicy` no-tool language before Intel tool selection. |
+| 110 | `ac169df39` | Port | Extend compiled `ChatToolChoicePolicy` no-tool language before Intel tool selection. **N/A 2026-09-25**: nothing in Intel calls `ChatToolChoicePolicy`; CloudChatEngine always sends `tool_choice: auto`. Revisit if Intel adopts the policy. |
 | 111 | `08a4049ab` | Omit | Loaded local-bundle sampling defaults and MLX batch adapter. |
 | 112 | `99a87c20f` | Stage | Image/compaction parent residency handoff after child and local-residency runtime. |
-| 113 | `cc1823517` | Split | Composer/sidebar/markdown main-thread fixes can port; local vision/model path segment does not. |
+| 113 | `cc1823517` | Split | Composer/sidebar/markdown main-thread fixes can port; local vision/model path segment does not. **Paths slice 2026-09-25** (`09c433587`): `ProcessEnvironment` getenv lookups. |
 | 114 | `b8b18b7b7` | Omit | Bonsai vMLX loading/media-prefill pin. |
-| 115 | `7802bcd49` | Port | Rehydrate persisted document text in Intel chat/warm-up and keep security bounds. |
+| 115 | `7802bcd49` | Port | Rehydrate persisted document text in Intel chat/warm-up and keep security bounds. **Ported 2026-09-25** (`edfa4d64f`); upstream test file is excluded on Intel for unrelated reasons. |
 | 116 | `0ef3d8335` | Stage | Sandbox provisioning attribution/quit-time VM cleanup after an Intel sandbox backend exists. |
 | 117 | `a916daee0` | Omit | Bonsai FP16/FP32 local runtime pin. |
 | 118 | `3d0a0a795` | Omit | Upstream 0.25.8 appcast. |
 | 119 | `56b3eb502` | Split | Preserve reasoning rail on Intel cold cloud send/bounded child; native model/child controls need later runtime. **Covered 2026-09-25**: Intel's `ModelProfileRegistry` does not memoize, and cloud options load synchronously on model selection, so the cold first-send loss does not reproduce. |
-| 120 | `13cc78ae3` | Port | Compact dispatch source badge for scheduled/watched Intel chats instead of exposing raw envelope. |
+| 120 | `13cc78ae3` | Port | Compact dispatch source badge for scheduled/watched Intel chats instead of exposing raw envelope. **Intel analogue 2026-09-25** (`7c36f34c2`): only Intel's watcher framing exists; stripped for display via shared constants. |
 | 121 | `f44c9c771` | Omit | Empty upstream commit (tree identical to parent); no patch to port. |
 | 122 | `a0aaa945d` | Split | DeepSeek Flash slug/reasoning slice ported in build 53; GPT-6 Astra Codex OAuth discovery/fallback, official API context/reasoning profile, and Claude Opus 5 sampler omission remain to port. **Remainder ported 2026-09-25** (`b554b4bb0`): Codex GPT-6 slug rule, fallback list incl. 5.6-luna (Intel already sends the Codex UA), client 0.155.1, GPT-6 effort profile, no `temperature` to reasoning models. Official-API context table and documented `max` profiles need upstream's GPT-5.x capability layer. |
 | 123 | `ef26b55b7` | Stage | n8n pending approval card/preset allowlists after B3 signed ingress and pairing. |
-| 124 | `dbab94a77` | Port | Avoid main-thread hang in selectable chat text hit testing; Intel has same view. |
+| 124 | `dbab94a77` | Port | Avoid main-thread hang in selectable chat text hit testing; Intel has same view. **Ported 2026-09-25** (`edfa4d64f`). |
 | 125 | `c4320c825` | Omit | Upstream 0.25.9 appcast. |
 | 126 | `15374269f` | Stage | Router cache-stat getter hang fix when #72 cache telemetry and its chat property are present. |
 | 127 | `289a52272` | Omit | Native local generation-output relay step scoping; Intel cloud engine has separate streaming. |
 | 128 | `f1ad85c42` | Omit | Install-cohort/age retention telemetry does not serve current Intel product and needs separate privacy decision. |
-| 129 | `dc6a9013c` | Port | Correct hover/favorite controls on bottom model-picker rows. |
+| 129 | `dc6a9013c` | Port | Correct hover/favorite controls on bottom model-picker rows. **N/A 2026-09-25**: Intel's compiled `ModelPickerView` is the non-table variant. |
 | 130 | `2ab74c0fd` | Superseded | Local SSD sizing/notices converge on settings-only `5c674f087`; no Intel local cache. |
 | 131 | `9631a3b41` | Port | Read-only authenticated `/credits/balance` can use Intel Router account client; require master-key/origin checks and no wallet mutation. **Staged 2026-09-25**: Intel's local HTTP server has no access-key authentication, and upstream requires a master key; do not expose the Router balance until Intel's local API authenticates callers. |
 | 132 | `a2dd43d30` | Stage | Channel follow-up tab lifetime and Focus Chat preference after B3 inbound relay. |
@@ -226,7 +226,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 135 | `3321cf6e5` | Omit | vMLX learned-resume/history checkpoint pin. |
 | 136 | `2ac423378` | Stage | Cloud-compatible context compaction, model fallback, preserved draft, visible failure, manual action; requires Intel compaction service/session integration. |
 | 137 | `b5c704f68` | Omit | Hang in local vision bundle path absent from Intel. |
-| 138 | `cb0dac4eb` | Port | Keep Intel cloud-run progress visible through final processing and label it “Finishing up…”. |
+| 138 | `cb0dac4eb` | Port | Keep Intel cloud-run progress visible through final processing and label it “Finishing up…”. **N/A 2026-09-25**: local vMLX engine tail. |
 | 139 | `19c6786e7` | Port | Normalize missing MCP object `properties` at ingest and provider schema encoding. **Ported 2026-09-25** (`e84a7ba21`) at MCP ingest and Intel's `ChatEngine.encodeTools`; upstream's `OpenAIAPI`/`RemoteProviderService` encoders are excluded here. |
 | 140 | `c1c4d712f` | Stage | Codex CLI local-provider card/Responses input shapes after Intel `/v1/responses` and server auth contract are audited. |
 | 141 | `3485efb41` | Omit | Hugging Face local-model deep link and token/download flow; no Intel model download manager. |
@@ -240,7 +240,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 149 | `a2388f323` | Omit | Date shift for Raptor Product Hunt campaign; campaign omitted by #145. |
 | 150 | `93513e8d6` | Port | Core Model first-token deadline, primary breaker, chat-model fallback on hang/unavailable, cancellation and distillation recovery; adapt out local MLX/Foundation assumptions for Ventura. **Ported with Intel policy 2026-09-25** (`a303bc3f7`): 150 s distill deadline and 10-minute Core Model breaker; only a not-billed unavailable primary (no endpoint/404) retries immediately on the chat model, a hung one is not re-sent. |
 | 151 | `bc7e2f628` | Omit | Upstream 0.25.12 appcast. |
-| 152 | `849bc4837` | Port | Correct nonexistent Settings shortcut and stale route names in Intel guides/help; respect actual Intel sidebar. |
+| 152 | `849bc4837` | Port | Correct nonexistent Settings shortcut and stale route names in Intel guides/help; respect actual Intel sidebar. **Intel slice 2026-09-25** (`699a42a4a`): Knowledge guide now quotes ⌘,. |
 | 153 | `c3eb4ef26` | Port | Move Markdown link opening off main-thread hit path; preserve URL safety. **Ported 2026-09-25** (`2d2606891`), applied cleanly. |
 | 154 | `70546416f` | Stage | Preserve runtime policy in isolated evals if Intel adopts that eval harness; test infrastructure, not shipped app behavior. |
 | 155 | `32a8b845d` | Omit | MiMo native local capabilities and resident allocator reuse. |
@@ -283,6 +283,12 @@ as of this audit**, unless the row explicitly says otherwise.
   #131 Staged behind local-API authentication; #91 deferred as its own
   project; #136 remains Stage. Gate: 1,141 tests in 171 suites, isolated
   root, x86_64 package build. Rosy acceptance pending.
+- **Smaller-fixes batch status (2026-09-25):** 15 ported or adapted, 1
+  Covered, 13 N/A with reasons in the rows. Still open as features, not
+  fixes: #49 Settings search, #68 approval modal, #86 Orchestrator polish,
+  #157/#158/#160 agent descriptions, #25/#4 agent working folder, #73 only
+  if a newer Xcode requires it, #170/#171 test patterns. Gate: 1,159 tests in
+  178 suites, x86_64 package build. Rosy acceptance pending.
 - **No promotion from this audit alone.** The user is testing build 53 now.
   Add any subsequent port to a new candidate and the focused Rosy checklist.
 

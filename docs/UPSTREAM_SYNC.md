@@ -1666,3 +1666,33 @@ Durable facts from this batch:
   account-bearing routes (e.g. `/credits/balance`) until it does.
 - **Intel already sends the Codex CLI user agent**, so Codex models gated on
   it (e.g. `gpt-5.6-luna`) are usable.
+
+### Upstream smaller-fixes batch — 2026-09-25
+
+Row outcomes are in `UPSTREAM_AUDIT_2026-09-25.md`. Gate: 1,159 tests in 178
+suites, isolated root, no live-data writes, x86_64 package build.
+
+Durable facts from this batch:
+
+- **Several Intel files keep upstream code in `#if !OSAURUS_INTEL` blocks**
+  (`ModelPickerView`, `ChatWindowState`, `ChatWindowManager`,
+  `ChatView`, `AgentsView`). A clean `git apply` can land in the dead
+  branch; always confirm the hunk is in the Intel `#else` section.
+- **Intel's compiled model picker is the non-table variant** and its add
+  action is *Add Provider* (Providers tab), not *Add Model*.
+- **Intel's Settings window is built in `AppDelegate`**, not
+  `WindowManager`; window-level fixes go there.
+- **Update checks**: before this batch Intel only checked for updates when
+  Settings opened, so Sparkle's 24 h cycle never armed in chat-only use. The
+  check now starts from launch once a chat window is shown.
+- **Tool approval prompts are FIFO** (`ToolPermissionPromptService`); the
+  single panel/key-monitor slots previously let one Enter approve two
+  concurrent prompts.
+- **Watcher framing strings are shared constants** on `WatcherManager`;
+  changing that text requires `IntelDispatchEnvelope` (display strip) to
+  keep matching, which the tests enforce.
+- **Do not memoize `ModelProfileRegistry.profile(for:)`** while
+  `AutoThinkingProfile` depends on runtime capability data.
+- New per-user settings live in `UserDefaults`: `RecentWorkingFolders`,
+  `chatComposerSpellCheckEnabled`, `intelLastOpenChat.v1`. Tests use private
+  suites and never the live domain.
