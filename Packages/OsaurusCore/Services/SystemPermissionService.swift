@@ -914,7 +914,11 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
     nonisolated static func debugTestCalendarEventKitAccess() -> String {
         let status = EKEventStore.authorizationStatus(for: .event)
         switch status {
-        case .authorized, .writeOnly:  // writeOnly shouldn't happen for us but covering it
+        case .writeOnly:
+            // Write-only (macOS 14+) cannot read events, so the calendar
+            // tools would fail; do not report it as granted (upstream 04e763bf7).
+            return "ERROR: Write-only access — grant Full Access in System Settings → Privacy & Security → Calendars"
+        case .authorized:
             let store = EKEventStore()
             // Try to fetch calendars to verify
             let calendars = store.calendars(for: .event)
@@ -940,7 +944,9 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
     nonisolated static func debugTestRemindersAccess() -> String {
         let status = EKEventStore.authorizationStatus(for: .reminder)
         switch status {
-        case .authorized, .writeOnly:
+        case .writeOnly:
+            return "ERROR: Write-only access — grant Full Access in System Settings → Privacy & Security → Reminders"
+        case .authorized:
             let store = EKEventStore()
             let calendars = store.calendars(for: .reminder)
             if !calendars.isEmpty {

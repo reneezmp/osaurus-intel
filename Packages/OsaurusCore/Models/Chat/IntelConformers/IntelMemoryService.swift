@@ -25,10 +25,32 @@
 
 import Foundation
 
+struct DistillDeadlineExceeded: LocalizedError {
+    var errorDescription: String? {
+        "The Memory model did not answer within \(Int(MemoryService.distillDeadline)) seconds"
+    }
+}
+
 public actor MemoryService {
     public static let shared = MemoryService()
 
     private let db = MemoryDatabase.shared
+
+    // MARK: Core-model breaker (Intel port of upstream 93513e8d6)
+    //
+    // Upstream falls back from a hung or unavailable core model to the chat
+    // model. Intel keeps its no-automatic-paid-retry rule: an UNAVAILABLE
+    // primary (no endpoint, HTTP 404) is retried once on the chat model because
+    // the failed request cannot have been billed; a HUNG primary only trips
+    // this breaker, so the pending signals are retried later on the chat model
+    // rather than re-sent immediately.
+    private var brokenCoreModel: String?
+    private var coreModelBrokenUntil: Date?
+    static let coreModelBreakerInterval: TimeInterval = 10 * 60
+    /// Bound on one distillation call. Longer than a healthy reasoning
+    /// response (Qwen's 4,096-token allowance included), shorter than the
+    /// transport's 300 s idle timeout.
+    static let distillDeadline: TimeInterval = 150
 
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         ISO8601DateFormatter()
@@ -512,7 +534,21 @@ public actor MemoryService {
         )
 
         do {
-            let response = try await generate(prompt: prompt, model: model)
+            var model = model
+            let response: String
+            do {
+                response = try await generate(prompt: prompt, model: model)
+            } catch {
+                switch await coreModelFailureAction(for: error, model: model) {
+                case .retry(let fallback):
+                    MemoryLogger.service.warning(
+                        "distill: core model \(model) unavailable; retrying once on chat model \(fallback)")
+                    model = fallback
+                    response = try await generate(prompt: prompt, model: model)
+                case .rethrow:
+                    throw error
+                }
+            }
             let parsed = parseDistillResponse(response)
             guard let episode = parsed.episode else {
                 MemoryLogger.service.warning("distill: no episode produced for \(conversationId)")
@@ -654,7 +690,9 @@ public actor MemoryService {
         // "mlx-community/Qwen3-8B-4bit") is NOT a remote-provider model and
         // MLX cannot run on this fork, so it must be validated exactly like
         // any other candidate rather than trusted just because it's set.
-        if let core = cfg.coreModelIdentifier, !core.isEmpty, isEligible(core) {
+        if let core = cfg.coreModelIdentifier, !core.isEmpty, isEligible(core),
+            !isCoreModelBroken(core)
+        {
             return core
         }
         if let def = cfg.defaultModel, !def.isEmpty, isEligible(def) {
@@ -665,6 +703,63 @@ public actor MemoryService {
         // configured. Already servable by construction — no validation needed.
         return bareModels.first
     }
+
+    private func isCoreModelBroken(_ model: String, now: Date = Date()) -> Bool {
+        guard brokenCoreModel == model, let until = coreModelBrokenUntil else { return false }
+        return now < until
+    }
+
+    enum CoreModelFailureAction: Equatable {
+        case retry(String)
+        case rethrow
+    }
+
+    enum CoreModelFailureKind: Equatable {
+        /// The request never reached a model that could bill it.
+        case unavailable
+        /// The request may have been accepted (and billed) but never answered.
+        case hung
+        case other
+    }
+
+    nonisolated static func classifyCoreModelFailure(_ error: Error) -> CoreModelFailureKind {
+        if error is CancellationError { return .other }
+        if error is DistillDeadlineExceeded { return .hung }
+        if let urlError = error as? URLError, urlError.code == .timedOut { return .hung }
+        if case CloudChatError.httpError(_, let status, _) = error, status == 404 { return .unavailable }
+        if let engineError = error as? ChatEngine.EngineError,
+            engineError.message.hasPrefix("No endpoint for model")
+        {
+            return .unavailable
+        }
+        return .other
+    }
+
+    /// Trips the breaker when the configured Core Model (not the chat
+    /// fallback) hangs or is unavailable, and names a not-billed retry target
+    /// for the unavailable case only.
+    private func coreModelFailureAction(for error: Error, model: String) async -> CoreModelFailureAction {
+        let cfg = ChatConfigurationStore.load()
+        guard let core = cfg.coreModelIdentifier, core == model else { return .rethrow }
+        let kind = Self.classifyCoreModelFailure(error)
+        guard kind != .other else { return .rethrow }
+        brokenCoreModel = core
+        coreModelBrokenUntil = Date().addingTimeInterval(Self.coreModelBreakerInterval)
+        guard kind == .unavailable, let fallback = await resolveDistillModel(), fallback != core else {
+            return .rethrow
+        }
+        return .retry(fallback)
+    }
+
+    #if DEBUG
+        func _setCoreModelBrokenForTesting(_ model: String?, until: Date?) {
+            brokenCoreModel = model
+            coreModelBrokenUntil = until
+        }
+        func _isCoreModelBrokenForTesting(_ model: String, now: Date) -> Bool {
+            isCoreModelBroken(model, now: now)
+        }
+    #endif
 
     /// When `resolveDistillModel()` returns nil, names the configured value
     /// that was rejected (core model preferred, then default model) — for
@@ -732,7 +827,19 @@ public actor MemoryService {
             // do not add an immediate retry of a potentially billed empty response.
             max_tokens: Self.distillationOutputTokenLimit(for: model)
         )
-        let response = try await engine.completeChat(request: request)
+        // Upstream's first-token deadline, adapted to Intel's non-streaming
+        // call: a hung provider must not hold the distill queue for the full
+        // transport timeout. Cancellation propagates to the request.
+        let response = try await withThrowingTaskGroup(of: ChatCompletionResponse.self) { group in
+            group.addTask { try await engine.completeChat(request: request) }
+            group.addTask {
+                try await Task.sleep(nanoseconds: UInt64(Self.distillDeadline * 1_000_000_000))
+                throw DistillDeadlineExceeded()
+            }
+            defer { group.cancelAll() }
+            guard let first = try await group.next() else { throw CancellationError() }
+            return first
+        }
         return response.choices.first?.message?.content ?? ""
     }
 

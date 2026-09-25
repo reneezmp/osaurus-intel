@@ -155,4 +155,48 @@ struct IntelMemoryDistillationRegressionTests {
         #expect(terminal?.result == result)
         #expect(result.contains("not offered"))
     }
+
+    // MARK: - Core-model fallback (upstream 93513e8d6, Intel policy)
+
+    @Test func unbilledCoreModelFailuresAreUnavailable() {
+        #expect(
+            MemoryService.classifyCoreModelFailure(
+                CloudChatError.httpError(provider: "Router", status: 404, message: "model not found")
+            ) == .unavailable
+        )
+        #expect(
+            MemoryService.classifyCoreModelFailure(
+                ChatEngine.EngineError(message: "No endpoint for model \"gone\". Add a provider")
+            ) == .unavailable
+        )
+    }
+
+    @Test func hungCoreModelTripsTheBreakerWithoutARetryClass() {
+        #expect(MemoryService.classifyCoreModelFailure(DistillDeadlineExceeded()) == .hung)
+        #expect(MemoryService.classifyCoreModelFailure(URLError(.timedOut)) == .hung)
+    }
+
+    @Test func cancellationAndBilledErrorsNeverFallBack() {
+        #expect(MemoryService.classifyCoreModelFailure(CancellationError()) == .other)
+        #expect(
+            MemoryService.classifyCoreModelFailure(
+                CloudChatError.httpError(provider: "Router", status: 500, message: "boom")
+            ) == .other
+        )
+        #expect(
+            MemoryService.classifyCoreModelFailure(
+                CloudChatError.outputLimit(provider: "Router", diagnostic: "finish=length")
+            ) == .other
+        )
+    }
+
+    @Test func breakerOnlyCoversTheBrokenModelUntilItExpires() async {
+        let service = MemoryService.shared
+        let now = Date()
+        await service._setCoreModelBrokenForTesting("core-a", until: now.addingTimeInterval(60))
+        defer { Task { await service._setCoreModelBrokenForTesting(nil, until: nil) } }
+        #expect(await service._isCoreModelBrokenForTesting("core-a", now: now))
+        #expect(!(await service._isCoreModelBrokenForTesting("core-b", now: now)))
+        #expect(!(await service._isCoreModelBrokenForTesting("core-a", now: now.addingTimeInterval(61))))
+    }
 }
