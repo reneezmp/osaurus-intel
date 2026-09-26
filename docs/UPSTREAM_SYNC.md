@@ -1765,3 +1765,10 @@ remote providers keep the no-synthesized-defaults rule.
 not the lost private key. A signature cannot sign new updates or yield the key.
 The rotation to `bYYJJqFx…` stands. Future sessions: identify such a file by
 its `edSignature=` prefix and appcast match without printing secrets.
+
+Candidate `1.0.57` (`58`) packages this sweep from `5132047c8` as
+`build/rosy-deploy/Osaurus-Intel-RC-VenturaControls-2026-09-26.zip`, SHA-256
+`6a89f273ec28135bf05bae3cc6a4deda3219a782fc42f0ef9250621a2fdc27b4`. Its manual
+scope is the "Follow-up retest" section of
+`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`. The next public release needs
+`BUILD_NUMBER` ≥ 59.

@@ -21,8 +21,8 @@ nothing here is accepted until checked on Rosy.
 - Round-trip checked: ZIP valid, macOS 13.0 minimum, canonical `~/.osaurus`,
   Sparkle key `bYYJJqFx…`, six framework symlinks kept, strict codesign passes
   with the stable Intel certificate requirement.
-- Rosy's build number is now `57`. The next public release must use
-  `BUILD_NUMBER` 58 or higher (see `UPSTREAM_SYNC.md` → Public release 1.0.55).
+- Rosy's build number is now `57` (then `58` with the follow-up candidate).
+  The next public release must use a higher `BUILD_NUMBER` (see `UPSTREAM_SYNC.md` → Public release 1.0.55).
 
 ## Before you start
 
@@ -250,6 +250,14 @@ themed-control sweep". The Sparkle file found on the Desktop
 the `bYYJJqFx…` key stays in use.
 
 ## Follow-up retest (next candidate)
+
+Candidate `1.0.57` (`58`), built from `5132047c8` on 2026-09-26:
+`build/rosy-deploy/Osaurus-Intel-RC-VenturaControls-2026-09-26.zip` (58 MB),
+SHA-256 `6a89f273ec28135bf05bae3cc6a4deda3219a782fc42f0ef9250621a2fdc27b4`.
+Round-trip checked as for `57` (ZIP valid, thin x86_64, macOS 13.0, canonical
+root, `bYYJJqFx…` key, six symlinks, strict codesign). Gate: 1,164 tests in 179
+suites, x86_64 build, no new missing localization keys. The next public release
+needs `BUILD_NUMBER` ≥ 59.
 
 - [ ] Settings → General: Capability Search shows Off/Default/… segments with
       readable text; the five checkboxes show their labels and tick marks.
