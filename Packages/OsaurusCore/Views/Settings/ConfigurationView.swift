@@ -329,13 +329,12 @@ struct ConfigurationView: View {
 
                                     SettingsSubsection(label: "Capability Search") {
                                         VStack(alignment: .leading, spacing: 10) {
-                                            Picker("", selection: $tempPreflightSearchMode) {
-                                                ForEach(PreflightSearchMode.allCases, id: \.self) { mode in
-                                                    Text(mode.rawValue.capitalized).tag(mode)
+                                            ThemedSegmentedPicker(
+                                                selection: $tempPreflightSearchMode,
+                                                options: PreflightSearchMode.allCases.map {
+                                                    ($0, $0.rawValue.capitalized)
                                                 }
-                                            }
-                                            .pickerStyle(.segmented)
-                                            .labelsHidden()
+                                            )
                                             .disabled(tempDisableTools)
 
                                             Text(tempPreflightSearchMode.helpText)
@@ -352,6 +351,7 @@ struct ConfigurationView: View {
                                                 Text("Disable tools", bundle: .module)
                                                     .font(.system(size: 12))
                                             }
+                                            .toggleStyle(ThemedCheckboxToggleStyle())
                                             Text(
                                                 "Send messages directly to the model with no tool specs or capability injection. Tools are off by default — enable them here or via the chat bar to let agents use built-in and plugin tools.",
                                                 bundle: .module
@@ -369,6 +369,7 @@ struct ConfigurationView: View {
                                                 Text("Enable memory", bundle: .module)
                                                     .font(.system(size: 12))
                                             }
+                                            .toggleStyle(ThemedCheckboxToggleStyle())
                                             Text(
                                                 "Inject persistent memory (identity, pinned facts, episodes) into the chat. A relevance gate decides whether memory is needed per-turn, with a single ~800 token budget when it is. Enable for agents that benefit from long-term context.",
                                                 bundle: .module
@@ -386,6 +387,7 @@ struct ConfigurationView: View {
                                                 Text("Enable clipboard monitoring", bundle: .module)
                                                     .font(.system(size: 12))
                                             }
+                                            .toggleStyle(ThemedCheckboxToggleStyle())
                                             Text(
                                                 "Automatically detect and offer text from any app as context. Includes 'grab selection' feature when summoning Osaurus.",
                                                 bundle: .module
@@ -403,6 +405,7 @@ struct ConfigurationView: View {
                                                 Text("Automatically name chats", bundle: .module)
                                                     .font(.system(size: 12))
                                             }
+                                            .toggleStyle(ThemedCheckboxToggleStyle())
                                             Text(
                                                 "After the first exchange, generate a short descriptive title for the chat instead of using the first message as the title.",
                                                 bundle: .module
@@ -446,6 +449,7 @@ struct ConfigurationView: View {
                                                     Text("AI-generated greetings", bundle: .module)
                                                         .font(.system(size: 12))
                                                 }
+                                                .toggleStyle(ThemedCheckboxToggleStyle())
                                                 Text(
                                                     "Off by default. When on, each empty state generates a fresh greeting + quick actions on the configured Core Model. The first generation can feel slow on small models like Foundation; the static greeting still paints instantly. Per-agent overrides in the Customization tab still win.",
                                                     bundle: .module
@@ -1869,8 +1873,7 @@ private struct AgentToolPermissionRow: View {
 
             Spacer()
 
-            Picker(
-                "",
+            ThemedSegmentedPicker(
                 selection: Binding(
                     get: { effectivePolicy },
                     set: { newValue in
@@ -1878,14 +1881,15 @@ private struct AgentToolPermissionRow: View {
                         configuredPolicy = toolRegistry.configuredPolicy(for: name)
                         onPolicyChange()
                     }
-                )
-            ) {
-                Text("Auto", bundle: .module).tag(ToolPermissionPolicy.auto)
-                Text("Ask", bundle: .module).tag(ToolPermissionPolicy.ask)
-                Text("Deny", bundle: .module).tag(ToolPermissionPolicy.deny)
-            }
-            .pickerStyle(.segmented)
-            .frame(width: 150)
+                ),
+                options: [
+                    (ToolPermissionPolicy.auto, "Auto"),
+                    (ToolPermissionPolicy.ask, "Ask"),
+                    (ToolPermissionPolicy.deny, "Deny"),
+                ],
+                fontSize: 11
+            )
+            .frame(width: 170)
         }
         .padding(.horizontal, 12)
         .padding(.vertical, 10)

@@ -415,7 +415,7 @@ public struct Attachment: Codable, Sendable, Equatable, Identifiable {
         case "docx", "doc": return "doc.text"
         case "xlsx", "xlsm", "xltx", "xltm", "xlsb", "xls", "csv", "tsv": return "tablecells"
         case "pptx", "pptm", "potx", "potm", "ppsx", "ppsm", "ppt": return "rectangle.on.rectangle"
-        case "md", "markdown": return "text.document"
+        case "md", "markdown": return "doc.text"  // the macOS 15 text-document symbol draws blank on Ventura
         case "json": return "curlybraces"
         case "xml", "html", "htm": return "chevron.left.forwardslash.chevron.right"
         case "rtf": return "doc.richtext"

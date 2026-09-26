@@ -67,7 +67,7 @@ struct AgentReorderSheet: View {
                 Text("Done", bundle: .module)
                     .font(.system(size: 13, weight: .medium))
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
             .keyboardShortcut(.defaultAction)
         }
         .padding(.horizontal, 20)

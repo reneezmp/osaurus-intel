@@ -1718,12 +1718,10 @@ private struct ProviderEditSheet: View {
             Text("Transport", bundle: .module)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
-            Picker("Transport", selection: $transport) {
-                Text("HTTP / SSE", bundle: .module).tag(MCPProviderTransport.http)
-                Text("Stdio", bundle: .module).tag(MCPProviderTransport.stdio)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ThemedSegmentedPicker(
+                selection: $transport,
+                options: [(MCPProviderTransport.http, "HTTP / SSE"), (MCPProviderTransport.stdio, "Stdio")]
+            )
         }
     }
 
@@ -1732,12 +1730,10 @@ private struct ProviderEditSheet: View {
             Text("Run in", bundle: .module)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
-            Picker("Run in", selection: $executionHost) {
-                Text("Sandbox", bundle: .module).tag(MCPProviderExecutionHost.sandbox)
-                Text("Host", bundle: .module).tag(MCPProviderExecutionHost.host)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ThemedSegmentedPicker(
+                selection: $executionHost,
+                options: [(MCPProviderExecutionHost.sandbox, "Sandbox"), (MCPProviderExecutionHost.host, "Host")]
+            )
         }
     }
 
@@ -1880,13 +1876,14 @@ private struct ProviderEditSheet: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
 
-            Picker("Authentication", selection: $authType) {
-                Text("None", bundle: .module).tag(MCPProviderAuthType.none)
-                Text("Bearer Token", bundle: .module).tag(MCPProviderAuthType.bearerToken)
-                Text("OAuth", bundle: .module).tag(MCPProviderAuthType.oauth)
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            ThemedSegmentedPicker(
+                selection: $authType,
+                options: [
+                    (MCPProviderAuthType.none, "None"),
+                    (MCPProviderAuthType.bearerToken, "Bearer Token"),
+                    (MCPProviderAuthType.oauth, "OAuth"),
+                ]
+            )
         }
     }
 

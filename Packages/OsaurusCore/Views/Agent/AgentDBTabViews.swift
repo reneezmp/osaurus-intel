@@ -458,14 +458,12 @@ public struct DataTabView: View {
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(theme.secondaryText)
                     .fixedSize()
-                Picker("", selection: $filterMode) {
-                    ForEach(DataFilterMode.allCases) { mode in
-                        Text(mode.label, bundle: .module).tag(mode)
-                    }
-                }
-                .pickerStyle(.segmented)
+                ThemedSegmentedPicker(
+                    selection: $filterMode,
+                    options: [(.live, "Active"), (.deleted, "Deleted"), (.all, "All")],
+                    fontSize: 11
+                )
                 .fixedSize()
-                .labelsHidden()
                 filterHelpButton
             }
             .fixedSize(horizontal: true, vertical: false)
@@ -487,9 +485,8 @@ public struct DataTabView: View {
                     Label(localized: "Delete \(selectedRowIds.count)", systemImage: "trash")
                         .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle(destructive: true))
                 .controlSize(.small)
-                .tint(.red)
             }
             if truncated {
                 Label(localized: "Truncated", systemImage: "scissors")
@@ -503,7 +500,7 @@ public struct DataTabView: View {
                 Label(localized: "Export CSV", systemImage: "square.and.arrow.up")
                     .font(.system(size: 11, weight: .medium))
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
             .controlSize(.small)
             .disabled(rows.isEmpty)
         }
@@ -2012,7 +2009,7 @@ public struct ViewsTabView: View {
                     )
                     .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
                 Button(role: .destructive) {
                     Task { await drop(view) }
@@ -2020,9 +2017,8 @@ public struct ViewsTabView: View {
                     Label(localized: "Drop", systemImage: "trash")
                         .font(.system(size: 11, weight: .medium))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle(destructive: true))
                 .controlSize(.small)
-                .tint(.red)
             }
             if let desc = view.description, !desc.isEmpty {
                 Text(desc).font(.system(size: 11)).foregroundColor(theme.tertiaryText)
@@ -2385,7 +2381,7 @@ fileprivate struct DataEmptyState: View {
                             .font(.system(size: 11, weight: .medium))
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
                 .padding(.top, 2)
             }

@@ -1684,21 +1684,15 @@ private struct MemorySettingsTabContent: View {
         card {
             VStack(alignment: .leading, spacing: 12) {
                 cardTitle("Embeddings")
-                Picker(
-                    "",
+                ThemedSegmentedPicker(
                     selection: Binding(
                         get: { config.embeddingProvider },
                         set: { v in
                             mutate { $0.embeddingProvider = v }
                             modelReady = StaticEmbeddingModel.isAvailable
-                        })
-                ) {
-                    Text("Off", bundle: .module).tag("none")
-                    Text("On-device", bundle: .module).tag("staticLocal")
-                    Text("Cloud", bundle: .module).tag("cloud")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                        }),
+                    options: [("none", "Off"), ("staticLocal", "On-device"), ("cloud", "Cloud")]
+                )
 
                 switch config.embeddingProvider {
                 case "staticLocal": localDetail

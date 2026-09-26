@@ -217,7 +217,7 @@ struct AgentKeyManagementRow: View {
 
             if accessKeys.isEmpty {
                 HStack(spacing: 6) {
-                    Image(systemName: "key.slash")
+                    Image(systemName: "lock.slash")
                         .font(.system(size: 10))
                         .foregroundColor(theme.tertiaryText)
                     Text("No access keys for this agent yet.", bundle: .module)

@@ -1707,3 +1707,61 @@ Candidate `1.0.56` (`57`) packages all three batches from `e8c5a6bd4` as
 round-trip is ZIP-valid, thin x86_64, macOS 13.0 minimum, canonical-root
 enabled, strictly signed, and keeps six framework symlinks. Because Rosy will
 then hold build `57`, the next public release needs `BUILD_NUMBER` ≥ 58.
+
+### Ventura themed-control sweep — 2026-09-26
+
+Rosy's pass on `1.0.56` (`57`) accepted every batch behaviour but found blank or
+white-on-white controls (results in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`).
+The earlier repairs (Aqua pinning, `IntelControlRendering` re-application,
+accent-tint clearing) reduce but do not remove the failure. Ventura still paints
+some **native** SwiftUI controls with dark-appearance glyphs on the light
+Settings paper. The durable rule for Intel is now **don't use these native
+styles in compiled views**. Use the explicitly themed replacements in
+`Views/Common/IntelThemedControls.swift`:
+
+| Native (fails on Ventura) | Intel replacement |
+| --- | --- |
+| `Picker` + `.pickerStyle(.segmented)` | `ThemedSegmentedPicker` |
+| `.buttonStyle(.bordered)` / `.borderedProminent` (+ `.tint(.red)`) | `ThemedBorderedButtonStyle(prominent:destructive:)` |
+| menu-style `Picker` | `ThemedMenuPicker` (the Memory console `Menu` pattern already accepted on Rosy) |
+| checkbox `Toggle` with an unstyled label | `.toggleStyle(ThemedCheckboxToggleStyle())` |
+| `.toggleStyle(.switch)` (fades when the window is inactive) | `ThemedSwitchToggleStyle` (used by `SettingsToggle` and the theme editor) |
+
+All 15 segmented pickers and 37 bordered buttons in compiled sources were
+converted. `IntelVenturaControlGuardTests` parses `Package.swift`'s exclude list
+and fails if either native style returns. The ~57 other `.switch` toggles and the
+implicit menu `Picker`s outside the theme editor were **not** swept. Convert them
+when Rosy reports one, or as a dedicated pass.
+
+Sheets are separate windows: a sheet must inject `.environment(\.theme, …)`
+itself, or themed controls fall back to `LightTheme`. It also needs
+`.intelControlRendering(theme:)`, or Ventura hides the text caret. The theme
+editor lacked both.
+
+**SF Symbols are now machine-checked.** macOS ships the symbol availability
+table at
+`/System/Library/CoreServices/CoreGlyphs.bundle/Contents/Resources/name_availability.plist`
+(`symbols` maps name → year, `year_to_release` maps year → OS). The same guard
+suite fails on any compiled symbol literal newer than macOS 13. It checks
+dotted literals, plus bare words after `systemName:` / `systemImage:` /
+`systemSymbolName:` / `icon:`. It skips when the table is absent. Bare words
+returned from switch statements are not caught (that is how `accessibility`
+slipped in). The first run replaced 16 symbols, including `text.document` (the
+blank document chip), `sparkles.2` (macOS 26), and the `gauge.with.*`,
+`*.badge.key`, `photo.badge.*` families. This supersedes the "visually check
+every new icon" warning in `SYNC_0.24.3_PLAN.md` for literal names.
+
+**Codex Thinking.** Intel deliberately never synthesizes profile defaults into
+`modelOptions`, and the Codex adapter only sends `reasoning` (with
+`summary: "auto"`) when an effort is present. So a model whose picker was never
+touched, such as GPT-6, streamed no reasoning summary at all.
+`ChatEngine.codexReasoningEffort` now sends the profile default the picker
+already displays (`medium`) for Codex reasoning models; an explicit choice,
+including "off", still wins. This exception is Codex-only; local and other
+remote providers keep the no-synthesized-defaults rule.
+
+**Sparkle key follow-up.** `~/Desktop/sparkle_sig.txt` turned out to be the
+`sparkle:edSignature` line of the `1.0.1` ZIP (it matches that appcast entry),
+not the lost private key. A signature cannot sign new updates or yield the key.
+The rotation to `bYYJJqFx…` stands. Future sessions: identify such a file by
+its `edSignature=` prefix and appcast match without printing secrets.

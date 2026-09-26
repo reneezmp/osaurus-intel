@@ -145,7 +145,7 @@ struct MarkdownImageView: View {
 
     private func errorView(_ error: Error) -> some View {
         VStack(spacing: 12) {
-            Image(systemName: "photo.badge.exclamationmark")
+            Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 32, weight: .light))
                 .foregroundColor(theme.tertiaryText)
 

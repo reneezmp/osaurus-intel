@@ -313,7 +313,7 @@ struct ModelRowView: View {
                 modelTypeBadge
             }
             if let quant = model.quantization {
-                MetadataPill(text: quant, icon: "gauge.with.dots.needle.bottom.50percent")
+                MetadataPill(text: quant, icon: "gauge.medium")
             }
         }
     }

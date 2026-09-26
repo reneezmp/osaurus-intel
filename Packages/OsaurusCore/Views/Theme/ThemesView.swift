@@ -323,7 +323,7 @@ struct ThemesView: View {
                     }
                     .font(.system(size: 13, weight: .medium))
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
 
                 Button(action: {
                     themeManager.forceReinstallBuiltInThemes(); loadThemes()
@@ -335,7 +335,7 @@ struct ThemesView: View {
                     }
                     .font(.system(size: 13, weight: .medium))
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
             }
         }
         .padding(40)
@@ -369,7 +369,7 @@ struct ThemesView: View {
                 }
                 .font(.system(size: 13, weight: .medium))
             }
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
         }
         .padding(40)
         .frame(maxWidth: .infinity, maxHeight: .infinity)

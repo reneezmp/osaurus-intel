@@ -121,7 +121,7 @@ enum SystemPermission: String, CaseIterable, Codable, Sendable {
         case .maps:
             return "map"
         case .accessibility:
-            return "accessibility"
+            return "figure.arms.open"
         case .contacts:
             return "person.crop.circle"
         case .disk:

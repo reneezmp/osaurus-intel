@@ -52,7 +52,7 @@ struct CreditsRedeemCodeCard: View {
                         Label("Redeem", systemImage: "sparkles")
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 .controlSize(.small)
                 .disabled(!isEnabled || !redemption.canSubmit)
             }
@@ -81,7 +81,7 @@ struct CreditsRedeemCodeCard: View {
             }
             Spacer()
             Button("Redeem another code") { redemption.reset(); focused = true }
-                .buttonStyle(.bordered).controlSize(.small)
+                .buttonStyle(ThemedBorderedButtonStyle()).controlSize(.small)
         }
     }
 

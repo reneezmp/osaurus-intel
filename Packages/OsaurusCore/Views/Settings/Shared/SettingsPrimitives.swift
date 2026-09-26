@@ -425,8 +425,10 @@ struct SettingsToggle: View {
 
             Spacer()
 
+            // Themed rather than native: Ventura fades the native switch to
+            // near-invisible whenever the window is inactive.
             Toggle("", isOn: $isOn)
-                .toggleStyle(SwitchToggleStyle(tint: themeManager.currentTheme.accentColor))
+                .toggleStyle(ThemedSwitchToggleStyle())
                 .labelsHidden()
         }
         .padding(12)

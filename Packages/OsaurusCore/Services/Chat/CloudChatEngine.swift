@@ -555,6 +555,25 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return headers
     }
 
+    /// Reasoning effort for a Codex request. An explicit choice wins ("off"
+    /// and friends send none). With no choice, a reasoning model gets the
+    /// default its picker already shows: Codex only streams a reasoning
+    /// summary (the chat's "Thinking") when a `reasoning` object is sent, so a
+    /// fresh model such as GPT-6 otherwise answers with no Thinking at all.
+    static func codexReasoningEffort(
+        modelId: String,
+        options: [String: ModelOptionValue]?
+    ) -> String? {
+        if let raw = options?["reasoningEffort"]?.stringValue {
+            let effort = raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
+            guard !effort.isEmpty, !["off", "disabled", "false", "none"].contains(effort) else {
+                return nil
+            }
+            return effort
+        }
+        return ModelProfileRegistry.defaults(for: modelId)["reasoningEffort"]?.stringValue?.lowercased()
+    }
+
     private func codexResponsesLiteSessionId(for sourceKey: String?) -> String {
         let key = sourceKey.flatMap { $0.isEmpty ? nil : $0 } ?? "request-\(UUID().uuidString)"
         if let existing = codexResponsesLiteSessionIds[key] { return existing }
@@ -674,12 +693,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             body["tool_choice"] = "auto"
                         }
                         if endpoint.isCodex {
-                            if let effort = request.modelOptions?["reasoningEffort"]?.stringValue?
-                                .trimmingCharacters(in: .whitespacesAndNewlines),
-                                !effort.isEmpty,
-                                !["off", "disabled", "false", "none"].contains(effort.lowercased())
+                            if let effort = Self.codexReasoningEffort(
+                                modelId: endpoint.modelId, options: request.modelOptions)
                             {
-                                body["reasoning_effort"] = effort.lowercased()
+                                body["reasoning_effort"] = effort
                             }
                             body = try IntelCodexResponsesAdapter.makeRequest(
                                 chatCompletions: body,

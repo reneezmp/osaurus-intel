@@ -23,7 +23,7 @@ struct SparklingStarsBackground: View {
                 endPoint: .bottomTrailing
             )
 
-            Image(systemName: "sparkles.2")
+            Image(systemName: "sparkles")
                 .font(.system(size: 96, weight: .light))
                 .foregroundStyle(theme.primaryText.opacity(0.9))
         }

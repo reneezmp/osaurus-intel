@@ -280,7 +280,7 @@ struct CreditsView: View {
                         Text("Open Identity", bundle: .module)
                             .font(.system(size: 12, weight: .semibold))
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ThemedBorderedButtonStyle())
                     .controlSize(.small)
                 }
                 Spacer()
@@ -349,7 +349,7 @@ struct CreditsView: View {
                     } label: {
                         Label(localized: "Add credits", systemImage: "creditcard.fill")
                     }
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                     .controlSize(.small)
                     .disabled(!OsaurusIdentity.exists() || accountService.isCreatingCheckout)
                 }
@@ -394,7 +394,7 @@ struct CreditsView: View {
                             Label(localized: "Export diagnostics", systemImage: "square.and.arrow.up")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ThemedBorderedButtonStyle())
                     .controlSize(.small)
                     .disabled(isExportingDiagnostics || ledgerTotalCount == 0)
                 }
@@ -472,7 +472,7 @@ struct CreditsView: View {
             } label: {
                 Label(localized: "Previous", systemImage: "chevron.left")
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
             .controlSize(.small)
             .disabled(!canGoToPreviousActivityPage || isLoadingCurrentActivity)
 
@@ -487,7 +487,7 @@ struct CreditsView: View {
                     Label(localized: "Next", systemImage: "chevron.right")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
             .controlSize(.small)
             .disabled(!canGoToNextActivityPage || isLoadingCurrentActivity)
         }
@@ -636,7 +636,7 @@ struct CreditsView: View {
                 Button {
                     openInsightsReference(reference)
                 } label: {
-                    Label(localized: "Insights", systemImage: "waveform.path.ecg.magnifyingglass")
+                    Label(localized: "Insights", systemImage: "stethoscope")
                         .labelStyle(.titleAndIcon)
                 }
                 .buttonStyle(.plain)

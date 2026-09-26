@@ -120,7 +120,7 @@ private extension SandboxPluginEditorView {
                 } label: {
                     Text("Cancel", bundle: .module)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
                 Button(action: savePlugin) {
                     HStack(spacing: 4) {
                         if showSaveConfirmation { Image(systemName: "checkmark") }
@@ -132,7 +132,7 @@ private extension SandboxPluginEditorView {
                         )
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 .disabled(plugin.name.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
             }
         }
@@ -200,7 +200,7 @@ private extension SandboxPluginEditorView {
                     Image(systemName: "plus")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
         }
     }
 
@@ -222,7 +222,7 @@ private extension SandboxPluginEditorView {
                     Image(systemName: "plus")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
         }
     }
 
@@ -309,7 +309,7 @@ private extension SandboxPluginEditorView {
                         Image(systemName: "plus")
                     }
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
             }
 
@@ -344,13 +344,10 @@ private extension SandboxPluginEditorView {
                 }
             }
             labeledField("Type") {
-                Picker("", selection: parameterTypeBinding(key: key, toolIndex: toolIndex)) {
-                    Text("string", bundle: .module).tag("string")
-                    Text("number", bundle: .module).tag("number")
-                    Text("boolean", bundle: .module).tag("boolean")
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                ThemedSegmentedPicker(
+                    selection: parameterTypeBinding(key: key, toolIndex: toolIndex),
+                    options: [("string", "string"), ("number", "number"), ("boolean", "boolean")]
+                )
             }
             HStack {
                 Text("Optional", bundle: .module)
@@ -743,7 +740,7 @@ private extension SandboxPluginEditorView {
                     Image(systemName: "plus")
                 }
             }
-            .buttonStyle(.bordered)
+            .buttonStyle(ThemedBorderedButtonStyle())
         }
     }
 }

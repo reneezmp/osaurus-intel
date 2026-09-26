@@ -30,13 +30,10 @@ struct ModelResidencySection: View {
         ) {
             SettingsSubsection(label: "Eviction Policy") {
                 VStack(alignment: .leading, spacing: 8) {
-                    Picker("", selection: $draft.modelEvictionPolicy) {
-                        ForEach(ModelEvictionPolicy.allCases, id: \.self) { policy in
-                            Text(policy.displayName).tag(policy)
-                        }
-                    }
-                    .pickerStyle(.segmented)
-                    .labelsHidden()
+                    ThemedSegmentedPicker(
+                        selection: $draft.modelEvictionPolicy,
+                        options: ModelEvictionPolicy.allCases.map { ($0, $0.displayName) }
+                    )
 
                     Text(draft.modelEvictionPolicy.description)
                         .font(.system(size: 11))

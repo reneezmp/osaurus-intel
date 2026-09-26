@@ -26,14 +26,12 @@ struct MultimodalSection: View {
                 hint:
                     "Auto = follow the model. Force-Off = reject any media. Force-On = require model support."
             ) {
-                Picker("", selection: $draft.multimodal.vlmMode) {
-                    ForEach(VMLXVLMServerMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .tag(mode)
+                ThemedSegmentedPicker(
+                    selection: $draft.multimodal.vlmMode,
+                    options: VMLXVLMServerMode.allCases.map {
+                        ($0, $0.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
                     }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                )
             }
 
             SettingsToggle(

@@ -83,6 +83,11 @@ struct ThemeEditorView: View {
         }
         .frame(minWidth: 900, minHeight: 650)
         .background(currentTheme.primaryBackground)
+        // The editor is a sheet (its own window), so it needs its own theme
+        // injection and the Intel caret/appearance repair; without them the
+        // themed controls fall back to LightTheme and Ventura hides the caret.
+        .environment(\.theme, currentTheme)
+        .intelControlRendering(theme: currentTheme)
         .task(id: editingTheme.background.imageData) {
             backgroundPreviewImage = await decodeThemeBackgroundImage(editingTheme.background.imageData)
         }
@@ -212,7 +217,7 @@ struct ThemeEditorView: View {
                 } label: {
                     Text("Cancel", bundle: .module)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
 
                 Button(action: saveTheme) {
                     HStack(spacing: 4) {
@@ -225,7 +230,7 @@ struct ThemeEditorView: View {
                         )
                     }
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 // Save stays visible for the "Saved!" confirmation, and a
                 // second click in that window used to mint another copy.
                 .disabled(isSaving)
@@ -260,22 +265,26 @@ struct ThemeEditorView: View {
                         .font(.system(size: 13))
                         .foregroundColor(currentTheme.primaryText)
                     Spacer()
-                    Picker("", selection: $editingTheme.isDark) {
-                        Text("Dark", bundle: .module).tag(true)
-                        Text("Light", bundle: .module).tag(false)
-                    }
-                    .pickerStyle(.segmented)
+                    ThemedSegmentedPicker(
+                        selection: $editingTheme.isDark,
+                        options: [(true, "Dark"), (false, "Light")]
+                    )
                     .frame(width: 140)
                 }
 
-                Picker(selection: $editingTheme.background.type) {
-                    Text("Solid", bundle: .module).tag(ThemeBackground.BackgroundType.solid)
-                    Text("Gradient", bundle: .module).tag(ThemeBackground.BackgroundType.gradient)
-                    Text("Image", bundle: .module).tag(ThemeBackground.BackgroundType.image)
-                } label: {
+                HStack {
                     Text("Background", bundle: .module)
+                        .font(.system(size: 13))
+                        .foregroundColor(currentTheme.primaryText)
+                    ThemedSegmentedPicker(
+                        selection: $editingTheme.background.type,
+                        options: [
+                            (ThemeBackground.BackgroundType.solid, "Solid"),
+                            (ThemeBackground.BackgroundType.gradient, "Gradient"),
+                            (ThemeBackground.BackgroundType.image, "Image"),
+                        ]
+                    )
                 }
-                .pickerStyle(.segmented)
 
                 if editingTheme.background.type == .image {
                     imageBackgroundControls
@@ -361,8 +370,7 @@ struct ThemeEditorView: View {
                 )
             )
             .labelsHidden()
-            .toggleStyle(.switch)
-            .tint(currentTheme.accentColor)
+            .toggleStyle(ThemedSwitchToggleStyle())
             .disabled(isImageBackground)
         }
     }
@@ -472,8 +480,7 @@ struct ThemeEditorView: View {
             Spacer()
             Toggle("", isOn: isOn)
                 .labelsHidden()
-                .toggleStyle(.switch)
-                .tint(currentTheme.accentColor)
+                .toggleStyle(ThemedSwitchToggleStyle())
         }
     }
 
@@ -546,10 +553,10 @@ struct ThemeEditorView: View {
                         Label {
                             Text("Replace Image", bundle: .module)
                         } icon: {
-                            Image(systemName: "photo.badge.plus")
+                            Image(systemName: "photo.on.rectangle")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ThemedBorderedButtonStyle())
 
                     Button {
                         editingTheme.background.imageData = nil
@@ -560,12 +567,12 @@ struct ThemeEditorView: View {
                             Image(systemName: "trash")
                         }
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ThemedBorderedButtonStyle())
                 }
             } else {
                 Button(action: { showImagePicker = true }) {
                     VStack(spacing: 8) {
-                        Image(systemName: "photo.badge.plus").font(.system(size: 24))
+                        Image(systemName: "photo.on.rectangle").font(.system(size: 24))
                         Text("Choose Image", bundle: .module).font(.system(size: 13, weight: .medium))
                     }
                     .frame(maxWidth: .infinity)
@@ -588,20 +595,23 @@ struct ThemeEditorView: View {
                 range: 0 ... 1
             )
 
-            Picker(
-                selection: Binding(
-                    get: { editingTheme.background.imageFit ?? .fill },
-                    set: { editingTheme.background.imageFit = $0 }
-                )
-            ) {
-                Text("Fill", bundle: .module).tag(ThemeBackground.ImageFit.fill)
-                Text("Fit", bundle: .module).tag(ThemeBackground.ImageFit.fit)
-                Text("Stretch", bundle: .module).tag(ThemeBackground.ImageFit.stretch)
-                Text("Tile", bundle: .module).tag(ThemeBackground.ImageFit.tile)
-            } label: {
+            HStack {
                 Text("Fit", bundle: .module)
+                    .font(.system(size: 13))
+                    .foregroundColor(currentTheme.primaryText)
+                ThemedSegmentedPicker(
+                    selection: Binding(
+                        get: { editingTheme.background.imageFit ?? .fill },
+                        set: { editingTheme.background.imageFit = $0 }
+                    ),
+                    options: [
+                        (ThemeBackground.ImageFit.fill, "Fill"),
+                        (ThemeBackground.ImageFit.fit, "Fit"),
+                        (ThemeBackground.ImageFit.stretch, "Stretch"),
+                        (ThemeBackground.ImageFit.tile, "Tile"),
+                    ]
+                )
             }
-            .pickerStyle(.segmented)
 
             Divider().opacity(0.3)
 
@@ -656,7 +666,7 @@ struct ThemeEditorView: View {
                     } label: {
                         Text("Test Animation", bundle: .module)
                     }
-                    .buttonStyle(.bordered)
+                    .buttonStyle(ThemedBorderedButtonStyle())
                 }
 
                 sliderRow("Quick", value: $editingTheme.animationConfig.durationQuick, range: 0.05 ... 0.5)
@@ -721,7 +731,7 @@ struct ThemeEditorView: View {
                                     Image(systemName: "plus")
                                 }
                             }
-                            .buttonStyle(.bordered)
+                            .buttonStyle(ThemedBorderedButtonStyle())
 
                             if (editingTheme.background.gradientColors?.count ?? 0) > 2 {
                                 Button(action: { editingTheme.background.gradientColors?.removeLast() }) {
@@ -731,7 +741,7 @@ struct ThemeEditorView: View {
                                         Image(systemName: "minus")
                                     }
                                 }
-                                .buttonStyle(.bordered)
+                                .buttonStyle(ThemedBorderedButtonStyle())
                             }
                         }
 
@@ -788,7 +798,7 @@ struct ThemeEditorView: View {
                                 Image(systemName: "arrow.clockwise")
                             }
                         }
-                        .buttonStyle(.bordered)
+                        .buttonStyle(ThemedBorderedButtonStyle())
 
                         Spacer()
 
@@ -801,7 +811,7 @@ struct ThemeEditorView: View {
                                 Image(systemName: "checkmark.circle")
                             }
                         }
-                        .buttonStyle(.borderedProminent)
+                        .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                         .disabled(rawThemeJSON.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty)
                     }
                 }
@@ -983,20 +993,16 @@ struct ThemeEditorView: View {
                 .font(.system(size: 13))
                 .foregroundColor(currentTheme.primaryText)
             Spacer()
-            Picker(
-                "",
+            ThemedMenuPicker(
                 selection: Binding<String>(
                     get: { editingTheme.codeHighlightTheme ?? "auto" },
                     set: { editingTheme.codeHighlightTheme = $0 == "auto" ? nil : $0 }
-                )
-            ) {
-                Text("Auto", bundle: .module).tag("auto")
-                Divider()
-                ForEach(availableHighlightrThemes(), id: \.self) { name in
-                    Text(name).tag(name)
-                }
-            }
-            .frame(width: 180)
+                ),
+                // An empty title renders as the divider after "Auto".
+                options: [("auto", L("Auto")), ("", "")]
+                    + availableHighlightrThemes().map { ($0, $0) },
+                width: 180
+            )
         }
     }
 
@@ -1120,13 +1126,12 @@ struct ThemeEditorView: View {
                 .font(.system(size: 13))
                 .foregroundColor(currentTheme.primaryText)
             Spacer()
-            Picker("", selection: fontName) {
-                ForEach(isMono ? availableMonoFonts : availablePrimaryFonts, id: \.self) { font in
-                    Text(font).font(.custom(font, size: 13)).tag(font)
-                }
-            }
-            .labelsHidden()
-            .frame(width: 160)
+            ThemedMenuPicker(
+                selection: fontName,
+                options: (isMono ? availableMonoFonts : availablePrimaryFonts).map { ($0, $0) },
+                width: 160,
+                font: { .custom($0, size: 13) }
+            )
         }
     }
 
@@ -1316,7 +1321,7 @@ struct ThemeEditorView: View {
 /// and live preview flashed black on each key, and saving mid-edit
 /// persisted an invalid color. The getter also uppercased on every
 /// keystroke, rewriting lowercase input under the cursor.
-private struct ThemeHexTextField: View {
+struct ThemeHexTextField: View {
     @Binding var hex: String
     let textColor: Color
 
@@ -1343,7 +1348,10 @@ private struct ThemeHexTextField: View {
                     text = normalized
                     return
                 }
-                if Self.isCompleteHex(normalized), normalized.caseInsensitiveCompare(hex) != .orderedSame {
+                // While typing, only full 6/8-digit values apply, so "#FF0"
+                // on the way to "#FF0000" doesn't flash yellow. Shorthand
+                // commits on Enter or when leaving the field.
+                if Self.isFullHex(normalized), normalized.caseInsensitiveCompare(hex) != .orderedSame {
                     hex = normalized
                 }
             }
@@ -1357,15 +1365,17 @@ private struct ThemeHexTextField: View {
             .onChange(of: isFocused) { focused in
                 // Leaving the field with an incomplete value restores the
                 // last committed hex instead of leaving junk on screen.
-                if !focused, !Self.isCompleteHex(text) {
-                    text = hex.uppercased()
-                }
+                if !focused { commitOrRestore() }
             }
-            .onSubmit {
-                if !Self.isCompleteHex(text) {
-                    text = hex.uppercased()
-                }
-            }
+            .onSubmit { commitOrRestore() }
+    }
+
+    private func commitOrRestore() {
+        if Self.isCompleteHex(text) {
+            if text.caseInsensitiveCompare(hex) != .orderedSame { hex = text }
+        } else {
+            text = hex.uppercased()
+        }
     }
 
     /// Forces a leading "#", drops non-hex characters, uppercases, and caps
@@ -1375,7 +1385,12 @@ private struct ThemeHexTextField: View {
         return "#" + digits
     }
 
-    private static func isCompleteHex(_ value: String) -> Bool {
+    static func isFullHex(_ value: String) -> Bool {
+        let digits = value.hasPrefix("#") ? String(value.dropFirst()) : value
+        return [6, 8].contains(digits.count) && digits.allSatisfy(\.isHexDigit)
+    }
+
+    static func isCompleteHex(_ value: String) -> Bool {
         let digits = value.hasPrefix("#") ? String(value.dropFirst()) : value
         return [3, 6, 8].contains(digits.count) && digits.allSatisfy(\.isHexDigit)
     }

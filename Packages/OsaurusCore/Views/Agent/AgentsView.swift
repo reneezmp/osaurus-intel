@@ -834,7 +834,7 @@ private enum DetailTab: String, CaseIterable {
         case .subagents: return "person.2.wave.2"
         case .customization: return "paintpalette.fill"
         case .network: return "network"
-        case .connections: return "person.2.badge.key"
+        case .connections: return "person.badge.key"
         case .channels: return "bubble.left.and.bubble.right"
         case .sandbox: return "shippingbox"
         case .automation: return "clock.badge.checkmark"
@@ -2644,12 +2644,10 @@ struct AgentDetailView: View {
     private var emptyStateSection: some View {
         AgentDetailSection(title: "Empty State", icon: "sparkles") {
             VStack(alignment: .leading, spacing: 14) {
-                Picker("", selection: emptyStateModeBinding) {
-                    Label(localized: "AI", systemImage: "sparkles").tag(EmptyStateMode.ai)
-                    Label(localized: "Custom", systemImage: "pencil.and.scribble").tag(EmptyStateMode.manual)
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                ThemedSegmentedPicker(
+                    selection: emptyStateModeBinding,
+                    options: [(EmptyStateMode.ai, "AI"), (EmptyStateMode.manual, "Custom")]
+                )
 
                 if isGenerativeOn {
                     aiEmptyStateBody
@@ -2847,7 +2845,7 @@ struct AgentDetailView: View {
                     .fill(theme.secondaryBackground.opacity(theme.isDark ? 0.4 : 0.5))
                 Circle()
                     .strokeBorder(theme.inputBorder, style: StrokeStyle(lineWidth: 1.2, dash: [3, 3]))
-                Image(systemName: "photo.badge.plus")
+                Image(systemName: "photo.on.rectangle")
                     .font(.system(size: 14, weight: .semibold))
                     .foregroundColor(theme.secondaryText)
             }
@@ -2953,7 +2951,7 @@ struct AgentDetailView: View {
         bonjourSection
         AgentDetailSection(title: L("Relay"), icon: "network") {
             dependencyEmptyState(
-                icon: "network.slash",
+                icon: "wifi.slash",
                 title: "Relay tunnel unavailable",
                 hint: "Public relay sharing depends on the Secure Channel pairing and relay services. The route is reserved here and will become interactive when that Intel backend lands."
             )
@@ -2970,7 +2968,7 @@ struct AgentDetailView: View {
     @ViewBuilder
     private var remoteConnectionsTabContent: some View {
         tabHelperText(DetailTab.connections.helperText)
-        AgentDetailSection(title: L("Remote Connections"), icon: "person.2.badge.key") {
+        AgentDetailSection(title: L("Remote Connections"), icon: "person.badge.key") {
             dependencyEmptyState(
                 icon: "antenna.radiowaves.left.and.right.slash",
                 title: "No connections yet",

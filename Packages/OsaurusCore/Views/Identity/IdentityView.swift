@@ -1014,7 +1014,7 @@ private struct AgentAddressesSection: View {
     }
 
     var body: some View {
-        IdentitySection(title: "AGENT ADDRESSES", icon: "person.2.badge.key.fill") {
+        IdentitySection(title: "AGENT ADDRESSES", icon: "person.badge.key.fill") {
             VStack(alignment: .leading, spacing: 10) {
                 if customAgents.isEmpty {
                     Text("No agents yet — create one in the Agents tab", bundle: .module)

@@ -62,7 +62,7 @@ enum ServerSettingsSection: String, CaseIterable, Hashable, Identifiable {
         case .authentication: return "key.horizontal"
         #if !OSAURUS_INTEL
         case .sampling: return "slider.horizontal.3"
-        case .concurrency: return "gauge.with.dots.needle.bottom.0percent"
+        case .concurrency: return "gauge.low"
         case .cache: return "externaldrive.connected.to.line.below"
         case .speculative: return "bolt.horizontal"
         case .liveActivity: return "waveform.path.ecg"

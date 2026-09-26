@@ -46,7 +46,7 @@ final class NativeChartView: NSView {
         case "line": return "chart.xyaxis.line"
         case "spline": return "chart.line.uptrend.xyaxis"
         case "column": return "chart.bar.fill"
-        case "bar": return "chart.bar.xaxis.ascending"
+        case "bar": return "chart.bar.xaxis"
         case "area": return "chart.line.flattrend.xyaxis.circle.fill"
         case "areaspline": return "chart.line.uptrend.xyaxis.circle.fill"
         case "pie": return "chart.pie.fill"

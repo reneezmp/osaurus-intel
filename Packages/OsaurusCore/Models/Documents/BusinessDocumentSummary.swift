@@ -37,7 +37,7 @@ public enum BusinessDocumentKind: String, Codable, CaseIterable, Sendable {
         case .presentation: return "rectangle.on.rectangle"
         case .pdf: return "doc.richtext"
         case .richText: return "doc.text"
-        case .plainText: return "text.document"
+        case .plainText: return "doc.text"  // the macOS 15 text-document symbol draws blank on Ventura
         case .document, .unknown: return "doc.plaintext"
         }
     }

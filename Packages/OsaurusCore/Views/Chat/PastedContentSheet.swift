@@ -89,7 +89,7 @@ struct PastedContentSheet: View {
                 onSave?(draft)
             }
             .keyboardShortcut(.defaultAction)
-            .buttonStyle(.borderedProminent)
+            .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
         }
         .padding(.horizontal, 16)
         .padding(.vertical, 12)

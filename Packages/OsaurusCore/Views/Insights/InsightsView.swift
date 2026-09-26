@@ -254,7 +254,7 @@ struct InsightsView: View {
                     .padding(.horizontal, 16)
 
                 StatPill(
-                    icon: "gauge.with.needle",
+                    icon: "gauge",
                     value: stats.formattedAvgSpeed,
                     label: "Avg Speed",
                     color: .cyan

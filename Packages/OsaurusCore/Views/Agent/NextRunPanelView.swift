@@ -355,7 +355,7 @@ public struct NextRunPanelView: View {
             .isEmpty
         return VStack(spacing: 0) {
             AgentSheetHeader(
-                icon: "pencil.and.list.clipboard",
+                icon: "list.clipboard",
                 title: "Edit next-run instructions",
                 subtitle:
                     "Editing the wake-up brief flags the row as user-scheduled so the agent knows you intervened.",

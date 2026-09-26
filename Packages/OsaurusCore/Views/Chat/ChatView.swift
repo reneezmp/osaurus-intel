@@ -4322,7 +4322,7 @@ private struct BonjourTokenSheet: View {
                     Text("Connect", bundle: .module)
                 }
                 .keyboardShortcut(.defaultAction)
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
             }
         }
         .padding(24)
@@ -4386,7 +4386,7 @@ private struct PairingSheet: View {
                         Text("Pair", bundle: .module)
                     }
                     .keyboardShortcut(.defaultAction)
-                    .buttonStyle(.borderedProminent)
+                    .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 }
             }
         }

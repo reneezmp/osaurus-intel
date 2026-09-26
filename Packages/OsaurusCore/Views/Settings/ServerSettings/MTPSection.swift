@@ -26,14 +26,12 @@ struct MTPSection: View {
                 hint:
                     "Off disables speculation. Auto uses it only when the model ships a verified native MTP head. Force-On requires that head."
             ) {
-                Picker("", selection: $draft.mtp.mode) {
-                    ForEach(VMLXMTPServerMode.allCases, id: \.self) { mode in
-                        Text(mode.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
-                            .tag(mode)
+                ThemedSegmentedPicker(
+                    selection: $draft.mtp.mode,
+                    options: VMLXMTPServerMode.allCases.map {
+                        ($0, $0.rawValue.replacingOccurrences(of: "_", with: " ").capitalized)
                     }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
+                )
             }
 
             OptionalIntField(

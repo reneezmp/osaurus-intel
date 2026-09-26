@@ -85,11 +85,11 @@ struct IntelConfigPlanApprovalCard: View {
                 Button("Cancel") {
                     queue.resolve(id: request.id, outcome: .denied)
                 }
-                .buttonStyle(.bordered)
+                .buttonStyle(ThemedBorderedButtonStyle())
                 Button("Apply") {
                     queue.resolve(id: request.id, outcome: .approved)
                 }
-                .buttonStyle(.borderedProminent)
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
             }
         }
         .padding(16)

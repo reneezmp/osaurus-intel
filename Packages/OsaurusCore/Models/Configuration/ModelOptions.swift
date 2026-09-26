@@ -585,7 +585,7 @@ struct Gemini31FlashImageProfile: ModelProfile {
         ModelOptionDefinition(
             id: "imageSize",
             label: "Resolution",
-            icon: "arrow.up.right.and.arrow.down.left",
+            icon: "arrow.down.right.and.arrow.up.left",
             kind: .segmented([
                 ModelOptionSegment(id: "auto", label: "Auto"),
                 ModelOptionSegment(id: "512px", label: "0.5K"),
@@ -631,7 +631,7 @@ struct GeminiProImageProfile: ModelProfile {
         ModelOptionDefinition(
             id: "imageSize",
             label: "Resolution",
-            icon: "arrow.up.right.and.arrow.down.left",
+            icon: "arrow.down.right.and.arrow.up.left",
             kind: .segmented([
                 ModelOptionSegment(id: "auto", label: "Auto"),
                 ModelOptionSegment(id: "1K", label: "1K"),
