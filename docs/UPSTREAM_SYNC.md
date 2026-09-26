@@ -1700,3 +1700,10 @@ Durable facts from this batch:
 **Manual acceptance for all three 2026-09-25 batches:**
 [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md).
 Record the candidate build there when it is cut.
+
+Candidate `1.0.56` (`57`) packages all three batches from `e8c5a6bd4` as
+`build/rosy-deploy/Osaurus-Intel-RC-UpstreamBatches-2026-09-26.zip`, SHA-256
+`e8e39c78a7159560557d6f0a564eeea68eedcd8b45374102a8a7b212dd3745ef`. The
+round-trip is ZIP-valid, thin x86_64, macOS 13.0 minimum, canonical-root
+enabled, strictly signed, and keeps six framework symlinks. Because Rosy will
+then hold build `57`, the next public release needs `BUILD_NUMBER` ≥ 58.

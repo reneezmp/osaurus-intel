@@ -13,10 +13,16 @@ nothing here is accepted until checked on Rosy.
 
 ## Candidate
 
-- Candidate: _not built yet_. Record version, build, archive name and
-  SHA-256 here when it is cut.
-- The candidate must be newer than `1.0.55` (`56`) so Sparkle ordering stays
-  correct.
+- Candidate: `1.0.56` build `57` (Debug, thin x86_64), built from
+  `e8c5a6bd4` on 2026-09-26.
+- Archive: `build/rosy-deploy/Osaurus-Intel-RC-UpstreamBatches-2026-09-26.zip`
+  (58 MB), SHA-256
+  `e8e39c78a7159560557d6f0a564eeea68eedcd8b45374102a8a7b212dd3745ef`.
+- Round-trip checked: ZIP valid, macOS 13.0 minimum, canonical `~/.osaurus`,
+  Sparkle key `bYYJJqFx…`, six framework symlinks kept, strict codesign passes
+  with the stable Intel certificate requirement.
+- Rosy's build number is now `57`. The next public release must use
+  `BUILD_NUMBER` 58 or higher (see `UPSTREAM_SYNC.md` → Public release 1.0.55).
 
 ## Before you start
 
