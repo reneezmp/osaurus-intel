@@ -16,7 +16,9 @@ import Foundation
 
 public enum OnboardingPrompt {
     /// Monotonic integer. Bump for any text change.
-    public static let version: Int = 1
+    /// Intel: 6 = upstream v5 minus file import/export (Release 2) and with
+    /// the db_execute/db_migrate approval note.
+    public static let version: Int = 6
 
     /// Block appended to the system prompt after the agent's persistent
     /// prompt and before per-run instructions (spec §5.5.3). The schema
@@ -42,6 +44,13 @@ public enum OnboardingPrompt {
         3. Use the high-level tools (`db_insert`, `db_update`, `db_query`, `db_delete`) by default. `db_execute(sql)` is the escape hatch for cases the typed tools can't express.
         4. `db_delete` is a soft delete. Data is recoverable. Do not try to clean up the DB by hard-deleting unless the user explicitly asks.
         5. Before creating a new table, briefly confirm the columns with the user. Agent-authored schemas without user input tend to be over-engineered or wrong-shaped.
+
+        Moving data at scale (do NOT insert large data one row at a time):
+        - If the rows are already in your context (e.g. JSON you just fetched), pass them as `db_insert(table, rows=[...])` / `db_upsert(table, key_columns, rows=[...])` in a single call.
+        - `db_execute` runs first-class SQL, including multi-statement transform scripts (e.g. `INSERT … SELECT`, CTEs, window functions) inside one transaction. The user may be asked to approve each `db_execute` and `db_migrate` call. `ATTACH`/`DETACH`, `PRAGMA` writes, `load_extension`, `DROP TABLE`/`TRUNCATE`, unconstrained `DELETE`, and writes to system tables are rejected.
+
+        Saved views:
+        - Define or redefine a saved SELECT with `db_define_view`. Run its stored definition directly with `db_run_view(name)`, or reference its name in read-only `db_query` SQL when you need to filter, join, aggregate, or page its result.
 
         Schema discipline:
         - Tables should have clear, narrow purposes. One thing per table.

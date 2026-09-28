@@ -51,6 +51,10 @@ connected merely because upstream has a Settings card.
 
 **Plan (2026-09-25):** [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md) — staged in three releases, covers B5 too.
 
+**Status (2026-09-28):** Release 1 implemented: database, tools, workspace,
+toggles and Delete Data; awaiting Rosy. Import/export (Release 2) and bundles
+(Release 3) remain. The text below describes the pre-port state.
+
 **Current UI:** Database exposes Overview, Tables, Saved Views, and History without pretending storage exists. Historical deep links already migrate to these sections.
 
 **Required backend:** restore `AgentDatabase`, `AgentDatabaseStore`, schema/database tools, saved-view persistence, write audit history, encrypted bundle import/export, and delete/reset behavior. Define and test Intel migration from any legacy `dbEnabled` records before enabling writes.
@@ -69,6 +73,10 @@ completion, folder access, persistence, and the full action lifecycle. Database
 History accurately explains that no database audit trail is present.
 
 **Required backend:** after B4, connect schedule/watcher run records and database mutations to the Database History section. This is separate from conversational Memory history, which already works.
+
+**Status (2026-09-28):** implemented with B4 Release 1. History lists
+schedule, watcher and manual runs with each run's `_changelog` changes, plus
+"Chat & manual edits" for changes without a run. Awaiting Rosy.
 
 ## B6 — Native Apple app tools
 

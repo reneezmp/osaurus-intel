@@ -102,6 +102,70 @@
         }
       }
     },
+    "An encrypted database on this Mac that the agent can build and query with db_* tools." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine verschlüsselte Datenbank auf diesem Mac, die der Agent mit db_*-Werkzeugen aufbauen und abfragen kann."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 上的加密数据库，智能体可以使用 db_* 工具构建和查询。"
+          }
+        }
+      }
+    },
+    "Ask the agent in chat to remember something — it will create the tables it needs, and you can browse them here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bitte den Agenten im Chat, sich etwas zu merken – er legt die nötigen Tabellen an, und du kannst sie hier durchsuchen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天中让智能体记住一些内容——它会创建所需的表，你可以在这里浏览。"
+          }
+        }
+      }
+    },
+    "Changes made outside scheduled or automated runs." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Änderungen außerhalb geplanter oder automatisierter Läufe."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在计划或自动运行之外进行的更改。"
+          }
+        }
+      }
+    },
+    "Chat & manual edits" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat & manuelle Änderungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天与手动编辑"
+          }
+        }
+      }
+    },
     "Check Spelling While Typing" : {
       "localizations" : {
         "de" : {
@@ -178,6 +242,22 @@
         }
       }
     },
+    "Couldn't delete the database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datenbank konnte nicht gelöscht werden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法删除数据库"
+          }
+        }
+      }
+    },
     "Couldn't Import Image" : {
       "localizations" : {
         "de" : {
@@ -218,6 +298,22 @@
         }
       }
     },
+    "Create your own agent and turn on its Database ability to give it an encrypted database it can build and query." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erstelle einen eigenen Agenten und aktiviere seine Datenbank-Fähigkeit, um ihm eine verschlüsselte Datenbank zu geben, die er aufbauen und abfragen kann."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "创建你自己的智能体并开启其数据库能力，即可为它提供一个可构建和查询的加密数据库。"
+          }
+        }
+      }
+    },
     "Current identity" : {
       "localizations" : {
         "de" : {
@@ -230,6 +326,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "当前身份"
+          }
+        }
+      }
+    },
+    "Delete Database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Datenbank löschen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除数据库"
+          }
+        }
+      }
+    },
+    "Deleting data also clears this agent's database history. The agent itself is kept." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Löschen der Daten entfernt auch den Datenbankverlauf dieses Agenten. Der Agent selbst bleibt erhalten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除数据也会清除此智能体的数据库历史记录。智能体本身会保留。"
           }
         }
       }
@@ -322,6 +450,22 @@
         }
       }
     },
+    "Give this agent an encrypted database it can build and query. Raw SQL and migrations ask before running." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gib diesem Agenten eine verschlüsselte Datenbank, die er aufbauen und abfragen kann. Rohes SQL und Migrationen fragen vor der Ausführung nach."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为此智能体提供一个可构建和查询的加密数据库。原始 SQL 和迁移在运行前会请求确认。"
+          }
+        }
+      }
+    },
     "I understand: agents get new addresses, existing access keys are revoked, and the current identity's recovery phrase will no longer restore this Mac unless I saved it." : {
       "localizations" : {
         "de" : {
@@ -406,6 +550,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不创建此智能体就离开吗？"
+          }
+        }
+      }
+    },
+    "Note: this agent uses a cloud model. The table layout is sent with every request, and any rows the agent reads or writes pass through that provider. The database file itself stays encrypted on this Mac." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hinweis: Dieser Agent nutzt ein Cloud-Modell. Die Tabellenstruktur wird mit jeder Anfrage gesendet, und alle Zeilen, die der Agent liest oder schreibt, laufen über diesen Anbieter. Die Datenbankdatei selbst bleibt verschlüsselt auf diesem Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "注意：此智能体使用云端模型。表结构会随每个请求发送，智能体读取或写入的任何行都会经过该提供商。数据库文件本身在此 Mac 上保持加密。"
           }
         }
       }
@@ -562,6 +722,22 @@
         }
       }
     },
+    "Private Database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Private Datenbank"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "私有数据库"
+          }
+        }
+      }
+    },
     "Recent Folders" : {
       "localizations" : {
         "de" : {
@@ -692,6 +868,54 @@
         }
       }
     },
+    "The agent adds rows when it has something to remember. You can also ask it directly in chat." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Agent fügt Zeilen hinzu, wenn er sich etwas merken soll. Du kannst ihn auch direkt im Chat darum bitten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体在需要记住某些内容时会添加行。你也可以直接在聊天中让它这样做。"
+          }
+        }
+      }
+    },
+    "The built-in agent has no private database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der integrierte Agent hat keine private Datenbank"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内置智能体没有私有数据库"
+          }
+        }
+      }
+    },
+    "The built-in agent has no private database. Create an agent to use one." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der integrierte Agent hat keine private Datenbank. Erstelle einen Agenten, um eine zu nutzen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内置智能体没有私有数据库。请创建一个智能体来使用它。"
+          }
+        }
+      }
+    },
     "The controls changed after you edited this JSON. Apply JSON will overwrite those control changes, and Refresh will discard your JSON edits." : {
       "localizations" : {
         "de" : {
@@ -772,6 +996,38 @@
         }
       }
     },
+    "The table layout is sent with every request, and rows the agent reads or writes pass through its cloud provider. The database file stays encrypted on this Mac." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Tabellenstruktur wird mit jeder Anfrage gesendet, und Zeilen, die der Agent liest oder schreibt, laufen über seinen Cloud-Anbieter. Die Datenbankdatei bleibt verschlüsselt auf diesem Mac."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表结构会随每个请求发送，智能体读取或写入的行会经过其云服务提供商。数据库文件在此 Mac 上保持加密。"
+          }
+        }
+      }
+    },
+    "This permanently deletes every table, row, and saved view this agent has stored, and its database history. The agent and its settings stay. This cannot be undone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dadurch werden alle Tabellen, Zeilen und gespeicherten Ansichten dieses Agenten sowie sein Datenbankverlauf dauerhaft gelöscht. Der Agent und seine Einstellungen bleiben erhalten. Dies kann nicht rückgängig gemacht werden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "这将永久删除此智能体存储的所有表、行和已保存视图，以及其数据库历史记录。智能体及其设置会保留。此操作无法撤销。"
+          }
+        }
+      }
+    },
     "Turn off Follow System Accent to choose a custom accent color." : {
       "localizations" : {
         "de" : {
@@ -840,6 +1096,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键时提供建议。文本永远不会被自动更正。"
+          }
+        }
+      }
+    },
+    "What the agent changed during normal chats, and edits you made in the Tables view. Newest first, up to 500." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Was der Agent in normalen Chats geändert hat und deine Änderungen in der Tabellenansicht. Neueste zuerst, bis zu 500."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体在普通聊天中所做的更改，以及你在表视图中所做的编辑。最新的在前，最多 500 条。"
           }
         }
       }
@@ -6627,6 +6899,42 @@
         }
       }
     },
+    "Approaching storage limit" : {
+      "comment" : "Label text for a badge that appears in the Database workspace header when an agent's database is approaching its storage limit.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Approaching storage limit"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Approaching storage limit"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Approaching storage limit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接近存储上限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "接近儲存上限"
+          }
+        }
+      }
+    },
     "Approval Required" : {
       "localizations" : {
         "de" : {
@@ -6849,6 +7157,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "提出一个真实的任务。它会使用网络、你的文件和你的应用来完成工作，并在回答前再次核对。"
+          }
+        }
+      }
+    },
+    "Ask the agent in chat to remember or track something — it will set up its own tables, and this overview fills in as it works." : {
+      "comment" : "A subtitle for the \"This agent hasn't stored anything yet.\" empty state in the DatabaseOverviewView.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ask the agent in chat to remember or track something — it will set up its own tables, and this overview fills in as it works."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ask the agent in chat to remember or track something — it will set up its own tables, and this overview fills in as it works."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ask the agent in chat to remember or track something — it will set up its own tables, and this overview fills in as it works."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天中让智能体记住或跟踪某些内容 — 它会建立自己的表，此概览会随着它的工作而更新。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天中讓智能體記住或跟蹤某些內容 — 它會建立自己的表，此概覽會隨着它的工作而更新。"
           }
         }
       }
@@ -8955,6 +9299,42 @@
         }
       }
     },
+    "Browse and edit the rows in each table." : {
+      "comment" : "Help text for the \"Tables\" section in the database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse and edit the rows in each table."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse and edit the rows in each table."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse and edit the rows in each table."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览和编辑每个表中的行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瀏覽和編輯每個表中的行。"
+          }
+        }
+      }
+    },
     "Browse and manage plugins" : {
       "localizations" : {
         "de" : {
@@ -9055,6 +9435,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "浏览斜杠命令"
+          }
+        }
+      }
+    },
+    "Browse tables" : {
+      "comment" : "Label for a button that takes the user to the \"Browse tables\" section of the workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse tables"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse tables"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Browse tables"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "瀏覽表"
           }
         }
       }
@@ -11035,6 +11451,42 @@
         }
       }
     },
+    "Choose one of this agent's tables from the list on the left." : {
+      "comment" : "Subtitle in the \"Pick a table\" empty state when there are no tables to show.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Choose one of this agent's tables from the list on the left."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Choose one of this agent's tables from the list on the left."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Choose one of this agent's tables from the list on the left."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从左侧列表中选择此智能体的一个表。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從左側清單中選擇此智能體的一個表。"
+          }
+        }
+      }
+    },
     "Choose your OpenAI access" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -11879,6 +12331,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "颜色"
+          }
+        }
+      }
+    },
+    "Columns" : {
+      "comment" : "Label for the \"Columns\" tab in the Database Tables view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Columns"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Columns"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Columns"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列"
           }
         }
       }
@@ -15527,6 +16015,42 @@
         }
       }
     },
+    "Dashboard" : {
+      "comment" : "A label displayed above a section of the Home view that shows no pinned views.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dashboard"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dashboard"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dashboard"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仪表板"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "儀錶板"
+          }
+        }
+      }
+    },
     "Dashboard of pinned views — the agent's own home screen." : {
       "localizations" : {
         "de" : {
@@ -16140,6 +16664,42 @@
         }
       }
     },
+    "Delete %lld Rows" : {
+      "comment" : "Button labels for a confirmation dialog that asks the user to confirm deleting multiple rows.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete %lld Rows"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete %lld Rows"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete %lld Rows"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 %lld 行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除 %lld 行"
+          }
+        }
+      }
+    },
     "Delete %lld rows?" : {
       "localizations" : {
         "de" : {
@@ -16156,6 +16716,74 @@
         }
       }
     },
+    "Delete 1 Row" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 Row"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 Row"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 Row"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 1 行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除 1 行"
+          }
+        }
+      }
+    },
+    "Delete 1 row?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 row?"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 row?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete 1 row?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除 1 行？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除 1 行？"
+          }
+        }
+      }
+    },
     "Delete Agent" : {
       "localizations" : {
         "de" : {
@@ -16168,6 +16796,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除代理"
+          }
+        }
+      }
+    },
+    "Delete All Data…" : {
+      "comment" : "Label for a button that deletes all data from the agent.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete All Data…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete All Data…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Delete All Data…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除所有数据…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除所有數據…"
           }
         }
       }
@@ -16406,6 +17070,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已从数据库中删除"
+          }
+        }
+      }
+    },
+    "Deleted rows the agent can still restore." : {
+      "comment" : "Description of a soft-delete filter mode when the mode is \"Deleted\".",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deleted rows the agent can still restore."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deleted rows the agent can still restore."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Deleted rows the agent can still restore."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体仍可恢复的已删除行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理仍可邊原的已刪除行。"
           }
         }
       }
@@ -17589,6 +18289,42 @@
         }
       }
     },
+    "Double-click a row (or press ↗) to open it · check rows to delete several at once · deleted rows are dimmed." : {
+      "comment" : "A tip that explains the grid's affordances:",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Double-click a row (or press ↗) to open it · check rows to delete several at once · deleted rows are dimmed."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Double-click a row (or press ↗) to open it · check rows to delete several at once · deleted rows are dimmed."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Double-click a row (or press ↗) to open it · check rows to delete several at once · deleted rows are dimmed."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "双击一行（或按 ↗）打开 · 勾选行可一次删除多个 · 已删除的行会变暗。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "雙擊一行（或按 ↗）開啟 · 勾選行可一次刪除多個 · 已刪除的行會變暗。"
+          }
+        }
+      }
+    },
     "Download" : {
       "localizations" : {
         "de" : {
@@ -18048,6 +18784,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "丢弃停滞时间超过此限制的请求。"
+          }
+        }
+      }
+    },
+    "Drop this saved view. The underlying tables are not affected." : {
+      "comment" : "Label for a button that drops a saved view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drop this saved view. The underlying tables are not affected."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drop this saved view. The underlying tables are not affected."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Drop this saved view. The underlying tables are not affected."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "删除此保存的视图。底层表不受影响。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刪除此儲存的視圖。底層表不受影響。"
           }
         }
       }
@@ -19053,6 +19825,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "启用剪贴板监控"
+          }
+        }
+      }
+    },
+    "Enable Database" : {
+      "comment" : "Button label that enables the database feature for an agent.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enable Database"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enable Database"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enable Database"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用数据库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啟用資料庫"
           }
         }
       }
@@ -20114,6 +20922,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每 %@"
+          }
+        }
+      }
+    },
+    "Every run and every change, with a full audit trail." : {
+      "comment" : "Help text for the \"History\" section in the database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Every run and every change, with a full audit trail."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Every run and every change, with a full audit trail."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Every run and every change, with a full audit trail."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次运行和每次变更，都有完整的审计记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每次運行和每次變更，都有完整的稽覈誌錄。"
+          }
+        }
+      }
+    },
+    "Everything in the table, including deleted rows." : {
+      "comment" : "Help text for the \"All\" filter mode in the row browser.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Everything in the table, including deleted rows."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Everything in the table, including deleted rows."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Everything in the table, including deleted rows."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表中的所有内容，包括已删除的行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表中的所有內容，包括已刪除的行。"
           }
         }
       }
@@ -22723,6 +23603,42 @@
         }
       }
     },
+    "Give this agent its own database" : {
+      "comment" : "Title of an action button in the empty state when the database feature is disabled, encouraging the user to enable it.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Give this agent its own database"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Give this agent its own database"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Give this agent its own database"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为此智能体提供自己的数据库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "爲此智能體提供自己的資料庫"
+          }
+        }
+      }
+    },
     "Give your dino a brain" : {
       "localizations" : {
         "de" : {
@@ -22880,6 +23796,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "前往%@控制台"
+          }
+        }
+      }
+    },
+    "Go to Tables" : {
+      "comment" : "Label for a button that takes the user to the \"Tables\" section of the app.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Go to Tables"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Go to Tables"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Go to Tables"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前往数据表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "前往表"
           }
         }
       }
@@ -25069,6 +26021,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "无限期"
+          }
+        }
+      }
+    },
+    "Indexes" : {
+      "comment" : "A label for the list of indexes in a database table.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Indexes"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Indexes"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Indexes"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "索引"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "索引"
           }
         }
       }
@@ -27940,6 +28928,42 @@
         }
       }
     },
+    "Loading more…" : {
+      "comment" : "A text label shown while waiting for more rows to load.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Loading more…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Loading more…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Loading more…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "加载更多…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "載入更多…"
+          }
+        }
+      }
+    },
     "Loading recommended tools…" : {
       "localizations" : {
         "de" : {
@@ -28419,6 +29443,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在生成你的签名…"
+          }
+        }
+      }
+    },
+    "Manage" : {
+      "comment" : "A label displayed above the section that lets the user manage their agent's data.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Manage"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Manage"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Manage"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "管理"
           }
         }
       }
@@ -30639,6 +31699,42 @@
         }
       }
     },
+    "More rows load automatically as you scroll — this fetches the next batch now." : {
+      "comment" : "Help text for a button that triggers a fetch of more rows in the Database Tables view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "More rows load automatically as you scroll — this fetches the next batch now."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "More rows load automatically as you scroll — this fetches the next batch now."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "More rows load automatically as you scroll — this fetches the next batch now."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滚动时会自动加载更多行——点按此按钮可立即获取下一批。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "滾動時自動載入更多行 — 現在獲取下一批。"
+          }
+        }
+      }
+    },
     "Morning Briefing" : {
       "localizations" : {
         "de" : {
@@ -31714,6 +32810,42 @@
         }
       }
     },
+    "No database changes were recorded for this run." : {
+      "comment" : "A message shown when a run has no database changes.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No database changes were recorded for this run."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No database changes were recorded for this run."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No database changes were recorded for this run."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此次运行未记录任何数据库更改。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此次運行未誌錄任何資料庫更改。"
+          }
+        }
+      }
+    },
     "No deleted rows in `%@`." : {
       "localizations" : {
         "de" : {
@@ -32457,6 +33589,42 @@
         }
       }
     },
+    "No pinned views yet. Pin a saved view from the Saved Views section to see it here at a glance." : {
+      "comment" : "A message displayed when there are no pinned views in the Database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No pinned views yet. Pin a saved view from the Saved Views section to see it here at a glance."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No pinned views yet. Pin a saved view from the Saved Views section to see it here at a glance."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No pinned views yet. Pin a saved view from the Saved Views section to see it here at a glance."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无固定视图。从保存的视图部分固定一个视图，即可在此一览。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無固定視圖。從儲存的視圖部分固定一個視圖，即可在此一覽。"
+          }
+        }
+      }
+    },
     "No plugins available" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -32718,6 +33886,42 @@
         }
       }
     },
+    "No rows in `%@` yet." : {
+      "comment" : "A table name.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No rows in `%@` yet."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No rows in `%@` yet."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No rows in `%@` yet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`%@` 中暂无行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "`%@` 中暫無行。"
+          }
+        }
+      }
+    },
     "No rows in `%@`." : {
       "localizations" : {
         "de" : {
@@ -32750,6 +33954,42 @@
         }
       }
     },
+    "No runs yet. When the agent works on a schedule or automation, each run shows up here." : {
+      "comment" : "A message displayed when a user has not yet run any tests.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No runs yet. When the agent works on a schedule or automation, each run shows up here."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No runs yet. When the agent works on a schedule or automation, each run shows up here."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No runs yet. When the agent works on a schedule or automation, each run shows up here."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无运行记录。当智能体按计划或自动运行时，每次运行都会显示在此处。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無運行誌錄。當代理按計劃或自動運行時，每次運行都會顯示在此處。"
+          }
+        }
+      }
+    },
     "No sandbox tools" : {
       "localizations" : {
         "de" : {
@@ -32762,6 +34002,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有沙盒工具"
+          }
+        }
+      }
+    },
+    "No saved views yet. Ask the agent in chat to create one — it uses the `db_define_view` tool." : {
+      "comment" : "A message shown in the Saved Views sidebar when there are no saved views.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No saved views yet. Ask the agent in chat to create one — it uses the `db_define_view` tool."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No saved views yet. Ask the agent in chat to create one — it uses the `db_define_view` tool."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No saved views yet. Ask the agent in chat to create one — it uses the `db_define_view` tool."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无保存的视图。在聊天中让智能体创建一个 — 它使用 `db_define_view` 工具。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無儲存的視圖。在聊天中讓智能體建立一個 — 它使用 `db_define_view` 工具。"
           }
         }
       }
@@ -34683,6 +35959,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开沙盒设置"
+          }
+        }
+      }
+    },
+    "Open Saved Views" : {
+      "comment" : "Label for a button that opens the Saved Views section.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Open Saved Views"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Open Saved Views"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Open Saved Views"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开保存的视图"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "開啟儲存的視圖"
           }
         }
       }
@@ -36898,6 +38210,42 @@
         }
       }
     },
+    "Permanently delete every table and row this agent has stored. The agent itself is kept." : {
+      "comment" : "Help text for the \"Delete All Data…\" button in the Database Overview view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Permanently delete every table and row this agent has stored. The agent itself is kept."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Permanently delete every table and row this agent has stored. The agent itself is kept."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Permanently delete every table and row this agent has stored. The agent itself is kept."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久删除此智能体存储的每个表和行。智能体本身保留。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久刪除此代理儲存的每個表和行。代理本身保留。"
+          }
+        }
+      }
+    },
     "Permanently delete identity, pinned facts, episodes, and conversation history." : {
       "localizations" : {
         "de" : {
@@ -37307,6 +38655,42 @@
         }
       }
     },
+    "Pick a table to see what's inside." : {
+      "comment" : "Title of a view that shows when no table is selected in the Database Tables view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pick a table to see what's inside."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pick a table to see what's inside."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pick a table to see what's inside."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择一个表查看内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇一個表查看內容。"
+          }
+        }
+      }
+    },
     "Pick a view to preview its rows." : {
       "localizations" : {
         "de" : {
@@ -37528,6 +38912,42 @@
         }
       }
     },
+    "Pin to Overview" : {
+      "comment" : "A button label that pins a saved view to the Overview dashboard.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pin to Overview"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pin to Overview"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pin to Overview"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定到概览"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定到概覽"
+          }
+        }
+      }
+    },
     "Pin to top" : {
       "localizations" : {
         "de" : {
@@ -37623,6 +39043,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "固定事实"
+          }
+        }
+      }
+    },
+    "Pinned views appear as cards on the Database Overview." : {
+      "comment" : "Tooltip text for the \"Pin to Overview\" button in the Database Saved Views view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pinned views appear as cards on the Database Overview."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pinned views appear as cards on the Database Overview."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Pinned views appear as cards on the Database Overview."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定视图以卡片形式显示在数据库概览上。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "固定視圖以卡片形式顯示在資料庫概覽上。"
           }
         }
       }
@@ -38427,6 +39883,76 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "预览内存上下文"
+          }
+        }
+      }
+    },
+    "Preview shows the first %lld rows." : {
+      "comment" : "A footer in the preview grid that explains that the preview only shows a subset of the total rows.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first %lld rows."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first %lld rows."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first %lld rows."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览显示前 %lld 行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽顯示前 %lld 行。"
+          }
+        }
+      }
+    },
+    "Preview shows the first row." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first row."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first row."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Preview shows the first row."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "预览显示第一行。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "預覽顯示第一行。"
           }
         }
       }
@@ -42450,6 +43976,42 @@
         }
       }
     },
+    "Refresh the table list" : {
+      "comment" : "Label for a button that refreshes the list of tables in the Database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Refresh the table list"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Refresh the table list"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Refresh the table list"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "刷新表列表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新整理表清單"
+          }
+        }
+      }
+    },
     "Refreshing..." : {
       "localizations" : {
         "de" : {
@@ -42734,6 +44296,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发布于 %@"
+          }
+        }
+      }
+    },
+    "Reload rows" : {
+      "comment" : "Label for a button that refreshes the list of rows in the Database Tables view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reload rows"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reload rows"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reload rows"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新加载行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "重新載入行"
           }
         }
       }
@@ -44724,6 +46322,42 @@
         }
       }
     },
+    "Reusable queries the agent has saved." : {
+      "comment" : "Help text for the \"Saved Views\" section in the database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reusable queries the agent has saved."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reusable queries the agent has saved."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Reusable queries the agent has saved."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体已保存的可复用查询。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能體已儲存的可複用查詢。"
+          }
+        }
+      }
+    },
     "Reuse cached prompt prefixes across requests for faster TTFT. When off, GPU and disk reuse are also disabled." : {
       "localizations" : {
         "de" : {
@@ -45080,6 +46714,150 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "路线"
+          }
+        }
+      }
+    },
+    "row" : {
+      "comment" : "A unit of measurement for a single row in a database.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "row"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "row"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "row"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        }
+      }
+    },
+    "rows" : {
+      "comment" : "Plural form of \"row\".",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "rows"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "rows"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "rows"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        }
+      }
+    },
+    "Rows" : {
+      "comment" : "Label for the \"Rows\" tab in the Database Tables view.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "行"
+          }
+        }
+      }
+    },
+    "Rows the agent (or you) deleted would appear here, ready to restore." : {
+      "comment" : "Description of the empty state when the user is browsing deleted rows.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows the agent (or you) deleted would appear here, ready to restore."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows the agent (or you) deleted would appear here, ready to restore."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Rows the agent (or you) deleted would appear here, ready to restore."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体（或你）删除的行会显示在此处，随时可以恢复。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能體（或你）刪除的行會顯示在此處，準備邊原。"
           }
         }
       }
@@ -47660,6 +49438,42 @@
         }
       }
     },
+    "Select all" : {
+      "comment" : "A toggle label that allows users to select or deselect all rows in a list.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select all"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select all"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select all"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全選"
+          }
+        }
+      }
+    },
     "Select All" : {
       "localizations" : {
         "de" : {
@@ -47752,6 +49566,42 @@
         }
       }
     },
+    "Select every row loaded so far (%lld)" : {
+      "comment" : "A help label for the toggle that allows users to select or deselect all rows.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select every row loaded so far (%lld)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select every row loaded so far (%lld)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select every row loaded so far (%lld)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择目前已加载的所有行（%lld）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇目前已載入的所有行（%lld）"
+          }
+        }
+      }
+    },
     "Select Folder to Watch" : {
       "localizations" : {
         "de" : {
@@ -47802,6 +49652,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择型号"
+          }
+        }
+      }
+    },
+    "Select row" : {
+      "comment" : "Accessibility label for the checkbox in the DataGrid.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select row"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select row"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Select row"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择行"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇行"
           }
         }
       }
@@ -52131,6 +54017,42 @@
         }
       }
     },
+    "Switch between the table's rows and its column layout." : {
+      "comment" : "Label for a segmented control in the Database Tables view that lets the user switch between viewing a table's rows and its column layout.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Switch between the table's rows and its column layout."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Switch between the table's rows and its column layout."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Switch between the table's rows and its column layout."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在表的行和列布局之间切换。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在表的行和列佈局之間切換。"
+          }
+        }
+      }
+    },
     "Switch the active agent" : {
       "localizations" : {
         "de" : {
@@ -52261,6 +54183,40 @@
         }
       }
     },
+    "System (managed by Osaurus)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "System (managed by Osaurus)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "System (managed by Osaurus)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "System (managed by Osaurus)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系统（由 Osaurus 管理）"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "系統（由 Osaurus 管理）"
+          }
+        }
+      }
+    },
     "System (reserved)" : {
       "localizations" : {
         "de" : {
@@ -52385,6 +54341,112 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "系统化的调试与问题解决方法"
+          }
+        }
+      }
+    },
+    "table" : {
+      "comment" : "Singular form of \"table\".",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "table"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "table"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "table"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
+          }
+        }
+      }
+    },
+    "tables" : {
+      "comment" : "Plural form of \"table\".",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "tables"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "tables"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "tables"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
+          }
+        }
+      }
+    },
+    "Tables" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tables"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tables"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tables"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "表"
           }
         }
       }
@@ -52993,6 +55055,40 @@
         }
       }
     },
+    "The agent designs this layout itself with the `db_create_table` tool. Ask it in chat if you want new columns." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent designs this layout itself with the `db_create_table` tool. Ask it in chat if you want new columns."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent designs this layout itself with the `db_create_table` tool. Ask it in chat if you want new columns."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent designs this layout itself with the `db_create_table` tool. Ask it in chat if you want new columns."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体使用 `db_create_table` 工具自行设计此布局。如果需要新列，请在聊天中询问。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能體使用 `db_create_table` 工具自行設計此佈局。如果需要新列，請在聊天中詢問。"
+          }
+        }
+      }
+    },
     "The agent determines the AI's behavior and available tools." : {
       "localizations" : {
         "de" : {
@@ -53005,6 +55101,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "代理决定人工智能的行为和可用工具。"
+          }
+        }
+      }
+    },
+    "The agent is writing to its database right now." : {
+      "comment" : "Tooltip text for the \"in-flight mutation spinner\" in the Database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent is writing to its database right now."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent is writing to its database right now."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "The agent is writing to its database right now."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体正在写入其数据库。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能體正在寫入其資料庫。"
           }
         }
       }
@@ -53930,6 +56062,78 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此智能体还没有记忆表。"
+          }
+        }
+      }
+    },
+    "This agent hasn't stored anything yet." : {
+      "comment" : "Title of a view that shows when an agent has no data stored.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent hasn't stored anything yet."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent hasn't stored anything yet."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent hasn't stored anything yet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此智能体尚未存储任何内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此智能體尚未儲存任何內容。"
+          }
+        }
+      }
+    },
+    "This agent's database is approaching its storage limit." : {
+      "comment" : "Localized help text for the \"Approaching storage limit\" badge.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent's database is approaching its storage limit."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent's database is approaching its storage limit."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "This agent's database is approaching its storage limit."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此智能体的数据库接近存储上限。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此代理的資料庫接近儲存上限。"
           }
         }
       }
@@ -58851,6 +61055,42 @@
         }
       }
     },
+    "What the agent has stored, at a glance." : {
+      "comment" : "Help text for the \"Overview\" section of the database workspace.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "What the agent has stored, at a glance."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "What the agent has stored, at a glance."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "What the agent has stored, at a glance."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体存储内容一览。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "代理儲存內容一覽。"
+          }
+        }
+      }
+    },
     "What the model can draw on by default." : {
       "comment" : "Subtitle for the \"Model Access\" feature group in the Agent Detail View.",
       "isCommentAutoGenerated" : true,
@@ -59238,6 +61478,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "清除 macOS 钥匙串，或在未同步 iCloud 钥匙串的情况下迁移到新 Mac，会使加密存储无法恢复。如果你需要迁移，请先进行明文备份。"
+          }
+        }
+      }
+    },
+    "With a database, the agent can keep notes, lists, and records between conversations — stored encrypted on this Mac. You can browse and edit everything it saves right here." : {
+      "comment" : "Description of the feature that allows an agent to store and manage data in a database.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "With a database, the agent can keep notes, lists, and records between conversations — stored encrypted on this Mac. You can browse and edit everything it saves right here."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "With a database, the agent can keep notes, lists, and records between conversations — stored encrypted on this Mac. You can browse and edit everything it saves right here."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "With a database, the agent can keep notes, lists, and records between conversations — stored encrypted on this Mac. You can browse and edit everything it saves right here."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有了数据库，智能体可以在对话之间保存笔记、列表和记录 — 以加密形式存储在此 Mac 上。你可以浏览和编辑它保存的所有内容。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "有了資料庫，代理可以在對話之間儲存筆記、清單和誌錄 — 以加密形式儲存在此 Mac 上。你可以瀏覽和編輯它儲存的所有內容。"
           }
         }
       }

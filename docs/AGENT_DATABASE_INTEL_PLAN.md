@@ -1,6 +1,8 @@
 # Private Agent Database (B4) + Database History (B5) — Intel plan
 
-**Status (2026-09-28):** Phase 0 landed; Phase 1 (Release 1) in progress.
+**Status (2026-09-28):** Phase 0 and Phase 1 (Release 1) implemented and
+tested in the package; awaiting the Rosy pass (the "Private agent database"
+section of `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`). Phases 2–3 not started.
 Update the phase status lines below as work lands.
 
 ## Context
@@ -81,6 +83,64 @@ behaviour as before). Tests: `IntelAgentDatabaseGroundworkTests`.
 4. Add `dbEnabled` coverage to `Tests/Agent/AgentCodableMigrationTests.swift`.
 
 ## Phase 1 — Release 1: database, tools, Database tab, History
+
+**Status: implemented (2026-09-28), awaiting Rosy.** What actually landed, and
+where it differs from the plan below:
+
+- Ported from `upstream/main`: `AgentDatabase`, `AgentDatabaseStore`,
+  `LocalAgentBridge`, `AgentRuntimeBridge`, `SchemaDumper`, `SchemaSnapshot`,
+  `OnboardingPrompt`, `DatabaseTools` and all eight `Views/Agent/Database/*`
+  files. The Intel stubs for the store and bridge are gone.
+- **Open path:** `StorageKeyManager.currentKey()` + `EncryptedSQLiteOpener`
+  (always encrypted), `StorageMigrationCoordinator.blockingAwaitReady()` for
+  the gate, and no quarantine on failure. Each open agent database registers
+  an `OsaurusDatabaseHandle` named `agent-db-<uuid>`, so storage-key rotation
+  can quiesce it before rekeying and maintenance reaches it. Upstream never
+  registers these, so an open agent database would have blocked a rotation.
+- **Read-only hardening:** `query()` and `forEachQueryRow()` now run
+  `forbiddenReason`, then `prepareSingleReadOnlyStatement`: `sqlite3_stmt_readonly`
+  must be true, and nothing but whitespace/comments may follow the first
+  statement. The tail pointer is read inside `withCString`; reading it after
+  `sqlite3_prepare_v2` returned was a use-after-free (caught by the tests).
+- **Release 2 code removed, not stubbed:** `db_import`, `db_export`,
+  `db_execute`'s `path:` form, `exportQueryToFile`, the Tables Import/Export
+  buttons, drag-and-drop and host import/export. Upstream
+  `Tests/Storage/DatabaseToolsTests.swift` is excluded until Release 2.
+  `OnboardingPrompt` is Intel v6: upstream v5 minus import/export, plus an
+  approval note.
+- **Approvals:** `DBExecuteTool` and `DBMigrateTool` are `PermissionedTool`s
+  with `.ask`; the dispatch path already honours `defaultPermissionPolicy`.
+- **Gating:** `ToolRegistry.databaseToolNames` (15 tools) registered at init.
+  At dispatch they are refused unless `effectiveDBEnabled`, and they bypass the
+  Tools-tab allowlist. In `composeChatContext` they are offered, and the
+  onboarding block is added to the cached prompt, only when the ability is on
+  and tools are available. The schema snapshot rides the per-turn
+  `memorySection` (upstream's DYNAMIC lane), so table changes don't break
+  DeepSeek's prompt cache.
+- **UI:** custom agents get `DatabaseWorkspaceView` full-height from
+  `tabContent`; the built-in agent gets an explanation. Real toggles sit in
+  Abilities (Autonomy & Data) and Configure. The privacy note is corrected for
+  Intel: upstream said "row data is not" sent, but on Intel every model is
+  remote and tool results go to the provider. Delete Data has a themed confirm
+  alert, error toast and `clearStorageWarning`. Bundle buttons are hidden
+  until Release 3. All native segmented/bordered/switch controls in the ported
+  views use the Intel themed controls, and two-value `onChange` is
+  down-levelled.
+- **History (B5):** runs from `SchedulerDatabase.runs`, filtered by
+  `DatabaseHistoryView.visibleRuns` (drops `schedule`), with readable trigger
+  labels. Interactive chat turns carry no run id, so a pinned **Chat & manual
+  edits** entry lists `_changelog WHERE run_id IS NULL` (newest 500). It only
+  opens the database when the file exists.
+- **Quota warning:** Intel `AgentManager.storageWarningAgentIds` plus a
+  24-hour-throttled toast (upstream used the excluded `NotificationService`).
+  `LocalAgentBridge.notify` only logs, because self-scheduling is unsupported.
+- **Strings:** 56 upstream catalog entries copied and 17 Intel strings
+  translated (de "du", zh-Hans "智能体"); missing keys 151 → 150.
+- **Tests:** `IntelAgentDatabaseGroundworkTests` (4), `IntelDatabaseToolsTests`
+  (10), upstream `AgentDatabaseTests` (38; one export test rewritten against
+  the streaming cursor; onboarding assertions inverted for Release 1) and
+  `AgentDataBrowserModelTests` (7). Full gate: 1,222 tests in 183 suites, plus
+  an x86_64 build.
 
 ### 1a. Storage (port from upstream/main)
 Un-exclude / replace: `Storage/AgentDatabase.swift`,

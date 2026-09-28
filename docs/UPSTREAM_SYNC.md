@@ -1772,3 +1772,35 @@ Candidate `1.0.57` (`58`) packages this sweep from `5132047c8` as
 scope is the "Follow-up retest" section of
 `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`. The next public release needs
 `BUILD_NUMBER` ≥ 59.
+
+### Private agent database, Release 1 — 2026-09-28
+
+B4/B5 Release 1 landed per `AGENT_DATABASE_INTEL_PLAN.md` (Phase 0 and Phase 1
+status sections hold the full list of adaptations). Durable lessons for future
+database or upstream work:
+
+- **Port the database subsystem from `upstream/main`.** The excluded on-disk
+  copies were thousands of lines stale. The same held for
+  `Tests/Storage/AgentDatabaseTests.swift`, which sat in the test-target
+  exclude list as an amputated-subsystem suite. It now runs; upstream
+  `DatabaseToolsTests.swift` is excluded until Release 2 (import/export).
+- **Every Intel database registers an `OsaurusDatabaseHandle`**, otherwise
+  storage-key rotation cannot quiesce it. Per-agent databases use
+  `agent-db-<uuid>`.
+- **`sqlite3_prepare_v2`'s tail pointer is only valid inside
+  `withCString`.** Passing a Swift `String` straight to the C call creates a
+  temporary buffer that is gone by the next line.
+- **Static helpers on SwiftUI views are MainActor-isolated.** Calling them from
+  a nonisolated test traps at runtime (signal 5, no message) rather than
+  failing to compile. Mark pure helpers `nonisolated`.
+- **Upstream privacy copy assumes local models.** On Intel every model is
+  remote and tool results travel to the provider; review any "stays on this
+  Mac" / "is not sent" wording when porting.
+- **Localization merge:** copy upstream catalog entries for every string
+  literal in newly ported files that upstream already translates, not only the
+  keys the checker reports. `check-swift-catalog-keys.py` does not see
+  `LocalizedStringKey` parameters or `Text(_:bundle:)` calls with extra
+  arguments.
+- Rosy acceptance: the "Private agent database" section of
+  `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+

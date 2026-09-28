@@ -1156,9 +1156,21 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         "list_knowledge", "read_knowledge", "search_knowledge",
     ]
 
+    /// Private agent database tools (docs/AGENT_DATABASE_INTEL_PLAN.md).
+    /// Like Knowledge, the Database ability toggle is the grant: these bypass
+    /// the Tools-tab allowlist and are gated on `effectiveDBEnabled` at
+    /// prompt composition and again at dispatch.
+    static let databaseToolNames: Set<String> = [
+        "db_schema", "db_create_table", "db_alter_table", "db_migrate",
+        "db_insert", "db_upsert", "db_update", "db_delete", "db_restore",
+        "db_query", "db_execute",
+        "db_define_view", "db_run_view", "db_list_views", "db_drop_view",
+    ]
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
+        registerDatabaseTools()
         registerWebSearchTools()
         registerIntelOrchestratorTools()
     }
@@ -1197,6 +1209,20 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             ReadKnowledgeTool(),
             ListKnowledgeTool(),
         ]
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
+    private func registerDatabaseTools() {
+        let tools: [OsaurusTool] = [
+            DBSchemaTool(), DBCreateTableTool(), DBAlterTableTool(), DBMigrateTool(),
+            DBInsertTool(), DBUpsertTool(), DBUpdateTool(), DBDeleteTool(), DBRestoreTool(),
+            DBQueryTool(), DBExecuteTool(),
+            DBDefineViewTool(), DBRunViewTool(), DBListViewsTool(), DBDropViewTool(),
+        ]
+        assert(Set(tools.map(\.name)) == Self.databaseToolNames)
         for tool in tools {
             toolsByName[tool.name] = tool
             builtInToolNames.insert(tool.name)
@@ -1397,6 +1423,18 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             self.runtimeManagedToolNames
         }
         let isKnowledgeTool = Self.knowledgeToolNames.contains(name)
+        let isDatabaseTool = Self.databaseToolNames.contains(name)
+        if isDatabaseTool {
+            // The ability toggle is the grant (Default agent never has it).
+            guard AgentManager.shared.effectiveDBEnabled(for: agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "The Database ability is off for this agent.",
+                    tool: name
+                )
+            }
+            return nil
+        }
         if !isKnowledgeTool,
             let enabled = AgentManager.shared.effectiveEnabledToolNames(for: agentId),
             !Self.isAdmittedBySeededAllowlist(

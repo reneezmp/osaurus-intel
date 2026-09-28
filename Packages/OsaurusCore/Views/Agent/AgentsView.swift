@@ -768,8 +768,8 @@ private enum DetailTab: String, CaseIterable {
     case sandbox
     case automation
     case memory
-    /// Grouped private-database surface matching upstream. Intel renders its nested routes
-    /// as dependency-aware empty states until AgentDatabase is restored.
+    /// Grouped private-database surface matching upstream (`DatabaseWorkspaceView`:
+    /// Overview / Tables / Saved Views / History). The built-in agent gets an explanation.
     case database
     /// Agent DB feature (spec §5.5 / §7). Visible only when
     /// `Agent.settings.dbEnabled == true`; the tab strip filters
@@ -792,9 +792,9 @@ private enum DetailTab: String, CaseIterable {
     static func allTabsForAgent(_ agent: Agent) -> [DetailTab] {
 #if OSAURUS_INTEL
         _ = agent
-        // The Intel target currently supplies only an AgentDatabaseStore stub.
-        // Never resurrect its historical DB tabs from a migrated `dbEnabled`
-        // flag: those controls would accept edits that cannot reach storage.
+        // Intel surfaces the private database through the single `.database`
+        // tab (DatabaseWorkspaceView). The legacy Home/Schema/Data/Views/
+        // Activity tabs stay hidden; their Intel views are placeholders.
         return DetailTab.allCases.filter { !dbTabs.contains($0) }
 #else
         if agent.settings.dbEnabled {
@@ -1270,6 +1270,28 @@ struct AgentDetailView: View {
             ActivityTabView(agentId: agent.id)
                 .environment(\.theme, themeManager.currentTheme)
                 .id(selectedTab)
+        case .builtIn(.database) where agent.id != Agent.defaultId:
+            // The private database workspace owns its own scrolling (the
+            // table grid needs full height), like upstream.
+            DatabaseWorkspaceView(
+                agentId: agent.id,
+                isEnabled: dbEnabled,
+                isRemoteProvider: isUsingRemoteProvider,
+                initialSection: selectedDatabaseSubtab,
+                initialTableName: pendingFocusedTableName,
+                initialViewName: pendingFocusedViewName,
+                onEnable: {
+                    dbEnabled = true
+                    debouncedSave()
+                },
+                // Encrypted agent bundles arrive with Intel Release 3; the
+                // workspace does not show those actions.
+                onExportBundle: {},
+                onImportBundle: {},
+                onDeleteData: { showDeleteDBConfirmation = true }
+            )
+            .environment(\.theme, themeManager.currentTheme)
+            .id(selectedTab)
         default:
             ScrollView {
                 VStack(alignment: .leading, spacing: 16) {
@@ -1496,6 +1518,13 @@ struct AgentDetailView: View {
                         "Are you sure you want to delete \"\(currentAgent.name)\"? This action cannot be undone. Any sandbox resources provisioned for this agent will also be removed."
                     ),
                 primaryButton: .destructive(L("Delete")) { onDelete(currentAgent) },
+                secondaryButton: .cancel(L("Cancel"))
+            )
+            .themedAlert(
+                L("Delete this agent's database?"),
+                isPresented: $showDeleteDBConfirmation,
+                message: L("This permanently deletes every table, row, and saved view this agent has stored, and its database history. The agent and its settings stay. This cannot be undone."),
+                primaryButton: .destructive(L("Delete Database")) { deleteAgentDatabaseData() },
                 secondaryButton: .cancel(L("Cancel"))
             )
             .themedAlert(
@@ -2439,11 +2468,27 @@ struct AgentDetailView: View {
                     description: "Model-chosen next runs require scheduler tools that are not available in this Intel build. User-created schedules and folder watchers remain available under Automation.",
                     icon: "calendar.badge.clock"
                 )
-                abilityUnavailableRow(
-                    title: "Database",
-                    description: "Per-agent structured storage is not available in this Intel build.",
-                    icon: "cylinder"
-                )
+                if agent.id == Agent.defaultId {
+                    abilityUnavailableRow(
+                        title: "Database",
+                        description: "The built-in agent has no private database. Create an agent to use one.",
+                        icon: "cylinder"
+                    )
+                } else {
+                    abilityToggleRow(
+                        title: "Database",
+                        description: "An encrypted database on this Mac that the agent can build and query with db_* tools.",
+                        icon: "cylinder",
+                        isOn: Binding(
+                            get: { dbEnabled },
+                            set: { dbEnabled = $0; debouncedSave() }
+                        ),
+                        destination: .database
+                    )
+                    if dbEnabled {
+                        databasePrivacyNote
+                    }
+                }
             }
         }
 
@@ -3025,44 +3070,17 @@ struct AgentDetailView: View {
         episodesSection
     }
 
+    /// Only reached for the built-in agent: custom agents get the full
+    /// `DatabaseWorkspaceView` from `tabContent`.
     @ViewBuilder
     private var intelDatabaseTabContent: some View {
         tabHelperText(DetailTab.database.helperText)
-        intelDatabaseSubtabBar
-
-        switch selectedDatabaseSubtab {
-        case .overview:
-            AgentDetailSection(title: L("Overview"), icon: "square.grid.2x2") {
-                dependencyEmptyState(
-                    icon: "cylinder.split.1x2",
-                    title: "Private database unavailable",
-                    hint: "The encrypted per-agent structured database and bundle service are not compiled into the Intel target yet. Tables and rows will be summarized here after that backend is restored."
-                )
-            }
-        case .tables:
-            AgentDetailSection(title: L("Tables"), icon: "tablecells") {
-                dependencyEmptyState(
-                    icon: "tablecells",
-                    title: "No database tables",
-                    hint: "Table browsing depends on AgentDatabase, its schema tools, and the table editor. This nested route is stable for the eventual port."
-                )
-            }
-        case .savedViews:
-            AgentDetailSection(title: L("Saved Views"), icon: "eye") {
-                dependencyEmptyState(
-                    icon: "eye.slash",
-                    title: "No saved views",
-                    hint: "Saved SQL views depend on the private Agent Database. They will be listed and previewed on this page when that service becomes available."
-                )
-            }
-        case .history:
-            AgentDetailSection(title: L("History"), icon: "clock.arrow.circlepath") {
-                dependencyEmptyState(
-                    icon: "clock.badge.questionmark",
-                    title: "No database run history",
-                    hint: "The database audit trail depends on AgentDatabase write logging and schedule-run integration. Conversation history remains available in the Memory tab."
-                )
-            }
+        AgentDetailSection(title: L("Database"), icon: "cylinder") {
+            dependencyEmptyState(
+                icon: "cylinder.split.1x2",
+                title: "The built-in agent has no private database",
+                hint: "Create your own agent and turn on its Database ability to give it an encrypted database it can build and query."
+            )
         }
     }
 
@@ -3444,11 +3462,35 @@ struct AgentDetailView: View {
 
     @ViewBuilder
     private var databaseFeatureRow: some View {
-        abilityUnavailableRow(
-            title: "Private Database",
-            description: "The structured per-agent database is not compiled into this Intel build. Its controls will return when the database backend is restored.",
-            icon: "cylinder"
+        if agent.id == Agent.defaultId {
+            abilityUnavailableRow(
+                title: "Private Database",
+                description: "The built-in agent has no private database. Create an agent to use one.",
+                icon: "cylinder"
+            )
+        } else {
+            featureToggleRow(
+                title: "Private Database",
+                subtitle: "Give this agent an encrypted database it can build and query. Raw SQL and migrations ask before running.",
+                isOn: $dbEnabled
+            )
+            if dbEnabled {
+                databasePrivacyNote
+            }
+        }
+    }
+
+    /// Intel runs only cloud models, so be explicit about what leaves the
+    /// Mac when the database ability is on.
+    private var databasePrivacyNote: some View {
+        Text(
+            "The table layout is sent with every request, and rows the agent reads or writes pass through its cloud provider. The database file stays encrypted on this Mac.",
+            bundle: .module
         )
+        .font(.system(size: 11))
+        .foregroundColor(theme.tertiaryText)
+        .fixedSize(horizontal: false, vertical: true)
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 
     /// Whether the agent's effective model resolves to a connected
@@ -3722,7 +3764,16 @@ struct AgentDetailView: View {
         // and forget any cached per-agent serial queue. The next DB
         // write reopens lazily and the agent rebuilds its own
         // tables from scratch — exactly the cold-start path.
-        try? AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
+        // begin/end so open Database views reload once the wipe settles.
+        AgentMutationActivity.shared.begin(agentId)
+        defer { AgentMutationActivity.shared.end(agentId) }
+        do {
+            try AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
+        } catch {
+            _ = ToastManager.shared.error(
+                L("Couldn't delete the database"), message: error.localizedDescription)
+            return
+        }
         do {
             try SchedulerDatabase.shared.deleteAllForAgent(agentId)
         } catch {
@@ -3731,6 +3782,8 @@ struct AgentDetailView: View {
             )
         }
         LocalAgentBridge.shared.forget(agentId: agentId)
+        AgentManager.shared.clearStorageWarning(for: agentId)
+        showSuccess("Deleted the agent's database")
     }
 
     /// Clear only the data that is genuinely available in the Intel build.

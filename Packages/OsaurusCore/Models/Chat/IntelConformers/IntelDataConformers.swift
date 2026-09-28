@@ -1818,6 +1818,9 @@ final class SystemPromptComposer: @unchecked Sendable {
         let webSearchEnabled = await MainActor.run {
             AgentManager.shared.agent(for: id)?.settings.webSearchEnabled ?? false
         }
+        let databaseEnabled = await MainActor.run {
+            AgentManager.shared.effectiveDBEnabled(for: id)
+        }
         let folderToolNames = await MainActor.run {
             Set(FolderToolManager.shared.folderToolNames)
         }
@@ -1888,6 +1891,18 @@ final class SystemPromptComposer: @unchecked Sendable {
         if !toolDirective.isEmpty {
             sections.append(PromptSection(id: "agentLoop", label: "Agent Loop", text: toolDirective, tint: .indigo))
         }
+        // Private agent database (docs/AGENT_DATABASE_INTEL_PLAN.md). The
+        // onboarding framing is session-constant, so it joins the stable,
+        // cached prompt; the schema snapshot changes as the agent works and
+        // rides the per-turn prefix below (upstream's DYNAMIC section).
+        let databaseActive = databaseEnabled && folderToolsAvailable
+        var databaseSchemaSection: String? = nil
+        if databaseActive {
+            let block = "\n\n" + OnboardingPrompt.block
+            prompt += block
+            sections.append(PromptSection(id: "agentDB", label: "Agent DB", text: block, tint: .orange))
+            databaseSchemaSection = Self.renderSchemaSnapshot(agentId: id)
+        }
         // Surface the registered tools, honoring the agent's capability picker
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
         // allowlist; in Auto mode (or un-seeded), send everything registered.
@@ -1901,6 +1916,9 @@ final class SystemPromptComposer: @unchecked Sendable {
             )
                 .filter {
                     knowledgeAllowed || !ToolRegistry.knowledgeToolNames.contains($0.function.name)
+                }
+                .filter {
+                    databaseActive || !ToolRegistry.databaseToolNames.contains($0.function.name)
                 }
                 .filter { spec in
                     folderToolIsVisible(
@@ -1929,6 +1947,10 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // (and only when) that live grant/project scope is non-empty.
                 if knowledgeAllowed {
                     allowed.formUnion(ToolRegistry.knowledgeToolNames)
+                }
+                // Same for the Database ability: the toggle is the grant.
+                if databaseActive {
+                    allowed.formUnion(ToolRegistry.databaseToolNames)
                 }
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
@@ -2004,9 +2026,28 @@ final class SystemPromptComposer: @unchecked Sendable {
             memorySection = [block, memorySection].compactMap { $0 }.joined(separator: "\n\n")
         }
 
+        if let databaseSchemaSection, !databaseSchemaSection.isEmpty {
+            memorySection = [databaseSchemaSection, memorySection].compactMap { $0 }
+                .joined(separator: "\n\n")
+        }
+
         return ComposedContext(
             prompt: prompt, toolTokens: toolTokens, tools: tools,
             memorySection: memorySection, promptSections: sections)
+    }
+
+    /// Upstream `SystemPromptComposer.renderSchemaSnapshot`: opens the agent
+    /// database (creating it on first use) and falls back to the "no tables
+    /// yet" block when it cannot be read.
+    static func renderSchemaSnapshot(agentId: UUID) -> String {
+        do {
+            return try LocalAgentBridge.shared.schemaSnapshot(agentId: agentId)
+        } catch {
+            NSLog(
+                "[Context:agentDB] schema snapshot unavailable for %@: %@",
+                agentId.uuidString, error.localizedDescription)
+            return SchemaSnapshot.emptyStateBlock
+        }
     }
 
     /// Splice the memory block in as its own system message immediately *before*

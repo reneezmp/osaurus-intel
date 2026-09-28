@@ -152,6 +152,46 @@ enum DatabaseToolHelpers {
             tool: tool
         )
     }
+
+    /// JSON-schema fragment for positional SQL bind parameters.
+    static let sqlParamsProperty: JSONValue = .object([
+        "type": .string("array"),
+        "description": .string(
+            "Positional bind parameters (optional). Each item may be string, number, boolean, or null."
+        ),
+    ])
+
+    /// Soft ceiling on encoded row payloads returned by read tools.
+    static let maxEncodedRowBytes = 80_000
+
+    /// Trim trailing rows so the JSON payload stays under the soft cap.
+    static func trimQueryRows(
+        _ rows: inout [[Any]],
+        offset: Int?,
+        maxBytes: Int = maxEncodedRowBytes
+    ) -> (sizeTruncated: Bool, pagingHint: String?) {
+        var sizeTruncated = false
+        if let data = try? JSONSerialization.data(withJSONObject: rows),
+            data.count > maxBytes, !rows.isEmpty
+        {
+            let avg = max(1, data.count / rows.count)
+            let keep = max(1, (maxBytes * 9 / 10) / avg)
+            if keep < rows.count {
+                rows = Array(rows.prefix(keep))
+                sizeTruncated = true
+            }
+        }
+        let hint: String?
+        if sizeTruncated {
+            let nextOffset = (offset ?? 0) + rows.count
+            hint =
+                "Result truncated at \(rows.count) rows. Page with `offset: \(nextOffset)`, "
+                + "or aggregate in SQL (COUNT/SUM/GROUP BY) instead of returning raw rows."
+        } else {
+            hint = nil
+        }
+        return (sizeTruncated, hint)
+    }
 }
 
 // MARK: - db_schema
@@ -197,9 +237,12 @@ final class DBCreateTableTool: OsaurusTool, @unchecked Sendable {
         "Create a new table in your private database. `purpose` is required "
         + "and surfaced to the user — make it a clear, single-sentence "
         + "description of what the table is for. Host-managed columns "
-        + "(`id`, `_created_at`, `_updated_at`, `_deleted_at`) are added "
-        + "automatically; do not redeclare them. Call `db_schema` first to "
-        + "confirm there isn't already a table with this name."
+        + "(`_created_at`, `_updated_at`, `_deleted_at`) are added "
+        + "automatically; do not redeclare them. An `id INTEGER PRIMARY KEY` "
+        + "is added too unless you declare your own `id` column or mark a "
+        + "column `primary_key` — a declared `id` becomes the primary key "
+        + "with the type you give it. Call `db_schema` first to confirm "
+        + "there isn't already a table with this name."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -228,8 +271,13 @@ final class DBCreateTableTool: OsaurusTool, @unchecked Sendable {
                         "name": .object(["type": .string("string")]),
                         "type": .object([
                             "type": .string("string"),
+                            "enum": .array(
+                                AgentDatabase.supportedColumnTypes.map(JSONValue.string)
+                            ),
                             "description": .string(
-                                "Column type affinity. One of TEXT, INTEGER, REAL, BLOB, NUMERIC."
+                                "Column type only; constraints belong in `nullable`, `default`, "
+                                    + "and `primary_key`. Do not include PRIMARY KEY, "
+                                    + "AUTOINCREMENT, DEFAULT, or NOT NULL here."
                             ),
                         ]),
                         "nullable": .object([
@@ -378,7 +426,12 @@ final class DBAlterTableTool: OsaurusTool, @unchecked Sendable {
                     "type": .string("object"),
                     "properties": .object([
                         "name": .object(["type": .string("string")]),
-                        "type": .object(["type": .string("string")]),
+                        "type": .object([
+                            "type": .string("string"),
+                            "enum": .array(
+                                AgentDatabase.supportedColumnTypes.map(JSONValue.string)
+                            ),
+                        ]),
                         "nullable": .object(["type": .string("boolean")]),
                         "default": .object(["type": .string("string")]),
                     ]),
@@ -447,7 +500,11 @@ final class DBAlterTableTool: OsaurusTool, @unchecked Sendable {
 
 // MARK: - db_migrate
 
-final class DBMigrateTool: OsaurusTool, @unchecked Sendable {
+/// Schema migrations default to **Ask** on Intel (Renée, 2026-09-25).
+final class DBMigrateTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
+    let requirements: [String] = []
+    let defaultPermissionPolicy: ToolPermissionPolicy = .ask
+
     let name = "db_migrate"
     let description =
         "Run a raw SQL migration as a reversible pair. Use only for cases "
@@ -513,9 +570,14 @@ final class DBMigrateTool: OsaurusTool, @unchecked Sendable {
 final class DBInsertTool: OsaurusTool, @unchecked Sendable {
     let name = "db_insert"
     let description =
-        "Insert one row into a table. The host-managed columns (`id`, "
-        + "`_created_at`, `_updated_at`, `_deleted_at`) are filled in "
-        + "automatically — do not include them in `row`."
+        "Insert row(s) into a table. Pass `row` for a single row, or `rows` "
+        + "(an array of objects) to insert many in one call — prefer `rows` "
+        + "for batches so you don't spend a tool call per row. For data that "
+        + "already lives in a file, use `db_import` instead. Host-managed "
+        + "columns (`_created_at`, `_updated_at`, `_deleted_at`) are filled "
+        + "in automatically — do not include them. An auto-added integer "
+        + "`id` fills itself too; include `id` only when the table declares "
+        + "its own `id` column."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -525,12 +587,24 @@ final class DBInsertTool: OsaurusTool, @unchecked Sendable {
             "row": .object([
                 "type": .string("object"),
                 "description": .string(
-                    "Column → value map. Strings / numbers / booleans / null only."
+                    "A single row: column → value map. Strings / numbers / "
+                        + "booleans / null only."
                 ),
                 "additionalProperties": .bool(true),
             ]),
+            "rows": .object([
+                "type": .string("array"),
+                "description": .string(
+                    "Many rows in one call. Each item is a column → value map. "
+                        + "Use this instead of repeated `db_insert` for batches."
+                ),
+                "items": .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(true),
+                ]),
+            ]),
         ]),
-        "required": .array([.string("table"), .string("row")]),
+        "required": .array([.string("table")]),
     ])
 
     func execute(argumentsJSON: String) async throws -> String {
@@ -542,15 +616,39 @@ final class DBInsertTool: OsaurusTool, @unchecked Sendable {
         let tableReq = requireString(args, "table", expected: "table name", tool: name)
         guard case .value(let table) = tableReq else { return tableReq.failureEnvelope ?? "" }
 
-        guard let rowRaw = args["row"] as? [String: Any] else {
-            return ToolEnvelope.failure(
-                kind: .invalidArgs,
-                message: "`row` must be a JSON object.",
-                tool: name
-            )
-        }
-
         do {
+            if let rowsAny = args["rows"] {
+                guard let rowsRaw = rowsAny as? [[String: Any]], !rowsRaw.isEmpty else {
+                    return ToolEnvelope.failure(
+                        kind: .invalidArgs,
+                        message: "`rows` must be a non-empty array of objects.",
+                        field: "rows",
+                        tool: name
+                    )
+                }
+                let mapped = rowsRaw.map { DatabaseToolHelpers.toSQLValues($0) }
+                let result = try LocalAgentBridge.shared.insertMany(
+                    agentId: agentId,
+                    table: table,
+                    rows: mapped
+                )
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: [
+                        "ids": result.rowIDs.map { NSNumber(value: $0) },
+                        "count": result.count,
+                    ]
+                )
+            }
+
+            guard let rowRaw = args["row"] as? [String: Any] else {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "Provide `row` (a single object) or `rows` (an array of objects).",
+                    field: "row",
+                    tool: name
+                )
+            }
             let result = try LocalAgentBridge.shared.insert(
                 agentId: agentId,
                 table: table,
@@ -571,9 +669,10 @@ final class DBInsertTool: OsaurusTool, @unchecked Sendable {
 final class DBUpsertTool: OsaurusTool, @unchecked Sendable {
     let name = "db_upsert"
     let description =
-        "Insert a row, or update the existing row if one conflicts on "
-        + "`key_columns`. The conflict columns must have a UNIQUE or "
-        + "PRIMARY KEY constraint."
+        "Insert row(s), or update the existing row when one conflicts on "
+        + "`key_columns`. Pass `row` for a single row or `rows` for a batch. "
+        + "The conflict columns must have a UNIQUE or PRIMARY KEY constraint. "
+        + "For file-backed data, use `db_import` with `mode=upsert` instead."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -589,8 +688,16 @@ final class DBUpsertTool: OsaurusTool, @unchecked Sendable {
                 "type": .string("object"),
                 "additionalProperties": .bool(true),
             ]),
+            "rows": .object([
+                "type": .string("array"),
+                "description": .string("Many rows in one call. Each item is a column → value map."),
+                "items": .object([
+                    "type": .string("object"),
+                    "additionalProperties": .bool(true),
+                ]),
+            ]),
         ]),
-        "required": .array([.string("table"), .string("key_columns"), .string("row")]),
+        "required": .array([.string("table"), .string("key_columns")]),
     ])
 
     func execute(argumentsJSON: String) async throws -> String {
@@ -610,15 +717,37 @@ final class DBUpsertTool: OsaurusTool, @unchecked Sendable {
         )
         guard case .value(let keyColumns) = keyReq else { return keyReq.failureEnvelope ?? "" }
 
-        guard let rowRaw = args["row"] as? [String: Any] else {
-            return ToolEnvelope.failure(
-                kind: .invalidArgs,
-                message: "`row` must be a JSON object.",
-                tool: name
-            )
-        }
-
         do {
+            if let rowsAny = args["rows"] {
+                guard let rowsRaw = rowsAny as? [[String: Any]], !rowsRaw.isEmpty else {
+                    return ToolEnvelope.failure(
+                        kind: .invalidArgs,
+                        message: "`rows` must be a non-empty array of objects.",
+                        field: "rows",
+                        tool: name
+                    )
+                }
+                let mapped = rowsRaw.map { DatabaseToolHelpers.toSQLValues($0) }
+                let result = try LocalAgentBridge.shared.upsertMany(
+                    agentId: agentId,
+                    table: table,
+                    keyColumns: keyColumns,
+                    rows: mapped
+                )
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: ["count": result.rowsAffected]
+                )
+            }
+
+            guard let rowRaw = args["row"] as? [String: Any] else {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "Provide `row` (a single object) or `rows` (an array of objects).",
+                    field: "row",
+                    tool: name
+                )
+            }
             let result = try LocalAgentBridge.shared.upsert(
                 agentId: agentId,
                 table: table,
@@ -824,10 +953,15 @@ final class DBRestoreTool: OsaurusTool, @unchecked Sendable {
 final class DBQueryTool: OsaurusTool, @unchecked Sendable {
     let name = "db_query"
     let description =
-        "Run a read-only SQL query. Returns at most 1000 rows; `truncated` "
-        + "is true when there were more. Queries auto-filter "
-        + "`_deleted_at IS NULL` on user tables unless you pass "
-        + "`include_deleted=true` explicitly in the WHERE clause."
+        "Run a read-only SQL query. Returns up to `limit` rows (default "
+        + "1000, hard cap 5000); page through larger results with "
+        + "`limit`/`offset`. `truncated` is true when more rows existed. For "
+        + "big tables, prefer aggregating in SQL (COUNT/SUM/GROUP BY) or "
+        + "`db_export` over returning raw rows. On user tables, add "
+        + "`_deleted_at IS NULL` to your WHERE when you want to hide "
+        + "soft-deleted rows — `db_query` runs your SQL as written. Saved "
+        + "view names are queryable: reference them in FROM/JOIN when you "
+        + "need to filter, combine, aggregate, or page a saved result."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -839,10 +973,16 @@ final class DBQueryTool: OsaurusTool, @unchecked Sendable {
                     "SELECT statement. May reference `?1`, `?2`, … bound from `params`."
                 ),
             ]),
-            "params": .object([
-                "type": .string("array"),
-                "description": .string("Positional bind parameters (optional)."),
-                "items": .object(["type": .string("string")]),
+            "params": DatabaseToolHelpers.sqlParamsProperty,
+            "limit": .object([
+                "type": .string("integer"),
+                "description": .string(
+                    "Max rows to return (default 1000, hard cap 5000). Pair with `offset` to page."
+                ),
+            ]),
+            "offset": .object([
+                "type": .string("integer"),
+                "description": .string("Rows to skip before returning (default 0)."),
             ]),
         ]),
         "required": .array([.string("sql")]),
@@ -863,23 +1003,39 @@ final class DBQueryTool: OsaurusTool, @unchecked Sendable {
         } else {
             params = []
         }
+        let limit = coerceInt(args["limit"])
+        let offset = coerceInt(args["offset"])
 
         do {
             let result = try LocalAgentBridge.shared.query(
                 agentId: agentId,
                 sql: sql,
-                params: params
+                params: params,
+                limit: limit,
+                offset: offset
             )
-            let rows: [[Any]] = result.rows.map { row in
+            var rows: [[Any]] = result.rows.map { row in
                 row.map { DatabaseToolHelpers.toJSONAny($0) }
+            }
+
+            let (sizeTruncated, pagingHint) = DatabaseToolHelpers.trimQueryRows(
+                &rows,
+                offset: offset
+            )
+
+            let truncated = result.truncated || sizeTruncated
+            var warnings: [String] = []
+            if truncated, let pagingHint {
+                warnings.append(pagingHint)
             }
             return ToolEnvelope.success(
                 tool: name,
                 result: [
                     "columns": result.columns,
                     "rows": rows,
-                    "truncated": result.truncated,
-                ]
+                    "truncated": truncated,
+                ],
+                warnings: warnings.isEmpty ? nil : warnings
             )
         } catch {
             return DatabaseToolHelpers.envelope(for: error, tool: name)
@@ -889,14 +1045,23 @@ final class DBQueryTool: OsaurusTool, @unchecked Sendable {
 
 // MARK: - db_execute
 
-final class DBExecuteTool: OsaurusTool, @unchecked Sendable {
+/// Intel Release 1: inline `sql` only (the upstream `path:` form needs the
+/// Release 2 file resolver). Raw SQL scripts default to **Ask**
+/// (Renée, 2026-09-25); users can still set the tool to Auto.
+final class DBExecuteTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     let name = "db_execute"
     let description =
-        "Raw SQL escape hatch. Use only when the typed surface "
-        + "(`db_insert`/`db_update`/`db_query`/etc.) can't express what "
-        + "you need. Logged distinctly in the activity log with "
-        + "`op='raw'`. DROP TABLE, TRUNCATE, DROP DATABASE, and "
-        + "unconstrained DELETE are rejected."
+        "Run first-class SQL the typed tools can't express — including "
+        + "multi-statement transform scripts (`INSERT … SELECT`, CTEs, "
+        + "window functions, index/trigger DDL) which run inside one "
+        + "transaction. Prefer this over pulling rows into context to "
+        + "compute by hand. The user may be asked to approve each call. "
+        + "Logged with `op='raw'`. Rejected: DROP TABLE, TRUNCATE, DROP "
+        + "DATABASE, unconstrained DELETE, ATTACH/DETACH, PRAGMA writes, "
+        + "load_extension, and writes to system tables."
+
+    let requirements: [String] = []
+    let defaultPermissionPolicy: ToolPermissionPolicy = .ask
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -904,12 +1069,9 @@ final class DBExecuteTool: OsaurusTool, @unchecked Sendable {
         "properties": .object([
             "sql": .object([
                 "type": .string("string"),
-                "description": .string("Statement to execute."),
+                "description": .string("Statement or script to execute."),
             ]),
-            "params": .object([
-                "type": .string("array"),
-                "items": .object(["type": .string("string")]),
-            ]),
+            "params": DatabaseToolHelpers.sqlParamsProperty,
         ]),
         "required": .array([.string("sql")]),
     ])
@@ -920,8 +1082,16 @@ final class DBExecuteTool: OsaurusTool, @unchecked Sendable {
         let agentReq = DatabaseToolHelpers.requireAgentId(tool: name)
         guard case .value(let agentId) = agentReq else { return agentReq.failureEnvelope ?? "" }
 
-        let sqlReq = requireString(args, "sql", expected: "SQL statement", tool: name)
-        guard case .value(let sql) = sqlReq else { return sqlReq.failureEnvelope ?? "" }
+        let sql = (args["sql"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !sql.isEmpty else {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message: "`sql` is required.",
+                field: "sql",
+                expected: "non-empty SQL string",
+                tool: name
+            )
+        }
 
         let params: [AgentSQLValue]
         if let raw = args["params"] {
@@ -940,6 +1110,9 @@ final class DBExecuteTool: OsaurusTool, @unchecked Sendable {
             if let warning = result.warning {
                 resultDict["warning"] = warning
             }
+            if let drained = result.selectRowsDrained {
+                resultDict["select_rows_drained"] = drained
+            }
             return ToolEnvelope.success(
                 tool: name,
                 result: resultDict,
@@ -950,6 +1123,10 @@ final class DBExecuteTool: OsaurusTool, @unchecked Sendable {
         }
     }
 }
+
+// db_import / db_export (file ingestion and export) arrive with Intel
+// Release 2 together with DatabaseImport / DatabaseExport /
+// DatabaseFilePathResolver (docs/AGENT_DATABASE_INTEL_PLAN.md, Phase 2).
 
 // MARK: - db_define_view
 
@@ -964,6 +1141,8 @@ final class DBDefineViewTool: OsaurusTool, @unchecked Sendable {
         "Save (or redefine) a named SQL view the user and you can re-run "
         + "later. View bodies must be SELECT or WITH ... SELECT only — "
         + "if you need to write data, use `db_insert` / `db_update`. "
+        + "The saved name is available in read-only `db_query`/`db_export` "
+        + "FROM and JOIN clauses, while `db_run_view` runs it directly. "
         + "`render_hint` controls how the UI plots the result; use one "
         + "of `table`, `bar`, `line`, `pie`, `number`."
 
@@ -1057,9 +1236,11 @@ final class DBDefineViewTool: OsaurusTool, @unchecked Sendable {
 final class DBRunViewTool: OsaurusTool, @unchecked Sendable {
     let name = "db_run_view"
     let description =
-        "Run a previously saved view by name. Returns the same shape as "
-        + "`db_query`: `{columns, rows, truncated}`. Use `db_list_views` "
-        + "to see what's defined."
+        "Run a previously saved view's stored SELECT directly by name. "
+        + "Returns the same shape as `db_query`: `{columns, rows, truncated}`. "
+        + "Use `db_query` or `db_export` with the view name in FROM/JOIN when "
+        + "you need additional filtering, composition, aggregation, or paging. "
+        + "Use `db_list_views` to see what's defined."
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -1084,16 +1265,26 @@ final class DBRunViewTool: OsaurusTool, @unchecked Sendable {
                 agentId: agentId,
                 name: viewName
             )
-            let rows: [[Any]] = result.rows.map { row in
+            var rows: [[Any]] = result.rows.map { row in
                 row.map { DatabaseToolHelpers.toJSONAny($0) }
+            }
+            let (sizeTruncated, pagingHint) = DatabaseToolHelpers.trimQueryRows(
+                &rows,
+                offset: nil
+            )
+            let truncated = result.truncated || sizeTruncated
+            var warnings: [String] = []
+            if truncated, let pagingHint {
+                warnings.append(pagingHint)
             }
             return ToolEnvelope.success(
                 tool: name,
                 result: [
                     "columns": result.columns,
                     "rows": rows,
-                    "truncated": result.truncated,
-                ]
+                    "truncated": truncated,
+                ],
+                warnings: warnings.isEmpty ? nil : warnings
             )
         } catch {
             return DatabaseToolHelpers.envelope(for: error, tool: name)

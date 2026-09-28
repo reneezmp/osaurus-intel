@@ -169,6 +169,9 @@ selected setting, the visible result, and whether a full relaunch changed it.
 - [x] Database Overview, Tables, Saved Views, and History preserve navigation.
 - [x] Until the Intel backend exists, every Database page and Ability card states
       the dependency and offers no fake import/export/edit/delete controls.
+- [ ] Superseded 2026-09-28: the backend now exists (Release 1). Accept it
+      with the "Private agent database" section of
+      `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
 ## 9. Settings sidebar
 

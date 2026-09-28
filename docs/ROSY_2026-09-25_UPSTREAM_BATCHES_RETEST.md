@@ -280,3 +280,69 @@ needs `BUILD_NUMBER` ≥ 59.
       Permissions → Accessibility, Identity keys, Agent network/sandbox rows,
       theme editor image buttons, Credits diagnostics.
 - [ ] Delete a chat, relaunch: it stays deleted (carried over from §15).
+
+## Private agent database (B4/B5 Release 1)
+
+Added 2026-09-28; needs a candidate built after `5c1fa2778`. Details are in
+[`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md). Use a **test
+agent** (create one, for example "Librarian") so nothing important is touched.
+Items marked **(paid)** send real provider requests.
+
+Setup and switches
+
+- [ ] Right after installing, every existing agent shows the Database ability
+      **off**, even one that had it on before (one-time reset).
+- [ ] Test agent → Abilities → Autonomy & Data → **Database** on: a note says
+      the table layout and any rows the agent reads or writes go to its cloud
+      provider. Configure → **Private Database** shows the same state.
+- [ ] The built-in agent's Database tab says it has no private database, and
+      its Database rows cannot be switched on.
+- [ ] Test agent → Database tab: Overview / Tables / Saved Views / History
+      appear. Turning the ability off shows "Give this agent its own database";
+      **Enable Database** there turns it back on.
+
+The agent at work
+
+- [ ] **(paid)** "Create a table for books I've read: title, author, rating."
+      (It may confirm the columns first.) Tables lists `books`, and Overview
+      shows it.
+- [ ] **(paid)** Add three books in one message: they appear in Tables without
+      reopening the tab.
+- [ ] **(paid)** "Which books did I rate 5?" gets the right answer.
+- [ ] **(paid)** Ask it to delete one book: Tables → **Deleted** shows it. Ask
+      it to restore the book: it is back under **Active**.
+- [ ] **(paid)** Ask it to save a view called "Top rated": Saved Views lists
+      it. Pin it and it appears on Overview.
+- [ ] **(paid)** Ask it to use raw SQL to change every rating by one author.
+      An **approval panel** appears: Deny leaves the data unchanged, and a
+      second try with Allow changes it.
+- [ ] **(paid)** With the ability **off**, ask it to list its tables: it has
+      no database tools (says it can't) and nothing changes.
+
+History and editing
+
+- [ ] Edit a cell yourself in the Tables grid: the value saves. History →
+      **Chat & manual edits** lists that edit and the agent's chat changes.
+- [ ] **(paid)** Give the test agent a schedule whose instructions add a row
+      (for example "Add a book titled Scheduled Test by Rosy, rating 3"), then
+      press **Run Now**. History shows a **Schedule** run, and selecting it
+      shows that insert.
+
+Deleting and persistence
+
+- [ ] Quit and relaunch: tables, rows, saved views and History are intact.
+- [ ] Overview → **Delete All Data…** asks for confirmation. After confirming,
+      tables and History are empty, and the agent can create a new table.
+- [ ] Delete the test agent: no error. **(optional)** Its folder
+      `~/.osaurus/agents/<id>/` is gone.
+
+Ventura rendering
+
+- [ ] Tables grid, the Rows/Columns and Active/Deleted/All controls, all
+      buttons, the Saved Views list and the History split view are readable,
+      with no blank icons or white-on-white text, also after clicking into a
+      chat window so Settings is inactive.
+
+- [ ] **(optional, back up `~/.osaurus` first)** Settings → Storage → rotate
+      the storage key while the test agent's database is open: rotation
+      succeeds, and the Tables tab still reads the data afterwards.

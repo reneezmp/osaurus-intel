@@ -78,9 +78,56 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         return d
     }()
 
+    /// Agents whose private database crossed its storage soft-warning
+    /// threshold (driven by `.agentStorageWarn` from `AgentDatabase`). Read by
+    /// the Database tab for an "approaching quota" badge. Sticky until the
+    /// agent's data is deleted.
+    @Published private(set) var storageWarningAgentIds: Set<UUID> = []
+    /// Last toast per agent; one per 24 h so repeated writes don't spam.
+    private var lastStorageWarningAt: [UUID: Date] = [:]
+    private static let storageWarningCooldown: TimeInterval = 24 * 60 * 60
+
     private init() {
         reload()
         loadKnowledgeGrants()
+        // The database layer edge-triggers from its own queue; copy the
+        // payload into primitives before hopping to the main actor.
+        NotificationCenter.default.addObserver(
+            forName: .agentStorageWarn,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let info = note.userInfo, let agentId = info["agentId"] as? UUID else { return }
+            let percent = (info["percent"] as? Int) ?? 0
+            let usedBytes = (info["usedBytes"] as? Int) ?? 0
+            let limitBytes = (info["limitBytes"] as? Int) ?? 0
+            Task { @MainActor in
+                self?.handleStorageWarning(
+                    agentId: agentId, percent: percent, usedBytes: usedBytes, limitBytes: limitBytes)
+            }
+        }
+    }
+
+    @MainActor
+    private func handleStorageWarning(agentId: UUID, percent: Int, usedBytes: Int, limitBytes: Int) {
+        storageWarningAgentIds.insert(agentId)
+        let now = Date()
+        if let last = lastStorageWarningAt[agentId], now.timeIntervalSince(last) < Self.storageWarningCooldown {
+            return
+        }
+        lastStorageWarningAt[agentId] = now
+        let name = agent(for: agentId)?.name ?? "Agent"
+        let message = String(
+            format: "%@ has used %d%% of its database storage (%.1f / %.1f MB).",
+            name, percent, Double(usedBytes) / 1_048_576.0, Double(limitBytes) / 1_048_576.0)
+        _ = ToastManager.shared.warning("Database \(percent)% full", message: message)
+    }
+
+    /// Delete Data wipes the database, so the quota badge no longer applies.
+    @MainActor
+    func clearStorageWarning(for agentId: UUID) {
+        storageWarningAgentIds.remove(agentId)
+        lastStorageWarningAt.removeValue(forKey: agentId)
     }
 
     /// Re-read custom agents from disk and rebuild `agents` (Default

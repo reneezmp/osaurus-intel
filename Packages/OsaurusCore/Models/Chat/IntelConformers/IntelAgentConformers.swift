@@ -300,13 +300,8 @@ final class AgentBundleService: @unchecked Sendable {
     func discard(preview: ImportPreview) {}
 }
 
-// MARK: - Agent Database Store (Intel stub)
-
-final class AgentDatabaseStore: @unchecked Sendable {
-    static let shared = AgentDatabaseStore()
-    private init() {}
-    func deleteOnDisk(for agentId: UUID) throws {}
-}
+// Agent Database Store: the real one (Storage/AgentDatabaseStore.swift),
+// un-excluded with the Intel agent database (docs/AGENT_DATABASE_INTEL_PLAN.md).
 
 // MARK: - Agent Secrets Keychain (Intel stub)
 
@@ -349,13 +344,7 @@ final class ChatHistoryDatabase: @unchecked Sendable {
 // SchedulerDatabase is now the real one (Storage/SchedulerDatabase.swift),
 // un-excluded in the M13 Schedules restore.
 
-// MARK: - Local Agent Bridge (Intel stub)
-
-final class LocalAgentBridge: @unchecked Sendable {
-    static let shared = LocalAgentBridge()
-    private init() {}
-    func forget(agentId: UUID) {}
-}
+// Local Agent Bridge: the real one (Services/AgentBridge/LocalAgentBridge.swift).
 
 // MARK: - Pocket TTS Voice Catalog (Intel stub)
 

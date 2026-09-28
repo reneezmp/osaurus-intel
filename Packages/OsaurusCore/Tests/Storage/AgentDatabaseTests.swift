@@ -4,7 +4,7 @@
 //
 //  Spec §1.4 + §5.5.2 + §5.5.5 round-trip tests for the agent DB
 //  layer. These run against an in-memory SQLCipher database so they
-//  don't need to coordinate with `StorageMigrationCoordinator`.
+//  don't need to coordinate with `StorageMutationGate`.
 //
 //  Coverage:
 //   - `SchemaSnapshot.render` truncates view SQL, then column lists,
@@ -136,6 +136,164 @@ struct AgentDatabaseTests {
         #expect(row[3] == .text(runId.uuidString))
     }
 
+    // MARK: - Native saved views
+
+    @Test
+    func savedViewsAreQueryableAndComposable() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "metrics",
+            purpose: "view query test",
+            columns: [
+                AgentColumnSpec(name: "day", type: "TEXT", nullable: false),
+                AgentColumnSpec(name: "value", type: "INTEGER", nullable: false),
+            ],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.insertMany(
+            table: "metrics",
+            rows: [
+                ["day": .text("mon"), "value": .integer(3)],
+                ["day": .text("tue"), "value": .integer(5)],
+                ["day": .text("wed"), "value": .integer(7)],
+            ],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.defineView(
+            name: "metric_rows",
+            sql: "SELECT id, day, value FROM metrics WHERE _deleted_at IS NULL",
+            renderHint: "table",
+            refresh: "live",
+            description: nil,
+            actor: .agent
+        )
+
+        let filtered = try db.query(
+            sql:
+                "SELECT v.day, m.value FROM metric_rows v "
+                + "JOIN metrics m ON m.id = v.id WHERE v.value >= 5 ORDER BY v.value"
+        )
+        #expect(filtered.rows == [
+            [.text("tue"), .integer(5)],
+            [.text("wed"), .integer(7)],
+        ])
+
+        let direct = try db.runView(name: "metric_rows")
+        #expect(direct.rows.count == 3)
+    }
+
+    @Test
+    func savedViewRedefineAndDropStaySynchronized() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "values_table",
+            purpose: "view lifecycle test",
+            columns: [AgentColumnSpec(name: "value", type: "INTEGER", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.insertMany(
+            table: "values_table",
+            rows: [["value": .integer(1)], ["value": .integer(2)]],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.defineView(
+            name: "selected_values",
+            sql: "SELECT value FROM values_table WHERE value >= 1",
+            renderHint: "table",
+            refresh: "live",
+            description: nil,
+            actor: .agent
+        )
+        #expect(try db.query(sql: "SELECT COUNT(*) FROM selected_values").rows[0][0] == .integer(2))
+
+        _ = try db.defineView(
+            name: "selected_values",
+            sql: "SELECT value FROM values_table WHERE value >= 2",
+            renderHint: "table",
+            refresh: "live",
+            description: nil,
+            actor: .agent
+        )
+        #expect(try db.query(sql: "SELECT COUNT(*) FROM selected_values").rows[0][0] == .integer(1))
+
+        #expect(try db.dropView(name: "selected_values", actor: .agent))
+        #expect(try db.savedView(named: "selected_values") == nil)
+        #expect(throws: AgentDatabaseError.self) {
+            _ = try db.query(sql: "SELECT * FROM selected_values")
+        }
+    }
+
+    @Test
+    func savedViewsHydrateAfterReopen() throws {
+        let url = FileManager.default.temporaryDirectory
+            .appendingPathComponent("agentdb-view-\(UUID().uuidString).sqlite")
+        defer {
+            for suffix in ["", "-wal", "-shm"] {
+                try? FileManager.default.removeItem(atPath: url.path + suffix)
+            }
+        }
+
+        do {
+            let db = AgentDatabase(agentId: UUID(), path: url.path)
+            try db.open()
+            try db.createTable(
+                name: "source_rows",
+                purpose: "view hydration test",
+                columns: [AgentColumnSpec(name: "value", type: "INTEGER", nullable: false)],
+                indexes: [],
+                actor: .agent,
+                runId: nil
+            )
+            _ = try db.insert(
+                table: "source_rows",
+                row: ["value": .integer(42)],
+                actor: .agent,
+                runId: nil
+            )
+            _ = try db.defineView(
+                name: "answer_view",
+                sql: "SELECT value FROM source_rows",
+                renderHint: "table",
+                refresh: "live",
+                description: nil,
+                actor: .agent
+            )
+            db.close()
+        }
+
+        let reopened = AgentDatabase(agentId: UUID(), path: url.path)
+        try reopened.open()
+        defer { reopened.close() }
+        #expect(try reopened.query(sql: "SELECT value FROM answer_view").rows[0][0] == .integer(42))
+    }
+
+    @Test
+    func invalidSavedViewDoesNotCommitMetadata() throws {
+        let db = try makeDB()
+        #expect(throws: AgentDatabaseError.self) {
+            _ = try db.defineView(
+                name: "broken_view",
+                sql: "SELECT missing FROM absent_table",
+                renderHint: "table",
+                refresh: "live",
+                description: nil,
+                actor: .agent
+            )
+        }
+        #expect(try db.savedView(named: "broken_view") == nil)
+    }
+
+    @Test
+    func rawDropViewIsForbidden() {
+        #expect(AgentDatabase.forbiddenReason(in: "DROP VIEW answer_view") != nil)
+    }
+
     // MARK: - Schema snapshot truncation
 
     @Test
@@ -143,6 +301,28 @@ struct AgentDatabaseTests {
         let schema = AgentDatabaseSchema(tables: [], views: [])
         let rendered = SchemaSnapshot.render(schema)
         #expect(rendered == SchemaSnapshot.emptyStateBlock)
+    }
+
+    @Test
+    func snapshotLabelsSavedViewsAsQueryable() {
+        // The views section must advertise both the direct runner and native
+        // read-only SQL composition so models do not repeat the historical
+        // `db_query ... FROM <view>` "no such table" failure.
+        let view = AgentSavedView(
+            name: "weekly_total",
+            sql: "SELECT 1",
+            renderHint: "table",
+            refresh: "manual",
+            description: nil,
+            createdAt: Date(),
+            updatedAt: Date()
+        )
+        let schema = AgentDatabaseSchema(tables: [], views: [view])
+        let rendered = SchemaSnapshot.render(schema)
+        #expect(rendered.contains("weekly_total"))
+        #expect(rendered.contains("db_run_view"))
+        #expect(rendered.contains("db_query"))
+        #expect(rendered.contains("reference by name"))
     }
 
     @Test
@@ -228,16 +408,653 @@ struct AgentDatabaseTests {
 
     @Test
     func onboardingPromptVersionIsPositive() {
-        #expect(OnboardingPrompt.version >= 1)
+        #expect(OnboardingPrompt.version >= 4)
         // Block stays anchored to the documented tool names so the
         // prompt and the registered tool ids never drift apart.
         #expect(OnboardingPrompt.block.contains("db_create_table"))
         #expect(OnboardingPrompt.block.contains("db_insert"))
         #expect(OnboardingPrompt.block.contains("db_query"))
         #expect(OnboardingPrompt.block.contains("db_delete"))
-        // And it still calls out the soft-delete contract explicitly.
+        // Intel Release 1: file import/export tools are not registered yet,
+        // so the prompt must not advertise them; bulk rows go through a
+        // single db_insert/db_upsert call, and db_execute/db_migrate may ask.
+        #expect(!OnboardingPrompt.block.contains("db_import"))
+        #expect(!OnboardingPrompt.block.contains("db_export"))
+        #expect(OnboardingPrompt.block.contains("rows=[...]"))
+        #expect(OnboardingPrompt.block.contains("approve"))
+        // Saved views support both direct execution and native SQL composition.
+        #expect(OnboardingPrompt.block.contains("db_run_view"))
+        #expect(OnboardingPrompt.block.contains("db_define_view"))
+        #expect(OnboardingPrompt.block.contains("reference its name"))
+        // Soft-delete guidance: typed tools hide tombstones; raw SQL does not.
         #expect(
             OnboardingPrompt.block.lowercased().contains("soft delete")
         )
     }
+
+    // MARK: - Bulk ingest (importRows / insertMany)
+
+    @Test
+    func importRowsInsertModeLoadsEveryRow() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "commits",
+            purpose: "ingest test",
+            columns: [
+                AgentColumnSpec(name: "sha", type: "TEXT", nullable: false),
+                AgentColumnSpec(name: "additions", type: "INTEGER", nullable: false),
+            ],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        let rows: [[String: AgentSQLValue]] = (1 ... 250).map { i in
+            ["sha": .text("sha-\(i)"), "additions": .integer(Int64(i))]
+        }
+        // No keyColumns => append/insert semantics, one host call for 250 rows.
+        let written = try db.importRows(table: "commits", rows: rows, actor: .user, runId: nil)
+        #expect(written == 250)
+        let count = try db.query(sql: "SELECT COUNT(*) FROM commits")
+        #expect(count.rows[0][0] == .integer(250))
+        let sum = try db.query(sql: "SELECT SUM(additions) FROM commits")
+        #expect(sum.rows[0][0] == .integer(Int64((1 ... 250).reduce(0, +))))
+    }
+
+    @Test
+    func importRowsUpsertModeDedupesOnKeyColumns() throws {
+        let db = try makeDB()
+        // A unique index on the key column is what makes ON CONFLICT(slug)
+        // resolve to an update instead of erroring.
+        try db.createTable(
+            name: "repos",
+            purpose: "upsert test",
+            columns: [
+                AgentColumnSpec(name: "slug", type: "TEXT", nullable: false),
+                AgentColumnSpec(name: "stars", type: "INTEGER", nullable: false),
+            ],
+            indexes: [AgentIndexSpec(name: "repos_slug_uq", columns: ["slug"], unique: true)],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.importRows(
+            table: "repos",
+            rows: [
+                ["slug": .text("a"), "stars": .integer(1)],
+                ["slug": .text("b"), "stars": .integer(2)],
+            ],
+            keyColumns: ["slug"],
+            actor: .user,
+            runId: nil
+        )
+        _ = try db.importRows(
+            table: "repos",
+            rows: [
+                ["slug": .text("a"), "stars": .integer(10)],  // conflict -> update
+                ["slug": .text("c"), "stars": .integer(3)],  // new -> insert
+            ],
+            keyColumns: ["slug"],
+            actor: .user,
+            runId: nil
+        )
+        let count = try db.query(sql: "SELECT COUNT(*) FROM repos")
+        #expect(count.rows[0][0] == .integer(3))  // a, b, c — not 4
+        let a = try db.query(
+            sql: "SELECT stars FROM repos WHERE slug = ?1",
+            params: [.text("a")]
+        )
+        #expect(a.rows[0][0] == .integer(10))  // updated, not duplicated
+    }
+
+    @Test
+    func insertManyReturnsARowidForEveryRow() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "scores",
+            purpose: "bulk insert test",
+            columns: [
+                AgentColumnSpec(name: "player", type: "TEXT", nullable: false),
+                AgentColumnSpec(name: "points", type: "INTEGER", nullable: false),
+            ],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        let ids = try db.insertMany(
+            table: "scores",
+            rows: [
+                ["player": .text("p1"), "points": .integer(10)],
+                ["player": .text("p2"), "points": .integer(20)],
+                ["player": .text("p3"), "points": .integer(30)],
+            ],
+            actor: .agent,
+            runId: nil
+        )
+        #expect(ids.count == 3)
+        #expect(Set(ids).count == 3)  // distinct rowids
+        let total = try db.query(sql: "SELECT SUM(points) FROM scores")
+        #expect(total.rows[0][0] == .integer(60))
+    }
+
+    // MARK: - Multi-statement db_execute
+
+    @Test
+    func executeRunsEveryStatementInAScript() throws {
+        let db = try makeDB()
+        let result = try db.execute(
+            sql: "CREATE TABLE t (a INTEGER); INSERT INTO t (a) VALUES (1); INSERT INTO t (a) VALUES (2);",
+            actor: .agent,
+            runId: nil
+        )
+        // CREATE doesn't move total_changes; two single-row inserts do.
+        #expect(result.rowsAffected == 2)
+        let count = try db.query(sql: "SELECT COUNT(*) FROM t")
+        #expect(count.rows[0][0] == .integer(2))
+    }
+
+    @Test
+    func executeMultiStatementTransformAggregatesInOneCall() throws {
+        let db = try makeDB()
+        _ = try db.execute(
+            sql: """
+                CREATE TABLE raw (day TEXT, amount INTEGER);
+                INSERT INTO raw (day, amount) VALUES ('d1', 10), ('d1', 20), ('d2', 5);
+                CREATE TABLE totals (day TEXT, total INTEGER);
+                INSERT INTO totals (day, total) SELECT day, SUM(amount) FROM raw GROUP BY day;
+                """,
+            actor: .agent,
+            runId: nil
+        )
+        let top = try db.query(sql: "SELECT day, total FROM totals ORDER BY total DESC")
+        #expect(top.rows.count == 2)
+        #expect(top.rows[0][0] == .text("d1"))
+        #expect(top.rows[0][1] == .integer(30))
+    }
+
+    // MARK: - Forbidden SQL guardrails
+
+    @Test
+    func forbiddenReasonBlocksDangerousStatements() {
+        // Legacy destructive set.
+        #expect(AgentDatabase.forbiddenReason(in: "DROP TABLE notes") != nil)
+        #expect(AgentDatabase.forbiddenReason(in: "TRUNCATE notes") != nil)
+        #expect(AgentDatabase.forbiddenReason(in: "DELETE FROM notes") != nil)  // no WHERE
+        // Sandbox escapes.
+        #expect(AgentDatabase.forbiddenReason(in: "ATTACH DATABASE 'x.db' AS y") != nil)
+        #expect(AgentDatabase.forbiddenReason(in: "DETACH DATABASE y") != nil)
+        #expect(AgentDatabase.forbiddenReason(in: "SELECT load_extension('evil')") != nil)
+        // Privileged PRAGMA write (flips journal mode / FK enforcement).
+        #expect(AgentDatabase.forbiddenReason(in: "PRAGMA journal_mode = WAL") != nil)
+        // Tampering with the audit / system tables bypasses the contract.
+        #expect(AgentDatabase.forbiddenReason(in: "DELETE FROM _changelog WHERE id = 1") != nil)
+        #expect(AgentDatabase.forbiddenReason(in: "INSERT INTO _views (name) VALUES ('x')") != nil)
+    }
+
+    @Test
+    func forbiddenReasonAllowsReadOnlyAndScopedWrites() {
+        #expect(AgentDatabase.forbiddenReason(in: "SELECT 1") == nil)
+        #expect(AgentDatabase.forbiddenReason(in: "SELECT * FROM notes WHERE id = 1") == nil)
+        // Read-only PRAGMAs (no `=`) stay allowed.
+        #expect(AgentDatabase.forbiddenReason(in: "PRAGMA table_info(notes)") == nil)
+        // A DELETE *with* a WHERE on a user table is allowed.
+        #expect(AgentDatabase.forbiddenReason(in: "DELETE FROM notes WHERE id = 1") == nil)
+    }
+
+    @Test
+    func executeRejectsForbiddenStatementAndDataSurvives() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "keepme",
+            purpose: "guardrail test",
+            columns: [AgentColumnSpec(name: "label", type: "TEXT", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.insert(table: "keepme", row: ["label": .text("one")], actor: .agent, runId: nil)
+        #expect(throws: AgentDatabaseError.self) {
+            _ = try db.execute(sql: "DROP TABLE keepme", actor: .agent, runId: nil)
+        }
+        let count = try db.query(sql: "SELECT COUNT(*) FROM keepme")
+        #expect(count.rows[0][0] == .integer(1))
+    }
+
+    // MARK: - Query paging (limit / offset / truncated)
+
+    @Test
+    func queryHonorsLimitAndOffsetAndTruncationFlag() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "nums",
+            purpose: "paging test",
+            columns: [AgentColumnSpec(name: "n", type: "INTEGER", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        let rows: [[String: AgentSQLValue]] = (1 ... 25).map { ["n": .integer(Int64($0))] }
+        _ = try db.importRows(table: "nums", rows: rows, actor: .agent, runId: nil)
+
+        // Page 1: rows 1..10, more remain -> truncated.
+        let page1 = try db.query(sql: "SELECT n FROM nums ORDER BY n", limit: 10, offset: 0)
+        #expect(page1.rows.count == 10)
+        #expect(page1.rows.first?[0] == .integer(1))
+        #expect(page1.rows.last?[0] == .integer(10))
+        #expect(page1.truncated)
+
+        // Last page: offset 20 leaves only 5 rows -> not truncated.
+        let page3 = try db.query(sql: "SELECT n FROM nums ORDER BY n", limit: 10, offset: 20)
+        #expect(page3.rows.count == 5)
+        #expect(page3.rows.first?[0] == .integer(21))
+        #expect(page3.rows.last?[0] == .integer(25))
+        #expect(page3.truncated == false)
+    }
+
+    @Test
+    func executeReportsDrainedSelectRows() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "rows",
+            purpose: "select drain",
+            columns: [AgentColumnSpec(name: "n", type: "INTEGER", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        _ = try db.insert(table: "rows", row: ["n": .integer(1)], actor: .agent, runId: nil)
+        _ = try db.insert(table: "rows", row: ["n": .integer(2)], actor: .agent, runId: nil)
+
+        let result = try db.execute(sql: "SELECT n FROM rows ORDER BY n", actor: .agent, runId: nil)
+        #expect(result.selectRowsDrained == 2)
+        #expect(result.warning?.contains("db_query") == true)
+    }
+
+    @Test
+    func queryDoesNotAutoFilterSoftDeletedRows() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "notes",
+            purpose: "soft delete visibility",
+            columns: [AgentColumnSpec(name: "title", type: "TEXT", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        let id = try db.insert(table: "notes", row: ["title": .text("gone")], actor: .agent, runId: nil)
+        _ = try db.softDelete(table: "notes", whereClause: ["id": .integer(id)], actor: .agent, runId: nil)
+
+        let all = try db.query(sql: "SELECT COUNT(*) FROM notes")
+        #expect(all.rows[0][0] == .integer(1))
+    }
+
+    // MARK: - Typed tools on raw-SQL tables (no host-managed columns)
+
+    // Regression (E4B loop): tables created via `db_execute` CREATE TABLE
+    // (or fixture seed SQL) have no `_deleted_at`, and the typed tools used
+    // to hard-fail with SQLite's bare "no such column: _deleted_at" on
+    // every update/delete/select against them.
+
+    @Test
+    func updateWorksOnRawSqlTableWithoutSoftDeleteColumn() throws {
+        let db = try makeDB()
+        _ = try db.execute(
+            sql:
+                "CREATE TABLE expenses (id INTEGER PRIMARY KEY, note TEXT, amount INTEGER); "
+                + "INSERT INTO expenses (note, amount) VALUES ('lunch', 12);",
+            actor: .agent,
+            runId: nil
+        )
+        let changed = try db.update(
+            table: "expenses",
+            set: ["amount": .integer(15)],
+            whereClause: ["note": .text("lunch")],
+            actor: .agent,
+            runId: nil
+        )
+        #expect(changed == 1)
+        let amount = try db.query(sql: "SELECT amount FROM expenses WHERE note = 'lunch'")
+        #expect(amount.rows[0][0] == .integer(15))
+    }
+
+    @Test
+    func softDeleteOnRawSqlTableThrowsActionableError() throws {
+        let db = try makeDB()
+        _ = try db.execute(
+            sql:
+                "CREATE TABLE expenses (id INTEGER PRIMARY KEY, note TEXT); "
+                + "INSERT INTO expenses (note) VALUES ('stale');",
+            actor: .agent,
+            runId: nil
+        )
+        do {
+            _ = try db.softDelete(
+                table: "expenses",
+                whereClause: ["note": .text("stale")],
+                actor: .agent,
+                runId: nil
+            )
+            Issue.record("softDelete should throw on a table without _deleted_at")
+        } catch let AgentDatabaseError.invalidArgument(message) {
+            // The error must steer the model to the working alternative,
+            // not just repeat SQLite's "no such column".
+            #expect(message.contains("_deleted_at"))
+            #expect(message.contains("db_execute"))
+        }
+        // The row is untouched.
+        let count = try db.query(sql: "SELECT COUNT(*) FROM expenses")
+        #expect(count.rows[0][0] == .integer(1))
+    }
+
+    @Test
+    func restoreOnRawSqlTableThrowsActionableError() throws {
+        let db = try makeDB()
+        _ = try db.execute(
+            sql: "CREATE TABLE plain (id INTEGER PRIMARY KEY, note TEXT);",
+            actor: .agent,
+            runId: nil
+        )
+        do {
+            _ = try db.restore(
+                table: "plain",
+                whereClause: ["note": .text("x")],
+                actor: .agent,
+                runId: nil
+            )
+            Issue.record("restore should throw on a table without _deleted_at")
+        } catch let AgentDatabaseError.invalidArgument(message) {
+            #expect(message.contains("_deleted_at"))
+        }
+    }
+
+    // MARK: - createTable with a model-declared `id` column
+
+    // Regression (E4B loop): declaring an explicit `id` column without
+    // `primary_key` used to collide with the auto-added
+    // `id INTEGER PRIMARY KEY AUTOINCREMENT` -> "duplicate column name: id".
+
+    @Test
+    func createTableWithDeclaredIdColumnPromotesItToPrimaryKey() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "tickets",
+            purpose: "declared-id regression",
+            columns: [
+                AgentColumnSpec(name: "id", type: "TEXT", nullable: false),
+                AgentColumnSpec(name: "title", type: "TEXT", nullable: false),
+            ],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        // Insert with an explicit TEXT id — the declared column, not the
+        // auto-added integer one, must be the primary key.
+        _ = try db.insert(
+            table: "tickets",
+            row: ["id": .text("T-1"), "title": .text("first")],
+            actor: .agent,
+            runId: nil
+        )
+        let info = try db.query(sql: "PRAGMA table_info(tickets)")
+        // Columns: id TEXT pk, title, _created_at, _updated_at, _deleted_at —
+        // exactly ONE column named id.
+        let idRows = info.rows.filter { $0[1] == .text("id") }
+        #expect(idRows.count == 1)
+        #expect(idRows.first?[2] == .text("TEXT"))
+        // pk flag is the 6th column of table_info output.
+        #expect(idRows.first?[5] == .integer(1))
+        let row = try db.query(sql: "SELECT title FROM tickets WHERE id = 'T-1'")
+        #expect(row.rows.count == 1)
+    }
+
+    @Test
+    func createTableWithExplicitPrimaryKeyStillWins() throws {
+        let db = try makeDB()
+        // A non-id primary key declared by the model: no id column is
+        // auto-added on top of it, and the declared PK is honored.
+        try db.createTable(
+            name: "slugs",
+            purpose: "explicit pk regression",
+            columns: [
+                AgentColumnSpec(name: "slug", type: "TEXT", nullable: false, primaryKey: true),
+                AgentColumnSpec(name: "label", type: "TEXT", nullable: true),
+            ],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        let info = try db.query(sql: "PRAGMA table_info(slugs)")
+        let pkRows = info.rows.filter { $0[5] == .integer(1) }
+        #expect(pkRows.count == 1)
+        #expect(pkRows.first?[1] == .text("slug"))
+        #expect(info.rows.contains { $0[1] == .text("id") } == false)
+    }
+
+    @Test
+    func createTableRejectsConstraintsEmbeddedInColumnType() throws {
+        let db = try makeDB()
+        do {
+            try db.createTable(
+                name: "water_log",
+                purpose: "reject compound type regression",
+                columns: [
+                    AgentColumnSpec(
+                        name: "id",
+                        type: "INTEGER PRIMARY KEY AUTOINCREMENT",
+                        nullable: false
+                    ),
+                    AgentColumnSpec(name: "ml", type: "INTEGER", nullable: false),
+                ],
+                actor: .agent,
+                runId: nil
+            )
+            Issue.record("compound column type should be rejected before SQL execution")
+        } catch let AgentDatabaseError.invalidArgument(message) {
+            #expect(message.contains("unsupported column type"))
+            #expect(message.contains("PRIMARY KEY"))
+        }
+        #expect(try db.schemaForTable("water_log") == nil)
+    }
+
+    @Test
+    func alterTableRejectsConstraintsEmbeddedInColumnType() throws {
+        let db = try makeDB()
+        try db.createTable(
+            name: "water_log",
+            purpose: "alter-type regression",
+            columns: [AgentColumnSpec(name: "ml", type: "INTEGER", nullable: false)],
+            actor: .agent,
+            runId: nil
+        )
+        do {
+            _ = try db.alterTableAddColumns(
+                name: "water_log",
+                additions: [
+                    AgentColumnSpec(name: "note", type: "TEXT NOT NULL", nullable: false)
+                ],
+                actor: .agent,
+                runId: nil
+            )
+            Issue.record("compound ALTER column type should be rejected before SQL execution")
+        } catch let AgentDatabaseError.invalidArgument(message) {
+            #expect(message.contains("unsupported column type"))
+        }
+        let schema = try #require(try db.schemaForTable("water_log"))
+        #expect(schema.columns.contains(where: { $0.name == "note" }) == false)
+    }
+
+    @Test
+    func typedDatabaseToolSchemasExposeOnlySupportedColumnTypes() throws {
+        func typeEnum(
+            in parameters: JSONValue?,
+            arrayKey: String
+        ) throws -> [String] {
+            guard case .object(let root) = parameters,
+                case .object(let properties)? = root["properties"],
+                case .object(let columns)? = properties[arrayKey],
+                case .object(let items)? = columns["items"],
+                case .object(let itemProperties)? = items["properties"],
+                case .object(let typeProperty)? = itemProperties["type"],
+                case .array(let values)? = typeProperty["enum"]
+            else {
+                Issue.record("missing `\(arrayKey).items.properties.type.enum`")
+                return []
+            }
+            return values.compactMap {
+                guard case .string(let value) = $0 else { return nil }
+                return value
+            }
+        }
+
+        #expect(
+            try typeEnum(in: DBCreateTableTool().parameters, arrayKey: "columns")
+                == AgentDatabase.supportedColumnTypes
+        )
+        #expect(
+            try typeEnum(in: DBAlterTableTool().parameters, arrayKey: "add_columns")
+                == AgentDatabase.supportedColumnTypes
+        )
+    }
+
+    // MARK: - Batched soft delete (Database workspace bulk action)
+
+    private func seedNotes(_ db: AgentDatabase, count: Int) throws -> [Int64] {
+        try db.createTable(
+            name: "notes",
+            purpose: "bulk soft-delete fixture",
+            columns: [AgentColumnSpec(name: "title", type: "TEXT", nullable: false)],
+            indexes: [],
+            actor: .agent,
+            runId: nil
+        )
+        var ids: [Int64] = []
+        for i in 0 ..< count {
+            ids.append(
+                try db.insert(
+                    table: "notes",
+                    row: ["title": .text("row \(i)")],
+                    actor: .agent,
+                    runId: nil
+                )
+            )
+        }
+        return ids
+    }
+
+    @Test
+    func softDeleteManyTombstonesSelectedRowsInOneCall() throws {
+        let db = try makeDB()
+        let ids = try seedNotes(db, count: 5)
+        let runId = UUID()
+
+        let affected = try db.softDeleteMany(
+            table: "notes",
+            ids: ids.prefix(3).map { .integer($0) },
+            actor: .user,
+            runId: runId
+        )
+        #expect(affected == 3)
+
+        let live = try db.query(sql: "SELECT COUNT(*) FROM notes WHERE _deleted_at IS NULL")
+        #expect(live.rows[0][0] == .integer(2))
+        let deleted = try db.query(sql: "SELECT COUNT(*) FROM notes WHERE _deleted_at IS NOT NULL")
+        #expect(deleted.rows[0][0] == .integer(3))
+
+        // One audit entry per tombstoned row, with the caller's actor + run.
+        let log = try db.query(
+            sql: "SELECT actor, run_id FROM _changelog WHERE op = 'soft_delete' AND table_name = 'notes'"
+        )
+        #expect(log.rows.count == 3)
+        for row in log.rows {
+            #expect(row[0] == .text("user"))
+            #expect(row[1] == .text(runId.uuidString))
+        }
+    }
+
+    @Test
+    func softDeleteManySkipsAlreadyDeletedRows() throws {
+        let db = try makeDB()
+        let ids = try seedNotes(db, count: 3)
+        _ = try db.softDelete(
+            table: "notes",
+            whereClause: ["id": .integer(ids[0])],
+            actor: .agent,
+            runId: nil
+        )
+
+        // Re-deleting a tombstoned row is a no-op: affected counts only the
+        // two live rows, and no duplicate changelog entry is written for it.
+        let affected = try db.softDeleteMany(
+            table: "notes",
+            ids: ids.map { .integer($0) },
+            actor: .user,
+            runId: nil
+        )
+        #expect(affected == 2)
+        let log = try db.query(
+            sql: "SELECT COUNT(*) FROM _changelog WHERE op = 'soft_delete' AND table_name = 'notes'"
+        )
+        #expect(log.rows[0][0] == .integer(3))
+    }
+
+    @Test
+    func softDeleteManyEmptySelectionIsANoOp() throws {
+        let db = try makeDB()
+        _ = try seedNotes(db, count: 2)
+        let affected = try db.softDeleteMany(table: "notes", ids: [], actor: .user, runId: nil)
+        #expect(affected == 0)
+        let live = try db.query(sql: "SELECT COUNT(*) FROM notes WHERE _deleted_at IS NULL")
+        #expect(live.rows[0][0] == .integer(2))
+    }
+
+    @Test
+    func softDeleteManyChunksLargeSelections() throws {
+        // 450 ids crosses the 400-per-statement chunk boundary, exercising
+        // the multi-chunk path within one transaction.
+        let db = try makeDB()
+        let ids = try seedNotes(db, count: 450)
+        let affected = try db.softDeleteMany(
+            table: "notes",
+            ids: ids.map { .integer($0) },
+            actor: .user,
+            runId: nil
+        )
+        #expect(affected == 450)
+        let live = try db.query(sql: "SELECT COUNT(*) FROM notes WHERE _deleted_at IS NULL")
+        #expect(live.rows[0][0] == .integer(0))
+    }
+
+    @Test
+    func softDeleteManyRejectsRawSQLTables() throws {
+        let db = try makeDB()
+        // A raw-SQL table without managed columns can't be soft-deleted.
+        _ = try db.execute(sql: "CREATE TABLE raw_rows (n INTEGER)", actor: .agent, runId: nil)
+        #expect(throws: (any Error).self) {
+            try db.softDeleteMany(table: "raw_rows", ids: [.integer(1)], actor: .user, runId: nil)
+        }
+    }
+
+    // MARK: - Full-result streaming cursor
+    //
+    // Intel Release 1: upstream wrote this through `DatabaseExport` (Release
+    // 2). The streaming cursor it relies on ships now, so test it directly.
+
+    @Test
+    func forEachQueryRowStreamsEveryFilteredRowNotJustTheLoadedPage() throws {
+        let db = try makeDB()
+        let ids = try seedNotes(db, count: 250)
+        _ = try db.softDelete(
+            table: "notes",
+            whereClause: ["id": .integer(ids[0])],
+            actor: .agent,
+            runId: nil
+        )
+        let sql = "SELECT * FROM \"notes\" WHERE _deleted_at IS NULL"
+        var header: [String] = []
+        let count = try db.forEachQueryRow(sql: sql, params: []) { columns, _ in
+            header = columns
+            return true
+        }
+        #expect(count == 249)
+        #expect(header.contains("id"))
+    }
+
 }

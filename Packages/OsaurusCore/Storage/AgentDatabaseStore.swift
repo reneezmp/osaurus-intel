@@ -56,13 +56,24 @@ public final class AgentDatabaseStore: @unchecked Sendable {
         return candidate
     }
 
+    /// Return the cached connection for `agentId` only if one is already
+    /// open — never opens. For callers on the main thread (e.g. the
+    /// context-budget preview) where a first open (file I/O + SQLCipher key
+    /// derivation) would hang the UI.
+    public func cachedOpenDatabase(for agentId: UUID) -> AgentDatabase? {
+        if let existing = lockedGet(agentId), existing.isOpen {
+            return existing
+        }
+        return nil
+    }
+
     /// Push a fresh storage limit into the (already-cached) connection
     /// for `agentId`. Called by `AgentManager` whenever the user edits
     /// `Agent.settings.limits.storageBytesLimit`, so the next mutation
     /// uses the new value without needing a reconnect.
     public func setStorageLimit(for agentId: UUID, bytes: Int) {
         guard let conn = lockedGet(agentId) else { return }
-        conn.storageBytesLimit = bytes
+        conn.setStorageBytesLimit(bytes)
     }
 
     /// Push a fresh soft-warn percent into the (already-cached)
@@ -70,13 +81,13 @@ public final class AgentDatabaseStore: @unchecked Sendable {
     /// reads this on its next post-commit quota check (spec §11.2).
     public func setStorageWarnPercent(for agentId: UUID, percent: Int) {
         guard let conn = lockedGet(agentId) else { return }
-        conn.storageWarnPercent = percent
+        conn.setStorageWarnPercent(percent)
     }
 
     /// Read the cached storage limit for `agentId`. Returns 0 (the
     /// `disabled` sentinel) when the agent has no open connection.
     public func storageLimit(for agentId: UUID) -> Int {
-        lockedGet(agentId)?.storageBytesLimit ?? 0
+        lockedGet(agentId)?.currentStorageBytesLimit() ?? 0
     }
 
     /// Read the on-disk file size for the agent's DB. Convenience for
