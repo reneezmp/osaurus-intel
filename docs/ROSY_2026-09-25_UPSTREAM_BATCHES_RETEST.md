@@ -347,6 +347,23 @@ Files: import and export (Release 2)
 - [ ] **(paid)** With no working folder selected, ask it to import a file: it
       asks you to pick a folder instead of failing silently.
 
+Agent bundles (Release 3)
+
+- [ ] Database → Overview → **Export Bundle**: choose a folder and a
+      passphrase (8+ characters, typed twice). A `.osaurus-agent` file appears
+      there. The passphrase fields and buttons are readable, with a blinking
+      cursor.
+- [ ] **Import Bundle** with a wrong passphrase: a clear "wrong passphrase"
+      error, and nothing changes.
+- [ ] Import it with the right passphrase: the review shows the agent's name,
+      table and view counts, "Replaces your existing agent …" (because it
+      still exists), and what it arrives with (for example "Database is on").
+      **Discard** changes nothing.
+- [ ] Delete the test agent, then import the bundle and **Activate**: the
+      agent comes back with its tables, rows and saved views.
+- [ ] **(optional)** Copy the bundle to another Mac (M4) and import it there:
+      same result.
+
 Deleting and persistence
 
 - [ ] Quit and relaunch: tables, rows, saved views and History are intact.

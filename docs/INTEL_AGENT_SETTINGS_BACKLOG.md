@@ -51,10 +51,10 @@ connected merely because upstream has a Settings card.
 
 **Plan (2026-09-25):** [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md) — staged in three releases, covers B5 too.
 
-**Status (2026-09-28):** Releases 1–2 implemented: database, tools,
-workspace, toggles, Delete Data, and CSV/TSV/JSON/JSONL/xlsx import/export;
-awaiting Rosy. Encrypted bundles (Release 3) remain. The text below describes
-the pre-port state.
+**Status (2026-09-28):** all three releases implemented: database, tools,
+workspace, toggles, Delete Data, CSV/TSV/JSON/JSONL/xlsx import/export, and
+encrypted agent bundles; awaiting Rosy. The text below describes the pre-port
+state.
 
 **Current UI:** Database exposes Overview, Tables, Saved Views, and History without pretending storage exists. Historical deep links already migrate to these sections.
 

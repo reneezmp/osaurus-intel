@@ -1280,14 +1280,13 @@ struct AgentDetailView: View {
                 initialSection: selectedDatabaseSubtab,
                 initialTableName: pendingFocusedTableName,
                 initialViewName: pendingFocusedViewName,
+                isBundleBusy: isBundleBusy,
                 onEnable: {
                     dbEnabled = true
                     debouncedSave()
                 },
-                // Encrypted agent bundles arrive with Intel Release 3; the
-                // workspace does not show those actions.
-                onExportBundle: {},
-                onImportBundle: {},
+                onExportBundle: { beginBundleExport() },
+                onImportBundle: { beginBundleImport() },
                 onDeleteData: { showDeleteDBConfirmation = true }
             )
             .environment(\.theme, themeManager.currentTheme)
@@ -3520,10 +3519,8 @@ struct AgentDetailView: View {
             .font(.system(size: 11))
             .foregroundColor(theme.tertiaryText)
             .fixedSize(horizontal: false, vertical: true)
-            SecureField("Passphrase", text: $bundlePassphraseInput)
-                .textFieldStyle(.roundedBorder)
-            SecureField("Confirm passphrase", text: $bundleConfirmPassphraseInput)
-                .textFieldStyle(.roundedBorder)
+            bundleSecureField("Passphrase", text: $bundlePassphraseInput)
+            bundleSecureField("Confirm passphrase", text: $bundleConfirmPassphraseInput)
             HStack {
                 Spacer()
                 Button(localized: "Cancel") {
@@ -3531,10 +3528,12 @@ struct AgentDetailView: View {
                     bundlePassphraseInput = ""
                     bundleConfirmPassphraseInput = ""
                 }
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
                 Button(localized: "Export") {
                     performBundleExport()
                 }
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
                 .disabled(
@@ -3545,6 +3544,7 @@ struct AgentDetailView: View {
         }
         .padding(20)
         .frame(width: 380)
+        .bundleSheetChrome(theme: themeManager.currentTheme)
     }
 
     @ViewBuilder
@@ -3562,18 +3562,19 @@ struct AgentDetailView: View {
                 .font(.system(size: 11))
                 .foregroundColor(theme.tertiaryText)
                 .fixedSize(horizontal: false, vertical: true)
-            SecureField("Passphrase", text: $bundlePassphraseInput)
-                .textFieldStyle(.roundedBorder)
+            bundleSecureField("Passphrase", text: $bundlePassphraseInput)
             HStack {
                 Spacer()
                 Button(localized: "Cancel") {
                     bundleImportSource = nil
                     bundlePassphraseInput = ""
                 }
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
                 Button(localized: "Unlock") {
                     performBundleImport()
                 }
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
                 .disabled(bundlePassphraseInput.count < 8)
@@ -3581,6 +3582,7 @@ struct AgentDetailView: View {
         }
         .padding(20)
         .frame(width: 380)
+        .bundleSheetChrome(theme: themeManager.currentTheme)
     }
 
     @ViewBuilder
@@ -3591,6 +3593,7 @@ struct AgentDetailView: View {
                 .foregroundColor(theme.primaryText)
             if let preview = bundleImportPreview {
                 bundleManifestSummary(preview.manifest)
+                bundleReviewNotes(preview)
             }
             Text(
                 "Activate copies the agent into ~/.osaurus/agents/<id>/, rekeys its database to your local key, and registers the agent for use. Discard wipes the unpacked scratch directory and changes nothing on disk.",
@@ -3604,16 +3607,62 @@ struct AgentDetailView: View {
                 Button(localized: "Discard", role: .destructive) {
                     discardBundlePreview()
                 }
+                .buttonStyle(ThemedBorderedButtonStyle())
                 .controlSize(.small)
                 Button(localized: "Activate") {
                     activateBundlePreview()
                 }
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                 .controlSize(.small)
                 .keyboardShortcut(.defaultAction)
             }
         }
         .padding(20)
         .frame(width: 440)
+        .bundleSheetChrome(theme: themeManager.currentTheme)
+    }
+
+    /// Themed secure field: the native rounded-border style draws unreliably
+    /// on Ventura sheets.
+    private func bundleSecureField(_ title: LocalizedStringKey, text: Binding<String>) -> some View {
+        SecureField(title, text: text)
+            .textFieldStyle(.plain)
+            .font(.system(size: 13))
+            .foregroundColor(theme.primaryText)
+            .padding(.horizontal, 10)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 7)
+                    .fill(theme.inputBackground)
+                    .overlay(RoundedRectangle(cornerRadius: 7).stroke(theme.inputBorder, lineWidth: 1))
+            )
+    }
+
+    /// What activation will change, shown before the user commits.
+    @ViewBuilder
+    private func bundleReviewNotes(_ preview: AgentBundleService.ImportPreview) -> some View {
+        VStack(alignment: .leading, spacing: 6) {
+            if let replaced = preview.replacesAgentName {
+                Label(
+                    L("Replaces your existing agent “\(replaced)” and its database."),
+                    systemImage: "exclamationmark.triangle"
+                )
+                .foregroundColor(theme.warningColor)
+            }
+            if case .collidesWithLocalAgent(let name) = preview.identityNote {
+                Label(
+                    L("Its address is already used by “\(name)”, so it arrives without one. Assign a new address in Identity."),
+                    systemImage: "person.badge.key"
+                )
+                .foregroundColor(theme.secondaryText)
+            }
+            if !preview.capabilityNotes.isEmpty {
+                Text(L("Arrives with: \(preview.capabilityNotes.joined(separator: ", "))."))
+                    .foregroundColor(theme.secondaryText)
+            }
+        }
+        .font(.system(size: 11))
+        .fixedSize(horizontal: false, vertical: true)
     }
 
     @ViewBuilder
@@ -3750,7 +3799,7 @@ struct AgentDetailView: View {
     private func discardBundlePreview() {
         guard let preview = bundleImportPreview else { return }
         bundleImportPreview = nil
-        AgentBundleService.shared.discard(preview: preview)
+        Task { await AgentBundleService.shared.discard(preview: preview) }
     }
 
     /// Wipe per-agent persisted DB + scheduler state for this agent.
@@ -6990,3 +7039,13 @@ fileprivate struct AgentSecretRow: View {
         AgentsView()
     }
 #endif
+
+private extension View {
+    /// Bundle sheets are separate windows: inject the theme and the Intel
+    /// caret/appearance repair, or Ventura draws white-on-white controls.
+    func bundleSheetChrome(theme: ThemeProtocol) -> some View {
+        background(theme.primaryBackground)
+            .environment(\.theme, theme)
+            .intelControlRendering(theme: theme)
+    }
+}

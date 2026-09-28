@@ -8,7 +8,8 @@ This is distinct from [Memory](MEMORY.md). Memory is a global, app-wide system t
 > adaptations and staging (no self-scheduling on Intel) are in
 > [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md). Intel
 > differences: file tools (`db_import`, `db_export`, `db_execute path:`) read
-> and write only the chat's working folder (no sandbox), no bundles yet,
+> and write only the chat's working folder (no sandbox); bundles use the
+> upstream format but refuse symlinks and special files on import;
 > `db_execute`/`db_migrate` ask by default, `db_query` is enforced
 > read-only by SQLite, the schema snapshot is sent per turn, and every model is
 > remote. So rows the agent reads or writes pass through the provider, and the

@@ -289,8 +289,27 @@ struct DatabaseOverviewView: View {
             sectionLabel("Manage")
             VStack(alignment: .leading, spacing: 12) {
                 HStack(spacing: 8) {
-                    // Intel: encrypted .osaurus-agent bundle export/import
-                    // arrives with Release 3 (docs/AGENT_DATABASE_INTEL_PLAN.md).
+                    Button(action: onExportBundle) {
+                        Label(localized: "Export Bundle", systemImage: "shippingbox")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(ThemedBorderedButtonStyle())
+                    .controlSize(.small)
+                    .disabled(isBundleBusy)
+                    .localizedHelp(
+                        "Save this agent and its database as an encrypted .osaurus-agent bundle you can back up or move to another Mac."
+                    )
+                    Button(action: onImportBundle) {
+                        Label(localized: "Import Bundle", systemImage: "square.and.arrow.down.on.square")
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .buttonStyle(ThemedBorderedButtonStyle())
+                    .controlSize(.small)
+                    .disabled(isBundleBusy)
+                    .localizedHelp("Restore an agent bundle exported from this or another Mac.")
+                    if isBundleBusy {
+                        ProgressView().controlSize(.small)
+                    }
                     Spacer()
                     Button(role: .destructive, action: onDeleteData) {
                         Label(localized: "Delete All Data…", systemImage: "trash")
@@ -303,7 +322,7 @@ struct DatabaseOverviewView: View {
                     )
                 }
                 Text(
-                    "Deleting data also clears this agent's database history. The agent itself is kept.",
+                    "Bundles include the agent's configuration and its encrypted database, protected by a passphrase you choose.",
                     bundle: .module
                 )
                 .font(.system(size: 10))

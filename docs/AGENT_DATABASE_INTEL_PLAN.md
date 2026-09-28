@@ -1,9 +1,10 @@
 # Private Agent Database (B4) + Database History (B5) — Intel plan
 
-**Status (2026-09-28):** Phases 0–2 (Releases 1 and 2, including xlsx)
-implemented and tested in the package; awaiting the Rosy pass (the "Private
-agent database" section of `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`).
-Phase 3 is now bundles only.
+**Status (2026-09-28):** all three releases implemented and tested in the
+package: database, tools, workspace and History; CSV/TSV/JSON/JSONL/xlsx
+import and export; encrypted agent bundles. Awaiting the Rosy pass (the
+"Private agent database" section of `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`).
+Self-scheduling stays out of scope on Intel.
 Update the phase status lines below as work lands.
 
 ## Context
@@ -281,6 +282,38 @@ turn on Tables Import/Export + drag-and-drop. Tests: parse/infer, 64 MiB caps,
 path escape refusal, round-trip.
 
 ## Phase 3 — Release 3: encrypted agent bundles
+
+**Status: implemented (2026-09-28), awaiting Rosy.** `AgentBundleService` is
+ported with upstream's format unchanged (manifest v1, PBKDF2-SHA256 600k,
+AES-GCM key wrap, uncompressed tar), so bundles move between Intel and Apple
+Silicon builds. Intel adaptations:
+
+- The database copy uses `sqlcipher_export` (StorageMigrator's pattern) from
+  the live file under the storage key into a new file under the bundle key,
+  and the reverse on import. It is a consistent snapshot, works in WAL mode,
+  and never writes the source. This replaces upstream's
+  `StorageFormatConverter`/`StorageEncryptionPolicy`/`OsaurusStorageOpener`,
+  which Intel doesn't have (always-encrypted storage).
+- **Import safety (new):** after `tar -x`, `validateStagingTree` refuses
+  symlinks, special files and hard-linked files anywhere in the bundle, on
+  open and again on activate. Without it, a crafted bundle could plant
+  `db.sqlite` or `views/` as a link that later redirects writes. The manifest's
+  KDF iteration count is capped (1…10M), and built-in agents are refused.
+- Identity: Intel agents have no device scope, so an imported address is kept
+  unless another local agent owns that address or index. In that case it is
+  cleared, with no automatic re-mint, because `assignAddress` would prompt for
+  authentication mid-import.
+- The review sheet also shows the agent it would replace and the riskier
+  abilities the bundle brings (Claude Code shell/writes/config writes, Web
+  Search, Database).
+- The bundle sheets (passphrase and review) get themed buttons and fields,
+  plus the theme/caret repair, because sheets are separate windows. `discard`
+  is awaited (the service is an actor).
+- Tests: `IntelAgentBundleTests`: round trip (tables, rows and saved views
+  survive; wrong passphrase refused; bundle bytes contain neither plaintext
+  rows nor a plaintext SQLite header), symlink bundle refused, short
+  passphrases, collision rule, capability notes. Full gate: 1,244 tests in
+  185 suites.
 
 - ~~xlsx~~: done in Release 2 (see above).
 - `AgentBundleService`: PBKDF2 (600k) + AES-GCM sealed bundle key, tar via

@@ -1821,3 +1821,17 @@ Phase 2). Lessons:
   the workbook half of upstream's file; its header says to replace it
   wholesale with the #91 port.
 
+### Private agent database, Release 3 — 2026-09-28
+
+Encrypted `.osaurus-agent` bundles landed; the Intel database port is now
+complete apart from self-scheduling (out of scope). Lessons:
+
+- **Treat every imported archive as hostile.** `tar -x` happily recreates
+  symlinks; anything moved from a staging tree into `~/.osaurus` must first be
+  checked for links and special files (`AgentBundleService.validateStagingTree`).
+- **`sqlcipher_export` is the Intel way to re-encrypt a database copy.** It
+  replaces upstream's storage-format converter and never modifies the source.
+- **Bundle sheets are windows too:** themed controls plus
+  `.environment(\.theme)` and `.intelControlRendering` (the same rule as the
+  theme editor).
+

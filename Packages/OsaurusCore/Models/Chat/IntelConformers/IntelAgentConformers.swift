@@ -187,33 +187,7 @@ public enum AgentRelayStatus: Sendable, Equatable {
     case error(String)
 }
 
-// MARK: - Agent bundle
-
-/// Agent bundle import/export is amputated on Intel. Minimal manifest
-/// surface for the share/import flows (which render placeholders).
-public struct AgentBundleManifest: Sendable {
-    public let name: String
-    public let agentName: String
-    public let agentDescription: String
-    public let schemaTables: Int
-    public let savedViews: Int
-    public let exportedAt: Date
-    public init(
-        name: String = "",
-        agentName: String = "",
-        agentDescription: String = "",
-        schemaTables: Int = 0,
-        savedViews: Int = 0,
-        exportedAt: Date = Date()
-    ) {
-        self.name = name
-        self.agentName = agentName
-        self.agentDescription = agentDescription
-        self.schemaTables = schemaTables
-        self.savedViews = savedViews
-        self.exportedAt = exportedAt
-    }
-}
+// Agent bundle manifest: the real one (Services/AgentBridge/AgentBundleService.swift).
 
 // MARK: - Relay Tunnel Manager (Intel stub)
 
@@ -253,55 +227,8 @@ final class RemoteAgentManager: ObservableObject, @unchecked Sendable {
     func remove(id: UUID) -> Bool { false }
 }
 
-// MARK: - Agent Bundle Service (Intel stub)
-
-final class AgentBundleService: @unchecked Sendable {
-    static let shared = AgentBundleService()
-    private init() {}
-
-    struct ImportPreview: Sendable {
-        let name: String
-        let displayName: String
-        let manifest: AgentBundleManifest
-        init(
-            name: String = "",
-            displayName: String = "",
-            manifest: AgentBundleManifest = AgentBundleManifest()
-        ) {
-            self.name = name
-            self.displayName = displayName
-            self.manifest = manifest
-        }
-    }
-
-    // Bundle import/export is amputated on Intel. These throw / no-op
-    // so the share-agent flow's buttons compile; the share sheet
-    // itself renders the AppleSiliconOnlyTab placeholder.
-    struct BundleExportResult: Sendable {
-        let bundleURL: URL
-    }
-
-    func exportBundle(
-        agentId: UUID,
-        passphrase: String,
-        destinationDirectory: URL
-    ) async throws -> BundleExportResult {
-        throw NSError(
-            domain: "AgentBundleService",
-            code: -1,
-            userInfo: [NSLocalizedDescriptionKey: "Agent bundle export is unavailable on Intel."]
-        )
-    }
-    func openBundleForReview(url: URL, passphrase: String) async throws -> ImportPreview {
-        ImportPreview()
-    }
-    @discardableResult
-    func activate(preview: ImportPreview) async throws -> ImportPreview { preview }
-    func discard(preview: ImportPreview) {}
-}
-
-// Agent Database Store: the real one (Storage/AgentDatabaseStore.swift),
-// un-excluded with the Intel agent database (docs/AGENT_DATABASE_INTEL_PLAN.md).
+// Agent Bundle Service: the real one (Services/AgentBridge/AgentBundleService.swift),
+// un-excluded with Release 3 of docs/AGENT_DATABASE_INTEL_PLAN.md.
 
 // MARK: - Agent Secrets Keychain (Intel stub)
 

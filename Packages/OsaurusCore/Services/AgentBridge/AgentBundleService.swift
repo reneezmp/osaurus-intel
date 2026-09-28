@@ -2,30 +2,38 @@
 //  AgentBundleService.swift
 //  osaurus
 //
-//  Phase 4 — per-agent encrypted export/import bundle (spec §11.1). The
-//  bundle is a tar archive (`.osaurus-agent`) containing:
+//  Per-agent encrypted export/import bundle (spec §11.1), Intel port of
+//  upstream's AgentBundleService (docs/AGENT_DATABASE_INTEL_PLAN.md, Phase 3).
+//  The bundle is a tar archive (`.osaurus-agent`) containing:
 //
 //   - `manifest.json`     — bundle metadata + key-wrapping ciphertext.
-//   - `agent.json`        — the agent's `Agent.json` body (no .osec wrap).
-//   - `db.sqlite`         — the agent's encrypted SQLCipher database,
-//                           rekeyed to a bundle-local key on export.
+//   - `agent.json`        — the agent's JSON body.
+//   - `db.sqlite`         — the agent's SQLCipher database, re-encrypted with
+//                           a bundle-local key on export.
 //   - `schema.sql`        — human-readable schema dump.
 //   - `views/<name>.sql`  — saved-view definitions.
 //   - `migrations/*.sql`  — migration files.
 //   - `runs/`             — JSON run traces (best effort; skipped if absent).
 //
-//  Key wrapping: a fresh random 256-bit "bundle key" is generated per
-//  export, used to rekey `db.sqlite` (and as the AES-GCM key for any
-//  future file-by-file wrapping). The bundle key itself is wrapped with
-//  a passphrase-derived KEK (PBKDF2-SHA256, 600k iterations, 16-byte
-//  salt, AES-GCM seal). The wrapper goes in `manifest.json` so the
-//  receiving Mac can derive the same KEK from the passphrase.
+//  Key wrapping (unchanged from upstream, so bundles move between Intel and
+//  Apple Silicon builds): a fresh 256-bit bundle key encrypts `db.sqlite`; the
+//  bundle key is sealed with AES-GCM under a PBKDF2-SHA256 key (600k
+//  iterations, 16-byte salt) derived from the user's passphrase.
 //
-//  Import is review-before-activation: the bundle is unpacked into a
-//  scratch directory; the caller surfaces the manifest to the user; only
-//  after explicit user approval does the service move files into
-//  `~/.osaurus/agents/<id>/` and rekey `db.sqlite` to the local storage
-//  key.
+//  Intel adaptations:
+//   - Databases are always SQLCipher with the shared storage key, so the
+//     copy is made with `sqlcipher_export` (the StorageMigrator pattern)
+//     instead of upstream's StorageFormatConverter/StorageEncryptionPolicy.
+//     The live file is only read.
+//   - Agents are loaded and saved through the Intel `AgentManager`.
+//   - Intel agents carry no device scope, so an imported address is kept
+//     unless another local agent already owns that address or index; then
+//     it is cleared (assign a new one in Identity — no surprise auth prompt).
+//   - Import refuses symlinks and anything that isn't a plain file or
+//     folder in the unpacked bundle: a crafted archive must not be able to
+//     plant a link that later redirects the agent's database writes.
+//   - The review preview names the local agent it would replace and the
+//     riskier abilities the bundled agent arrives with.
 //
 
 import CommonCrypto
@@ -42,31 +50,30 @@ public enum AgentBundleError: Error, LocalizedError {
     case decryptFailed(String)
     case manifestInvalid(String)
     case rekeyFailed(String)
+    case unsafeBundle(String)
 
     public var errorDescription: String? {
         switch self {
         case .agentNotFound: return "Agent not found."
         case .readFailed(let m): return "Bundle read failed: \(m)"
         case .writeFailed(let m): return "Bundle write failed: \(m)"
-        case .archiveFailed(let m): return "Archive build failed: \(m)"
-        case .passphraseTooShort:
-            return "Bundle passphrase must be at least 8 characters."
-        case .decryptFailed(let m): return "Bundle key unwrap failed: \(m)"
+        case .archiveFailed(let m): return "Bundle archive failed: \(m)"
+        case .passphraseTooShort: return "Passphrase must be at least 8 characters."
+        case .decryptFailed(let m): return "Could not unlock the bundle: \(m)"
         case .manifestInvalid(let m): return "Bundle manifest is invalid: \(m)"
-        case .rekeyFailed(let m): return "Bundle rekey failed: \(m)"
+        case .rekeyFailed(let m): return "Could not re-encrypt the database: \(m)"
+        case .unsafeBundle(let m): return "This bundle was refused: \(m)"
         }
     }
 }
 
-/// Format-tag we stamp into the manifest. Bump when the on-disk shape
-/// changes so old/new versions can refuse incompatible bundles.
+/// Format-tag stamped into the manifest. Bump when the on-disk shape changes
+/// so old/new versions can refuse incompatible bundles.
 public enum AgentBundleFormat {
     public static let currentVersion: Int = 1
 }
 
-/// What gets pretty-printed into the manifest. Public so the importer
-/// can render a review screen ("This bundle exports `<name>` with N
-/// tables and M rows — proceed?") without rummaging in private types.
+/// Manifest shape, byte-compatible with upstream so bundles are portable.
 public struct AgentBundleManifest: Codable, Sendable {
     public var formatVersion: Int
     public var exportedAt: Date
@@ -87,14 +94,19 @@ public struct AgentBundleManifest: Codable, Sendable {
     public var keyTag: String
 }
 
-/// Top-level service. Singleton so callers don't accidentally instantiate
-/// multiple file-system roots; the work itself is reentrant.
 public actor AgentBundleService {
     public static let shared = AgentBundleService()
 
-    /// Default PBKDF2 cost. Burn ~250ms on Apple Silicon to make brute
-    /// force expensive without making import feel sluggish.
+    /// Default PBKDF2 cost (matches upstream).
     public static let kdfIterations = 600_000
+    /// Refuse absurd iteration counts from a crafted manifest (CPU burn).
+    static let maxKdfIterations = 10_000_000
+
+    /// Top-level entries activation moves into place; anything else in a
+    /// bundle is ignored.
+    static let knownEntries: Set<String> = [
+        "manifest.json", "agent.json", "db.sqlite", "schema.sql", "views", "migrations", "runs",
+    ]
 
     private init() {}
 
@@ -106,83 +118,55 @@ public actor AgentBundleService {
     }
 
     /// Build a `.osaurus-agent` bundle for `agentId`, sealed with
-    /// `passphrase`. `destinationDirectory` must exist and be writable;
-    /// the file is named `<agent-slug>.osaurus-agent`. Returns the URL
-    /// of the produced file plus the manifest copied into it.
+    /// `passphrase`, into `destinationDirectory` as `<agent-name>.osaurus-agent`.
     public func exportBundle(
         agentId: UUID,
         passphrase: String,
         destinationDirectory: URL
     ) async throws -> ExportResult {
         guard passphrase.count >= 8 else { throw AgentBundleError.passphraseTooShort }
-
-        // 1. Materialize the agent into a scratch directory we own. We
-        //    can't ship the live `~/.osaurus/agents/<id>/db.sqlite`
-        //    directly because we have to rekey it to the bundle key
-        //    without touching the live file. Copy first, then rekey
-        //    the copy.
         let agent: Agent = try await MainActor.run {
-            guard let a = AgentStore.load(id: agentId) else {
+            guard let agent = AgentManager.shared.agent(for: agentId), !agent.isBuiltIn else {
                 throw AgentBundleError.agentNotFound
             }
-            return a
+            return agent
         }
 
         let scratch = try makeScratchDirectory(prefix: "osaurus-agent-export-")
         defer { try? FileManager.default.removeItem(at: scratch) }
 
-        // 2. Write the agent JSON. We round-trip through the same
-        //    encoder AgentStore uses so the bundle matches the
-        //    on-disk wire format byte-for-byte.
-        try writeAgentJSON(agent, to: scratch.appendingPathComponent("agent.json"))
+        try writeJSON(agent, to: scratch.appendingPathComponent("agent.json"))
 
-        // 3. Copy + rekey the per-agent database.
         let bundleKey = SymmetricKey(size: .bits256)
-        try await copyAndRekeyAgentDB(
+        try exportAgentDatabase(
             agentId: agentId,
             to: scratch.appendingPathComponent("db.sqlite"),
-            newKey: bundleKey
+            bundleKey: bundleKey
         )
 
-        // 4. Copy schema.sql / views/ / migrations/ / runs/ if present.
         let agentDir = OsaurusPaths.agentDirectory(for: agentId)
         try copyIfExists(
             from: agentDir.appendingPathComponent("schema.sql"),
-            to: scratch.appendingPathComponent("schema.sql")
-        )
+            to: scratch.appendingPathComponent("schema.sql"))
         try copyDirIfExists(
             from: OsaurusPaths.agentViewsDirectory(for: agentId),
-            to: scratch.appendingPathComponent("views")
-        )
+            to: scratch.appendingPathComponent("views"))
         try copyDirIfExists(
             from: OsaurusPaths.agentMigrationsDirectory(for: agentId),
-            to: scratch.appendingPathComponent("migrations")
-        )
+            to: scratch.appendingPathComponent("migrations"))
         try copyDirIfExists(
             from: OsaurusPaths.agentRunsDirectory(for: agentId),
-            to: scratch.appendingPathComponent("runs")
-        )
+            to: scratch.appendingPathComponent("runs"))
 
-        // 5. Build the manifest. Schema / view counts come from the
-        //    rekeyed copy of `db.sqlite` so we open with the bundle
-        //    key — keeps the manifest honest.
         let (tables, views) =
             (try? readBundleStats(
-                dbPath: scratch.appendingPathComponent("db.sqlite").path,
-                key: bundleKey
-            )) ?? (0, 0)
+                dbPath: scratch.appendingPathComponent("db.sqlite").path, key: bundleKey)) ?? (0, 0)
 
-        let (kdfSalt, kekData) = try deriveKEK(passphrase: passphrase)
-        let kek = SymmetricKey(data: kekData)
+        let (salt, kekData) = try deriveKEK(passphrase: passphrase)
         let sealed = try AES.GCM.seal(
-            bundleKey.withUnsafeBytes { Data($0) },
-            using: kek
-        )
-        guard let nonce = sealed.nonce.withUnsafeBytes({ Data($0) }) as Data?,
-            !nonce.isEmpty
-        else {
-            throw AgentBundleError.archiveFailed("nonce missing")
-        }
+            bundleKey.withUnsafeBytes { Data($0) }, using: SymmetricKey(data: kekData))
+        let nonce = sealed.nonce.withUnsafeBytes { Data($0) }
+        guard !nonce.isEmpty else { throw AgentBundleError.archiveFailed("nonce missing") }
 
         let manifest = AgentBundleManifest(
             formatVersion: AgentBundleFormat.currentVersion,
@@ -192,188 +176,221 @@ public actor AgentBundleService {
             agentDescription: agent.description,
             schemaTables: tables,
             savedViews: views,
-            kdfSalt: kdfSalt.base64EncodedString(),
+            kdfSalt: salt.base64EncodedString(),
             kdfIterations: Self.kdfIterations,
             keyNonce: nonce.base64EncodedString(),
             keyCiphertext: sealed.ciphertext.base64EncodedString(),
             keyTag: sealed.tag.base64EncodedString()
         )
-        try writeManifest(manifest, to: scratch.appendingPathComponent("manifest.json"))
+        try writeJSON(manifest, to: scratch.appendingPathComponent("manifest.json"))
 
-        // 6. Tar the scratch directory into the destination.
         let slug = sanitizeFilename(agent.displayName.isEmpty ? agent.id.uuidString : agent.displayName)
-        let bundleURL =
-            destinationDirectory
-            .appendingPathComponent("\(slug).osaurus-agent")
+        let bundleURL = destinationDirectory.appendingPathComponent("\(slug).osaurus-agent")
         try await tarDirectory(scratch, into: bundleURL)
-
         return ExportResult(bundleURL: bundleURL, manifest: manifest)
     }
 
     // MARK: - Import (review-before-activate)
 
+    /// What activation does to the imported agent's cryptographic address.
+    public enum IdentityNote: Equatable, Sendable {
+        /// Another local agent already owns this address or index; the
+        /// imported copy arrives without one.
+        case collidesWithLocalAgent(name: String)
+    }
+
     public struct ImportPreview: Sendable {
-        /// Read-only directory we unpacked into. Caller can show its
-        /// contents in a review UI. Survives until `activate` or
-        /// `discard` is called.
+        /// Unpacked, validated staging directory. Lives until `activate` or
+        /// `discard`.
         public var stagingDirectory: URL
         public var manifest: AgentBundleManifest
-        /// Bundle key, unwrapped with the user's passphrase. Held
-        /// in-memory only — never written to disk. We need it again
-        /// in `activate` to rekey `db.sqlite` to the local storage key.
+        public var identityNote: IdentityNote?
+        /// Name of the local agent with the same id that activation replaces.
+        public var replacesAgentName: String?
+        /// Abilities the bundled agent arrives with that deserve a look
+        /// (shell, file writes, web search, database, config writes).
+        public var capabilityNotes: [String]
+        /// Unwrapped with the passphrase; memory only.
         let bundleKey: SymmetricKey
     }
 
-    /// Unpack and verify a bundle without touching `~/.osaurus/`. The
-    /// caller is expected to surface `preview.manifest` to the user
-    /// for review, then call `activate(preview:)` to actually move
-    /// the files into place. `discard(preview:)` cleans up.
-    public func openBundleForReview(
-        url: URL,
-        passphrase: String
-    ) async throws -> ImportPreview {
+    /// Pure identity rule. Same-UUID re-imports are overwrites, so the
+    /// record with the agent's own id never counts as a collision.
+    static func resolveImportIdentity(
+        agent: Agent,
+        localAgents: [Agent]
+    ) -> (agent: Agent, note: IdentityNote?) {
+        guard !agent.isBuiltIn, agent.agentAddress != nil || agent.agentIndex != nil else {
+            return (agent, nil)
+        }
+        let addressLower = agent.agentAddress?.lowercased()
+        let collision = localAgents.first { existing in
+            guard !existing.isBuiltIn, existing.id != agent.id else { return false }
+            if let index = agent.agentIndex, existing.agentIndex == index { return true }
+            if let addressLower, existing.agentAddress?.lowercased() == addressLower { return true }
+            return false
+        }
+        guard let collision else { return (agent, nil) }
+        var cleared = agent
+        cleared.agentIndex = nil
+        cleared.agentAddress = nil
+        return (cleared, .collidesWithLocalAgent(name: collision.name))
+    }
+
+    /// Abilities worth surfacing before activating someone else's agent.
+    static func capabilityNotes(for agent: Agent) -> [String] {
+        var notes: [String] = []
+        if let claude = agent.claudeCode {
+            if claude.allowShell { notes.append(L("Claude Code may run shell commands")) }
+            if claude.allowWrites { notes.append(L("Claude Code may write files")) }
+            if claude.allowOsaurusConfigWrites { notes.append(L("May change Osaurus settings")) }
+        }
+        if agent.settings.webSearchEnabled { notes.append(L("Web Search is on")) }
+        if agent.settings.dbEnabled { notes.append(L("Database is on")) }
+        return notes
+    }
+
+    /// Unpack, validate and unlock a bundle without touching `~/.osaurus`.
+    public func openBundleForReview(url: URL, passphrase: String) async throws -> ImportPreview {
         guard passphrase.count >= 8 else { throw AgentBundleError.passphraseTooShort }
 
         let staging = try makeScratchDirectory(prefix: "osaurus-agent-import-")
+        func fail(_ error: Error) -> Error {
+            try? FileManager.default.removeItem(at: staging)
+            return error
+        }
         do {
             try await untar(url, into: staging)
+            try Self.validateStagingTree(staging)
         } catch {
-            try? FileManager.default.removeItem(at: staging)
-            throw error
+            throw fail(error)
         }
 
         let manifestURL = staging.appendingPathComponent("manifest.json")
         guard FileManager.default.fileExists(atPath: manifestURL.path) else {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.manifestInvalid("no manifest.json in bundle")
+            throw fail(AgentBundleError.manifestInvalid("no manifest.json in bundle"))
         }
-        let manifestData = try Data(contentsOf: manifestURL)
         let manifest: AgentBundleManifest
         do {
             let decoder = JSONDecoder()
             decoder.dateDecodingStrategy = .iso8601
-            manifest = try decoder.decode(AgentBundleManifest.self, from: manifestData)
+            manifest = try decoder.decode(AgentBundleManifest.self, from: Data(contentsOf: manifestURL))
         } catch {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.manifestInvalid(error.localizedDescription)
+            throw fail(AgentBundleError.manifestInvalid(error.localizedDescription))
         }
         guard manifest.formatVersion == AgentBundleFormat.currentVersion else {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.manifestInvalid(
-                "format version \(manifest.formatVersion) not supported by this build"
-            )
+            throw fail(
+                AgentBundleError.manifestInvalid(
+                    "format version \(manifest.formatVersion) not supported by this build"))
+        }
+        guard (1 ... Self.maxKdfIterations).contains(manifest.kdfIterations) else {
+            throw fail(AgentBundleError.manifestInvalid("unsupported key-derivation cost"))
         }
 
-        // Unwrap the bundle key. Wrong passphrase = AES-GCM auth failure.
         guard let salt = Data(base64Encoded: manifest.kdfSalt),
             let nonceBytes = Data(base64Encoded: manifest.keyNonce),
             let ciphertext = Data(base64Encoded: manifest.keyCiphertext),
             let tag = Data(base64Encoded: manifest.keyTag)
         else {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.manifestInvalid("manifest base64 fields malformed")
-        }
-
-        let kekData = try Self.pbkdf2(
-            passphrase: passphrase,
-            salt: salt,
-            iterations: manifest.kdfIterations,
-            keyLength: 32
-        )
-        let kek = SymmetricKey(data: kekData)
-        let nonce: AES.GCM.Nonce
-        do {
-            nonce = try AES.GCM.Nonce(data: nonceBytes)
-        } catch {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.decryptFailed(error.localizedDescription)
-        }
-        let sealedBox: AES.GCM.SealedBox
-        do {
-            sealedBox = try AES.GCM.SealedBox(nonce: nonce, ciphertext: ciphertext, tag: tag)
-        } catch {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.decryptFailed(error.localizedDescription)
+            throw fail(AgentBundleError.manifestInvalid("manifest base64 fields malformed"))
         }
         let bundleKeyData: Data
         do {
-            bundleKeyData = try AES.GCM.open(sealedBox, using: kek)
+            let kek = SymmetricKey(
+                data: try Self.pbkdf2(
+                    passphrase: passphrase, salt: salt, iterations: manifest.kdfIterations, keyLength: 32))
+            let box = try AES.GCM.SealedBox(
+                nonce: try AES.GCM.Nonce(data: nonceBytes), ciphertext: ciphertext, tag: tag)
+            bundleKeyData = try AES.GCM.open(box, using: kek)
         } catch {
-            try? FileManager.default.removeItem(at: staging)
-            throw AgentBundleError.decryptFailed(
-                "wrong passphrase or corrupted bundle"
-            )
+            throw fail(AgentBundleError.decryptFailed("wrong passphrase or corrupted bundle"))
         }
+
+        let staged: Agent
+        do {
+            staged = try Self.decodeAgent(at: staging.appendingPathComponent("agent.json"))
+        } catch {
+            throw fail(error)
+        }
+        guard staged.id == manifest.agentId, !staged.isBuiltIn else {
+            throw fail(AgentBundleError.manifestInvalid("manifest agentId mismatch"))
+        }
+        let locals = await MainActor.run { AgentManager.shared.agents }
+        let note = Self.resolveImportIdentity(agent: staged, localAgents: locals).note
+        let replaces = locals.first { $0.id == staged.id && !$0.isBuiltIn }?.name
 
         return ImportPreview(
             stagingDirectory: staging,
             manifest: manifest,
+            identityNote: note,
+            replacesAgentName: replaces,
+            capabilityNotes: Self.capabilityNotes(for: staged),
             bundleKey: SymmetricKey(data: bundleKeyData)
         )
     }
 
-    /// Activate a previously reviewed import: move the staged files
-    /// into `~/.osaurus/agents/<id>/`, rekey `db.sqlite` from the
-    /// bundle key to the host storage key, and write the agent JSON
-    /// through `AgentStore`.
+    /// Activate a reviewed import: re-encrypt `db.sqlite` from the bundle key
+    /// to the local storage key, move the files into
+    /// `~/.osaurus/agents/<id>/`, and save the agent.
     @discardableResult
     public func activate(preview: ImportPreview) async throws -> Agent {
-        let manifest = preview.manifest
         let staging = preview.stagingDirectory
-        let fm = FileManager.default
+        defer { try? FileManager.default.removeItem(at: staging) }
+        // The staging tree was validated on open; re-check in case anything
+        // changed on disk since.
+        try Self.validateStagingTree(staging)
 
-        // 1. Decode the staged agent JSON. Catch malformed early.
-        let agentURL = staging.appendingPathComponent("agent.json")
-        guard fm.fileExists(atPath: agentURL.path) else {
-            throw AgentBundleError.manifestInvalid("no agent.json in bundle")
-        }
-        let agentData = try Data(contentsOf: agentURL)
-        let decoder = JSONDecoder()
-        decoder.dateDecodingStrategy = .iso8601
-        let agent = try decoder.decode(Agent.self, from: agentData)
-        guard agent.id == manifest.agentId else {
+        let bundled = try Self.decodeAgent(at: staging.appendingPathComponent("agent.json"))
+        guard bundled.id == preview.manifest.agentId, !bundled.isBuiltIn else {
             throw AgentBundleError.manifestInvalid("manifest agentId mismatch")
         }
+        let locals = await MainActor.run { AgentManager.shared.agents }
+        let agent = Self.resolveImportIdentity(agent: bundled, localAgents: locals).agent
 
-        // 2. Rekey `db.sqlite` from bundle key → host storage key.
-        let dbPath = staging.appendingPathComponent("db.sqlite").path
-        if fm.fileExists(atPath: dbPath) {
-            let hostKey = try StorageKeyManager.shared.currentKey()
-            try Self.rekeyBundleDatabase(
-                path: dbPath,
-                fromBundleKey: preview.bundleKey,
-                toHostKey: hostKey
-            )
+        let fm = FileManager.default
+        let stagedDB = staging.appendingPathComponent("db.sqlite").path
+        let convertedDB = staging.appendingPathComponent("db.local.sqlite").path
+        if fm.fileExists(atPath: stagedDB) {
+            let localKey: SymmetricKey
+            do {
+                localKey = try StorageKeyManager.shared.currentKey()
+            } catch {
+                throw AgentBundleError.rekeyFailed("storage key unavailable")
+            }
+            try Self.reencrypt(from: stagedDB, sourceKey: preview.bundleKey, to: convertedDB, destinationKey: localKey)
         }
 
-        // 3. Move files into the live agent directory. The agent JSON
-        //    goes through `AgentStore.save` so any normalization the
-        //    store does (back-compat decoding, etc.) is preserved.
         let agentDir = OsaurusPaths.agentDirectory(for: agent.id)
         OsaurusPaths.ensureExistsSilent(agentDir)
-        // Close the live DB handle first (if one exists) so we don't
-        // hold an open fd while replacing the file.
-        await MainActor.run { AgentDatabaseStore.shared.close(agent.id) }
-        try moveOverwriting(from: dbPath, to: agentDir.appendingPathComponent("db.sqlite").path)
+        // Drop the live handle (and the bridge's queue) before replacing files.
+        AgentDatabaseStore.shared.close(agent.id)
+        LocalAgentBridge.shared.forget(agentId: agent.id)
+        let liveDB = OsaurusPaths.agentDatabaseFile(for: agent.id).path
+        if fm.fileExists(atPath: convertedDB) {
+            for sidecar in ["-wal", "-shm"] { try? fm.removeItem(atPath: liveDB + sidecar) }
+            try moveOverwriting(from: convertedDB, to: liveDB)
+        }
         try moveOverwritingIfExists(
             from: staging.appendingPathComponent("schema.sql").path,
-            to: agentDir.appendingPathComponent("schema.sql").path
-        )
+            to: agentDir.appendingPathComponent("schema.sql").path)
         try moveDirOverwritingIfExists(
             from: staging.appendingPathComponent("views").path,
-            to: OsaurusPaths.agentViewsDirectory(for: agent.id).path
-        )
+            to: OsaurusPaths.agentViewsDirectory(for: agent.id).path)
         try moveDirOverwritingIfExists(
             from: staging.appendingPathComponent("migrations").path,
-            to: OsaurusPaths.agentMigrationsDirectory(for: agent.id).path
-        )
+            to: OsaurusPaths.agentMigrationsDirectory(for: agent.id).path)
         try moveDirOverwritingIfExists(
             from: staging.appendingPathComponent("runs").path,
-            to: OsaurusPaths.agentRunsDirectory(for: agent.id).path
-        )
+            to: OsaurusPaths.agentRunsDirectory(for: agent.id).path)
 
-        await MainActor.run { AgentStore.save(agent) }
-        try? FileManager.default.removeItem(at: staging)
+        await MainActor.run {
+            if AgentManager.shared.agent(for: agent.id) != nil {
+                AgentManager.shared.update(agent)
+            } else {
+                AgentManager.shared.add(agent)
+            }
+            NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
+        }
         return agent
     }
 
@@ -382,128 +399,145 @@ public actor AgentBundleService {
         try? FileManager.default.removeItem(at: preview.stagingDirectory)
     }
 
-    // MARK: - Internals
+    // MARK: - Validation
 
-    private func makeScratchDirectory(prefix: String) throws -> URL {
-        let temp = FileManager.default.temporaryDirectory
-            .appendingPathComponent(prefix + UUID().uuidString)
-        do {
-            try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
-        } catch {
-            throw AgentBundleError.writeFailed(error.localizedDescription)
-        }
-        return temp
-    }
-
-    private func writeAgentJSON(_ agent: Agent, to url: URL) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        do {
-            try encoder.encode(agent).write(to: url)
-        } catch {
-            throw AgentBundleError.writeFailed(error.localizedDescription)
-        }
-    }
-
-    private func writeManifest(_ manifest: AgentBundleManifest, to url: URL) throws {
-        let encoder = JSONEncoder()
-        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        encoder.dateEncodingStrategy = .iso8601
-        do {
-            try encoder.encode(manifest).write(to: url)
-        } catch {
-            throw AgentBundleError.writeFailed(error.localizedDescription)
-        }
-    }
-
-    private func copyIfExists(from src: URL, to dst: URL) throws {
+    /// Refuse symlinks and anything that isn't a regular file or directory,
+    /// anywhere in the unpacked tree, plus hard-linked files.
+    static func validateStagingTree(_ root: URL) throws {
         let fm = FileManager.default
-        guard fm.fileExists(atPath: src.path) else { return }
-        do {
-            try fm.copyItem(at: src, to: dst)
-        } catch {
-            throw AgentBundleError.writeFailed(
-                "copy \(src.lastPathComponent): \(error.localizedDescription)"
-            )
+        let keys: [URLResourceKey] = [.isSymbolicLinkKey, .isRegularFileKey, .isDirectoryKey, .linkCountKey]
+        guard
+            let enumerator = fm.enumerator(
+                at: root, includingPropertiesForKeys: keys, options: [], errorHandler: { _, _ in false })
+        else {
+            throw AgentBundleError.readFailed("could not read the unpacked bundle")
+        }
+        for case let url as URL in enumerator {
+            let values = try url.resourceValues(forKeys: Set(keys))
+            let name = url.lastPathComponent
+            if values.isSymbolicLink == true {
+                throw AgentBundleError.unsafeBundle("it contains a symbolic link (\(name))")
+            }
+            if values.isDirectory == true { continue }
+            guard values.isRegularFile == true else {
+                throw AgentBundleError.unsafeBundle("it contains a special file (\(name))")
+            }
+            if (values.linkCount ?? 1) > 1 {
+                throw AgentBundleError.unsafeBundle("it contains a hard-linked file (\(name))")
+            }
+        }
+        for required in ["manifest.json", "agent.json"] {
+            var isDirectory: ObjCBool = false
+            if fm.fileExists(atPath: root.appendingPathComponent(required).path, isDirectory: &isDirectory),
+                isDirectory.boolValue
+            {
+                throw AgentBundleError.unsafeBundle("\(required) is a folder")
+            }
         }
     }
 
-    private func copyDirIfExists(from src: URL, to dst: URL) throws {
-        let fm = FileManager.default
-        var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: src.path, isDirectory: &isDir), isDir.boolValue else { return }
+    private static func decodeAgent(at url: URL) throws -> Agent {
+        guard FileManager.default.fileExists(atPath: url.path) else {
+            throw AgentBundleError.manifestInvalid("no agent.json in bundle")
+        }
         do {
-            try fm.copyItem(at: src, to: dst)
+            let decoder = JSONDecoder()
+            decoder.dateDecodingStrategy = .iso8601
+            return try decoder.decode(Agent.self, from: Data(contentsOf: url))
         } catch {
-            throw AgentBundleError.writeFailed(
-                "copy dir \(src.lastPathComponent): \(error.localizedDescription)"
-            )
+            throw AgentBundleError.manifestInvalid("agent.json: \(error.localizedDescription)")
         }
     }
 
-    private func copyAndRekeyAgentDB(
-        agentId: UUID,
-        to destination: URL,
-        newKey: SymmetricKey
-    ) async throws {
-        let fm = FileManager.default
-        let src = OsaurusPaths.agentDatabaseFile(for: agentId).path
-        guard fm.fileExists(atPath: src) else {
-            // No DB yet — write an empty SQLCipher file with `newKey` so
-            // the bundle is uniform.
-            let conn = try EncryptedSQLiteOpener.open(path: destination.path, key: newKey)
+    // MARK: - Database copy (sqlcipher_export)
+
+    /// Export the live agent database (or an empty one) into `destination`
+    /// encrypted with `bundleKey`. The live file is only read.
+    private func exportAgentDatabase(agentId: UUID, to destination: URL, bundleKey: SymmetricKey) throws {
+        let source = OsaurusPaths.agentDatabaseFile(for: agentId).path
+        guard FileManager.default.fileExists(atPath: source) else {
+            // No database yet: ship an empty encrypted file so bundles are uniform.
+            let conn = try EncryptedSQLiteOpener.open(path: destination.path, key: bundleKey)
             sqlite3_close(conn)
             return
         }
+        let localKey: SymmetricKey
         do {
-            try fm.copyItem(atPath: src, toPath: destination.path)
+            localKey = try StorageKeyManager.shared.currentKey()
         } catch {
-            throw AgentBundleError.writeFailed("copy db: \(error.localizedDescription)")
+            throw AgentBundleError.writeFailed("storage key unavailable")
         }
-        // Pre-rekey we close any in-process handles so the bundle copy
-        // isn't fighting the live file (it isn't — we copied — but the
-        // copy might have inherited an unfinished WAL). Best-effort.
-        await MainActor.run { AgentDatabaseStore.shared.close(agentId) }
-        let hostKey = try StorageKeyManager.shared.currentKey()
-        try Self.rekeyBundleDatabase(
-            path: destination.path,
-            fromBundleKey: hostKey,
-            toHostKey: newKey
-        )
+        try Self.reencrypt(from: source, sourceKey: localKey, to: destination.path, destinationKey: bundleKey)
     }
 
-    /// Open the rekeyed bundle DB and tally tables + views for the
-    /// manifest. Best-effort; failures return (0, 0) and the export
-    /// proceeds without manifest stats rather than aborting.
-    private func readBundleStats(
-        dbPath: String,
-        key: SymmetricKey
-    ) throws -> (Int, Int) {
-        let conn = try EncryptedSQLiteOpener.open(path: dbPath, key: key)
-        defer { sqlite3_close(conn) }
+    /// Copy an encrypted database under a different key with
+    /// `sqlcipher_export` (a consistent read snapshot; works in WAL mode and
+    /// never modifies the source). Forwards `user_version`.
+    static func reencrypt(
+        from sourcePath: String,
+        sourceKey: SymmetricKey,
+        to destinationPath: String,
+        destinationKey: SymmetricKey
+    ) throws {
+        let fm = FileManager.default
+        try? fm.removeItem(atPath: destinationPath)
+        for sidecar in ["-wal", "-shm"] { try? fm.removeItem(atPath: destinationPath + sidecar) }
 
-        var tables = 0
+        let source: OpaquePointer
+        do {
+            source = try EncryptedSQLiteOpener.open(
+                path: sourcePath, key: sourceKey, applyPerfPragmas: false, applyForeignKeys: false)
+        } catch {
+            throw AgentBundleError.rekeyFailed("open source: \(error.localizedDescription)")
+        }
+        defer { sqlite3_close(source) }
+
+        let hex = destinationKey.withUnsafeBytes { raw in raw.map { String(format: "%02x", $0) }.joined() }
+        let escaped = destinationPath.replacingOccurrences(of: "'", with: "''")
+        guard sqlite3_exec(source, "ATTACH DATABASE '\(escaped)' AS bundle KEY \"x'\(hex)'\"", nil, nil, nil)
+            == SQLITE_OK
+        else {
+            throw AgentBundleError.rekeyFailed("attach: \(String(cString: sqlite3_errmsg(source)))")
+        }
+        for pragma in [
+            "PRAGMA bundle.cipher_memory_security = OFF",
+            "PRAGMA bundle.cipher_page_size = 4096",
+            "PRAGMA bundle.kdf_iter = 256000",
+        ] {
+            _ = sqlite3_exec(source, pragma, nil, nil, nil)
+        }
+        guard sqlite3_exec(source, "SELECT sqlcipher_export('bundle')", nil, nil, nil) == SQLITE_OK else {
+            let message = String(cString: sqlite3_errmsg(source))
+            _ = sqlite3_exec(source, "DETACH DATABASE bundle", nil, nil, nil)
+            try? fm.removeItem(atPath: destinationPath)
+            throw AgentBundleError.rekeyFailed("export: \(message)")
+        }
+        var userVersion: Int32 = 0
         var stmt: OpaquePointer?
-        // Count user tables — anything not in our reserved list.
-        let sql =
-            "SELECT count(*) FROM sqlite_master WHERE type='table' "
-            + "AND name NOT LIKE 'sqlite_%' "
-            + "AND name NOT IN ('_tables_meta', '_changelog', '_views')"
-        if sqlite3_prepare_v2(conn, sql, -1, &stmt, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt) }
-            if sqlite3_step(stmt) == SQLITE_ROW {
-                tables = Int(sqlite3_column_int(stmt, 0))
-            }
+        if sqlite3_prepare_v2(source, "PRAGMA main.user_version", -1, &stmt, nil) == SQLITE_OK, let s = stmt {
+            if sqlite3_step(s) == SQLITE_ROW { userVersion = sqlite3_column_int(s, 0) }
+            sqlite3_finalize(s)
         }
-        var views = 0
-        var stmt2: OpaquePointer?
-        if sqlite3_prepare_v2(conn, "SELECT count(*) FROM _views", -1, &stmt2, nil) == SQLITE_OK {
-            defer { sqlite3_finalize(stmt2) }
-            if sqlite3_step(stmt2) == SQLITE_ROW {
-                views = Int(sqlite3_column_int(stmt2, 0))
-            }
+        if userVersion > 0 {
+            _ = sqlite3_exec(source, "PRAGMA bundle.user_version = \(userVersion)", nil, nil, nil)
         }
+        _ = sqlite3_exec(source, "DETACH DATABASE bundle", nil, nil, nil)
+    }
+
+    /// Tally user tables and saved views for the manifest. Best effort.
+    private func readBundleStats(dbPath: String, key: SymmetricKey) throws -> (Int, Int) {
+        let conn = try EncryptedSQLiteOpener.open(path: dbPath, key: key, applyPerfPragmas: false)
+        defer { sqlite3_close(conn) }
+        func count(_ sql: String) -> Int {
+            var stmt: OpaquePointer?
+            guard sqlite3_prepare_v2(conn, sql, -1, &stmt, nil) == SQLITE_OK, let s = stmt else { return 0 }
+            defer { sqlite3_finalize(s) }
+            return sqlite3_step(s) == SQLITE_ROW ? Int(sqlite3_column_int(s, 0)) : 0
+        }
+        let tables = count(
+            "SELECT count(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' "
+                + "AND name NOT IN ('_tables_meta', '_changelog', '_views')")
+        let views = count("SELECT count(*) FROM _views")
         return (tables, views)
     }
 
@@ -515,29 +549,16 @@ public actor AgentBundleService {
             throw AgentBundleError.archiveFailed("CSPRNG salt")
         }
         let salt = Data(saltBytes)
-        let key = try Self.pbkdf2(
-            passphrase: passphrase,
-            salt: salt,
-            iterations: Self.kdfIterations,
-            keyLength: 32
-        )
-        return (salt, key)
+        return (salt, try Self.pbkdf2(passphrase: passphrase, salt: salt, iterations: Self.kdfIterations, keyLength: 32))
     }
 
     /// PBKDF2-HMAC-SHA256 via CommonCrypto.
-    fileprivate static func pbkdf2(
-        passphrase: String,
-        salt: Data,
-        iterations: Int,
-        keyLength: Int
-    ) throws -> Data {
+    static func pbkdf2(passphrase: String, salt: Data, iterations: Int, keyLength: Int) throws -> Data {
         var derived = Data(count: keyLength)
         let passphraseBytes = Array(passphrase.utf8)
         let result = derived.withUnsafeMutableBytes { derivedBuffer -> Int32 in
             salt.withUnsafeBytes { saltBuffer -> Int32 in
-                guard let derivedBase = derivedBuffer.baseAddress,
-                    let saltBase = saltBuffer.baseAddress
-                else {
+                guard let derivedBase = derivedBuffer.baseAddress, let saltBase = saltBuffer.baseAddress else {
                     return Int32(kCCParamError)
                 }
                 return CCKeyDerivationPBKDF(
@@ -559,39 +580,51 @@ public actor AgentBundleService {
         return derived
     }
 
-    // MARK: - Rekey helper
+    // MARK: - Files
 
-    /// Open the bundle DB with one key and rekey it to another. Used
-    /// on both the export side (host key → bundle key) and the import
-    /// side (bundle key → host key). Mirrors the body of
-    /// `StorageExportService.rekeyDatabase` but expressed in our
-    /// `EncryptedSQLiteOpener.rekey` API.
-    fileprivate static func rekeyBundleDatabase(
-        path: String,
-        fromBundleKey oldKey: SymmetricKey,
-        toHostKey newKey: SymmetricKey
-    ) throws {
-        let conn = try EncryptedSQLiteOpener.open(
-            path: path,
-            key: oldKey,
-            applyPerfPragmas: false,
-            applyForeignKeys: false
-        )
-        defer { sqlite3_close(conn) }
+    private func makeScratchDirectory(prefix: String) throws -> URL {
+        let temp = FileManager.default.temporaryDirectory.appendingPathComponent(prefix + UUID().uuidString)
         do {
-            try EncryptedSQLiteOpener.rekey(connection: conn, newKey: newKey)
+            try FileManager.default.createDirectory(at: temp, withIntermediateDirectories: true)
         } catch {
-            throw AgentBundleError.rekeyFailed(error.localizedDescription)
+            throw AgentBundleError.writeFailed(error.localizedDescription)
+        }
+        return temp
+    }
+
+    private func writeJSON<T: Encodable>(_ value: T, to url: URL) throws {
+        let encoder = JSONEncoder()
+        encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
+        encoder.dateEncodingStrategy = .iso8601
+        do {
+            try encoder.encode(value).write(to: url)
+        } catch {
+            throw AgentBundleError.writeFailed(error.localizedDescription)
         }
     }
 
-    // MARK: - File moves
+    private func copyIfExists(from src: URL, to dst: URL) throws {
+        guard FileManager.default.fileExists(atPath: src.path) else { return }
+        do {
+            try FileManager.default.copyItem(at: src, to: dst)
+        } catch {
+            throw AgentBundleError.writeFailed("copy \(src.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
+
+    private func copyDirIfExists(from src: URL, to dst: URL) throws {
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: src.path, isDirectory: &isDir), isDir.boolValue else { return }
+        do {
+            try FileManager.default.copyItem(at: src, to: dst)
+        } catch {
+            throw AgentBundleError.writeFailed("copy dir \(src.lastPathComponent): \(error.localizedDescription)")
+        }
+    }
 
     private func moveOverwriting(from srcPath: String, to dstPath: String) throws {
         let fm = FileManager.default
-        if fm.fileExists(atPath: dstPath) {
-            try? fm.removeItem(atPath: dstPath)
-        }
+        if fm.fileExists(atPath: dstPath) { try? fm.removeItem(atPath: dstPath) }
         do {
             try fm.moveItem(atPath: srcPath, toPath: dstPath)
         } catch {
@@ -600,23 +633,14 @@ public actor AgentBundleService {
     }
 
     private func moveOverwritingIfExists(from srcPath: String, to dstPath: String) throws {
-        let fm = FileManager.default
-        guard fm.fileExists(atPath: srcPath) else { return }
+        guard FileManager.default.fileExists(atPath: srcPath) else { return }
         try moveOverwriting(from: srcPath, to: dstPath)
     }
 
     private func moveDirOverwritingIfExists(from srcPath: String, to dstPath: String) throws {
-        let fm = FileManager.default
         var isDir: ObjCBool = false
-        guard fm.fileExists(atPath: srcPath, isDirectory: &isDir), isDir.boolValue else { return }
-        if fm.fileExists(atPath: dstPath) {
-            try? fm.removeItem(atPath: dstPath)
-        }
-        do {
-            try fm.moveItem(atPath: srcPath, toPath: dstPath)
-        } catch {
-            throw AgentBundleError.writeFailed("move dir \(srcPath): \(error.localizedDescription)")
-        }
+        guard FileManager.default.fileExists(atPath: srcPath, isDirectory: &isDir), isDir.boolValue else { return }
+        try moveOverwriting(from: srcPath, to: dstPath)
     }
 
     private func sanitizeFilename(_ name: String) -> String {
@@ -626,14 +650,9 @@ public actor AgentBundleService {
         return trimmed.isEmpty ? "agent" : trimmed
     }
 
-    // MARK: - Tar (shell out to `/usr/bin/tar`)
+    // MARK: - Tar (`/usr/bin/tar`)
 
-    /// `Process`-based tar. We avoid pulling in a zip dependency for the
-    /// MVP — tar is already on every macOS install and the bundle is
-    /// small (db.sqlite is the bulk). Format is uncompressed `.tar` even
-    /// though the extension is `.osaurus-agent`; future versions can
-    /// switch to `tar.gz` without changing the format version because
-    /// `untar` autodetects.
+    /// Uncompressed tar, as upstream; `untar` autodetects compression.
     private func tarDirectory(_ dir: URL, into bundle: URL) async throws {
         try? FileManager.default.removeItem(at: bundle)
         let process = Process()
@@ -642,11 +661,11 @@ public actor AgentBundleService {
         try await runProcess(process, errorContext: "tar")
     }
 
+    /// bsdtar refuses absolute paths and `..` components by default (no
+    /// `-P`); `validateStagingTree` then rejects links and special files.
     private func untar(_ bundle: URL, into dir: URL) async throws {
         let process = Process()
         process.executableURL = URL(fileURLWithPath: "/usr/bin/tar")
-        // `-xf` autodetects gzip / bzip2 / plain so a future .tar.gz
-        // bundle still imports cleanly here.
         process.arguments = ["-xf", bundle.path, "-C", dir.path]
         try await runProcess(process, errorContext: "untar")
     }
@@ -654,19 +673,23 @@ public actor AgentBundleService {
     private func runProcess(_ process: Process, errorContext: String) async throws {
         let errorPipe = Pipe()
         process.standardError = errorPipe
-        process.standardOutput = Pipe()
-        do {
-            try process.run()
-        } catch {
-            throw AgentBundleError.archiveFailed("\(errorContext) launch: \(error.localizedDescription)")
+        process.standardOutput = FileHandle.nullDevice
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            process.terminationHandler = { _ in continuation.resume() }
+            do {
+                try process.run()
+            } catch {
+                process.terminationHandler = nil
+                continuation.resume()
+            }
         }
-        await withCheckedContinuation { (c: CheckedContinuation<Void, Never>) in
-            process.terminationHandler = { _ in c.resume() }
+        guard process.processIdentifier != 0 else {
+            throw AgentBundleError.archiveFailed("\(errorContext) could not launch")
         }
         guard process.terminationStatus == 0 else {
             let stderr = (try? errorPipe.fileHandleForReading.readToEnd()) ?? Data()
-            let msg = String(data: stderr, encoding: .utf8) ?? "exit \(process.terminationStatus)"
-            throw AgentBundleError.archiveFailed("\(errorContext): \(msg)")
+            let message = String(data: stderr, encoding: .utf8) ?? "exit \(process.terminationStatus)"
+            throw AgentBundleError.archiveFailed("\(errorContext): \(message)")
         }
     }
 }
