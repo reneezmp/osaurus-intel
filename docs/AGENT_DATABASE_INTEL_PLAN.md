@@ -1,6 +1,6 @@
 # Private Agent Database (B4) + Database History (B5) — Intel plan
 
-**Status (2026-09-25):** approved by Renée; implementation starts with Phase 0.
+**Status (2026-09-28):** Phase 0 landed; Phase 1 (Release 1) in progress.
 Update the phase status lines below as work lands.
 
 ## Context
@@ -56,6 +56,14 @@ exactly what each run changed.
   (~:190–254). Un-exclude the real files in `Package.swift`.
 
 ## Phase 0 — Groundwork and safety fixes (small, ships with Release 1)
+
+**Status: done (2026-09-28).** The reset marker is a file,
+`agents/.intel-agent-database-flag-reset-v1`, not a UserDefaults key, so it is
+scoped to the storage root (isolated in tests, carried with migrated data).
+`AgentManager.delete` now also removes the custom avatar, `agent_runs` rows,
+the per-agent directory and the bridge handle. Schedules, watchers and chats
+owned by a deleted agent are unchanged (they fall back to the Default agent's
+behaviour as before). Tests: `IntelAgentDatabaseGroundworkTests`.
 
 1. **One-time legacy flag reset.** In Intel `AgentManager` load path
    (`IntelManagerConformers.swift`), set `settings.dbEnabled = false` for every

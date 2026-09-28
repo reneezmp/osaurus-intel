@@ -35,6 +35,10 @@ extension Notification.Name {
     /// AgentDetailView voice section observes it to route the user to
     /// TTS settings (amputated on Intel, but the name must resolve).
     static let openTTSSettingsRequested = Notification.Name("openTTSSettingsRequested")
+    /// Edge-triggered by `AgentDatabase` when an agent's database crosses its
+    /// storage soft-warning threshold (userInfo: agentId, percent, usedBytes,
+    /// limitBytes). Upstream declares it in the excluded AgentManager.swift.
+    static let agentStorageWarn = Notification.Name("agentStorageWarn")
     /// `schedulesChanged` now comes from the real ScheduleManager
     /// (Managers/ScheduleManager.swift), un-excluded in M13 Schedules restore.
     /// `watchersChanged` now comes from the real WatcherManager
@@ -301,7 +305,7 @@ final class AgentBundleService: @unchecked Sendable {
 final class AgentDatabaseStore: @unchecked Sendable {
     static let shared = AgentDatabaseStore()
     private init() {}
-    func deleteOnDisk(for agentId: UUID) {}
+    func deleteOnDisk(for agentId: UUID) throws {}
 }
 
 // MARK: - Agent Secrets Keychain (Intel stub)

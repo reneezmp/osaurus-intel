@@ -105,7 +105,33 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
             }
         }
         custom.sort { $0.createdAt < $1.createdAt }
+        resetLegacyDatabaseFlagsIfNeeded(&custom)
         agents = [Agent.default] + custom
+    }
+
+    /// Marker (in the agents folder, so it is scoped to the storage root and
+    /// moves with the data) recording that the one-time database-flag reset
+    /// has run.
+    static func databaseFlagResetMarker() -> URL {
+        OsaurusPaths.agents().appendingPathComponent(".intel-agent-database-flag-reset-v1")
+    }
+
+    /// Before the Intel agent database existed, `dbEnabled` could be saved as
+    /// true (upstream imports, earlier UI) while the tools were stubbed. That
+    /// silently made `BackgroundTaskManager` record hidden run history. Clear
+    /// every such flag once so database tools stay off until the user turns
+    /// the ability on. Runs before the first publish of `agents`.
+    private func resetLegacyDatabaseFlagsIfNeeded(_ custom: inout [Agent]) {
+        let marker = Self.databaseFlagResetMarker()
+        guard !FileManager.default.fileExists(atPath: marker.path) else { return }
+        var changed = false
+        for index in custom.indices where custom[index].settings.dbEnabled {
+            custom[index].settings.dbEnabled = false
+            persist(custom[index])
+            changed = true
+        }
+        try? Data("reset legacy dbEnabled flags\n".utf8).write(to: marker, options: [.atomic])
+        if changed { bumpCapabilityRevision() }
     }
 
     private func persist(_ agent: Agent) {
@@ -246,6 +272,17 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         guard id != Agent.defaultId else {
             return AgentDeleteResult(deleted: false)
         }
+        // Mirror upstream AgentStore.delete: every per-agent artefact goes.
+        // Each cleanup is best-effort so one missing store (never opened)
+        // can't block deletion.
+        if let avatar = agent(for: id)?.customAvatarURL {
+            try? FileManager.default.removeItem(at: avatar)
+        }
+        try? SchedulerDatabase.shared.deleteAllForAgent(id)
+        try? AgentDatabaseStore.shared.deleteOnDisk(for: id)
+        // Drop the bridge's cached handle/queue so a later agent with the
+        // same id can't re-attach to a stale connection.
+        LocalAgentBridge.shared.forget(agentId: id)
         let url = OsaurusPaths.agents().appendingPathComponent("\(id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
         knowledgeGrants.removeValue(forKey: id)

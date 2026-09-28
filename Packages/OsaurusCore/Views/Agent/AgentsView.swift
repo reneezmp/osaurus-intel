@@ -3722,7 +3722,7 @@ struct AgentDetailView: View {
         // and forget any cached per-agent serial queue. The next DB
         // write reopens lazily and the agent rebuilds its own
         // tables from scratch — exactly the cold-start path.
-        AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
+        try? AgentDatabaseStore.shared.deleteOnDisk(for: agentId)
         do {
             try SchedulerDatabase.shared.deleteAllForAgent(agentId)
         } catch {
