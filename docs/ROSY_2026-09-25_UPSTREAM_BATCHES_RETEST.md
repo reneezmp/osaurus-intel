@@ -328,6 +328,25 @@ History and editing
       press **Run Now**. History shows a **Schedule** run, and selecting it
       shows that insert.
 
+Files: import and export (Release 2)
+
+- [ ] In the test agent's Tables tab, **Import** (down-arrow button) a small
+      `.csv`: the rows land in the selected table, and a banner reports how
+      many. Dragging a `.json` or `.xlsx` file onto the Tables screen does the
+      same.
+- [ ] **Export** (up-arrow button) saves a CSV of every matching row, not just
+      the rows on screen. Open it in Numbers or TextEdit.
+- [ ] **(paid)** Choose a working folder with the chat's Folder button, put
+      `books.csv` in it, and ask the agent to import it into a table: one tool
+      call, and the rows appear in Tables.
+- [ ] **(paid)** Ask it to export the top-rated books to `top.xlsx` in the
+      working folder: the file opens in Numbers or Excel with numbers as
+      numbers.
+- [ ] **(paid)** Ask it to export to a file that already exists: it refuses
+      unless told to overwrite.
+- [ ] **(paid)** With no working folder selected, ask it to import a file: it
+      asks you to pick a folder instead of failing silently.
+
 Deleting and persistence
 
 - [ ] Quit and relaunch: tables, rows, saved views and History are intact.

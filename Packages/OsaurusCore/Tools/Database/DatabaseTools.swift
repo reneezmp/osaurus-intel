@@ -1045,23 +1045,26 @@ final class DBQueryTool: OsaurusTool, @unchecked Sendable {
 
 // MARK: - db_execute
 
-/// Intel Release 1: inline `sql` only (the upstream `path:` form needs the
-/// Release 2 file resolver). Raw SQL scripts default to **Ask**
-/// (Renée, 2026-09-25); users can still set the tool to Auto.
+/// Raw SQL scripts default to **Ask** on Intel (Renée, 2026-09-25); users can
+/// still set the tool to Auto. `path` reads a `.sql` file from the chat's
+/// working folder (Intel has no sandbox workspace).
 final class DBExecuteTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
+    let requirements: [String] = []
+    let defaultPermissionPolicy: ToolPermissionPolicy = .ask
+
     let name = "db_execute"
     let description =
         "Run first-class SQL the typed tools can't express — including "
         + "multi-statement transform scripts (`INSERT … SELECT`, CTEs, "
         + "window functions, index/trigger DDL) which run inside one "
         + "transaction. Prefer this over pulling rows into context to "
-        + "compute by hand. The user may be asked to approve each call. "
+        + "compute by hand. Pass `path` (instead of `sql`) to run a `.sql` "
+        + "script from the chat's working folder without loading it into "
+        + "tokens. Use `db_import` for CSV/JSON ingestion. The user may be "
+        + "asked to approve each call. "
         + "Logged with `op='raw'`. Rejected: DROP TABLE, TRUNCATE, DROP "
         + "DATABASE, unconstrained DELETE, ATTACH/DETACH, PRAGMA writes, "
         + "load_extension, and writes to system tables."
-
-    let requirements: [String] = []
-    let defaultPermissionPolicy: ToolPermissionPolicy = .ask
 
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -1069,11 +1072,19 @@ final class DBExecuteTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         "properties": .object([
             "sql": .object([
                 "type": .string("string"),
-                "description": .string("Statement or script to execute."),
+                "description": .string(
+                    "Statement to execute. Mutually exclusive with `path`."
+                ),
+            ]),
+            "path": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Path to a `.sql` script in the chat's working folder. "
+                        + "Mutually exclusive with `sql`."
+                ),
             ]),
             "params": DatabaseToolHelpers.sqlParamsProperty,
         ]),
-        "required": .array([.string("sql")]),
     ])
 
     func execute(argumentsJSON: String) async throws -> String {
@@ -1082,15 +1093,31 @@ final class DBExecuteTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         let agentReq = DatabaseToolHelpers.requireAgentId(tool: name)
         guard case .value(let agentId) = agentReq else { return agentReq.failureEnvelope ?? "" }
 
-        let sql = (args["sql"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
-        guard !sql.isEmpty else {
+        let inlineSQL = (args["sql"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let pathArg = (args["path"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+        let hasSQL = !(inlineSQL ?? "").isEmpty
+        let hasPath = !(pathArg ?? "").isEmpty
+        guard hasSQL != hasPath else {
+            let field = (hasSQL && hasPath) ? "sql" : nil
             return ToolEnvelope.failure(
                 kind: .invalidArgs,
-                message: "`sql` is required.",
-                field: "sql",
-                expected: "non-empty SQL string",
+                message: "Pass exactly one of `sql` or `path`.",
+                field: field,
+                expected: "sql XOR path",
                 tool: name
             )
+        }
+
+        let sql: String
+        if hasPath, let pathArg {
+            switch await DatabaseFilePathResolver.loadTextScript(path: pathArg, tool: name) {
+            case .failed(let envelope):
+                return envelope
+            case .text(let text):
+                sql = text
+            }
+        } else {
+            sql = inlineSQL ?? ""
         }
 
         let params: [AgentSQLValue]
@@ -1124,9 +1151,378 @@ final class DBExecuteTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     }
 }
 
-// db_import / db_export (file ingestion and export) arrive with Intel
-// Release 2 together with DatabaseImport / DatabaseExport /
-// DatabaseFilePathResolver (docs/AGENT_DATABASE_INTEL_PLAN.md, Phase 2).
+// MARK: - db_import
+
+/// Host-mediated bulk loader. The model points at a file in the working
+/// folder; the host resolves the path (same symlink-safe guard as
+/// `file_read`), parses CSV/TSV/JSON/JSONL, optionally infers + creates the
+/// table, and bulk-inserts via `LocalAgentBridge.importRows` — so a large
+/// load costs zero per-row tokens and doesn't burn the tool-call budget.
+final class DBImportTool: OsaurusTool, @unchecked Sendable {
+    let name = "db_import"
+    let description =
+        "Bulk-load a file from the chat's working folder straight into a "
+        + "table. The host reads and parses it, so "
+        + "no row data passes through your tokens and you don't spend a tool "
+        + "call per row — use this instead of looping `db_insert` whenever "
+        + "the data already lives in a file (e.g. `/workspace/output/data.csv`). "
+        + "Supports CSV, TSV, JSON (array or object), JSONL/NDJSON, and Excel "
+        + ".xlsx (first sheet by default; pick one with `sheet_name`); the "
+        + "format is auto-detected from the extension/content. Creates the "
+        + "table from the file's columns when it doesn't exist (set "
+        + "`create_table` false to require an existing one). Returns a small "
+        + "summary (counts + columns), never the row data."
+
+    let parameters: JSONValue? = .object([
+        "type": .string("object"),
+        "additionalProperties": .bool(false),
+        "properties": .object([
+            "table": .object([
+                "type": .string("string"),
+                "description": .string("Destination table name."),
+            ]),
+            "path": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Path to the data file in the chat's working folder "
+                        + "(e.g. `data/today.csv`)."
+                ),
+            ]),
+            "format": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Optional override: `csv`, `tsv`, `json`, `jsonl`/`ndjson`, `xlsx`. "
+                        + "Auto-detected from the extension/content when omitted."
+                ),
+            ]),
+            "sheet_name": .object([
+                "type": .string("string"),
+                "description": .string(
+                    ".xlsx only: which sheet to import (case-insensitive). "
+                        + "Defaults to the first non-empty sheet."
+                ),
+            ]),
+            "mode": .object([
+                "type": .string("string"),
+                "enum": .array([.string("insert"), .string("upsert")]),
+                "description": .string(
+                    "`insert` (default, appends rows) or `upsert` (dedupes on "
+                        + "`key_columns`). There is no `append` mode — `insert` "
+                        + "is the append. Upsert requires `key_columns`."
+                ),
+            ]),
+            "key_columns": .object([
+                "type": .string("array"),
+                "items": .object(["type": .string("string")]),
+                "description": .string(
+                    "For `upsert`: the conflict columns. A UNIQUE index on them "
+                        + "is created automatically when this call creates the table."
+                ),
+            ]),
+            "create_table": .object([
+                "type": .string("boolean"),
+                "description": .string(
+                    "Create the table from the file's columns if it's missing. Default true."
+                ),
+            ]),
+            "has_header": .object([
+                "type": .string("boolean"),
+                "description": .string("CSV/TSV/XLSX only: first row is a header. Default true."),
+            ]),
+            "columns": .object([
+                "type": .string("array"),
+                "description": .string(
+                    "Optional ordered column names — each item is a string or "
+                        + "`{name, type}`. Required for headerless CSV; the `type` "
+                        + "overrides inferred affinity when a table is created."
+                ),
+                "items": .object(["type": .string("object")]),
+            ]),
+            "max_rows": .object([
+                "type": .string("integer"),
+                "description": .string("Optional cap on the number of rows imported."),
+            ]),
+        ]),
+        "required": .array([.string("table"), .string("path")]),
+    ])
+
+    func execute(argumentsJSON: String) async throws -> String {
+        let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
+        guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+        let agentReq = DatabaseToolHelpers.requireAgentId(tool: name)
+        guard case .value(let agentId) = agentReq else { return agentReq.failureEnvelope ?? "" }
+
+        let tableReq = requireString(args, "table", expected: "destination table name", tool: name)
+        guard case .value(let table) = tableReq else { return tableReq.failureEnvelope ?? "" }
+        let pathReq = requireString(
+            args,
+            "path",
+            expected: "path in the chat's working folder",
+            tool: name
+        )
+        guard case .value(let path) = pathReq else { return pathReq.failureEnvelope ?? "" }
+
+        let modeRaw = (args["mode"] as? String)?.lowercased() ?? "insert"
+        guard modeRaw == "insert" || modeRaw == "upsert" else {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message: "`mode` must be `insert` or `upsert`.",
+                field: "mode",
+                expected: "insert | upsert",
+                tool: name
+            )
+        }
+        var keyColumns: [String] = []
+        if modeRaw == "upsert" {
+            let keyReq = requireStringArray(
+                args,
+                "key_columns",
+                expected: "conflict columns for upsert",
+                tool: name
+            )
+            guard case .value(let keys) = keyReq else { return keyReq.failureEnvelope ?? "" }
+            keyColumns = keys
+        }
+
+        let createTable = coerceBool(args["create_table"]) ?? true
+        let hasHeader = coerceBool(args["has_header"]) ?? true
+        let maxRows = coerceInt(args["max_rows"])
+
+        // `columns` override accepts a [String] of names or [{name, type?}].
+        var explicitColumnNames: [String]?
+        var typeOverrides: [String: String] = [:]
+        if let colsAny = args["columns"] {
+            if let names = colsAny as? [String], !names.isEmpty {
+                explicitColumnNames = names
+            } else if let objects = colsAny as? [[String: Any]], !objects.isEmpty {
+                var names: [String] = []
+                for object in objects {
+                    guard let columnName = object["name"] as? String, !columnName.isEmpty else {
+                        continue
+                    }
+                    names.append(columnName)
+                    if let type = object["type"] as? String, !type.isEmpty {
+                        typeOverrides[columnName] = type
+                    }
+                }
+                if !names.isEmpty { explicitColumnNames = names }
+            }
+        }
+
+        switch await DatabaseFilePathResolver.resolveForRead(path: path, tool: name) {
+        case .failed(let envelope):
+            return envelope
+        case .resolved(let resolved):
+            let parsed: DatabaseImport.Parsed
+            do {
+                parsed = try AgentImportRunner.parse(
+                    url: resolved.url,
+                    explicitFormat: args["format"] as? String,
+                    hasHeader: hasHeader,
+                    explicitColumns: explicitColumnNames,
+                    maxRows: maxRows,
+                    sheetName: (args["sheet_name"] as? String)
+                )
+            } catch {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: (error as? LocalizedError)?.errorDescription ?? error.localizedDescription,
+                    tool: name,
+                    retryable: false
+                )
+            }
+
+            let mode: AgentImportRunner.Mode =
+                (modeRaw == "upsert") ? .upsert(keyColumns: keyColumns) : .insert
+            do {
+                let outcome = try AgentImportRunner.run(
+                    agentId: agentId,
+                    table: table,
+                    parsed: parsed,
+                    mode: mode,
+                    createTable: createTable,
+                    typeOverrides: typeOverrides,
+                    sourceLabel: (path as NSString).lastPathComponent
+                )
+
+                var resultDict: [String: Any] = [
+                    "table": outcome.table,
+                    "rows_imported": outcome.rowsImported,
+                    "rows_skipped": outcome.rowsSkipped,
+                    "created_table": outcome.createdTable,
+                    "columns": outcome.columns,
+                    "truncated": outcome.truncated,
+                    "source_scope": resolved.scope.rawValue,
+                ]
+                if !outcome.droppedColumns.isEmpty {
+                    resultDict["dropped_columns"] = outcome.droppedColumns
+                }
+                if !outcome.sampleErrors.isEmpty { resultDict["sample_errors"] = outcome.sampleErrors }
+
+                var warnings: [String] = []
+                if outcome.truncated {
+                    warnings.append("Import stopped at max_rows; not all rows were loaded.")
+                }
+                if !outcome.droppedColumns.isEmpty {
+                    warnings.append(
+                        "Ignored columns not on `\(table)`: "
+                            + outcome.droppedColumns.joined(separator: ", ") + "."
+                    )
+                }
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: resultDict,
+                    warnings: warnings.isEmpty ? nil : warnings
+                )
+            } catch let error as AgentImportRunner.RunError {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: error.errorDescription ?? "Import failed.",
+                    tool: name,
+                    retryable: false
+                )
+            } catch {
+                return DatabaseToolHelpers.envelope(for: error, tool: name)
+            }
+        }
+    }
+}
+
+// MARK: - db_export
+
+/// Host-mediated bulk exporter. Runs a read-only SELECT and writes rows
+/// to CSV/JSON/JSONL on disk — the mirror of `db_import`.
+final class DBExportTool: OsaurusTool, @unchecked Sendable {
+    let name = "db_export"
+    let description =
+        "Run a read-only SELECT and write the rows to a file in the chat's "
+        + "working folder. No row data passes "
+        + "through your tokens — use this instead of paging `db_query` when "
+        + "you need a large extract. Supports CSV (default), JSON, "
+        + "JSONL/NDJSON, and Excel `.xlsx` (one typed sheet; auto-detected "
+        + "from the path extension). Returns a small summary only."
+
+    /// Upstream flags this for its sandbox workspace; on Intel exports land
+    /// in the chat's working folder, so it only keeps the upstream shape.
+    var mutatesSandboxWorkspace: Bool { true }
+
+    let parameters: JSONValue? = .object([
+        "type": .string("object"),
+        "additionalProperties": .bool(false),
+        "properties": .object([
+            "sql": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Read-only SELECT or WITH … SELECT statement."
+                ),
+            ]),
+            "params": DatabaseToolHelpers.sqlParamsProperty,
+            "path": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Destination file in the chat's working folder."
+                ),
+            ]),
+            "format": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Optional override: `csv`, `json`, `jsonl`/`ndjson`, `xlsx`. "
+                        + "Auto-detected from extension when omitted."
+                ),
+            ]),
+            "overwrite": .object([
+                "type": .string("boolean"),
+                "description": .string(
+                    "Replace an existing file at `path`. Default false."
+                ),
+            ]),
+        ]),
+        "required": .array([.string("sql"), .string("path")]),
+    ])
+
+    func execute(argumentsJSON: String) async throws -> String {
+        let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
+        guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+        let agentReq = DatabaseToolHelpers.requireAgentId(tool: name)
+        guard case .value(let agentId) = agentReq else { return agentReq.failureEnvelope ?? "" }
+
+        let sqlReq = requireString(args, "sql", expected: "read-only SELECT statement", tool: name)
+        guard case .value(let sql) = sqlReq else { return sqlReq.failureEnvelope ?? "" }
+        let pathReq = requireString(
+            args,
+            "path",
+            expected: "destination path in the chat's working folder",
+            tool: name
+        )
+        guard case .value(let path) = pathReq else { return pathReq.failureEnvelope ?? "" }
+
+        guard
+            let format = DatabaseExport.Format.detect(
+                path: path,
+                explicit: args["format"] as? String
+            )
+        else {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "Could not detect export format from `\(path)`. "
+                    + "Pass `format`: csv, json, jsonl, or xlsx.",
+                field: "format",
+                tool: name
+            )
+        }
+
+        let overwrite = coerceBool(args["overwrite"]) ?? false
+        switch await DatabaseFilePathResolver.resolveForWrite(
+            path: path,
+            tool: name,
+            overwrite: overwrite
+        ) {
+        case .failed(let envelope):
+            return envelope
+        case .resolved(let resolved):
+            let params: [AgentSQLValue]
+            if let raw = args["params"] {
+                params = DatabaseToolHelpers.toSQLValueArray(raw)
+            } else {
+                params = []
+            }
+
+            do {
+                let outcome = try LocalAgentBridge.shared.exportQueryToFile(
+                    agentId: agentId,
+                    sql: sql,
+                    params: params,
+                    url: resolved.url,
+                    format: format,
+                    maxBytes: DatabaseImport.maxBytes
+                )
+                var warnings: [String] = []
+                if outcome.truncated {
+                    warnings.append(
+                        "Export stopped at the \(DatabaseImport.maxBytes)-byte file cap; "
+                            + "not all rows were written. Narrow the query or export in chunks."
+                    )
+                }
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: [
+                        "path": path,
+                        "format": format.rawValue,
+                        "rows_exported": outcome.rowsExported,
+                        "bytes": outcome.bytesWritten,
+                        "truncated": outcome.truncated,
+                        "columns": outcome.columns,
+                        "destination_scope": resolved.scope.rawValue,
+                    ],
+                    warnings: warnings.isEmpty ? nil : warnings
+                )
+            } catch {
+                return DatabaseToolHelpers.envelope(for: error, tool: name)
+            }
+        }
+    }
+}
 
 // MARK: - db_define_view
 

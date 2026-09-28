@@ -100,8 +100,9 @@ struct DatabaseTablesView: View {
                     .allowsHitTesting(false)
             }
         }
-        // Intel Release 1: file drag-and-drop import arrives with Release 2
-        // (DatabaseImport / AgentImportRunner; docs/AGENT_DATABASE_INTEL_PLAN.md).
+        .onDrop(of: [.fileURL], isTargeted: $isDropTargeted) { providers in
+            handleDrop(providers)
+        }
         .task { await loadTables(applyFocus: true) }
         .onChange(of: agentId) { _ in
             Task { await loadTables(applyFocus: true) }
@@ -434,7 +435,22 @@ struct DatabaseTablesView: View {
             }
             // Icon-only actions keep the bar within the pane's minimum
             // width — the labels live in tooltips instead.
-            // Import / Export buttons return with Intel Release 2.
+            controlBarIconButton(
+                systemImage: "square.and.arrow.down",
+                isBusy: isImporting,
+                disabled: isImporting || selectedTableIsSystem,
+                help: "Import a CSV, TSV, JSON, or JSONL file into this table. You can also drag a file onto this screen."
+            ) {
+                presentImportPanel()
+            }
+            controlBarIconButton(
+                systemImage: "square.and.arrow.up",
+                isBusy: isExporting,
+                disabled: isExporting || (browser.totalCount ?? browser.rows.count) == 0,
+                help: "Export every matching row to a CSV file — not just the rows loaded here."
+            ) {
+                exportCSV()
+            }
             controlBarIconButton(
                 systemImage: "arrow.clockwise",
                 isBusy: false,
@@ -745,10 +761,10 @@ struct DatabaseTablesView: View {
                     systemImage: "tray",
                     title: "No rows in `\(tableLabel)` yet.",
                     subtitle:
-                        "The agent adds rows when it has something to remember. You can also ask it directly in chat.",
-                    actionTitle: nil,
-                    actionSystemImage: nil,
-                    action: nil,
+                        "The agent adds rows when it has something to remember. You can also ask it directly in chat, or import a file.",
+                    actionTitle: "Import a file…",
+                    actionSystemImage: "square.and.arrow.down",
+                    action: selectedTableIsSystem ? nil : { presentImportPanel() },
                     theme: theme
                 )
             }
@@ -841,10 +857,10 @@ struct DatabaseTablesView: View {
             systemImage: "tablecells.badge.ellipsis",
             title: "This agent hasn't stored anything yet.",
             subtitle:
-                "Ask the agent in chat to remember something — it will create the tables it needs, and you can browse them here.",
-            actionTitle: nil,
-            actionSystemImage: nil,
-            action: nil,
+                "Ask the agent in chat to remember something — it will create the tables it needs, and you can browse them here. You can also import a CSV or JSON file to start a table yourself.",
+            actionTitle: "Import a file…",
+            actionSystemImage: "square.and.arrow.down",
+            action: { presentImportPanel() },
             theme: theme
         )
     }
@@ -1014,7 +1030,166 @@ struct DatabaseTablesView: View {
         }
     }
 
-    // Host import (actor=user) and full-result CSV export return with Intel
-    // Release 2 (DatabaseImport / DatabaseExport / AgentImportRunner).
+    // MARK: - Host import (actor=user)
 
+    /// Open a file picker for the supported import formats. Runs on the
+    /// MainActor (NSOpenPanel is AppKit-only) and hands the chosen URL
+    /// to `importFile`.
+    @MainActor
+    private func presentImportPanel() {
+        guard !isImporting else { return }
+        let panel = NSOpenPanel()
+        panel.allowsMultipleSelection = false
+        panel.canChooseDirectories = false
+        panel.canChooseFiles = true
+        var types: [UTType] = [.commaSeparatedText, .tabSeparatedText, .json, .plainText]
+        if let jsonl = UTType(filenameExtension: "jsonl") { types.append(jsonl) }
+        if let ndjson = UTType(filenameExtension: "ndjson") { types.append(ndjson) }
+        panel.allowedContentTypes = types
+        panel.message = String(
+            localized: "Choose a CSV, TSV, JSON, or JSONL file to import.",
+            bundle: .module
+        )
+        panel.prompt = String(localized: "Import", bundle: .module)
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { await importFile(url: url) }
+    }
+
+    /// Accept a file dragged onto the section. Loads the first droppable
+    /// URL and routes it through the same `importFile` path as the button.
+    private func handleDrop(_ providers: [NSItemProvider]) -> Bool {
+        guard !isImporting,
+            let provider = providers.first(where: { $0.canLoadObject(ofClass: URL.self) })
+        else { return false }
+        _ = provider.loadObject(ofClass: URL.self) { url, _ in
+            guard let url else { return }
+            Task { @MainActor in await importFile(url: url) }
+        }
+        return true
+    }
+
+    /// Parse `url` off the main thread, then bulk-load it through the
+    /// shared `AgentImportRunner` with the write stamped `actor=user`.
+    /// Imports into the selected table, or a new table named after the
+    /// file when none is selected.
+    @MainActor
+    private func importFile(url: URL) async {
+        guard !isImporting else { return }
+        actionError = nil
+        importSummary = nil
+        isImporting = true
+        defer { isImporting = false }
+
+        let table = (selectedTableIsSystem ? nil : selectedTable) ?? suggestedTableName(from: url)
+        do {
+            let parsed = try await Task.detached(priority: .userInitiated) {
+                () throws -> DatabaseImport.Parsed in
+                let didAccess = url.startAccessingSecurityScopedResource()
+                defer { if didAccess { url.stopAccessingSecurityScopedResource() } }
+                return try AgentImportRunner.parse(url: url)
+            }.value
+
+            let outcome = try ChatExecutionContext.$currentRunActor.withValue("user") {
+                try AgentImportRunner.run(
+                    agentId: agentId,
+                    table: table,
+                    parsed: parsed,
+                    sourceLabel: url.lastPathComponent
+                )
+            }
+
+            await loadTables(applyFocus: false)
+            selectedTable = outcome.table
+            browser.refresh()
+
+            var line =
+                "Imported \(outcome.rowsImported) "
+                + (outcome.rowsImported == 1 ? "row" : "rows")
+                + " into `\(outcome.table)`"
+            if outcome.createdTable { line += " (new table)" }
+            if !outcome.droppedColumns.isEmpty {
+                let n = outcome.droppedColumns.count
+                line += " · ignored \(n) unmatched column" + (n == 1 ? "" : "s")
+            }
+            importSummary = line
+        } catch {
+            actionError =
+                (error as? LocalizedError)?.errorDescription ?? error.localizedDescription
+        }
+    }
+
+    /// Derive a safe SQLite table name from a file name (lowercased, only
+    /// letters/digits/underscores, never leading with a digit).
+    private func suggestedTableName(from url: URL) -> String {
+        let base = url.deletingPathExtension().lastPathComponent.lowercased()
+        var out = ""
+        for ch in base {
+            if ch.isLetter || ch.isNumber {
+                out.append(ch)
+            } else if ch == "_" || ch == "-" || ch == " " {
+                out.append("_")
+            }
+        }
+        while out.contains("__") { out = out.replacingOccurrences(of: "__", with: "_") }
+        out = out.trimmingCharacters(in: CharacterSet(charactersIn: "_"))
+        if let first = out.first, first.isNumber { out = "t_" + out }
+        return out.isEmpty ? "imported_data" : out
+    }
+
+    // MARK: - CSV Export (streams the FULL filtered result)
+
+    /// Export every row matching the current table + filter via the same
+    /// streaming path `db_export` uses — the old grid export silently
+    /// wrote only the rows loaded in memory.
+    private func exportCSV() {
+        guard let table = selectedTable else { return }
+        let filter = selectedTableIsSystem ? DataFilterMode.all : filterMode
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.commaSeparatedText]
+        panel.nameFieldStringValue = "\(table).csv"
+        Task { @MainActor in
+            guard panel.runModal() == .OK, let url = panel.url else { return }
+            isExporting = true
+            actionError = nil
+            let agentId = agentId
+            let hasDeletedColumn = browser.deletedColumnIndex != nil
+            let sql: String = {
+                var conditions: [String] = []
+                if hasDeletedColumn {
+                    switch filter {
+                    case .live: conditions.append("_deleted_at IS NULL")
+                    case .deleted: conditions.append("_deleted_at IS NOT NULL")
+                    case .all: break
+                    }
+                }
+                let whereSQL = conditions.isEmpty ? "" : "WHERE " + conditions.joined(separator: " AND ")
+                return "SELECT * FROM \"\(table)\" \(whereSQL)"
+            }()
+            let outcome: Result<DatabaseExport.Result, Error> = await Task.detached(
+                priority: .userInitiated
+            ) {
+                Result {
+                    try LocalAgentBridge.shared.exportQueryToFile(
+                        agentId: agentId,
+                        sql: sql,
+                        params: [],
+                        url: url,
+                        format: .csv,
+                        maxBytes: 1_073_741_824
+                    )
+                }
+            }.value
+            isExporting = false
+            switch outcome {
+            case .success(let result):
+                importSummary =
+                    "Exported \(result.rowsExported) "
+                    + (result.rowsExported == 1 ? "row" : "rows")
+                    + " to \(url.lastPathComponent)"
+                    + (result.truncated ? " (stopped at the 1 GB export limit)" : "")
+            case .failure(let error):
+                actionError = "Export failed: \(error.localizedDescription)"
+            }
+        }
+    }
 }

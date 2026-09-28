@@ -1,8 +1,9 @@
 # Private Agent Database (B4) + Database History (B5) — Intel plan
 
-**Status (2026-09-28):** Phase 0 and Phase 1 (Release 1) implemented and
-tested in the package; awaiting the Rosy pass (the "Private agent database"
-section of `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`). Phases 2–3 not started.
+**Status (2026-09-28):** Phases 0–2 (Releases 1 and 2, including xlsx)
+implemented and tested in the package; awaiting the Rosy pass (the "Private
+agent database" section of `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`).
+Phase 3 is now bundles only.
 Update the phase status lines below as work lands.
 
 ## Context
@@ -236,6 +237,41 @@ Use `StoragePathsTestLock` + `OsaurusPaths.overrideRoot` + `_setKeyForTesting`
 
 ## Phase 2 — Release 2: file import/export (CSV/TSV/JSON/JSONL)
 
+**Status: implemented (2026-09-28), awaiting Rosy. xlsx came along.** Intel
+already compiled `XLSXAdapter`/`XLSXEmitter`, so the Phase 3 xlsx backport was
+three small pieces: `XLSXAdapter.workbook(from:filename:)` (exact upstream),
+`XLSXEmitter.packageBytes(for:)`, and a trimmed
+`Folder/FileWriteDocumentRouting.swift` holding only the workbook half
+(`workbook(sheets:)`, limits, cell typing). The rest of that upstream file (the
+file_write render route) needs the #91 rich-formats stack. **Replace the
+trimmed file with upstream's whole file when #91 lands.**
+
+- `DatabaseImport`, `DatabaseExport` and `AgentImportRunner` are upstream,
+  unchanged.
+- `DatabaseFilePathResolver` is Intel-written: the only root is
+  `ChatExecutionContext.currentFolderRoot`. It does **not** use
+  `FolderToolHelpers.resolvePath`, which blocks `../` but not symlinks.
+  Instead it checks containment on symlink-resolved paths (the deepest
+  existing ancestor for new files), refuses the root itself and directories,
+  keeps upstream's overwrite guard and 64 MiB read cap, and creates parent
+  folders only after containment passes. With no folder selected, it tells the
+  model to ask for one.
+- Restored `db_import`, `db_export`, `db_execute path:` (still Ask by default),
+  `LocalAgentBridge.exportQueryToFile`, the Tables Import/Export buttons,
+  drag-and-drop and empty-state "Import a file…" actions. Tool descriptions say
+  "the chat's working folder" instead of "sandbox workspace". Export's save
+  panel uses `runModal()` (upstream's `beginModal` helper lives in the
+  excluded `UIWorkarounds.swift`).
+- `db_import` and `db_export` default to Auto: imports are logged, soft-delete
+  restorable writes, and exports never overwrite without `overwrite: true`.
+- `OnboardingPrompt` v7: upstream's bulk-data guidance with working-folder
+  paths, xlsx, the approval note and a no-folder hint.
+- Tests: upstream `DatabaseToolsTests` re-enabled with the sandbox cases
+  replaced by an escape test (`../`, absolute, symlinked folder and file, for
+  reads and writes). `IntelDatabaseToolsTests` gained an end-to-end CSV →
+  `db_import` → `db_export .xlsx` → re-parse test through the real registry.
+  Full gate: 1,239 tests in 184 suites.
+
 Port `DatabaseImport`, `DatabaseExport`, `AgentImportRunner`,
 `DatabaseFilePathResolver` from upstream/main with xlsx paths compiled out,
 and the resolver reduced to the **host working-folder root**
@@ -244,11 +280,9 @@ drop the sandbox branch). Enable `db_import`, `db_export`, `db_execute path:`;
 turn on Tables Import/Export + drag-and-drop. Tests: parse/infer, 64 MiB caps,
 path escape refusal, round-trip.
 
-## Phase 3 — Release 3: xlsx + encrypted agent bundles
+## Phase 3 — Release 3: encrypted agent bundles
 
-- xlsx: backport `XLSXAdapter.workbook(from:filename:)`,
-  `XLSXEmitter.packageBytes(for:)`, `FileWriteDocumentRouting.maxRowsPerSheet`
-  (relates to deferred #91 rich formats — do together if #91 is scheduled).
+- ~~xlsx~~: done in Release 2 (see above).
 - `AgentBundleService`: PBKDF2 (600k) + AES-GCM sealed bundle key, tar via
   `/usr/bin/tar`; replace `StorageFormatConverter`/`StorageEncryptionPolicy`
   with `EncryptedSQLiteOpener.rekey` on a copied file; `AgentStore.save` →

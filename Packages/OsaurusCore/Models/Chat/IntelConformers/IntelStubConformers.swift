@@ -1163,7 +1163,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let databaseToolNames: Set<String> = [
         "db_schema", "db_create_table", "db_alter_table", "db_migrate",
         "db_insert", "db_upsert", "db_update", "db_delete", "db_restore",
-        "db_query", "db_execute",
+        "db_query", "db_execute", "db_import", "db_export",
         "db_define_view", "db_run_view", "db_list_views", "db_drop_view",
     ]
 
@@ -1219,7 +1219,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let tools: [OsaurusTool] = [
             DBSchemaTool(), DBCreateTableTool(), DBAlterTableTool(), DBMigrateTool(),
             DBInsertTool(), DBUpsertTool(), DBUpdateTool(), DBDeleteTool(), DBRestoreTool(),
-            DBQueryTool(), DBExecuteTool(),
+            DBQueryTool(), DBExecuteTool(), DBImportTool(), DBExportTool(),
             DBDefineViewTool(), DBRunViewTool(), DBListViewsTool(), DBDropViewTool(),
         ]
         assert(Set(tools.map(\.name)) == Self.databaseToolNames)

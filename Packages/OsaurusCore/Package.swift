@@ -219,11 +219,6 @@ let package = Package(
                 "Service/GenerationEventMapperTests.swift",
                 "Service/MLXBatchAdapterTests.swift",
                 "Helpers/FakeEmbedder.swift",
-                // Upstream's database-tool suite is almost entirely file
-                // import/export (DatabaseImport/Export/FilePathResolver,
-                // xlsx). Re-enable with Intel Release 2; Release 1 tool
-                // coverage lives in IntelDatabaseToolsTests.
-                "Storage/DatabaseToolsTests.swift",
                 // Trips a fatalError inside swift-secp256k1 0.23.2 rather than
                 // failing: `P256K.Recovery.PublicKey(_:signature:format:)` calls
                 // `fatalError("secp256k1_ecdsa_recover failed with valid

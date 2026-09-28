@@ -411,7 +411,31 @@ public final class LocalAgentBridge: @unchecked Sendable, AgentRuntimeBridge {
         }
     }
 
-    // `exportQueryToFile` (db_export) returns with Intel Release 2.
+    /// Stream a read-only query to a file on disk (used by `db_export`).
+    func exportQueryToFile(
+        agentId: UUID,
+        sql: String,
+        params: [AgentSQLValue],
+        url: URL,
+        format: DatabaseExport.Format,
+        maxBytes: Int
+    ) throws -> DatabaseExport.Result {
+        try serialized(agentId) {
+            let database = try AgentDatabaseStore.shared.database(for: agentId)
+            try AgentDatabase.validateReadOnlyQuery(sql)
+            let probe = try database.query(sql: sql, params: params, limit: 1, offset: 0)
+            return try DatabaseExport.streamWrite(
+                url: url,
+                format: format,
+                maxBytes: maxBytes,
+                headerColumns: probe.columns
+            ) { emit in
+                _ = try database.forEachQueryRow(sql: sql, params: params) { columns, row in
+                    try emit(columns, row)
+                }
+            }
+        }
+    }
 
     // MARK: - AgentRuntimeBridge (saved views, spec §6.3)
 

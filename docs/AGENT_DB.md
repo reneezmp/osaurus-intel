@@ -7,8 +7,9 @@ This is distinct from [Memory](MEMORY.md). Memory is a global, app-wide system t
 > **Intel fork:** this document describes upstream. The Intel port, its
 > adaptations and staging (no self-scheduling on Intel) are in
 > [`AGENT_DATABASE_INTEL_PLAN.md`](AGENT_DATABASE_INTEL_PLAN.md). Intel
-> Release 1 differences: no `db_import`/`db_export` or `db_execute path:` yet,
-> no bundles, `db_execute`/`db_migrate` ask by default, `db_query` is enforced
+> differences: file tools (`db_import`, `db_export`, `db_execute path:`) read
+> and write only the chat's working folder (no sandbox), no bundles yet,
+> `db_execute`/`db_migrate` ask by default, `db_query` is enforced
 > read-only by SQLite, the schema snapshot is sent per turn, and every model is
 > remote. So rows the agent reads or writes pass through the provider, and the
 > "row data is not sent" wording below is upstream-only. The Intel detail view

@@ -1804,3 +1804,20 @@ database or upstream work:
 - Rosy acceptance: the "Private agent database" section of
   `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
+### Private agent database, Release 2 — 2026-09-28
+
+CSV/TSV/JSON/JSONL **and xlsx** import/export landed (`AGENT_DATABASE_INTEL_PLAN.md`
+Phase 2). Lessons:
+
+- **`FolderToolHelpers.resolvePath` does not follow symlinks.** It stops `../`
+  and absolute paths outside the root, but a symlink inside the working folder
+  can point anywhere. The Intel `DatabaseFilePathResolver` checks containment
+  on symlink-resolved paths. The folder `file_*` tools still use the weaker
+  check; that is tracked as a separate follow-up.
+- **Check what Intel already compiles before scheduling a backport.** The
+  planned xlsx phase needed only three small members because `XLSXAdapter`
+  and `XLSXEmitter` were already in the target.
+- **Trimmed ports must say so.** `Folder/FileWriteDocumentRouting.swift` is
+  the workbook half of upstream's file; its header says to replace it
+  wholesale with the #91 port.
+

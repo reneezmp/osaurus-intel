@@ -415,12 +415,17 @@ struct AgentDatabaseTests {
         #expect(OnboardingPrompt.block.contains("db_insert"))
         #expect(OnboardingPrompt.block.contains("db_query"))
         #expect(OnboardingPrompt.block.contains("db_delete"))
-        // Intel Release 1: file import/export tools are not registered yet,
-        // so the prompt must not advertise them; bulk rows go through a
-        // single db_insert/db_upsert call, and db_execute/db_migrate may ask.
-        #expect(!OnboardingPrompt.block.contains("db_import"))
-        #expect(!OnboardingPrompt.block.contains("db_export"))
-        #expect(OnboardingPrompt.block.contains("rows=[...]"))
+        // The bulk-ingestion guidance must be present so the model reaches
+        // for db_import instead of looping single-row writes.
+        #expect(OnboardingPrompt.block.contains("db_import"))
+        #expect(OnboardingPrompt.block.contains("db_export"))
+        // Import mode contract: `insert` is the append; there is no
+        // `append` mode for the model to invent.
+        #expect(OnboardingPrompt.block.contains("no `append` mode"))
+        // Intel: files live in the chat's working folder (no sandbox), and
+        // raw SQL / migrations may ask for approval.
+        #expect(OnboardingPrompt.block.contains("working folder"))
+        #expect(!OnboardingPrompt.block.contains("sandbox"))
         #expect(OnboardingPrompt.block.contains("approve"))
         // Saved views support both direct execution and native SQL composition.
         #expect(OnboardingPrompt.block.contains("db_run_view"))

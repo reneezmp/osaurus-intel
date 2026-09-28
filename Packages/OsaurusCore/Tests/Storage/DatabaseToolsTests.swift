@@ -46,32 +46,48 @@ struct DatabaseToolsTests {
                 return
             }
             #expect(resolved.scope == .hostFolder)
-            #expect(resolved.url.path == file.path)
+            // Intel resolves symlinks (/var → /private/var) for containment.
+            #expect(resolved.url.path == file.resolvingSymlinksInPath().path)
         }
     }
 
+    /// Intel replaces upstream's sandbox-root test: the working folder is the
+    /// only root, and `../`, absolute paths outside it, and symlinks that
+    /// point out of it are refused for both reads and writes.
     @Test
-    func pathResolverReadsFromSandboxAgentDir() async throws {
-        let agentName = "test-agent-\(UUID().uuidString.prefix(8))"
-        let agentDir = OsaurusPaths.containerAgentDir(agentName)
-        try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: agentDir) }
+    @MainActor
+    func pathResolverRefusesEscapesFromWorkingFolder() async throws {
+        let outside = FileManager.default.temporaryDirectory
+            .appendingPathComponent("osaurus-db-outside-\(UUID().uuidString)", isDirectory: true)
+        try FileManager.default.createDirectory(at: outside, withIntermediateDirectories: true)
+        defer { try? FileManager.default.removeItem(at: outside) }
+        let secret = outside.appendingPathComponent("secret.csv")
+        try "s\n1\n".write(to: secret, atomically: true, encoding: .utf8)
 
-        let file = agentDir.appendingPathComponent("output.csv")
-        try "x\n1\n".write(to: file, atomically: true, encoding: .utf8)
+        try await withHostFolder { root in
+            try FileManager.default.createSymbolicLink(
+                at: root.appendingPathComponent("link"), withDestinationURL: outside)
+            try FileManager.default.createSymbolicLink(
+                at: root.appendingPathComponent("secret-link.csv"), withDestinationURL: secret)
 
-        let agentId = UUID()
-        let result = await ChatExecutionContext.$sandboxAgentName.withValue(agentName) {
-            await ChatExecutionContext.$currentAgentId.withValue(agentId) {
-                await DatabaseFilePathResolver.resolveForRead(path: "output.csv", tool: "db_import")
+            for path in ["../\(outside.lastPathComponent)/secret.csv", secret.path, "link/secret.csv", "secret-link.csv"] {
+                let read = await DatabaseFilePathResolver.resolveForRead(path: path, tool: "db_import")
+                guard case .failed(let envelope) = read else {
+                    Issue.record("read of \(path) should be refused")
+                    continue
+                }
+                #expect(envelope.contains("outside the working folder"), "\(path)")
             }
+            for path in ["../escape.csv", "link/new.csv", outside.appendingPathComponent("new.csv").path] {
+                let write = await DatabaseFilePathResolver.resolveForWrite(
+                    path: path, tool: "db_export", overwrite: true)
+                guard case .failed = write else {
+                    Issue.record("write to \(path) should be refused")
+                    continue
+                }
+            }
+            #expect(!FileManager.default.fileExists(atPath: outside.appendingPathComponent("new.csv").path))
         }
-        guard case .resolved(let resolved) = result else {
-            Issue.record("expected success, got \(result)")
-            return
-        }
-        #expect(resolved.scope == .sandbox)
-        #expect(resolved.url.path == file.path)
     }
 
     @Test
@@ -263,11 +279,12 @@ struct DatabaseToolsTests {
         defer { try? FileManager.default.removeItem(at: root) }
         let url = root.appendingPathComponent("multi.xlsx")
 
-        let json = """
-            {"sheets":[{"name":"People","rows":[["name","age"],["Ada",36]]},
-                       {"name":"Cities","rows":[["city","pop"],["Oslo",700000]]}]}
-            """
-        let workbook = try FileWriteDocumentRouting.buildWorkbook(from: json)
+        // Intel: build the workbook from rows (the JSON route in upstream's
+        // FileWriteDocumentRouting arrives with the #91 rich-formats port).
+        let workbook = try FileWriteDocumentRouting.workbook(sheets: [
+            ("People", [["name", "age"], ["Ada", 36]]),
+            ("Cities", [["city", "pop"], ["Oslo", 700000]]),
+        ])
         try XLSXEmitter.packageBytes(for: workbook).write(to: url)
 
         let first = try AgentImportRunner.parse(url: url)
@@ -393,44 +410,48 @@ struct DatabaseToolsTests {
     }
 
     @Test
+    @MainActor
     func exportOverwriteGuard() async throws {
-        // Pin the resolver to a sandbox root via the TaskLocal (checked
-        // before any process-global state), so parallel sibling suites
-        // can't redirect the write candidate mid-test.
-        let agentName = "test-agent-\(UUID().uuidString.prefix(8))"
-        let agentDir = OsaurusPaths.containerAgentDir(agentName)
-        try FileManager.default.createDirectory(at: agentDir, withIntermediateDirectories: true)
-        defer { try? FileManager.default.removeItem(at: agentDir) }
+        // Intel: the working folder is the only write root (no sandbox).
+        try await withHostFolder { root in
+            let dest = root.appendingPathComponent("out.csv")
+            try "old\n".write(to: dest, atomically: true, encoding: .utf8)
 
-        let dest = agentDir.appendingPathComponent("out.csv")
-        try "old\n".write(to: dest, atomically: true, encoding: .utf8)
-
-        let result = await ChatExecutionContext.$sandboxAgentName.withValue(agentName) {
-            await DatabaseFilePathResolver.resolveForWrite(
+            let result = await DatabaseFilePathResolver.resolveForWrite(
                 path: "out.csv",
                 tool: "db_export",
                 overwrite: false
             )
-        }
-        guard case .failed(let envelope) = result else {
-            Issue.record("expected overwrite failure")
-            return
-        }
-        #expect(envelope.contains("overwrite"))
+            guard case .failed(let envelope) = result else {
+                Issue.record("expected overwrite failure")
+                return
+            }
+            #expect(envelope.contains("overwrite"))
 
-        // Same path with overwrite: true must resolve to the sandbox file.
-        let allowed = await ChatExecutionContext.$sandboxAgentName.withValue(agentName) {
-            await DatabaseFilePathResolver.resolveForWrite(
+            let allowed = await DatabaseFilePathResolver.resolveForWrite(
                 path: "out.csv",
                 tool: "db_export",
                 overwrite: true
             )
+            guard case .resolved(let resolved) = allowed else {
+                Issue.record("expected overwrite:true to resolve")
+                return
+            }
+            #expect(resolved.scope == .hostFolder)
+            #expect(resolved.url.path == dest.resolvingSymlinksInPath().path)
+
+            // A new file in a new subfolder creates its parents inside the root.
+            let nested = await DatabaseFilePathResolver.resolveForWrite(
+                path: "exports/2026/books.csv",
+                tool: "db_export",
+                overwrite: false
+            )
+            guard case .resolved(let nestedURL) = nested else {
+                Issue.record("expected nested path to resolve")
+                return
+            }
+            #expect(FileManager.default.fileExists(atPath: nestedURL.url.deletingLastPathComponent().path))
         }
-        guard case .resolved(let resolved) = allowed else {
-            Issue.record("expected overwrite:true to resolve")
-            return
-        }
-        #expect(resolved.scope == .sandbox)
-        #expect(resolved.url.path == dest.path)
     }
+
 }

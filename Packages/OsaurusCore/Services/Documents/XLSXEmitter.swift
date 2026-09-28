@@ -50,6 +50,12 @@ public struct XLSXEmitter: DocumentFormatEmitter {
     private static let officeDocumentRelationshipType =
         "http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument"
 
+    /// Synchronous package bytes for a workbook — for callers that already
+    /// run inside a serialized, non-async context (e.g. `db_export`).
+    static func packageBytes(for workbook: Workbook) throws -> Data {
+        try packageData(for: workbook)
+    }
+
     private static func packageData(for workbook: Workbook) throws -> Data {
         let sheets = try validatedSheets(workbook.sheets)
         try rejectFormulaCells(in: sheets)

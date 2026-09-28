@@ -16,9 +16,9 @@ import Foundation
 
 public enum OnboardingPrompt {
     /// Monotonic integer. Bump for any text change.
-    /// Intel: 6 = upstream v5 minus file import/export (Release 2) and with
-    /// the db_execute/db_migrate approval note.
-    public static let version: Int = 6
+    /// Intel: 7 = upstream v5 with working-folder (not sandbox) file paths,
+    /// the db_execute/db_migrate approval note, and a no-folder hint.
+    public static let version: Int = 7
 
     /// Block appended to the system prompt after the agent's persistent
     /// prompt and before per-run instructions (spec §5.5.3). The schema
@@ -46,11 +46,14 @@ public enum OnboardingPrompt {
         5. Before creating a new table, briefly confirm the columns with the user. Agent-authored schemas without user input tend to be over-engineered or wrong-shaped.
 
         Moving data at scale (do NOT insert large data one row at a time):
+        - If the data is in a file in the chat's working folder, call `db_import(table, path)`. The host reads, parses (CSV/TSV/JSON/JSONL/XLSX), and bulk-loads it — no row data passes through your tokens and you spend one tool call, not one per row. It creates the table from the file's columns when needed. `mode` is `insert` (default, appends rows) or `upsert` (dedupes on `key_columns`); there is no `append` mode.
+        - To extract a large result set without paging `db_query`, call `db_export(sql, path)` — the host writes CSV/JSON/JSONL/XLSX into the working folder and returns a summary only.
         - If the rows are already in your context (e.g. JSON you just fetched), pass them as `db_insert(table, rows=[...])` / `db_upsert(table, key_columns, rows=[...])` in a single call.
-        - `db_execute` runs first-class SQL, including multi-statement transform scripts (e.g. `INSERT … SELECT`, CTEs, window functions) inside one transaction. The user may be asked to approve each `db_execute` and `db_migrate` call. `ATTACH`/`DETACH`, `PRAGMA` writes, `load_extension`, `DROP TABLE`/`TRUNCATE`, unconstrained `DELETE`, and writes to system tables are rejected.
+        - `db_execute` runs first-class SQL, including multi-statement transform scripts (e.g. `INSERT … SELECT`, CTEs, window functions) inside one transaction. Pass `path` instead of `sql` to run a `.sql` script from the working folder without loading it into tokens. The user may be asked to approve each `db_execute` and `db_migrate` call. `ATTACH`/`DETACH`, `PRAGMA` writes, `load_extension`, `DROP TABLE`/`TRUNCATE`, unconstrained `DELETE`, and writes to system tables are rejected.
+        - File tools need a working folder; if none is selected, ask the user to choose one with the Folder button.
 
         Saved views:
-        - Define or redefine a saved SELECT with `db_define_view`. Run its stored definition directly with `db_run_view(name)`, or reference its name in read-only `db_query` SQL when you need to filter, join, aggregate, or page its result.
+        - Define or redefine a saved SELECT with `db_define_view`. Run its stored definition directly with `db_run_view(name)`, or reference its name in read-only `db_query`/`db_export` SQL when you need to filter, join, aggregate, or page its result.
 
         Schema discipline:
         - Tables should have clear, narrow purposes. One thing per table.

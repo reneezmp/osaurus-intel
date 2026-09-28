@@ -35,13 +35,13 @@ struct IntelDatabaseToolsTests {
 
     // MARK: - Registration and approvals
 
-    @Test("All fifteen Release 1 tools are registered; import/export are not")
+    @Test("All seventeen database tools are registered, including import/export")
     func registration() {
         let names = Set(ToolRegistry.shared.listTools().map(\.name))
-        #expect(ToolRegistry.databaseToolNames.count == 15)
+        #expect(ToolRegistry.databaseToolNames.count == 17)
         #expect(ToolRegistry.databaseToolNames.isSubset(of: names))
-        #expect(!names.contains("db_import"))
-        #expect(!names.contains("db_export"))
+        #expect(names.contains("db_import"))
+        #expect(names.contains("db_export"))
     }
 
     @Test("Raw SQL and migrations ask by default; everything else runs automatically")
@@ -54,7 +54,7 @@ struct IntelDatabaseToolsTests {
         }
     }
 
-    @Test("db_execute requires sql and no longer offers a path form")
+    @Test("db_execute takes sql or a working-folder path")
     func executeSchema() throws {
         let tool = try #require(
             ToolRegistry.shared.listTools().first { $0.name == "db_execute" })
@@ -65,7 +65,52 @@ struct IntelDatabaseToolsTests {
             return
         }
         #expect(properties["sql"] != nil)
-        #expect(properties["path"] == nil)
+        #expect(properties["path"] != nil)
+    }
+
+    @MainActor
+    @Test("db_import loads a working-folder CSV and db_export writes an .xlsx back")
+    func importExportThroughTools() async throws {
+        try await ChatHistoryTestStorage.run {
+            let agent = Self.makeAgent(dbEnabled: true)
+            AgentManager.shared.add(agent)
+            let folder = FileManager.default.temporaryDirectory
+                .appendingPathComponent("osaurus-db-io-\(UUID().uuidString)", isDirectory: true)
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            defer { try? FileManager.default.removeItem(at: folder) }
+            try "title,rating\nDune,5\nEmma,4\n".write(
+                to: folder.appendingPathComponent("books.csv"), atomically: true, encoding: .utf8)
+
+            let (imported, exported, noFolder) = try await ChatExecutionContext.$currentAgentId.withValue(agent.id) {
+                let imported = try await ChatExecutionContext.$currentFolderRoot.withValue(folder) {
+                    try await ToolRegistry.shared.execute(
+                        name: "db_import", argumentsJSON: #"{"table":"books","path":"books.csv"}"#)
+                }
+                let exported = try await ChatExecutionContext.$currentFolderRoot.withValue(folder) {
+                    try await ToolRegistry.shared.execute(
+                        name: "db_export",
+                        argumentsJSON: #"{"sql":"SELECT title, rating FROM books","path":"out/books.xlsx"}"#)
+                }
+                // Without a working folder the file tools explain how to get one.
+                let noFolder = try await ToolRegistry.shared.execute(
+                    name: "db_import", argumentsJSON: #"{"table":"books","path":"books.csv"}"#)
+                return (imported, exported, noFolder)
+            }
+            #expect(!Self.envelopeIsFailure(imported), "\(imported)")
+            #expect(!Self.envelopeIsFailure(exported), "\(exported)")
+            #expect(noFolder.contains("working folder"))
+
+            let count = try LocalAgentBridge.shared.query(
+                agentId: agent.id, sql: "SELECT COUNT(*) FROM books WHERE _deleted_at IS NULL", params: [])
+            #expect(count.rows.first?.first == .integer(2))
+            let xlsx = folder.appendingPathComponent("out/books.xlsx")
+            #expect(FileManager.default.fileExists(atPath: xlsx.path))
+            let reparsed = try AgentImportRunner.parse(url: xlsx)
+            #expect(reparsed.columns == ["title", "rating"])
+            #expect(reparsed.rows.count == 2)
+
+            _ = await AgentManager.shared.delete(id: agent.id)
+        }
     }
 
     // MARK: - Ability gate
