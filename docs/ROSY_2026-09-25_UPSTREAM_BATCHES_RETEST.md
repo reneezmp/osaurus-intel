@@ -464,3 +464,38 @@ All items are **(paid)**.
 - [ ] Ask it to overwrite list.xlsx, then undo the file change: the original
       workbook comes back intact.
 
+## Native Apple apps, Release 1
+
+Use a **test agent** (never the built-in one) and a tool-capable model. Items
+that talk to the model are **(paid)**. Use a throwaway calendar/list or
+delete what you create afterwards.
+
+- [ ] Agents › your test agent › Overview: an **Apple Apps** section lists
+      Calendar, Reminders, Contacts, Notes and Shortcuts with switches that
+      render on Ventura (not blank). The built-in agent shows a note instead.
+- [ ] Switch on Calendar: macOS asks for Calendar access (once). If you deny
+      it, the row says Osaurus doesn't have Calendar access, and **Allow
+      Access…** opens the system prompt or System Settings.
+- [ ] **(paid)** "What's on my calendar tomorrow?": the agent lists real
+      events with the right day (no approval card for reading).
+- [ ] **(paid)** "Add 'Dentist' next Tuesday at 3pm": an approval card
+      appears before anything is created; after Allow, the event is in
+      Calendar at the right time and the agent repeats the title and time.
+- [ ] **(paid)** Ask it to delete that event: the card appears and has **no
+      Always Allow** button. Ask it to delete another one: the card appears
+      again.
+- [ ] **(paid)** Reminders: "remind me to buy lentils tomorrow" (approval
+      card), then "mark it done".
+- [ ] **(paid)** Contacts: "what's my own phone number?" / look someone up.
+- [ ] **(paid)** Notes: "make a note called Pantry with rice and lentils":
+      macOS asks once to let Osaurus control Notes; the note appears.
+- [ ] **(paid)** Shortcuts: "list my shortcuts", then run a harmless one
+      (approval card first).
+- [ ] Switch Calendar off and ask about your calendar again **(paid)**: the
+      agent no longer has calendar tools (it says it can't, instead of
+      calling one).
+- [ ] Quit and relaunch: the switches keep their state.
+- [ ] If you ever installed the old osaurus-tools Calendar/Reminders/
+      Contacts/Notes plugins: after the first launch a toast says they're
+      built in now, agents that used them already have the app switched on,
+      and the toast does not come back on the next launch.

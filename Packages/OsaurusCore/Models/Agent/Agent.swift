@@ -643,6 +643,11 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// Exposes the native `web_search` and `search_and_extract` tools to this
     /// agent. Outbound search is opt-in on the Intel fork.
     public var webSearchEnabled: Bool
+    /// Built-in Apple apps this custom agent may use (Calendar, Reminders,
+    /// …). The per-app toggle is the only grant: Apple tool names never
+    /// live in `manualToolNames`. Apps not yet shipped on Intel are kept but
+    /// ignored (`AgentManager.effectiveAppleApps`).
+    public var enabledAppleApps: Set<AppleApp>
     /// Self-scheduling bounds. Always present so the UI never has to disambiguate
     /// "schedule disabled" vs "schedule with default bounds"; `mode = .manual`
     /// (dailyRunCap = 0) is the off state.
@@ -667,10 +672,12 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         limits: AgentLimitsSettings = .defaults,
         generativeGreetingsEnabled: Bool? = nil,
         greetingPersona: String? = nil,
-        webSearchEnabled: Bool = false
+        webSearchEnabled: Bool = false,
+        enabledAppleApps: Set<AppleApp> = []
     ) {
         self.dbEnabled = dbEnabled
         self.webSearchEnabled = webSearchEnabled
+        self.enabledAppleApps = enabledAppleApps
         self.schedule = schedule
         self.limits = limits
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
@@ -681,6 +688,9 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         let c = try decoder.container(keyedBy: CodingKeys.self)
         dbEnabled = try c.decodeIfPresent(Bool.self, forKey: .dbEnabled) ?? false
         webSearchEnabled = try c.decodeIfPresent(Bool.self, forKey: .webSearchEnabled) ?? false
+        // Tolerant: unknown app names (a newer build) are dropped, not fatal.
+        let rawAppleApps = (try? c.decodeIfPresent([String].self, forKey: .enabledAppleApps)) ?? []
+        enabledAppleApps = Set(rawAppleApps.compactMap(AppleApp.init(rawValue:)))
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
@@ -711,6 +721,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     private enum CodingKeys: String, CodingKey {
         case dbEnabled
         case webSearchEnabled
+        case enabledAppleApps
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -723,6 +734,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         var c = encoder.container(keyedBy: CodingKeys.self)
         try c.encode(dbEnabled, forKey: .dbEnabled)
         try c.encode(webSearchEnabled, forKey: .webSearchEnabled)
+        try c.encode(AppleApp.sorted(enabledAppleApps).map(\.rawValue), forKey: .enabledAppleApps)
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)

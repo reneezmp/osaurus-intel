@@ -187,6 +187,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // (enabled by default) in its initializer.
         ToastWindowController.shared.setup()
 
+        #if OSAURUS_INTEL
+            // Superseded osaurus-tools Apple plugins → built-in Apple apps
+            // (docs/APPLE_APPS_INTEL_PLAN.md). Per-app markers; after the
+            // toast panel exists so the one-time notice can render.
+            Task { @MainActor in
+                await AppleAppsPluginMigration.migrateIfNeededAtLaunch()
+            }
+        #endif
+
         // Pre-warm the open-panel machinery. The first NSOpenPanel init in a
         // process loads the remote file-picker (ViewBridge) service, which can
         // take seconds cold — reported as a hang when it happens on the user's

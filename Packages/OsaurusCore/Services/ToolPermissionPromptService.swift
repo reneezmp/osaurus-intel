@@ -106,7 +106,8 @@ enum ToolPermissionPromptService {
                 argumentsJSON: argumentsJSON,
                 onAllow: onAllow,
                 onDeny: onDeny,
-                onAlwaysAllow: onAlwaysAllow
+                onAlwaysAllow: onAlwaysAllow,
+                allowsAlwaysAllow: !ToolRegistry.shared.requiresApprovalEveryCall(toolName)
             )
             .environment(\.theme, themeManager.currentTheme)
 

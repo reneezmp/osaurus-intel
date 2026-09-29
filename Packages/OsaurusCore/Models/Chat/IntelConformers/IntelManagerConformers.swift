@@ -606,6 +606,32 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.dbEnabled
     }
 
+    /// Built-in Apple apps the agent may use right now: its toggles,
+    /// limited to the apps shipped on Intel. The Default agent never has any.
+    func effectiveAppleApps(for agentId: UUID) -> Set<AppleApp> {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return [] }
+        return agent.settings.enabledAppleApps.intersection(AppleApp.availableOnIntel)
+    }
+
+    /// Replace the Apple apps a custom agent may use (the Abilities toggles).
+    /// Any Apple tool name that leaked into the manual allowlist is dropped
+    /// at the same time so the toggle stays the single switch.
+    func updateEnabledAppleApps(_ apps: Set<AppleApp>, for agentId: UUID) {
+        guard agentId != Agent.defaultId, var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        let cleaned = agent.manualToolNames.map { $0.filter { !AppleApp.allToolNames.contains($0) } }
+        guard agent.settings.enabledAppleApps != apps || cleaned != agent.manualToolNames else { return }
+        agent.settings.enabledAppleApps = apps
+        agent.manualToolNames = cleaned
+        update(agent)
+    }
+
+    /// The agent record as it is on disk right now (not the in-memory copy).
+    /// `persist` swallows write errors, so migrations read back to verify.
+    static func loadPersisted(id: UUID) throws -> Agent {
+        let url = OsaurusPaths.agents().appendingPathComponent("\(id.uuidString).json")
+        return try isoDecoder.decode(Agent.self, from: Data(contentsOf: url))
+    }
+
     func effectiveMemoryDisabled(for agentId: UUID) -> Bool {
         let globalDisabled = !MemoryConfigurationStore.load().enabled
         guard let agent = agent(for: agentId), !agent.isBuiltIn else { return globalDisabled }

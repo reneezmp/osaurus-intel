@@ -45,6 +45,12 @@ public enum ToolEnvelope {
         /// User clicked "Deny" on an interactive approval prompt.
         /// Distinct from `rejected` (configured policy refusal).
         case userDenied = "user_denied"
+        /// The requested item (event, contact, note…) doesn't exist.
+        /// Upstream kind, added with the Apple app tools.
+        case notFound = "not_found"
+        /// A macOS permission (TCC) is missing for this tool. Upstream kind,
+        /// added with the Apple app tools.
+        case permissionDenied = "permission_denied"
     }
 
     // MARK: - Construction
@@ -308,7 +314,7 @@ public enum ToolEnvelope {
 
     private static func defaultRetryable(for kind: Kind) -> Bool {
         switch kind {
-        case .rejected, .toolNotFound, .userDenied: return false
+        case .rejected, .toolNotFound, .userDenied, .notFound, .permissionDenied: return false
         case .invalidArgs, .timeout, .executionError, .unavailable: return true
         }
     }

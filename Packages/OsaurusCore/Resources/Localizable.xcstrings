@@ -70,6 +70,38 @@
         }
       }
     },
+    "%@ no longer need a plugin. Already turned on for %@; for other agents use Agents → Overview → Apple Apps." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ brauchen kein Plug-in mehr. Bereits eingeschaltet für %2$@; für andere Agenten unter Agenten → Übersicht → Apple-Apps."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ 不再需要插件。已为%2$@开启；其他智能体请前往“智能体 → 概述 → Apple 应用”。"
+          }
+        }
+      }
+    },
+    "%@ no longer need a plugin. Turn each app on per agent under Agents → Overview → Apple Apps." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ brauchen kein Plug-in mehr. Schalte jede App pro Agent unter Agenten → Übersicht → Apple-Apps ein."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ 不再需要插件。请在“智能体 → 概述 → Apple 应用”中为每个智能体开启相应应用。"
+          }
+        }
+      }
+    },
     "About %lld tokens freed. The full chat stays visible." : {
       "localizations" : {
         "de" : {
@@ -150,6 +182,22 @@
         }
       }
     },
+    "Allow Access…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zugriff erlauben …"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许访问…"
+          }
+        }
+      }
+    },
     "Already have an identity on another Mac?" : {
       "localizations" : {
         "de" : {
@@ -178,6 +226,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 Mac 上的加密数据库，智能体可以使用 db_* 工具构建和查询。"
+          }
+        }
+      }
+    },
+    "Apple Apps" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-Apps"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 应用"
+          }
+        }
+      }
+    },
+    "Apple apps are now built into Osaurus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-Apps sind jetzt in Osaurus integriert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 应用现已内置于 Osaurus"
           }
         }
       }
@@ -1034,6 +1114,38 @@
         }
       }
     },
+    "List and run your shortcuts." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deine Kurzbefehle auflisten und ausführen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "列出并运行你的快捷指令。"
+          }
+        }
+      }
+    },
+    "Look up, add and update contacts." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kontakte nachschlagen, hinzufügen und aktualisieren."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查找、添加和更新联系人。"
+          }
+        }
+      }
+    },
     "macOS system permissions for Osaurus." : {
       "localizations" : {
         "de" : {
@@ -1046,6 +1158,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Osaurus 的 macOS 系统权限。"
+          }
+        }
+      }
+    },
+    "Mail" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mail"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "邮件"
+          }
+        }
+      }
+    },
+    "Maps & Location" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Karten & Standort"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "地图与位置"
           }
         }
       }
@@ -1078,6 +1222,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可以更改 Osaurus 设置"
+          }
+        }
+      }
+    },
+    "Music" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Musik"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "音乐"
           }
         }
       }
@@ -1174,6 +1334,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂时没有可压缩的内容——最近的对话已经尽可能精简。"
+          }
+        }
+      }
+    },
+    "Open Agents" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten öffnen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开智能体"
+          }
+        }
+      }
+    },
+    "Osaurus doesn't have %@ access yet." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus hat noch keinen Zugriff auf %@."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 尚未获得%@访问权限。"
           }
         }
       }
@@ -1362,6 +1554,54 @@
         }
       }
     },
+    "Read, add and change events." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Termine lesen, hinzufügen und ändern."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取、添加和更改日程。"
+          }
+        }
+      }
+    },
+    "Read, add, complete and change reminders." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erinnerungen lesen, hinzufügen, abhaken und ändern."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取、添加、完成和更改提醒事项。"
+          }
+        }
+      }
+    },
+    "Reading runs on its own. Creating or changing anything asks you first, and deleting asks every time. What the agent reads passes through its cloud provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lesen läuft von selbst. Vor dem Erstellen oder Ändern wirst du gefragt, vor dem Löschen jedes Mal. Was der Agent liest, geht über seinen Cloud-Anbieter."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "读取会自动进行。创建或更改任何内容前都会先询问你，删除时每次都会询问。智能体读取的内容会经过其云服务提供商。"
+          }
+        }
+      }
+    },
     "Recent Folders" : {
       "localizations" : {
         "de" : {
@@ -1508,6 +1748,38 @@
         }
       }
     },
+    "Search, read, create and add to notes. macOS asks the first time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Notizen durchsuchen, lesen, erstellen und ergänzen. macOS fragt beim ersten Mal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索、阅读、创建和补充备忘录。macOS 会在首次使用时询问。"
+          }
+        }
+      }
+    },
+    "Shortcuts" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kurzbefehle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快捷指令"
+          }
+        }
+      }
+    },
     "Stop Using a Default Folder" : {
       "localizations" : {
         "de" : {
@@ -1600,6 +1872,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "智能体在需要记住某些内容时会添加行。你也可以直接在聊天中让它这样做。"
+          }
+        }
+      }
+    },
+    "The built-in agent can't use Apple apps. Create an agent to use them." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der integrierte Agent kann keine Apple-Apps verwenden. Erstelle einen Agenten, um sie zu nutzen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内置智能体无法使用 Apple 应用。请创建一个智能体来使用它们。"
           }
         }
       }
@@ -1928,6 +2216,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键时提供建议。文本永远不会被自动更正。"
+          }
+        }
+      }
+    },
+    "Unnamed contact" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unbenannter Kontakt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未命名联系人"
           }
         }
       }

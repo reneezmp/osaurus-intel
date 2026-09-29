@@ -35,3 +35,18 @@ protocol PermissionedTool {
 extension PermissionedTool {
     var handlesOwnApproval: Bool { false }
 }
+
+/// A tool whose approval can never be pre-granted: every single call shows the
+/// card, and "Always Allow" is not offered (upstream `PerCallApprovalTool`).
+/// Used for deletions such as `calendar_delete_event` / `reminders_delete`:
+/// an Always Allow taken for anything else must never silently authorise
+/// removal. On Intel, `ToolRegistry.policyInfo` clamps these tools' effective
+/// policy to Ask (Deny still wins) and `setPolicy(.auto, …)` is refused.
+protocol PerCallApprovalTool {
+    /// Marker only. Conformance is the whole contract.
+    var requiresApprovalEveryCall: Bool { get }
+}
+
+extension PerCallApprovalTool {
+    var requiresApprovalEveryCall: Bool { true }
+}

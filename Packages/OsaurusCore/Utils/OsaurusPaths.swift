@@ -123,6 +123,11 @@ public enum OsaurusPaths {
         root().appendingPathComponent("projects", isDirectory: true)
     }
 
+    /// Built-in Apple apps state (per-app plugin → native migration markers).
+    public static func appleAppsConfigFile() -> URL {
+        config().appendingPathComponent("apple-apps.json")
+    }
+
     /// Intel's per-agent Knowledge grant ledger. The grant list is kept
     /// separate from the Agent JSON while the Intel Agent model remains a
     /// compatibility mirror; it is keyed by agent UUID and contains no

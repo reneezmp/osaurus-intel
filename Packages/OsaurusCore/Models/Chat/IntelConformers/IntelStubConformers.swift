@@ -1147,6 +1147,13 @@ public struct ClaudePluginInstallReport: Sendable {
     public var totalImportedMCPProviders: Int { 0 }
 }
 
+/// Tools that belong to a capability group (e.g. one Apple app) declare it
+/// so pickers can bucket them. Upstream declares this in the excluded
+/// Tools/ToolRegistry.swift.
+protocol CapabilityToolGroupDeclaring: OsaurusTool {
+    var capabilityGroupId: String { get }
+}
+
 // MARK: - ToolRegistry (stub)
 
 final class ToolRegistry: ObservableObject, @unchecked Sendable {
@@ -1167,10 +1174,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         "db_define_view", "db_run_view", "db_list_views", "db_drop_view",
     ]
 
+    /// Built-in Apple app tools shipped on Intel (docs/APPLE_APPS_INTEL_PLAN.md).
+    /// The agent's per-app toggle is the grant: these bypass the Tools-tab
+    /// allowlist and are gated on `effectiveAppleApps` at prompt composition
+    /// and again at dispatch.
+    static let appleAppToolNames: Set<String> = AppleApp.toolNames(for: Set(AppleApp.availableOnIntel))
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
         registerDatabaseTools()
+        registerAppleAppTools()
         registerWebSearchTools()
         registerIntelOrchestratorTools()
     }
@@ -1223,6 +1237,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             DBDefineViewTool(), DBRunViewTool(), DBListViewsTool(), DBDropViewTool(),
         ]
         assert(Set(tools.map(\.name)) == Self.databaseToolNames)
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
+    private func registerAppleAppTools() {
+        let tools = AppleAppToolCatalog.makeTools()
+        assert(Set(tools.map(\.name)) == Self.appleAppToolNames)
         for tool in tools {
             toolsByName[tool.name] = tool
             builtInToolNames.insert(tool.name)
@@ -1370,6 +1393,11 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         return try await tool.execute(argumentsJSON: argumentsJSON)
     }
 
+    /// True for `PerCallApprovalTool`s: every call needs its own approval.
+    func requiresApprovalEveryCall(_ name: String) -> Bool {
+        (toolsByName[name] as? any PerCallApprovalTool)?.requiresApprovalEveryCall == true
+    }
+
     func handlesOwnApproval(for name: String) -> Bool {
         (toolsByName[name] as? any PermissionedTool)?.handlesOwnApproval == true
     }
@@ -1407,6 +1435,23 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 message: "This configuration tool is available only to the built-in Orchestrator.",
                 tool: name
             )
+        }
+
+        // Apple app tools always need an agent that switched the app on;
+        // with no agent context (or the Default agent) they never run.
+        if let app = AppleApp.app(forTool: name) {
+            let agentId = ChatExecutionContext.currentAgentId
+            let enabled = agentId.map { AgentManager.shared.effectiveAppleApps(for: $0) } ?? []
+            guard let agentId, enabled.contains(app),
+                !AgentManager.shared.effectiveToolsDisabled(for: agentId)
+            else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "\(app.displayName) is not turned on for this agent (Agents → Overview → Apple Apps).",
+                    tool: name
+                )
+            }
+            return nil
         }
 
         guard let agentId = ChatExecutionContext.currentAgentId else { return nil }
@@ -1571,6 +1616,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// back the user's actual choice. (M11 Phase 11.A.3 click-through
     /// fix, Renée 2026-06-01.)
     func setPolicy(_ policy: ToolPermissionPolicy, for toolName: String) {
+        // Per-call tools (deletions) can never be set to run unasked.
+        if policy == .auto, requiresApprovalEveryCall(toolName) { return }
         objectWillChange.send()
         _policies[toolName] = policy
         persistPolicies()
@@ -1696,11 +1743,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         guard let tool = toolsByName[name] else { return nil }
         let permissioned = tool as? any PermissionedTool
         let defaultPolicy = permissioned?.defaultPermissionPolicy ?? .auto
+        var effective = _policies[name] ?? defaultPolicy
+        // Per-call tools always ask unless the user denied them outright
+        // (an old persisted Auto, or a hand-edited file, cannot skip it).
+        if effective == .auto, requiresApprovalEveryCall(name) { effective = .ask }
         return ToolPolicyInfo(
             isPermissioned: permissioned != nil,
             defaultPolicy: defaultPolicy,
             configuredPolicy: _policies[name],
-            effectivePolicy: _policies[name] ?? defaultPolicy,
+            effectivePolicy: effective,
             requirements: permissioned?.requirements ?? [],
             grantsByRequirement: [:],
             systemPermissions: [],

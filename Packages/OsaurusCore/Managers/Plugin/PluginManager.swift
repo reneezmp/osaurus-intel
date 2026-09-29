@@ -1589,7 +1589,38 @@ import Foundation
 @MainActor
 public final class PluginManager: ObservableObject {
     public static let shared = PluginManager()
-    public static let supersededPluginIds: Set<String> = ["search-intel"]
+    /// Plugins replaced by built-ins: the retired Intel search dylib, and the
+    /// osaurus-tools Apple app plugins whose app ships natively on Intel
+    /// (docs/APPLE_APPS_INTEL_PLAN.md). Apple plugins for apps not shipped
+    /// yet keep loading.
+    public nonisolated static let supersededPluginIds: Set<String> =
+        Set(["search-intel"]).union(supersededAppleAppPluginIds)
+
+    /// Apple app plugin ids superseded on Intel (subset of the above).
+    public nonisolated static var supersededAppleAppPluginIds: Set<String> {
+        Set(AppleApp.availableOnIntel.compactMap(\.supersededPluginId))
+    }
+
+    /// Superseded Apple app plugins whose folder is still installed under
+    /// `Tools/` (a version directory or `current` link inside). The plugin
+    /// → native migration keys off this: legacy names like `create_note`
+    /// are only rewritten when the plugin that shipped them was installed.
+    /// Synchronous file I/O; `root` is a test seam.
+    nonisolated static func installedSupersededAppleAppPluginIds(toolsRoot root: URL? = nil) -> Set<String> {
+        let root = root ?? OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
+        let fm = FileManager.default
+        var installed: Set<String> = []
+        for pluginId in supersededAppleAppPluginIds {
+            let dir = root.appendingPathComponent(pluginId, isDirectory: true)
+            var isDir: ObjCBool = false
+            guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
+            let entries = (try? fm.contentsOfDirectory(atPath: dir.path)) ?? []
+            if entries.contains(where: { $0 == "current" || SemanticVersion.parse($0) != nil }) {
+                installed.insert(pluginId)
+            }
+        }
+        return installed
+    }
 
     /// Successfully loaded (compatible) plugins.
     @Published public private(set) var loadedPlugins: [LoadedPluginInfo] = []
@@ -1792,10 +1823,10 @@ public final class PluginManager: ObservableObject {
     /// are logged but don't abort the scan — the plugin still shows in the
     /// (capability) bucket; it just won't be invocable.
     private func loadNative(pluginId: String, pluginDir: URL) {
-        // Retired by the native provider cascade. Refuse the legacy Intel
-        // dylib so it cannot overwrite ToolRegistry's first-party web_search.
+        // Retired by built-ins (search provider cascade, native Apple apps).
+        // Refuse the dylib so it cannot overwrite a first-party tool.
         guard !Self.supersededPluginIds.contains(pluginId) else {
-            NSLog("[Osaurus Intel] skipped retired native plugin 'search-intel'")
+            NSLog("[Osaurus Intel] skipped superseded native plugin '\(pluginId)' (now built in)")
             return
         }
         guard let dylib = IntelPluginLoader.findDylib(in: pluginDir) else {

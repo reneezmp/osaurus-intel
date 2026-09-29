@@ -1821,6 +1821,9 @@ final class SystemPromptComposer: @unchecked Sendable {
         let databaseEnabled = await MainActor.run {
             AgentManager.shared.effectiveDBEnabled(for: id)
         }
+        let appleAppToolNames = await MainActor.run {
+            AppleApp.toolNames(for: AgentManager.shared.effectiveAppleApps(for: id))
+        }
         let folderToolNames = await MainActor.run {
             Set(FolderToolManager.shared.folderToolNames)
         }
@@ -1924,6 +1927,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                 .filter {
                     databaseActive || !ToolRegistry.databaseToolNames.contains($0.function.name)
                 }
+                .filter {
+                    // Apple app tools: only the apps this agent switched on.
+                    !AppleApp.allToolNames.contains($0.function.name)
+                        || appleAppToolNames.contains($0.function.name)
+                }
                 .filter { spec in
                     folderToolIsVisible(
                         spec.function.name,
@@ -1956,6 +1964,8 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if databaseActive {
                     allowed.formUnion(ToolRegistry.databaseToolNames)
                 }
+                // And for Apple apps: the per-app toggle is the grant.
+                allowed.formUnion(appleAppToolNames)
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }
@@ -1984,6 +1994,15 @@ final class SystemPromptComposer: @unchecked Sendable {
                         id: "pluginInstructions", label: "Plugin Instructions", text: block, tint: .cyan)
                 )
             }
+        }
+        // Built-in Apple apps (docs/APPLE_APPS_INTEL_PLAN.md): guidance for the
+        // apps that resolved into this turn's schema; the clock rides the
+        // per-turn prefix below.
+        let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: Set(tools.map { $0.function.name }))
+        if !activeAppleApps.isEmpty {
+            let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
+            prompt += block
+            sections.append(PromptSection(id: "appleApps", label: "Apple Apps", text: block, tint: .green))
         }
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.
@@ -2032,6 +2051,11 @@ final class SystemPromptComposer: @unchecked Sendable {
 
         if let databaseSchemaSection, !databaseSchemaSection.isEmpty {
             memorySection = [databaseSchemaSection, memorySection].compactMap { $0 }
+                .joined(separator: "\n\n")
+        }
+
+        if !activeAppleApps.isEmpty {
+            memorySection = [IntelAppleAppsGuidance.clock(), memorySection].compactMap { $0 }
                 .joined(separator: "\n\n")
         }
 

@@ -15,6 +15,8 @@ struct ToolPermissionView: View {
     let onAllow: () -> Void
     let onDeny: () -> Void
     let onAlwaysAllow: () -> Void
+    /// False for per-call tools (deletions): no Always Allow button.
+    var allowsAlwaysAllow: Bool = true
 
     @ObservedObject private var themeManager = ThemeManager.shared
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -231,7 +233,9 @@ struct ToolPermissionView: View {
                     action: onAllow
                 )
             }
-            AlwaysAllowButton(action: { showAlwaysAllowConfirm = true })
+            if allowsAlwaysAllow {
+                AlwaysAllowButton(action: { showAlwaysAllowConfirm = true })
+            }
         }
     }
 

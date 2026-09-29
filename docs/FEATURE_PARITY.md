@@ -117,10 +117,11 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
 
 ### Absent
 
-- Native Apple app tools (`348bc70cb`) are not in Intel. They are feasible,
-  not rejected: upstream Calendar/Reminders uses macOS 14 full-access APIs,
-  while Rosy requires a macOS 13 EventKit path plus TCC, per-agent grants,
-  tool approvals, and plugin migration. See B6 in the Agent Settings backlog.
+- Native Apple app tools (`348bc70cb`): **Release 1 shipped 2026-09-29**
+  (Calendar, Reminders, Contacts, Notes, Shortcuts) with a macOS 13 EventKit
+  path, per-agent switches, reads-auto/changes-ask approvals, per-call
+  deletes and plugin migration. Mail/Maps/Music and Messages are staged.
+  See [`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
 - Upstream Privacy filtering, Browser Use/Computer Use, and rich document
   generation remain absent. Each needs a separate Intel capability and
   authorization design; the upstream audit records their commit slices.

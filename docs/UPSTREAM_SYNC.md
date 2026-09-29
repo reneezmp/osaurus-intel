@@ -42,8 +42,10 @@ arm64 release metadata, or optional telemetry/marketing.
 The near-term implementation queue is MCP argument and canonical-name safety,
 chat-history migration, schedule slot accounting, Core Model fallback,
 theme/attachment/window fixes, and remaining hosted-model catalog/profile
-work. Rich folder formats, native Apple app tools, n8n/Channels, Workspaces,
-native subagents, and computer use remain feasible staged projects with
+work. Rich folder formats (shipped 2026-09-29), native Apple app tools
+(Release 1 shipped 2026-09-29, see `APPLE_APPS_INTEL_PLAN.md`),
+n8n/Channels, Workspaces, native subagents, and computer use remain
+feasible staged projects with
 explicit backend and Ventura gates. Their product states and order are in
 [`FEATURE_PARITY.md`](FEATURE_PARITY.md) and
 [`INTEL_AGENT_SETTINGS_BACKLOG.md`](INTEL_AGENT_SETTINGS_BACKLOG.md).
@@ -1982,3 +1984,21 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   `file_read`; upstream's vision `ToolResultMediaBridge` is not ported.
 - `file_copy` stays removed on Intel (design choice: `shell_run cp`).
 
+### Native Apple apps, Release 1 (upstream #134 / `348bc70cb`) — 2026-09-29
+
+- Staged by app (Renée): Calendar, Reminders, Contacts, Notes, Shortcuts now;
+  Mail/Maps/Music next; Messages last. Full plan and file map:
+  [`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
+- Copied from upstream/main: `AppleApps/` minus Mail/Messages/Maps/Music,
+  `AppleScriptExecutor`, `AppleScriptAccessibility`, and `AppleScriptLanguage`
+  (extracted from upstream's AppleScriptAction.swift). `ToolEnvelope` gained
+  `not_found` and `permission_denied` kinds.
+- **EventKit `.fullAccess` is macOS 14.** The services accept `.authorized` on
+  Ventura. Keep this edit when re-syncing those files.
+- **Intel had no per-call approval.** Ported `PerCallApprovalTool`: deletes
+  always show the card without Always Allow, and a stored Auto is clamped to
+  Ask. Mail's argument-aware variant is needed for Release 2.
+- Intel has no `get_current_time`, schema validator or registry permission
+  pre-check; the plan doc records how each is covered.
+- Migration markers are per app so later releases migrate their own plugins;
+  only shipped apps' `osaurus.*` plugins are superseded.

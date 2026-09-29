@@ -97,6 +97,11 @@ cannot silently bypass an existing grant. Port by app family with tests and
 Rosy permission-denied/relaunch acceptance; do not gate the entire family on
 the first unsupported API.
 
+**Status (2026-09-29):** Release 1 (Calendar, Reminders, Contacts, Notes,
+Shortcuts) implemented; awaiting Rosy. Mail/Maps/Music (Release 2) and
+Messages (Release 3) are staged. Plan, gates and Intel differences:
+[`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
+
 ## B7 — Workspace agents and team billing
 
 **Current UI/runtime:** B1/B2 are dependency explanations; Intel has no
