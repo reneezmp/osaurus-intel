@@ -32,7 +32,7 @@ public struct ChatExportOptions: Codable, Equatable, Sendable {
 
     public static func loadLast() -> ChatExportOptions {
         guard let data = UserDefaults.standard.data(forKey: defaultsKey),
-              let value = try? JSONDecoder().decode(ChatExportOptions.self, from: data)
+            let value = try? JSONDecoder().decode(ChatExportOptions.self, from: data)
         else { return ChatExportOptions() }
         return value
     }
@@ -46,12 +46,9 @@ public struct ChatExportOptions: Codable, Equatable, Sendable {
 extension ChatSessionData {
     /// True if at least one turn carries any timing data. Used by the
     /// chooser to enable / disable the page-2 toggles.
+    /// Intel: every turn carries `createdAt`, so any chat with turns has
+    /// timestamps to export (upstream's legacy turns could lack them).
     public var hasAnyTimingData: Bool {
-        turns.contains { turn in
-            turn.createdAt != nil
-                || turn.completedAt != nil
-                || turn.generationTokenCount != nil
-                || turn.timeToFirstToken != nil
-        }
+        !turns.isEmpty
     }
 }

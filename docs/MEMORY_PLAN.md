@@ -141,10 +141,9 @@ Projects section in the Agents tab. No migration required.
 
 ## 3b. Follow-ups raised during testing
 
-- **Chat export on Intel.** Removed from both menus in 1.0.34 because
-  `ChatSessionExportCoordinator` and `ExportChooserSheet` are excluded, so it
-  could never work. Owner wants it back — that means an Intel export path, not
-  just restoring the menu entry.
+- **Completed 2026-09-29 — chat export on Intel.** Upstream's exporter,
+  coordinator, options and chooser now compile on Intel; Export… is back in
+  both per-chat menus (see `UPSTREAM_SYNC.md`).
 - **Completed 2026-09-08 — upstream's fuller project page.** The Intel page now
   uses the richer two-column layout and includes Knowledge, a per-project
   default agent, a working folder, and shared-memory preview/deep-link.

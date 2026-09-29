@@ -61,7 +61,7 @@ feature had been labelled before this sweep.
 | `W-tool-discovery` | Automatic tool discovery (semantic search over tools/skills, `capabilities_search`/`capabilities_load`, session tool state) | M (4.9k) | Silently absent: Intel "Auto" mode sends every tool. | Port the index/search; embeddings via Intel's local embedder. |
 | `W-description-backfill` | Background fill of missing agent descriptions | S (0.2k) | Omitted (automatic paid calls). | **Shipped 2026-09-29** as an opt-in switch, off by default (Settings › Chat › Agent Descriptions), including #2897 stale-prompt handling and #2898 purposes in agent lists. |
 | `W-doc-editing` | In-place .docx/.xlsx/.pptx/.pdf editing, PDF form filling, `.pptx` writing, business-document and CSV workflows, `file_copy` | L (6.6k) | #2907 part B staged; `file_copy` "removed by design". | Plan in [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md). `file_copy` returns (copying binaries through `shell_run cp` bypasses undo). |
-| `W-chat-export` | Export chats (Markdown/JSON/…, with timing) | S (0.7k) | Removed in 1.0.34 because the files are excluded; Renée wants it back (`MEMORY_PLAN.md` §3b). | Intel export path over the Intel chat store. |
+| `W-chat-export` | Export chats (Markdown, PDF, zip with attachments; optional timestamps, deltas and token usage) | S (0.7k) | Removed in 1.0.34. | **Shipped 2026-09-29** — right-click a chat (or its "…" menu) › Export…. |
 
 ### 3b. Chat and everyday UX
 

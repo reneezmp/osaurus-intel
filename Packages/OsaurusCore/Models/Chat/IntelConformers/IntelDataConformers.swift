@@ -503,7 +503,6 @@ final class ChatConfigurationStore: @unchecked Sendable {
 }
 
 
-final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
 
 // M12 Gap 2/3: the real `FolderContextService` (Folder/FolderContextService.swift)
 // is un-excluded — it drives the NSOpenPanel folder picker and registers the

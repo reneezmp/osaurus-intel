@@ -31,7 +31,9 @@ public enum ChatSessionExporter {
     /// When `options` enables any timing flag, the header line gains a
     /// suffix like ` — 14:02:18 (+1m23s, 312 tok, 28.4 tok/s)` with each
     /// piece guarded by both the flag and presence of the underlying data.
-    public static func markdown(for session: ChatSessionData, options: ChatExportOptions = ChatExportOptions()) -> String {
+    public static func markdown(for session: ChatSessionData, options: ChatExportOptions = ChatExportOptions())
+        -> String
+    {
         var lines: [String] = []
         lines.append("# \(session.title)")
         lines.append("")
@@ -54,6 +56,11 @@ public enum ChatSessionExporter {
 
         let agentLabel = assistantLabel(for: session)
         var previousTurnAnchor: Date? = nil
+        // Repeat detection for exported tool calls, using the SAME signature
+        // (name + canonical args) as `AgentTaskState`'s dedupe and the UI's
+        // "×N" badge. Reset at each user message to mirror `beginMessage()`:
+        // a repeat is a within-message loop signal, not a cross-message one.
+        var toolCallOrdinals: [String: Int] = [:]
         for (idx, turn) in session.turns.enumerated() {
             let role = roleLabel(for: turn, assistantLabel: agentLabel)
             let suffix = timingSuffix(for: turn, options: options, previousAnchor: previousTurnAnchor)
@@ -72,10 +79,26 @@ public enum ChatSessionExporter {
                 }
                 lines.append("")
             }
+            if turn.role == .user {
+                toolCallOrdinals.removeAll(keepingCapacity: true)
+            }
             if let calls = turn.toolCalls, !calls.isEmpty {
                 lines.append("**Tool calls**")
                 for call in calls {
-                    lines.append("- `\(call.function.name)` — `\(call.function.arguments)`")
+                    // Intel: per-call durations are not recorded in turn data.
+                    var line = "- `\(call.function.name)` — `\(call.function.arguments)`"
+                    let key =
+                        call.function.name + "\u{1F}"
+                        + Self.canonicalArgs(call.function.arguments)
+                    let ordinal = (toolCallOrdinals[key] ?? 0) + 1
+                    toolCallOrdinals[key] = ordinal
+                    // An exported loop must read as a loop — durations and
+                    // repeat markers are how a reviewer sees "3 × 14s spent
+                    // re-issuing one call" instead of three ordinary steps.
+                    if ordinal > 1 {
+                        line += " (repeat ×\(ordinal))"
+                    }
+                    lines.append(line)
                 }
                 lines.append("")
             }
@@ -83,7 +106,11 @@ public enum ChatSessionExporter {
         return lines.joined(separator: "\n")
     }
 
-    public static func writeMarkdown(session: ChatSessionData, options: ChatExportOptions = ChatExportOptions(), to url: URL) throws {
+    public static func writeMarkdown(
+        session: ChatSessionData,
+        options: ChatExportOptions = ChatExportOptions(),
+        to url: URL
+    ) throws {
         let text = markdown(for: session, options: options)
         do {
             try text.data(using: .utf8)?.write(to: url, options: .atomic)
@@ -96,7 +123,9 @@ public enum ChatSessionExporter {
 
     /// `NSPrintOperation` save-to-file gives page-broken output instead of
     /// the single tall page `NSView.dataWithPDF` would produce.
-    public static func writePDF(session: ChatSessionData, options: ChatExportOptions = ChatExportOptions(), to url: URL) throws {
+    public static func writePDF(session: ChatSessionData, options: ChatExportOptions = ChatExportOptions(), to url: URL)
+        throws
+    {
         let attributed = attributedMarkdown(for: session, options: options)
         let contentWidth: CGFloat = 540  // letter width minus 72pt margins
         let textView = NSTextView(frame: NSRect(x: 0, y: 0, width: contentWidth, height: 720))
@@ -128,7 +157,9 @@ public enum ChatSessionExporter {
 
     /// Bundles `chat.md` plus hydrated attachments under `attachments/`.
     /// Unresolvable attachment bytes are skipped.
-    public static func writeZip(session: ChatSessionData, options: ChatExportOptions = ChatExportOptions(), to url: URL) async throws {
+    public static func writeZip(session: ChatSessionData, options: ChatExportOptions = ChatExportOptions(), to url: URL)
+        async throws
+    {
         let fm = FileManager.default
         let bundleName = sanitizeFilename(session.title.isEmpty ? "chat" : session.title)
         let workRoot = fm.temporaryDirectory.appendingPathComponent(
@@ -160,7 +191,7 @@ public enum ChatSessionExporter {
 
         let tempZip = workRoot.appendingPathComponent("\(bundleName).zip")
         do {
-            try await fm.zipItem(at: bundleDir, to: tempZip)
+            try Self.zipDirectory(bundleDir, to: tempZip)
             if fm.fileExists(atPath: url.path) {
                 try fm.removeItem(at: url)
             }
@@ -189,11 +220,39 @@ public enum ChatSessionExporter {
     /// Resolves the session's agent name for assistant role labels. Returns
     /// nil for the default (built-in) agent so the export stays "Assistant"
     /// instead of adding a noisy suffix.
+    /// Intel: canonical form of tool arguments (sorted-key JSON when it
+    /// parses, else the raw text) so repeated calls are recognised; upstream
+    /// uses `AgentTaskState.canonicalArgs`, which Intel does not compile yet.
+    static func canonicalArgs(_ raw: String) -> String {
+        guard let data = raw.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data, options: [.fragmentsAllowed]),
+            let canonical = try? JSONSerialization.data(
+                withJSONObject: object, options: [.sortedKeys, .fragmentsAllowed, .withoutEscapingSlashes]),
+            let text = String(data: canonical, encoding: .utf8)
+        else { return raw.trimmingCharacters(in: .whitespacesAndNewlines) }
+        return text
+    }
+
+    /// Intel: zip a folder with macOS `ditto` (Intel's ZipArchive only reads).
+    static func zipDirectory(_ directory: URL, to zip: URL) throws {
+        let process = Process()
+        process.executableURL = URL(fileURLWithPath: "/usr/bin/ditto")
+        process.arguments = ["-c", "-k", "--sequesterRsrc", "--keepParent", directory.path, zip.path]
+        let errors = Pipe()
+        process.standardError = errors
+        try process.run()
+        process.waitUntilExit()
+        guard process.terminationStatus == 0 else {
+            let message = String(data: errors.fileHandleForReading.readDataToEndOfFile(), encoding: .utf8) ?? ""
+            throw ExportError.writeFailed("zip failed (\(process.terminationStatus)) \(message)")
+        }
+    }
+
     private static func assistantLabel(for session: ChatSessionData) -> String? {
-        guard let agentId = session.agentId,
-              agentId != Agent.defaultId,
-              let agent = AgentManager.shared.agent(for: agentId),
-              !agent.isBuiltIn
+        guard let agentId = Optional(session.agentId),
+            agentId != Agent.defaultId,
+            let agent = AgentManager.shared.agent(for: agentId),
+            !agent.isBuiltIn
         else { return nil }
         let name = agent.displayName.trimmingCharacters(in: .whitespacesAndNewlines)
         return name.isEmpty ? nil : name
@@ -209,13 +268,14 @@ public enum ChatSessionExporter {
     ) -> String {
         guard options.hasAnyFlag else { return "" }
         var head: String? = nil
-        if options.includeTimestamps, let created = turn.createdAt {
+        if options.includeTimestamps, let created = Optional(turn.createdAt) {
             head = formatTime(created)
         }
         var parens: [String] = []
         if options.includeDeltas,
-           let created = turn.createdAt,
-           let previous = previousAnchor {
+            let created = Optional(turn.createdAt),
+            let previous = previousAnchor
+        {
             let delta = created.timeIntervalSince(previous)
             if delta >= 0 {
                 parens.append("+\(formatDuration(delta))")
@@ -225,12 +285,16 @@ public enum ChatSessionExporter {
             if let tokens = turn.generationTokenCount {
                 parens.append("\(tokens) tok")
             }
-            if let created = turn.createdAt,
-               let completed = turn.completedAt {
-                let dur = completed.timeIntervalSince(created)
-                if dur > 0, let tokens = turn.generationTokenCount, tokens > 0 {
-                    let tps = Double(tokens) / dur
-                    parens.append(String(format: "%.1f tok/s", tps))
+            if let rate = turn.generationTokensPerSecond, rate.isFinite, rate >= 0 {
+                parens.append(String(format: "%.1f tok/s", rate))
+            } else if let created = Optional(turn.createdAt),
+                let completed = turn.completedAt
+            {
+                // Legacy turns have no recorded rate. Keep their existing estimate,
+                // excluding cache finalization when the output boundary is known.
+                let duration = completed.timeIntervalSince(created)
+                if duration > 0, let tokens = turn.generationTokenCount, tokens > 0 {
+                    parens.append(String(format: "%.1f tok/s estimated", Double(tokens) / duration))
                 }
             }
         }
@@ -305,7 +369,9 @@ public enum ChatSessionExporter {
     }
 
     /// PDF body: title bold, meta secondary, tool calls monospace.
-    private static func attributedMarkdown(for session: ChatSessionData, options: ChatExportOptions) -> NSAttributedString {
+    private static func attributedMarkdown(for session: ChatSessionData, options: ChatExportOptions)
+        -> NSAttributedString
+    {
         let body = NSMutableAttributedString()
         let titleFont = NSFont.boldSystemFont(ofSize: 18)
         let metaFont = NSFont.systemFont(ofSize: 10)
@@ -332,10 +398,12 @@ public enum ChatSessionExporter {
         for (idx, turn) in session.turns.enumerated() {
             let role = roleLabel(for: turn, assistantLabel: agentLabel)
             let suffix = timingSuffix(for: turn, options: options, previousAnchor: previousTurnAnchor)
-            body.append(NSAttributedString(
-                string: "\(role) — turn \(idx + 1)\(suffix)\n",
-                attributes: [.font: roleFont]
-            ))
+            body.append(
+                NSAttributedString(
+                    string: "\(role) — turn \(idx + 1)\(suffix)\n",
+                    attributes: [.font: roleFont]
+                )
+            )
             previousTurnAnchor = turn.createdAt ?? previousTurnAnchor
             let trimmed = turn.content.trimmingCharacters(in: .whitespacesAndNewlines)
             if !trimmed.isEmpty {

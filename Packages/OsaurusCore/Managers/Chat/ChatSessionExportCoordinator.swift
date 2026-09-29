@@ -12,6 +12,19 @@ import UniformTypeIdentifiers
 
 @MainActor
 enum ChatSessionExportCoordinator {
+    /// History lists and restored tabs hold metadata with empty turns. Resolve
+    /// availability before the chooser treats those rows as having no metrics.
+    static func hasTimingData(
+        metadataSession: ChatSessionData,
+        // Intel: the chat store keeps full sessions in `ChatSessionsManager`.
+        load: @MainActor (UUID) async -> ChatSessionData? = { id in
+            ChatSessionsManager.shared.session(for: id)
+        }
+    ) async -> Bool {
+        if metadataSession.hasAnyTimingData { return true }
+        return await load(metadataSession.id)?.hasAnyTimingData ?? false
+    }
+
     static func run(
         metadataSession: ChatSessionData,
         format: ChatSessionSidebar.ExportFormat,
@@ -22,10 +35,7 @@ enum ChatSessionExportCoordinator {
         // in-memory manager (freshly created sessions are not flushed yet,
         // and `loadSession` is intermittently returning nil for rows that
         // do exist).
-        guard
-            let full = ChatSessionStore.load(id: metadataSession.id)
-                ?? ChatSessionsManager.shared.session(for: metadataSession.id)
-        else {
+        guard let full = ChatSessionsManager.shared.session(for: metadataSession.id) else {
             presentError(ChatSessionExporter.ExportError.sessionMissing)
             return
         }
@@ -36,37 +46,39 @@ enum ChatSessionExportCoordinator {
         panel.allowedContentTypes = [contentType(for: format)]
         panel.title = panelTitle(format)
 
-        let response = panel.runModal()
-        guard response == .OK, let url = panel.url else { return }
-
-        let progressId = UUID()
-
-        // Only surface the progress alert if the export hasn't finished
-        // within the threshold, so quick markdown writes don't flash a
-        // dialog the user can't read.
-        let progressThreshold: Duration = .seconds(2.5)
-        let displayTask = Task { @MainActor in
-            do {
-                try await Task.sleep(for: progressThreshold)
-            } catch {
-                return  // cancelled before the threshold elapsed
-            }
-            ThemedAlertCenter.shared.present(
-                ThemedAlertRequest(
-                    id: progressId,
-                    title: progressTitle(format),
-                    message: "Working on \"\(full.title)\". This may take a moment for larger chats.",
-                    accessory: AnyView(ExportProgressIndicator()),
-                    buttons: [.cancel("Hide")],
-                    onDismiss: {
-                        ThemedAlertCenter.shared.dismiss(scope: scope, id: progressId)
-                    }
-                ),
-                scope: scope
-            )
-        }
-
         Task { @MainActor in
+            let response = await withCheckedContinuation { continuation in
+                panel.begin { continuation.resume(returning: $0) }
+            }
+            guard response == .OK, let url = panel.url else { return }
+
+            let progressId = UUID()
+
+            // Only surface the progress alert if the export hasn't finished
+            // within the threshold, so quick markdown writes don't flash a
+            // dialog the user can't read.
+            let progressThreshold: Duration = .seconds(2.5)
+            let displayTask = Task { @MainActor in
+                do {
+                    try await Task.sleep(for: progressThreshold)
+                } catch {
+                    return  // cancelled before the threshold elapsed
+                }
+                ThemedAlertCenter.shared.present(
+                    ThemedAlertRequest(
+                        id: progressId,
+                        title: progressTitle(format),
+                        message: "Working on \"\(full.title)\". This may take a moment for larger chats.",
+                        accessory: AnyView(ExportProgressIndicator()),
+                        buttons: [.cancel("Hide")],
+                        onDismiss: {
+                            ThemedAlertCenter.shared.dismiss(scope: scope, id: progressId)
+                        }
+                    ),
+                    scope: scope
+                )
+            }
+
             let result: Result<Void, Error>
             do {
                 switch format {

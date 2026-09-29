@@ -195,10 +195,8 @@ struct ChatContentView: View {
                                 windowState?.refreshSessions()
                             },
                             onExport: { _, _ in
-                                // Export pipeline is amputated on Intel
-                                // (ChatSessionExportCoordinator + ExportChooserSheet
-                                // both live in excluded files). The Export menu
-                                // item is gated to hidden inside the sidebar.
+                                // Rows run export themselves (menu → chooser →
+                                // `ChatSessionExportCoordinator`), as upstream.
                             },
                             onOpenProject: { [weak windowState] projectId in
                                 windowState?.openProjectId = projectId

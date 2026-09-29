@@ -626,3 +626,13 @@ and each self-scheduled wake is another paid run.
 - [ ] Type your own description: the card shows yours. Clear it again: the
       generated purpose returns without a new request. Edit the instructions:
       **(paid)** a new purpose replaces the old one.
+
+## Chat export
+
+- [ ] Right-click a chat in the sidebar (and also its "…" button): **Export…**
+      is back, between Change Project and Archive.
+- [ ] Export as **Markdown**, **PDF** and **Zip**: each opens a save panel;
+      the files open in TextEdit/Preview/Finder and contain the conversation,
+      including tool calls. The zip also carries any attachments.
+- [ ] On the options page, turn on timestamps and token usage: the Markdown
+      shows times and "tok / tok/s" next to replies.

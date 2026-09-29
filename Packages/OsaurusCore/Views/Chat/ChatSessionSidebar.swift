@@ -1054,12 +1054,46 @@ private struct SessionRow: View {
                     }
                 }
                 Divider()
+                Button(action: requestExport) { Text("Export…", bundle: .module) }
+                Divider()
                 Button(action: onToggleArchive) {
                     Text(session.archived ? "Unarchive" : "Archive", bundle: .module)
                 }
                 Button(role: .destructive, action: requestDelete) { Text("Delete", bundle: .module) }
             }
         }
+    }
+
+    // MARK: - Export (upstream; restored on Intel 2026-09-29)
+
+    private func requestExport() {
+        let requestId = UUID()
+        let scope = alertScope
+        let metadata = session
+        let sheet = ExportChooserSheet(session: session) { format, options in
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+            ChatSessionExportCoordinator.run(
+                metadataSession: metadata,
+                format: format,
+                options: options,
+                scope: scope
+            )
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: "Export Conversation",
+                message: nil,
+                buttons: [.cancel(L("Cancel"))],
+                showsCloseButton: true,
+                customContent: AnyView(sheet),
+                width: 420,
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
     }
 
     // MARK: - Actions Popover
@@ -1086,6 +1120,10 @@ private struct SessionRow: View {
                 ) {
                     showingProjectPicker = true
                 }
+            }
+            ActionsPopoverButton(icon: "square.and.arrow.up", label: "Export…", isDestructive: false) {
+                showActionsPopover = false
+                requestExport()
             }
             Divider().padding(.vertical, 2)
             ActionsPopoverButton(

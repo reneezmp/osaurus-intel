@@ -2146,3 +2146,17 @@ calling a sync complete.
   in that `Agent(...)` call or the next save wipes them.
 - Triggers: agent add/update, a clean chat run, and saving Settings (so
   turning the switch on fills existing agents).
+
+### Chat export (`W-chat-export`) — 2026-09-29
+
+- Upstream `ChatSessionExporter`, `ChatSessionExportCoordinator`,
+  `ChatExportOptions` and `ExportChooserSheet` (was an Intel stub) compile on
+  Intel; "Export…" is back in the right-click menu and the "…" popover
+  (1.0.34 had removed it because it could never work).
+- Intel adaptations: sessions load from `ChatSessionsManager.session(for:)`
+  (Intel's JSON history; upstream's `ChatSessionStore` is excluded);
+  `createdAt`/`agentId` are non-optional in Intel's chat data; zip bundles use
+  `/usr/bin/ditto` (Intel's `ZipArchive` only reads); the save panel uses the
+  callback `begin`; per-call tool durations are not recorded on Intel;
+  repeated-call detection uses a local sorted-key JSON canonicalizer until
+  `AgentTaskState` is ported.
