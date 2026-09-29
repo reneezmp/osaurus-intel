@@ -71,7 +71,7 @@ final Intel release is tested as one integrated product.
 | Agent Settings — Connections | Working and tested | Rosy retest on 2026-09-13 confirms Network, Remote Connections, and Agent Channels navigation; immediate and persistent Bonjour state; matching explanatory status; and `_osaurus._tcp` appearance/disappearance on a second device. Relay/workspace sharing, remote grants, and Channels remain accurately dependency-blocked with no dead actions; see `INTEL_AGENT_SETTINGS_BACKLOG.md`. |
 | Agent Settings — Automation | Working and tested | Rosy passed conventional schedule/watcher creation, execution, folder inheritance, persistence, cleanup, and the visible standalone Edit, Run Now, Pause/Resume, and Delete actions with confirmation on build 53. Model-callable Self-scheduling remains a separate unavailable backend, not included in this promotion. |
 | Agent Settings — Memory | Working and tested | DeepSeek distillation, cold routing, empty state, Memory off/on, paid consent, backfill, persistence, scoped cleanup, and the Ventura filters/720×500 inspector passed. Build 54's privacy-safe live shape proved the Qwen failure is a textless `finish_reason=length` at the 1,024-token output cap, not a missing SSE decoder field. The next candidate gives only Router `qwen-3-8-max` a bounded 4,096-token distillation allowance; Rosy acceptance remains pending. Rosy acceptance on public build `1.0.55` (`56`), 2026-09-25, passed the Qwen retest; Memory is accepted. |
-| Agent Settings — Private Database (B4) and History (B5) | Partial | Release 1 of `AGENT_DATABASE_INTEL_PLAN.md` (2026-09-28): encrypted per-agent database, 15 `db_*` tools (raw SQL and migrations ask by default), Database workspace (Overview/Tables/Saved Views/History), run history plus a "Chat & manual edits" entry, and complete delete/reset behaviour. Package gate is 1,222 tests. **Not yet tested on Rosy.** Release 2 (same day): `db_import`/`db_export`/`db_execute path:` for CSV, TSV, JSON, JSONL and **xlsx** from the chat's working folder (symlink-safe), plus Tables Import/Export and drag-and-drop; package gate 1,239 tests. Release 3 (same day): encrypted `.osaurus-agent` bundle export/import with review before activation and symlink-safe unpacking; package gate 1,244 tests. Only self-scheduling (intentionally out of Intel scope) is missing. |
+| Agent Settings — Private Database (B4) and History (B5) | Partial | Release 1 of `AGENT_DATABASE_INTEL_PLAN.md` (2026-09-28): encrypted per-agent database, 15 `db_*` tools (raw SQL and migrations ask by default), Database workspace (Overview/Tables/Saved Views/History), run history plus a "Chat & manual edits" entry, and complete delete/reset behaviour. Package gate is 1,222 tests. **Not yet tested on Rosy.** Release 2 (same day): `db_import`/`db_export`/`db_execute path:` for CSV, TSV, JSON, JSONL and **xlsx** from the chat's working folder (symlink-safe), plus Tables Import/Export and drag-and-drop; package gate 1,239 tests. Release 3 (same day): encrypted `.osaurus-agent` bundle export/import with review before activation and symlink-safe unpacking; package gate 1,244 tests. Only self-scheduling is missing (portable; `W-self-scheduling` in `INTEL_MISSING_FEATURES_BACKLOG.md`). |
 | Agent Settings — Subagents and Sandbox | Dependency-blocked | Native delegation and container execution require Intel-compatible runtime work. Do not call their current explanatory pages implementations. |
 | Insights | Working and tested | Rosy retest on 2026-09-13 confirms ordinary and tool-using chat records, model, duration, request/output, token and completion data, offered/executed tools, useful provider failures, and non-empty list rendering. Newer per-message diagnostics remain deliberately assigned to the later chat-interface revamp. |
 | Ventura native controls | Working and tested | Themes, carets, readable controls, Knowledge forms, and message statistics passed earlier Rosy acceptance. `1.0.46` build `47` removed the Settings white band and passed Rosy acceptance with visible/clickable active and inactive traffic lights. Preserve the deliberate compatibility split: chat installs its replacement strip beside the native close button; Settings installs in the persistent frame root and uses the native button only as its coordinate source. |
@@ -125,11 +125,22 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
 - Upstream Privacy filtering, Browser Use/Computer Use, and rich document
   generation remain absent. Each needs a separate Intel capability and
   authorization design; the upstream audit records their commit slices.
+- **Full sweep 2026-09-29:** every upstream feature Intel lacks is listed,
+  sized and ordered in [`INTEL_MISSING_FEATURES_BACKLOG.md`](INTEL_MISSING_FEATURES_BACKLOG.md)
+  (770 upstream files, all classified). It found features that had been
+  silently missing or mislabeled: the `todo`/`complete`/`clarify` agent-loop
+  tools, Methods, automatic tool discovery, self-scheduling ("out of scope"),
+  `file_copy` ("by design") and Voice ("Apple-Silicon-only" — true only of
+  the FluidAudio engine; Apple Speech works on Intel).
 
 ### Intentionally omitted
 
+(Per the verdict rule, these are **incompatible**, not omitted by choice.)
+
 - MLX/vMLX pins, local model downloads/residency and bundle-specific fixes
-  have no compiled Intel inference path today. Upstream arm64 appcasts and
+  need Apple Silicon (MLX/Metal); a different local runtime for Intel would be
+  a new project, not a port. The Linux VM sandbox needs Apple Containerization
+  (Apple Silicon only); the host Seatbelt shell sandbox is portable. Upstream arm64 appcasts and
   release scripts do not replace the Intel x86_64 release flow. Raptor
   campaign UI and new install-cohort telemetry are not Intel product features.
   This does **not** omit generic fixes contained in mixed commits; their

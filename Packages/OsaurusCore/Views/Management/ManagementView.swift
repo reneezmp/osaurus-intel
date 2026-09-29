@@ -295,7 +295,12 @@ private extension ManagementView {
         // always returns `true` there by definition.
         if !tab.isAvailableOnIntel {
             item.isDisabled = true
-            item.disabledHelp = "Not available on Intel — requires Apple Silicon"
+            // Voice is not hardware-bound (upstream's engine is; Apple Speech
+            // is not), so it says "not yet" instead of "requires Apple Silicon".
+            item.disabledHelp =
+                tab == .voice
+                ? L("Not available on Intel yet")
+                : L("Not available on Intel — requires Apple Silicon")
         }
         return item
     }

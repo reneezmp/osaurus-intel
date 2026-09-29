@@ -149,11 +149,13 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
 
     /// Whether the tab's underlying subsystem is functional on Intel.
     ///
-    /// On the Intel fork, the tabs whose backing stack lives entirely in
-    /// excluded hardware-bound subsystems (MLX local inference, FluidAudio
-    /// voice, Containerization sandbox) stay visibly disabled in the sidebar
-    /// via `SidebarItemData.isDisabled` + a `.help()` tooltip — listed so users
-    /// see what's Apple-Silicon-only, but clicking is a no-op.
+    /// On the Intel fork, the tabs whose upstream backing stack is not
+    /// compiled stay visibly disabled in the sidebar. MLX local inference and
+    /// the Containerization sandbox need Apple Silicon; Voice is disabled only
+    /// because upstream's engine is FluidAudio — an Apple Speech port is on
+    /// the backlog (`W-voice`, docs/INTEL_MISSING_FEATURES_BACKLOG.md). They
+    /// use `SidebarItemData.isDisabled` + a `.help()` tooltip, so users see
+    /// what is not available yet; clicking is a no-op.
     ///
     /// M13 (Group C, Renée 2026-06-03): `.insights` and `.schedules` are now
     /// available. `InsightsService` is Foundation+Combine only; the Schedules

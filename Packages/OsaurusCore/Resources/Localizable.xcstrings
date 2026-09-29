@@ -1370,6 +1370,38 @@
         }
       }
     },
+    "Not available on Intel yet" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf Intel noch nicht verfügbar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Intel 上暂不可用"
+          }
+        }
+      }
+    },
+    "Not available on Intel — requires Apple Silicon" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf Intel nicht verfügbar – erfordert Apple Silicon"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在 Intel 上不可用——需要 Apple 芯片"
+          }
+        }
+      }
+    },
     "Note: this agent uses a cloud model. The table layout is sent with every request, and any rows the agent reads or writes pass through that provider. The database file itself stays encrypted on this Mac." : {
       "localizations" : {
         "de" : {

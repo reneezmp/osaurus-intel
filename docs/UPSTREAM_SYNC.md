@@ -2074,3 +2074,14 @@ under the rule before calling that audit clean:
   no cloud-engine equivalent bug.
 - #103 `61ba32da8` / #128 `f1ad85c42` telemetry — a product/privacy
   decision, not an incompatibility.
+
+### Full missing-features sweep — 2026-09-29
+
+Every upstream feature Intel lacks is now in
+[`INTEL_MISSING_FEATURES_BACKLOG.md`](INTEL_MISSING_FEATURES_BACKLOG.md), with
+the per-file map in
+[`INTEL_MISSING_FEATURES_APPENDIX.md`](INTEL_MISSING_FEATURES_APPENDIX.md).
+Re-run `python3 scripts/upstream/classify_gap.py` after each upstream fetch: it
+lists every upstream source file Intel does not compile and fails on any file
+no feature claims. Add new files to a feature (or a new feature row) before
+calling a sync complete.
