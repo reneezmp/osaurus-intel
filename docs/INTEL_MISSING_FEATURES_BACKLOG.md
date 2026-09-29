@@ -68,7 +68,7 @@ feature had been labelled before this sweep.
 | Id | Feature | Size | Notes |
 |---|---|---|---|
 | `W-chat-tabs` | Browser-style chat tabs, per-tab scroll, live-session registry | M (1.8k) | ROADMAP since 2026-09-08. Unblocks #2910/#2911. |
-| `W-chat-ux` | Cross-block text selection (#2899), `@file` mentions, input history (↑), follow-up suggestions (**decision**: paid, opt-in), compaction marker in the transcript, activity/dispatch rows, recent-folders panel, chat import guide, IME-aware text field (CJK input), Markdown document view, screenshot attach, slash-command registry parity, context attribution | M (7.1k) | Mostly independent small items. Follow-up suggestions call a model automatically upstream: opt-in on Intel. |
+| `W-chat-ux` | Cross-block text selection (#2899), `@file` mentions, input history (↑), follow-up suggestions (on by default like upstream — decision 3f), compaction marker in the transcript, activity/dispatch rows, recent-folders panel, chat import guide, IME-aware text field (CJK input), Markdown document view, screenshot attach, slash-command registry parity, context attribution | M (7.1k) | Mostly independent small items. Follow-up suggestions follow upstream (on by default, switch in Settings). |
 | `W-tool-catalog-ui` | Friendly tool names (`ToolDisplayName`), tool catalog rows, availability badges, advanced diagnostics | M (2.3k) | Intel currently shows raw tool names in places. |
 | `W-file-history` | Per-chat file change history with revert, history/inspector panes | L (8.0k) | #2907 part A. |
 | `W-ui-misc` | Chat layout tour, onboarding design system, theme library management, system accent colour, in-app guide, keep-awake during agent runs, keychain helpers, shared UI components | M (3.2k) | Small pieces; keep-awake during long runs is useful on laptops. |
@@ -104,14 +104,13 @@ feature had been labelled before this sweep.
 | `W-channels` | Slack, Telegram, Discord, WhatsApp, iMessage, n8n, custom JSON channels and the channel runtime | XL (51.9k) | B3 transport, credential isolation, reply assignment, safety gates. |
 | `W-workspaces-identity-mobile` | Workspaces and shared agents, Osaurus ID, pairing/secure channel, relay, Bonjour browsing, phone app, peer inference sharing, invites | XL (24.6k) | B1/B2 identity, pairing and relay; B7 billing; the secp256k1 crash vector (#131) first. |
 
-### 3f. Needs a decision (not a technical block)
+### 3f. Decisions (Renée, 2026-09-29)
 
-| Id | Question for Renée |
+| Topic | Decision |
 |---|---|
-| `W-diagnostics-telemetry` | Crash reporting, feature telemetry and install-cohort metrics are privacy decisions. The **support diagnostics bundle**, termination forensics and console log file are local and useful regardless. |
-| Chat titles (covered) | Intel generates chat titles with a **paid cloud call automatically** (on by default, opt-out). Keep, or make it opt-in like descriptions and follow-ups? |
-| `INC-mlx` | Whether to start a separate local-inference project for Intel (for example llama.cpp). |
-| Follow-up suggestions (`W-chat-ux`) | Opt-in, like descriptions? |
+| Chat titles, follow-up suggestions | **Follow upstream:** both on by default (Settings switches to turn off), even though Intel runs them on the chat's paid cloud model. Titles already behave this way; follow-ups ship on by default with `W-chat-ux`. (Agent description backfill stays opt-in, off by default — a separate decision.) |
+| Crash reporting and telemetry (`W-diagnostics-telemetry`) | **Not ported for now.** Upstream sends analytics to Aptabase and crashes to Sentry with **upstream's own keys** from its build config; an Intel build would either send nothing or send to the upstream team. Worth revisiting only if Renée sets up her own Sentry/Aptabase projects (for example to receive testers' crash reports). The local pieces — support diagnostics bundle, termination forensics, console log file — are still on the backlog. |
+| Local model inference (`INC-mlx`) | Not now. A future Intel local runtime would be closer to Renée's [Rosy-Bit](https://github.com/reneezmp/Rosy-Bit) app than to a port. |
 
 ## 4. Not a user feature
 
