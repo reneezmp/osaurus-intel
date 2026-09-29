@@ -79,6 +79,8 @@ struct ConfigurationView: View {
 
     // Search (passed from sidebar)
     @Binding var searchText: String
+    /// Settings-search landing target (upstream #49); scrolled into view.
+    @Environment(\.settingsLandingPending) private var landingPending
 
     init(searchText: Binding<String> = .constant("")) {
         self._searchText = searchText
@@ -102,7 +104,9 @@ struct ConfigurationView: View {
                     .offset(y: hasAppeared ? 0 : -10)
                     .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
 
-                // Scrollable content area
+                // Scrollable content area. The reader scrolls a settings-search
+                // landing anchor into view (upstream #49).
+                ScrollViewReader { scrollProxy in
                 ScrollView {
                     VStack(alignment: .leading, spacing: 24) {
                         // MARK: - General Section
@@ -616,6 +620,11 @@ struct ConfigurationView: View {
                     .frame(maxWidth: .infinity)
                 }
                 .opacity(hasAppeared ? 1 : 0)
+                .onAppear { scrollToLandingAnchor(landingPending, proxy: scrollProxy, delayed: true) }
+                .onChange(of: landingPending) { id in
+                    scrollToLandingAnchor(id, proxy: scrollProxy, delayed: false)
+                }
+                }
             }
 
             // Success toast overlay
@@ -1110,6 +1119,22 @@ struct ConfigurationView: View {
                 }
             }
         )
+    }
+
+    /// Scroll a search landing anchor into view. On first appearance the tab
+    /// may still be laying out, so give it a beat before scrolling.
+    private func scrollToLandingAnchor(_ id: String?, proxy: ScrollViewProxy, delayed: Bool) {
+        guard let id, id.hasPrefix("settings.") else { return }
+        let scroll = {
+            withAnimation(.easeInOut(duration: 0.35)) {
+                proxy.scrollTo(id, anchor: .center)
+            }
+        }
+        if delayed {
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: scroll)
+        } else {
+            scroll()
+        }
     }
 
     private var coreModelPicker: some View {

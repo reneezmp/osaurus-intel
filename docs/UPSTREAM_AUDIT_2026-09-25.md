@@ -137,7 +137,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 46 | `40be05cb8` | Stage | Claude plugin GitHub import after Intel plugin/skill installer route is restored; CLI integration already works. |
 | 47 | `879a6a6a9` | Omit | Qwen AR vMLX scheduling pin. |
 | 48 | `dec325484` | Stage | Osaurus ID/Workspace refresh depends on Router identity and Workspaces service. |
-| 49 | `53c24678a` | Port | Make Intel Settings searchable/grounded for bounded Orchestrator and Management help; exclude nonexistent routes. |
+| 49 | `53c24678a` | Port | Make Intel Settings searchable/grounded for bounded Orchestrator and Management help; exclude nonexistent routes. **Ported 2026-09-28 (search half):** Intel-written `SettingsSearchIndex` (67 entries grounded in Intel view strings by tests), cross-tab results pane, landing glow and scroll on General. Orchestrator grounding (`osaurus_help` find) remains staged. |
 | 50 | `a609acdb5` | Stage | First-party n8n ingress needs B3 channel store, signed webhook, credential lifecycle, and dispatch. |
 | 51 | `9beb51ef7` | Omit | Upstream 0.25.2 appcast. |
 | 52 | `219640c82` | Port | Repair incomplete chat-history schema/turn persistence in Intel's compiled session store; do not copy upstream SQL migration blindly. **Intel analogue fixed 2026-09-25** (`5bccc4bef`): no SQLite open path on Intel, but queued whole-session metadata writes could overwrite a newer turn; per-session write generations now drop stale snapshots. |

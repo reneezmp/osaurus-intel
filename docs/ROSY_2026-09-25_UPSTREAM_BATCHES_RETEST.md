@@ -382,3 +382,19 @@ Ventura rendering
 - [ ] **(optional, back up `~/.osaurus` first)** Settings → Storage → rotate
       the storage key while the test agent's database is open: rotation
       succeeds, and the Tables tab still reads the data afterwards.
+
+## Settings search (upstream #49)
+
+Added 2026-09-28; needs a candidate built after this commit.
+
+- [ ] Type "spelling" in **Search Settings**: a results page lists **Check
+      Spelling While Typing** under General. Click it: the General page opens,
+      scrolls to that switch, and it glows briefly. The search box clears.
+- [ ] Try "hotkey", "temperature", "recovery phrase", "api key", "toast": each
+      lists sensible results grouped by page, and clicking one opens the right
+      page.
+- [ ] A nonsense word shows "No settings match …".
+- [ ] While results are showing, clicking a page in the sidebar leaves search
+      and shows that page.
+- [ ] Results and glow read well on Ventura (no white-on-white text).
+

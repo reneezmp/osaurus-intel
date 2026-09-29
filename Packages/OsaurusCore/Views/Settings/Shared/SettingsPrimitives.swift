@@ -34,6 +34,9 @@ struct SettingsSection<Content: View>: View {
             }
 
             content()
+                // Controls inside resolve their search-landing anchor from
+                // (section title, own label); see `settingsAutoAnchor`.
+                .environment(\.settingsSectionTitle, title)
         }
         .padding(16)
         .background(
@@ -57,6 +60,10 @@ struct SettingsField<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(label)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(LocalizedStringKey(label), bundle: .module)
                 .font(.system(size: 11, weight: .medium))
@@ -82,6 +89,10 @@ struct SettingsSubsection<Content: View>: View {
     @ViewBuilder let content: () -> Content
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(label)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 12) {
             HStack(spacing: 6) {
                 Rectangle()
@@ -115,6 +126,10 @@ struct StyledSettingsTextField: View {
     @State private var isFocused = false
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(label)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LocalizedStringKey(label), bundle: .module)
                 .font(.system(size: 12, weight: .medium))
@@ -197,6 +212,10 @@ struct SettingsSliderField: View {
     }
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(label)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text(LocalizedStringKey(label), bundle: .module)
                 .font(.system(size: 12, weight: .medium))
@@ -295,6 +314,10 @@ struct SettingsStepperField: View {
     }
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(label)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         VStack(alignment: .leading, spacing: 6) {
             Text(LocalizedStringKey(label), bundle: .module)
                 .font(.system(size: 12, weight: .medium))
@@ -395,6 +418,87 @@ struct SettingsStepperField: View {
     }
 }
 
+// MARK: - Search landing anchors (automatic)
+
+private struct SettingsSectionTitleKey: EnvironmentKey {
+    static let defaultValue: String? = nil
+}
+
+extension EnvironmentValues {
+    /// Title of the enclosing `SettingsSection`, used to resolve search anchors.
+    var settingsSectionTitle: String? {
+        get { self[SettingsSectionTitleKey.self] }
+        set { self[SettingsSectionTitleKey.self] = newValue }
+    }
+}
+
+extension View {
+    /// Anchors a settings control for search landing when the index has an
+    /// entry for (enclosing section, this label). Lets the shared primitives
+    /// anchor themselves instead of every call site repeating ids.
+    func settingsAutoAnchor(_ label: String) -> some View {
+        modifier(SettingsAutoAnchorModifier(label: label))
+    }
+}
+
+private struct SettingsAutoAnchorModifier: ViewModifier {
+    let label: String
+    @Environment(\.settingsSectionTitle) private var section
+
+    func body(content: Content) -> some View {
+        content.settingsLandingAnchor(
+            section.flatMap { SettingsSearchIndex.anchorID(section: $0, label: label) })
+    }
+}
+
+// MARK: - Search Highlight
+
+extension View {
+    /// Wraps a control in a soft accent glow while it's the active search-result
+    /// landing target — no border, just a halo that hugs the control's shape. A
+    /// no-op when `active` is false. Driven by `settingsLandingAnchor`.
+    func settingsSearchHighlight(_ active: Bool) -> some View {
+        modifier(SettingsSearchHighlightModifier(active: active))
+    }
+}
+
+private struct SettingsSearchHighlightModifier: ViewModifier {
+    let active: Bool
+    @ObservedObject private var themeManager = ThemeManager.shared
+
+    /// 0 at rest, eased up to 1 and back to 0 once when the control becomes a
+    /// match, layered over a faint persistent glow.
+    @State private var glow: CGFloat = 0
+
+    private static let breathDuration: Double = 0.9
+
+    private var glowOpacity: Double { active ? 0.22 + 0.5 * Double(glow) : 0 }
+    private var glowRadius: CGFloat { active ? 6 + 14 * glow : 0 }
+
+    func body(content: Content) -> some View {
+        let theme = themeManager.currentTheme
+        content
+            .compositingGroup()
+            .shadow(color: theme.accentColor.opacity(glowOpacity), radius: glowRadius)
+            .animation(.easeOut(duration: 0.25), value: active)
+            .onAppear { if active { firePulse() } }
+            // macOS 13: single-value onChange.
+            .onChange(of: active) { isActive in
+                if isActive { firePulse() } else { glow = 0 }
+            }
+    }
+
+    /// One breath: ease up, then back down. macOS 13 has no animation
+    /// completion handler, so the fall is scheduled after the rise.
+    private func firePulse() {
+        glow = 0
+        withAnimation(.easeInOut(duration: Self.breathDuration)) { glow = 1 }
+        DispatchQueue.main.asyncAfter(deadline: .now() + Self.breathDuration) {
+            withAnimation(.easeInOut(duration: Self.breathDuration)) { glow = 0 }
+        }
+    }
+}
+
 // MARK: - Settings Toggle
 
 struct SettingsToggle: View {
@@ -406,6 +510,10 @@ struct SettingsToggle: View {
     @Binding var isOn: Bool
 
     var body: some View {
+        bodyContent.settingsAutoAnchor(title)
+    }
+
+    @ViewBuilder private var bodyContent: some View {
         HStack {
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {

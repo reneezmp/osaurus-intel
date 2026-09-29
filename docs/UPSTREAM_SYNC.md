@@ -1891,3 +1891,23 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   symlink check disabled, 7 of its 8 tests fail and files appear outside the
   fixture root.
 
+### Settings search (upstream #49) — 2026-09-28
+
+- **The search index is Intel-authored, not ported.** Upstream's 163 entries
+  describe upstream pages (a separate Chat tab, Channels, Workspaces, local
+  models). `Models/Configuration/SettingsSearchIndex.swift` lists only Intel
+  settings. `SettingsSearchIndexTests` fails when a title isn't a string in
+  Intel's views, when a tab is hidden or unavailable, or when a General entry
+  can't resolve its anchor. When a setting is renamed or moved, update the
+  index in the same change.
+- **Anchors are automatic.** `SettingsSection` publishes its title through the
+  environment; `SettingsField`/`Subsection`/`Toggle`/`StepperField`/
+  `SliderField`/`StyledSettingsTextField` look up (section, label) in the
+  index (`anchorLabel` when the host control's label differs from the entry
+  title). New General-page settings built from these primitives only need an
+  index entry.
+- The glow (`settingsSearchHighlight`) was down-levelled for macOS 13 (no
+  animation completion handler, single-value `onChange`).
+- Still staged from #49: Orchestrator grounding via an `osaurus_help`-style
+  settings finder.
+

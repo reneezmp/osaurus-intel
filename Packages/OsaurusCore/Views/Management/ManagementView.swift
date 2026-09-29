@@ -35,6 +35,7 @@ struct ManagementView: View {
 
     @State private var hasAppeared = false
     @State private var searchText = ""
+    @ObservedObject private var highlightCoordinator = SettingsHighlightCoordinator.shared
 
     /// Captured at sheet-presentation time so the sheet body keeps a stable
     /// reference even after the coordinator clears `pendingInvite` on dismiss.
@@ -144,10 +145,39 @@ private extension ManagementView {
             searchText: $searchText,
             sections: sidebarSections
         ) { tabId in
-            contentView(for: tabId)
-                .opacity(hasAppeared ? 1 : 0)
+            Group {
+                // A live query takes over the content pane with cross-tab
+                // results (upstream #49); selecting one navigates to its tab
+                // and clears the query.
+                if isSearching {
+                    SettingsSearchResultsView(query: searchText) { entry in
+                        handleResultSelected(entry)
+                    }
+                } else {
+                    contentView(for: tabId)
+                }
+            }
+            .opacity(hasAppeared ? 1 : 0)
+            // Propagate the pending landing anchor so the matched control glows.
+            .environment(\.settingsLandingPending, highlightCoordinator.pending)
         } footer: {
             updateButton
+        }
+    }
+
+    var isSearching: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    func handleResultSelected(_ entry: SettingsSearchEntry) {
+        searchText = ""
+        withAnimation(.easeOut(duration: 0.2)) {
+            stateManager.selectedTab = entry.tab
+        }
+        guard !entry.isTabLevel else { return }
+        // Let the destination tab render before it looks for the anchor.
+        DispatchQueue.main.async {
+            highlightCoordinator.request(entry.id)
         }
     }
 
@@ -296,19 +326,17 @@ private extension ManagementView {
     }
 
     func handleTabChange(to newTab: ManagementTab) {
-        // Clear search when navigating away from settings
-        if newTab != .settings && !searchText.isEmpty {
+        // Picking a tab (from the sidebar or a search result) ends the search.
+        _ = newTab
+        if !searchText.isEmpty {
             searchText = ""
         }
     }
 
     func handleSearchChange(to newValue: String) {
-        // Auto-navigate to settings when searching
-        if !newValue.isEmpty && stateManager.selectedTab != .settings {
-            withAnimation(.easeOut(duration: 0.2)) {
-                stateManager.selectedTab = .settings
-            }
-        }
+        // Cross-tab results replace the content pane while searching, so no
+        // tab switch is needed (upstream #49 replaced the old jump to General).
+        _ = newValue
     }
 }
 

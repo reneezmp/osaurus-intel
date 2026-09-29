@@ -70,6 +70,22 @@
         }
       }
     },
+    "Add custom provider" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eigenen Anbieter hinzufügen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加自定义提供商"
+          }
+        }
+      }
+    },
     "Adding a provider switches to the Providers tab and closes this window. Create the agent first to keep what you entered." : {
       "localizations" : {
         "de" : {
@@ -118,6 +134,22 @@
         }
       }
     },
+    "Approvals for folder file, shell and git tools, not macOS permissions." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Freigaben für Datei-, Shell- und Git-Werkzeuge im Ordner, nicht macOS-Berechtigungen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件夹中文件、Shell 和 Git 工具的审批，而非 macOS 权限。"
+          }
+        }
+      }
+    },
     "Arrives with: %@." : {
       "localizations" : {
         "de" : {
@@ -146,6 +178,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天中让智能体记住一些内容——它会创建所需的表，你可以在这里浏览。"
+          }
+        }
+      }
+    },
+    "Automatically name chats" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats automatisch benennen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动命名聊天"
           }
         }
       }
@@ -244,6 +292,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude Code 可以写入文件"
+          }
+        }
+      }
+    },
+    "Cloud Models" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Cloud-Modelle"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "云端模型"
           }
         }
       }
@@ -394,6 +458,38 @@
         }
       }
     },
+    "Declarative Configuration" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deklarative Konfiguration"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "声明式配置"
+          }
+        }
+      }
+    },
+    "Delegation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Delegierung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "委派"
+          }
+        }
+      }
+    },
     "Delete Database" : {
       "localizations" : {
         "de" : {
@@ -438,6 +534,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "放弃并添加提供商"
+          }
+        }
+      }
+    },
+    "Distillation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Destillation"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "提炼"
+          }
+        }
+      }
+    },
+    "Embeddings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Embeddings"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "嵌入"
           }
         }
       }
@@ -606,6 +734,22 @@
         }
       }
     },
+    "Knowledge" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wissen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "知识"
+          }
+        }
+      }
+    },
     "Leave without creating this agent?" : {
       "localizations" : {
         "de" : {
@@ -630,6 +774,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不创建此智能体就离开吗？"
+          }
+        }
+      }
+    },
+    "macOS system permissions for Osaurus." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS-Systemberechtigungen für Osaurus."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 的 macOS 系统权限。"
+          }
+        }
+      }
+    },
+    "Max Iterations" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Max. Iterationen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "最大迭代次数"
           }
         }
       }
@@ -814,6 +990,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "粘贴您想要切换到的身份的 24 个单词恢复短语。这将替换此 Mac 上当前的身份。"
+          }
+        }
+      }
+    },
+    "Premium web search" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Premium-Websuche"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高级网页搜索"
           }
         }
       }
@@ -1028,6 +1220,22 @@
         }
       }
     },
+    "The chat default; agents can override it, and Work has its own." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Standard für Chats; Agenten können ihn überschreiben, und „Arbeit“ hat einen eigenen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天的默认值；智能体可以覆盖它，“工作”也有自己的设置。"
+          }
+        }
+      }
+    },
     "The controls changed after you edited this JSON. Apply JSON will overwrite those control changes, and Refresh will discard your JSON edits." : {
       "localizations" : {
         "de" : {
@@ -1140,6 +1348,22 @@
         }
       }
     },
+    "Try a different term, like “hotkey” or “spelling”." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Versuche einen anderen Begriff, etwa „Tastenkürzel“ oder „Rechtschreibung“."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "试试其他词，例如“快捷键”或“拼写”。"
+          }
+        }
+      }
+    },
     "Turn off Follow System Accent to choose a custom accent color." : {
       "localizations" : {
         "de" : {
@@ -1180,6 +1404,22 @@
         }
       }
     },
+    "Turns memory on or off for chats; the Memory tab has the details." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schaltet das Gedächtnis für Chats ein oder aus; Details findest du im Tab „Gedächtnis“."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为聊天开启或关闭记忆；详细设置在“记忆”标签页中。"
+          }
+        }
+      }
+    },
     "Typing" : {
       "localizations" : {
         "de" : {
@@ -1208,6 +1448,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键时提供建议。文本永远不会被自动更正。"
+          }
+        }
+      }
+    },
+    "Web Search" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Websuche"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "网页搜索"
           }
         }
       }
@@ -2904,6 +3160,46 @@
         }
       }
     },
+    "%lld settings match \"%@\"" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$lld settings match \"%2$@\""
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "%1$lld settings match \"%2$@\""
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%1$lld settings match \"%2$@\""
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Настройки %1$lld соответствуют «%2$@»"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个设置匹配“%@”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個設置匹配\"%@\""
+          }
+        }
+      }
+    },
     "%lld skill%@" : {
       "localizations" : {
         "de" : {
@@ -3722,6 +4018,22 @@
       },
       "shouldTranslate" : false
     },
+    "⌘+N Starts a New Chat in the Current Window" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⌘+N startet einen neuen Chat im aktuellen Fenster"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "⌘+N 在当前窗口中开始新聊天"
+          }
+        }
+      }
+    },
     "⏎" : {
       "localizations" : {
         "de" : {
@@ -3844,6 +4156,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 小时"
+          }
+        }
+      }
+    },
+    "1 setting matches \"%@\"" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 setting matches \"%@\""
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 setting matches \"%@\""
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 setting matches \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个设置匹配 “%@”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 個設定匹配 \"%@\""
           }
         }
       }
@@ -34470,6 +34816,40 @@
         }
       }
     },
+    "No settings match \"%@\"" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No settings match \"%@\""
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No settings match \"%@\""
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Нет настроек, соответствующих \"%@\""
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有设置匹配“%@”"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "沒有設置匹配「%@」"
+          }
+        }
+      }
+    },
     "No skills here" : {
       "localizations" : {
         "de" : {
@@ -49248,6 +49628,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索提供方"
+          }
+        }
+      }
+    },
+    "Search Results" : {
+      "comment" : "Title for the section of the Themes view that displays search results.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Search Results"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "검색 결과"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Результаты поиска"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索结果"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索結果"
           }
         }
       }
