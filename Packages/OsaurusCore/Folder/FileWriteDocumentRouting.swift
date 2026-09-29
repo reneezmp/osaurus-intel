@@ -2,40 +2,319 @@
 //  FileWriteDocumentRouting.swift
 //  osaurus
 //
-//  Intel: the workbook-building half of upstream's FileWriteDocumentRouting,
-//  used by `db_export` for `.xlsx`. The rest of the upstream file (the
-//  file_write route that renders .xlsx/.docx/.pdf/.pptx from content) needs
-//  WorkbookWorkflowService, the rich-text renderers and PPTXEmitter, which
-//  arrive with the rich folder formats port (#91). Replace this file with
-//  upstream's whole file at that point.
+//  `file_write` document generation by extension: `.xlsx` from CSV/TSV
+//  text or JSON rows, `.docx` / `.pdf` from Markdown or HTML, `.pptx` from
+//  Markdown (one slide per heading). Builds the
+//  `StructuredDocument`, runs it through the registered emitters, and
+//  reports the shape the tool envelope needs (format, counts, bytes).
+//  Sandbox containment and the envelope itself stay in `FileWriteTool`.
 //
 
+import CoreGraphics
 import Foundation
 
 enum FileWriteDocumentRouting {
+    enum Target: String, Sendable {
+        case xlsx
+        case docx
+        case pdf
+        case pptx
+
+        var formatId: String { rawValue }
+
+        var contentHint: String {
+            switch self {
+            case .xlsx:
+                return
+                    "CSV or TSV text (one sheet; delimiter sniffed) or JSON `{\"sheets\":[{\"name\":\"Q1\",\"rows\":[[\"Region\",\"Revenue\"],[\"West\",1200]]}]}`"
+            case .docx, .pdf:
+                return "Markdown (headings, lists, tables, code) or HTML"
+            case .pptx:
+                return "Markdown: each `#`/`##` heading starts a slide (its title); lines below are the slide's bullets"
+            }
+        }
+    }
+
     enum RoutingError: LocalizedError {
+        case emptyContent
+        case invalidJSON(String)
         case noRows
         case tooManySheets(Int, max: Int)
         case tooManyRows(Int, max: Int)
         case tooManyColumns(Int, max: Int)
+        case validation([WorkbookValidationIssue])
+        case renderFailed(String)
+        case missingEmitter(String)
 
         var errorDescription: String? {
             switch self {
+            case .emptyContent:
+                return "`content` is empty; provide the document body."
+            case .invalidJSON(let reason):
+                return "`content` looks like JSON but is not a valid workbook description (\(reason)). "
+                    + "Expected {\"sheets\":[{\"name\":..., \"rows\":[[...]]}]} or a JSON array of rows."
             case .noRows:
-                return "The workbook has no rows."
+                return "No rows were found in `content`; provide CSV/TSV text or JSON rows."
             case .tooManySheets(let count, let max):
-                return "The workbook has \(count) sheets; the limit is \(max)."
+                return "\(count) sheets exceed the \(max)-sheet limit."
             case .tooManyRows(let count, let max):
-                return "A sheet has \(count) rows; the limit is \(max)."
+                return "\(count) rows exceed the \(max)-row limit for one sheet; split the data or write CSV instead."
             case .tooManyColumns(let count, let max):
-                return "A row has \(count) columns; the limit is \(max)."
+                return "\(count) columns exceed the \(max)-column limit."
+            case .validation(let issues):
+                return "Workbook validation failed: " + issues.map(\.message).joined(separator: "; ")
+            case .renderFailed(let reason):
+                return reason
+            case .missingEmitter(let format):
+                return "No \(format) writer is registered."
             }
         }
+    }
+
+    static func target(forExtension ext: String) -> Target? {
+        // Intel: no PowerPoint writer yet (see the `.pptx` plan branch), so
+        // `.pptx` is not a write target; file_write refuses it with a pivot.
+        guard let target = Target(rawValue: ext.lowercased()), target != .pptx else { return nil }
+        return target
+    }
+
+    // MARK: - Plan (shared by dry run and write)
+
+    struct Plan {
+        let target: Target
+        let document: StructuredDocument
+        /// Payload fields describing the document (`sheets`, `rows`,
+        /// `estimated_pages`, `syntax`, ...).
+        var summary: [String: Any]
+    }
+
+    static func plan(target: Target, content: String, filename: String) throws -> Plan {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw RoutingError.emptyContent }
+        switch target {
+        case .xlsx:
+            let workbook = try buildWorkbook(from: content)
+            let sheetSummaries = workbook.sheets.map { sheet -> [String: Any] in
+                [
+                    "name": sheet.name,
+                    "rows": sheet.rows.count,
+                    "columns": sheet.rows.map { $0.cells.count }.max() ?? 0,
+                ]
+            }
+            let document = StructuredDocument(
+                formatId: "xlsx",
+                filename: filename,
+                fileSize: 0,
+                representation: AnyStructuredRepresentation(formatId: "xlsx", underlying: workbook),
+                security: .notInspected(formatId: "xlsx", fileExtension: "xlsx", sourceTrust: .generatedArtifact),
+                textFallback: ""
+            )
+            let issues = WorkbookWorkflowService.validationIssues(for: workbook)
+            let blocking = issues.filter { $0.severity == .error }
+            if !blocking.isEmpty { throw RoutingError.validation(blocking) }
+            return Plan(
+                target: target,
+                document: document,
+                summary: [
+                    "sheets": workbook.sheets.count,
+                    "rows": workbook.sheets.reduce(0) { $0 + $1.rows.count },
+                    "sheet_summaries": sheetSummaries,
+                    "input": detectedWorkbookInput(content).rawValue,
+                ]
+            )
+        case .docx, .pdf:
+            let syntax = MarkdownRichTextRenderer.sniffSyntax(content)
+            let source = RichTextSourceDocument(
+                markup: content,
+                syntax: syntax == .html ? .html : .markdown,
+                title: URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+            )
+            let document = StructuredDocument(
+                formatId: target.formatId,
+                filename: filename,
+                fileSize: 0,
+                representation: AnyStructuredRepresentation(formatId: target.formatId, underlying: source),
+                security: .notInspected(
+                    formatId: target.formatId,
+                    fileExtension: target.rawValue,
+                    sourceTrust: .generatedArtifact
+                ),
+                textFallback: content
+            )
+            var summary: [String: Any] = [
+                "input": syntax.rawValue,
+                "characters": content.count,
+            ]
+            if target == .pdf {
+                summary["estimated_pages"] = max(1, Int((Double(content.count) / 3_000).rounded(.up)))
+            }
+            return Plan(target: target, document: document, summary: summary)
+        case .pptx:
+            let title = URL(fileURLWithPath: filename).deletingPathExtension().lastPathComponent
+            let source = RichTextSourceDocument(markup: content, syntax: .markdown, title: title)
+            let document = StructuredDocument(
+                formatId: "pptx",
+                filename: filename,
+                fileSize: 0,
+                representation: AnyStructuredRepresentation(formatId: "pptx", underlying: source),
+                security: .notInspected(formatId: "pptx", fileExtension: "pptx", sourceTrust: .generatedArtifact),
+                textFallback: content
+            )
+            // Intel: PowerPoint output needs upstream's OOXML writer stack
+            // (PPTXEmitter/OOXMLText/ZipArchiveWriter), which arrived after
+            // #91. `target(forExtension:)` never returns `.pptx`, so this is
+            // unreachable until that stack is ported.
+            _ = document
+            throw RoutingError.missingEmitter("pptx")
+        }
+    }
+
+    // MARK: - Write
+
+    struct Written {
+        let bytesWritten: Int64
+        var extra: [String: Any] = [:]
+    }
+
+    static func write(
+        _ plan: Plan,
+        to url: URL,
+        registry: DocumentFormatRegistry = .shared
+    ) async throws -> Written {
+        DocumentAdaptersBootstrap.registerBuiltIns(registry: registry)
+        try FileManager.default.createDirectory(
+            at: url.deletingLastPathComponent(),
+            withIntermediateDirectories: true
+        )
+        switch plan.target {
+        case .xlsx:
+            let result = try await WorkbookWorkflowService.export(plan.document, to: url, registry: registry)
+            return Written(bytesWritten: result.bytesWritten)
+        case .docx, .pdf, .pptx:
+            guard let emitter = registry.emitter(for: plan.document) else {
+                throw RoutingError.missingEmitter(plan.target.rawValue)
+            }
+            do {
+                try await emitter.emit(plan.document, to: url)
+            } catch let error as DocumentAdapterError {
+                throw RoutingError.renderFailed(error.localizedDescription)
+            }
+            let size = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
+            var extra: [String: Any] = [:]
+            if plan.target == .pdf, let pages = pdfPageCount(at: url) {
+                extra["pages"] = pages
+            }
+            return Written(bytesWritten: size, extra: extra)
+        }
+    }
+
+    private static func pdfPageCount(at url: URL) -> Int? {
+        guard let provider = CGDataProvider(url: url as CFURL),
+            let document = CGPDFDocument(provider)
+        else { return nil }
+        return document.numberOfPages
+    }
+
+    // MARK: - Workbook building
+
+    enum WorkbookInput: String {
+        case csv
+        case tsv
+        case json
     }
 
     static let maxSheets = 20
     static let maxRowsPerSheet = 100_000
     static let maxColumns = 1_024
+
+    static func detectedWorkbookInput(_ content: String) -> WorkbookInput {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.hasPrefix("{") || trimmed.hasPrefix("[") { return .json }
+        // Delimiter sniff on the first non-empty line: tabs win when present.
+        let firstLine = trimmed.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        return firstLine.contains("\t") ? .tsv : .csv
+    }
+
+    static func buildWorkbook(from content: String) throws -> Workbook {
+        switch detectedWorkbookInput(content) {
+        case .json:
+            return try workbook(fromJSON: content)
+        case .csv:
+            return try workbook(fromDelimited: content, delimiter: .comma)
+        case .tsv:
+            return try workbook(fromDelimited: content, delimiter: .tab)
+        }
+    }
+
+    private static func workbook(fromDelimited text: String, delimiter: CSVDelimiter) throws -> Workbook {
+        let parsed = CSVRowParser.parseRows(source: text, delimiter: delimiter)
+        let rows: [[Any]] = parsed.map { row in
+            row.cells.map { $0.wasQuoted ? ($0.text as Any) : (typed($0.text) as Any) }
+        }
+        // Drop a trailing empty row produced by a final newline.
+        let trimmedRows = trimTrailingEmptyRows(rows)
+        guard !trimmedRows.isEmpty else { throw RoutingError.noRows }
+        return try workbook(sheets: [("Sheet1", trimmedRows)])
+    }
+
+    private static func workbook(fromJSON text: String) throws -> Workbook {
+        guard let data = text.data(using: .utf8) else { throw RoutingError.invalidJSON("not UTF-8") }
+        let object: Any
+        do {
+            object = try JSONSerialization.jsonObject(with: data)
+        } catch {
+            throw RoutingError.invalidJSON(error.localizedDescription)
+        }
+        var sheets: [(String, [[Any]])] = []
+        if let dict = object as? [String: Any] {
+            if let sheetList = dict["sheets"] as? [[String: Any]] {
+                for (index, sheet) in sheetList.enumerated() {
+                    let name = (sheet["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Sheet\(index + 1)"
+                    guard let rows = rowsFromJSON(sheet["rows"]) else {
+                        throw RoutingError.invalidJSON("sheet \(index + 1) has no `rows` array (of arrays, or of objects)")
+                    }
+                    sheets.append((name, rows))
+                }
+            } else if let rows = rowsFromJSON(dict["rows"]) {
+                let name = (dict["name"] as? String).flatMap { $0.isEmpty ? nil : $0 } ?? "Sheet1"
+                sheets.append((name, rows))
+            } else {
+                throw RoutingError.invalidJSON("top-level object needs `sheets` or `rows`")
+            }
+        } else if let rows = rowsFromJSON(object) {
+            sheets.append(("Sheet1", rows))
+        } else {
+            throw RoutingError.invalidJSON(
+                "expected an object with `sheets`/`rows`, an array of rows, or an array of objects"
+            )
+        }
+        return try workbook(sheets: sheets)
+    }
+
+    /// Rows from a JSON value at any level (`sheets[].rows`, top-level
+    /// `rows`, or the bare top-level array): an array of arrays as-is, or an
+    /// array of objects (records) turned into a header row from the union of
+    /// keys plus one row per record. Models write `{"Item": "Rent",
+    /// "Amount": 1200}` records as naturally as positional rows (Raptor
+    /// no-think `write-xlsx-by-extension` did, and got an error for it);
+    /// both shapes describe the same sheet. A record whose values repeat its
+    /// keys (`{"Item": "Item", "Amount": "Amount"}` — a header spelled as a
+    /// record) is dropped so the header isn't written twice.
+    static func rowsFromJSON(_ value: Any?) -> [[Any]]? {
+        if let rows = value as? [[Any]] { return rows }
+        guard let records = value as? [[String: Any]], !records.isEmpty else { return nil }
+        var headers: [String] = []
+        for record in records {
+            for key in record.keys.sorted() where !headers.contains(key) { headers.append(key) }
+        }
+        var rows: [[Any]] = [headers]
+        for record in records {
+            let isHeaderEcho = record.allSatisfy { key, value in (value as? String) == key }
+            if isHeaderEcho { continue }
+            rows.append(headers.map { record[$0] ?? "" })
+        }
+        return rows
+    }
 
     /// Build a typed `Workbook` from raw rows (`String` / numeric / `Bool` /
     /// `nil` cells) — shared by the `.xlsx` write route and `db_export`.

@@ -23,12 +23,22 @@ public enum FileOperationType: String, Codable, Sendable {
 // MARK: - File Operation
 
 /// A recorded file operation that can be undone.
+/// How `FileOperation.previousContent` is stored (upstream #91). `utf8` is
+/// the plain text body (historical default); `base64` carries arbitrary
+/// bytes so an overwritten binary document restores exactly on undo.
+public enum FileOperationContentEncoding: String, Codable, Sendable {
+    case utf8
+    case base64
+}
+
 public struct FileOperation: Codable, Sendable, Identifiable {
     public let id: UUID
     public let type: FileOperationType
     public let path: String  // Relative path from root
     public let destinationPath: String?  // For move/copy operations
     public let previousContent: String?  // For write/delete (to restore)
+    /// Encoding of `previousContent`; absent (older entries) means `.utf8`.
+    public let previousContentEncoding: FileOperationContentEncoding?
     public let timestamp: Date
     /// Owning chat session id (used to scope undo per conversation).
     public let sessionId: String
@@ -40,6 +50,7 @@ public struct FileOperation: Codable, Sendable, Identifiable {
         path: String,
         destinationPath: String? = nil,
         previousContent: String? = nil,
+        previousContentEncoding: FileOperationContentEncoding? = nil,
         timestamp: Date = Date(),
         sessionId: String,
         batchId: UUID? = nil
@@ -49,6 +60,7 @@ public struct FileOperation: Codable, Sendable, Identifiable {
         self.path = path
         self.destinationPath = destinationPath
         self.previousContent = previousContent
+        self.previousContentEncoding = previousContentEncoding
         self.timestamp = timestamp
         self.sessionId = sessionId
         self.batchId = batchId
@@ -86,6 +98,25 @@ extension FileOperationType {
 }
 
 extension FileOperation {
+    /// `previousContent` fields for arbitrary bytes: UTF-8 text stays
+    /// readable in history; anything else is base64.
+    public static func encodePreviousContent(_ data: Data?) -> (
+        content: String?, encoding: FileOperationContentEncoding?
+    ) {
+        guard let data else { return (nil, nil) }
+        if let text = String(data: data, encoding: .utf8) { return (text, .utf8) }
+        return (data.base64EncodedString(), .base64)
+    }
+
+    /// Bytes to restore on undo, honouring the stored encoding.
+    public var previousContentData: Data? {
+        guard let previousContent else { return nil }
+        switch previousContentEncoding ?? .utf8 {
+        case .utf8: return previousContent.data(using: .utf8)
+        case .base64: return Data(base64Encoded: previousContent)
+        }
+    }
+
     /// Display filename (last path component)
     public var filename: String {
         (path as NSString).lastPathComponent

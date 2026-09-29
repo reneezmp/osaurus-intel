@@ -38,12 +38,17 @@ enum FolderToolError: LocalizedError {
         /// `DocumentParser` threw `.readFailed` / `.unsupportedFormat` /
         /// `.fileTooLarge`.
         case parseFailed
+        /// An image with no legible text (OCR found nothing).
+        case imageWithoutText
 
         var pivotHint: String? {
             switch self {
             case .imageOnlyPdf:
                 return
-                    "The PDF has no extractable text layer (likely scanned images); use an OCR tool via shell_run."
+                    "The PDF has no text layer and on-device text recognition found no legible text in it."
+            case .imageWithoutText:
+                return
+                    "The image has no legible text. This chat's models can't see images, so describe what you need from it or ask the user."
             case .parseFailed:
                 return
                     "The document couldn't be parsed — it may be encrypted, password-protected, or malformed."
@@ -414,9 +419,12 @@ struct FileTreeTool: OsaurusTool {
 struct FileReadTool: OsaurusTool {
     let name = "file_read"
     let description =
-        "Read the contents of a text file. **Use this instead of `cat` / `head` / `tail` in "
-        + "`shell_run`.** Cannot read binary files (PDFs, images, etc.). Optionally specify start_line "
-        + "and end_line for partial reads. Line numbers are 1-indexed."
+        "Read a file from the working folder: "
+        + WorkspaceFileFormatPolicy.readableFormatsSummary
+        + ". Documents come back as extracted text; images and scanned PDFs as text recognized "
+        + "on this Mac (OCR). **Use this instead of `cat` / `head` / `tail` or pandoc/pdftotext in "
+        + "`shell_run`.** Optionally specify start_line and end_line for partial reads. Line numbers "
+        + "are 1-indexed."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -483,6 +491,20 @@ struct FileReadTool: OsaurusTool {
         }
 
         let ext = fileURL.pathExtension.lowercased()
+        // Upstream #91: recognised document formats without a built-in
+        // reader get an honest message naming the sibling format that works.
+        if case .unsupportedDocument(let family) = WorkspaceFileFormatPolicy.readSupport(for: ext) {
+            let alternative = family.supportedAlternative.map { " Save it as \($0) and read that instead." } ?? ""
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "`\(relativePath)` is a \(family.label) format file_read can't open. It reads "
+                    + WorkspaceFileFormatPolicy.readableFormatsSummary + "." + alternative,
+                field: "path",
+                tool: name,
+                retryable: false
+            )
+        }
         let content = try await loadFileContent(
             url: fileURL,
             relativePath: relativePath,
@@ -562,6 +584,16 @@ struct FileReadTool: OsaurusTool {
                 ext: ext
             )
         }
+        switch WorkspaceFileFormatPolicy.readSupport(for: ext) {
+        case .workbook, .extractedText:
+            // PowerPoint / Excel (upstream #91) through the registered
+            // document adapters.
+            return try await extractWithDocumentAdapter(url: url, relativePath: relativePath, ext: ext)
+        case .image:
+            return try await recognizeImageText(url: url, relativePath: relativePath, ext: ext)
+        case .rawText, .unsupportedDocument:
+            break
+        }
 
         let data = try Data(contentsOf: url)
         if data.prefix(Self.binarySniffBytes).contains(0) {
@@ -601,10 +633,49 @@ struct FileReadTool: OsaurusTool {
         if case .document(_, let text, _) = attachment.kind {
             return text
         }
-        // Image-only PDF (DocumentParser falls back to per-page image
-        // attachments). We can't surface those through file_read — emit
-        // the binary envelope so the model pivots instead of retrying.
+        // Image-only (scanned) PDF: DocumentParser falls back to page
+        // images. Recognize their text on-device (upstream #91); only when
+        // nothing is legible does the model get the image-only-PDF error.
+        if ext == "pdf", let ocr = await FileReadImageSupport.ocrImageOnlyPDF(url: url) {
+            let scope =
+                ocr.pagesScanned < ocr.totalPages
+                ? "pages 1–\(ocr.pagesScanned) of \(ocr.totalPages)" : "\(ocr.totalPages) pages"
+            return "(Scanned PDF — text recognized by OCR, \(scope).)\n" + ocr.text
+        }
         throw binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
+    }
+
+    /// PowerPoint / Excel text via `DocumentFormatRegistry` (upstream #91).
+    private func extractWithDocumentAdapter(url: URL, relativePath: String, ext: String) async throws -> String {
+        DocumentAdaptersBootstrap.registerBuiltIns()
+        guard let adapter = DocumentFormatRegistry.shared.adapter(for: url) else {
+            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+        }
+        do {
+            let document = try await adapter.parse(url: url, sizeLimit: Int64(FileReadImageSupport.maxSourceBytes))
+            return document.textFallback
+        } catch DocumentAdapterError.emptyContent {
+            return ""
+        } catch {
+            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+        }
+    }
+
+    /// Images: Intel chat is text-only, so recognize the image's text with
+    /// the Vision framework (upstream #91's text-only-model path). A blank
+    /// image is refused honestly rather than returned as empty.
+    private func recognizeImageText(url: URL, relativePath: String, ext: String) async throws -> String {
+        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
+        guard size <= FileReadImageSupport.maxSourceBytes, let data = try? Data(contentsOf: url) else {
+            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+        }
+        let lines = await FileReadImageSupport.recognizeTextLines(in: data)
+            .filter { $0.contains(where: { !$0.isWhitespace }) }
+        guard !lines.isEmpty else {
+            throw binaryError(path: relativePath, ext: ext, detail: .imageWithoutText)
+        }
+        return "(Image — text recognized by OCR; layout and graphics are not described.)\n"
+            + lines.joined(separator: "\n")
     }
 
     /// Construct a `binaryContent` error, normalising an empty extension
@@ -627,9 +698,13 @@ struct FileReadTool: OsaurusTool {
 struct FileWriteTool: OsaurusTool, PermissionedTool {
     let name = "file_write"
     let description =
-        "Create a new file or overwrite an existing file with the provided content. **Use this "
-        + "instead of `echo` / `cat` heredoc in `shell_run`.** Parent directories will be created "
-        + "if they don't exist. You MUST provide the file contents in the `content` parameter."
+        "Create a new file or overwrite an existing file with the provided content: "
+        + WorkspaceFileFormatPolicy.writableFormatsSummary
+        + ". The extension picks the format; document generation is built in, so never shell out to "
+        + "pandoc or Python for it. **Use this instead of `echo` / `cat` heredoc in `shell_run`.** "
+        + "Parent directories will be created if they don't exist. You MUST provide the file "
+        + "contents in the `content` parameter. Pass `dry_run: true` to preview a document without "
+        + "writing it."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -641,8 +716,12 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
             "content": .object([
                 "type": .string("string"),
                 "description": .string(
-                    "Content to write to the file"
+                    "Content to write. For .docx/.pdf: Markdown or HTML. For .xlsx: CSV/TSV text or JSON rows."
                 ),
+            ]),
+            "dry_run": .object([
+                "type": .string("boolean"),
+                "description": .string("Preview a document target (.docx/.pdf/.xlsx) without writing it."),
             ]),
         ]),
         "required": .array([.string("path"), .string("content")]),
@@ -685,10 +764,56 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
         }
 
         let fileURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
+        let ext = fileURL.pathExtension.lowercased()
+        let dryRun = (args["dry_run"] as? Bool) ?? false
 
-        // Capture previous state for undo
+        // Upstream #91: document targets render through the built-in
+        // emitters; recognised document formats we can't produce are
+        // refused instead of getting Markdown bytes under a binary extension.
+        let documentTarget = FileWriteDocumentRouting.target(forExtension: ext)
+        if documentTarget == nil, WorkspaceFileFormatPolicy.prefersDocumentExtraction(ext) || ext == "pptx" {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "file_write can't produce .\(ext) files. It writes "
+                    + WorkspaceFileFormatPolicy.writableFormatsSummary
+                    + ". Pick one of those extensions (for slides, write a .docx or .pdf outline).",
+                field: "path",
+                tool: name,
+                retryable: false
+            )
+        }
+        var documentPlan: FileWriteDocumentRouting.Plan?
+        if let documentTarget {
+            do {
+                documentPlan = try FileWriteDocumentRouting.plan(
+                    target: documentTarget, content: content, filename: fileURL.lastPathComponent)
+            } catch {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message:
+                        "Couldn't build the .\(ext) document: \(error.localizedDescription). "
+                        + "Expected content: \(documentTarget.contentHint).",
+                    field: "content",
+                    tool: name,
+                    retryable: true
+                )
+            }
+            if dryRun, let plan = documentPlan {
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: [
+                        "dry_run": true, "path": relativePath, "format": documentTarget.rawValue,
+                        "summary": plan.summary,
+                    ])
+            }
+        }
+
+        // Capture previous state for undo (binary-safe, upstream #91): a
+        // binary file overwritten here used to log no previous content,
+        // so undo deleted it instead of restoring it.
         let existed = FileManager.default.fileExists(atPath: fileURL.path)
-        let previousContent = existed ? try? String(contentsOf: fileURL, encoding: .utf8) : nil
+        let previous = FileOperation.encodePreviousContent(existed ? try? Data(contentsOf: fileURL) : nil)
 
         // Log operation before executing
         if let sessionId = ChatExecutionContext.currentSessionId {
@@ -696,11 +821,26 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
                 FileOperation(
                     type: existed ? .write : .create,
                     path: relativePath,
-                    previousContent: previousContent,
+                    previousContent: previous.content,
+                    previousContentEncoding: previous.encoding,
                     sessionId: sessionId,
                     batchId: ChatExecutionContext.currentBatchId
                 )
             )
+        }
+
+        if let plan = documentPlan {
+            let written = try await FileWriteDocumentRouting.write(plan, to: fileURL)
+            var result: [String: Any] = [
+                "kind": "document_write_result",
+                "path": relativePath,
+                "format": plan.target.rawValue,
+                "bytes_written": written.bytesWritten,
+                "summary": plan.summary,
+                "action": existed ? "updated" : "created",
+            ]
+            for (key, value) in written.extra { result[key] = value }
+            return ToolEnvelope.success(tool: name, result: result)
         }
 
         // Create parent directories if needed
@@ -813,6 +953,22 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         }
 
         let fileURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
+        // Upstream #91: binary documents are rebuilt, not text-edited.
+        let editExt = fileURL.pathExtension.lowercased()
+        if FileWriteDocumentRouting.target(forExtension: editExt) != nil
+            || WorkspaceFileFormatPolicy.prefersDocumentExtraction(editExt) || editExt == "pptx"
+        {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "file_edit changes text files; `\(relativePath)` is a .\(editExt) document. "
+                    + "Read it with file_read, then write the whole updated document with file_write "
+                    + "(Markdown for .docx/.pdf, CSV or JSON rows for .xlsx).",
+                field: "path",
+                tool: name,
+                retryable: false
+            )
+        }
 
         guard FileManager.default.fileExists(atPath: fileURL.path) else {
             throw FolderToolError.fileNotFound(relativePath)
@@ -866,8 +1022,10 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
 struct FileSearchTool: OsaurusTool {
     let name = "file_search"
     let description =
-        "Search for text in files using case-insensitive substring matching. **Use this instead of "
-        + "`grep` / `rg` / `find` in `shell_run`.** Returns matching lines with file paths and line numbers."
+        "Search for text in files using case-insensitive substring matching, including inside PDF, "
+        + "Word, PowerPoint and Excel files. **Use this instead of `grep` / `rg` / `find` in "
+        + "`shell_run`.** Returns matching lines with file paths and line numbers (documents show "
+        + "a page, slide, sheet or paragraph instead)."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -923,6 +1081,7 @@ struct FileSearchTool: OsaurusTool {
 
         var results: [String] = []
         var totalMatches = 0
+        var skippedDocuments = 0
 
         // Determine if searching a file or directory
         var isDirectory: ObjCBool = false
@@ -961,30 +1120,47 @@ struct FileSearchTool: OsaurusTool {
                     }
                 }
 
-                // Search file
-                if let matches = searchFile(
-                    fileURL, pattern: pattern,
-                    maxResults: maxResults - totalMatches,
-                    rootPath: rootPath
-                ) {
+                // Search file (documents through extracted text, upstream #91)
+                let matches: [String]?
+                if DocumentTextExtractionCache.isSearchableDocument(extension: fileURL.pathExtension) {
+                    matches = await searchDocument(
+                        fileURL, pattern: pattern, maxResults: maxResults - totalMatches,
+                        rootPath: rootPath, skipped: &skippedDocuments)
+                } else {
+                    matches = searchFile(
+                        fileURL, pattern: pattern,
+                        maxResults: maxResults - totalMatches,
+                        rootPath: rootPath
+                    )
+                }
+                if let matches {
                     results.append(contentsOf: matches)
                     totalMatches += matches.count
                 }
             }
         } else {
             // Search single file
-            if let matches = searchFile(
-                searchURL, pattern: pattern, maxResults: maxResults, rootPath: rootPath
-            ) {
+            let matches: [String]?
+            if DocumentTextExtractionCache.isSearchableDocument(extension: searchURL.pathExtension) {
+                matches = await searchDocument(
+                    searchURL, pattern: pattern, maxResults: maxResults, rootPath: rootPath,
+                    skipped: &skippedDocuments)
+            } else {
+                matches = searchFile(searchURL, pattern: pattern, maxResults: maxResults, rootPath: rootPath)
+            }
+            if let matches {
                 results.append(contentsOf: matches)
                 totalMatches = matches.count
             }
         }
 
+        let skippedNote =
+            skippedDocuments > 0
+            ? "\n(\(skippedDocuments) document(s) couldn't be searched — too large, encrypted or damaged.)" : ""
         if results.isEmpty {
             return ToolEnvelope.success(
                 tool: name,
-                text: "No matches found for '\(pattern)'"
+                text: "No matches found for '\(pattern)'" + skippedNote
             )
         }
 
@@ -994,8 +1170,35 @@ struct FileSearchTool: OsaurusTool {
         if totalMatches >= maxResults {
             output += "\n\n(results truncated at \(maxResults))"
         }
+        output += skippedNote
 
         return ToolEnvelope.success(tool: name, text: output)
+    }
+
+    /// Matches inside a document's extracted text (upstream #91), located by
+    /// page / slide / sheet row / paragraph.
+    private func searchDocument(
+        _ url: URL, pattern: String, maxResults: Int, rootPath: URL, skipped: inout Int
+    ) async -> [String]? {
+        guard maxResults > 0 else { return nil }
+        DocumentAdaptersBootstrap.registerBuiltIns()
+        let extracted: ExtractedDocumentText
+        do {
+            extracted = try await DocumentTextExtractionCache.shared.units(for: url)
+        } catch {
+            skipped += 1
+            return nil
+        }
+        var matches: [String] = []
+        let displayPath = FolderToolHelpers.displayPath(for: url, under: rootPath)
+        outer: for unit in extracted.units {
+            for line in unit.text.components(separatedBy: .newlines)
+            where line.localizedCaseInsensitiveContains(pattern) {
+                matches.append("\(displayPath) [\(unit.locator)]: \(line.trimmingCharacters(in: .whitespaces))")
+                if matches.count >= maxResults { break outer }
+            }
+        }
+        return matches.isEmpty ? nil : matches
     }
 
     private func searchFile(

@@ -1865,7 +1865,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                 for any real answer, CALL the tool. NEVER fabricate, guess, or \
                 simulate file names, file contents, or command output — if you have \
                 not called the tool this turn, you do not know the answer. Do not \
-                describe running a command in prose; actually call the tool.
+                describe running a command in prose; actually call the tool. \
+                Documents are built in: `file_read` and `file_search` handle PDF, Word, \
+                PowerPoint, Excel and images (OCR), and `file_write` produces .docx and \
+                .pdf from Markdown and .xlsx from CSV or JSON rows. Never shell out to \
+                pandoc, pdftotext or Python for these.
                 """
         } else {
             toolDirective = ""

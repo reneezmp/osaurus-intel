@@ -444,3 +444,23 @@ Added 2026-09-28; needs a candidate built after this commit.
       Context Length afterwards.
 - [ ] A short chat (one or two exchanges) says there's nothing to compact yet.
 
+## Rich folder formats (upstream #91)
+
+Use a chat with a working folder (Folder button) and any tool-capable model.
+All items are **(paid)**.
+
+- [ ] "Write a short meal plan to plan.docx": a real Word file appears and
+      opens in Pages/Word with headings and bullets. Same for plan.pdf.
+- [ ] "Put this shopping list in list.xlsx: …": opens in Numbers/Excel with
+      numbers as numbers.
+- [ ] "Read report.pdf / slides.pptx / budget.xlsx and summarize": the agent
+      reads the actual content (no pandoc or "I can't read binary files").
+- [ ] Put a screenshot of some text (or a scanned PDF) in the folder and ask
+      what it says: the text is recognized.
+- [ ] "Find 'lentils' in my folder": matches inside Word/PDF files show a
+      page or paragraph.
+- [ ] Ask for a PowerPoint: it explains it can't make .pptx and offers a
+      .docx/.pdf outline instead.
+- [ ] Ask it to overwrite list.xlsx, then undo the file change: the original
+      workbook comes back intact.
+

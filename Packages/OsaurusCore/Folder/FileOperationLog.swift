@@ -268,9 +268,9 @@ public actor FileOperationLog {
             // Undo write/edit: restore previous content or delete if it was new.
             // file_edit always supplies previousContent (the full pre-edit
             // file body) so undo just rewrites the file in place.
-            if let previousContent = operation.previousContent {
+            if let previousData = operation.previousContentData {
                 do {
-                    try previousContent.write(to: fileURL, atomically: true, encoding: .utf8)
+                    try previousData.write(to: fileURL, options: .atomic)
                 } catch {
                     throw FileUndoError.fileSystemError(
                         "Failed to restore file content: \(error.localizedDescription)"
@@ -320,7 +320,7 @@ public actor FileOperationLog {
 
         case .delete:
             // Undo delete: recreate file from previous content
-            guard let previousContent = operation.previousContent else {
+            guard let previousData = operation.previousContentData else {
                 throw FileUndoError.cannotUndo("Delete operation missing previous content")
             }
 
@@ -328,7 +328,7 @@ public actor FileOperationLog {
                 // Ensure parent directory exists
                 let parentDir = fileURL.deletingLastPathComponent()
                 try fm.createDirectory(at: parentDir, withIntermediateDirectories: true)
-                try previousContent.write(to: fileURL, atomically: true, encoding: .utf8)
+                try previousData.write(to: fileURL, options: .atomic)
             } catch {
                 throw FileUndoError.fileSystemError(
                     "Failed to restore deleted file: \(error.localizedDescription)"

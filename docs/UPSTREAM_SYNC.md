@@ -1958,3 +1958,27 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
 - `ChatSessionData` has explicit `CodingKeys`: **a new field needs a case
   there**, or it is never written.
 
+### Rich folder formats (upstream #91) — 2026-09-29
+
+- **Intel's FolderTools.swift is an old, trimmed snapshot** (about 3k lines
+  short of upstream's pre-#91 file), so #91 was hand-ported onto it rather
+  than 3-way merged. Upstream's later edits to the same files (#2894, #2907,
+  #2914) belong to the next upstream-commit pass.
+- Ported standalone from upstream/main: `WorkspaceFileFormatPolicy` (own file;
+  upstream keeps it inside WorkspaceWriteSafety.swift), `MarkdownRichTextRenderer`,
+  `DOCXEmitter`, `PDFEmitter`, `RichTextPDFRenderer`, `RichTextSourceDocument`,
+  `CSVRowParser`, `WorkbookWorkflowService`, `DocumentTextExtractionCache`,
+  `FileReadImageSupport`, the full `FileWriteDocumentRouting` (replacing the
+  Release-2 trimmed copy), and an image-helpers-only `RemoteImagePayloadPolicy`.
+- **PowerPoint writing is not in #91.** It arrived later with
+  `PPTXEmitter`/`OOXMLText`/an OOXML DOM and a ZIP writer Intel's older
+  reader-only `ZipArchive.swift` lacks. `target(forExtension:)` never returns
+  `.pptx` on Intel, and file_write refuses it with a pivot.
+- **Binary-safe undo fixed a real data-loss path:** overwriting a binary file
+  with `file_write` logged no previous content, so undo *deleted* the file.
+  `FileOperation.previousContentEncoding` (upstream) now stores base64 for
+  non-UTF-8 bytes, and undo writes bytes.
+- Intel chat is text-only, so images and scanned PDFs are OCR'd (Vision) in
+  `file_read`; upstream's vision `ToolResultMediaBridge` is not ported.
+- `file_copy` stays removed on Intel (design choice: `shell_run cp`).
+
