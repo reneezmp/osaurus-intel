@@ -22,7 +22,9 @@ struct IntelAgentLoopToolsTests {
         let names = Set(ToolRegistry.shared.listTools().map(\.name))
         #expect(ToolRegistry.agentLoopToolNames == ["todo", "complete", "clarify", "get_current_time"])
         #expect(ToolRegistry.agentLoopToolNames.isSubset(of: names))
-        #expect(!names.contains("speak"))  // arrives with the Voice port
+        // `speak` is registered but gated on the agent's Speak Tool switch.
+        #expect(names.contains(ToolRegistry.speakToolName))
+        #expect(!ToolRegistry.agentLoopToolNames.contains(ToolRegistry.speakToolName))
     }
 
     @Test("Only a successful complete, clarify or folder pick ends the run")

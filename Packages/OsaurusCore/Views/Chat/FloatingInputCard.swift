@@ -575,7 +575,9 @@ struct FloatingInputCard: View {
                         lastVoiceActivityTime = Date()
                         resetPauseDetectionForRecording()
                         print("[FloatingInputCard] Recording confirmed - voice input ready")
-                    } else if voiceInputState == .idle {
+                    } else if voiceInputState == .idle, VADService.shared.state != .listening {
+                        // Intel: never adopt VAD Mode's wake-word listening as
+                        // chat input (chat windows can stay open on Intel).
                         print("[FloatingInputCard] External recording detected. Overlay: \(showVoiceOverlay)")
                         voiceInputState = .recording
                         lastVoiceActivityTime = Date()

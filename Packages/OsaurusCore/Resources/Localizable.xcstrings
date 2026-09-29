@@ -342,6 +342,38 @@
         }
       }
     },
+    "Apple servers" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple-Server"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 服务器"
+          }
+        }
+      }
+    },
+    "Apple's Servers" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Server von Apple"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Apple 服务器"
+          }
+        }
+      }
+    },
     "Approvals for folder file, shell and git tools, not macOS permissions." : {
       "localizations" : {
         "de" : {
@@ -406,6 +438,22 @@
         }
       }
     },
+    "Automatic (match the reply's language)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisch (passend zur Sprache der Antwort)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动（匹配回复的语言）"
+          }
+        }
+      }
+    },
     "Automatically name chats" : {
       "localizations" : {
         "de" : {
@@ -466,6 +514,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "后台辅助程序"
+          }
+        }
+      }
+    },
+    "Cancel (Esc)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Abbrechen (Esc)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "取消 (Esc)"
           }
         }
       }
@@ -552,6 +616,22 @@
         }
       }
     },
+    "Choose Language" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache wählen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择语言"
+          }
+        }
+      }
+    },
     "Choose…" : {
       "localizations" : {
         "de" : {
@@ -596,6 +676,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Claude Code 可以写入文件"
+          }
+        }
+      }
+    },
+    "Clean Up Transcription" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkription bereinigen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清理转写文本"
           }
         }
       }
@@ -750,6 +846,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩超时。未做任何更改。"
+          }
+        }
+      }
+    },
+    "core model" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Core-Modell"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "核心模型"
           }
         }
       }
@@ -1066,6 +1178,102 @@
         }
       }
     },
+    "Enable Text-to-Speech" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprachausgabe aktivieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用文本转语音"
+          }
+        }
+      }
+    },
+    "Enable Transcription Mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkriptionsmodus aktivieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用转写模式"
+          }
+        }
+      }
+    },
+    "Enable VAD Mode" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "VAD-Modus aktivieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用语音活动检测模式"
+          }
+        }
+      }
+    },
+    "Enable Voice Input" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracheingabe aktivieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用语音输入"
+          }
+        }
+      }
+    },
+    "Engine" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Engine"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "引擎"
+          }
+        }
+      }
+    },
+    "Enhanced" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erweitert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "增强"
+          }
+        }
+      }
+    },
     "Enter a valid phrase" : {
       "localizations" : {
         "de" : {
@@ -1262,6 +1470,22 @@
         }
       }
     },
+    "Keep the natural transcription, including filler words. Cleanup would send each transcript to your core model's provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die natürliche Transkription samt Füllwörtern behalten. Die Bereinigung würde jede Transkription an den Anbieter deines Core-Modells senden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "保留自然的转写文本，包括语气词。清理会将每段转写文本发送给核心模型的提供商。"
+          }
+        }
+      }
+    },
     "Knowledge" : {
       "localizations" : {
         "de" : {
@@ -1274,6 +1498,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "知识"
+          }
+        }
+      }
+    },
+    "Language Ready" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache bereit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语言已就绪"
+          }
+        }
+      }
+    },
+    "Language Recognised on This Mac" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache wird auf diesem Mac erkannt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 可识别该语言"
           }
         }
       }
@@ -1450,6 +1706,22 @@
         }
       }
     },
+    "Needs Apple's servers on this Mac." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Braucht auf diesem Mac die Server von Apple."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Mac 上需要使用 Apple 服务器。"
+          }
+        }
+      }
+    },
     "New chats with %@ will open in this folder." : {
       "localizations" : {
         "de" : {
@@ -1498,6 +1770,22 @@
         }
       }
     },
+    "No language" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Sprache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无语言"
+          }
+        }
+      }
+    },
     "No model is available. Connect a provider or set a Core Model." : {
       "localizations" : {
         "de" : {
@@ -1514,6 +1802,38 @@
         }
       }
     },
+    "No speech detected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Sprache erkannt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未检测到语音"
+          }
+        }
+      }
+    },
+    "No Speech Detected" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Sprache erkannt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未检测到语音"
+          }
+        }
+      }
+    },
     "no text changes" : {
       "localizations" : {
         "de" : {
@@ -1526,6 +1846,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文本无更改"
+          }
+        }
+      }
+    },
+    "Not allowed yet" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch nicht erlaubt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未允许"
           }
         }
       }
@@ -1594,6 +1930,70 @@
         }
       }
     },
+    "Nothing was inserted." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Es wurde nichts eingefügt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未插入任何内容。"
+          }
+        }
+      }
+    },
+    "On this Mac" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Mac"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Mac 上"
+          }
+        }
+      }
+    },
+    "On This Mac (System Voices)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Mac (Systemstimmen)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Mac 上（系统语音）"
+          }
+        }
+      }
+    },
+    "Only for languages that can't be recognised on this Mac. Your speech is then sent to Apple. VAD Mode never uses them." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nur für Sprachen, die auf diesem Mac nicht erkannt werden können. Deine Sprache wird dann an Apple gesendet. Der VAD-Modus nutzt sie nie."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "仅用于此 Mac 无法识别的语言。此时你的语音会发送给 Apple。VAD 模式从不使用 Apple 服务器。"
+          }
+        }
+      }
+    },
     "Open Agents" : {
       "localizations" : {
         "de" : {
@@ -1638,6 +2038,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Osaurus 尚未获得全磁盘访问权限。"
+          }
+        }
+      }
+    },
+    "Osaurus transcribes with Apple Speech, which macOS asks you to allow once." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus transkribiert mit Apple Speech. macOS fragt dich einmal um Erlaubnis."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 使用 Apple 语音进行转写，macOS 会请你允许一次。"
           }
         }
       }
@@ -1794,6 +2210,38 @@
         }
       }
     },
+    "Pick a language in the Recognition tab" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle im Tab „Erkennung“ eine Sprache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请在“识别”标签页中选择语言"
+          }
+        }
+      }
+    },
+    "Premium" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Premium"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高级"
+          }
+        }
+      }
+    },
     "Premium web search" : {
       "localizations" : {
         "de" : {
@@ -1806,6 +2254,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "高级网页搜索"
+          }
+        }
+      }
+    },
+    "Preparing speech recognition…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung wird vorbereitet …"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备语音识别…"
           }
         }
       }
@@ -1988,6 +2452,38 @@
         }
       }
     },
+    "Recognition" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkennung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "识别"
+          }
+        }
+      }
+    },
+    "Recognition language" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkennungssprache"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "识别语言"
+          }
+        }
+      }
+    },
     "Replace Identity" : {
       "localizations" : {
         "de" : {
@@ -2100,6 +2596,38 @@
         }
       }
     },
+    "Restricted on this Mac" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auf diesem Mac eingeschränkt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Mac 上受限"
+          }
+        }
+      }
+    },
+    "Runs on this Mac. Audio never leaves it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Läuft auf diesem Mac. Der Ton verlässt ihn nie."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此 Mac 上运行，音频不会离开本机。"
+          }
+        }
+      }
+    },
     "Search places, get directions and travel times, and find where this Mac is." : {
       "localizations" : {
         "de" : {
@@ -2180,6 +2708,22 @@
         }
       }
     },
+    "Sends text to any server implementing the OpenAI /v1/audio/speech API, such as openai-edge-tts or Kokoro." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sendet Text an einen beliebigen Server mit der OpenAI-API /v1/audio/speech, etwa openai-edge-tts oder Kokoro."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将文本发送到任何实现 OpenAI /v1/audio/speech API 的服务器，例如 openai-edge-tts 或 Kokoro。"
+          }
+        }
+      }
+    },
     "Shortcuts" : {
       "localizations" : {
         "de" : {
@@ -2192,6 +2736,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "快捷指令"
+          }
+        }
+      }
+    },
+    "Speech is sent to Apple for recognition" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sprache wird zur Erkennung an Apple gesendet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音会发送给 Apple 进行识别"
+          }
+        }
+      }
+    },
+    "Speech Recognition" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音识别"
+          }
+        }
+      }
+    },
+    "Speech Recognition Allowed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung erlaubt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已允许语音识别"
+          }
+        }
+      }
+    },
+    "Speech recognition not set up" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung nicht eingerichtet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "尚未设置语音识别"
+          }
+        }
+      }
+    },
+    "Speech recognition ready" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung bereit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音识别已就绪"
+          }
+        }
+      }
+    },
+    "Speech recognition ready when needed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracherkennung bei Bedarf bereit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "语音识别将在需要时就绪"
+          }
+        }
+      }
+    },
+    "Stop and insert" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppen und einfügen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止并插入"
           }
         }
       }
@@ -2324,6 +2980,22 @@
         }
       }
     },
+    "The built-in agent doesn't get the speak tool. Create an agent to use it, or use the speaker button on any reply." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der eingebaute Agent bekommt kein Sprechwerkzeug. Erstelle einen Agenten, um es zu nutzen, oder verwende den Lautsprecher-Knopf an einer Antwort."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内置智能体没有朗读工具。请创建一个智能体来使用它，或使用任意回复上的扬声器按钮。"
+          }
+        }
+      }
+    },
     "The built-in agent doesn't schedule itself. Create an agent to use it; schedules and folder watchers are under Automation." : {
       "localizations" : {
         "de" : {
@@ -2440,6 +3112,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在生成摘要期间对话发生了变化。"
+          }
+        }
+      }
+    },
+    "The core model removes filler words like \"uh\" and \"mm\". Each transcript is sent to its provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Core-Modell entfernt Füllwörter wie „äh“ und „hm“. Jede Transkription wird an seinen Anbieter gesendet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "核心模型会删除“呃”“嗯”等语气词。每段转写文本都会发送给其提供商。"
           }
         }
       }
@@ -2564,6 +3252,38 @@
         }
       }
     },
+    "This language can't be recognised on this Mac. Allow Apple's servers below, or pick another language." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sprache kann auf diesem Mac nicht erkannt werden. Erlaube unten die Server von Apple oder wähle eine andere Sprache."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此 Mac 无法识别该语言。请在下方允许使用 Apple 服务器，或选择其他语言。"
+          }
+        }
+      }
+    },
+    "This language uses Apple's servers: your speech is sent to Apple to be transcribed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sprache nutzt die Server von Apple: Deine Sprache wird zur Transkription an Apple gesendet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该语言使用 Apple 服务器：你的语音会发送给 Apple 进行转写。"
+          }
+        }
+      }
+    },
     "This permanently deletes every table, row, and saved view this agent has stored, and its database history. The agent and its settings stay. This cannot be undone." : {
       "localizations" : {
         "de" : {
@@ -2632,6 +3352,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "關閉「跟隨系統強調色」以選擇自訂強調色。"
+          }
+        }
+      }
+    },
+    "Turned off in System Settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In den Systemeinstellungen ausgeschaltet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已在系统设置中关闭"
           }
         }
       }
@@ -2748,6 +3484,22 @@
         }
       }
     },
+    "Use Apple's servers when needed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bei Bedarf die Server von Apple nutzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "需要时使用 Apple 服务器"
+          }
+        }
+      }
+    },
     "Use as Default for %@" : {
       "localizations" : {
         "de" : {
@@ -2776,6 +3528,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用文件夹"
+          }
+        }
+      }
+    },
+    "Uses the voices built into macOS, on this Mac. Add more voices in System Settings → Accessibility → Spoken Content." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nutzt die in macOS eingebauten Stimmen auf diesem Mac. Weitere Stimmen fügst du in den Systemeinstellungen unter Bedienungshilfen → Gesprochene Inhalte hinzu."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用此 Mac 上 macOS 内置的语音。可在“系统设置”→“辅助功能”→“朗读内容”中添加更多语音。"
+          }
+        }
+      }
+    },
+    "Wake Word" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aktivierungswort"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "唤醒词"
           }
         }
       }

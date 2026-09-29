@@ -2895,7 +2895,12 @@ final class ChatSession: ObservableObject {
                                         ) {
                                             try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
                                                 try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
-                                                    try await engine.streamChat(request: req)
+                                                    // `speak` ties playback to this reply (speaker
+                                                    // button, row spinner).
+                                                    try await ChatExecutionContext.$currentAssistantTurnId
+                                                        .withValue(assistantTurn.id) {
+                                                            try await engine.streamChat(request: req)
+                                                        }
                                                 }
                                             }
                                         }
@@ -3288,7 +3293,12 @@ final class ChatSession: ObservableObject {
                                         ) {
                                             try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
                                                 try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
-                                                    try await engine.streamChat(request: finalReq)
+                                                    // `speak` ties playback to this reply (speaker
+                                                    // button, row spinner).
+                                                    try await ChatExecutionContext.$currentAssistantTurnId
+                                                        .withValue(assistantTurn.id) {
+                                                            try await engine.streamChat(request: finalReq)
+                                                        }
                                                 }
                                             }
                                         }

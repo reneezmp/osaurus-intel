@@ -502,5 +502,33 @@ struct AgentLoopToolsTests {
     // audio output). We only assert validation gates here. end-to-end
     // playback is verified manually
 
-    // Intel: the `speak` tests return with the Voice port (`W-voice`).
+    @Test
+    func speak_rejectsEmptyText() async throws {
+        let result = try await SpeakTool().execute(argumentsJSON: #"{"text": "   "}"#)
+        #expect(ToolEnvelope.isError(result))
+        #expect(result.contains("non-empty"))
+    }
+
+    @Test
+    func speak_rejectsMissingText() async throws {
+        let result = try await SpeakTool().execute(argumentsJSON: #"{}"#)
+        #expect(ToolEnvelope.isError(result))
+    }
+
+    @Test
+    func speak_rejectsMalformedArgs() async throws {
+        let result = try await SpeakTool().execute(argumentsJSON: "not json")
+        #expect(ToolEnvelope.isError(result))
+    }
+
+    @Test
+    func speak_parseExtractsTrimmedText() {
+        #expect(
+            SpeakTool.parse(argumentsJSON: #"{"text": "  hi  "}"#) == "hi"
+        )
+        #expect(SpeakTool.parse(argumentsJSON: #"{"text": ""}"#) == nil)
+        #expect(SpeakTool.parse(argumentsJSON: #"{"text": "   "}"#) == nil)
+        #expect(SpeakTool.parse(argumentsJSON: #"{}"#) == nil)
+        #expect(SpeakTool.parse(argumentsJSON: "garbage") == nil)
+    }
 }

@@ -58,6 +58,9 @@ public final class VADService: ObservableObject {
 
     // Debounce detection to avoid duplicate triggers
     private var lastDetectionTime: Date = .distantPast
+
+    /// True while an off-main agent-detection pass is running.
+    private var isDetectionInFlight = false
     private let detectionCooldown: TimeInterval = 3.0  // Seconds before detecting same agent again
 
     // Auto-restart management
@@ -86,6 +89,11 @@ public final class VADService: ObservableObject {
             enabledAgentIds: configuration.enabledAgentIds,
             customWakePhrase: configuration.customWakePhrase
         )
+
+        // Intel: help Apple Speech hear the wake words.
+        speechService.contextualHints =
+            configuration.enabledAgentIds.compactMap { AgentManager.shared.agent(for: $0)?.name }
+            + (configuration.customWakePhrase.isEmpty ? [] : [configuration.customWakePhrase])
 
         print("[VADService] Loaded configuration with \(configuration.enabledAgentIds.count) enabled agents")
     }
@@ -131,6 +139,12 @@ public final class VADService: ObservableObject {
                 state = .error("Failed to load model: \(error.localizedDescription)")
                 throw error
             }
+        }
+
+        // Intel: an always-on listener never sends audio to Apple's servers.
+        guard speechService.recognitionRunsOnDevice else {
+            state = .error(VADError.needsOnDeviceRecognition.localizedDescription)
+            throw VADError.needsOnDeviceRecognition
         }
 
         // Start streaming transcription with keep-alive enabled
@@ -194,8 +208,18 @@ public final class VADService: ObservableObject {
     // MARK: - Private Methods
 
     private func setupObservers() {
-        // Observe configuration changes
+        // Observe configuration changes.
+        //
+        // Every sink below delivers on the main run loop before mutating this
+        // @MainActor object's @Published state. `SpeechService` publishes some
+        // of these (`currentTranscription`, `confirmedTranscription`,
+        // `audioLevel`, `isRecording`) from its transcription worker — a
+        // separate actor whose stream resumes off the main thread — so without
+        // `.receive(on: RunLoop.main)` the writes are the "Updating
+        // ObservedObject<VADService> from background threads" undefined behavior
+        // seen in the crash log.
         NotificationCenter.default.publisher(for: .voiceConfigurationChanged)
+            .receive(on: RunLoop.main)
             .sink { [weak self] _ in
                 self?.loadConfiguration()
             }
@@ -203,12 +227,14 @@ public final class VADService: ObservableObject {
 
         // Observe transcription changes from SpeechService
         speechService.$currentTranscription
+            .receive(on: RunLoop.main)
             .sink { [weak self] transcription in
                 self?.handleTranscription(transcription, isConfirmed: false)
             }
             .store(in: &cancellables)
 
         speechService.$confirmedTranscription
+            .receive(on: RunLoop.main)
             .sink { [weak self] transcription in
                 self?.handleTranscription(transcription, isConfirmed: true)
             }
@@ -216,6 +242,7 @@ public final class VADService: ObservableObject {
 
         // Observe audio level
         speechService.$audioLevel
+            .receive(on: RunLoop.main)
             .sink { [weak self] level in
                 guard let self = self, self.state == .listening else { return }
                 self.audioLevel = level
@@ -225,6 +252,7 @@ public final class VADService: ObservableObject {
         // Observe recording state - auto-restart if stopped unexpectedly
         speechService.$isRecording
             .dropFirst()  // Ignore initial value
+            .receive(on: RunLoop.main)
             .sink { [weak self] isRecording in
                 guard let self = self else { return }
 
@@ -304,26 +332,45 @@ public final class VADService: ObservableObject {
         let now = Date()
         guard now.timeIntervalSince(lastDetectionTime) >= detectionCooldown else { return }
 
-        if let detection = detector.detect(in: text) {
-            lastDetectionTime = now
+        // Skip if a detection pass is already running; the next transcription
+        // update will retry with fresher text anyway.
+        guard !isDetectionInFlight else { return }
+        isDetectionInFlight = true
 
-            print(
-                "[VADService] ✅ Detected agent: \(detection.agentName) with confidence \(detection.confidence) in '\(text)'"
-            )
+        // Fuzzy matching over every agent name and wake variation is heavy on
+        // long transcriptions, so run it off the main actor. The detector is
+        // immutable and Sendable.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            let detection = detector.detect(in: text)
+            await MainActor.run { [weak self] in
+                guard let self else { return }
+                self.isDetectionInFlight = false
+                guard let detection else { return }
+                // Re-check the cooldown: another pass may have fired while
+                // this one was off-main.
+                let now = Date()
+                guard now.timeIntervalSince(self.lastDetectionTime) >= self.detectionCooldown
+                else { return }
+                self.lastDetectionTime = now
 
-            // Pause VAD (will resume when ChatView closes)
-            Task {
-                await self.pause()
-
-                // Clear transcription to avoid re-detecting same phrase
-                speechService.clearTranscription()
-                accumulatedTranscription = ""
-
-                // Post notification to open chat with voice mode
-                NotificationCenter.default.post(
-                    name: .vadAgentDetected,
-                    object: detection
+                print(
+                    "[VADService] ✅ Detected agent: \(detection.agentName) with confidence \(detection.confidence) in '\(text)'"
                 )
+
+                // Pause VAD (will resume when ChatView closes)
+                Task {
+                    await self.pause()
+
+                    // Clear transcription to avoid re-detecting same phrase
+                    self.speechService.clearTranscription()
+                    self.accumulatedTranscription = ""
+
+                    // Post notification to open chat with voice mode
+                    NotificationCenter.default.post(
+                        name: .vadAgentDetected,
+                        object: detection
+                    )
+                }
             }
         }
     }
@@ -371,6 +418,8 @@ public enum VADError: Error, LocalizedError {
     case notEnabled
     case noAgentsEnabled
     case noModelSelected
+    /// Intel: the recognition language needs Apple's servers.
+    case needsOnDeviceRecognition
 
     public var errorDescription: String? {
         switch self {
@@ -380,6 +429,9 @@ public enum VADError: Error, LocalizedError {
             return "No agents are enabled for VAD activation"
         case .noModelSelected:
             return "No speech model selected"
+        case .needsOnDeviceRecognition:
+            return
+                "VAD Mode needs a language that is recognised on this Mac, so an always-on microphone never sends audio to Apple."
         }
     }
 }

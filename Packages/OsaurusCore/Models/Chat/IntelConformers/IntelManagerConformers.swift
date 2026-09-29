@@ -654,6 +654,13 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.selfSchedulingEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// Speak Tool (upstream `speakEnabled`): custom agents only (upstream's
+    /// Default agent has it off), and only while the agent's tools are on.
+    func effectiveSpeakEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.speakEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a
     /// deliberate divergence from upstream, not to be "corrected" toward it):
     /// cloud **distillation** — the `MemoryService.performDistillSession`
@@ -824,7 +831,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     /// amputated on Intel → always `.default` (disabled), write no-ops.
     func effectiveAutonomousExec(for agentId: UUID) -> AutonomousExecConfig? { .default }
     func updateAutonomousExec(_ config: AutonomousExecConfig, for agentId: UUID) async throws {}
-    func ttsVoice(for agentId: UUID) -> Any? { nil }
+    func ttsVoice(for agentId: UUID) -> Any? { agent(for: agentId)?.ttsVoice }
     func themeId(for agentId: UUID) -> UUID? { agent(for: agentId)?.themeId }
 }
 

@@ -133,6 +133,11 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
   tools (now shipped), automatic tool discovery, self-scheduling ("out of scope"),
   `file_copy` ("by design") and Voice ("Apple-Silicon-only" — true only of
   the FluidAudio engine; Apple Speech works on Intel).
+- **Voice shipped 2026-09-29** ([`VOICE_INTEL.md`](VOICE_INTEL.md)): chat
+  microphone, Transcription Mode hotkey, VAD Mode wake words, speaker button,
+  auto-speak, per-agent voice and the `speak` tool, on Apple Speech and the
+  macOS system voices (plus upstream's OpenAI-compatible TTS server). Awaiting
+  Rosy.
 
 ### Intentionally omitted
 

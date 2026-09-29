@@ -41,12 +41,14 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
     /// Tabs belonging to this section, in display order.
     public var tabs: [ManagementTab] {
         switch self {
-        case .general: [.settings, .themes, .credits, .identity, .permissions, .storage]
+        // Voice sits after Settings as upstream orders it (available on Intel
+        // since the Apple Speech port).
+        case .general: [.settings, .voice, .themes, .credits, .identity, .permissions, .storage]
         case .models: [.providers]
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
         case .automation: [.schedules, .watchers]
-        case .unavailable: [.models, .voice, .sandbox]
+        case .unavailable: [.models, .sandbox]
         case .developerTools: [.server, .insights]
         }
     }
@@ -151,11 +153,13 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     ///
     /// On the Intel fork, the tabs whose upstream backing stack is not
     /// compiled stay visibly disabled in the sidebar. MLX local inference and
-    /// the Containerization sandbox need Apple Silicon; Voice is disabled only
-    /// because upstream's engine is FluidAudio — an Apple Speech port is on
-    /// the backlog (`W-voice`, docs/INTEL_MISSING_FEATURES_BACKLOG.md). They
-    /// use `SidebarItemData.isDisabled` + a `.help()` tooltip, so users see
-    /// what is not available yet; clicking is a no-op.
+    /// the Containerization sandbox need Apple Silicon. They use
+    /// `SidebarItemData.isDisabled` + a `.help()` tooltip, so users see what
+    /// is not available; clicking is a no-op.
+    ///
+    /// `.voice` is available since 2026-09-29: Apple Speech and the macOS
+    /// system voices stand in for upstream's FluidAudio engines
+    /// (docs/VOICE_INTEL.md).
     ///
     /// M13 (Group C, Renée 2026-06-03): `.insights` and `.schedules` are now
     /// available. `InsightsService` is Foundation+Combine only; the Schedules
@@ -173,7 +177,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     /// all — there, every tab is simply available.
     public var isAvailableOnIntel: Bool {
         switch self {
-        case .models, .voice, .sandbox:
+        case .models, .sandbox:
             return false
         case .insights, .schedules:
             return true

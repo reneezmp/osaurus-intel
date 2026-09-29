@@ -848,10 +848,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     result = "⛔️ “\(call.name)” was not run — \(reason)."
                                 } else {
                                     do {
-                                        result = try await ToolRegistry.shared.execute(
-                                            name: call.name,
-                                            argumentsJSON: call.arguments
-                                        )
+                                        // Tools that bind UI to their call (`speak`)
+                                        // read the call id from the task-local.
+                                        result = try await ChatExecutionContext.$currentToolCallId.withValue(
+                                            call.callID
+                                        ) {
+                                            try await ToolRegistry.shared.execute(
+                                                name: call.name,
+                                                argumentsJSON: call.arguments
+                                            )
+                                        }
                                     } catch {
                                         result = ToolEnvelope.fromError(error, tool: call.name)
                                     }
@@ -1069,10 +1075,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             } else {
                                 NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
                                 do {
-                                    result = try await ToolRegistry.shared.execute(
-                                        name: call.name,
-                                        argumentsJSON: call.arguments
-                                    )
+                                    result = try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
+                                        try await ToolRegistry.shared.execute(
+                                            name: call.name,
+                                            argumentsJSON: call.arguments
+                                        )
+                                    }
                                     NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                                 } catch {
                                     NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")

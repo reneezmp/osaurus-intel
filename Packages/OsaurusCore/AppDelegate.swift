@@ -194,6 +194,15 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         #endif
 
         #if OSAURUS_INTEL
+            // Voice (docs/VOICE_INTEL.md): Apple Speech auto-prepare, VAD
+            // Mode, the Transcription Mode hotkey and voice notifications.
+            IntelVoiceLaunch.start { [weak self] subTab in
+                if let subTab { ManagementStateManager.shared.voiceSubTabRequest = subTab }
+                self?.showManagementWindow(initialTab: .voice)
+            }
+        #endif
+
+        #if OSAURUS_INTEL
             // Superseded osaurus-tools Apple plugins → built-in Apple apps
             // (docs/APPLE_APPS_INTEL_PLAN.md). Per-app markers; after the
             // toast panel exists so the one-time notice can render.
@@ -431,6 +440,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
+            // Stop the microphone and playback first (bounded by nothing
+            // slow: engine stops are quick; see IntelVoiceLaunch.shutdown).
+            await IntelVoiceLaunch.shutdown()
             await ClaudeCodeProcessRegistry.shared.terminateAll()
             await MCPBridge.shared.stop()
             await server.stop()

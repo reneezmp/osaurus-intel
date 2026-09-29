@@ -329,8 +329,10 @@ The Intel sidebar follows upstream's section sequence and row ordering for every
 settings surface that exists in this fork: General, Models, Agents,
 Capabilities, Automation, and Developer Tools. Developer Tools uses upstream's
 persistent reveal switch. Do not add working-looking rows for roadmap features
-before their settings surfaces exist. Local Models, Voice, and Sandbox remain
-disabled together under **Not Available on This Mac**, immediately before the
+before their settings surfaces exist. Local Models and Sandbox remain
+disabled together under **Not Available on This Mac** (Voice left that section
+on 2026-09-29 — see [`VOICE_INTEL.md`](VOICE_INTEL.md) — and sits under General
+after Settings, as upstream orders it), immediately before the
 Developer Tools footer section, so the upstream organization stays recognizable
 without misrepresenting Intel support.
 
@@ -2102,7 +2104,7 @@ calling a sync complete.
   always refused in a real chat because the session was never passed to the
   engine's tool calls; its unit tests had called the tool directly.
 - Ported upstream `AgentLoopTools` (`todo`, `complete`, `clarify`; `speak`
-  waits for Voice), `CurrentTimeTool`, `AgentTodoRunScope`, the newer
+  arrived with Voice the same day), `CurrentTimeTool`, `AgentTodoRunScope`, the newer
   `AgentTodoStore`, and switched on the real `PromptQueue`,
   `ClarifyPromptOverlay` and `SecretPromptOverlay` (they had Intel stubs, the
   overlays labelled "Apple Silicon only"). The four tools bypass the Tools-tab
@@ -2203,3 +2205,36 @@ calling a sync complete.
   `ZipArchiveWriterTests`; Intel `IntelDocumentEditingTests`.
   `FileWriteDocumentFormatsTests` was not ported (upstream test helpers and
   journal); PowerPoint writing is covered in `IntelRichFolderFormatsTests`.
+
+### Voice (`W-voice`) — 2026-09-29
+
+- Full manual: [`VOICE_INTEL.md`](VOICE_INTEL.md). Engines swapped, UI and
+  behaviour upstream's: Apple Speech (`SFSpeechRecognizer`) replaces
+  Parakeet + Silero; macOS system voices (`AVSpeechSynthesizer`) replace
+  PocketTTS; the OpenAI-compatible TTS client is upstream's (Intel caches one
+  `URLSession` per proxy setting: `GlobalProxySettings.sharedSession()` is not
+  on Intel).
+- Un-excluded: `SpeechService`, `SpeechModelManager`, `TTSService` (Intel
+  rewrites of the engine parts), `VADService`, `TranscriptionModeService`,
+  `TranscriptionCleanupService` (Intel generator), `TranscriptionHotKeyManager`,
+  `AgentNameDetector`, `TranscriptionConfiguration`, `VADConfiguration`; all
+  `Views/Voice/*` replaced with upstream/main (the on-disk copies were stale
+  and gated out). The voice stubs in `IntelStubConformers` /
+  `IntelDataConformers` / `IntelAgentConformers` are gone.
+- **Decisions:** recognition on this Mac only unless the user allows Apple's
+  servers; VAD Mode never uses them; transcript cleanup off by default (paid
+  call to the Core Model provider); `speak` behind a per-agent switch.
+- **Info.plist:** `NSSpeechRecognitionUsageDescription` added (app plist and
+  build settings). Without it macOS kills the app when it asks for access.
+- **Engine fix that other tools benefit from:** `CloudChatEngine` now binds
+  `ChatExecutionContext.currentToolCallId` around each tool call, and `ChatView`
+  binds `currentAssistantTurnId` around the stream (both were only bound in the
+  never-used upstream intercept path).
+- `ChatWindowManager` (Intel) now posts `.chatViewClosed` when a window
+  closes and pauses VAD when a chat window becomes key (upstream's rule).
+- Tests: upstream `OpenAICompatibleTTSTests` (config decoding adapted to the
+  system engine), `TTSTextChunkerTests`, `TranscriptionTextNormalizerTests`,
+  `LiveVoiceAudioSnapshotTests`, `OpenAICompatibleTTSClientGlobalProxyTests`,
+  the `speak` checks in `AgentLoopToolsTests`; Intel `IntelVoiceTests`.
+- `LiveVoiceAudioInputRegistry` (direct audio for local omni models) stays
+  excluded and is now classified `INC-mlx` in `classify_gap.py`.

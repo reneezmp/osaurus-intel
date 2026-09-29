@@ -464,7 +464,8 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Osaurus plugins may access your calendar to read and create events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Osaurus plugins may access your calendar to read and create events.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Osaurus needs access to your microphone to test speech recognition with Whisper.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Osaurus uses the microphone for voice input and dictation, transcribed with Apple Speech.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Osaurus uses Apple Speech to turn what you say into text for chat, dictation and wake words. It stays on this Mac unless you allow Apple's servers in Voice settings.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Osaurus plugins may access your reminders to read and create tasks.";
 				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
 				INFOPLIST_KEY_SUFeedURL = "$(SU_FEED_URL)";
@@ -524,7 +525,8 @@
 				INFOPLIST_KEY_NSCalendarsFullAccessUsageDescription = "Osaurus plugins may access your calendar to read and create events.";
 				INFOPLIST_KEY_NSCalendarsUsageDescription = "Osaurus plugins may access your calendar to read and create events.";
 				INFOPLIST_KEY_NSHumanReadableCopyright = "";
-				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Osaurus needs access to your microphone to test speech recognition with Whisper.";
+				INFOPLIST_KEY_NSMicrophoneUsageDescription = "Osaurus uses the microphone for voice input and dictation, transcribed with Apple Speech.";
+				INFOPLIST_KEY_NSSpeechRecognitionUsageDescription = "Osaurus uses Apple Speech to turn what you say into text for chat, dictation and wake words. It stays on this Mac unless you allow Apple's servers in Voice settings.";
 				INFOPLIST_KEY_NSRemindersUsageDescription = "Osaurus plugins may access your reminders to read and create tasks.";
 				INFOPLIST_KEY_SUEnableAutomaticChecks = YES;
 				INFOPLIST_KEY_SUFeedURL = "$(SU_FEED_URL)";

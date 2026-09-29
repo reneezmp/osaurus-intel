@@ -2,32 +2,15 @@
 //  SpeechConfiguration.swift
 //  osaurus
 //
-//  Configuration model for FluidAudio voice transcription settings.
+//  Configuration model for voice transcription settings.
+//
+//  Intel: upstream picks a FluidAudio Parakeet model version; Intel
+//  transcribes with Apple Speech (`SFSpeechRecognizer`), so the model choice
+//  is a recognition language plus an explicit opt-in for Apple's servers
+//  when that language can't run on this Mac. See docs/VOICE_INTEL.md.
 //
 
 import Foundation
-
-/// ASR model version for FluidAudio Parakeet models
-public enum SpeechModelVersion: String, Codable, Equatable, CaseIterable, Sendable {
-    /// Parakeet TDT v2 (0.6B) - English-only, highest recall
-    case v2
-    /// Parakeet TDT v3 (0.6B) - Multilingual, 25 European languages
-    case v3
-
-    public var displayName: String {
-        switch self {
-        case .v2: return L("Parakeet v2 (English)")
-        case .v3: return L("Parakeet v3 (Multilingual)")
-        }
-    }
-
-    public var description: String {
-        switch self {
-        case .v2: return L("English-only model with highest recall")
-        case .v3: return L("Multilingual model supporting 25 European languages")
-        }
-    }
-}
 
 /// Voice transcription stop mode
 public enum TranscriptionStopMode: String, Codable, Equatable, CaseIterable, Sendable {
@@ -51,10 +34,16 @@ public enum TranscriptionStopMode: String, Codable, Equatable, CaseIterable, Sen
     }
 }
 
-/// Configuration settings for FluidAudio voice transcription
+/// Configuration settings for voice transcription
 public struct SpeechConfiguration: Codable, Equatable, Sendable {
-    /// ASR model version (.v2 English-only or .v3 multilingual)
-    public var modelVersion: SpeechModelVersion
+    /// Apple Speech recognition language (a locale identifier such as
+    /// `en-US`). Empty means the system language.
+    public var recognitionLocale: String
+
+    /// Allow Apple's servers when the language can't be recognised on this
+    /// Mac. Off by default: audio then never leaves the Mac, and a language
+    /// without on-device support is reported as not ready instead.
+    public var allowServerRecognition: Bool
 
     /// Selected audio input device unique ID (nil = system default)
     public var selectedInputDeviceId: String?
@@ -82,12 +71,23 @@ public struct SpeechConfiguration: Codable, Equatable, Sendable {
     /// Seconds of silence before closing voice input (0 = disabled, 10-120 seconds)
     public var silenceTimeoutSeconds: Double
 
+    /// Whether to clean up the raw transcription with the core model
+    /// (removes filler words like "uh"/"mm", stutters, and self-corrections).
+    /// Disable to keep the natural, verbatim transcription.
+    ///
+    /// Intel: off by default. The core model is a remote provider here, so
+    /// cleanup is a paid call that sends every transcript to it.
+    public var postProcessTranscription: Bool
+
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = SpeechConfiguration.default
-        self.modelVersion =
-            try container.decodeIfPresent(SpeechModelVersion.self, forKey: .modelVersion)
-            ?? defaults.modelVersion
+        self.recognitionLocale =
+            try container.decodeIfPresent(String.self, forKey: .recognitionLocale)
+            ?? defaults.recognitionLocale
+        self.allowServerRecognition =
+            try container.decodeIfPresent(Bool.self, forKey: .allowServerRecognition)
+            ?? defaults.allowServerRecognition
         self.selectedInputDeviceId = try container.decodeIfPresent(String.self, forKey: .selectedInputDeviceId)
         self.selectedInputSource =
             try container.decodeIfPresent(AudioInputSource.self, forKey: .selectedInputSource)
@@ -110,10 +110,14 @@ public struct SpeechConfiguration: Codable, Equatable, Sendable {
         self.silenceTimeoutSeconds =
             try container.decodeIfPresent(Double.self, forKey: .silenceTimeoutSeconds)
             ?? defaults.silenceTimeoutSeconds
+        self.postProcessTranscription =
+            try container.decodeIfPresent(Bool.self, forKey: .postProcessTranscription)
+            ?? defaults.postProcessTranscription
     }
 
     public init(
-        modelVersion: SpeechModelVersion = .v3,
+        recognitionLocale: String = "",
+        allowServerRecognition: Bool = false,
         selectedInputDeviceId: String? = nil,
         selectedInputSource: AudioInputSource = .microphone,
         sensitivity: VoiceSensitivity = .medium,
@@ -121,9 +125,11 @@ public struct SpeechConfiguration: Codable, Equatable, Sendable {
         transcriptionStopMode: TranscriptionStopMode = .automatic,
         pauseDuration: Double = 1.5,
         confirmationDelay: Double = 2.0,
-        silenceTimeoutSeconds: Double = 30.0
+        silenceTimeoutSeconds: Double = 30.0,
+        postProcessTranscription: Bool = false
     ) {
-        self.modelVersion = modelVersion
+        self.recognitionLocale = recognitionLocale
+        self.allowServerRecognition = allowServerRecognition
         self.selectedInputDeviceId = selectedInputDeviceId
         self.selectedInputSource = selectedInputSource
         self.sensitivity = sensitivity
@@ -132,11 +138,13 @@ public struct SpeechConfiguration: Codable, Equatable, Sendable {
         self.pauseDuration = pauseDuration
         self.confirmationDelay = confirmationDelay
         self.silenceTimeoutSeconds = silenceTimeoutSeconds
+        self.postProcessTranscription = postProcessTranscription
     }
 
     public static var `default`: SpeechConfiguration {
         SpeechConfiguration(
-            modelVersion: .v3,
+            recognitionLocale: "",
+            allowServerRecognition: false,
             selectedInputDeviceId: nil,
             selectedInputSource: .microphone,
             sensitivity: .medium,
@@ -144,7 +152,8 @@ public struct SpeechConfiguration: Codable, Equatable, Sendable {
             transcriptionStopMode: .automatic,
             pauseDuration: 1.5,
             confirmationDelay: 2.0,
-            silenceTimeoutSeconds: 30.0
+            silenceTimeoutSeconds: 30.0,
+            postProcessTranscription: false
         )
     }
 }
@@ -200,6 +209,16 @@ public enum VoiceSensitivity: String, Codable, CaseIterable, Sendable {
         }
     }
 
+    /// Intel: speech threshold for the energy detector that stands in for
+    /// Silero, on the same scaled RMS as the audio meter (`rms * 10`, 0–1).
+    public var energyThreshold: Float {
+        switch self {
+        case .low: return 0.12
+        case .medium: return 0.07
+        case .high: return 0.035
+        }
+    }
+
     /// Silence duration to consider speech ended (higher = waits longer)
     public var silenceThresholdSeconds: Double {
         switch self {
@@ -225,6 +244,7 @@ public enum SpeechConfigurationStore {
     public static func save(_ configuration: SpeechConfiguration) {
         cachedConfig = configuration
         saveToDisk(configuration)
+        NotificationCenter.default.post(name: .speechConfigurationChanged, object: nil)
     }
 
     private static func loadFromDisk() -> SpeechConfiguration {
@@ -255,4 +275,10 @@ public enum SpeechConfigurationStore {
     private static func configurationFileURL() -> URL {
         OsaurusPaths.speechConfigFile()
     }
+}
+
+extension Notification.Name {
+    /// Intel: posted by `SpeechConfigurationStore.save` so the recogniser
+    /// and the language list pick up a new language or server opt-in.
+    public static let speechConfigurationChanged = Notification.Name("osaurus.speechConfigurationChanged")
 }

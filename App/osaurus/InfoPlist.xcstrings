@@ -236,19 +236,19 @@
         "de" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Osaurus verwendet das Mikrofon für die Spracherkennung auf dem Gerät mit FluidAudio."
+            "value" : "Osaurus verwendet das Mikrofon für Spracheingabe und Diktat, transkribiert mit Apple Speech."
           }
         },
         "en" : {
           "stringUnit" : {
             "state" : "new",
-            "value" : "Osaurus uses the microphone for on-device voice transcription with FluidAudio."
+            "value" : "Osaurus uses the microphone for voice input and dictation, transcribed with Apple Speech."
           }
         },
         "zh-Hans" : {
           "stringUnit" : {
             "state" : "translated",
-            "value" : "Osaurus 使用麦克风通过 FluidAudio 进行设备端语音转写。"
+            "value" : "Osaurus 使用麦克风进行语音输入和听写，并通过 Apple 语音转写。"
           }
         }
       }
@@ -273,6 +273,30 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "Osaurus 插件可能会访问你的提醒事项，以读取和创建任务。"
+          }
+        }
+      }
+    },
+    "NSSpeechRecognitionUsageDescription" : {
+      "comment" : "Privacy - Speech Recognition Usage Description",
+      "extractionState" : "extracted_with_value",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus verwendet Apple Speech, um Gesprochenes für Chat, Diktat und Aktivierungswörter in Text umzuwandeln. Es bleibt auf diesem Mac, außer du erlaubst in den Spracheinstellungen die Server von Apple."
+          }
+        },
+        "en" : {
+          "stringUnit" : {
+            "state" : "new",
+            "value" : "Osaurus uses Apple Speech to turn what you say into text for chat, dictation and wake words. It stays on this Mac unless you allow Apple's servers in Voice settings."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 使用 Apple 语音将你说的话转为文字，用于聊天、听写和唤醒词。除非你在语音设置中允许使用 Apple 服务器，否则一切都留在此 Mac 上。"
           }
         }
       }

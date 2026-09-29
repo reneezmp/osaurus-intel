@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  VoiceView.swift
 //  osaurus
@@ -13,11 +12,9 @@ import SwiftUI
 
 enum VoiceTab: String, CaseIterable, AnimatedTabItem {
     case setup = "Setup"
-    case audioSettings = "Audio"
-    case voiceInput = "Voice Input"
-    case transcription = "Transcription"
+    case speechToText = "Speech To Text"
+    case textToSpeech = "Text To Speech"
     case vadMode = "VAD Mode"
-    case tts = "TTS"
     case models = "Models"
 
     var title: String {
@@ -26,7 +23,8 @@ enum VoiceTab: String, CaseIterable, AnimatedTabItem {
         case .speechToText: return L("Speech To Text")
         case .textToSpeech: return L("Text To Speech")
         case .vadMode: return L("VAD Mode")
-        case .models: return L("Models")
+        // Intel: Apple Speech languages and access, not model downloads.
+        case .models: return L("Recognition")
         }
     }
 }
@@ -72,16 +70,12 @@ struct VoiceView: View {
             Group {
                 switch selectedTab {
                 case .setup:
-                    VoiceSetupTab(onComplete: { selectedTab = .audioSettings })
-                case .audioSettings:
-                    AudioSettingsTab()
-                case .voiceInput:
-                    VoiceInputSettingsTab()
-                case .transcription:
+                    VoiceSetupTab(onComplete: { selectedTab = .speechToText })
+                case .speechToText:
                     TranscriptionModeSettingsTab()
                 case .vadMode:
                     VADModeSettingsTab()
-                case .tts:
+                case .textToSpeech:
                     TTSModeSettingsTab()
                 case .models:
                     VoiceModelsTab()
@@ -100,7 +94,7 @@ struct VoiceView: View {
                 selectedTab = tab
                 managementState.voiceSubTabRequest = nil
             } else if isSetupComplete {
-                selectedTab = .audioSettings
+                selectedTab = .speechToText
             } else {
                 selectedTab = .setup
             }
@@ -126,9 +120,7 @@ struct VoiceView: View {
         } tabsRow: {
             HeaderTabsRow(
                 selection: $selectedTab,
-                counts: [
-                    .models: modelManager.downloadedModelsCount
-                ]
+                counts: [:]
             )
         }
     }
@@ -136,8 +128,9 @@ struct VoiceView: View {
     private var headerSubtitle: String {
         if !isSetupComplete {
             return L("Complete setup to enable voice")
-        } else if modelManager.downloadedModelsCount > 0 {
-            return "\(modelManager.downloadedModelsCount) models • \(modelManager.totalDownloadedSizeString)"
+        } else if let language = modelManager.selectedModel {
+            // Intel: the recognition language and where it runs.
+            return "\(language.name) • \(modelManager.totalDownloadedSizeString)"
         } else {
             return L("Voice transcription ready")
         }
@@ -208,376 +201,162 @@ private struct VoiceHeaderStatusIndicator: View {
     }
 }
 
-// MARK: - Voice Models Tab
+// MARK: - Recognition Tab (Intel)
 
+/// Intel: upstream's Models tab downloads Parakeet models. Apple Speech has
+/// nothing to download, so this tab holds what decides whether voice works:
+/// Speech Recognition access, the language, and the opt-in for Apple's
+/// servers. See docs/VOICE_INTEL.md.
 private struct VoiceModelsTab: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var modelManager = SpeechModelManager.shared
-
-    @State private var searchText: String = ""
-
-    /// Single-pass output of the filter + partition step. Used to
-    /// be three independent computed properties (`filteredModels`,
-    /// `recommendedModels`, `otherModels`) that each walked
-    /// `availableModels` per body render. With download progress
-    /// republishing `modelManager.objectWillChange` at high frequency
-    /// during model setup, that meant 3 full-list passes per progress
-    /// chunk on top of the per-keystroke search work.
-    @State private var partitioned: PartitionedModels = PartitionedModels(
-        recommended: [],
-        other: []
-    )
-
-    private struct PartitionedModels {
-        var recommended: [SpeechModel]
-        var other: [SpeechModel]
-    }
+    @State private var allowServer = SpeechConfigurationStore.load().allowServerRecognition
+    @State private var selectedId: String = ""
 
     var body: some View {
         ScrollView {
-            VStack(spacing: 24) {
-                // Legacy WhisperKit cleanup banner
-                if modelManager.legacyWhisperModelsExist {
-                    LegacyWhisperBanner()
-                        .padding(.horizontal, 24)
-                }
-
-                // Search
-                SearchField(text: $searchText, placeholder: "Search models")
-                    .padding(.horizontal, 24)
-
-                // Recommended section
-                if !partitioned.recommended.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("RECOMMENDED", bundle: .module)
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(theme.secondaryText)
-                            .tracking(0.5)
-                            .padding(.horizontal, 24)
-
-                        VStack(spacing: 12) {
-                            ForEach(partitioned.recommended) { model in
-                                SpeechModelRow(model: model)
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                    }
-                }
-
-                // Other models section
-                if !partitioned.other.isEmpty {
-                    VStack(alignment: .leading, spacing: 12) {
-                        Text("ALL MODELS", bundle: .module)
-                            .font(.system(size: 11, weight: .bold))
-                            .foregroundColor(theme.secondaryText)
-                            .tracking(0.5)
-                            .padding(.horizontal, 24)
-
-                        VStack(spacing: 12) {
-                            ForEach(partitioned.other) { model in
-                                SpeechModelRow(model: model)
-                            }
-                        }
-                        .padding(.horizontal, 24)
-                    }
-                }
-
-                Spacer(minLength: 24)
+            VStack(alignment: .leading, spacing: 24) {
+                accessSection
+                languageSection
+                serverSection
             }
-            .padding(.top, 16)
+            .padding(.horizontal, 24)
+            .padding(.vertical, 24)
+            .frame(maxWidth: .infinity, alignment: .top)
         }
-        .onAppear { refreshPartition() }
-        .task(id: searchText) {
-            // Debounce search input so partition doesn't run on every
-            // keystroke. 150 ms matches the equivalent debounce in
-            // ModelDownloadView and keeps the UI feeling live.
-            try? await Task.sleep(for: .milliseconds(150))
-            if !Task.isCancelled { refreshPartition() }
-        }
-        .onReceive(modelManager.objectWillChange) { _ in
-            // SpeechModelManager publishes per download progress chunk.
-            // Refresh on every publish — the single-pass walk is cheap
-            // (small fixed list); the win is collapsing three full
-            // passes per body into one.
-            refreshPartition()
+        .onAppear {
+            selectedId = modelManager.selectedModel?.id ?? ""
+            allowServer = SpeechConfigurationStore.load().allowServerRecognition
+            modelManager.refreshDownloadStates()
+            Task { await modelManager.refreshDiskStateInBackground() }
         }
     }
 
-    private func refreshPartition() {
-        let trimmed = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
-        var recommended: [SpeechModel] = []
-        var other: [SpeechModel] = []
-        recommended.reserveCapacity(modelManager.availableModels.count)
-        other.reserveCapacity(modelManager.availableModels.count)
-        for model in modelManager.availableModels {
-            if !trimmed.isEmpty {
-                let match =
-                    SearchService.matches(query: trimmed, in: model.name)
-                    || SearchService.matches(query: trimmed, in: model.description)
-                if !match { continue }
-            }
-            if model.isRecommended {
-                recommended.append(model)
-            } else {
-                other.append(model)
-            }
-        }
-        partitioned = PartitionedModels(recommended: recommended, other: other)
-    }
-}
+    // MARK: Access
 
-// MARK: - Legacy WhisperKit Cleanup Banner
-
-private struct LegacyWhisperBanner: View {
-    @Environment(\.theme) private var theme
-    @ObservedObject private var modelManager = SpeechModelManager.shared
-    @State private var isDeleting = false
-
-    var body: some View {
-        HStack(spacing: 12) {
-            Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 18))
-                .foregroundColor(theme.warningColor)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text("Legacy WhisperKit models found", bundle: .module)
-                    .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-
-                Text(
-                    "These models are no longer used. Delete to free up \(modelManager.legacyWhisperModelsSizeString ?? "disk space").",
-                    bundle: .module
-                )
-                .font(.system(size: 12))
-                .foregroundColor(theme.secondaryText)
-            }
-
-            Spacer()
-
-            Button(action: {
-                isDeleting = true
-                modelManager.deleteLegacyWhisperModels()
-                isDeleting = false
-            }) {
-                if isDeleting {
-                    ProgressView()
-                        .controlSize(.small)
-                } else {
-                    Text("Delete", bundle: .module)
+    private var accessSection: some View {
+        SettingsSection(title: "Speech Recognition", icon: "waveform") {
+            HStack(spacing: 12) {
+                Image(systemName: accessIcon)
+                    .font(.system(size: 16, weight: .medium))
+                    .foregroundColor(accessColor)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text(accessTitle)
                         .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 14)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(theme.errorColor)
-                        )
-                }
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(isDeleting)
-        }
-        .padding(14)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(theme.warningColor.opacity(0.08))
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(theme.warningColor.opacity(0.25), lineWidth: 1)
-                )
-        )
-    }
-}
-
-// MARK: - Speech Model Row
-
-private struct SpeechModelRow: View {
-    @Environment(\.theme) private var theme
-    @ObservedObject private var modelManager = SpeechModelManager.shared
-
-    let model: SpeechModel
-
-    @State private var isHovering = false
-
-    private var downloadState: SpeechDownloadState {
-        modelManager.effectiveDownloadState(for: model)
-    }
-
-    private var isSelected: Bool {
-        modelManager.selectedModelId == model.id
-    }
-
-    var body: some View {
-        HStack(spacing: 16) {
-            // Icon
-            ZStack {
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(iconBackground)
-                Image(systemName: iconName)
-                    .font(.system(size: 18, weight: .medium))
-                    .foregroundColor(iconColor)
-            }
-            .frame(width: 48, height: 48)
-
-            // Info
-            VStack(alignment: .leading, spacing: 4) {
-                HStack(spacing: 8) {
-                    Text(model.name)
-                        .font(.system(size: 14, weight: .semibold))
                         .foregroundColor(theme.primaryText)
-
-                    if model.isEnglishOnly {
-                        Text("EN", bundle: .module)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(theme.secondaryText)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(theme.tertiaryBackground))
-                    }
-
-                    if isSelected {
-                        Text("Default", bundle: .module)
-                            .font(.system(size: 9, weight: .bold))
-                            .foregroundColor(theme.successColor)
-                            .padding(.horizontal, 5)
-                            .padding(.vertical, 2)
-                            .background(Capsule().fill(theme.successColor.opacity(0.1)))
-                    }
-                }
-
-                Text(model.description)
-                    .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryText)
-                    .lineLimit(1)
-
-                Text(model.size)
+                    Text(
+                        "Osaurus transcribes with Apple Speech, which macOS asks you to allow once.",
+                        bundle: .module
+                    )
                     .font(.system(size: 11))
                     .foregroundColor(theme.tertiaryText)
+                }
+                Spacer()
+                accessAction
             }
-
-            Spacer()
-
-            // Actions
-            actionButton
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 14)
-                .fill(theme.cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 14)
-                        .stroke(
-                            isSelected ? theme.successColor.opacity(0.3) : theme.cardBorder,
-                            lineWidth: 1
-                        )
-                )
-        )
-        .scaleEffect(isHovering ? 1.005 : 1)
-        .animation(.easeOut(duration: 0.15), value: isHovering)
-        .onHover { hovering in
-            isHovering = hovering
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(theme.inputBackground)
+                    .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder, lineWidth: 1))
+            )
         }
     }
 
-    private var iconName: String {
-        switch downloadState {
-        case .completed: return "waveform"
-        case .downloading: return "arrow.down.circle"
-        case .failed: return "exclamationmark.triangle"
-        default: return "waveform.circle"
+    private var accessTitle: String {
+        switch modelManager.authorizationStatus {
+        case .authorized: return L("Allowed")
+        case .denied: return L("Turned off in System Settings")
+        case .restricted: return L("Restricted on this Mac")
+        default: return L("Not allowed yet")
         }
     }
 
-    private var iconColor: Color {
-        switch downloadState {
-        case .completed: return theme.successColor
-        case .downloading: return theme.accentColor
-        case .failed: return theme.errorColor
-        default: return theme.secondaryText
-        }
+    private var accessIcon: String {
+        modelManager.authorizationStatus == .authorized ? "checkmark.circle.fill" : "exclamationmark.circle"
     }
 
-    private var iconBackground: Color {
-        switch downloadState {
-        case .completed: return theme.successColor.opacity(0.15)
-        case .downloading: return theme.accentColor.opacity(0.15)
-        case .failed: return theme.errorColor.opacity(0.15)
-        default: return theme.tertiaryBackground
-        }
+    private var accessColor: Color {
+        modelManager.authorizationStatus == .authorized ? theme.successColor : theme.warningColor
     }
 
     @ViewBuilder
-    private var actionButton: some View {
-        switch downloadState {
-        case .notStarted, .failed:
-            Button(action: { modelManager.downloadModel(model) }) {
-                Text("Download", bundle: .module)
-                    .font(.system(size: 13, weight: .medium))
-                    .foregroundColor(theme.isDark ? theme.primaryBackground : .white)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 8)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(theme.accentColor)
-                    )
+    private var accessAction: some View {
+        switch modelManager.authorizationStatus {
+        case .authorized:
+            EmptyView()
+        case .denied, .restricted:
+            Button(L("Open Settings")) { SpeechModelManager.openSpeechRecognitionSettings() }
+                .buttonStyle(ThemedBorderedButtonStyle())
+        default:
+            Button(L("Allow")) {
+                if let model = modelManager.selectedModel { modelManager.downloadModel(model) }
             }
-            .buttonStyle(PlainButtonStyle())
+            .buttonStyle(ThemedBorderedButtonStyle())
+        }
+    }
 
-        case .downloading(let progress):
-            HStack(spacing: 12) {
-                // Progress indicator
-                ZStack {
-                    Circle()
-                        .stroke(theme.tertiaryBackground, lineWidth: 3)
-                    Circle()
-                        .trim(from: 0, to: progress)
-                        .stroke(theme.accentColor, style: StrokeStyle(lineWidth: 3, lineCap: .round))
-                        .rotationEffect(.degrees(-90))
-                        .animation(.easeOut(duration: 0.3), value: progress)
-                }
-                .frame(width: 28, height: 28)
+    // MARK: Language
 
-                Text("\(Int(progress * 100))%", bundle: .module)
-                    .font(.system(size: 12, weight: .medium, design: .monospaced))
-                    .foregroundColor(theme.secondaryText)
-                    .frame(width: 40)
-
-                Button(action: { modelManager.cancelDownload(model.id) }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 18))
-                        .foregroundColor(theme.tertiaryText)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-
-        case .completed:
-            HStack(spacing: 8) {
-                if !isSelected {
-                    Button(action: { modelManager.setDefaultModel(model.id) }) {
-                        Text("Set Default", bundle: .module)
-                            .font(.system(size: 12, weight: .medium))
-                            .foregroundColor(theme.accentColor)
-                            .padding(.horizontal, 12)
-                            .padding(.vertical, 6)
-                            .background(
-                                RoundedRectangle(cornerRadius: 6)
-                                    .stroke(theme.accentColor, lineWidth: 1)
-                            )
+    private var languageSection: some View {
+        SettingsSection(title: "Language", icon: "globe") {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack {
+                    Text("Recognition language", bundle: .module)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                    Spacer()
+                    Picker("", selection: $selectedId) {
+                        ForEach(modelManager.availableModels) { model in
+                            Text(verbatim: "\(model.name) · \(model.size)").tag(model.id)
+                        }
                     }
-                    .buttonStyle(PlainButtonStyle())
+                    .labelsHidden()
+                    .pickerStyle(MenuPickerStyle())
+                    .frame(maxWidth: 320)
+                    .onChange(of: selectedId) { newValue in
+                        guard !newValue.isEmpty, newValue != modelManager.selectedModel?.id else { return }
+                        modelManager.setDefaultModel(newValue)
+                    }
                 }
+                if let selected = modelManager.selectedModel {
+                    Text(languageStatus(for: selected))
+                        .font(.system(size: 11))
+                        .foregroundColor(
+                            modelManager.effectiveDownloadState(for: selected) == .completed
+                                ? theme.tertiaryText : theme.warningColor)
+                }
+            }
+        }
+    }
 
-                Button(action: { modelManager.deleteModel(model) }) {
-                    Image(systemName: "trash")
-                        .font(.system(size: 14))
-                        .foregroundColor(theme.tertiaryText)
-                        .padding(8)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6)
-                                .fill(theme.tertiaryBackground)
-                        )
+    private func languageStatus(for model: SpeechModel) -> String {
+        if model.onDevice {
+            return L("Runs on this Mac. Audio never leaves it.")
+        }
+        return allowServer
+            ? L("This language uses Apple's servers: your speech is sent to Apple to be transcribed.")
+            : L("This language can't be recognised on this Mac. Allow Apple's servers below, or pick another language.")
+    }
+
+    // MARK: Apple's servers
+
+    private var serverSection: some View {
+        SettingsSection(title: "Apple's Servers", icon: "network") {
+            VStack(alignment: .leading, spacing: 10) {
+                SettingsToggle(
+                    title: L("Use Apple's servers when needed"),
+                    description: L(
+                        "Only for languages that can't be recognised on this Mac. Your speech is then sent to Apple. VAD Mode never uses them."
+                    ),
+                    isOn: $allowServer
+                )
+                .onChange(of: allowServer) { newValue in
+                    var config = SpeechConfigurationStore.load()
+                    guard config.allowServerRecognition != newValue else { return }
+                    config.allowServerRecognition = newValue
+                    SpeechConfigurationStore.save(config)
                 }
-                .buttonStyle(PlainButtonStyle())
             }
         }
     }
@@ -589,12 +368,4 @@ private struct SpeechModelRow: View {
     #Preview {
         VoiceView()
     }
-#endif
-#else
-import SwiftUI
-struct VoiceView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Voice", symbol: "mic.fill")
-    }
-}
 #endif

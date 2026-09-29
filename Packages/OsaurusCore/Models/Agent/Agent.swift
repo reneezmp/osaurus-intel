@@ -675,6 +675,9 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// own next run (`schedule_next_run`, `cancel_next_run`) and post
     /// notifications (`notify`), within the `schedule` preset. Default off.
     public var selfSchedulingEnabled: Bool
+    /// Speak Tool (upstream): the agent gets the `speak` tool to read a reply
+    /// aloud when asked. Default off.
+    public var speakEnabled: Bool
     /// Self-scheduling bounds. Always present so the UI never has to disambiguate
     /// "schedule disabled" vs "schedule with default bounds"; `mode = .manual`
     /// (dailyRunCap = 0) is the off state.
@@ -701,12 +704,14 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         greetingPersona: String? = nil,
         webSearchEnabled: Bool = false,
         enabledAppleApps: Set<AppleApp> = [],
-        selfSchedulingEnabled: Bool = false
+        selfSchedulingEnabled: Bool = false,
+        speakEnabled: Bool = false
     ) {
         self.dbEnabled = dbEnabled
         self.webSearchEnabled = webSearchEnabled
         self.enabledAppleApps = enabledAppleApps
         self.selfSchedulingEnabled = selfSchedulingEnabled
+        self.speakEnabled = speakEnabled
         self.schedule = schedule
         self.limits = limits
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
@@ -721,6 +726,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         let rawAppleApps = (try? c.decodeIfPresent([String].self, forKey: .enabledAppleApps)) ?? []
         enabledAppleApps = Set(rawAppleApps.compactMap(AppleApp.init(rawValue:)))
         selfSchedulingEnabled = try c.decodeIfPresent(Bool.self, forKey: .selfSchedulingEnabled) ?? false
+        speakEnabled = try c.decodeIfPresent(Bool.self, forKey: .speakEnabled) ?? false
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
@@ -753,6 +759,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case webSearchEnabled
         case enabledAppleApps
         case selfSchedulingEnabled
+        case speakEnabled
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -767,6 +774,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(webSearchEnabled, forKey: .webSearchEnabled)
         try c.encode(AppleApp.sorted(enabledAppleApps).map(\.rawValue), forKey: .enabledAppleApps)
         try c.encode(selfSchedulingEnabled, forKey: .selfSchedulingEnabled)
+        try c.encode(speakEnabled, forKey: .speakEnabled)
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)

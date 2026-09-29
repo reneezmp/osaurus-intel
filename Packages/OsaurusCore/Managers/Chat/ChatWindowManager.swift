@@ -1269,6 +1269,8 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
+        // VAD Mode resumes once the last chat window is gone (IntelVoiceLaunch).
+        NotificationCenter.default.post(name: .chatViewClosed, object: id)
     }
 
     // MARK: - NSWindowDelegate (Intel chat windows)
@@ -1293,6 +1295,8 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
+        // VAD Mode resumes once the last chat window is gone (IntelVoiceLaunch).
+        NotificationCenter.default.post(name: .chatViewClosed, object: id)
     }
 
     /// Track the genuinely-focused window so "Ask AI" / dock reopen target the
@@ -1302,6 +1306,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             let id = windowId(for: window)
         else { return }
         lastFocusedWindowId = id
+        // Upstream pauses VAD Mode whenever the chat is shown, so the chat's
+        // microphone never competes with the wake-word listener.
+        if VADService.shared.state != .idle {
+            Task { await VADService.shared.pause() }
+        }
     }
 
     public func findWindows(byAgentId agentId: UUID) -> [(id: UUID, info: ChatWindowInfo)] {

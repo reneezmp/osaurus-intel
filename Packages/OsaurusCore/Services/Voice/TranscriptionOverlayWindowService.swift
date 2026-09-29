@@ -84,7 +84,7 @@ public final class TranscriptionOverlayWindowService: ObservableObject {
     // MARK: - Private Helpers
 
     private func createPanel() {
-        let panelSize = NSSize(width: 400, height: 60)
+        let panelSize = NSSize(width: 400, height: 120)
         let initialRect = NSRect(origin: .zero, size: panelSize)
 
         // Create panel with minimal chrome
@@ -97,7 +97,10 @@ public final class TranscriptionOverlayWindowService: ObservableObject {
 
         panel.isOpaque = false
         panel.backgroundColor = .clear
-        panel.hasShadow = true
+        // Native window shadow traces a black silhouette around the clear, rounded
+        // content. The SwiftUI view draws its own shadow, so disable the native one
+        // (matches the toast overlay).
+        panel.hasShadow = false
         panel.level = .floating
         panel.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary, .transient]
         panel.hidesOnDeactivate = false
@@ -109,6 +112,10 @@ public final class TranscriptionOverlayWindowService: ObservableObject {
         let overlayView = createOverlayView()
         let hostingController = NSHostingController(rootView: AnyView(overlayView))
         hostingController.view.frame = NSRect(origin: .zero, size: panelSize)
+        // Ensure the hosting view's backing is transparent so nothing paints
+        // behind the rounded SwiftUI content.
+        hostingController.view.wantsLayer = true
+        hostingController.view.layer?.backgroundColor = NSColor.clear.cgColor
 
         panel.contentViewController = hostingController
 
@@ -117,10 +124,17 @@ public final class TranscriptionOverlayWindowService: ObservableObject {
     }
 
     private func createOverlayView() -> some View {
-        TranscriptionOverlayView(
+        let config = SpeechConfigurationStore.load()
+        // Show a Stop button whenever transcription won't stop on its own:
+        // manual mode, or automatic mode with pause duration 0 (no auto-send).
+        let showsStopButton =
+            config.transcriptionStopMode == .manual
+            || (config.transcriptionStopMode == .automatic && config.pauseDuration == 0)
+        return TranscriptionOverlayView(
             audioLevel: audioLevel,
             isActive: isActive,
             isProcessing: isProcessing,
+            showsStopButton: showsStopButton,
             onDone: { [weak self] in
                 self?.onDone?()
             },
@@ -146,12 +160,12 @@ public final class TranscriptionOverlayWindowService: ObservableObject {
 
         guard let screen = activeScreen else { return }
 
-        // Position at top-center of the screen, below menu bar
+        // Position at bottom-center of the screen, above the Dock.
         let visibleFrame = screen.visibleFrame
         let panelSize = panel.frame.size
 
         let x = visibleFrame.origin.x + (visibleFrame.width - panelSize.width) / 2
-        let y = visibleFrame.origin.y + visibleFrame.height - panelSize.height - 20
+        let y = visibleFrame.origin.y + 20
 
         panel.setFrameOrigin(NSPoint(x: x, y: y))
     }

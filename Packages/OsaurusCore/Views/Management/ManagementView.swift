@@ -171,6 +171,9 @@ private extension ManagementView {
 
     func handleResultSelected(_ entry: SettingsSearchEntry) {
         searchText = ""
+        if entry.tab == .voice, let subTab = entry.subTab {
+            stateManager.voiceSubTabRequest = subTab
+        }
         withAnimation(.easeOut(duration: 0.2)) {
             stateManager.selectedTab = entry.tab
         }
@@ -286,7 +289,7 @@ private extension ManagementView {
             badgeHighlight: badgeHighlight(for: tab)
         )
         // On Intel, tabs whose entire backing subsystem is amputated
-        // (Models / Voice / Sandbox) stay listed — clustered together under
+        // (Models / Sandbox) stay listed — clustered together under
         // the "Not Available on This Mac" section — but render disabled so
         // users get a discoverable explainer instead of a working button
         // that opens an empty placeholder. `SidebarItemView` applies
@@ -295,12 +298,7 @@ private extension ManagementView {
         // always returns `true` there by definition.
         if !tab.isAvailableOnIntel {
             item.isDisabled = true
-            // Voice is not hardware-bound (upstream's engine is; Apple Speech
-            // is not), so it says "not yet" instead of "requires Apple Silicon".
-            item.disabledHelp =
-                tab == .voice
-                ? L("Not available on Intel yet")
-                : L("Not available on Intel — requires Apple Silicon")
+            item.disabledHelp = L("Not available on Intel — requires Apple Silicon")
         }
         return item
     }

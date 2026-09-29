@@ -2539,6 +2539,28 @@ struct AgentDetailView: View {
             )
         }
 
+        // Upstream groups the Speak Tool under Output.
+        AgentDetailSection(title: L("Output"), icon: "speaker.wave.2") {
+            if agent.id == Agent.defaultId {
+                abilityUnavailableRow(
+                    title: "Speak Tool",
+                    description: "The built-in agent doesn't get the speak tool. Create an agent to use it, or use the speaker button on any reply.",
+                    icon: "speaker.wave.2"
+                )
+            } else {
+                abilityToggleRow(
+                    title: "Speak Tool",
+                    description: "Give the agent a tool it can call to read a reply aloud when you ask. For always-speak, use Auto Speak Responses in the Voice section.",
+                    icon: "speaker.wave.2",
+                    isOn: Binding(
+                        get: { currentAgent.settings.speakEnabled },
+                        set: { setSpeakEnabled($0) }
+                    ),
+                    destination: nil
+                )
+            }
+        }
+
         AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
             VStack(spacing: 10) {
                 if agent.id == Agent.defaultId {
@@ -3544,6 +3566,16 @@ struct AgentDetailView: View {
     /// The Self-scheduling master switch (upstream behaviour): turning it on
     /// from the "manual" preset picks Ambient so real bounds apply; turning it
     /// off cancels a pending self-scheduled wake the user could no longer see.
+    /// The Speak Tool switch (upstream `speakEnabled`), written directly.
+    private func setSpeakEnabled(_ enabled: Bool) {
+        guard var current = agentManager.agent(for: agent.id), !current.isBuiltIn else { return }
+        guard current.settings.speakEnabled != enabled else { return }
+        current.settings.speakEnabled = enabled
+        current.updatedAt = Date()
+        agentManager.update(current)
+        showSaveIndicator()
+    }
+
     private func setSelfScheduling(_ enabled: Bool) {
         guard var current = agentManager.agent(for: agent.id), !current.isBuiltIn else { return }
         guard current.settings.selfSchedulingEnabled != enabled else { return }
@@ -5869,7 +5901,9 @@ struct AgentDetailView: View {
                 // Written directly by the Apple app toggles; pass it through.
                 enabledAppleApps: current.settings.enabledAppleApps,
                 // Written directly by the Self-scheduling switch.
-                selfSchedulingEnabled: current.settings.selfSchedulingEnabled
+                selfSchedulingEnabled: current.settings.selfSchedulingEnabled,
+                // Written directly by the Speak Tool switch.
+                speakEnabled: current.settings.speakEnabled
             ),
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,
@@ -6196,8 +6230,13 @@ private struct AgentDetailVoiceSection: View {
     @Binding var ttsVoice: String
     let onSave: () -> Void
 
+    /// Intel: the voice list follows the active engine — installed system
+    /// voices, or a free-form name for an OpenAI-compatible server.
+    @State private var provider: TTSProvider = TTSConfigurationStore.load().provider
+    @State private var systemVoices: [SystemVoiceCatalog.Entry] = []
+
     var body: some View {
-        AgentDetailSection(title: "Voice", icon: "speaker.wave.2") {
+        AgentDetailSection(title: L("Voice"), icon: "speaker.wave.2") {
             VStack(alignment: .leading, spacing: 12) {
                 HStack {
                     VStack(alignment: .leading, spacing: 2) {
@@ -6205,9 +6244,7 @@ private struct AgentDetailVoiceSection: View {
                             .font(.system(size: 12, weight: .medium))
                             .foregroundColor(theme.primaryText)
                         Text(
-                            ttsService.isModelReady
-                                ? "Read replies aloud after streaming completes."
-                                : "Download the PocketTTS model in Voice settings to enable.",
+                            "Read every reply aloud automatically after streaming completes. For on-request only, use the Speak Tool feature instead.",
                             bundle: .module
                         )
                         .font(.system(size: 11))
@@ -6215,9 +6252,8 @@ private struct AgentDetailVoiceSection: View {
                     }
                     Spacer()
                     Toggle("", isOn: $autoSpeak)
-                        .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
+                        .toggleStyle(ThemedSwitchToggleStyle())
                         .labelsHidden()
-                        .disabled(!ttsService.isModelReady)
                         .onChange(of: autoSpeak) { _ in onSave() }
                 }
                 .padding(10)
@@ -6230,65 +6266,64 @@ private struct AgentDetailVoiceSection: View {
                         )
                 )
 
-                if !ttsService.isModelReady {
-                    Button {
-                        NotificationCenter.default.post(
-                            name: .openTTSSettingsRequested,
-                            object: nil
-                        )
-                    } label: {
-                        HStack(spacing: 6) {
-                            Image(systemName: "arrow.down.circle")
-                                .font(.system(size: 11, weight: .semibold))
-                            Text("Open Voice Settings", bundle: .module)
-                                .font(.system(size: 11, weight: .medium))
-                        }
-                        .foregroundColor(theme.accentColor)
-                    }
-                    .buttonStyle(.plain)
-                }
-
-                if autoSpeak && ttsService.isModelReady {
-                    HStack {
-                        Text("Voice", bundle: .module)
-                            .font(.system(size: 12))
-                            .foregroundColor(theme.secondaryText)
-                        Spacer()
+                HStack {
+                    Text("Voice", bundle: .module)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                    Spacer()
+                    if provider == .system {
                         Picker("", selection: $ttsVoice) {
                             Text("Default (global)", bundle: .module).tag("")
-                            ForEach(agentVoiceOptions, id: \.self) { voice in
-                                Text(PocketTTSVoiceCatalog.displayName(for: voice))
-                                    .tag(voice)
+                            if !ttsVoice.isEmpty, !systemVoices.contains(where: { $0.id == ttsVoice }) {
+                                Text(verbatim: SystemVoiceCatalog.displayName(for: ttsVoice)).tag(ttsVoice)
+                            }
+                            ForEach(systemVoices) { voice in
+                                Text(verbatim: SystemVoiceCatalog.label(for: voice)).tag(voice.id)
                             }
                         }
                         .labelsHidden()
                         .pickerStyle(MenuPickerStyle())
-                        .frame(maxWidth: 200)
+                        .frame(maxWidth: 280)
                         .onChange(of: ttsVoice) { _ in onSave() }
+                    } else {
+                        TextField(L("Default (global)"), text: $ttsVoice)
+                            .textFieldStyle(RoundedBorderTextFieldStyle())
+                            .font(.system(size: 12))
+                            .frame(maxWidth: 200)
+                            .onChange(of: ttsVoice) { _ in onSave() }
                     }
-                    .padding(10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(theme.inputBackground)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(theme.inputBorder, lineWidth: 1)
-                            )
-                    )
                 }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.inputBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 8)
+                                .stroke(theme.inputBorder, lineWidth: 1)
+                        )
+                )
+
+                Button {
+                    NotificationCenter.default.post(name: .openTTSSettingsRequested, object: nil)
+                } label: {
+                    HStack(spacing: 6) {
+                        Image(systemName: "gearshape")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Open Voice Settings", bundle: .module)
+                            .font(.system(size: 11, weight: .medium))
+                    }
+                    .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(.plain)
             }
         }
-        .onAppear { ttsService.refreshModelState() }
-    }
-
-    /// Built-in catalog plus any stored custom voice (preserves legacy values).
-    private var agentVoiceOptions: [String] {
-        let builtIn = PocketTTSVoiceCatalog.availableVoices
-        let current = ttsVoice.trimmingCharacters(in: .whitespacesAndNewlines)
-        if !current.isEmpty && !builtIn.contains(current) {
-            return [current] + builtIn
+        .onAppear {
+            provider = TTSConfigurationStore.load().provider
+            if systemVoices.isEmpty { systemVoices = SystemVoiceCatalog.availableVoices() }
         }
-        return builtIn
+        .onReceive(NotificationCenter.default.publisher(for: .ttsConfigurationChanged)) { _ in
+            provider = TTSConfigurationStore.load().provider
+        }
     }
 }
 

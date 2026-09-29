@@ -1,5 +1,9 @@
 # Voice Input Guide
 
+> **Intel fork:** this is upstream's guide (FluidAudio / Parakeet). The Intel
+> build uses Apple Speech and the macOS system voices instead — see
+> [`VOICE_INTEL.md`](VOICE_INTEL.md) for what differs.
+
 Osaurus includes powerful voice input capabilities powered by [FluidAudio](https://github.com/FluidInference/FluidAudio) — fully local, private, on-device speech-to-text transcription.
 
 ---

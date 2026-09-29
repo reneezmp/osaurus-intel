@@ -667,3 +667,68 @@ Working folder with a Word file, a spreadsheet, a slide deck and a PDF
       open it in Preview and check the **radio button** shows Pro selected
       (macOS 27's PDFKit loses it; Ventura's may not). Note the result.
 - [ ] Ask for a preview first ("dry run"): nothing changes until confirmed.
+
+## Voice
+
+Manual: [`VOICE_INTEL.md`](VOICE_INTEL.md). Use headphones for the speech
+checks. Items marked **(paid)** use the chat model.
+
+**First, the unknown (please record the answer):**
+
+- [ ] Voice → Recognition: allow Speech Recognition when macOS asks. Note
+      which languages show **"On this Mac"** (at least English and German).
+      If none do, note it: voice then needs *Use Apple's servers when needed*
+      and VAD Mode stays unavailable — both are expected in that case.
+
+Setup and settings:
+
+- [ ] The sidebar lists **Voice** under General (after Settings), and it opens.
+- [ ] Setup tab: Microphone → Grant, Speech Recognition → Allow; both tick.
+      Tap the big mic, say a sentence: the text appears live. The footer says
+      "All processing happens on your Mac" (or, with Apple's servers on,
+      "Speech is sent to Apple for recognition").
+- [ ] Recognition tab: switch the language to German, speak German, then back.
+      Turning *Use Apple's servers when needed* on/off changes the status line.
+- [ ] Audio Input: pick another microphone (or System Audio with Screen
+      Recording allowed); dictation still works.
+
+Chat microphone:
+
+- [ ] In a chat, tap the mic, speak, pause: the countdown appears and the
+      message sends by itself **(paid)**. Manual stop mode: it waits for Stop.
+- [ ] Deny microphone access once (System Settings) and tap the mic: the
+      "microphone access" alert explains how to fix it; re-allow and it works.
+
+Transcription Mode (dictate anywhere):
+
+- [ ] Speech To Text tab: turn on Transcription Mode, set a hotkey, allow
+      Accessibility when asked. In TextEdit press the hotkey, speak, pause: the
+      text is pasted into TextEdit. Esc cancels without pasting.
+- [ ] *Clean Up Transcription* is **off** by default. Turn it on and dictate
+      "uh I I went to the store" **(paid)**: the pasted text is tidied. Turn it
+      off again.
+
+VAD Mode (wake word):
+
+- [ ] VAD Mode tab: enable it for one agent. Close **all** chat windows, say
+      "Hey <agent name>, …": that agent's chat opens and listens. Opening a
+      chat window yourself pauses listening; closing the last one resumes it.
+- [ ] With Apple's servers as the only option for the language, VAD Mode
+      refuses to start and says why.
+
+Speaking:
+
+- [ ] Voice → Text To Speech: engine *On This Mac (System Voices)*, voice
+      *Automatic*; Preview plays. Change voice and speed; Preview follows.
+- [ ] Speaker button on a German reply and on an English reply: Automatic picks
+      a matching voice for each. Tap again to stop.
+- [ ] Agent → Configure → Voice: turn on Auto Speak and pick a voice; the next
+      reply is read in that voice **(paid)**.
+- [ ] Agent → Abilities → Output → **Speak Tool** on, then "read your answer
+      aloud" **(paid)**: the `speak` call shows a spinner while it plays and a
+      check after. With the switch off the agent has no speak tool.
+- [ ] Optional, if you run a TTS server (e.g. openai-edge-tts in Docker):
+      engine *OpenAI-Compatible Server*, Test Connection → Connected, Preview
+      plays.
+- [ ] Quit Osaurus while something is playing or the mic is on: it quits
+      cleanly and the mic indicator goes off.

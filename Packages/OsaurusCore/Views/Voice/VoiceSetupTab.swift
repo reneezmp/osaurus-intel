@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  VoiceSetupTab.swift
 //  osaurus
@@ -15,6 +14,8 @@ struct VoiceSetupTab: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var speechService = SpeechService.shared
     @ObservedObject private var modelManager = SpeechModelManager.shared
+    @ObservedObject private var audioInputManager = AudioInputManager.shared
+    @ObservedObject private var systemAudioManager = SystemAudioCaptureManager.shared
 
     /// Called when setup is complete
     var onComplete: (() -> Void)?
@@ -25,6 +26,21 @@ struct VoiceSetupTab: View {
     @State private var hasAppeared = false
     @State private var micButtonScale: CGFloat = 1.0
     @State private var isPressed = false
+
+    // Shared audio settings (apply to all voice modes)
+    @State private var sensitivity: VoiceSensitivity = .medium
+    @State private var hasLoadedSettings = false
+
+    private func loadSettings() {
+        sensitivity = SpeechConfigurationStore.load().sensitivity
+    }
+
+    private func saveSettings() {
+        var config = SpeechConfigurationStore.load()
+        config.sensitivity = sensitivity
+        SpeechConfigurationStore.save(config)
+        NotificationCenter.default.post(name: .voiceConfigurationChanged, object: nil)
+    }
 
     /// Whether all requirements are met
     private var isSetupComplete: Bool {
@@ -54,41 +70,63 @@ struct VoiceSetupTab: View {
     var body: some View {
         ScrollView {
             VStack(spacing: 0) {
+                // Onboarding hero — kept in a narrow, centered column
+                VStack(spacing: 0) {
+                    Spacer()
+                        .frame(height: 40)
+
+                    // Requirements checklist (compact)
+                    requirementsSection
+                        .opacity(hasAppeared ? 1 : 0)
+                        .animation(.easeOut(duration: 0.25).delay(0.05), value: hasAppeared)
+
+                    Spacer()
+                        .frame(height: 24)
+
+                    // Central voice test area — the hero beat of the two-beat
+                    // entrance (house spring; everything else fades in behind it)
+                    voiceTestSection
+                        .opacity(hasAppeared ? 1 : 0)
+                        .scaleEffect(hasAppeared ? 1 : 0.95)
+                        .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+
+                    Spacer()
+                        .frame(height: 16)
+
+                    // Privacy footer
+                    privacyFooter
+                        .opacity(hasAppeared ? 1 : 0)
+                        .animation(.easeOut(duration: 0.25).delay(0.05), value: hasAppeared)
+                }
+                .padding(.horizontal, 24)
+                .frame(maxWidth: 520)
+                .frame(maxWidth: .infinity)
+
                 Spacer()
                     .frame(height: 40)
 
-                // Requirements checklist (compact)
-                requirementsSection
+                // Shared audio settings (sensitivity + input device) — full width,
+                // matching the other voice settings tabs.
+                audioSettingsSection
                     .opacity(hasAppeared ? 1 : 0)
-                    .offset(y: hasAppeared ? 0 : 8)
-                    .animation(.spring(response: 0.5, dampingFraction: 0.85).delay(0.05), value: hasAppeared)
-
-                Spacer()
-                    .frame(height: 48)
-
-                // Central voice test area
-                voiceTestSection
-                    .opacity(hasAppeared ? 1 : 0)
-                    .scaleEffect(hasAppeared ? 1 : 0.95)
-                    .animation(.spring(response: 0.6, dampingFraction: 0.8).delay(0.15), value: hasAppeared)
-
-                Spacer()
-                    .frame(height: 32)
-
-                // Privacy footer
-                privacyFooter
-                    .opacity(hasAppeared ? 1 : 0)
-                    .animation(.easeOut(duration: 0.4).delay(0.3), value: hasAppeared)
+                    .animation(.easeOut(duration: 0.25).delay(0.05), value: hasAppeared)
+                    .padding(.horizontal, 24)
 
                 Spacer()
             }
-            .padding(.horizontal, 24)
-            .frame(maxWidth: 520)
-            .frame(maxWidth: .infinity)
         }
         .onAppear {
+            if !hasLoadedSettings {
+                loadSettings()
+                hasLoadedSettings = true
+            }
             withAnimation {
                 hasAppeared = true
+            }
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .voiceConfigurationChanged)) { _ in
+            if !isTestingVoice {
+                loadSettings()
             }
         }
         .onChange(of: speechService.currentTranscription) { newValue in
@@ -171,8 +209,8 @@ struct VoiceSetupTab: View {
             modelStatusIcon
                 .frame(width: 20, height: 20)
 
-            // Label
-            Text("Speech Model", bundle: .module)
+            // Label (Intel: Apple Speech needs access, not a download)
+            Text("Speech Recognition", bundle: .module)
                 .font(.system(size: 13, weight: .medium))
                 .foregroundColor(hasModel ? theme.primaryText : theme.secondaryText)
 
@@ -218,9 +256,28 @@ struct VoiceSetupTab: View {
                     .font(.system(size: 11, weight: .medium, design: .monospaced))
                     .foregroundColor(theme.accentColor)
             }
-        } else if let recommendedModel = modelManager.availableModels.first(where: { $0.isRecommended }) {
-            Button(action: { modelManager.downloadModel(recommendedModel) }) {
-                Text("Download", bundle: .module)
+        } else if modelManager.authorizationStatus == .denied || modelManager.authorizationStatus == .restricted {
+            Button(action: { SpeechModelManager.openSpeechRecognitionSettings() }) {
+                Text("Open Settings", bundle: .module)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.accentColor)
+            }
+            .buttonStyle(.plain)
+        } else if modelManager.authorizationStatus == .authorized {
+            // Access is granted, but the language needs Apple's servers.
+            Button(action: {
+                ManagementStateManager.shared.voiceSubTabRequest = VoiceTab.models.rawValue
+            }) {
+                Text("Choose Language", bundle: .module)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.accentColor)
+            }
+            .buttonStyle(.plain)
+        } else if let model = modelManager.selectedModel
+            ?? modelManager.availableModels.first(where: { $0.isRecommended })
+        {
+            Button(action: { modelManager.downloadModel(model) }) {
+                Text("Allow", bundle: .module)
                     .font(.system(size: 11, weight: .semibold))
                     .foregroundColor(theme.accentColor)
             }
@@ -231,7 +288,7 @@ struct VoiceSetupTab: View {
     // MARK: - Voice Test Section
 
     private var voiceTestSection: some View {
-        VStack(spacing: 24) {
+        VStack(spacing: 12) {
             // Mic button with waveform ring
             micButton
 
@@ -329,8 +386,8 @@ struct VoiceSetupTab: View {
                 // Hint text
                 Text(
                     isTestingVoice
-                        ? "Listening..."
-                        : (isSetupComplete ? "Tap to test your voice" : "Complete setup to begin")
+                        ? L("Listening...")
+                        : (isSetupComplete ? L("Tap to test your voice") : L("Complete setup to begin"))
                 )
                 .font(.system(size: 14))
                 .foregroundColor(theme.tertiaryText)
@@ -371,14 +428,257 @@ struct VoiceSetupTab: View {
 
     private var privacyFooter: some View {
         HStack(spacing: 6) {
-            Image(systemName: "lock.fill")
+            Image(systemName: modelManager.selectedModel?.onDevice == false ? "network" : "lock.fill")
                 .font(.system(size: 10))
                 .foregroundColor(theme.tertiaryText)
 
-            Text("All processing happens on your Mac", bundle: .module)
-                .font(.system(size: 11))
-                .foregroundColor(theme.tertiaryText)
+            // Intel: honest about Apple's servers when the user allowed them.
+            if modelManager.selectedModel?.onDevice == false {
+                Text("Speech is sent to Apple for recognition", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            } else {
+                Text("All processing happens on your Mac", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
         }
+    }
+
+    // MARK: - Audio Settings Section
+
+    private var audioSettingsSection: some View {
+        VStack(spacing: 16) {
+            inputDeviceCard
+            sensitivitySettingsCard
+        }
+    }
+
+    private var sensitivitySettingsCard: some View {
+        SettingsSection(title: "Voice Sensitivity", icon: "waveform") {
+            VStack(alignment: .leading, spacing: 16) {
+                Text("Adjust how sensitive voice detection is", bundle: .module)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.secondaryText)
+
+                // Sensitivity Picker
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Sensitivity Level", bundle: .module)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+
+                    HStack(spacing: 0) {
+                        ForEach(VoiceSensitivity.allCases, id: \.self) { level in
+                            Button(action: {
+                                sensitivity = level
+                                saveSettings()
+                            }) {
+                                Text(level.displayName)
+                                    .font(.system(size: 13, weight: sensitivity == level ? .semibold : .medium))
+                                    .foregroundColor(
+                                        sensitivity == level
+                                            ? (theme.isDark ? theme.primaryBackground : .white)
+                                            : theme.primaryText
+                                    )
+                                    .frame(maxWidth: .infinity)
+                                    .padding(.vertical, 8)
+                                    .contentShape(Rectangle())
+                                    .background(
+                                        RoundedRectangle(cornerRadius: 6)
+                                            .fill(sensitivity == level ? theme.accentColor : Color.clear)
+                                    )
+                            }
+                            .buttonStyle(.plain)
+                            .contentShape(Rectangle())
+                        }
+                    }
+                    .padding(4)
+                    .background(
+                        RoundedRectangle(cornerRadius: 10)
+                            .fill(theme.tertiaryBackground)
+                    )
+
+                    Text(sensitivity.description)
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
+                }
+
+                // Additional info
+                HStack(spacing: 8) {
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.accentColor)
+                    Text(
+                        "Applies to all voice modes: pause detection, wake word, and voice activity",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                }
+                .padding(12)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.accentColor.opacity(0.1))
+                )
+            }
+        }
+    }
+
+    private var inputDeviceCard: some View {
+        SettingsSection(title: "Audio Input", icon: "mic") {
+            VStack(alignment: .leading, spacing: 16) {
+                HStack(spacing: 12) {
+                    Text(inputSourceDescription)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+
+                    Spacer()
+
+                    Button(action: { audioInputManager.refreshDevices() }) {
+                        Image(systemName: "arrow.clockwise")
+                            .font(.system(size: 14, weight: .medium))
+                            .foregroundColor(theme.secondaryText)
+                            .padding(8)
+                            .background(
+                                RoundedRectangle(cornerRadius: 8)
+                                    .fill(theme.tertiaryBackground)
+                            )
+                    }
+                    .buttonStyle(PlainButtonStyle())
+                    .localizedHelp("Refresh available devices")
+                }
+
+                // Input Source Picker
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("Input Source", bundle: .module)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+
+                    HStack(spacing: 8) {
+                        ForEach(AudioInputSource.allCases, id: \.self) { source in
+                            let isSelected = audioInputManager.selectedInputSource == source
+                            let isDisabled = source == .systemAudio && !systemAudioManager.isAvailable
+
+                            Button(action: {
+                                if !isDisabled {
+                                    withAnimation(.easeInOut(duration: 0.2)) {
+                                        audioInputManager.selectedInputSource = source
+                                    }
+                                }
+                            }) {
+                                HStack(spacing: 6) {
+                                    Image(systemName: source.iconName)
+                                        .font(.system(size: 12, weight: .medium))
+                                    Text(source.displayName)
+                                        .font(.system(size: 12, weight: .medium))
+                                }
+                                .foregroundColor(
+                                    isDisabled
+                                        ? theme.tertiaryText
+                                        : (isSelected
+                                            ? (theme.isDark ? theme.primaryBackground : .white) : theme.primaryText)
+                                )
+                                .padding(.horizontal, 14)
+                                .padding(.vertical, 8)
+                                .background(
+                                    RoundedRectangle(cornerRadius: 8)
+                                        .fill(isSelected ? theme.accentColor : theme.tertiaryBackground)
+                                )
+                            }
+                            .buttonStyle(PlainButtonStyle())
+                            .disabled(isDisabled)
+                        }
+
+                        Spacer()
+                    }
+                }
+
+                // Device picker (microphone mode only)
+                if audioInputManager.selectedInputSource == .microphone {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("Select Input Device", bundle: .module)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(theme.secondaryText)
+
+                        Menu {
+                            Button(action: { audioInputManager.selectDevice(nil) }) {
+                                HStack {
+                                    Text("System Default", bundle: .module)
+                                    if audioInputManager.selectedDeviceId == nil {
+                                        Image(systemName: "checkmark")
+                                    }
+                                }
+                            }
+
+                            Divider()
+
+                            ForEach(audioInputManager.availableDevices) { device in
+                                Button(action: { audioInputManager.selectDevice(device.id) }) {
+                                    HStack {
+                                        Text(device.name)
+                                        if device.isDefault {
+                                            Text("(Default)", bundle: .module)
+                                                .foregroundColor(.secondary)
+                                        }
+                                        if audioInputManager.selectedDeviceId == device.id {
+                                            Image(systemName: "checkmark")
+                                        }
+                                    }
+                                }
+                            }
+                        } label: {
+                            HStack(spacing: 10) {
+                                Image(systemName: "mic.fill")
+                                    .font(.system(size: 14))
+                                    .foregroundColor(theme.accentColor)
+
+                                Text(selectedDeviceName)
+                                    .font(.system(size: 13, weight: .medium))
+                                    .foregroundColor(theme.primaryText)
+                                    .lineLimit(1)
+
+                                Spacer()
+
+                                Image(systemName: "chevron.up.chevron.down")
+                                    .font(.system(size: 10, weight: .medium))
+                                    .foregroundColor(theme.tertiaryText)
+                            }
+                            .padding(.horizontal, 12)
+                            .padding(.vertical, 10)
+                            .background(
+                                RoundedRectangle(cornerRadius: 10)
+                                    .fill(theme.inputBackground)
+                                    .overlay(
+                                        RoundedRectangle(cornerRadius: 10)
+                                            .stroke(theme.inputBorder, lineWidth: 1)
+                                    )
+                            )
+                        }
+                        .menuStyle(.borderlessButton)
+                    }
+                }
+            }
+        }
+    }
+
+    private var inputSourceDescription: String {
+        switch audioInputManager.selectedInputSource {
+        case .microphone:
+            return audioInputManager.selectedDevice?.name ?? L("System Default")
+        case .systemAudio:
+            return systemAudioManager.hasPermission
+                ? L("Computer audio")
+                : L("Permission required")
+        }
+    }
+
+    private var selectedDeviceName: String {
+        if let selectedId = audioInputManager.selectedDeviceId,
+            let device = audioInputManager.availableDevices.first(where: { $0.id == selectedId })
+        {
+            return device.name
+        }
+        return L("System Default")
     }
 
     // MARK: - Actions
@@ -496,12 +796,4 @@ private struct BlinkingCursor: View {
                 .themedBackground()
         }
     }
-#endif
-#else
-import SwiftUI
-struct VoiceSetupTab: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Voice Setup", symbol: "gearshape")
-    }
-}
 #endif

@@ -31,10 +31,6 @@ extension Notification.Name {
     /// Posted by AgentManager when an agent's config changes (capability
     /// picker writes). M12 follow-up — AgentCapabilityManagerView observes it.
     static let agentUpdated = Notification.Name("agentUpdated")
-    /// Posted by TTSService when a voice model needs configuring. The
-    /// AgentDetailView voice section observes it to route the user to
-    /// TTS settings (amputated on Intel, but the name must resolve).
-    static let openTTSSettingsRequested = Notification.Name("openTTSSettingsRequested")
     /// Edge-triggered by `AgentDatabase` when an agent's database crosses its
     /// storage soft-warning threshold (userInfo: agentId, percent, usedBytes,
     /// limitBytes). Upstream declares it in the excluded AgentManager.swift.
@@ -272,13 +268,6 @@ final class ChatHistoryDatabase: @unchecked Sendable {
 // un-excluded in the M13 Schedules restore.
 
 // Local Agent Bridge: the real one (Services/AgentBridge/LocalAgentBridge.swift).
-
-// MARK: - Pocket TTS Voice Catalog (Intel stub)
-
-enum PocketTTSVoiceCatalog {
-    static let availableVoices: [String] = []
-    static func displayName(for voiceId: String) -> String { voiceId }
-}
 
 // MARK: - JSONValue (mirrored from excluded OpenAIAPI.swift)
 //

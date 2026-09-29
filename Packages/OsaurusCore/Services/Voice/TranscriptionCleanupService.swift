@@ -2,9 +2,16 @@
 //  TranscriptionCleanupService.swift
 //  osaurus
 //
-//  Runs raw voice transcription through the local LLM to remove filler words
+//  Runs raw voice transcription through the core model to remove filler words
 //  and fix punctuation. Always falls back to the raw text on any failure so
 //  we never lose the user's words.
+//
+//  Intel: upstream calls `CoreModelService` (MLX / Foundation Models on this
+//  Mac) with a local MLX fallback. Intel's core model is the remote Memory /
+//  Core Model provider, reached through `ChatEngine` like every other Intel
+//  one-shot call — so cleanup is a paid call that sends the transcript to
+//  that provider, which is why `postProcessTranscription` is off by default
+//  on Intel. Same prompt, guards and fallbacks as upstream.
 //
 
 import Foundation
@@ -15,6 +22,29 @@ private let logger = Logger(subsystem: "ai.osaurus", category: "transcription_cl
 @MainActor
 public final class TranscriptionCleanupService {
     public static let shared = TranscriptionCleanupService()
+
+    /// Resolves the model and returns its reply. Tests inject their own.
+    typealias Generator = @Sendable (_ systemPrompt: String, _ userPrompt: String, _ maxTokens: Int) async throws
+        -> String
+
+    var generator: Generator = { systemPrompt, userPrompt, maxTokens in
+        guard let model = await IntelAgentDescriptionGenerator.resolveModel(agentModel: nil) else {
+            throw CleanupUnavailable()
+        }
+        let request = ChatCompletionRequest(
+            model: model,
+            messages: [
+                ChatMessage(role: "system", content: systemPrompt),
+                ChatMessage(role: "user", content: userPrompt),
+            ],
+            temperature: 0.1,
+            max_tokens: maxTokens
+        )
+        let response = try await ChatEngine(model: model).completeChat(request: request)
+        return response.choices.first?.message?.content ?? ""
+    }
+
+    struct CleanupUnavailable: Error {}
 
     private static let systemPrompt = """
         You clean up voice-to-text transcripts. Remove only non-lexical hesitation \
@@ -31,16 +61,15 @@ public final class TranscriptionCleanupService {
 
     private static let minWordsForCleanup = 3
     private static let minHallucinationRatio: Double = 0.3
-    private static let cleanupTimeout: TimeInterval = 10
+    static let cleanupTimeout: TimeInterval = 10
 
-    private init() {}
+    init() {}
 
-    /// Cleans `rawText` via a local LLM. Always returns a usable string —
-    /// falls back to `rawText` on short input, no local model available,
-    /// timeout, error, or suspiciously short output.
+    /// Cleans `rawText` with the core model. Always returns a usable string —
+    /// falls back to `rawText` on short input, no model available, timeout,
+    /// error, or suspiciously short output.
     public func clean(_ rawText: String) async -> String {
         debugLog("[cleanup] --- clean() called ---")
-        debugLog("[cleanup] RAW input (\(rawText.count) chars): \(rawText)")
 
         let trimmed = rawText.trimmingCharacters(in: .whitespacesAndNewlines)
         let wordCount = trimmed.split(separator: " ").count
@@ -58,73 +87,29 @@ public final class TranscriptionCleanupService {
             </transcript>
             """
 
-        // try the user's configured core model first.
-        let coreModelId = ChatConfigurationStore.load().coreModelIdentifier ?? "<nil>"
-        debugLog("[cleanup] Trying core model: \(coreModelId)")
         let start = Date()
-        do {
-            let response = try await CoreModelService.shared.generate(
-                prompt: userPrompt,
-                systemPrompt: Self.systemPrompt,
-                temperature: 0.1,
-                maxTokens: max(256, trimmed.count),
-                timeout: Self.cleanupTimeout,
-            )
-            return postProcess(response: response, rawText: rawText, trimmed: trimmed, start: start, source: "core")
-        } catch CoreModelError.modelUnavailable(let requested) {
-            debugLog("[cleanup] Core model unavailable (\(requested)); trying local MLX fallback")
-            return await tryLocalFallback(userPrompt: userPrompt, rawText: rawText, trimmed: trimmed)
-        } catch {
-            let elapsed = Date().timeIntervalSince(start)
-            debugLog(
-                "[cleanup] ERROR after \(String(format: "%.2f", elapsed))s: \(error.localizedDescription) — using raw"
-            )
-            return rawText
-        }
-    }
-
-    // MARK: - Local MLX fallback
-
-    private func tryLocalFallback(userPrompt: String, rawText: String, trimmed: String) async -> String {
-        let installed = MLXService.getAvailableModels()
-        guard let fallbackModel = installed.first else {
-            debugLog("[cleanup] FALLBACK: no local MLX models installed, using raw")
-            return rawText
-        }
-        debugLog("[cleanup] Local fallback model: \(fallbackModel)")
-
-        let messages: [ChatMessage] = [
-            ChatMessage(role: "system", content: Self.systemPrompt),
-            ChatMessage(role: "user", content: userPrompt),
-        ]
-        let params = GenerationParameters(
-            temperature: 0.1,
-            maxTokens: max(256, trimmed.count),
-        )
-
-        let start = Date()
+        let generator = self.generator
+        let systemPrompt = Self.systemPrompt
+        let timeout = Self.cleanupTimeout
+        let maxTokens = max(256, trimmed.count)
         do {
             let response = try await withThrowingTaskGroup(of: String.self) { group in
                 group.addTask {
-                    try await MLXService.shared.generateOneShot(
-                        messages: messages,
-                        parameters: params,
-                        requestedModel: fallbackModel
-                    )
+                    try await generator(systemPrompt, userPrompt, maxTokens)
                 }
                 group.addTask {
-                    try await Task.sleep(for: .seconds(Self.cleanupTimeout))
-                    throw CoreModelError.timedOut
+                    try await Task.sleep(nanoseconds: UInt64(timeout * 1_000_000_000))
+                    throw CancellationError()
                 }
                 let first = try await group.next() ?? ""
                 group.cancelAll()
                 return first
             }
-            return postProcess(response: response, rawText: rawText, trimmed: trimmed, start: start, source: "mlx")
+            return postProcess(response: response, rawText: rawText, trimmed: trimmed, start: start, source: "core")
         } catch {
             let elapsed = Date().timeIntervalSince(start)
             debugLog(
-                "[cleanup] FALLBACK ERROR after \(String(format: "%.2f", elapsed))s: \(error.localizedDescription) — using raw"
+                "[cleanup] ERROR after \(String(format: "%.2f", elapsed))s: \(error.localizedDescription) — using raw"
             )
             return rawText
         }

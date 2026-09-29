@@ -2,50 +2,164 @@
 //  TTSConfiguration.swift
 //  osaurus
 //
-//  Configuration model for FluidAudio PocketTTS text-to-speech.
+//  Configuration model for text-to-speech.
+//
+//  Intel: upstream's on-device engine is FluidAudio PocketTTS (CoreML,
+//  Apple Silicon). Intel's on-device engine is the macOS system voices
+//  (`AVSpeechSynthesizer`); the OpenAI-compatible server engine is
+//  upstream's, unchanged. See docs/VOICE_INTEL.md.
 //
 
 import Foundation
 
-/// Configuration settings for PocketTTS text-to-speech.
+/// Which engine synthesizes speech.
+public enum TTSProvider: String, Codable, Equatable, Sendable, CaseIterable {
+    /// Intel: the macOS system voices, on this Mac (`AVSpeechSynthesizer`).
+    /// Stands in for upstream's `pocketTTS`.
+    case system
+    /// Any server exposing the OpenAI `/v1/audio/speech` API
+    /// (openai-edge-tts, Kokoro-FastAPI, LocalAI, OpenAI itself, …).
+    case openAICompatible
+
+    /// An upstream `pocketTTS` value (or anything unknown) reads as the
+    /// system voices, so a copied upstream config still speaks.
+    public init(from decoder: Decoder) throws {
+        let raw = try decoder.singleValueContainer().decode(String.self)
+        self = TTSProvider(rawValue: raw) ?? .system
+    }
+}
+
+/// Configuration settings for text-to-speech.
 public struct TTSConfiguration: Codable, Equatable, Sendable {
     /// Master enable toggle. When false, speaker buttons are hidden from message cells.
     public var enabled: Bool
 
-    /// PocketTTS voice identifier.
+    /// Active synthesis engine.
+    public var provider: TTSProvider
+
+    /// Intel: system voice identifier (`AVSpeechSynthesisVoice.identifier`).
+    /// Empty picks a voice for each reply's language automatically.
     public var voice: String
 
-    /// Generation temperature (0.1 – 1.2). Higher = more variation.
-    public var temperature: Double
+    /// Intel: system voice speaking rate, as a multiple of the normal rate
+    /// (0.5 – 2.0). Replaces upstream's PocketTTS temperature.
+    public var rate: Double
 
-    public static let defaultVoice = "alba"
+    /// Base URL of the OpenAI-compatible server, without the `/v1/audio/speech`
+    /// path (e.g. `http://localhost:5050`).
+    public var remoteEndpoint: String
+
+    /// Model name sent to the remote server.
+    public var remoteModel: String
+
+    /// Voice identifier sent to the remote server. Free-form: each server has
+    /// its own catalog (OpenAI names, edge-tts names, …).
+    public var remoteVoice: String
+
+    /// Playback speed multiplier sent to the remote server (0.25 – 4.0).
+    public var remoteSpeed: Double
+
+    /// Automatic: match each reply's language.
+    public static let defaultVoice = ""
+    public static let defaultRemoteEndpoint = "http://localhost:5050"
+    public static let defaultRemoteModel = "tts-1"
+    public static let defaultRemoteVoice = "alloy"
 
     public init(from decoder: Decoder) throws {
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let defaults = TTSConfiguration.default
         self.enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? defaults.enabled
+        self.provider =
+            try container.decodeIfPresent(TTSProvider.self, forKey: .provider) ?? defaults.provider
         self.voice = try container.decodeIfPresent(String.self, forKey: .voice) ?? defaults.voice
-        self.temperature =
-            try container.decodeIfPresent(Double.self, forKey: .temperature) ?? defaults.temperature
+        self.rate = try container.decodeIfPresent(Double.self, forKey: .rate) ?? defaults.rate
+        self.remoteEndpoint =
+            try container.decodeIfPresent(String.self, forKey: .remoteEndpoint)
+            ?? defaults.remoteEndpoint
+        self.remoteModel =
+            try container.decodeIfPresent(String.self, forKey: .remoteModel) ?? defaults.remoteModel
+        self.remoteVoice =
+            try container.decodeIfPresent(String.self, forKey: .remoteVoice) ?? defaults.remoteVoice
+        self.remoteSpeed =
+            try container.decodeIfPresent(Double.self, forKey: .remoteSpeed) ?? defaults.remoteSpeed
     }
 
     public init(
         enabled: Bool = true,
+        provider: TTSProvider = .system,
         voice: String = TTSConfiguration.defaultVoice,
-        temperature: Double = 0.7
+        rate: Double = 1.0,
+        remoteEndpoint: String = TTSConfiguration.defaultRemoteEndpoint,
+        remoteModel: String = TTSConfiguration.defaultRemoteModel,
+        remoteVoice: String = TTSConfiguration.defaultRemoteVoice,
+        remoteSpeed: Double = 1.0
     ) {
         self.enabled = enabled
+        self.provider = provider
         self.voice = voice
-        self.temperature = temperature
+        self.rate = rate
+        self.remoteEndpoint = remoteEndpoint
+        self.remoteModel = remoteModel
+        self.remoteVoice = remoteVoice
+        self.remoteSpeed = remoteSpeed
     }
 
     public static var `default`: TTSConfiguration { TTSConfiguration() }
+}
+
+/// API key for the OpenAI-compatible TTS server. Kept in the keychain, never
+/// in the JSON config file. Empty/whitespace writes clear the stored key.
+///
+/// Every SecItem call goes through `queue`: keychain reads and writes are
+/// synchronous XPC to securityd that can block for seconds under contention,
+/// which on the main thread shows up as Sentry app-hang events. The serial
+/// queue also orders a save against a following load.
+public enum TTSRemoteAPIKeyStore {
+    private static let service = "ai.osaurus.tts.remote"
+    private static let account = "apiKey"
+    private static let queue = DispatchQueue(label: "ai.osaurus.tts.keychain", qos: .utility)
+
+    /// Synchronous read. Never call on the main thread; use `load(completion:)`
+    /// or call from an already-background context.
+    public static func loadSync() -> String? {
+        guard let data = Keychain.read(service: service, account: account),
+            let key = String(data: data, encoding: .utf8),
+            !key.isEmpty
+        else { return nil }
+        return key
+    }
+
+    /// Read off the main thread and deliver on the main actor.
+    public static func load(completion: @escaping @MainActor (String?) -> Void) {
+        queue.async {
+            let key = loadSync()
+            Task { @MainActor in completion(key) }
+        }
+    }
+
+    /// Fire-and-forget upsert/delete off the caller's thread.
+    public static func save(_ key: String) {
+        let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+        queue.async {
+            if trimmed.isEmpty {
+                Keychain.delete(service: service, account: account)
+            } else {
+                Keychain.write(service: service, account: account, data: Data(trimmed.utf8))
+            }
+        }
+    }
 }
 
 /// Handles persistence of `TTSConfiguration` with in-memory caching.
 @MainActor
 public enum TTSConfigurationStore {
     private static var cachedConfig: TTSConfiguration?
+
+    /// Serializes disk writes off the main actor. The cache is authoritative
+    /// for readers, so the file write is fire-and-forget; the settings UI
+    /// saves on every keystroke, which must never mean per-keystroke disk
+    /// I/O on the main thread.
+    private static let diskQueue = DispatchQueue(label: "ai.osaurus.tts.config", qos: .utility)
 
     public static func load() -> TTSConfiguration {
         if let cached = cachedConfig { return cached }
@@ -56,7 +170,7 @@ public enum TTSConfigurationStore {
 
     public static func save(_ configuration: TTSConfiguration) {
         cachedConfig = configuration
-        saveToDisk(configuration)
+        diskQueue.async { saveToDisk(configuration) }
         NotificationCenter.default.post(name: .ttsConfigurationChanged, object: nil)
     }
 
@@ -73,7 +187,7 @@ public enum TTSConfigurationStore {
         }
     }
 
-    private static func saveToDisk(_ configuration: TTSConfiguration) {
+    nonisolated private static func saveToDisk(_ configuration: TTSConfiguration) {
         let url = OsaurusPaths.ttsConfigFile()
         OsaurusPaths.ensureExistsSilent(url.deletingLastPathComponent())
         do {

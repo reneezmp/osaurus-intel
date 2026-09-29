@@ -2,14 +2,20 @@
 //  SpeechService.swift
 //  osaurus
 //
-//  Core service wrapping FluidAudio for audio transcription.
+//  Core service for audio transcription.
+//
+//  Intel: upstream transcribes with FluidAudio (Parakeet ASR + Silero VAD,
+//  CoreML, Apple Silicon). Intel keeps upstream's audio capture — input
+//  devices, system audio, engine recovery, level meter — and transcribes
+//  with Apple Speech (`SFSpeechRecognizer`) instead, segmenting speech with
+//  a loudness detector. See docs/VOICE_INTEL.md.
 //
 
 @preconcurrency import AVFoundation
 import CoreAudio
-@preconcurrency import FluidAudio
 import Foundation
 import os
+@preconcurrency import Speech
 @preconcurrency import ScreenCaptureKit
 
 /// Result of a transcription operation
@@ -93,21 +99,35 @@ public enum SpeechError: Error, LocalizedError {
     case transcriptionFailed(String)
     case microphonePermissionDenied
     case audioFileNotFound
+    /// Intel: Speech Recognition access was denied in System Settings.
+    case speechRecognitionDenied
+    /// Intel: Apple Speech doesn't support this language.
+    case languageUnavailable(String)
+    /// Intel: this language needs Apple's servers, which the user hasn't allowed.
+    case onDeviceUnavailable(String)
 
     public var errorDescription: String? {
         switch self {
         case .noModelSelected:
-            return "No speech model selected. Please download and select a model."
+            return "No speech recognition language selected. Pick one in Voice settings."
         case .modelNotLoaded:
-            return "No model loaded. Please load a model first."
+            return "Speech recognition isn't ready. Finish setup in Voice settings."
         case .modelNotReady:
-            return "Speech model is not ready."
+            return "Speech recognition is not ready."
         case .transcriptionFailed(let message):
             return "Transcription failed: \(message)"
         case .microphonePermissionDenied:
             return "Microphone permission denied. Please grant access in System Settings."
         case .audioFileNotFound:
             return "Audio file not found."
+        case .speechRecognitionDenied:
+            return
+                "Speech Recognition access is off. Allow Osaurus in System Settings → Privacy & Security → Speech Recognition."
+        case .languageUnavailable(let language):
+            return "Apple Speech doesn't support \(language)."
+        case .onDeviceUnavailable(let language):
+            return
+                "\(language) can't be recognised on this Mac. Allow Apple's servers in Voice settings, or pick another language."
         }
     }
 }
@@ -193,15 +213,42 @@ public final class AudioInputManager: ObservableObject {
             return
         }
 
+        // Enumerating audio devices (`AVCaptureDevice.DiscoverySession` plus the
+        // CoreAudio default-device lookup) makes synchronous XPC calls to the
+        // audio HAL that can hang for seconds. Run that off the main actor and
+        // publish the Sendable result back.
+        Task { @MainActor [weak self] in
+            let devices = await Task.detached(priority: .userInitiated) {
+                AudioInputManager.discoverInputDevices()
+            }.value
+            guard let self else { return }
+            self.availableDevices = devices
+            if let selectedId = self.selectedDeviceId,
+                !devices.contains(where: { $0.id == selectedId })
+            {
+                self.selectedDeviceId = nil
+            }
+        }
+    }
+
+    private nonisolated static func discoverInputDevices() -> [AudioInputDevice] {
+        // Intel: `.microphone` / `.external` are macOS 14+; Ventura names
+        // the same device types `.builtInMicrophone` / `.externalUnknown`.
+        let deviceTypes: [AVCaptureDevice.DeviceType]
+        if #available(macOS 14.0, *) {
+            deviceTypes = [.microphone, .external]
+        } else {
+            deviceTypes = [.builtInMicrophone, .externalUnknown]
+        }
         let discoverySession = AVCaptureDevice.DiscoverySession(
-            deviceTypes: [.microphone, .external],
+            deviceTypes: deviceTypes,
             mediaType: .audio,
             position: .unspecified
         )
 
-        let defaultDeviceId = getDefaultInputDeviceId()
+        let defaultDeviceId = defaultInputDeviceUID()
 
-        availableDevices = discoverySession.devices.compactMap { device in
+        return discoverySession.devices.compactMap { device in
             let name = device.localizedName
             if name.hasPrefix("CADefaultDevice") || name.contains("Aggregate") && name.contains("-") || name.isEmpty {
                 return nil
@@ -212,12 +259,6 @@ public final class AudioInputManager: ObservableObject {
                 name: name,
                 isDefault: device.uniqueID == defaultDeviceId
             )
-        }
-
-        if let selectedId = selectedDeviceId,
-            !availableDevices.contains(where: { $0.id == selectedId })
-        {
-            selectedDeviceId = nil
         }
     }
 
@@ -266,7 +307,7 @@ public final class AudioInputManager: ObservableObject {
 
     // MARK: - CoreAudio Helpers
 
-    private func getDefaultInputDeviceId() -> String? {
+    private nonisolated static func defaultInputDeviceUID() -> String? {
         var defaultDeviceId = AudioDeviceID()
         var propertySize = UInt32(MemoryLayout<AudioDeviceID>.size)
 
@@ -287,10 +328,10 @@ public final class AudioInputManager: ObservableObject {
 
         guard status == noErr else { return nil }
 
-        return getDeviceUID(for: defaultDeviceId)
+        return deviceUID(for: defaultDeviceId)
     }
 
-    private func getDeviceUID(for deviceId: AudioDeviceID) -> String? {
+    private nonisolated static func deviceUID(for deviceId: AudioDeviceID) -> String? {
         var propertyAddress = AudioObjectPropertyAddress(
             mSelector: kAudioDevicePropertyDeviceUID,
             mScope: kAudioObjectPropertyScopeGlobal,
@@ -347,7 +388,7 @@ public final class AudioInputManager: ObservableObject {
         guard status == noErr else { return nil }
 
         for deviceId in deviceIds {
-            if let deviceUID = getDeviceUID(for: deviceId), deviceUID == uid {
+            if let deviceUID = Self.deviceUID(for: deviceId), deviceUID == uid {
                 return deviceId
             }
         }
@@ -583,28 +624,14 @@ private class SystemAudioStreamOutput: NSObject, SCStreamOutput {
     }
 }
 
-/// Wrapper to make AsrManager safely transferable across concurrency boundaries.
-/// AsrManager is thread-safe in practice but not marked Sendable by FluidAudio.
-final class SendableAsrManager: @unchecked Sendable {
-    let manager: AsrManager
-    init(_ manager: AsrManager) { self.manager = manager }
-}
-
-/// FluidAudio 0.14 moved the decoder state onto the caller: every
-/// `transcribe(_:decoderState:)` invocation threads a fresh or reused
-/// `TdtDecoderState` so the library doesn't have to stash per-call
-/// mutable state behind its own lock. Decoder-layer count comes off
-/// the manager itself, so the factory is a thin `async` shim.
-private enum SpeechDecoderStateFactory {
-    static func make(for manager: AsrManager) async -> TdtDecoderState {
-        let decoderLayers = await manager.decoderLayerCount
-        return TdtDecoderState.make(decoderLayers: decoderLayers)
-    }
-}
-
 // MARK: - Speech Service
 
-/// Service for audio transcription using FluidAudio
+/// Service for audio transcription using Apple Speech (Intel).
+///
+/// Same published surface as upstream's FluidAudio service, so the chat
+/// microphone, Transcription Mode and VAD Mode run unchanged. "Loading a
+/// model" means preparing an `SFSpeechRecognizer` for the chosen language;
+/// the model id is that language's locale identifier.
 @MainActor
 public final class SpeechService: ObservableObject {
     public static let shared = SpeechService()
@@ -623,10 +650,18 @@ public final class SpeechService: ObservableObject {
     @Published public var audioLevel: Float = 0.0
     @Published public var isSpeechDetected: Bool = false
 
+    /// Intel: whether the loaded recogniser keeps audio on this Mac. False
+    /// only when the user allowed Apple's servers for a language without
+    /// on-device support.
+    @Published public private(set) var recognitionRunsOnDevice: Bool = true
+
+    /// Intel: words the recogniser should favour (agent names and the wake
+    /// phrase, set by VAD Mode).
+    public var contextualHints: [String] = []
+
     // MARK: - Private Properties
 
-    private var sendableAsrManager: SendableAsrManager?
-    private nonisolated(unsafe) var vadManager: VadManager?
+    private var recognizer: SFSpeechRecognizer?
 
     private var activeInputDeviceId: String?
     private var activeInputSource: AudioInputSource?
@@ -641,6 +676,7 @@ public final class SpeechService: ObservableObject {
     // MARK: - Initialization
 
     private var appActivationObserver: NSObjectProtocol?
+    private var configurationObserver: NSObjectProtocol?
 
     private init() {
         // Read-only state seed. The TCC prompt is deferred to the real
@@ -659,10 +695,29 @@ public final class SpeechService: ObservableObject {
                 self?.checkMicrophonePermission()
             }
         }
+
+        // A new language or server opt-in needs a fresh recogniser.
+        configurationObserver = NotificationCenter.default.addObserver(
+            forName: .speechConfigurationChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in
+                guard let self, self.isModelLoaded, !self.isRecording else { return }
+                if SpeechModelManager.shared.selectedModel?.id != self.loadedModelId
+                    || !self.recognizerMatchesConfiguration()
+                {
+                    self.unloadModel()
+                }
+            }
+        }
     }
 
     deinit {
         if let observer = appActivationObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = configurationObserver {
             NotificationCenter.default.removeObserver(observer)
         }
     }
@@ -707,57 +762,91 @@ public final class SpeechService: ObservableObject {
         }
     }
 
+    // MARK: - Speech Recognition Permission (Intel)
+
+    /// Ask for Speech Recognition access when it hasn't been decided yet.
+    /// Needs `NSSpeechRecognitionUsageDescription` in the app's Info.plist.
+    public static func requestSpeechRecognitionAuthorization() async -> SFSpeechRecognizerAuthorizationStatus {
+        let current = SFSpeechRecognizer.authorizationStatus()
+        guard current == .notDetermined else { return current }
+        return await withCheckedContinuation { continuation in
+            SFSpeechRecognizer.requestAuthorization { status in
+                continuation.resume(returning: status)
+            }
+        }
+    }
+
     // MARK: - Model Loading
 
-    /// Load the ASR model for a given version
+    /// Prepare Apple Speech for a language (`modelId` is a locale
+    /// identifier). Fails when Speech Recognition access is denied, the
+    /// language isn't supported, or it needs Apple's servers and the user
+    /// hasn't allowed them.
     public func loadModel(_ modelId: String) async throws {
         guard !isLoadingModel else {
             print("[SpeechService] Already loading a model, skipping")
             return
         }
 
-        print("[SpeechService] Starting to load model: \(modelId)")
         isLoadingModel = true
         lastError = nil
-
-        sendableAsrManager = nil
-        vadManager = nil
+        recognizer = nil
         isModelLoaded = false
         loadedModelId = nil
+        defer { isLoadingModel = false }
 
         do {
-            let version: AsrModelVersion = modelId == "v2" ? .v2 : .v3
-            let models = try await Task.detached(priority: .userInitiated) {
-                return try await AsrModels.downloadAndLoad(version: version)
-            }.value
+            let status = await Self.requestSpeechRecognitionAuthorization()
+            SpeechModelManager.shared.updateAuthorization(status)
+            guard status == .authorized else { throw SpeechError.speechRecognitionDenied }
 
-            let manager = AsrManager(config: .default)
-            try await manager.loadModels(models)
-            self.sendableAsrManager = SendableAsrManager(manager)
+            let config = SpeechConfigurationStore.load()
+            let locale = Locale(identifier: modelId)
+            guard let recognizer = SFSpeechRecognizer(locale: locale) else {
+                throw SpeechError.languageUnavailable(SpeechModelManager.languageName(for: modelId))
+            }
+            let onDevice = recognizer.supportsOnDeviceRecognition
+            guard onDevice || config.allowServerRecognition else {
+                throw SpeechError.onDeviceUnavailable(SpeechModelManager.languageName(for: modelId))
+            }
+            guard recognizer.isAvailable else {
+                throw SpeechError.transcriptionFailed(
+                    "Speech recognition for \(SpeechModelManager.languageName(for: modelId)) is not available right now."
+                )
+            }
+            recognizer.queue = Self.recognitionQueue
+            recognizer.defaultTaskHint = .dictation
 
-            let vad = try await VadManager(
-                config: VadConfig(defaultThreshold: SpeechConfigurationStore.load().sensitivity.vadThreshold)
-            )
-            self.vadManager = vad
-
-            print("[SpeechService] Model loaded successfully")
+            self.recognizer = recognizer
+            recognitionRunsOnDevice = onDevice
             isModelLoaded = true
             loadedModelId = modelId
-            isLoadingModel = false
+            print("[SpeechService] Apple Speech ready for \(modelId) (on device: \(onDevice))")
         } catch {
-            print("[SpeechService] Failed to load model: \(error)")
+            print("[SpeechService] Failed to prepare Apple Speech: \(error)")
             lastError = error.localizedDescription
             isModelLoaded = false
             loadedModelId = nil
-            isLoadingModel = false
-            throw SpeechError.transcriptionFailed(error.localizedDescription)
+            throw error
         }
+    }
+
+    /// Recognition callbacks run here rather than on the main queue.
+    private static let recognitionQueue: OperationQueue = {
+        let queue = OperationQueue()
+        queue.name = "ai.osaurus.speech.recognition"
+        queue.maxConcurrentOperationCount = 1
+        return queue
+    }()
+
+    private func recognizerMatchesConfiguration() -> Bool {
+        guard let recognizer else { return false }
+        return recognizer.supportsOnDeviceRecognition || SpeechConfigurationStore.load().allowServerRecognition
     }
 
     /// Unload the current model
     public func unloadModel() {
-        sendableAsrManager = nil
-        vadManager = nil
+        recognizer = nil
         isModelLoaded = false
         loadedModelId = nil
         print("[SpeechService] Model unloaded")
@@ -773,6 +862,9 @@ public final class SpeechService: ObservableObject {
             return
         }
 
+        // Never raise the Speech Recognition prompt from a background path.
+        guard SFSpeechRecognizer.authorizationStatus() == .authorized else { return }
+
         do {
             try await loadModel(selectedModel.id)
             print("[SpeechService] Auto-loaded model: \(selectedModel.id)")
@@ -783,7 +875,7 @@ public final class SpeechService: ObservableObject {
 
     /// Ensure a model is loaded, using the default if needed
     public func ensureModelLoaded() async throws {
-        if isModelLoaded && sendableAsrManager != nil {
+        if isModelLoaded && recognizer != nil {
             return
         }
 
@@ -800,7 +892,7 @@ public final class SpeechService: ObservableObject {
     public func transcribe(audioURL: URL) async throws -> TranscriptionResult {
         try await ensureModelLoaded()
 
-        guard let wrappedManager = sendableAsrManager else {
+        guard let recognizer else {
             throw SpeechError.modelNotReady
         }
 
@@ -811,19 +903,12 @@ public final class SpeechService: ObservableObject {
         isTranscribing = true
         defer { isTranscribing = false }
 
-        do {
-            let result = try await Task.detached {
-                var decoderState = await SpeechDecoderStateFactory.make(for: wrappedManager.manager)
-                return try await wrappedManager.manager.transcribe(audioURL, decoderState: &decoderState)
-            }.value
-
-            return TranscriptionResult(
-                text: result.text,
-                durationSeconds: result.duration
-            )
-        } catch {
-            throw SpeechError.transcriptionFailed(error.localizedDescription)
-        }
+        let request = SFSpeechURLRecognitionRequest(url: audioURL)
+        request.requiresOnDeviceRecognition = recognitionRunsOnDevice
+        request.addsPunctuation = true
+        request.shouldReportPartialResults = false
+        let text = try await AppleSpeechSegment.recognizeFile(request: request, recognizer: recognizer)
+        return TranscriptionResult(text: text, durationSeconds: nil)
     }
 
     // MARK: - Streaming Transcription
@@ -838,6 +923,7 @@ public final class SpeechService: ObservableObject {
 
     /// Captures the current live turn's raw PCM for direct Omni audio input.
     /// Call before `stopStreamingTranscription()` clears the active buffer.
+    /// (Intel sends no raw audio to models; kept for upstream's composer.)
     public func currentLiveAudioSnapshot() -> LiveVoiceAudioSnapshot? {
         let samples = audioBuffer.snapshotRetained()
         guard !samples.isEmpty else { return nil }
@@ -859,7 +945,7 @@ public final class SpeechService: ObservableObject {
 
         if let worker = transcriptionWorker {
             print("[SpeechService] Stopping previous worker before restart")
-            await worker.stop()
+            _ = await worker.stop(flush: false)
             transcriptionWorker = nil
         }
 
@@ -896,7 +982,7 @@ public final class SpeechService: ObservableObject {
 
         try await ensureModelLoaded()
 
-        guard let wrappedAsrManager = sendableAsrManager, let vadManager = vadManager else {
+        guard let recognizer else {
             throw SpeechError.modelNotLoaded
         }
 
@@ -909,9 +995,14 @@ public final class SpeechService: ObservableObject {
         isUsingSystemAudio = (inputSource == .systemAudio)
 
         let config = SpeechConfigurationStore.load()
+        let recognition = AppleSpeechSettings(
+            recognizer: recognizer,
+            requiresOnDevice: recognitionRunsOnDevice,
+            contextualStrings: contextualHints
+        )
 
         print("[SpeechService] Starting transcription with:")
-        print("[SpeechService]   - Model: \(config.modelVersion.rawValue)")
+        print("[SpeechService]   - Language: \(loadedModelId ?? "?") (on device: \(recognitionRunsOnDevice))")
         print("[SpeechService]   - Sensitivity: \(config.sensitivity)")
 
         if inputSource == .microphone {
@@ -940,8 +1031,7 @@ public final class SpeechService: ObservableObject {
                 }
 
                 transcriptionWorker = TranscriptionWorker(
-                    asrManager: wrappedAsrManager,
-                    vadManager: vadManager,
+                    recognition: recognition,
                     audioBuffer: audioBuffer,
                     inputFormat: tapFormat,
                     sensitivity: config.sensitivity
@@ -986,8 +1076,7 @@ public final class SpeechService: ObservableObject {
                 self.activeInputSource = inputSource
 
                 transcriptionWorker = TranscriptionWorker(
-                    asrManager: wrappedAsrManager,
-                    vadManager: vadManager,
+                    recognition: recognition,
                     audioBuffer: audioBuffer,
                     inputFormat: systemAudioFormat,
                     sensitivity: config.sensitivity
@@ -1012,9 +1101,13 @@ public final class SpeechService: ObservableObject {
             "[SpeechService] Stopping streaming transcription (force: \(force), keepAlive: \(keepAudioEngineAlive))"
         )
 
-        audioBuffer.setActive(false)
-        await transcriptionWorker?.stop()
+        // Intel: the worker finishes the segment in progress (Apple Speech
+        // returns its final text once the audio ends) instead of upstream's
+        // re-transcription of the leftover buffer.
+        let worker = transcriptionWorker
         transcriptionWorker = nil
+        let finalText = await worker?.stop(flush: true)
+        audioBuffer.setActive(false)
 
         systemAudioPollingTask?.cancel()
         systemAudioPollingTask = nil
@@ -1027,29 +1120,17 @@ public final class SpeechService: ObservableObject {
         }
 
         isRecording = false
+        isSpeechDetected = false
+        _ = audioBuffer.getAndClear()
 
-        let finalBuffer = audioBuffer.getAndClear()
-
-        if finalBuffer.count > 16000, let wrappedManager = sendableAsrManager {
-            do {
-                var decoderState = await SpeechDecoderStateFactory.make(for: wrappedManager.manager)
-                let result = try await wrappedManager.manager.transcribe(
-                    finalBuffer,
-                    decoderState: &decoderState
-                )
-                let finalText = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-                await MainActor.run {
-                    if self.confirmedTranscription.isEmpty {
-                        self.confirmedTranscription = finalText
-                    } else {
-                        self.confirmedTranscription += " " + finalText
-                    }
-                    self.currentTranscription = ""
-                }
-                return finalText
-            } catch {
-                print("[SpeechService] Final transcription error: \(error)")
+        if let finalText, !finalText.isEmpty {
+            if confirmedTranscription.isEmpty {
+                confirmedTranscription = finalText
+            } else {
+                confirmedTranscription += " " + finalText
             }
+            currentTranscription = ""
+            return finalText
         }
 
         return currentTranscription
@@ -1070,7 +1151,7 @@ public final class SpeechService: ObservableObject {
             engineConfigObserver = nil
         }
 
-        await transcriptionWorker?.stop()
+        _ = await transcriptionWorker?.stop(flush: false)
         transcriptionWorker = nil
 
         systemAudioPollingTask?.cancel()
@@ -1093,6 +1174,7 @@ public final class SpeechService: ObservableObject {
             }.value
         }
     }
+
 
     private func startSystemAudioPolling() {
         let bufferRef = audioBuffer
@@ -1253,7 +1335,7 @@ public final class SpeechService: ObservableObject {
             print("[SpeechService] Max recovery attempts (\(maxRecoveryAttempts)) reached")
             lastError = "Audio device changed. Please restart voice input."
             audioBuffer.setActive(false)
-            await transcriptionWorker?.stop()
+            _ = await transcriptionWorker?.stop(flush: false)
             transcriptionWorker = nil
             isRecording = false
             return
@@ -1264,7 +1346,7 @@ public final class SpeechService: ObservableObject {
         print("[SpeechService] Recovering audio engine (attempt \(recoveryAttempts)/\(maxRecoveryAttempts))...")
 
         audioBuffer.setActive(false)
-        await transcriptionWorker?.stop()
+        _ = await transcriptionWorker?.stop(flush: false)
         transcriptionWorker = nil
 
         if let engine = audioEngine {
@@ -1289,7 +1371,11 @@ public final class SpeechService: ObservableObject {
 
     private func startWorkerProcessing() {
         guard let worker = transcriptionWorker else { return }
-        Task {
+        // `TranscriptionWorker` is a separate actor whose AsyncStream resumes on
+        // the cooperative pool, so consume it on the main actor — otherwise these
+        // @Published writes land off-main ("Updating ObservedObject from
+        // background threads will cause undefined behavior").
+        Task { @MainActor in
             print("[SpeechService] Starting to consume worker updates")
             for await update in await worker.start() {
                 switch update {
@@ -1346,7 +1432,7 @@ public final class SpeechService: ObservableObject {
 
 }
 
-// MARK: - Transcription Worker
+// MARK: - Transcription Worker (Intel: Apple Speech)
 
 private enum TranscriptionUpdate: Sendable {
     case partial(String)
@@ -1354,46 +1440,59 @@ private enum TranscriptionUpdate: Sendable {
     case speechActivity(Bool)
 }
 
+/// What the worker needs to start Apple Speech requests.
+/// `@unchecked Sendable`: `SFSpeechRecognizer` is safe to share once
+/// configured; the service never mutates it after `loadModel`.
+struct AppleSpeechSettings: @unchecked Sendable {
+    let recognizer: SFSpeechRecognizer
+    let requiresOnDevice: Bool
+    let contextualStrings: [String]
+}
+
+/// Upstream's worker cuts the stream into speech segments with Silero VAD
+/// and transcribes each with Parakeet. Intel keeps the segmenting (so the
+/// chat's pause/auto-send and VAD Mode behave the same) with a loudness
+/// detector, and streams each segment into one Apple Speech request, whose
+/// partial results feed the live preview.
 private actor TranscriptionWorker {
-    private let asrManager: SendableAsrManager
-    private let vadManager: VadManager
+    private let recognition: AppleSpeechSettings
     private let audioBuffer: ThreadSafeAudioBuffer
     private var task: Task<Void, Never>?
     private var continuation: AsyncStream<TranscriptionUpdate>.Continuation?
     private let inputFormat: AVAudioFormat
-    private let targetFormat: AVAudioFormat?
+    private let targetFormat: AVAudioFormat
     private let needsConversion: Bool
     private var converter: AVAudioConverter?
 
-    private let vadThreshold: Float
+    private let speechThreshold: Float
     private let silenceThresholdSeconds: Double
+    /// Apple's servers cap one request at about a minute; stay well under.
     private let maxSegmentDurationSeconds: Double = 30.0
-    private let minSamples = 16000
-    // Reused across segments in a single streaming session so the
-    // decoder's KV cache stays warm between chunks; reset when the
-    // worker is torn down.
-    private var decoderState: TdtDecoderState?
+    /// Audio kept from just before speech is detected, so the first
+    /// syllable isn't clipped (0.5 s at 16 kHz).
+    private let preRollSamples = 8_000
+
+    private var segment: AppleSpeechSegment?
+    private var idleSamples: [Float] = []
+    private var isSpeaking = false
+    private var lastSpeechTime = Date()
+    private var segmentStartTime = Date()
+    private var lastReportedSpeechActivity = false
+    private var stopped = false
 
     init(
-        asrManager: SendableAsrManager,
-        vadManager: VadManager,
+        recognition: AppleSpeechSettings,
         audioBuffer: ThreadSafeAudioBuffer,
         inputFormat: AVAudioFormat,
         sensitivity: VoiceSensitivity = .medium
     ) {
-        self.asrManager = asrManager
-        self.vadManager = vadManager
+        self.recognition = recognition
         self.audioBuffer = audioBuffer
         self.inputFormat = inputFormat
-
-        let inputRate = inputFormat.sampleRate
-        self.needsConversion = inputRate != 16000
-        self.targetFormat =
-            needsConversion
-            ? AVAudioFormat(commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)
-            : nil
-
-        self.vadThreshold = sensitivity.vadThreshold
+        self.needsConversion = inputFormat.sampleRate != 16000
+        self.targetFormat = AVAudioFormat(
+            commonFormat: .pcmFormatFloat32, sampleRate: 16000, channels: 1, interleaved: false)!
+        self.speechThreshold = sensitivity.energyThreshold
         self.silenceThresholdSeconds = sensitivity.silenceThresholdSeconds
     }
 
@@ -1409,74 +1508,73 @@ private actor TranscriptionWorker {
         return stream
     }
 
-    func stop() {
-        task?.cancel()
-        continuation?.finish()
+    /// Stop the worker. With `flush`, the segment in progress is finished
+    /// (buffered audio appended, Apple Speech's final text awaited) and its
+    /// text returned; without it, the segment is cancelled.
+    func stop(flush: Bool) async -> String? {
+        guard !stopped else { return nil }
+        stopped = true
+        let running = task
         task = nil
+        running?.cancel()
+        // Let a finalize that is already under way deliver its text first.
+        await running?.value
+
+        var text: String?
+        if let segment {
+            self.segment = nil
+            if flush {
+                let raw = audioBuffer.getAndClear()
+                if !raw.isEmpty { segment.append(convertTo16kHz(raw), format: targetFormat) }
+                let finished = await segment.finish(timeout: 2.5)
+                text = finished.isEmpty ? nil : finished
+            } else {
+                segment.cancel()
+            }
+        }
+        continuation?.finish()
         continuation = nil
+        return text
     }
 
     private func runLoop() async {
-        if needsConversion, let targetFormat {
-            print("[TranscriptionWorker] Started (\(inputFormat.sampleRate)Hz -> \(targetFormat.sampleRate)Hz)")
-            self.converter = AVAudioConverter(from: inputFormat, to: targetFormat)
-            if self.converter == nil {
+        if needsConversion {
+            converter = AVAudioConverter(from: inputFormat, to: targetFormat)
+            if converter == nil {
                 print("[TranscriptionWorker] Failed to create audio converter")
             }
-        } else {
-            print("[TranscriptionWorker] Started (\(inputFormat.sampleRate)Hz, no conversion needed)")
         }
 
-        var vadState = await vadManager.makeStreamState()
-        var lastSpeechTime = Date()
-        var isSpeaking = false
-        var lastReportedSpeechActivity = false
-        var segmentStartTime = Date()
-        var accumulatedSamples: [Float] = []
-
-        while audioBuffer.isActive && !Task.isCancelled {
+        while !stopped && audioBuffer.isActive && !Task.isCancelled {
             do {
                 try await Task.sleep(nanoseconds: 100_000_000)
             } catch {
                 break
             }
 
-            guard audioBuffer.isActive else { break }
+            guard !stopped, audioBuffer.isActive else { break }
 
-            let rawSamples = audioBuffer.getAndClear()
-            if !rawSamples.isEmpty {
-                let converted = convertTo16kHz(rawSamples)
-                accumulatedSamples.append(contentsOf: converted)
-            }
-
-            let vadChunkSize = VadManager.chunkSize  // 4096 samples (~256ms at 16kHz)
-            var speechDetected = false
-
-            if accumulatedSamples.count >= vadChunkSize {
-                let recentSamples = Array(accumulatedSamples.suffix(vadChunkSize))
-                do {
-                    let vadResult = try await vadManager.processStreamingChunk(
-                        recentSamples,
-                        state: vadState,
-                        config: .default
-                    )
-                    vadState = vadResult.state
-                    speechDetected = vadResult.probability > vadThreshold
-                } catch {
-                    let sum = recentSamples.reduce(0) { $0 + $1 * $1 }
-                    let level = sqrt(sum / Float(recentSamples.count)) * 10
-                    speechDetected = level > 0.05
-                }
-            }
-
+            let samples = convertTo16kHz(audioBuffer.getAndClear())
+            let speechDetected = !samples.isEmpty && Self.level(of: samples) > speechThreshold
             let now = Date()
 
             if speechDetected {
                 if !isSpeaking {
                     isSpeaking = true
                     segmentStartTime = now
+                    beginSegment(preRoll: Array(idleSamples.suffix(preRollSamples)))
+                    idleSamples = []
                 }
                 lastSpeechTime = now
+            }
+
+            if isSpeaking {
+                segment?.append(samples, format: targetFormat)
+            } else if !samples.isEmpty {
+                idleSamples.append(contentsOf: samples)
+                if idleSamples.count > 16000 {
+                    idleSamples.removeFirst(idleSamples.count - 16000)
+                }
             }
 
             if speechDetected != lastReportedSpeechActivity {
@@ -1486,35 +1584,51 @@ private actor TranscriptionWorker {
 
             let silenceDuration = now.timeIntervalSince(lastSpeechTime)
             let segmentDuration = now.timeIntervalSince(segmentStartTime)
-
             let shouldFinalize =
                 isSpeaking
                 && (silenceDuration > silenceThresholdSeconds || segmentDuration > maxSegmentDurationSeconds)
 
             if shouldFinalize {
-                await finalizeSegment(accumulatedSamples)
-                accumulatedSamples = []
                 isSpeaking = false
+                let finishing = segment
+                segment = nil
                 if lastReportedSpeechActivity {
                     lastReportedSpeechActivity = false
                     continuation?.yield(.speechActivity(false))
                 }
-            } else if isSpeaking && accumulatedSamples.count > minSamples {
-                if segmentDuration > 1.0 {
-                    await updatePreview(accumulatedSamples)
+                if let finishing {
+                    let text = await finishing.finish(timeout: 3)
+                    if !text.isEmpty {
+                        continuation?.yield(.final(text))
+                    }
                 }
-            } else if !isSpeaking && accumulatedSamples.count > 16000 * 5 {
-                accumulatedSamples = Array(accumulatedSamples.suffix(16000))
             }
         }
 
         print("[TranscriptionWorker] Exiting run loop, buffer active: \(audioBuffer.isActive)")
-        continuation?.finish()
+    }
+
+    private func beginSegment(preRoll: [Float]) {
+        let continuation = self.continuation
+        let segment = AppleSpeechSegment(settings: recognition) { text in
+            continuation?.yield(.partial(text))
+        }
+        if !preRoll.isEmpty {
+            segment.append(preRoll, format: targetFormat)
+        }
+        self.segment = segment
+    }
+
+    /// Scaled RMS on the audio meter's scale (`rms * 10`, clamped to 1).
+    nonisolated static func level(of samples: [Float]) -> Float {
+        guard !samples.isEmpty else { return 0 }
+        let sum = samples.reduce(Float(0)) { $0 + $1 * $1 }
+        return min(1, sqrt(sum / Float(samples.count)) * 10)
     }
 
     private func convertTo16kHz(_ samples: [Float]) -> [Float] {
         guard needsConversion else { return samples }
-        guard let converter = converter, let targetFormat else { return [] }
+        guard !samples.isEmpty, let converter = converter else { return [] }
 
         let inputFrameCount = AVAudioFrameCount(samples.count)
         guard let inputBuffer = AVAudioPCMBuffer(pcmFormat: inputFormat, frameCapacity: inputFrameCount) else {
@@ -1536,7 +1650,13 @@ private actor TranscriptionWorker {
         }
 
         var error: NSError?
+        var consumed = false
         let inputBlock: AVAudioConverterInputBlock = { _, outStatus in
+            if consumed {
+                outStatus.pointee = .noDataNow
+                return nil
+            }
+            consumed = true
             outStatus.pointee = .haveData
             return inputBuffer
         }
@@ -1554,39 +1674,127 @@ private actor TranscriptionWorker {
 
         return []
     }
+}
 
-    private func finalizeSegment(_ buffer: [Float]) async {
-        guard !buffer.isEmpty else { return }
+// MARK: - Apple Speech Segment (Intel)
 
-        do {
-            var state: TdtDecoderState
-            if let decoderState {
-                state = decoderState
-            } else {
-                state = await SpeechDecoderStateFactory.make(for: asrManager.manager)
+/// One Apple Speech request for one stretch of speech: audio is appended as
+/// it arrives, partial results go to `onPartial`, and `finish` ends the audio
+/// and waits (bounded) for the final text. `finish` is idempotent, and a
+/// segment that errors or times out resolves to its latest partial text.
+final class AppleSpeechSegment: @unchecked Sendable {
+    private let request = SFSpeechAudioBufferRecognitionRequest()
+    private var task: SFSpeechRecognitionTask?
+    private let lock = NSLock()
+    private var latest = ""
+    private var resolved: String?
+    private var ending = false
+    private var waiters: [CheckedContinuation<String, Never>] = []
+
+    init(settings: AppleSpeechSettings, onPartial: @escaping @Sendable (String) -> Void) {
+        request.shouldReportPartialResults = true
+        request.requiresOnDeviceRecognition = settings.requiresOnDevice
+        request.addsPunctuation = true
+        request.taskHint = .dictation
+        if !settings.contextualStrings.isEmpty {
+            request.contextualStrings = settings.contextualStrings
+        }
+        task = settings.recognizer.recognitionTask(with: request) { [weak self] result, error in
+            guard let self else { return }
+            if let result {
+                let text = result.bestTranscription.formattedString
+                if result.isFinal {
+                    self.resolve(text)
+                    return
+                }
+                // Once the segment is ending, a late partial must not
+                // repaint the live preview after the final text landed.
+                let forward: Bool = self.lock.withLock {
+                    self.latest = text
+                    return !self.ending
+                }
+                if forward { onPartial(text) }
             }
-            let result = try await asrManager.manager.transcribe(buffer, decoderState: &state)
-            decoderState = state
-            let text = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            if !text.isEmpty {
-                continuation?.yield(.final(text))
+            if error != nil {
+                self.resolve(nil)
             }
-        } catch {
-            print("[TranscriptionWorker] Finalize error: \(error)")
         }
     }
 
-    private func updatePreview(_ buffer: [Float]) async {
-        do {
-            // Previews use a throwaway state so a bad partial chunk
-            // can't poison the next finalize — the shared `decoderState`
-            // only advances when `finalizeSegment` confirms a segment.
-            var previewState = await SpeechDecoderStateFactory.make(for: asrManager.manager)
-            let result = try await asrManager.manager.transcribe(buffer, decoderState: &previewState)
-            let text = result.text.trimmingCharacters(in: CharacterSet.whitespacesAndNewlines)
-            continuation?.yield(.partial(text))
-        } catch {
-            // Ignore preview errors
+    func append(_ samples: [Float], format: AVAudioFormat) {
+        guard !samples.isEmpty,
+            let buffer = AVAudioPCMBuffer(pcmFormat: format, frameCapacity: AVAudioFrameCount(samples.count))
+        else { return }
+        buffer.frameLength = AVAudioFrameCount(samples.count)
+        if let channel = buffer.floatChannelData?[0] {
+            samples.withUnsafeBufferPointer { channel.update(from: $0.baseAddress!, count: samples.count) }
+        }
+        request.append(buffer)
+    }
+
+    /// End the audio and wait up to `timeout` seconds for the final text.
+    func finish(timeout: TimeInterval) async -> String {
+        let alreadyEnding: Bool = lock.withLock {
+            let was = ending
+            ending = true
+            return was
+        }
+        if !alreadyEnding { request.endAudio() }
+        return await withCheckedContinuation { continuation in
+            let immediate: String? = lock.withLock {
+                if let resolved { return resolved }
+                waiters.append(continuation)
+                return nil
+            }
+            if let immediate {
+                continuation.resume(returning: immediate)
+            } else {
+                DispatchQueue.global(qos: .userInitiated).asyncAfter(deadline: .now() + timeout) { [weak self] in
+                    self?.resolve(nil)
+                }
+            }
+        }
+    }
+
+    func cancel() {
+        lock.withLock { ending = true }
+        task?.cancel()
+        resolve(nil)
+    }
+
+    /// First resolution wins; `nil` falls back to the latest partial.
+    private func resolve(_ text: String?) {
+        let (value, pending): (String, [CheckedContinuation<String, Never>]) = lock.withLock {
+            if resolved == nil {
+                resolved = (text ?? latest).trimmingCharacters(in: .whitespacesAndNewlines)
+            }
+            let pending = waiters
+            waiters = []
+            return (resolved ?? "", pending)
+        }
+        for waiter in pending { waiter.resume(returning: value) }
+    }
+
+    /// Recognise a whole file (`SpeechService.transcribe(audioURL:)`).
+    static func recognizeFile(request: SFSpeechURLRecognitionRequest, recognizer: SFSpeechRecognizer) async throws
+        -> String
+    {
+        final class Once: @unchecked Sendable {
+            let lock = NSLock()
+            var done = false
+            func claim() -> Bool { lock.withLock { defer { done = true }; return !done } }
+        }
+        let once = Once()
+        return try await withCheckedThrowingContinuation { continuation in
+            _ = recognizer.recognitionTask(with: request) { result, error in
+                if let result, result.isFinal {
+                    if once.claim() { continuation.resume(returning: result.bestTranscription.formattedString) }
+                } else if let error {
+                    if once.claim() {
+                        continuation.resume(throwing: SpeechError.transcriptionFailed(error.localizedDescription))
+                    }
+                }
+            }
         }
     }
 }

@@ -34,6 +34,8 @@ public struct SettingsSearchEntry: Identifiable, Sendable, Hashable {
     /// Label of the settings control that hosts this entry when it differs
     /// from `title` (e.g. the "Tools" subsection hosts "Disable tools").
     public let anchorLabel: String?
+    /// Voice sub-tab to open (a `VoiceTab` raw value), as upstream does.
+    public let subTab: String?
 
     public init(
         id: String,
@@ -42,7 +44,8 @@ public struct SettingsSearchEntry: Identifiable, Sendable, Hashable {
         title: String,
         anchorLabel: String? = nil,
         keywords: [String] = [],
-        disambiguation: String? = nil
+        disambiguation: String? = nil,
+        subTab: String? = nil
     ) {
         self.id = id
         self.tab = tab
@@ -51,6 +54,7 @@ public struct SettingsSearchEntry: Identifiable, Sendable, Hashable {
         self.keywords = keywords
         self.disambiguation = disambiguation
         self.anchorLabel = anchorLabel
+        self.subTab = subTab
     }
 
     /// Breadcrumb shown in results, e.g. ["General", "Chat", "Temperature"].
@@ -348,5 +352,63 @@ public enum SettingsSearchIndex {
         .init(
             id: "insights.overview", tab: .insights, title: "Insights",
             keywords: ["logs", "requests", "latency", "tokens", "diagnostics"]),
+        // MARK: Voice (subTab values are VoiceTab raw values; Intel titles)
+        .init(
+            id: "voice.stt.language", tab: .voice, section: "Recognition",
+            title: "Recognition language",
+            keywords: ["speech recognition", "apple speech", "dictation", "transcription", "language"],
+            subTab: "Models"),
+        .init(
+            id: "voice.stt.server", tab: .voice, section: "Recognition",
+            title: "Use Apple's servers when needed",
+            keywords: ["apple servers", "server recognition", "privacy", "on device"],
+            subTab: "Models"),
+        .init(
+            id: "voice.stt.hotkey", tab: .voice, section: "Speech to Text",
+            title: "Activation Hotkey",
+            keywords: [
+                "dictation hotkey", "push to talk", "voice hotkey", "transcription mode", "dictate",
+            ],
+            subTab: "Speech To Text"),
+        .init(
+            id: "voice.stt.chat", tab: .voice, section: "Speech to Text",
+            title: "Voice Input in Chat",
+            keywords: ["microphone", "mic", "speak to chat", "voice input"],
+            subTab: "Speech To Text"),
+        .init(
+            id: "voice.stt.cleanup", tab: .voice, section: "Speech to Text",
+            title: "Clean Up Transcription",
+            keywords: ["filler words", "uh", "um", "post-process", "tidy"],
+            subTab: "Speech To Text"),
+        .init(
+            id: "voice.stt.pause", tab: .voice, section: "Speech to Text",
+            title: "Pause Detection",
+            keywords: ["pause", "auto stop", "auto send", "stop after silence"],
+            subTab: "Speech To Text"),
+        .init(
+            id: "voice.stt.vad", tab: .voice, section: "VAD Mode",
+            title: "VAD Mode",
+            keywords: ["wake word", "always listening", "hey", "voice activation", "vad"],
+            subTab: "VAD Mode"),
+        .init(
+            id: "voice.setup.sensitivity", tab: .voice, section: "Setup",
+            title: "Voice Sensitivity",
+            keywords: ["sensitivity", "noise", "quiet speech"],
+            subTab: "Setup"),
+        .init(
+            id: "voice.setup.input", tab: .voice, section: "Setup",
+            title: "Audio Input",
+            keywords: ["microphone", "input device", "system audio"],
+            subTab: "Setup"),
+        .init(
+            id: "voice.tts.enable", tab: .voice, section: "Text to Speech",
+            title: "Enable Text-to-Speech",
+            keywords: ["tts", "read aloud", "speak", "speaker button", "speech synthesis"],
+            subTab: "Text To Speech"),
+        .init(
+            id: "voice.tts.remote", tab: .voice, section: "Text to Speech",
+            title: "OpenAI-Compatible Server",
+            keywords: ["remote tts", "tts endpoint", "openai tts", "kokoro", "edge tts"],
+            subTab: "Text To Speech"),
     ]
 }

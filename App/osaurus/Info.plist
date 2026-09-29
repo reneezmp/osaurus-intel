@@ -46,9 +46,11 @@
 	<key>NSLocationWhenInUseUsageDescription</key>
 	<string>Osaurus plugins may access your location to provide location-based services.</string>
 	<key>NSMicrophoneUsageDescription</key>
-	<string>Osaurus uses the microphone for on-device voice transcription with FluidAudio.</string>
+	<string>Osaurus uses the microphone for voice input and dictation, transcribed with Apple Speech.</string>
 	<key>NSRemindersUsageDescription</key>
 	<string>Osaurus plugins may access your reminders to read and create tasks.</string>
+	<key>NSSpeechRecognitionUsageDescription</key>
+	<string>Osaurus uses Apple Speech to turn what you say into text for chat, dictation and wake words. It stays on this Mac unless you allow Apple's servers in Voice settings.</string>
 	<key>NSScreenCaptureUsageDescription</key>
 	<string>Osaurus can capture system audio for transcription. Screen content is not recorded.</string>
 	<key>SUEnableAutomaticChecks</key>

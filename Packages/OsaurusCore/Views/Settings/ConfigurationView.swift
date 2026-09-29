@@ -546,7 +546,7 @@ struct ConfigurationView: View {
                         }
 
                         // MARK: - Voice Section
-                        if matchesSearch("Voice", "Parakeet", "Transcription", "Model", "Speech") {
+                        if matchesSearch("Voice", "Apple Speech", "Transcription", "Language", "Speech") {
                             VoiceSettingsSection()
                         }
 
@@ -1716,19 +1716,20 @@ private struct VoiceSettingsSection: View {
     }
 
     private var modelStatusText: String {
+        // Intel: Apple Speech languages instead of downloaded models.
         if speechService.isLoadingModel {
-            return "Loading model..."
+            return L("Preparing speech recognition…")
         } else if speechService.isModelLoaded {
             if let modelId = speechService.loadedModelId,
                 let model = modelManager.availableModels.first(where: { $0.id == modelId })
             {
-                return model.name
+                return "\(model.name) • \(model.size)"
             }
-            return "Model Loaded"
+            return L("Speech recognition ready")
         } else if modelManager.downloadedModelsCount == 0 {
-            return "No models downloaded"
+            return L("Speech recognition not set up")
         } else {
-            return "Model not loaded"
+            return L("Speech recognition ready when needed")
         }
     }
 

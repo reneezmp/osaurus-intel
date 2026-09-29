@@ -1442,19 +1442,6 @@ final actor SessionToolStateStore {
     }
 }
 
-final class TTSService: ObservableObject, @unchecked Sendable {
-    func toggleSpeak(text: String, messageId: UUID, voiceOverride: Any? = nil) {}
-    func stop() {}
-    var playingMessageId: UUID? { nil }
-    var activeSpeakCallId: String? { nil }
-    static let shared = TTSService()
-    func refreshModelState() {}
-    var selectedVoice: Any? { nil }
-    var isSpeaking: Bool { false }
-    var selectedModel: Any? { nil }
-    var isModelReady: Bool { false }
-}
-
 struct MockChatData: Sendable {
     init() {}
     static var isEnabled: Bool { false }
@@ -1805,6 +1792,9 @@ final class SystemPromptComposer: @unchecked Sendable {
         let databaseEnabled = await MainActor.run {
             AgentManager.shared.effectiveDBEnabled(for: id)
         }
+        let speakEnabled = await MainActor.run {
+            AgentManager.shared.effectiveSpeakEnabled(for: id)
+        }
         let appleAppToolNames = await MainActor.run {
             AppleApp.toolNames(for: AgentManager.shared.effectiveAppleApps(for: id))
         }
@@ -1935,6 +1925,9 @@ final class SystemPromptComposer: @unchecked Sendable {
                 .filter { spec in
                     selfSchedulingEnabled || !["schedule_next_run", "cancel_next_run", "notify"].contains(spec.function.name)
                 }
+                .filter { spec in
+                    speakEnabled || spec.function.name != ToolRegistry.speakToolName
+                }
             if let enabled = enabledToolNames {
                 // Folder/runtime tools (file_read, file_write, file_edit,
                 // file_search, file_tree, shell_run, git_*) are auto-mounted with
@@ -1966,6 +1959,10 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // Self-scheduling: the agent's switch is the grant.
                 if selfSchedulingEnabled {
                     allowed.formUnion(ToolRegistry.selfSchedulingToolNames)
+                }
+                // Speak Tool: the agent's switch is the grant.
+                if speakEnabled {
+                    allowed.insert(ToolRegistry.speakToolName)
                 }
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
@@ -2453,10 +2450,7 @@ extension NSNotification.Name {
     /// Posted by the `/agent` slash command to pop open the toolbar's agent
     /// picker for the window identified in `userInfo["windowId"]`.
     static let chatToolbarOpenAgentPicker = NSNotification.Name("chatToolbarOpenAgentPicker")
-    static let vadStartNewSession = NSNotification.Name("vadStartNewSession")
-    static let chatViewClosed = NSNotification.Name("chatViewClosed")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
-    static let ttsPlaybackStateChanged = NSNotification.Name("osaurus.ttsPlaybackStateChanged")
 }
 #endif
 
