@@ -1911,3 +1911,17 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
 - Still staged from #49: Orchestrator grounding via an `osaurus_help`-style
   settings finder.
 
+### Agent descriptions (upstream #157/#158) — 2026-09-28
+
+- **Port the latest upstream shape, not the audited commit.** #157 made
+  descriptions mandatory, but upstream/main later made them optional, never
+  blocking saves or delegation. Intel follows upstream/main.
+- **No automatic generation on Intel.** Upstream's `AgentDescriptionBackfill`
+  quietly summarizes prompts with a local model. On Intel that would be
+  unrequested paid cloud calls, so `IntelAgentDescriptionGenerator` runs only
+  from the "Suggest from instructions" button, and the result is ordinary
+  editable user text (no `generatedDescription` field).
+- **Purposes are data.** `AgentDescriptionPolicy.quoted` JSON-escapes each
+  purpose in the Orchestrator roster, and the prompt tells the model to treat
+  it as data, never as instructions.
+

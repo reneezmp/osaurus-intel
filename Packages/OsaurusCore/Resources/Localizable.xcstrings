@@ -70,6 +70,22 @@
         }
       }
     },
+    "Add a short purpose so the Orchestrator and agent pickers know what this agent is for." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Füge einen kurzen Zweck hinzu, damit der Orchestrator und die Agentenauswahl wissen, wofür dieser Agent da ist."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加简短用途，让 Orchestrator 和智能体选择器知道此智能体的用途。"
+          }
+        }
+      }
+    },
     "Add custom provider" : {
       "localizations" : {
         "de" : {
@@ -82,6 +98,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加自定义提供商"
+          }
+        }
+      }
+    },
+    "Add instructions first, then ask for a suggestion." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Füge zuerst Anweisungen hinzu und bitte dann um einen Vorschlag."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先添加指令，再请求建议。"
           }
         }
       }
@@ -178,6 +210,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天中让智能体记住一些内容——它会创建所需的表，你可以在这里浏览。"
+          }
+        }
+      }
+    },
+    "Asks your Core Model for a one-line summary of this agent's instructions. This sends a small request to your cloud provider." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bittet dein Kernmodell um eine einzeilige Zusammenfassung der Anweisungen dieses Agenten. Dabei wird eine kleine Anfrage an deinen Cloud-Anbieter gesendet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请你的核心模型为此智能体的指令生成一行摘要。这会向你的云服务提供商发送一个小请求。"
           }
         }
       }
@@ -406,6 +454,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法匯入圖片"
+          }
+        }
+      }
+    },
+    "Couldn't suggest a description" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Beschreibung konnte nicht vorgeschlagen werden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法建议描述"
           }
         }
       }
@@ -826,6 +890,38 @@
         }
       }
     },
+    "No description yet — add one in the agent's Configure tab so the Orchestrator knows when to use it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Beschreibung – füge im Tab „Konfigurieren“ des Agenten eine hinzu, damit der Orchestrator weiß, wann er ihn nutzen soll."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有描述——请在智能体的“配置”标签页中添加，让 Orchestrator 知道何时使用它。"
+          }
+        }
+      }
+    },
+    "No model is available. Connect a provider or set a Core Model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Kein Modell verfügbar. Verbinde einen Anbieter oder lege ein Kernmodell fest."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可用的模型。请连接提供商或设置核心模型。"
+          }
+        }
+      }
+    },
     "Note: this agent uses a cloud model. The table layout is sent with every request, and any rows the agent reads or writes pass through that provider. The database file itself stays encrypted on this Mac." : {
       "localizations" : {
         "de" : {
@@ -1172,6 +1268,22 @@
         }
       }
     },
+    "Suggest from instructions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Aus Anweisungen vorschlagen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "根据指令建议"
+          }
+        }
+      }
+    },
     "The agent adds rows when it has something to remember. You can also ask it directly in chat." : {
       "localizations" : {
         "de" : {
@@ -1312,6 +1424,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法將該檔案讀取為圖片。請嘗試 PNG 或 JPEG。"
+          }
+        }
+      }
+    },
+    "The model returned no suggestion. Try again or write one yourself." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Modell hat keinen Vorschlag geliefert. Versuche es erneut oder schreibe selbst einen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型没有返回建议。请重试或自己填写。"
           }
         }
       }

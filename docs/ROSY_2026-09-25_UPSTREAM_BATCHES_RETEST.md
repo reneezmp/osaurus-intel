@@ -398,3 +398,16 @@ Added 2026-09-28; needs a candidate built after this commit.
       and shows that page.
 - [ ] Results and glow read well on Ventura (no white-on-white text).
 
+## Agent descriptions (upstream #157/#158)
+
+- [ ] Agents → any custom agent → Configure: with an empty description, a hint
+      explains why it helps. **(paid)** **Suggest from instructions** fills the
+      field with a one-line purpose you can edit; it saves like typed text.
+- [ ] With empty instructions, the Suggest button is disabled.
+- [ ] Create a new agent: the sheet has an optional **Description** field
+      (with the same Suggest button), and creating without one still works.
+- [ ] Orchestrator → Delegation: allowed agents show their description, or an
+      orange "No description yet" note.
+- [ ] **(paid)** Ask the Orchestrator which agent suits a task that matches
+      one agent's description: it picks that agent (or says none fits).
+

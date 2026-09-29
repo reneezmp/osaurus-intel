@@ -86,6 +86,20 @@ struct OrchestratorDelegationSettings: View {
                                 VStack(alignment: .leading, spacing: 2) {
                                     Text(agent.displayName)
                                         .foregroundColor(theme.primaryText)
+                                    // The Orchestrator picks targets by purpose
+                                    // (upstream #157); flag agents without one.
+                                    let purpose = AgentDescriptionPolicy.normalized(agent.description)
+                                    if purpose.isEmpty {
+                                        Text("No description yet — add one in the agent's Configure tab so the Orchestrator knows when to use it.", bundle: .module)
+                                            .font(.system(size: 10))
+                                            .foregroundColor(theme.warningColor)
+                                            .fixedSize(horizontal: false, vertical: true)
+                                    } else {
+                                        Text(purpose)
+                                            .font(.system(size: 10))
+                                            .foregroundColor(theme.secondaryText)
+                                            .lineLimit(2)
+                                    }
                                     Text(agentManager.effectiveModel(for: agent.id) ?? "")
                                         .font(.system(size: 10, design: .monospaced))
                                         .foregroundColor(theme.tertiaryText)
@@ -93,7 +107,7 @@ struct OrchestratorDelegationSettings: View {
                                 Spacer()
                                 Toggle("", isOn: admissionBinding(for: agent.id))
                                     .labelsHidden()
-                                    .toggleStyle(.switch)
+                                    .toggleStyle(ThemedSwitchToggleStyle())
                             }
                         }
                     }

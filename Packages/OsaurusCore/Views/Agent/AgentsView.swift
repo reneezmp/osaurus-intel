@@ -2299,6 +2299,20 @@ struct AgentDetailView: View {
                     icon: "text.alignleft"
                 )
 
+                if agent.id != Agent.defaultId {
+                    HStack(alignment: .top, spacing: 8) {
+                        if description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                            AgentDescriptionHint()
+                        }
+                        Spacer(minLength: 8)
+                        AgentDescriptionSuggestButton(
+                            systemPrompt: systemPrompt,
+                            agentModel: AgentManager.shared.effectiveModel(for: agent.id),
+                            onSuggestion: { description = $0 }
+                        )
+                    }
+                }
+
                 HStack(spacing: 6) {
                     Image(systemName: "calendar")
                         .font(.system(size: 9, weight: .medium))
@@ -6187,6 +6201,7 @@ private struct AgentEditorSheet: View {
     /// the suggested name in sync. Once the user types their own value, the
     /// name is theirs and presets stop touching it.
     @State private var nameUserEdited: Bool = false
+    @State private var descriptionText: String = ""
     @State private var selectedAvatar: String? = nil
     @State private var systemPrompt: String = ""
     @State private var selectedModel: String?
@@ -6353,6 +6368,7 @@ private struct AgentEditorSheet: View {
             VStack(alignment: .leading, spacing: 18) {
                 templatesStrip
                 nameField
+                descriptionField
                 avatarField
                 modelField
                 capabilitiesField
@@ -6419,6 +6435,30 @@ private struct AgentEditorSheet: View {
                 if newValue != selectedTemplate.defaultName {
                     nameUserEdited = true
                 }
+            }
+        }
+    }
+
+    /// Optional purpose (upstream #157): it helps the Orchestrator and agent
+    /// pickers, but never blocks creation.
+    private var descriptionField: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            AgentSheetSectionLabel("Description")
+            StyledTextField(
+                placeholder: "Brief description (optional)",
+                text: $descriptionText,
+                icon: "text.alignleft"
+            )
+            HStack(alignment: .top, spacing: 8) {
+                if descriptionText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    AgentDescriptionHint()
+                }
+                Spacer(minLength: 8)
+                AgentDescriptionSuggestButton(
+                    systemPrompt: systemPrompt,
+                    agentModel: selectedModel,
+                    onSuggestion: { descriptionText = $0 }
+                )
             }
         }
     }
@@ -6795,7 +6835,7 @@ private struct AgentEditorSheet: View {
         let agent = Agent(
             id: UUID(),
             name: trimmedName,
-            description: "",
+            description: AgentDescriptionPolicy.normalized(descriptionText),
             systemPrompt: systemPrompt.trimmingCharacters(in: .whitespacesAndNewlines),
             themeId: nil,
             defaultModel: selectedModel,

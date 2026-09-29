@@ -289,7 +289,8 @@ struct IntelOrchestratorTargetsTool: OsaurusTool, PermissionedTool {
         let snapshot = await snapshotBuilder()
         return ToolEnvelope.success(tool: name, result: [
             "targets": snapshot.targets.map { target in
-                ["name": target.name, "target_agent_id": target.id.uuidString, "model": target.modelID]
+                ["name": target.name, "target_agent_id": target.id.uuidString, "model": target.modelID,
+                 "purpose": target.purpose]
             },
             "blocked": snapshot.blocked,
         ])
