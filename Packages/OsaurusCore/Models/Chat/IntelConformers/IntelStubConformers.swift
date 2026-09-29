@@ -1187,12 +1187,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// (see `AgentLoopRunEnd`).
     static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time"]
 
+    /// Self-scheduling tools; the agent's Self-scheduling switch is the grant
+    /// (`effectiveSelfSchedulingEnabled`), bypassing the Tools-tab allowlist.
+    static let selfSchedulingToolNames: Set<String> = ["schedule_next_run", "cancel_next_run", "notify"]
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
         registerDatabaseTools()
         registerAppleAppTools()
         registerAgentLoopTools()
+        registerSelfSchedulingTools()
         registerWebSearchTools()
         let folderPrompt = PromptWorkingFolderTool()
         toolsByName[folderPrompt.name] = folderPrompt
@@ -1257,6 +1262,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     private func registerAgentLoopTools() {
         let tools: [OsaurusTool] = [TodoTool(), CompleteTool(), ClarifyTool(), CurrentTimeTool()]
         assert(Set(tools.map(\.name)) == Self.agentLoopToolNames)
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
+    private func registerSelfSchedulingTools() {
+        let tools: [OsaurusTool] = [ScheduleNextRunTool(), CancelNextRunTool(), NotifyTool()]
+        assert(Set(tools.map(\.name)) == Self.selfSchedulingToolNames)
         for tool in tools {
             toolsByName[tool.name] = tool
             builtInToolNames.insert(tool.name)
@@ -1530,6 +1544,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 return ToolEnvelope.failure(
                     kind: .unavailable,
                     message: "The Database ability is off for this agent.",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if Self.selfSchedulingToolNames.contains(name) {
+            // The Self-scheduling switch is the grant (not the allowlist).
+            guard AgentManager.shared.effectiveSelfSchedulingEnabled(for: agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Self-scheduling is disabled for this agent.",
                     tool: name
                 )
             }

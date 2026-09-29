@@ -2112,3 +2112,21 @@ calling a sync complete.
 - Upstream `Tests/Tool/AgentLoopToolsTests.swift` is enabled (minus `speak`);
   Intel tests in `Tests/Chat/IntelAgentLoopToolsTests.swift` drive the real
   engine against an HTTP fixture (clarify ends after one request).
+
+### Self-scheduling (`W-self-scheduling`) — 2026-09-29
+
+- The scheduler side already ran on Intel (`NextRunScheduler` started at
+  launch, `LocalAgentBridge.scheduleNextRun`, the next-run table and
+  `NextRunPanelView`); only the tools, the switch and the UI were missing.
+  `effectiveSelfSchedulingEnabled` had been hard-coded to `false`.
+- Ported upstream `Tools/Database/SchedulerTools.swift` unchanged and
+  `AgentSettings.selfSchedulingEnabled` (default off). Enabled only for custom
+  agents with tools on; the switch is the grant (bypasses the Tools-tab
+  allowlist in the prompt and at dispatch). Turning it on from the "manual"
+  preset picks Ambient; turning it off cancels a pending wake.
+- **Intel notification service:** upstream's `NotificationService.swift` is
+  excluded (model/plugin notifications), so
+  `Services/IntelNotificationService.swift` provides `postAgentEvent` for
+  `notify`. It becomes the delegate at launch but **asks for notification
+  permission only when self-scheduling is switched on or an agent notifies**
+  (upstream asks at launch). Clicking opens the agent in Agents.

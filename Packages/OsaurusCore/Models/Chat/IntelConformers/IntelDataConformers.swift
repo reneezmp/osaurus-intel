@@ -1961,6 +1961,10 @@ final class SystemPromptComposer: @unchecked Sendable {
                 allowed.insert(PromptWorkingFolderTool.toolName)
                 // So are the agent-loop tools (todo/complete/clarify/time).
                 allowed.formUnion(ToolRegistry.agentLoopToolNames)
+                // Self-scheduling: the agent's switch is the grant.
+                if selfSchedulingEnabled {
+                    allowed.formUnion(ToolRegistry.selfSchedulingToolNames)
+                }
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }

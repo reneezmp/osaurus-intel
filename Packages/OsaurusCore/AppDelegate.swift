@@ -188,6 +188,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         ToastWindowController.shared.setup()
 
         #if OSAURUS_INTEL
+            // Agent notifications (self-scheduling `notify`): route clicks.
+            // Permission is asked later, when an agent first needs it.
+            NotificationService.shared.configureOnLaunch()
+        #endif
+
+        #if OSAURUS_INTEL
             // Superseded osaurus-tools Apple plugins → built-in Apple apps
             // (docs/APPLE_APPS_INTEL_PLAN.md). Per-app markers; after the
             // toast panel exists so the one-time notice can render.

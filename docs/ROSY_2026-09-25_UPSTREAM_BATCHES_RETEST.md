@@ -593,3 +593,23 @@ Custom test agent with tools on and a tool-capable model; all **(paid)**.
       section: the picker must now actually open (the first build refused).
 - [ ] Turn the agent's Tools off: none of these appear, and the agent just
       answers in text.
+
+## Self-scheduling
+
+Custom test agent, tools on, a tool-capable model; model items are **(paid)**
+and each self-scheduled wake is another paid run.
+
+- [ ] Agents › test agent › Overview › Autonomy & Data: **Self-scheduling**
+      is a switch (not "unavailable"). Turning it on asks once for macOS
+      notification permission; Configure › Scheduling then shows Ambient,
+      Reactive and Project cards with Ambient selected. The built-in agent
+      shows a note instead of a switch.
+- [ ] Pick **Reactive** (as often as every 5 minutes). **(paid)** In a chat:
+      "In 5 minutes, check the time and send me a notification with it."
+      The Next Run panel at the top of the agent shows the scheduled wake.
+- [ ] About 5 minutes later a new background run appears for the agent and
+      a macOS notification "<agent> · …" arrives; clicking it opens the agent.
+- [ ] Schedule another wake, then turn Self-scheduling **off**: the pending
+      wake disappears from the Next Run panel and never runs.
+- [ ] With the switch off, **(paid)** asking the agent to schedule itself: it
+      says it can't (the tools aren't offered).

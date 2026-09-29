@@ -641,11 +641,12 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     /// Self-scheduling is an explicit per-agent opt-in. The upstream scheduler
     /// tool file is excluded from the Intel target, so runtime policy must be
     /// available here for both prompt composition and dispatch enforcement.
+    /// Self-scheduling (upstream): the agent's master switch, custom agents
+    /// only, and only while its tools are on. The schedule preset's bounds are
+    /// enforced by `LocalAgentBridge.scheduleNextRun`.
     func effectiveSelfSchedulingEnabled(for agentId: UUID) -> Bool {
-        // SchedulerTools.swift is excluded from the Intel target. Persisted
-        // upstream/legacy modes must not make prompt composition advertise a
-        // capability this build cannot execute.
-        false
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.selfSchedulingEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a

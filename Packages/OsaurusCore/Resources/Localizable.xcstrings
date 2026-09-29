@@ -246,6 +246,22 @@
         }
       }
     },
+    "Ambient" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hintergrund"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "常驻"
+          }
+        }
+      }
+    },
     "An encrypted database on this Mac that the agent can build and query with db_* tools." : {
       "localizations" : {
         "de" : {
@@ -402,6 +418,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动化（音乐）"
+          }
+        }
+      }
+    },
+    "Background helper" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Hilfe im Hintergrund"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "后台辅助程序"
           }
         }
       }
@@ -842,6 +874,22 @@
         }
       }
     },
+    "Deep work" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konzentrierte Arbeit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "深度工作"
+          }
+        }
+      }
+    },
     "Default folder saved" : {
       "localizations" : {
         "de" : {
@@ -1174,6 +1222,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "不创建此智能体就离开吗？"
+          }
+        }
+      }
+    },
+    "Let the agent schedule its own follow-up runs and send you notifications. How often it may run is set under Configure → Scheduling. Each run uses the agent's cloud model." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lass den Agenten eigene Folgeläufe planen und dir Benachrichtigungen senden. Wie oft er laufen darf, legst du unter Konfigurieren → Planung fest. Jeder Lauf nutzt das Cloud-Modell des Agenten."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "让智能体自行安排后续运行并向你发送通知。运行频率在“配置 → 计划”中设置。每次运行都会使用智能体的云端模型。"
           }
         }
       }
@@ -1666,6 +1730,54 @@
         }
       }
     },
+    "Project" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目"
+          }
+        }
+      }
+    },
+    "Quick reflexes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schnelle Reaktion"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "快速反应"
+          }
+        }
+      }
+    },
+    "Reactive" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Reaktiv"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "响应"
+          }
+        }
+      }
+    },
     "Read your conversations and send iMessages or texts. Reading needs Full Disk Access; every send asks first." : {
       "localizations" : {
         "de" : {
@@ -1940,6 +2052,38 @@
         }
       }
     },
+    "Self-scheduling is off. Turn it on under Overview → Autonomy & Data to let the agent schedule its own runs. Schedules and folder watchers you create yourself are under Automation." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Selbstplanung ist aus. Schalte sie unter Übersicht → Autonomie & Daten ein, damit der Agent seine eigenen Läufe planen kann. Selbst erstellte Zeitpläne und Ordnerüberwachungen findest du unter Automatisierung."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自调度已关闭。在“概述 → 自主与数据”中开启后，智能体即可自行安排运行。你自己创建的计划和文件夹监视在“自动化”中。"
+          }
+        }
+      }
+    },
+    "Self-scheduling off" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Selbstplanung aus"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自调度已关闭"
+          }
+        }
+      }
+    },
     "Shortcuts" : {
       "localizations" : {
         "de" : {
@@ -2052,6 +2196,22 @@
         }
       }
     },
+    "The agent only runs when you ask. Scheduled API calls from the agent are rejected." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Agent läuft nur, wenn du ihn darum bittest. Vom Agenten geplante Läufe werden abgelehnt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体仅在你请求时运行。来自智能体的定时 API 调用会被拒绝。"
+          }
+        }
+      }
+    },
     "The built-in agent can't use Apple apps. Create an agent to use them." : {
       "localizations" : {
         "de" : {
@@ -2064,6 +2224,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "内置智能体无法使用 Apple 应用。请创建一个智能体来使用它们。"
+          }
+        }
+      }
+    },
+    "The built-in agent doesn't schedule itself. Create an agent to use it; schedules and folder watchers are under Automation." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der integrierte Agent plant sich nicht selbst. Erstelle einen Agenten, um das zu nutzen; Zeitpläne und Ordnerüberwachungen findest du unter Automatisierung."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "内置智能体不会自行安排运行。创建一个智能体即可使用；计划和文件夹监视在“自动化”中。"
           }
         }
       }
@@ -2408,6 +2584,54 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未命名联系人"
+          }
+        }
+      }
+    },
+    "Up to 4 runs/day · at most once an hour · quiet 10pm–7am." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bis zu 4 Läufe/Tag · höchstens einmal pro Stunde · Ruhezeit 22–7 Uhr."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天最多 4 次运行 · 每小时最多一次 · 晚上 10 点至早上 7 点为安静时段。"
+          }
+        }
+      }
+    },
+    "Up to 48 runs/day · as often as every 5 min · no quiet hours." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bis zu 48 Läufe/Tag · bis zu alle 5 Min. · keine Ruhezeit."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天最多 48 次运行 · 最快每 5 分钟一次 · 无安静时段。"
+          }
+        }
+      }
+    },
+    "Up to 6 runs/day · at most once an hour · quiet 10pm–7am." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bis zu 6 Läufe/Tag · höchstens einmal pro Stunde · Ruhezeit 22–7 Uhr."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每天最多 6 次运行 · 每小时最多一次 · 晚上 10 点至早上 7 点为安静时段。"
           }
         }
       }

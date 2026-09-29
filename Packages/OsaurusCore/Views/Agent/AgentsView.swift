@@ -2541,11 +2541,24 @@ struct AgentDetailView: View {
 
         AgentDetailSection(title: L("Autonomy & Data"), icon: "clock.arrow.circlepath") {
             VStack(spacing: 10) {
-                abilityUnavailableRow(
-                    title: "Self-scheduling",
-                    description: "Model-chosen next runs require scheduler tools that are not available in this Intel build. User-created schedules and folder watchers remain available under Automation.",
-                    icon: "calendar.badge.clock"
-                )
+                if agent.id == Agent.defaultId {
+                    abilityUnavailableRow(
+                        title: "Self-scheduling",
+                        description: "The built-in agent doesn't schedule itself. Create an agent to use it; schedules and folder watchers are under Automation.",
+                        icon: "calendar.badge.clock"
+                    )
+                } else {
+                    abilityToggleRow(
+                        title: "Self-scheduling",
+                        description: "Let the agent schedule its own follow-up runs and send you notifications. How often it may run is set under Configure → Scheduling. Each run uses the agent's cloud model.",
+                        icon: "calendar.badge.clock",
+                        isOn: Binding(
+                            get: { currentAgent.settings.selfSchedulingEnabled },
+                            set: { setSelfScheduling($0) }
+                        ),
+                        destination: .configure
+                    )
+                }
                 if agent.id == Agent.defaultId {
                     abilityUnavailableRow(
                         title: "Database",
@@ -3443,16 +3456,140 @@ struct AgentDetailView: View {
 
     // MARK: - Scheduling
 
-    /// Model-callable scheduling is not compiled into the Intel target. Keep
-    /// this surface explanatory and non-mutating; conventional user-created
-    /// schedules and folder watchers remain available in Automation.
+    /// Self-scheduling bounds (upstream #9.4 presets). The Abilities switch
+    /// owns on/off; these cards choose how often the agent may run itself.
     private var scheduleSection: some View {
         AgentDetailSection(title: L("Scheduling"), icon: "calendar.badge.clock") {
-            abilityUnavailableRow(
-                title: "Self-scheduling",
-                description: "This Intel build cannot expose schedule_next_run, cancel_next_run, or notify to the model. Create explicit schedules or folder watchers in Automation instead.",
-                icon: "calendar.badge.exclamationmark"
+            VStack(alignment: .leading, spacing: 10) {
+                if currentAgent.settings.selfSchedulingEnabled {
+                    Text(
+                        "How often this agent is allowed to run itself in the background. The agent picks its own next time within these bounds.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                    VStack(spacing: 8) {
+                        ForEach(Self.selectableScheduleModes, id: \.self) { mode in
+                            scheduleModeCard(mode: mode)
+                        }
+                    }
+                } else {
+                    Text(
+                        "Self-scheduling is off. Turn it on under Overview → Autonomy & Data to let the agent schedule its own runs. Schedules and folder watchers you create yourself are under Automation.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+        }
+    }
+
+    /// Presets offered in the picker; `.manual` is "off", owned by the switch.
+    private static let selectableScheduleModes: [AgentScheduleMode] =
+        AgentScheduleMode.allCases.filter { $0 != .manual }
+
+    @ViewBuilder
+    private func scheduleModeCard(mode: AgentScheduleMode) -> some View {
+        let isSelected = (currentAgent.settings.schedule.mode == mode)
+        Button {
+            selectScheduleMode(mode)
+        } label: {
+            HStack(alignment: .top, spacing: 12) {
+                Image(systemName: isSelected ? "largecircle.fill.circle" : "circle")
+                    .font(.system(size: 16))
+                    .foregroundColor(isSelected ? theme.accentColor : theme.tertiaryText)
+                    .padding(.top, 1)
+                VStack(alignment: .leading, spacing: 4) {
+                    HStack(spacing: 6) {
+                        Text(Self.scheduleModeTitle(mode))
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(theme.primaryText)
+                        Text(Self.scheduleModeTagline(mode))
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.secondaryText)
+                    }
+                    Text(Self.scheduleModePresetSummary(mode))
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                Spacer(minLength: 0)
+            }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(isSelected ? theme.accentColor.opacity(0.08) : theme.inputBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 10)
+                            .stroke(isSelected ? theme.accentColor.opacity(0.6) : theme.inputBorder, lineWidth: 1)
+                    )
             )
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    private func selectScheduleMode(_ newMode: AgentScheduleMode) {
+        guard var current = agentManager.agent(for: agent.id) else { return }
+        guard current.settings.schedule.mode != newMode else { return }
+        current.settings.schedule = AgentScheduleSettings.defaults(for: newMode)
+        current.updatedAt = Date()
+        agentManager.update(current)
+        showSaveIndicator()
+    }
+
+    /// The Self-scheduling master switch (upstream behaviour): turning it on
+    /// from the "manual" preset picks Ambient so real bounds apply; turning it
+    /// off cancels a pending self-scheduled wake the user could no longer see.
+    private func setSelfScheduling(_ enabled: Bool) {
+        guard var current = agentManager.agent(for: agent.id), !current.isBuiltIn else { return }
+        guard current.settings.selfSchedulingEnabled != enabled else { return }
+        current.settings.selfSchedulingEnabled = enabled
+        if enabled, current.settings.schedule.mode == .manual {
+            current.settings.schedule = AgentScheduleSettings.defaults(for: .ambient)
+        }
+        current.updatedAt = Date()
+        agentManager.update(current)
+        if enabled {
+            NotificationService.shared.requestAuthorizationIfNeeded()
+        } else {
+            try? LocalAgentBridge.shared.cancelNextRun(agentId: agent.id)
+        }
+        showSaveIndicator()
+    }
+
+    nonisolated static func scheduleModeTitle(_ mode: AgentScheduleMode) -> String {
+        switch mode {
+        case .ambient: return L("Ambient")
+        case .reactive: return L("Reactive")
+        case .project: return L("Project")
+        case .manual: return L("Manual")
+        }
+    }
+
+    nonisolated static func scheduleModeTagline(_ mode: AgentScheduleMode) -> String {
+        switch mode {
+        case .ambient: return L("Background helper")
+        case .reactive: return L("Quick reflexes")
+        case .project: return L("Deep work")
+        case .manual: return L("Self-scheduling off")
+        }
+    }
+
+    /// Plain-English summary of `AgentScheduleSettings.defaults(for:)`.
+    nonisolated static func scheduleModePresetSummary(_ mode: AgentScheduleMode) -> String {
+        switch mode {
+        case .ambient:
+            return L("Up to 6 runs/day · at most once an hour · quiet 10pm–7am.")
+        case .reactive:
+            return L("Up to 48 runs/day · as often as every 5 min · no quiet hours.")
+        case .project:
+            return L("Up to 4 runs/day · at most once an hour · quiet 10pm–7am.")
+        case .manual:
+            return L("The agent only runs when you ask. Scheduled API calls from the agent are rejected.")
         }
     }
 
@@ -5730,7 +5867,9 @@ struct AgentDetailView: View {
                 }(),
                 webSearchEnabled: webSearchEnabled,
                 // Written directly by the Apple app toggles; pass it through.
-                enabledAppleApps: current.settings.enabledAppleApps
+                enabledAppleApps: current.settings.enabledAppleApps,
+                // Written directly by the Self-scheduling switch.
+                selfSchedulingEnabled: current.settings.selfSchedulingEnabled
             ),
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,
