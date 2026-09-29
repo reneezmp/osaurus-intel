@@ -40,6 +40,29 @@ public actor AgentTodoStore {
         return todo
     }
 
+    /// Store a checklist only when its parsed tasks or checkbox states changed.
+    ///
+    /// Models sometimes repeat the same `todo` call after a successful action.
+    /// Treating that replay as a fresh update churns the UI timestamp and can
+    /// convince the model that rewriting the checklist is forward progress.
+    /// Keep the comparison actor-isolated so concurrent calls for one session
+    /// cannot both report a change.
+    public func setTodoIfChanged(
+        markdown: String,
+        for sessionId: String
+    ) -> (todo: AgentTodo, changed: Bool, previousDoneCount: Int?) {
+        let candidate = AgentTodo.parse(markdown)
+        let previousDoneCount = todosBySession[sessionId]?.doneCount
+        if let existing = todosBySession[sessionId],
+            Self.hasSameChecklist(existing, candidate)
+        {
+            return (existing, false, previousDoneCount)
+        }
+        todosBySession[sessionId] = candidate
+        Self.postChanged(sessionId: sessionId)
+        return (candidate, true, previousDoneCount)
+    }
+
     /// Drop the todo for `sessionId` (called when a chat is reset).
     public func clear(for sessionId: String) {
         guard todosBySession.removeValue(forKey: sessionId) != nil else { return }
@@ -52,5 +75,12 @@ public actor AgentTodoStore {
             object: nil,
             userInfo: ["sessionId": sessionId]
         )
+    }
+
+    private static func hasSameChecklist(_ lhs: AgentTodo, _ rhs: AgentTodo) -> Bool {
+        guard lhs.items.count == rhs.items.count else { return false }
+        return zip(lhs.items, rhs.items).allSatisfy {
+            $0.text == $1.text && $0.isDone == $1.isDone
+        }
     }
 }

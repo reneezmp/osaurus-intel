@@ -505,23 +505,6 @@ final class ChatConfigurationStore: @unchecked Sendable {
 
 final class ChatSessionExportCoordinator: @unchecked Sendable { static let shared = ChatSessionExportCoordinator() }
 
-struct ClarifyPromptState: Sendable {
-    init(question: String = "", options: [String] = [], allowMultiple: Bool = false, onSubmit: ((String) -> Void)? = nil) {}
-    func cancel() {}
-}
-
-struct SecretPromptState: Sendable {
-    init() {}
-    init(key: String = "", description: String = "", instructions: String = "", agentId: UUID? = nil, onSubmit: ((String) -> Void)? = nil) {}
-    var key: String { "" }
-    var description: String { "" }
-    var instructions: String { "" }
-    var agentId: UUID? { nil }
-    func cancel() {}
-}
-
-struct ClarifyTool: Sendable { init() {}; static func parse(argumentsJSON json: String) -> ClarifyPayload? { nil } }
-
 // M12 Gap 2/3: the real `FolderContextService` (Folder/FolderContextService.swift)
 // is un-excluded — it drives the NSOpenPanel folder picker and registers the
 // folder tool suite via FolderToolManager. The amputated directory-watcher /
@@ -1492,31 +1475,6 @@ struct ServiceToolInvocations: Error, Sendable {
     let invocations: [ServiceToolInvocation]
 }
 
-enum PromptQueueItem: Identifiable, Sendable {
-    case secret(SecretPromptState)
-    case clarify(ClarifyPromptState)
-
-    var id: String {
-        switch self {
-        case .secret: return "secret"
-        case .clarify: return "clarify"
-        }
-    }
-}
-
-final class PromptQueue: ObservableObject, @unchecked Sendable {
-    var current: PromptQueueItem? { nil }
-    func enqueue(_ item: PromptQueueItem) {}
-    func drainAll() {}
-    func advance() {}
-}
-
-struct ClarifyPayload: Sendable, Equatable {
-    let question: String = ""
-    let options: [String] = []
-    let allowMultiple: Bool = false
-}
-
 final class BlockMemoizer: @unchecked Sendable {
     init() {}
     static let shared = BlockMemoizer()
@@ -2001,6 +1959,8 @@ final class SystemPromptComposer: @unchecked Sendable {
                 allowed.formUnion(appleAppToolNames)
                 // The folder ask is a chat-surface affordance, not a capability.
                 allowed.insert(PromptWorkingFolderTool.toolName)
+                // So are the agent-loop tools (todo/complete/clarify/time).
+                allowed.formUnion(ToolRegistry.agentLoopToolNames)
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }

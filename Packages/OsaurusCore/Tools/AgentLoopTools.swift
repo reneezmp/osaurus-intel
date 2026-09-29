@@ -29,10 +29,16 @@ import Foundation
 public final class TodoTool: OsaurusTool, @unchecked Sendable {
     public let name = "todo"
     public let description =
-        "Write or replace the current task checklist. Pass a markdown checklist where every item "
-        + "is a line starting with `- [ ]` (pending) or `- [x]` (done). Calling again replaces "
-        + "the entire list — to mark items done, send the full list with the new boxes checked. "
-        + "Use this for tasks with more than 2 obvious steps; skip for trivial work."
+        "Write or replace the OPTIONAL task checklist for multi-step work (3+ steps). The "
+        + "checklist records progress but never decides whether the turn stays open. Create it "
+        + "before starting, then re-send it only after a task or checkbox actually changes. "
+        + "Every item is a line "
+        + "starting with `- [ ]` (pending) or `- [x]` (done); each call replaces the entire "
+        + "list. Do not repeat an unchanged checklist or mark verification done before running "
+        + "it. Before the final answer, if task status changed since the last call, re-send the "
+        + "full checklist once with every actually finished item checked through this tool, not "
+        + "as prose. Then answer the user exactly once and stop even if an item remains "
+        + "unchecked. Skip Todo for a direct question or single-step task."
 
     public let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -82,22 +88,90 @@ public final class TodoTool: OsaurusTool, @unchecked Sendable {
             )
         }
 
-        let stored = await AgentTodoStore.shared.setTodo(markdown: trimmed, for: sessionId)
-        if stored.totalCount == 0 {
+        // Zero parseable checkboxes is a CONTRACT failure, not a soft
+        // warning. The old success-with-warning path let a `- item` list
+        // (no `[ ]`) through silently: the store then held 0 items, the
+        // todo-staleness nudge could never arm (pending == 0), the UI block
+        // showed nothing, and mark-as-you-go discipline was structurally
+        // impossible for the rest of the run (observed live: a model did
+        // every step of a multi-file refactor correctly but its checkbox-less
+        // list meant no progress could ever be recorded). Reject with the
+        // exact syntax so the immediate retry lands.
+        let parsed = AgentTodo.parse(trimmed)
+        if parsed.totalCount == 0 {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "No checklist items found. Every item must be a line starting "
+                    + "with `- [ ]` (pending) or `- [x]` (done) — e.g. "
+                    + "\"- [x] Read config\\n- [ ] Add field\\n- [ ] Test\". "
+                    + "Re-send the full list in that format.",
+                field: "markdown",
+                expected: "markdown checklist with `- [ ]` / `- [x]` items",
+                tool: name
+            )
+        }
+        let update = await AgentTodoStore.shared.setTodoIfChanged(
+            markdown: trimmed,
+            for: sessionId
+        )
+        // The checklist is visible for the whole session, but completion
+        // semantics are scoped to this logical run. Mark even an unchanged
+        // valid checklist: explicitly re-sending it this turn makes it the
+        // current run's task state.
+        ChatExecutionContext.agentTodoRunScope?.markTodoWritten()
+        let stored = update.todo
+        // Did anything actually run since the last checklist write? Newly
+        // checked items with no intervening tool call are the model marking
+        // work it only described. The write is still accepted — a list can be
+        // legitimately re-scoped, and refusing it would strand the run with no
+        // way to correct the list — but the reply must not launder the claim
+        // into a fact the model can quote back at itself later.
+        //
+        // Requires a PRE-EXISTING checklist: the first list of a session may
+        // legitimately arrive with items already checked (planning steps, work
+        // done before the list existed), and there is no earlier count to
+        // compare it against.
+        let didToolWork =
+            ChatExecutionContext.agentTodoRunScope?.consumeToolWorkSinceLastTodo() ?? true
+        let previousDoneCount = update.previousDoneCount
+        let unverifiedCompletions =
+            update.changed && !didToolWork
+            && (previousDoneCount.map { stored.doneCount > $0 } ?? false)
+        if !update.changed {
             return ToolEnvelope.success(
                 tool: name,
                 text:
-                    "Todo updated, but no `- [ ]` / `- [x]` lines were found. "
-                    + "Make sure each item starts with a checkbox.",
-                warnings: ["no checklist items detected"]
+                    "Todo unchanged: \(stored.doneCount)/\(stored.totalCount) complete. "
+                    + "Do not call `todo` again until a task or checkbox changes. Execute the "
+                    + "next concrete pending action now. Before the final answer, send one last "
+                    + "tool update only if status changed; never print the checklist as prose. "
+                    + "Then answer the user once and stop."
             )
         }
-        return ToolEnvelope.success(
-            tool: name,
-            text:
-                "Todo updated: \(stored.doneCount)/\(stored.totalCount) complete. "
-                + "Continue with the next pending item, or call `complete(summary)` when all done."
-        )
+        if unverifiedCompletions {
+            let newlyChecked = stored.doneCount - (previousDoneCount ?? 0)
+            return ToolEnvelope.success(
+                tool: name,
+                text:
+                    "Todo recorded, but NOT verified: you checked off \(newlyChecked) more "
+                    + "item(s) and no tool has run since your last checklist. Checking a box "
+                    + "does not do the work and this reply is not evidence that it happened — "
+                    + "do not cite it later as proof. If those items really are done, run the "
+                    + "tool that proves it (read back the file, list the directory, re-run the "
+                    + "search) before relying on them; if they are not done, uncheck them and "
+                    + "do the work now."
+            )
+        }
+        // Intel: split so the x86_64 type checker does not time out.
+        let progress = "Todo updated: \(stored.doneCount)/\(stored.totalCount) complete. "
+        let guidance: String =
+            "Continue with the next concrete pending action. Re-send the full checklist "
+            + "only after its status changes. Before the final answer, send one last tool "
+            + "update if status changed, with every actually finished item checked; never "
+            + "print the checklist as prose. Then answer once and stop; Todo never keeps "
+            + "the turn open."
+        return ToolEnvelope.success(tool: name, text: progress + guidance)
     }
 }
 
@@ -107,12 +181,15 @@ public final class TodoTool: OsaurusTool, @unchecked Sendable {
 /// intercepts this call, ends the loop, and surfaces the summary to the UI.
 public final class CompleteTool: OsaurusTool, @unchecked Sendable {
     public let name = "complete"
+    static let staleSessionTodoReason = "stale_session_todo"
     public let description =
-        "End the current task with a one-paragraph summary. Include WHAT you did and HOW you "
-        + "verified it (the command you ran, the file you checked, the URL you opened). "
-        + "Vague summaries (`done`, `looks good`, `complete`) are rejected. If you couldn't "
-        + "finish, say so honestly in the summary instead of pretending — that's fine; the "
-        + "user understands partial work."
+        "OPTIONAL early closure for a multi-step task tracked with `todo` that is honestly "
+        + "blocked or cannot be finished. A successful task does not need this tool: first mark "
+        + "every todo item checked, then answer the user normally and stop. For blocked work, "
+        + "the summary must state WHAT was done, HOW it was verified, and what remains. Invoke "
+        + "this through the structured tool protocol only, never by typing `complete(...)` into "
+        + "the answer, and never alongside another tool call. Vague summaries (`done`, `looks "
+        + "good`, `complete`) are rejected."
 
     public let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -121,7 +198,7 @@ public final class CompleteTool: OsaurusTool, @unchecked Sendable {
             "summary": .object([
                 "type": .string("string"),
                 "description": .string(
-                    "What you did + how you verified, in one paragraph. Example: \"Added /health route in app.py and verified with `curl localhost:8080/health` returning 200.\" Required minimum length: about 30 characters of meaningful prose."
+                    "What you did + how you verified, in one paragraph (≥30 chars of meaningful prose). Example: \"Added /health route in app.py; verified with `curl localhost:8080/health` returning 200.\""
                 ),
             ])
         ]),
@@ -154,7 +231,53 @@ public final class CompleteTool: OsaurusTool, @unchecked Sendable {
                 tool: name
             )
         }
-        return ToolEnvelope.success(tool: name, text: "Task completed.")
+
+        // A session Todo is intentionally persistent UI state. It is not
+        // permission for an unrelated later turn to close as BLOCKED. A
+        // canonical run that did not write Todo may still use `complete` as a
+        // structured final answer (small local models commonly do this even
+        // when the prompt asks for plain prose); in that case ignore any stale
+        // session checklist and close as completed. Only a Todo explicitly
+        // written in this run may turn completion into a blocked outcome.
+        // Bare/direct tool callers do not publish a run scope and retain their
+        // historical session-checklist behavior.
+        let shouldInspectSessionTodo =
+            ChatExecutionContext.agentTodoRunScope?.hasCurrentRunTodo ?? true
+
+        // Pending items mean this is an honest blocked terminal, not success.
+        // The canonical loop separately requires a fresh Todo update after
+        // the latest action before this tool may execute. Keep the remaining
+        // items visible and return typed outcome data so headless/API callers
+        // receive the same truth as Chat's blocked completion banner.
+        if shouldInspectSessionTodo,
+            let sessionId = ChatExecutionContext.currentSessionId, !sessionId.isEmpty,
+            let todo = await AgentTodoStore.shared.todo(for: sessionId)
+        {
+            let pending = todo.totalCount - todo.doneCount
+            if pending > 0 {
+                return ToolEnvelope.success(
+                    tool: name,
+                    result: [
+                        "text": "Tracked task closed with \(pending) todo item"
+                            + (pending == 1 ? "" : "s") + " still pending.",
+                        "outcome": "blocked",
+                        "pending_todo_items": pending,
+                    ],
+                    warnings: [
+                        "the task is incomplete; the remaining todo item"
+                            + (pending == 1 ? " is" : "s are") + " still unchecked"
+                    ]
+                )
+            }
+        }
+        return ToolEnvelope.success(
+            tool: name,
+            result: [
+                "text": "Task completed.",
+                "outcome": "completed",
+                "pending_todo_items": 0,
+            ]
+        )
     }
 
     /// Returns nil when the summary is acceptable, or a human-readable
@@ -177,6 +300,20 @@ public final class CompleteTool: OsaurusTool, @unchecked Sendable {
                 "`summary` looks like a placeholder. Describe the concrete work and the concrete verification step (a command, a file, a URL)."
         }
         return nil
+    }
+
+    /// Pull the trimmed `summary` out of a `complete(...)` call's JSON
+    /// arguments. Returns nil when the JSON is malformed or the summary
+    /// is empty; callers fall back to the raw tool result string. Shared
+    /// by the chat-surface intercept and the eval harness so the parsed
+    /// completion text is identical on every surface.
+    public static func parseSummary(from argumentsJSON: String) -> String? {
+        guard let data = argumentsJSON.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let summary = dict["summary"] as? String
+        else { return nil }
+        let trimmed = summary.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
     }
 }
 
@@ -216,8 +353,10 @@ private let kMaxClarifyOptionLength = 80
 public final class ClarifyTool: OsaurusTool, @unchecked Sendable {
     public let name = "clarify"
     public let description =
-        "Ask the user a single critical question when the task is ambiguous in a way that would "
-        + "lead to the wrong result if you guessed. The conversation pauses; the user's next "
+        "Ask the user a single critical question ONLY when the task is genuinely under-specified "
+        + "— a required input is missing or contradictory and guessing wrong would change the "
+        + "result. A fully specified task, even a large multi-step one, is NOT ambiguous: plan it "
+        + "and start. The conversation pauses; the user's next "
         + "message becomes your answer. For minor preferences or recoverable choices, pick a "
         + "sensible default and proceed instead of pausing. When the answer is one of a finite "
         + "set (≤6 short choices), pass them as `options` so the user can pick with a tap "
@@ -232,20 +371,20 @@ public final class ClarifyTool: OsaurusTool, @unchecked Sendable {
             "question": .object([
                 "type": .string("string"),
                 "description": .string(
-                    "Specific, concrete question. Avoid open-ended `what would you like?` style; ask the actual decision (\"Use Postgres or SQLite?\")."
+                    "The concrete decision to ask (\"Use Postgres or SQLite?\") — not open-ended \"what would you like?\" style."
                 ),
             ]),
             "options": .object([
                 "type": .string("array"),
                 "items": .object(["type": .string("string")]),
                 "description": .string(
-                    "Optional list of short answer choices (≤6, ≤80 chars each). When present, the UI shows them as one-tap buttons; omit for free-form answers."
+                    "≤6 short answer choices (≤80 chars each), shown as one-tap buttons; omit for free-form answers."
                 ),
             ]),
             "allowMultiple": .object([
                 "type": .string("boolean"),
                 "description": .string(
-                    "When true and `options` is set, the user can pick more than one. Defaults to false."
+                    "Allow picking more than one option. Defaults to false."
                 ),
             ]),
         ]),
@@ -379,109 +518,22 @@ public final class ClarifyTool: OsaurusTool, @unchecked Sendable {
 }
 
 // MARK: - speak
+//
+// Intel: `speak` (upstream `SpeakTool`) arrives with the Voice port
+// (`W-voice`, docs/INTEL_MISSING_FEATURES_BACKLOG.md); Intel's TTSService is
+// still a stub.
 
-/// Speak text aloud via PocketTTS. Fire-and-forget: returns the moment
-/// playback starts. The row spinner clears when audio drains.
-public final class SpeakTool: OsaurusTool, @unchecked Sendable {
-    public let name = "speak"
-    public let description =
-        "Read text aloud using the local text-to-speech engine. Use ONLY when the user explicitly "
-        + "asks to hear the response (`read this aloud`, `dictate this`, `speak`). Pass the exact "
-        + "prose to vocalize as plain text — no markdown, no code fences, no tool noise. Playback "
-        + "runs in the background; the user sees a spinner on the call until audio finishes."
+// MARK: - Run-ending tools (Intel)
 
-    public let parameters: JSONValue? = .object([
-        "type": .string("object"),
-        "additionalProperties": .bool(false),
-        "properties": .object([
-            "text": .object([
-                "type": .string("string"),
-                "description": .string(
-                    "Plain prose to speak aloud. Strip markdown/code; keep it conversational."
-                ),
-            ])
-        ]),
-        "required": .array([.string("text")]),
-    ])
+/// Tools whose successful result ends the agent run. On Intel,
+/// `CloudChatEngine` executes tools inside its own loop, so it stops after the
+/// round and `ChatSession` reacts to the result card (completion banner,
+/// clarify prompt, folder continuation). A failure envelope never ends the
+/// run: the model sees it and retries.
+enum AgentLoopRunEnd {
+    static let toolNames: Set<String> = ["complete", "clarify", PromptWorkingFolderTool.toolName]
 
-    public init() {}
-
-    public func execute(argumentsJSON: String) async throws -> String {
-        let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
-        guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
-
-        let textReq = requireString(
-            args,
-            "text",
-            expected: "non-empty plain prose to speak",
-            tool: name
-        )
-        guard case .value(let raw) = textReq else { return textReq.failureEnvelope ?? "" }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !trimmed.isEmpty else {
-            return ToolEnvelope.failure(
-                kind: .invalidArgs,
-                message: "`text` must be a non-empty string.",
-                field: "text",
-                expected: "non-empty plain prose",
-                tool: name
-            )
-        }
-
-        // Respect the user's master TTS toggle.
-        let enabled = await MainActor.run { TTSConfigurationStore.load().enabled }
-        guard enabled else {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message:
-                    "Text-to-speech is disabled in settings. Tell the user to enable it under "
-                    + "Settings → Voice if they want spoken responses.",
-                tool: name,
-                retryable: false
-            )
-        }
-
-        // Outside chat (HTTP API), fall back to fresh ids — playback
-        // still works, just without the bubble/row UI binding.
-        let messageId = ChatExecutionContext.currentAssistantTurnId ?? UUID()
-        let callId = ChatExecutionContext.currentToolCallId ?? UUID().uuidString
-        let agentId = ChatExecutionContext.currentAgentId
-
-        do {
-            try await MainActor.run {
-                let agentVoice = agentId.flatMap { AgentManager.shared.agent(for: $0)?.ttsVoice }
-                try TTSService.shared.startToolPlayback(
-                    text: trimmed,
-                    messageId: messageId,
-                    callId: callId,
-                    voiceOverride: agentVoice
-                )
-            }
-        } catch TTSPlaybackError.modelNotReady {
-            return ToolEnvelope.failure(
-                kind: .unavailable,
-                message:
-                    "TTS model isn't loaded. User was prompted to download it — retry "
-                    + "once ready, or fall back to a text response.",
-                tool: name,
-                retryable: true
-            )
-        } catch {
-            return ToolEnvelope.fromError(error, tool: name)
-        }
-
-        // Past-tense label — the spinner conveys in-progress state.
-        return ToolEnvelope.success(tool: name, text: "Read aloud.")
-    }
-
-    /// Extract the trimmed `text` field. Returns nil when missing or
-    /// empty. Pure helper for tests.
-    public static func parse(argumentsJSON: String) -> String? {
-        guard let data = argumentsJSON.data(using: .utf8),
-            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-            let raw = dict["text"] as? String
-        else { return nil }
-        let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
-        return trimmed.isEmpty ? nil : trimmed
+    static func endsRun(toolName: String, result: String) -> Bool {
+        toolNames.contains(toolName) && !ToolEnvelope.isError(result)
     }
 }

@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ClarifyPromptOverlay.swift
 //  osaurus
@@ -448,13 +447,3 @@ private struct ChipFlowLayout: Layout {
         )
     }
 }
-#else
-import SwiftUI
-struct ClarifyPromptOverlay: View {
-    let state: ClarifyPromptState
-    let onDismiss: () -> Void
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Clarify Prompt", symbol: "apple.logo")
-    }
-}
-#endif

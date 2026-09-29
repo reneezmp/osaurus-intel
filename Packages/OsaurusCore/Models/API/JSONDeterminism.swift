@@ -27,7 +27,12 @@ extension JSONEncoder {
     /// path. Grep for `osaurusCanonical` to find existing call sites.
     static func osaurusCanonical(prettyPrinted: Bool = false) -> JSONEncoder {
         let encoder = JSONEncoder()
-        encoder.outputFormatting = prettyPrinted ? [.sortedKeys, .prettyPrinted] : [.sortedKeys]
+        // `.withoutEscapingSlashes` (upstream): paths and ratios reach the
+        // model as `src/app.py` and `1/3`, not `src\/app.py` and `1\/3`.
+        encoder.outputFormatting =
+            prettyPrinted
+            ? [.sortedKeys, .prettyPrinted, .withoutEscapingSlashes]
+            : [.sortedKeys, .withoutEscapingSlashes]
         return encoder
     }
 }
@@ -35,7 +40,7 @@ extension JSONEncoder {
 extension JSONSerialization.WritingOptions {
     /// Canonical writing options for `JSONSerialization.data(withJSONObject:options:)`.
     /// Same determinism contract as `JSONEncoder.osaurusCanonical`.
-    static let osaurusCanonical: JSONSerialization.WritingOptions = [.sortedKeys]
+    static let osaurusCanonical: JSONSerialization.WritingOptions = [.sortedKeys, .withoutEscapingSlashes]
 }
 
 /// Recursive normaliser used as the determinism-friendly fallback for

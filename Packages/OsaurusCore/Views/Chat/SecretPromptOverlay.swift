@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  SecretPromptOverlay.swift
 //  osaurus
@@ -175,13 +174,3 @@ private struct SecretPromptCard: View {
         }
     }
 }
-#else
-import SwiftUI
-struct SecretPromptOverlay: View {
-    let state: SecretPromptState
-    let onDismiss: () -> Void
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Secret Prompt", symbol: "apple.logo")
-    }
-}
-#endif

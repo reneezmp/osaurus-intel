@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  PromptQueue.swift
 //  osaurus
@@ -162,7 +161,3 @@ public final class ClarifyPromptState: ObservableObject {
         onCancel()
     }
 }
-#else
-// Intel: PromptQueue provided by IntelDataConformers (full ObservableObject implementation)
-import SwiftUI
-#endif

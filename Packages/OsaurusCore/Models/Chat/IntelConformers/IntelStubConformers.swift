@@ -1180,11 +1180,19 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// and again at dispatch.
     static let appleAppToolNames: Set<String> = AppleApp.toolNames(for: Set(AppleApp.availableOnIntel))
 
+    /// Agent-loop tools (upstream `AgentLoopTools` + `get_current_time`).
+    /// Chat affordances rather than agent capabilities: offered whenever the
+    /// agent's tools are on, bypassing the Tools-tab allowlist like upstream's
+    /// baseline. `complete`, `clarify` and `prompt_working_folder` end the run
+    /// (see `AgentLoopRunEnd`).
+    static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time"]
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
         registerDatabaseTools()
         registerAppleAppTools()
+        registerAgentLoopTools()
         registerWebSearchTools()
         let folderPrompt = PromptWorkingFolderTool()
         toolsByName[folderPrompt.name] = folderPrompt
@@ -1240,6 +1248,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             DBDefineViewTool(), DBRunViewTool(), DBListViewsTool(), DBDropViewTool(),
         ]
         assert(Set(tools.map(\.name)) == Self.databaseToolNames)
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
+    private func registerAgentLoopTools() {
+        let tools: [OsaurusTool] = [TodoTool(), CompleteTool(), ClarifyTool(), CurrentTimeTool()]
+        assert(Set(tools.map(\.name)) == Self.agentLoopToolNames)
         for tool in tools {
             toolsByName[tool.name] = tool
             builtInToolNames.insert(tool.name)
@@ -1385,6 +1402,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         if let denial = await runtimeCapabilityDenial(for: name) {
             return denial
         }
+        // Count real tool work for the run so `todo` can tell progress from
+        // assertion (upstream; recorded at dispatch, success or not).
+        ChatExecutionContext.agentTodoRunScope?.recordToolExecution(name: name)
         guard let tool = toolsByName[name] else {
             return ToolEnvelope.failure(
                 kind: .toolNotFound,
@@ -1462,6 +1482,15 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // capability: the attended chat offers it (bypassing the Tools-tab
         // allowlist) and the tool itself refuses without that chat.
         if name == PromptWorkingFolderTool.toolName { return nil }
+        if Self.agentLoopToolNames.contains(name) {
+            if let agentId = ChatExecutionContext.currentAgentId,
+                AgentManager.shared.effectiveToolsDisabled(for: agentId)
+            {
+                return ToolEnvelope.failure(
+                    kind: .unavailable, message: "Tools are disabled for this agent.", tool: name)
+            }
+            return nil
+        }
 
         // Apple app tools always need an agent that switched the app on;
         // with no agent context (or the Default agent) they never run.

@@ -802,6 +802,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
 
                             var results: [IntelCodexResponsesToolResult] = []
+                            var runEndedByTool = false
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
                                 let call = IntelCodexResponsesToolCall(
@@ -872,6 +873,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                 )
                                 results.append(.init(callID: call.callID, output: result))
+                                if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
+                                    runEndedByTool = true
+                                }
+                            }
+                            // `complete` / `clarify` / `prompt_working_folder`
+                            // end the run: the chat reacts to their result
+                            // cards instead of asking the model again.
+                            if runEndedByTool {
+                                NSLog("[CloudChatEngine] Run ended by an agent-loop tool")
+                                logInference()
+                                continuation.finish()
+                                return
                             }
                             codexReplayItems.append(
                                 contentsOf: try finalized.completion.replayInputItems(toolResults: results)
@@ -992,6 +1005,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         // Execute each tool, surface the result card, and feed
                         // the result back as a tool message.
+                        var runEndedByTool = false
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
@@ -1087,6 +1101,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 "tool_call_id": callId,
                                 "content": result,
                             ])
+                            if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
+                                runEndedByTool = true
+                            }
+                        }
+                        // `complete` / `clarify` / `prompt_working_folder` end
+                        // the run after this round: every call in the round
+                        // has its result card, and the chat reacts to them.
+                        if runEndedByTool {
+                            NSLog("[CloudChatEngine] Run ended by an agent-loop tool")
+                            logInference()
+                            continuation.finish()
+                            return
                         }
                         // Loop: send the continuation request with tool results.
                     }

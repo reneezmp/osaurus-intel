@@ -495,6 +495,38 @@ final class ChatSession: ObservableObject {
         ClarifyTool.parse(argumentsJSON: json)
     }
 
+    /// Intel: `CloudChatEngine` executes tools inside its own loop and stops
+    /// after a round in which a run-ending tool succeeded (`AgentLoopRunEnd`);
+    /// the chat applies that tool's effect from its result card here: the
+    /// completion banner, the clarify prompt (the answer continues the chat),
+    /// or the `prompt_working_folder` continuation.
+    func handleRunEndingToolResult(name: String, arguments: String, result: String) {
+        guard AgentLoopRunEnd.endsRun(toolName: name, result: result) else { return }
+        switch name {
+        case "complete":
+            lastCompletionSummary = Self.parseCompleteSummary(from: arguments) ?? result
+            promptQueue.drainAll()
+        case "clarify":
+            guard let payload = Self.parseClarifyPayload(from: arguments) else { return }
+            awaitingClarify = payload
+            lastCompletionSummary = nil
+            promptQueue.enqueue(
+                .clarify(
+                    ClarifyPromptState(
+                        question: payload.question,
+                        options: payload.options,
+                        allowMultiple: payload.allowMultiple,
+                        onSubmit: { [weak self] answer in self?.send(answer) }
+                    )
+                )
+            )
+        case PromptWorkingFolderTool.toolName:
+            pendingWorkingFolderContinuation = true
+        default:
+            break
+        }
+    }
+
     /// Apply initial model selection after agentId is set (for cached picker items)
     func applyInitialModelSelection() {
         guard selectedModel == nil, !pickerItems.isEmpty else { return }
@@ -2307,6 +2339,7 @@ final class ChatSession: ObservableObject {
                     toolTurn.toolCallId = done.callId
                     let newAssistantTurn = ChatTurn(role: .assistant, content: "")
                     turns.append(contentsOf: [toolTurn, newAssistantTurn])
+                    handleRunEndingToolResult(name: done.name, arguments: done.arguments, result: done.result)
                     currentTurn = newAssistantTurn
                     processor = StreamingDeltaProcessor(
                         turn: newAssistantTurn
@@ -2596,6 +2629,9 @@ final class ChatSession: ObservableObject {
                 // `prompt_working_folder` and hands the tool this session.
                 let offersFolderPrompt = canPromptForWorkingFolder
                 let folderPromptBox: WeakChatSessionBox? = offersFolderPrompt ? WeakChatSessionBox(self) : nil
+                // One todo scope per run (upstream): `todo` tells progress
+                // from assertion, `complete` checks only this run's list.
+                let todoRunScope = AgentTodoRunScope()
                 let context = await SystemPromptComposer.composeChatContext(
                     agentId: effectiveAgentId,
                     executionMode: executionMode,
@@ -2854,7 +2890,11 @@ final class ChatSession: ObservableObject {
                                         try await ChatExecutionContext.$currentSessionId.withValue(
                                             sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
                                         ) {
-                                            try await engine.streamChat(request: req)
+                                            try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
+                                                try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
+                                                    try await engine.streamChat(request: req)
+                                                }
+                                            }
                                         }
                                     }
                                 }
@@ -3243,7 +3283,11 @@ final class ChatSession: ObservableObject {
                                         try await ChatExecutionContext.$currentSessionId.withValue(
                                             sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
                                         ) {
-                                            try await engine.streamChat(request: finalReq)
+                                            try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
+                                                try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
+                                                    try await engine.streamChat(request: finalReq)
+                                                }
+                                            }
                                         }
                                     }
                                 }

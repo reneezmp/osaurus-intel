@@ -2085,3 +2085,30 @@ Re-run `python3 scripts/upstream/classify_gap.py` after each upstream fetch: it
 lists every upstream source file Intel does not compile and fails on any file
 no feature claims. Add new files to a feature (or a new feature row) before
 calling a sync complete.
+
+### Agent-loop tools (`W-agent-loop-tools`, core) — 2026-09-29
+
+- **Architecture fact:** Intel's `CloudChatEngine` executes tool calls
+  **inside its own stream loop** and only reports finished calls to the chat
+  (`StreamingToolHint.encodeDone`); it never throws `ServiceToolInvocations`.
+  So `ChatSession`'s invocation-path intercepts (upstream shape) do not run on
+  Intel. A tool that must end the run or change chat state is handled in two
+  places: `AgentLoopRunEnd` (the engine stops after that round, both the
+  Responses and chat-completions loops) and
+  `ChatSession.handleRunEndingToolResult` (reacts to the result card). Task
+  locals a tool needs (`currentChatSessionBox`, `agentTodoRunScope`) must be
+  bound around `engine.streamChat`, which the stream task inherits.
+- This fixed `prompt_working_folder` (shipped earlier the same day), which
+  always refused in a real chat because the session was never passed to the
+  engine's tool calls; its unit tests had called the tool directly.
+- Ported upstream `AgentLoopTools` (`todo`, `complete`, `clarify`; `speak`
+  waits for Voice), `CurrentTimeTool`, `AgentTodoRunScope`, the newer
+  `AgentTodoStore`, and switched on the real `PromptQueue`,
+  `ClarifyPromptOverlay` and `SecretPromptOverlay` (they had Intel stubs, the
+  overlays labelled "Apple Silicon only"). The four tools bypass the Tools-tab
+  allowlist like upstream's baseline and follow the agent's tools switch.
+- **Canonical JSON now uses `.withoutEscapingSlashes`** (upstream): Intel had
+  been sending every tool result to models with `\/` in paths and ratios.
+- Upstream `Tests/Tool/AgentLoopToolsTests.swift` is enabled (minus `speak`);
+  Intel tests in `Tests/Chat/IntelAgentLoopToolsTests.swift` drive the real
+  engine against an HTTP fixture (clarify ends after one request).

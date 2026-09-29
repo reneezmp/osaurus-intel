@@ -576,3 +576,20 @@ model are **(paid)**.
       editing (it used to snap to the clamped value), and after leaving it
       shows the saved number (`64`; a lone `0` becomes `1`). Put the old
       value back afterwards.
+
+## Agent-loop tools (todo, complete, clarify, current time)
+
+Custom test agent with tools on and a tool-capable model; all **(paid)**.
+
+- [ ] "Plan a three-day trip to Lisbon, step by step": a checklist appears
+      above the composer and its boxes tick as the agent works; it answers
+      once at the end (no loop of checklist rewrites).
+- [ ] "Help me pick a laptop — ask me what you need to know first": a
+      question card with option chips appears at the bottom; picking a chip
+      (or typing an answer) continues the chat with that answer.
+- [ ] "What's the date and time right now?": correct local date/time and
+      time zone.
+- [ ] Re-test `prompt_working_folder` from the "Upstream batch 2026-09-29"
+      section: the picker must now actually open (the first build refused).
+- [ ] Turn the agent's Tools off: none of these appear, and the agent just
+      answers in text.
