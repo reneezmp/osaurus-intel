@@ -182,6 +182,22 @@
         }
       }
     },
+    "Agent Descriptions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agentenbeschreibungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体描述"
+          }
+        }
+      }
+    },
     "Allow Access…" : {
       "localizations" : {
         "de" : {
@@ -1034,6 +1050,22 @@
         }
       }
     },
+    "Fill in missing agent descriptions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlende Agentenbeschreibungen ergänzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "补全缺失的智能体描述"
+          }
+        }
+      }
+    },
     "Folder not found" : {
       "localizations" : {
         "de" : {
@@ -1086,6 +1118,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "跟隨系統強調色"
+          }
+        }
+      }
+    },
+    "For agents without a description, write a one-line purpose from their instructions in the background, so the Orchestrator and agent lists can show what each agent is for. Uses each agent's cloud model (a small paid request per agent, again only when its instructions change). Descriptions you write always win." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für Agenten ohne Beschreibung wird im Hintergrund aus ihren Anweisungen ein einzeiliger Zweck geschrieben, damit der Orchestrator und die Agentenlisten zeigen können, wofür jeder Agent da ist. Nutzt das Cloud-Modell des jeweiligen Agenten (eine kleine kostenpflichtige Anfrage pro Agent, erneut nur, wenn sich die Anweisungen ändern). Selbst geschriebene Beschreibungen haben immer Vorrang."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "对于没有描述的智能体，会在后台根据其指令写出一行用途说明，让编排器和智能体列表能显示每个智能体的用途。使用各智能体的云端模型（每个智能体一次小额付费请求，仅在指令更改时再次请求）。你自己写的描述始终优先。"
           }
         }
       }

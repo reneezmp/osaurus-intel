@@ -523,13 +523,13 @@ private struct AgentCard: View {
                         // Always render the description line so card heights line
                         // up across the grid — placeholder when the agent has none.
                         Text(
-                            agent.description.isEmpty
+                            agent.displayDescription.isEmpty
                                 ? L("No description")
-                                : agent.description
+                                : agent.displayDescription
                         )
                         .font(.system(size: 11))
                         .foregroundColor(
-                            agent.description.isEmpty ? theme.tertiaryText : theme.secondaryText
+                            agent.displayDescription.isEmpty ? theme.tertiaryText : theme.secondaryText
                         )
                         .lineLimit(1)
                         .truncationMode(.tail)
@@ -5873,7 +5873,9 @@ struct AgentDetailView: View {
             ),
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,
-            workingFolderPath: current.workingFolderPath
+            workingFolderPath: current.workingFolderPath,
+            generatedDescription: current.generatedDescription,
+            generatedDescriptionPromptHash: current.generatedDescriptionPromptHash
         )
 
         agentManager.update(updated)

@@ -190,6 +190,10 @@ public enum SettingsSearchIndex {
             id: "settings.chat.titles", tab: .settings, section: "Chat",
             title: "Automatically name chats", anchorLabel: "Chat Titles", keywords: ["chat titles", "rename", "auto title"]),
         .init(
+            id: "settings.chat.agentDescriptions", tab: .settings, section: "Chat",
+            title: "Fill in missing agent descriptions", anchorLabel: "Agent Descriptions",
+            keywords: ["agent description", "purpose", "backfill", "orchestrator"]),
+        .init(
             id: "settings.chat.newChatShortcut", tab: .settings, section: "Chat",
             title: "⌘+N Starts a New Chat in the Current Window",
             keywords: ["cmd n", "command n", "new chat", "new window", "shortcut"]),

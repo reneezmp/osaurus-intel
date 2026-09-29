@@ -9,6 +9,7 @@
 //  reaches a model.
 //
 
+import CryptoKit
 import Foundation
 
 public enum AgentDescriptionPolicy {
@@ -17,6 +18,13 @@ public enum AgentDescriptionPolicy {
     public static let generatedMaximumCharacters = 160
 
     /// Trims and collapses the text to a single line.
+    /// Stable identity of the system prompt a generated description came from
+    /// (upstream). A prompt edit changes the hash and invalidates the summary.
+    public static func promptHash(_ systemPrompt: String) -> String {
+        let data = Data(normalized(systemPrompt).utf8)
+        return SHA256.hash(data: data).map { String(format: "%02x", $0) }.joined()
+    }
+
     public static func normalized(_ value: String) -> String {
         let trimmed = value.trimmingCharacters(in: .whitespacesAndNewlines)
         guard trimmed.contains(where: { $0.isNewline }) else { return trimmed }

@@ -121,7 +121,7 @@ enum IntelOrchestratorAdmission {
             targets.append(
                 .init(
                     id: id, name: agent.displayName, modelID: modelID,
-                    purpose: AgentDescriptionPolicy.normalized(agent.description)))
+                    purpose: agent.routingDescription))
         }
         if configuration.customAgentAllowlist.isEmpty {
             blocked.append("No custom agent is allowed.")

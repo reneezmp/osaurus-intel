@@ -2116,6 +2116,9 @@ final class ChatSession: ObservableObject {
             generateLLMTitle(
                 userText: context.userContent, assistantText: assistant, sessionId: sid)
         }
+        // Opt-in description backfill after a clean run (upstream trigger;
+        // no-op unless Settings › Chat › "Fill in missing agent descriptions").
+        AgentDescriptionBackfill.shared.scheduleAll()
         #endif
 
         let agentUUID = UUID(uuidString: context.memoryAgentId) ?? Agent.defaultId

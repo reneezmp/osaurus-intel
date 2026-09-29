@@ -613,3 +613,16 @@ and each self-scheduled wake is another paid run.
       wake disappears from the Next Run panel and never runs.
 - [ ] With the switch off, **(paid)** asking the agent to schedule itself: it
       says it can't (the tools aren't offered).
+
+## Agent description filler (opt-in)
+
+- [ ] Settings › General › Chat › **Agent Descriptions**: "Fill in missing
+      agent descriptions" is **off** by default.
+- [ ] With it off, create an agent with instructions but no description:
+      its card says "No description" and nothing is generated.
+- [ ] **(paid)** Turn it on and save: within a few seconds that agent's card
+      shows a one-line purpose (the description field itself stays empty).
+      The Orchestrator's delegation settings list shows the same purpose.
+- [ ] Type your own description: the card shows yours. Clear it again: the
+      generated purpose returns without a new request. Edit the instructions:
+      **(paid)** a new purpose replaces the old one.

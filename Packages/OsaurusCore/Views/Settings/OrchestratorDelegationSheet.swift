@@ -88,7 +88,7 @@ struct OrchestratorDelegationSettings: View {
                                         .foregroundColor(theme.primaryText)
                                     // The Orchestrator picks targets by purpose
                                     // (upstream #157); flag agents without one.
-                                    let purpose = AgentDescriptionPolicy.normalized(agent.description)
+                                    let purpose = agent.routingDescription
                                     if purpose.isEmpty {
                                         Text("No description yet — add one in the agent's Configure tab so the Orchestrator knows when to use it.", bundle: .module)
                                             .font(.system(size: 10))

@@ -2130,3 +2130,19 @@ calling a sync complete.
   `notify`. It becomes the delegate at launch but **asks for notification
   permission only when self-scheduling is switched on or an agent notifies**
   (upstream asks at launch). Clicking opens the agent in Agents.
+
+### Agent description backfill, opt-in (`W-description-backfill`) — 2026-09-29
+
+- Upstream #2892/#2897/#2901/#2898 on Intel as
+  `Services/Agent/AgentDescriptionBackfill.swift`: same queue, coalescing,
+  retry and "your text wins" re-checks as upstream, but it runs **only while
+  Settings › Chat › "Fill in missing agent descriptions" is on (default off)**,
+  one request at a time with each agent's own cloud model (upstream uses a
+  free local core model Intel does not have).
+- `Agent.generatedDescription` / `generatedDescriptionPromptHash` (upstream
+  keys) with `routingDescription` (roster) and `displayDescription` (lists);
+  `AgentDescriptionPolicy.promptHash` (SHA-256 of the normalized prompt).
+  **The agent editor's save rebuild passes both fields through** — keep them
+  in that `Agent(...)` call or the next save wipes them.
+- Triggers: agent add/update, a clean chat run, and saving Settings (so
+  turning the switch on fills existing agents).

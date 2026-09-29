@@ -1453,7 +1453,7 @@ private struct AgentPicker: View {
                     ForEach(agents, id: \.id) { agent in
                         AgentOptionRow(
                             name: agent.name,
-                            description: agent.description,
+                            description: agent.displayDescription,
                             isSelected: selectedAgentId == agent.id,
                             action: {
                                 selectedAgentId = agent.id

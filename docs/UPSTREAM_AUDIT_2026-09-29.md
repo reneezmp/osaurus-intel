@@ -78,7 +78,7 @@ the prerequisite". Every commit is one of:
 | Cross-block chat selection (upstream #2247) | #2899 |
 | Browser-style chat tabs (upstream #2630) | #2910, #2911 (and #2907 part C's tab strip) |
 | Intel chat export (MEMORY_PLAN §3b) | #2902 |
-| Opt-in background description generation — **decided 2026-09-29 (Renée): port as an opt-in switch, off by default** | #2892, #2897, #2901, #2898 |
+| Opt-in background description generation — **shipped 2026-09-29** (off by default) | #2892, #2897, #2901, #2898 |
 | Native subagents (staged) | #2890 admission slice |
 | Mobile pairing / relay (B1) | #2875, #2913 Connect card, #2930, #2931 |
 | Workspaces billing (B7) | #2915 |

@@ -43,6 +43,7 @@ struct ConfigurationView: View {
     @State private var isCoreModelMenuPresented = false
     @State private var tempEnableClipboardMonitoring: Bool = false
     @State private var tempAutoGenerateChatTitles: Bool = true
+    @State private var tempBackfillAgentDescriptions: Bool = false
     /// Make ⌘N start a new chat in the frontmost chat window (the sidebar
     /// "New Chat" action) instead of opening a new window. Applied
     /// immediately via `AppStorage`, like `updater.isBetaChannel` above, so
@@ -412,6 +413,24 @@ struct ConfigurationView: View {
                                             .toggleStyle(ThemedCheckboxToggleStyle())
                                             Text(
                                                 "After the first exchange, generate a short descriptive title for the chat instead of using the first message as the title.",
+                                                bundle: .module
+                                            )
+                                            .font(.system(size: 11))
+                                            .foregroundColor(theme.tertiaryText)
+                                        }
+                                    }
+
+                                    SettingsDivider()
+
+                                    SettingsSubsection(label: "Agent Descriptions") {
+                                        VStack(alignment: .leading, spacing: 8) {
+                                            Toggle(isOn: $tempBackfillAgentDescriptions) {
+                                                Text("Fill in missing agent descriptions", bundle: .module)
+                                                    .font(.system(size: 12))
+                                            }
+                                            .toggleStyle(ThemedCheckboxToggleStyle())
+                                            Text(
+                                                "For agents without a description, write a one-line purpose from their instructions in the background, so the Orchestrator and agent lists can show what each agent is for. Uses each agent's cloud model (a small paid request per agent, again only when its instructions change). Descriptions you write always win.",
                                                 bundle: .module
                                             )
                                             .font(.system(size: 11))
@@ -859,6 +878,7 @@ struct ConfigurationView: View {
         tempCoreModelName = chat.coreModelName ?? ""
         tempEnableClipboardMonitoring = chat.enableClipboardMonitoring
         tempAutoGenerateChatTitles = chat.autoGenerateChatTitles
+        tempBackfillAgentDescriptions = chat.backfillAgentDescriptions
         tempGenerativeGreetingsEnabled = chat.generativeGreetingsEnabled
         // Storage convention: empty string = "use the built-in default."
         // The editor never displays an empty state — we hydrate it with
@@ -914,6 +934,7 @@ struct ConfigurationView: View {
         tempCoreModelName = chatDefaults.coreModelName ?? ""
         tempEnableClipboardMonitoring = chatDefaults.enableClipboardMonitoring
         tempAutoGenerateChatTitles = chatDefaults.autoGenerateChatTitles
+        tempBackfillAgentDescriptions = chatDefaults.backfillAgentDescriptions
         tempGenerativeGreetingsEnabled = chatDefaults.generativeGreetingsEnabled
         // Match `loadConfiguration`: hydrate the editor with the
         // built-in default rather than leaving it blank. Saving with
@@ -1048,6 +1069,7 @@ struct ConfigurationView: View {
             disableTools: tempDisableTools,
             enableClipboardMonitoring: tempEnableClipboardMonitoring,
             autoGenerateChatTitles: tempAutoGenerateChatTitles,
+            backfillAgentDescriptions: tempBackfillAgentDescriptions,
             generativeGreetingsEnabled: tempGenerativeGreetingsEnabled,
             greetingPersona: {
                 // Collapse an unedited built-in default back to "" so
@@ -1061,6 +1083,8 @@ struct ConfigurationView: View {
             }()
         )
         ChatConfigurationStore.save(chatCfg)
+        // Turning the opt-in description backfill on fills existing agents.
+        AgentDescriptionBackfill.shared.scheduleAll()
 
         // Persist memory enable toggle. Budgets are not user-adjustable in
         // this UI — users can edit MemoryConfiguration.json directly for

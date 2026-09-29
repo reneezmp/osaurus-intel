@@ -827,8 +827,8 @@ private struct AgentToggleRow: View {
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(theme.primaryText)
 
-                if !agent.description.isEmpty {
-                    Text(agent.description)
+                if !agent.displayDescription.isEmpty {
+                    Text(agent.displayDescription)
                         .font(.system(size: 11))
                         .foregroundColor(theme.tertiaryText)
                         .lineLimit(1)

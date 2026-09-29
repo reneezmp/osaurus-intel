@@ -280,6 +280,8 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         persist(agent)
         reload()
         bumpCapabilityRevision()
+        let id = agent.id
+        Task { @MainActor in AgentDescriptionBackfill.shared.scheduleIfNeeded(id) }
     }
 
     func update(_ agent: Agent) {
@@ -297,6 +299,9 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         reload()
         bumpCapabilityRevision()
         NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
+        // Opt-in description backfill (no-op unless the Settings switch is on).
+        let id = agent.id
+        Task { @MainActor in AgentDescriptionBackfill.shared.scheduleIfNeeded(id) }
     }
 
     /// Set or clear a custom agent's default working folder (upstream #25).
@@ -1396,6 +1401,10 @@ final class ChatConfiguration: @unchecked Sendable {
     // already ran unconditionally; this flag makes it an opt-out,
     // default-on to preserve existing behavior on upgrade.
     var autoGenerateChatTitles: Bool = true
+    /// Upstream #2892 background description backfill. **Opt-in, off by
+    /// default on Intel** (Renée, 2026-09-29): every call is a paid cloud
+    /// request with the agent's own model.
+    var backfillAgentDescriptions: Bool = false
     var defaultToolSelectionMode: Any? = nil
     var defaultManualToolNames: [String]? = nil
     var defaultManualSkillNames: [String]? = nil
@@ -1453,6 +1462,7 @@ final class ChatConfiguration: @unchecked Sendable {
         defaultManualSkillNames: [String]? = nil,
         enableClipboardMonitoring: Bool = true,
         autoGenerateChatTitles: Bool = true,
+        backfillAgentDescriptions: Bool = false,
         generativeGreetingsEnabled: Bool = false,
         greetingPersona: String = ""
     ) {
@@ -1478,6 +1488,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualSkillNames = defaultManualSkillNames
         self.enableClipboardMonitoring = enableClipboardMonitoring
         self.autoGenerateChatTitles = autoGenerateChatTitles
+        self.backfillAgentDescriptions = backfillAgentDescriptions
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
         self.greetingPersona = greetingPersona
     }
@@ -1507,6 +1518,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualSkillNames = other.defaultManualSkillNames
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
         self.autoGenerateChatTitles = other.autoGenerateChatTitles
+        self.backfillAgentDescriptions = other.backfillAgentDescriptions
         self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
         self.greetingPersona = other.greetingPersona
     }
@@ -1540,6 +1552,7 @@ final class ChatConfiguration: @unchecked Sendable {
         var greetingPersona: String? = nil
         var enableClipboardMonitoring: Bool? = nil
         var autoGenerateChatTitles: Bool? = nil
+        var backfillAgentDescriptions: Bool? = nil
         var defaultManualToolNames: [String]? = nil
         var defaultManualSkillNames: [String]? = nil
         var coreModelProvider: String? = nil
@@ -1575,6 +1588,7 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.greetingPersona { greetingPersona = v }
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
         if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
+        if let v = s.backfillAgentDescriptions { backfillAgentDescriptions = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
         if let v = s.defaultManualSkillNames { defaultManualSkillNames = v }
         if let v = s.coreModelProvider { coreModelProvider = v }
@@ -1602,6 +1616,7 @@ final class ChatConfiguration: @unchecked Sendable {
         s.greetingPersona = greetingPersona
         s.enableClipboardMonitoring = enableClipboardMonitoring
         s.autoGenerateChatTitles = autoGenerateChatTitles
+        s.backfillAgentDescriptions = backfillAgentDescriptions
         s.defaultManualToolNames = defaultManualToolNames
         s.defaultManualSkillNames = defaultManualSkillNames
         s.coreModelProvider = coreModelProvider

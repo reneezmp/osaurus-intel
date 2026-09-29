@@ -575,8 +575,8 @@ struct AgentPill: View {
                     .font(.system(size: 12, weight: isCurrent ? .semibold : .medium))
                     .foregroundColor(theme.primaryText)
                     .lineLimit(1)
-                if !agent.description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(agent.description)
+                if !agent.displayDescription.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    Text(agent.displayDescription)
                         .font(.system(size: 10))
                         .foregroundColor(theme.tertiaryText)
                         .lineLimit(1)

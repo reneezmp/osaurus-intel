@@ -129,6 +129,22 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// authority; the bookmark is kept for upstream bundle compatibility.
     public var workingFolderBookmark: Data?
     public var workingFolderPath: String?
+    /// Purpose line generated in the background from `systemPrompt` when
+    /// `description` is blank (upstream #2892; on Intel only while
+    /// Settings › Chat › "Fill in missing agent descriptions" is on). Never
+    /// shown as the user's own text.
+    public var generatedDescription: String?
+    /// `AgentDescriptionPolicy.promptHash` of the prompt `generatedDescription`
+    /// came from, so an instruction edit invalidates it.
+    public var generatedDescriptionPromptHash: String?
+
+    /// What the Orchestrator roster and agent pickers use: the user's text when
+    /// present, otherwise the generated purpose, otherwise "".
+    public var routingDescription: String {
+        let manual = AgentDescriptionPolicy.normalized(description)
+        if !manual.isEmpty { return manual }
+        return AgentDescriptionPolicy.normalized(generatedDescription ?? "")
+    }
 
     public init(
         id: UUID = UUID(),
@@ -163,7 +179,9 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         settings: AgentSettings = .defaultDisabled,
         order: Int? = nil,
         workingFolderBookmark: Data? = nil,
-        workingFolderPath: String? = nil
+        workingFolderPath: String? = nil,
+        generatedDescription: String? = nil,
+        generatedDescriptionPromptHash: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -198,6 +216,8 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.order = order
         self.workingFolderBookmark = workingFolderBookmark
         self.workingFolderPath = workingFolderPath
+        self.generatedDescription = generatedDescription
+        self.generatedDescriptionPromptHash = generatedDescriptionPromptHash
     }
 
     // MARK: - Custom avatar resolution
@@ -226,10 +246,11 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         return isBuiltIn ? L(String.LocalizationValue(name)) : name
     }
 
-    /// Display description for UI rendering. Same rules as `displayName`.
+    /// Display purpose (upstream #2898): the user's text (built-ins localized
+    /// like `displayName`), else the generated purpose.
     public var displayDescription: String {
-        guard isBuiltIn, !description.isEmpty else { return description }
-        return L(String.LocalizationValue(description))
+        if AgentDescriptionPolicy.normalized(description).isEmpty { return routingDescription }
+        return isBuiltIn ? L(String.LocalizationValue(description)) : description
     }
 
     // MARK: - Built-in Agents
@@ -360,6 +381,8 @@ extension Agent {
         workingFolderPath =
             try c.decodeIfPresent(String.self, forKey: .workingFolderPath)
             ?? folderLegacy.decodeIfPresent(String.self, forKey: .hostWorkspacePath)
+        generatedDescription = try c.decodeIfPresent(String.self, forKey: .generatedDescription)
+        generatedDescriptionPromptHash = try c.decodeIfPresent(String.self, forKey: .generatedDescriptionPromptHash)
     }
 }
 
