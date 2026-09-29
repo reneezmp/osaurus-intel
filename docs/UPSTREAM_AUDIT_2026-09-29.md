@@ -22,41 +22,67 @@ vocabulary of [`UPSTREAM_AUDIT_2026-09-25.md`](UPSTREAM_AUDIT_2026-09-25.md)
 
 ## Classification
 
+**Verdict rule (Renée, 2026-09-29):** "Omit" is not allowed for "Intel lacks
+the prerequisite". Every commit is one of:
+
+- **Incompatible** — needs Apple Silicon hardware (MLX/Metal local
+  inference) or is an upstream-only artifact (their appcast, their tests of
+  code Intel cannot run).
+- **Omit (not a feature)** — compiles, but carries nothing for Intel users
+  (upstream marketing). Rare; say why.
+- **Needs work** — portable once a named prerequisite lands; the
+  prerequisite goes on the backlog.
+- **Needs work + decision** — portable, but conflicts with a standing Intel
+  policy (for example, no automatic paid calls) until Renée decides.
+
 | # | Commit | Verdict | Intel note |
 |---:|---|---|---|
-| 1 | `76eda8b78` #2888 | Omit | Official **local** model update polling; Intel has no local models. |
-| 2 | `c97f5e701` #2882 | Omit | Retires the local Raptor v0.5 model; upstream What's New copy. |
-| 3 | `0802d9692` #2890 | Omit | Local MLX generation defaults and native-subagent output admission. |
+| 1 | `76eda8b78` #2888 | **Incompatible** | Update polling for MLX local models. MLX runs only on Apple Silicon (Metal); Intel has no local model runtime to update. |
+| 2 | `c97f5e701` #2882 | **Incompatible** | Retires the MLX Raptor v0.5 model and rewrites upstream's own What's New copy. (Intel's What's New screen still carries upstream 0.17.7 notes and never matches an Intel version; writing Intel's own release notes is a separate, possible task.) |
+| 3 | `0802d9692` #2890 | Split | MLX generation-defaults slice: **incompatible**. Child output-budget admission slice: **needs work**, lands with native subagents (staged; Intel has bounded delegation today). |
 | 4 | `fb3d06a58` #2889 | Covered | Intel's `CloudChatEngine` already ignores empty streamed tool names (`!n.isEmpty`) and tells the model when no tools are offered. Evals/tests are upstream-only. |
-| 5 | `3388439f7` #2892 | Omit (design) | Background description backfill runs a model automatically; Intel keeps descriptions optional with an explicit "Suggest" (no automatic paid calls). |
-| 6 | `74f80f721` #2895 | Omit | Test-only (model manager scan barrier). |
+| 5 | `3388439f7` #2892 | **Needs work + decision** | Background description backfill. Upstream runs it on a free local core model; Intel has none, so it would be paid cloud calls. Portable as an **opt-in** ("fill missing descriptions in the background with model X"), off by default. |
+| 6 | `74f80f721` #2895 | **Incompatible** | Test-only change to the MLX model manager's tests. |
 | 7 | `0ee595278` #2893 | Split → **Port** | Integer field shipped. Context cap: Intel's `ChatConfiguration` has no `contextLengthCap`. Follow-up parsing: Intel has no follow-up suggestions. Search anchors: Intel's settings index is its own. |
 | 8 | `79f978e16` #2894 | **Port** | Shipped. |
-| 9 | `d1f1bdfbd` | Omit | Upstream 0.25.13 appcast. |
-| 10 | `be3617236` #2896 | Omit | MLX runtime pin. |
-| 11 | `a7d2f37e7` #2897 | Omit (design) | Backfill follow-up (see #5). |
-| 12 | `610aa089a` #2898 | Omit (design) | Shows generated purposes; Intel generates none automatically. |
+| 9 | `d1f1bdfbd` | **Incompatible** | Upstream's own release feed (arm64 builds, their signing key). Intel publishes its own appcast. |
+| 10 | `be3617236` #2896 | **Incompatible** | MLX runtime pin (Apple Silicon only). |
+| 11 | `a7d2f37e7` #2897 | **Needs work + decision** | Backfill follow-up; lands with #5. |
+| 12 | `610aa089a` #2898 | **Needs work + decision** | Shows backfilled purposes in pickers; lands with #5. |
 | 13 | `d8d24271b` #2875 | Stage | iOS app integration (mobile relay, phone chats). Needs the mobile/relay backend (B1). |
-| 14 | `f90c8dcb3` #2899 | Omit | Fix for upstream's cross-block drag selection, which Intel does not have. |
-| 15 | `3479aedc8` #2901 | Omit (design) | Backfill follow-up (see #5). |
+| 14 | `f90c8dcb3` #2899 | **Needs work** | Fix for cross-block drag selection. Prerequisite: port that feature first (upstream #2247 `5212ffbc6`, `ChatCrossSelection.swift`, ~320 lines), never ported to Intel. |
+| 15 | `3479aedc8` #2901 | **Needs work + decision** | Backfill follow-up; lands with #5. |
 | 16 | `c9e2d61a9` #2900 | Covered | Upstream's SQLite history dropped generation metrics; Intel's history already encodes TTFT, tok/s and token counts. |
-| 17 | `12a02a9f7` #2902 | Omit | Export timing for restored chats; the export coordinator is excluded on Intel. |
-| 18 | `4b7dd0f1a` #2905 | Omit | Product Hunt dialogs (marketing). |
-| 19 | `a53e1b45e` #2906 | Omit | Product Hunt fix. |
-| 20 | `9e3bde41f` | Omit | Upstream 0.25.14 appcast. |
+| 17 | `12a02a9f7` #2902 | **Needs work** | Export timing for restored chats. Prerequisite: Intel chat export, removed in 1.0.34 because its files are excluded; Renée wants it back (`MEMORY_PLAN.md` §3b). |
+| 18 | `4b7dd0f1a` #2905 | Omit (not a feature) | Upstream's Product Hunt launch dialogs asking users to vote for their product. Compiles on Intel; there is nothing for Intel users. |
+| 19 | `a53e1b45e` #2906 | Omit (not a feature) | Fix to the Product Hunt dialogs (#18). |
+| 20 | `9e3bde41f` | **Incompatible** | Upstream's own release feed (see #9). |
 | 21 | `74e83c6c5` #2907 | **Stage** | Three features; see the plan below. |
 | 22 | `fcda29d39` #2909 | **Port** | Shipped (hand-ported; Intel's scroll files diverge). |
-| 23 | `1faed06fb` #2910 | Omit | Chat tab strip vs inspector rail; Intel has no chat tabs. |
+| 23 | `1faed06fb` #2910 | **Needs work** | Tab strip vs inspector rail. Prerequisite: browser-style chat tabs (upstream #2630 `ae942a150`, already ROADMAP-feasible in `DEFER_FEASIBILITY_AUDIT_2026-09-08.md`), not yet ported. |
 | 24 | `612c48626` #2912 | **Port** (simplified) | Shipped. |
-| 25 | `1eb0faddf` #2911 | Omit | Per-tab scroll memory; Intel has no chat tabs. |
-| 26 | `e1ff79b51` #2913 | Omit | Card style for local model updates and Osaurus Connect (mobile). |
+| 25 | `1eb0faddf` #2911 | **Needs work** | Per-tab scroll memory; lands with chat tabs (#23). |
+| 26 | `e1ff79b51` #2913 | Split | Local-model update card: **incompatible**. Osaurus Connect (phone pairing) card: **needs work**, lands with B1. |
 | 27 | `0c27f14c1` #2914 | Split → **Port** | Text slice shipped. Document slice (DOCX/PPTX/PDF editing, AcroForm filling) needs #2907's editors; `ToolWirePropertyOrder` (xAI constrained decoding) and `edits`/`operations` argument normalisation belong with the fuller `file_edit` (batch `edits`, `dry_run`) — staged with #2907 part B. |
 | 28 | `541a1b559` #2916 | **Port** (adapted) | Shipped. |
 | 29 | `694efa53a` #2915 | Stage | Workspace pool billing (B7). |
 | 30 | `0a114acdb` #2918 | **Port** | Shipped. |
-| 31 | `764124dce` #2917 | Omit | MLX gathered-matmul runtime. |
+| 31 | `764124dce` #2917 | **Incompatible** | MLX gathered-matmul runtime (Apple Silicon only). |
 | 32 | `0cd7d294f` #2931 | Stage | Phone "worked-for" span over the mobile protocol (B1). |
 | 33 | `3dad2dad4` #2930 | Stage | Phone chat handoff and quick actions (B1). |
+
+## Needs-work backlog from this batch
+
+| Prerequisite | Unblocks |
+|---|---|
+| Cross-block chat selection (upstream #2247) | #2899 |
+| Browser-style chat tabs (upstream #2630) | #2910, #2911 (and #2907 part C's tab strip) |
+| Intel chat export (MEMORY_PLAN §3b) | #2902 |
+| Opt-in background description generation (decision: paid model, off by default) | #2892, #2897, #2901, #2898 |
+| Native subagents (staged) | #2890 admission slice |
+| Mobile pairing / relay (B1) | #2875, #2913 Connect card, #2930, #2931 |
+| Workspaces billing (B7) | #2915 |
+| #2907 A/B/C (plan below) | #2914 document slice |
 
 ## Staged plan for #2907 (and the #2914 document slice)
 

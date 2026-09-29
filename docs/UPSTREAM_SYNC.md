@@ -2049,3 +2049,28 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   (`prompt_working_folder`) gets the session only through
   `ChatExecutionContext.currentChatSessionBox`, which only an attended,
   window-backed, non-dispatch `ChatSession` binds.
+
+### Verdict rule: "doesn't apply" is not a verdict — 2026-09-29
+
+Renée: the fork ports everything it can, even when it takes work. In
+upstream audits, **Omit/N/A is only for commits that are truly incompatible**
+(need Apple Silicon hardware — MLX/Metal local inference — or are
+upstream-only artifacts such as their appcast or tests of code Intel cannot
+run) or that carry nothing for users (upstream marketing, stated as such).
+"Intel doesn't have X yet" means **Needs work**, with X named and put on the
+backlog; a policy conflict (for example, automatic paid calls) means
+**Needs work + decision**. The 2026-09-29 audit was corrected to this rule
+(its first draft omitted tab, selection, export and backfill commits).
+
+Earlier Omit verdicts in `UPSTREAM_AUDIT_2026-09-25.md` are mostly MLX pins,
+local-model runtime and appcasts (legitimately incompatible). Re-check these
+under the rule before calling that audit clean:
+
+- #65 `6e67eec21` local embeddings endpoint — Intel does ship a local
+  embedder (memory recall); an endpoint may be portable.
+- #107 `97a390380` tool-stream cancellation — "Intel cloud stream
+  cancellation needs separate audit" is an open task, not an Omit.
+- #127 `289a52272` and #163 `2fecfc883` — native-only as written; confirm
+  no cloud-engine equivalent bug.
+- #103 `61ba32da8` / #128 `f1ad85c42` telemetry — a product/privacy
+  decision, not an incompatibility.
