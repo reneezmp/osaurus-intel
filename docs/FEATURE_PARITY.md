@@ -129,7 +129,7 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
   sized and ordered in [`INTEL_MISSING_FEATURES_BACKLOG.md`](INTEL_MISSING_FEATURES_BACKLOG.md)
   (770 upstream files, all classified). It found features that had been
   silently missing or mislabeled: the `todo`/`complete`/`clarify` agent-loop
-  tools, Methods, automatic tool discovery, self-scheduling ("out of scope"),
+  tools (now shipped), automatic tool discovery, self-scheduling ("out of scope"),
   `file_copy` ("by design") and Voice ("Apple-Silicon-only" — true only of
   the FluidAudio engine; Apple Speech works on Intel).
 

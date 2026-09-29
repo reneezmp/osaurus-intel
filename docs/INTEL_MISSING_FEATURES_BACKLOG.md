@@ -57,7 +57,7 @@ feature had been labelled before this sweep.
 | `W-agent-loop-tools` | **Core shipped 2026-09-29** (`todo`, `complete`, `clarify`, `get_current_time`, the clarify prompt card, unescaped slashes in tool JSON); remaining: output caps/compression, schema validation, run-progress monitor, repetition detector, grounded claim checks, `ToolWirePropertyOrder`, vision tool results. Originally: `todo`, `complete`, `clarify` agent-loop tools; `get_current_time`; tool output caps/compression; argument schema validation; run-progress (stall) monitor; stream repetition detector; grounded claim checks; `ToolWirePropertyOrder`; images from tool results to vision models | M (5.3k) | **Silently absent.** `ChatView` has the `complete`/`clarify` intercepts, but the tools are not registered (`AgentLoopTools.swift` excluded; `ClarifyTool` is a stub). | Port on top of Intel's chat loop. Lets agents keep a todo list, ask a clarifying question with options, and finish cleanly. |
 | `W-voice` | Voice input (dictation), live voice, text-to-speech | M (4.7k) | "Apple-Silicon-only" (Voice tab disabled) — true only of the **FluidAudio** engine. | Apple Speech (`SFSpeechRecognizer`) for dictation and `AVSpeechSynthesizer` or the upstream OpenAI-compatible TTS client for speech; all run on Intel. Engine swap, same UI. |
 | `W-self-scheduling` | **Shipped 2026-09-29** (tools, switch, presets, agent notifications; schedule run-history view remains). Agent schedules its own next run (`schedule_next_run`, `cancel_next_run`, `notify`) and schedule run history | S (1.0k) | "Intentionally out of Intel scope" — not a valid reason under the rule. | The scheduler already runs on Intel; the per-agent Self-scheduling toggle is the consent. |
-| `W-methods` | **Methods**: reusable procedures the agent can save, score and reuse | S (1.0k) | **Silently absent**, not in the parity ledger. | Port service + encrypted database. |
+| `W-methods` | Methods (saved procedures) | — | ~~Silently absent~~ **Re-checked 2026-09-29: retired upstream.** Upstream removed method creation (`MethodTools.swift`) in April 2026 (#893, "Deprecate Work Mode"); `upstream/main` only lets `capabilities_load` find methods saved by older upstream builds. Intel never had methods, so an Intel port would be an empty database nothing can fill. | Nothing to port on its own. If `W-tool-discovery` is ported, its search simply returns no method hits. Revisit only if upstream brings method creation back. |
 | `W-tool-discovery` | Automatic tool discovery (semantic search over tools/skills, `capabilities_search`/`capabilities_load`, session tool state) | M (4.9k) | Silently absent: Intel "Auto" mode sends every tool. | Port the index/search; embeddings via Intel's local embedder. |
 | `W-description-backfill` | Background fill of missing agent descriptions | S (0.2k) | Omitted (automatic paid calls). | **Decided:** opt-in switch, off by default. |
 | `W-doc-editing` | In-place .docx/.xlsx/.pptx/.pdf editing, PDF form filling, `.pptx` writing, business-document and CSV workflows, `file_copy` | L (6.6k) | #2907 part B staged; `file_copy` "removed by design". | Plan in [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md). `file_copy` returns (copying binaries through `shell_run cp` bypasses undo). |
@@ -131,9 +131,10 @@ cloud models if the fork wants its own eval suite; no user-facing effect.
 
 ## 6. Suggested order
 
-1. **Wrongly dropped, small:** `W-agent-loop-tools`, `W-self-scheduling`,
-   `W-methods`, `W-description-backfill` (opt-in), `W-chat-export`,
-   `file_copy`.
+1. **Wrongly dropped, small:** `W-agent-loop-tools` (core shipped),
+   `W-self-scheduling` (shipped), `W-description-backfill` (opt-in),
+   `W-chat-export`, `file_copy`. (`W-methods` turned out to be retired
+   upstream.)
 2. **Medium, high value:** `W-doc-editing`, `W-voice`, `W-tool-discovery`,
    `W-knowledge-write`, `W-chat-tabs` + cross-block selection,
    `W-tool-catalog-ui`, `W-media-generation`.
