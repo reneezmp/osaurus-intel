@@ -139,9 +139,9 @@ public final class FolderContextService: ObservableObject {
             let projectType = detectProjectType(url)
             let options = FileTreeOptions(ignorePatterns: projectType.ignorePatterns)
             let tree = buildFileTree(url, options: options)
-            let manifest = readManifest(url, projectType: projectType)
+            let manifest = Self.readManifest(url, projectType: projectType)
             let isGitRepo = checkIsGitRepo(url)
-            let contextFiles = readContextFiles(url)
+            let contextFiles = Self.readContextFiles(url)
             let detectedExtensions = scanForKnownExtensions(
                 url, ignorePatterns: projectType.ignorePatterns)
             return FolderScanResult(
@@ -260,9 +260,12 @@ public final class FolderContextService: ObservableObject {
     /// Find and read the first present project-context file from `url`.
     /// Returns a pre-formatted `## <filename>\n\n<content>` block, truncated
     /// to `contextFileMaxChars`, or `nil` if no candidate exists.
-    nonisolated private func readContextFiles(_ url: URL) -> String? {
+    /// Intel: candidates go through the folder tools' symlink-safe resolver,
+    /// so a linked `AGENTS.md -> ~/.ssh/id_rsa` in a cloned repo is skipped
+    /// instead of being sent to the model with the prompt.
+    nonisolated static func readContextFiles(_ url: URL) -> String? {
         for name in Self.contextFileCandidates {
-            let candidate = url.appendingPathComponent(name)
+            guard let candidate = try? FolderToolHelpers.resolvePath(name, rootPath: url) else { continue }
             guard let raw = try? String(contentsOf: candidate, encoding: .utf8) else { continue }
             let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
             guard !trimmed.isEmpty else { continue }
@@ -586,11 +589,12 @@ public final class FolderContextService: ObservableObject {
 
     // MARK: - Manifest Reading
 
-    nonisolated private func readManifest(_ url: URL, projectType: ProjectType) -> String? {
+    nonisolated static func readManifest(_ url: URL, projectType: ProjectType) -> String? {
         guard let manifestFile = projectType.primaryManifest else { return nil }
 
-        let manifestURL = url.appendingPathComponent(manifestFile)
-        guard FileManager.default.fileExists(atPath: manifestURL.path) else { return nil }
+        guard let manifestURL = try? FolderToolHelpers.resolvePath(manifestFile, rootPath: url),
+            FileManager.default.fileExists(atPath: manifestURL.path)
+        else { return nil }
 
         do {
             let content = try String(contentsOf: manifestURL, encoding: .utf8)

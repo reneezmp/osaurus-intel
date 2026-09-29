@@ -1809,11 +1809,11 @@ database or upstream work:
 CSV/TSV/JSON/JSONL **and xlsx** import/export landed (`AGENT_DATABASE_INTEL_PLAN.md`
 Phase 2). Lessons:
 
-- **`FolderToolHelpers.resolvePath` does not follow symlinks.** It stops `../`
+- **`FolderToolHelpers.resolvePath` did not follow symlinks.** It stopped `../`
   and absolute paths outside the root, but a symlink inside the working folder
-  can point anywhere. The Intel `DatabaseFilePathResolver` checks containment
-  on symlink-resolved paths. The folder `file_*` tools still use the weaker
-  check; that is tracked as a separate follow-up.
+  could point anywhere. The Intel `DatabaseFilePathResolver` checks containment
+  on symlink-resolved paths. The folder tools now do too; see "Folder tools
+  symlink containment" below.
 - **Check what Intel already compiles before scheduling a backport.** The
   planned xlsx phase needed only three small members because `XLSXAdapter`
   and `XLSXEmitter` were already in the target.
@@ -1834,4 +1834,60 @@ complete apart from self-scheduling (out of scope). Lessons:
 - **Bundle sheets are windows too:** themed controls plus
   `.environment(\.theme)` and `.intelControlRendering` (the same rule as the
   theme editor).
+
+### Folder tools symlink containment — 2026-09-28
+
+Follow-up from Release 2. A link inside the chat's working folder
+(`link -> /etc`, `notes.txt -> ~/.ssh/id_rsa`) no longer lets the folder tools
+reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
+`OSAURUS_TEST_ROOT`, live storage unchanged.
+
+- **What changed.** `FolderToolHelpers.resolvePath` keeps its lexical check and
+  error types, then compares symlink-resolved paths
+  (`symlinkResolvedPath`). The resolver walks one component at a time with
+  `lstat`/`readlink`, accepts a tail that doesn't exist yet, follows dangling
+  links to their target text, and refuses loops. It still returns the
+  lexical URL, as upstream does, so display paths and the operation log are
+  unchanged. `file_search` now prints root-relative paths through
+  `displayPath` (upstream #1819 behaviour).
+- **Why not `URL.resolvingSymlinksInPath()`.** It strips `/private` from
+  existing paths (the root `/var/folders/...` stays `/var/...`) but not from
+  a path whose tail doesn't exist, and it leaves a dangling link unresolved.
+  Mixing the two sides produces false refusals under `/var` and `/tmp`, or a
+  dangling link that passes. Resolve both sides with the same walker.
+  Absolute paths may use either spelling of the root (`/private/var/...`).
+- **Audit of paths that bypass the resolver.** `file_tree` and `file_search`
+  walk with `contentsOfDirectory`/`enumerator`; resource values describe a
+  link itself (`isDirectory`/`isRegularFile` false), so neither descends into
+  or reads through a link. Keep it that way: `fileExists(isDirectory:)`
+  follows links and would reopen the hole. The enumerators return
+  `/private/var/...` paths for a `/var/...` root. `FolderContextService` read
+  `AGENTS.md`/`CLAUDE.md`/the manifest straight into the prompt; those reads
+  now go through `resolvePath` too. `git_diff` refused nothing on `commit`;
+  a value like `--output=/path` made git write any file without approval, so
+  a leading dash is now rejected, and `git_commit` stages with `git add --`.
+  `shell_run` is not a containment boundary (its cwd is the root and its
+  command is arbitrary, behind approval). `FileOperationLog` undo joins paths
+  onto a root that production never sets (`setRootPath` has no caller), so
+  undo is inert on Intel.
+- **Upstream already has the core fix; the sync missed it.** Upstream added
+  symlink containment to `resolvePath` in #1298 (`7c9b14e0c`, sandbox reads of
+  the host workspace) and `displayPath` in #1819 (`79171ecb`, recorded as SKIP in
+  `UPSTREAM_TRIAGE_0.24.3.md` because it was a local-model harness batch).
+  Security hardening folded into skipped commits is easy to lose. When a
+  triage verdict is SKIP or Omit, grep the diff for `resolvePath`,
+  `symlink`, and path checks before closing it.
+- **Offer upstream:** the `git_diff` `commit` option injection and the linked
+  context-file/manifest reads are still present on `upstream/main`
+  (`0a114acdb`) and worth a small upstream PR. Upstream's resolver treats a
+  dangling link as a new file; Foundation's atomic writes replace the link
+  rather than follow it, and `createDirectory` through a dangling folder link
+  fails, so this is defence in depth, not a live escape. Offer it with the
+  PR, but it doesn't need its own.
+- Tests: `Tests/Folder/FolderToolsSymlinkContainmentTests.swift` (linked
+  folder, linked file, relative `../` link, dangling link, loop, new file under
+  a linked parent, for read, write, edit, search, tree, git and context files;
+  in-folder links and the `/private/var` spelling still resolve). With the
+  symlink check disabled, 7 of its 8 tests fail and files appear outside the
+  fixture root.
 

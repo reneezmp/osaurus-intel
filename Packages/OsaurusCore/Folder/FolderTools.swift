@@ -96,32 +96,109 @@ enum FolderToolHelpers {
     /// resolved path must equal root or be a strict child (`root + "/"`)
     /// so traversal and sibling directories like `<root>-other` cannot slip
     /// through a substring match.
+    ///
+    /// Intel: containment is then re-checked on symlink-resolved paths, so a
+    /// link inside the folder (`link -> /etc`, `notes.txt -> ~/.ssh/id_rsa`)
+    /// can't carry a read or write outside it. An absolute path may also use
+    /// another spelling of the root, such as `/private/var/...` for a root
+    /// under `/var/...`.
     static func resolvePath(_ relativePath: String, rootPath: URL) throws -> URL {
         let rootStandardized = rootPath.standardized.path
+        let realRoot = symlinkResolvedPath(rootStandardized)
+        func isPhysicallyWithinRoot(_ url: URL) -> Bool {
+            guard let realRoot, let realPath = symlinkResolvedPath(url.path) else { return false }
+            return isPath(realPath, within: realRoot)
+        }
+
         let resolvedURL: URL
         if relativePath.hasPrefix("/") {
-            let absStandardized = URL(fileURLWithPath: relativePath).standardized.path
-            let isWithinRoot =
-                absStandardized == rootStandardized
-                || absStandardized.hasPrefix(rootStandardized + "/")
-            guard isWithinRoot else {
+            resolvedURL = URL(fileURLWithPath: relativePath).standardized
+            guard isPhysicallyWithinRoot(resolvedURL) else {
+                if isPath(resolvedURL.path, within: rootStandardized) {
+                    throw FolderToolError.pathOutsideRoot(relativePath)
+                }
                 throw FolderToolError.invalidArguments(
                     "path must be relative to the working directory or absolute under it "
                         + "(got '\(relativePath)'). Pass just the file or directory name — "
                         + "e.g. 'README.md' or 'src/app.py'."
                 )
             }
-            resolvedURL = URL(fileURLWithPath: absStandardized)
-        } else {
-            resolvedURL = rootPath.appendingPathComponent(relativePath).standardized
+            return resolvedURL
         }
-        let isWithinRoot =
-            resolvedURL.path == rootStandardized
-            || resolvedURL.path.hasPrefix(rootStandardized + "/")
-        guard isWithinRoot else {
+
+        resolvedURL = rootPath.appendingPathComponent(relativePath).standardized
+        guard isPath(resolvedURL.path, within: rootStandardized),
+            isPhysicallyWithinRoot(resolvedURL)
+        else {
             throw FolderToolError.pathOutsideRoot(relativePath)
         }
         return resolvedURL
+    }
+
+    /// `path` is `root` or lies beneath it (never a sibling such as
+    /// `<root>-other`).
+    static func isPath(_ path: String, within root: String) -> Bool {
+        path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    }
+
+    /// Links followed before giving up, matching the kernel's `MAXSYMLINKS`.
+    private static let maxSymlinkHops = 32
+
+    /// Absolute `path` with every symbolic link expanded, one component at a
+    /// time, the way the kernel follows it. Unlike `realpath(3)` it accepts a
+    /// tail that doesn't exist yet, and unlike `URL.resolvingSymlinksInPath()`
+    /// it never strips `/private` and it follows dangling links to their
+    /// target text, so a link to a file that doesn't exist yet can't be used
+    /// to create one elsewhere. `..` inside a link target is applied after the
+    /// link is expanded. Returns nil for a link loop or an unreadable link.
+    static func symlinkResolvedPath(_ path: String) -> String? {
+        var resolved: [String] = []
+        var pending = Array(path.split(separator: "/").map(String.init).reversed())
+        var hops = 0
+        let fm = FileManager.default
+        while let component = pending.popLast() {
+            if component == "." { continue }
+            if component == ".." {
+                _ = resolved.popLast()
+                continue
+            }
+            let candidate = "/" + (resolved + [component]).joined(separator: "/")
+            var info = stat()
+            guard lstat(candidate, &info) == 0, (info.st_mode & S_IFMT) == S_IFLNK else {
+                resolved.append(component)
+                continue
+            }
+            hops += 1
+            guard hops <= maxSymlinkHops,
+                let target = try? fm.destinationOfSymbolicLink(atPath: candidate)
+            else { return nil }
+            if target.hasPrefix("/") { resolved.removeAll() }
+            pending.append(contentsOf: target.split(separator: "/").map(String.init).reversed())
+        }
+        return "/" + resolved.joined(separator: "/")
+    }
+
+    /// Root-relative display path for a URL produced by walking the folder.
+    /// FileManager enumerators hand back physical paths (`/private/var/...`)
+    /// even when the root was given as `/var/...`, so fall back to comparing
+    /// symlink-resolved paths before settling for the bare file name.
+    static func displayPath(for url: URL, under rootPath: URL) -> String {
+        let root = rootPath.standardized.path
+        let path = url.standardized.path
+        if let relative = relativePath(path, under: root) { return relative }
+        if let realRoot = symlinkResolvedPath(root),
+            let realPath = symlinkResolvedPath(path),
+            let relative = relativePath(realPath, under: realRoot)
+        {
+            return relative
+        }
+        return url.lastPathComponent
+    }
+
+    private static func relativePath(_ path: String, under root: String) -> String? {
+        guard isPath(path, within: root) else { return nil }
+        if path == root { return "." }
+        return String(path.dropFirst(root.hasSuffix("/") ? root.count : root.count + 1))
     }
 
     /// Parse JSON arguments to dictionary
@@ -310,6 +387,9 @@ struct FileTreeTool: OsaurusTool {
                 let isLast = index == sorted.count - 1
                 let connector = isLast ? "└── " : "├── "
                 let childPrefix = isLast ? "    " : "│   "
+                // Resource values describe a symlink itself (never a
+                // directory), so a linked folder is listed by name and not
+                // descended into, even when it points outside the root.
                 let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
 
                 if isDir {
@@ -862,7 +942,9 @@ struct FileSearchTool: OsaurusTool {
             while let fileURL = enumerator?.nextObject() as? URL {
                 guard totalMatches < maxResults else { break }
 
-                // Check if regular file
+                // Check if regular file. A symlink reports false here and
+                // the enumerator doesn't descend into linked folders, so the
+                // walk never reads outside the root.
                 guard
                     let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
                     resourceValues.isRegularFile == true
@@ -921,20 +1003,20 @@ struct FileSearchTool: OsaurusTool {
     ) -> [String]? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
-        let relativePath =
-            url.path.hasPrefix(rootPath.path)
-            ? String(url.path.dropFirst(rootPath.path.count + 1))
-            : url.lastPathComponent
-
         let lines = content.components(separatedBy: .newlines)
         var matches: [String] = []
+        var relativePath: String?
 
         for (index, line) in lines.enumerated() {
             guard matches.count < maxResults else { break }
 
             if line.localizedCaseInsensitiveContains(pattern) {
                 let lineNum = index + 1
-                matches.append("\(relativePath):\(lineNum): \(line.trimmingCharacters(in: .whitespaces))")
+                // Resolved on the first hit only; the fallback walks symlinks.
+                let displayPath =
+                    relativePath ?? FolderToolHelpers.displayPath(for: url, under: rootPath)
+                relativePath = displayPath
+                matches.append("\(displayPath):\(lineNum): \(line.trimmingCharacters(in: .whitespaces))")
             }
         }
 
@@ -1366,7 +1448,16 @@ struct GitDiffTool: OsaurusTool {
 
         var arguments = ["diff"]
         if staged { arguments.append("--cached") }
-        if let commit = commit { arguments.append(commit) }
+        if let commit = commit {
+            // A leading dash would be parsed as an option, and `git diff
+            // --output=<file>` writes anywhere on disk without approval.
+            guard !commit.hasPrefix("-") else {
+                throw FolderToolError.invalidArguments(
+                    "commit must be a commit hash or range such as 'HEAD~1..HEAD' (got '\(commit)')."
+                )
+            }
+            arguments.append(commit)
+        }
         if let filePath = filePath { arguments.append(contentsOf: ["--", filePath]) }
 
         let (output, exitCode) = try await FolderToolHelpers.runGitCommand(
@@ -1452,7 +1543,7 @@ struct GitCommitTool: OsaurusTool, PermissionedTool {
         }
 
         // Stage files
-        let stageArgs = (files != nil && !files!.isEmpty) ? ["add"] + files! : ["add", "-A"]
+        let stageArgs = (files != nil && !files!.isEmpty) ? ["add", "--"] + files! : ["add", "-A"]
         let (stageOutput, stageExitCode) = try await FolderToolHelpers.runGitCommand(
             arguments: stageArgs,
             in: rootPath

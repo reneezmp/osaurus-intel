@@ -251,7 +251,8 @@ trimmed file with upstream's whole file when #91 lands.**
   unchanged.
 - `DatabaseFilePathResolver` is Intel-written: the only root is
   `ChatExecutionContext.currentFolderRoot`. It does **not** use
-  `FolderToolHelpers.resolvePath`, which blocks `../` but not symlinks.
+  `FolderToolHelpers.resolvePath`, which blocked `../` but not symlinks
+  until the 2026-09-28 folder-tools fix (`UPSTREAM_SYNC.md`).
   Instead it checks containment on symlink-resolved paths (the deepest
   existing ancestor for new files), refuses the root itself and directories,
   keeps upstream's overwrite guard and 64 MiB read cap, and creates parent
