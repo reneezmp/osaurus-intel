@@ -2,7 +2,10 @@
 //  IntelConfigPlanApprovalCard.swift
 //  OsaurusCore
 //
-//  Bottom-pinned review card for an exact Intel Gate 5A plan.
+//  Centered, modal review dialog for an exact Intel Gate 5A plan (upstream
+//  #68, `163a97552`): the chat behind is dimmed and blocked, Esc cancels and
+//  Return applies. Intel keeps its own card instead of upstream's
+//  ThemedAlertCenter route.
 //
 
 #if OSAURUS_INTEL
@@ -17,13 +20,18 @@ struct IntelConfigPlanApprovalCard: View {
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
     var body: some View {
-        VStack {
-            Spacer()
+        ZStack {
             if let request = pendingRequest {
+                // Dim and block the chat: a configuration change is a
+                // deliberate decision, not something to click past.
+                Color.black.opacity(theme.isDark ? 0.45 : 0.25)
+                    .ignoresSafeArea()
+                    .contentShape(Rectangle())
+                    .onTapGesture {}
+                    .transition(.opacity)
                 card(for: request)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 16)
-                    .transition(.move(edge: .bottom).combined(with: .opacity))
+                    .padding(24)
+                    .transition(.scale(scale: 0.96).combined(with: .opacity))
             }
         }
         .animation(.spring(response: 0.3, dampingFraction: 0.85), value: pendingRequest?.id)
@@ -86,10 +94,12 @@ struct IntelConfigPlanApprovalCard: View {
                     queue.resolve(id: request.id, outcome: .denied)
                 }
                 .buttonStyle(ThemedBorderedButtonStyle())
+                .keyboardShortcut(.cancelAction)
                 Button("Apply") {
                     queue.resolve(id: request.id, outcome: .approved)
                 }
                 .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
+                .keyboardShortcut(.defaultAction)
             }
         }
         .padding(16)

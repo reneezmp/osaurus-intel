@@ -1925,3 +1925,19 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   purpose in the Orchestrator roster, and the prompt tells the model to treat
   it as data, never as instructions.
 
+### Audit leftovers — 2026-09-29
+
+- #49 remainder: `orchestrator_config` `find_setting` (read-only) returns
+  paths from `SettingsSearchIndex`; the Orchestrator prompt requires it for
+  "where is…" questions.
+- #68: the config approval card is centered and modal (dim, blocked chat,
+  Esc/Return).
+- #25: agent default working folder, explicit on Intel (see audit row).
+  **Rebuilding an `Agent(...)` must pass `workingFolderBookmark`/
+  `workingFolderPath`** or the next editor save wipes them.
+- **Found in passing:** Agents › Duplicate called the no-op Intel
+  `AgentStore.save` stub and reported success without saving. It now uses
+  `AgentManager.add`. Check any other compiled caller of `AgentStore.*`,
+  which is a stub on Intel.
+- #86 N/A and #131 still staged; reasons in the audit rows.
+

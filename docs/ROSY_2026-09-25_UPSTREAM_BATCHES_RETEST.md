@@ -411,3 +411,21 @@ Added 2026-09-28; needs a candidate built after this commit.
 - [ ] **(paid)** Ask the Orchestrator which agent suits a task that matches
       one agent's description: it picks that agent (or says none fits).
 
+## Audit leftovers (#49, #68, #25) and Duplicate
+
+- [ ] **(paid)** Ask the Orchestrator "where do I turn on spell check?": it
+      answers with **General › Chat › Check Spelling While Typing** (and ⌘,),
+      not a made-up menu.
+- [ ] **(paid)** Ask the Orchestrator to change its own settings: the review
+      appears **centered** with the chat dimmed behind it; Esc cancels and
+      Return applies.
+- [ ] Chat with a custom agent, pick a folder, right-click the folder chip:
+      **Use as Default for <agent>**. Start a new chat with that agent: it
+      opens in that folder. A new chat in a project with its own folder uses
+      the project's folder instead.
+- [ ] Agents › Configure › **Default Working Folder** shows the same folder;
+      Choose… and Clear work, and "Stop Using a Default Folder" in the chip
+      menu clears it.
+- [ ] Agents → a card's **Duplicate**: the copy really appears (before this
+      fix it said "Duplicated as …" but saved nothing).
+

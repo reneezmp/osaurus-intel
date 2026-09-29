@@ -312,6 +312,22 @@
         }
       }
     },
+    "Choose…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Auswählen…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择…"
+          }
+        }
+      }
+    },
     "Claude Code may run shell commands" : {
       "localizations" : {
         "de" : {
@@ -534,6 +550,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "声明式配置"
+          }
+        }
+      }
+    },
+    "Default folder saved" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standardordner gespeichert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已保存默认文件夹"
+          }
+        }
+      }
+    },
+    "Default Working Folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Standard-Arbeitsordner"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "默认工作文件夹"
           }
         }
       }
@@ -886,6 +934,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可以更改 Osaurus 设置"
+          }
+        }
+      }
+    },
+    "New chats with %@ will open in this folder." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Chats mit %@ öffnen sich in diesem Ordner."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与 %@ 的新聊天将在此文件夹中打开。"
+          }
+        }
+      }
+    },
+    "New chats with this agent open in this folder, unless their project has its own. You can also set it from the folder chip in chat." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Chats mit diesem Agenten öffnen sich in diesem Ordner, außer ihr Projekt hat einen eigenen. Du kannst ihn auch über den Ordner-Chip im Chat festlegen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "与此智能体的新聊天会在此文件夹中打开，除非其项目有自己的文件夹。你也可以在聊天中通过文件夹标签设置。"
           }
         }
       }
@@ -1268,6 +1348,22 @@
         }
       }
     },
+    "Stop Using a Default Folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keinen Standardordner mehr verwenden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止使用默认文件夹"
+          }
+        }
+      }
+    },
     "Suggest from instructions" : {
       "localizations" : {
         "de" : {
@@ -1576,6 +1672,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键时提供建议。文本永远不会被自动更正。"
+          }
+        }
+      }
+    },
+    "Use as Default for %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Als Standard für %@ verwenden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "设为 %@ 的默认文件夹"
+          }
+        }
+      }
+    },
+    "Use Folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner verwenden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用文件夹"
           }
         }
       }

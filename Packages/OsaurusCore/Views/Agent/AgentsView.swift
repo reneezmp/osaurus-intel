@@ -417,8 +417,10 @@ struct AgentsView: View {
             updatedAt: Date()
         )
 
-        AgentStore.save(duplicated)
-        agentManager.refresh()
+        // Intel: `AgentStore` is a no-op stub here, so saving through it made
+        // Duplicate report success while nothing was written. Persist
+        // through the Intel AgentManager instead.
+        agentManager.add(duplicated)
         showSuccess("Duplicated as \"\(newName)\"")
 
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) {
@@ -2223,6 +2225,9 @@ struct AgentDetailView: View {
         defaultModelSection
         claudeCodeSection
         systemPromptSection
+        if agent.id != Agent.defaultId {
+            workingFolderSection
+        }
         voiceSection
         if agent.id != Agent.defaultId {
             scheduleSection
@@ -2284,6 +2289,61 @@ struct AgentDetailView: View {
     /// Editable identity card — name, description, and "Created" footer. Lives at
     /// the top of the Configure tab now that the title bar's avatar/dropdown is
     /// dedicated to switching between agents.
+    /// Default working folder (upstream #25): new chats with this agent open
+    /// in it unless their project has its own folder.
+    private var workingFolderSection: some View {
+        let path = agentManager.agent(for: agent.id)?.workingFolderPath
+        return AgentDetailSection(title: L("Default Working Folder"), icon: "folder") {
+            VStack(alignment: .leading, spacing: 8) {
+                HStack(spacing: 8) {
+                    Image(systemName: path == nil ? "folder.badge.questionmark" : "folder.fill")
+                        .foregroundColor(path == nil ? theme.tertiaryText : theme.accentColor)
+                    Text(path.map { ($0 as NSString).abbreviatingWithTildeInPath } ?? L("None"))
+                        .font(.system(size: 12, design: path == nil ? .default : .monospaced))
+                        .foregroundColor(path == nil ? theme.tertiaryText : theme.primaryText)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                    Spacer(minLength: 8)
+                    Button {
+                        chooseWorkingFolder()
+                    } label: {
+                        Text("Choose…", bundle: .module)
+                    }
+                    .buttonStyle(ThemedBorderedButtonStyle())
+                    .controlSize(.small)
+                    if path != nil {
+                        Button(role: .destructive) {
+                            agentManager.setWorkingFolder(path: nil, for: agent.id)
+                        } label: {
+                            Text("Clear", bundle: .module)
+                        }
+                        .buttonStyle(ThemedBorderedButtonStyle())
+                        .controlSize(.small)
+                    }
+                }
+                Text(
+                    "New chats with this agent open in this folder, unless their project has its own. You can also set it from the folder chip in chat.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+    }
+
+    private func chooseWorkingFolder() {
+        let panel = NSOpenPanel()
+        panel.canChooseDirectories = true
+        panel.canChooseFiles = false
+        panel.allowsMultipleSelection = false
+        panel.canCreateDirectories = true
+        panel.prompt = L("Use Folder")
+        guard panel.runModal() == .OK, let url = panel.url else { return }
+        agentManager.setWorkingFolder(path: url.standardizedFileURL.path, for: agent.id)
+        RecentFoldersStore.shared.record(path: url.standardizedFileURL.path)
+    }
+
     private var identitySection: some View {
         AgentDetailSection(title: "Identity", icon: "person.crop.circle") {
             VStack(alignment: .leading, spacing: 10) {
@@ -5665,7 +5725,9 @@ struct AgentDetailView: View {
                 }(),
                 webSearchEnabled: webSearchEnabled
             ),
-            order: current.order
+            order: current.order,
+            workingFolderBookmark: current.workingFolderBookmark,
+            workingFolderPath: current.workingFolderPath
         )
 
         agentManager.update(updated)

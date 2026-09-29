@@ -123,6 +123,12 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     public var settings: AgentSettings
     /// User-defined position. `nil` falls to the end, sorted alphabetically.
     public var order: Int?
+    /// The agent's default working folder (upstream #25, same JSON keys):
+    /// new chats with this agent open with it unless their project has a
+    /// folder. Intel is not App-Sandboxed, so `workingFolderPath` is the
+    /// authority; the bookmark is kept for upstream bundle compatibility.
+    public var workingFolderBookmark: Data?
+    public var workingFolderPath: String?
 
     public init(
         id: UUID = UUID(),
@@ -155,7 +161,9 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         autoSpeak: Bool? = nil,
         ttsVoice: String? = nil,
         settings: AgentSettings = .defaultDisabled,
-        order: Int? = nil
+        order: Int? = nil,
+        workingFolderBookmark: Data? = nil,
+        workingFolderPath: String? = nil
     ) {
         self.id = id
         self.name = name
@@ -188,6 +196,8 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
         self.ttsVoice = ttsVoice
         self.settings = settings
         self.order = order
+        self.workingFolderBookmark = workingFolderBookmark
+        self.workingFolderPath = workingFolderPath
     }
 
     // MARK: - Custom avatar resolution
@@ -286,6 +296,12 @@ extension Agent {
         case selectedModel
     }
 
+    /// Upstream's pre-rename keys for the working folder, read only.
+    private enum WorkingFolderLegacyCodingKeys: String, CodingKey {
+        case hostWorkspaceBookmark
+        case hostWorkspacePath
+    }
+
     /// Custom decoder that provides default values for fields added after the initial release,
     /// ensuring older persisted JSON files remain loadable.
     public init(from decoder: Decoder) throws {
@@ -337,6 +353,13 @@ extension Agent {
         ttsVoice = try c.decodeIfPresent(String.self, forKey: .ttsVoice)
         settings = try c.decodeIfPresent(AgentSettings.self, forKey: .settings) ?? .defaultDisabled
         order = try c.decodeIfPresent(Int.self, forKey: .order)
+        let folderLegacy = try decoder.container(keyedBy: WorkingFolderLegacyCodingKeys.self)
+        workingFolderBookmark =
+            try c.decodeIfPresent(Data.self, forKey: .workingFolderBookmark)
+            ?? folderLegacy.decodeIfPresent(Data.self, forKey: .hostWorkspaceBookmark)
+        workingFolderPath =
+            try c.decodeIfPresent(String.self, forKey: .workingFolderPath)
+            ?? folderLegacy.decodeIfPresent(String.self, forKey: .hostWorkspacePath)
     }
 }
 

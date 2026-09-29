@@ -10,7 +10,8 @@ struct IntelOrchestratorConfigurationTool: OsaurusTool, PermissionedTool {
     let name = Self.toolName
     let description =
         "Validate, plan, or apply the built-in Orchestrator's bounded Intel configuration. "
-        + "Only default_agent and delegation are supported. Apply always pauses for an exact user-reviewed diff."
+        + "Only default_agent and delegation are supported. Apply always pauses for an exact user-reviewed diff. "
+        + "find_setting searches every Settings page and returns the exact path to quote to the user."
     let requirements: [String] = []
     let defaultPermissionPolicy: ToolPermissionPolicy = .auto
     let handlesOwnApproval = true
@@ -22,8 +23,13 @@ struct IntelOrchestratorConfigurationTool: OsaurusTool, PermissionedTool {
         "properties": .object([
             "operation": .object([
                 "type": .string("string"),
-                "enum": .array([.string("schema"), .string("plan"), .string("apply")]),
-                "description": .string("schema is read-only; plan previews paths; apply requires the user's review."),
+                "enum": .array([.string("schema"), .string("plan"), .string("apply"), .string("find_setting")]),
+                "description": .string(
+                    "schema and find_setting are read-only; plan previews paths; apply requires the user's review."),
+            ]),
+            "query": .object([
+                "type": .string("string"),
+                "description": .string("Words describing the setting, for find_setting (e.g. \"spell check\")."),
             ]),
             "document": .object([
                 "type": .string("string"),
@@ -66,6 +72,13 @@ struct IntelOrchestratorConfigurationTool: OsaurusTool, PermissionedTool {
             switch operation {
             case "schema":
                 return ToolEnvelope.success(tool: name, result: schemaResult())
+            case "find_setting":
+                let query = (arguments["query"] as? String)?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+                guard !query.isEmpty else {
+                    return ToolEnvelope.failure(
+                        kind: .invalidArgs, message: "query is required for find_setting.", field: "query", tool: name)
+                }
+                return ToolEnvelope.success(tool: name, result: Self.findSettingResult(query: query))
             case "plan", "apply":
                 guard let document = arguments["document"] as? String else {
                     return ToolEnvelope.failure(kind: .invalidArgs, message: "document is required for \(operation).", field: "document", tool: name)
@@ -91,11 +104,34 @@ struct IntelOrchestratorConfigurationTool: OsaurusTool, PermissionedTool {
                     return ToolEnvelope.failure(kind: .rejected, message: "The configuration review was cancelled or no chat review surface was available.", tool: name, retryable: true)
                 }
             default:
-                return ToolEnvelope.failure(kind: .invalidArgs, message: "operation must be schema, plan, or apply.", field: "operation", tool: name)
+                return ToolEnvelope.failure(kind: .invalidArgs, message: "operation must be schema, plan, apply, or find_setting.", field: "operation", tool: name)
             }
         } catch {
             return ToolEnvelope.fromError(error, tool: name)
         }
+    }
+
+    /// Grounded Settings lookup (upstream #49): results come from the same
+    /// Intel-authored index the Settings search field uses, so the model can
+    /// quote a real path instead of guessing menus or shortcuts.
+    static func findSettingResult(query: String, limit: Int = 5) -> [String: Any] {
+        let matches = SettingsSearchIndex.search(query).prefix(limit)
+        return [
+            "query": query,
+            "matches": matches.map { entry -> [String: Any] in
+                var row: [String: Any] = [
+                    "path": entry.breadcrumbPath,
+                    "page": entry.tab.label,
+                    "setting": entry.title,
+                    "open_with": "Osaurus menu › Settings… (⌘,), then \(entry.tab.label) in the sidebar",
+                ]
+                if let note = entry.disambiguation { row["note"] = note }
+                return row
+            },
+            "guidance": matches.isEmpty
+                ? "No Settings entry matches. Say so; do not invent a menu path."
+                : "Quote the path as shown. The user can also type the setting name into Search Settings.",
+        ]
     }
 
     private func schemaResult() -> [String: Any] {

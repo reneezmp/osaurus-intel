@@ -113,7 +113,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 22 | `c1ceafe59` | Omit | Upstream 0.25.0 appcast; Intel has separate version/signing/release flow. |
 | 23 | `dcb041654` | Omit | Local-model alignment/preparation UI tied to removed model runtime. |
 | 24 | `6db0f029a` | Stage | Peer model-sharing toggle after pairing, remote grants, and host inference policy. |
-| 25 | `97498c331` | Split | Agent working-folder default is feasible; decide explicit default vs Intel's already tested per-chat/project folder ownership. Sandbox interplay later. |
+| 25 | `97498c331` | Split | Agent working-folder default is feasible; decide explicit default vs Intel's already tested per-chat/project folder ownership. Sandbox interplay later. **Ported 2026-09-29 as an explicit default:** upstream's `workingFolderBookmark`/`workingFolderPath` keys (plus legacy `hostWorkspace*` decode); set from the folder chip menu ("Use as Default for …") or Agents › Configure › Default Working Folder; fresh project-less chats open in it and a project folder wins. Intel does not auto-save every chip pick. |
 | 26 | `026bebe32` | Stage | `/v1/responses` non-function input and decode errors need Intel local Responses endpoint contract. |
 | 27 | `598d8ee7a` | Superseded | Workspace intro dialog replaced by inline empty state in `16ec3a7a3`. |
 | 28 | `a48a58cf4` | Stage | Delegated child file writes only after native child lifecycle, folder grants, and per-child permission policy. |
@@ -137,7 +137,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 46 | `40be05cb8` | Stage | Claude plugin GitHub import after Intel plugin/skill installer route is restored; CLI integration already works. |
 | 47 | `879a6a6a9` | Omit | Qwen AR vMLX scheduling pin. |
 | 48 | `dec325484` | Stage | Osaurus ID/Workspace refresh depends on Router identity and Workspaces service. |
-| 49 | `53c24678a` | Port | Make Intel Settings searchable/grounded for bounded Orchestrator and Management help; exclude nonexistent routes. **Ported 2026-09-28 (search half):** Intel-written `SettingsSearchIndex` (67 entries grounded in Intel view strings by tests), cross-tab results pane, landing glow and scroll on General. Orchestrator grounding (`osaurus_help` find) remains staged. |
+| 49 | `53c24678a` | Port | Make Intel Settings searchable/grounded for bounded Orchestrator and Management help; exclude nonexistent routes. **Ported 2026-09-28 (search half):** Intel-written `SettingsSearchIndex` (67 entries grounded in Intel view strings by tests), cross-tab results pane, landing glow and scroll on General. Orchestrator grounding done 2026-09-29: `orchestrator_config` gains read-only `find_setting` over the same index, and the Orchestrator prompt says to quote its path instead of guessing. |
 | 50 | `a609acdb5` | Stage | First-party n8n ingress needs B3 channel store, signed webhook, credential lifecycle, and dispatch. |
 | 51 | `9beb51ef7` | Omit | Upstream 0.25.2 appcast. |
 | 52 | `219640c82` | Port | Repair incomplete chat-history schema/turn persistence in Intel's compiled session store; do not copy upstream SQL migration blindly. **Intel analogue fixed 2026-09-25** (`5bccc4bef`): no SQLite open path on Intel, but queued whole-session metadata writes could overwrite a newer turn; per-session write generations now drop stale snapshots. |
@@ -156,7 +156,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 65 | `6e67eec21` | Omit | Local embedding-model endpoint substitutes Potion; Intel has no compiled local embeddings endpoint. Revisit if exposed. |
 | 66 | `7666cc6ba` | Port | Daily/cron consumed-slot anchor, catch-up and overlap protection in compiled `ScheduleManager`. **Ported 2026-09-25** (`ae337cc0f`): consumed-slot anchor, latest-due catch-up, dispatch-time overlap guard, honest Run Now result. Run-history test omitted (no Intel run history). |
 | 67 | `4a78f169d` | Stage | Multi-device agent addresses/owner redeem need B1/B2 identity, relay, Keychain migration. |
-| 68 | `163a97552` | Port | Centered themed declarative-config approval modal fits Intel Gate 5B. |
+| 68 | `163a97552` | Port | Centered themed declarative-config approval modal fits Intel Gate 5B. **Ported 2026-09-29:** the Intel card is centered over a dimmed, click-blocking chat; Esc cancels, Return applies (Intel keeps its own card rather than upstream's ThemedAlertCenter route). |
 | 69 | `3fd0e69a3` | Omit | Installed MLX vision-bundle discovery/admission and local model-format checks. |
 | 70 | `ac96bcbb4` | Split | History/tab/agent QoL can port; ModelManager suggested local-model changes do not. **N/A 2026-09-25**: tabs, history dialog, workspaces. |
 | 71 | `338425936` | Stage | n8n setup readiness follows B3 ingress and #59 pairing; prevent unusable codes. |
@@ -174,7 +174,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 83 | `1bf922253` | Omit | MTP opt-in and native local runtime settings. |
 | 84 | `d73fd0939` | Split | Generic image chat completion/usage safety can port to Intel cloud Chat/API; native local usage math does not. **N/A 2026-09-25**: local runtime usage accounting. |
 | 85 | `39fc21b58` | Omit | Local model repair/download integrity and progress in removed model manager. |
-| 86 | `e20ffcfb0` | Split | Bounded Orchestrator UX and declarative approval polish can port; native spawn/sandbox/workspace simplification belongs to their later clusters. |
+| 86 | `e20ffcfb0` | Split | Bounded Orchestrator UX and declarative approval polish can port; native spawn/sandbox/workspace simplification belongs to their later clusters. **N/A on Intel (2026-09-29):** the commit reshapes upstream's native `spawn_agent` workers (waves, `continue`, NEEDS INPUT, worker tools, budgets, spawn permissions, worker folders). Intel's bounded delegation is deliberately single-turn and tool-free, and `orchestrator_config` never creates agents, so the "inherit the Orchestrator's model" slice has no Intel caller. Revisit only with native subagents. |
 | 87 | `156c5eee4` | Omit | Upstream 0.25.5 appcast. |
 | 88 | `d42dee07a` | Omit | Local model manifest/update enforcement; no Intel local model manager. |
 | 89 | `fa706a5de` | Stage | Warning-pressure spawn refusal copy after native child/RAM policy; bounded cloud delegation has different limits. |
@@ -219,7 +219,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 128 | `f1ad85c42` | Omit | Install-cohort/age retention telemetry does not serve current Intel product and needs separate privacy decision. |
 | 129 | `dc6a9013c` | Port | Correct hover/favorite controls on bottom model-picker rows. **N/A 2026-09-25**: Intel's compiled `ModelPickerView` is the non-table variant. |
 | 130 | `2ab74c0fd` | Superseded | Local SSD sizing/notices converge on settings-only `5c674f087`; no Intel local cache. |
-| 131 | `9631a3b41` | Port | Read-only authenticated `/credits/balance` can use Intel Router account client; require master-key/origin checks and no wallet mutation. **Staged 2026-09-25**: Intel's local HTTP server has no access-key authentication, and upstream requires a master key; do not expose the Router balance until Intel's local API authenticates callers. |
+| 131 | `9631a3b41` | Port | Read-only authenticated `/credits/balance` can use Intel Router account client; require master-key/origin checks and no wallet mutation. **Staged 2026-09-25**: Intel's local HTTP server has no access-key authentication, and upstream requires a master key; do not expose the Router balance until Intel's local API authenticates callers. | **Still staged 2026-09-29, stronger reason:** the only Intel access-key validator path can hit a `fatalError` inside swift-secp256k1 0.23.2 on tampered tokens (why `AccessKeyValidatorTests` is excluded), so authenticating an endpoint with it would hand callers a crash. Needs the library fix or a different verifier first.
 | 132 | `a2dd43d30` | Stage | Channel follow-up tab lifetime and Focus Chat preference after B3 inbound relay. |
 | 133 | `5c674f087` | Omit | Final SSD cache notice moves to local cache settings, which Intel does not ship. |
 | 134 | `348bc70cb` | Stage | Nine built-in Apple app tool families are feasible with Ventura EventKit compatibility, per-agent opt-in, TCC, forced approvals, plugin-name migration, and live revocation. Upstream macOS 14 `fullAccess` calls cannot be copied unchanged. |

@@ -32,7 +32,7 @@ enum IntelOrchestratorPrompt {
 
             Use `orchestrator_targets` to inspect the live admitted target roster when asked, especially after settings change. A target appears only when an allowed custom agent's exact effective model is both admitted and available. The prompt roster below is a snapshot, not proof of current availability. Delegation is available only through `orchestrator_delegate`. Delegate only to a custom agent and cloud model the user explicitly admitted in Orchestrator settings. Each child is fresh, standalone, tool-free, limited to one turn, bounded by input, token, output, and timeout limits, cancellable, and returned only as inline text. Never claim that a child chat, file, background task, nested delegation, or durable artifact was created.
 
-            Configuration is available only through `orchestrator_config`. Inspect or plan before applying changes, and apply only after the exact review flow approves them. Do not invent tools, permissions, targets, models, or completed actions. When a gate denies a request, explain the real gate and let the user change it explicitly.
+            Configuration is available only through `orchestrator_config`. Inspect or plan before applying changes, and apply only after the exact review flow approves them. When the user asks where a setting lives or how to change something you cannot configure, call `orchestrator_config` with `operation: "find_setting"` and quote the returned path; never guess menu paths or keyboard shortcuts. Do not invent tools, permissions, targets, models, or completed actions. When a gate denies a request, explain the real gate and let the user change it explicitly.
             """
 
         if delegationTargets.isEmpty {

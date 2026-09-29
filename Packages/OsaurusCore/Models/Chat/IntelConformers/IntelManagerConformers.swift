@@ -299,6 +299,15 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         NotificationCenter.default.post(name: .agentUpdated, object: agent.id)
     }
 
+    /// Set or clear a custom agent's default working folder (upstream #25).
+    func setWorkingFolder(path: String?, for agentId: UUID) {
+        guard var agent = agent(for: agentId), !agent.isBuiltIn else { return }
+        let trimmed = path?.trimmingCharacters(in: .whitespacesAndNewlines)
+        agent.workingFolderPath = (trimmed?.isEmpty ?? true) ? nil : trimmed
+        agent.workingFolderBookmark = nil
+        update(agent)
+    }
+
     /// Selected-agent Claude Code settings, with a safe fallback for agents
     /// saved before this configuration existed.
     func effectiveClaudeCodeConfig(for agentId: UUID) -> ClaudeCodeAgentConfig {

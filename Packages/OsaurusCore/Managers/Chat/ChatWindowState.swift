@@ -787,7 +787,10 @@ final class ChatWindowState: ObservableObject {
             startNewChat()
         }
         session.projectId = project.id
-        if !session.folderState.hasActiveFolder {
+        // The project's folder wins over the agent's default folder (#25).
+        // Only a project that has a folder overrides: the agent default
+        // restores asynchronously, so an empty project must not cancel it.
+        if project.folderPath != nil || project.folderBookmark != nil {
             session.folderState.restore(
                 bookmark: project.folderBookmark,
                 path: project.folderPath

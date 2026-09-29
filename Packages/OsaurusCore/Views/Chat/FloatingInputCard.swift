@@ -2412,6 +2412,7 @@ extension FloatingInputCard {
                         }
                     }
                 }
+                agentDefaultFolderMenuItems
                 recentFolderMenuItems
             }
 
@@ -2432,6 +2433,44 @@ extension FloatingInputCard {
             }
         }
         .animation(.easeOut(duration: 0.15), value: hasFolder)
+    }
+
+    /// The agent's default working folder (upstream #25). Intel makes it an
+    /// explicit choice instead of saving every pick.
+    @ViewBuilder
+    private var agentDefaultFolderMenuItems: some View {
+        let id = agentId ?? Agent.defaultId
+        if id != Agent.defaultId, let agent = AgentManager.shared.agent(for: id) {
+            let current = folderState.persistedPath
+            let saved = agent.workingFolderPath
+            if let current, current != saved {
+                Divider()
+                Button {
+                    AgentManager.shared.setWorkingFolder(path: current, for: id)
+                    ToastManager.shared.success(
+                        L("Default folder saved"),
+                        message: L("New chats with \(agent.name) will open in this folder."))
+                } label: {
+                    Label {
+                        Text("Use as Default for \(agent.name)", bundle: .module)
+                    } icon: {
+                        Image(systemName: "pin")
+                    }
+                }
+            }
+            if saved != nil {
+                if current == nil || current == saved { Divider() }
+                Button {
+                    AgentManager.shared.setWorkingFolder(path: nil, for: id)
+                } label: {
+                    Label {
+                        Text("Stop Using a Default Folder", bundle: .module)
+                    } icon: {
+                        Image(systemName: "pin.slash")
+                    }
+                }
+            }
+        }
     }
 
     /// Recent working folders (upstream 3034800ef), excluding the current

@@ -1167,6 +1167,7 @@ final class ChatSession: ObservableObject {
         pinned = false
         projectId = nil
         folderState.clearFolder()
+        applyAgentDefaultFolder()
         isDirty = false
 
         // Reset agent-loop UI state.
@@ -1202,10 +1203,24 @@ final class ChatSession: ObservableObject {
         input = ""
         agentId = newAgentId
         restoreDraft()
+        // reset() opened the OLD agent's default folder; use the new one's.
+        applyAgentDefaultFolder()
         // reset() picked a model for the OLD agent; re-resolve for the
         // new one now that turns/sessionId are cleared.
         applyEffectiveModel(for: newAgentId)
         Task { [weak self] in await self?.refreshContextEstimates() }
+    }
+
+    /// A fresh, project-less chat opens in its agent's default working
+    /// folder (upstream #25). A project's own folder takes over in
+    /// `ChatWindowState.startNewChat(in:)`.
+    func applyAgentDefaultFolder() {
+        guard sessionId == nil, turns.isEmpty, projectId == nil else { return }
+        folderState.clearFolder()
+        guard let id = agentId, id != Agent.defaultId,
+            let path = AgentManager.shared.agent(for: id)?.workingFolderPath, !path.isEmpty
+        else { return }
+        folderState.restore(bookmark: nil, path: path)
     }
 
     // MARK: - Composer Drafts
