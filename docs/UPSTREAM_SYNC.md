@@ -43,7 +43,7 @@ The near-term implementation queue is MCP argument and canonical-name safety,
 chat-history migration, schedule slot accounting, Core Model fallback,
 theme/attachment/window fixes, and remaining hosted-model catalog/profile
 work. Rich folder formats (shipped 2026-09-29), native Apple app tools
-(Releases 1–2 shipped 2026-09-29, see `APPLE_APPS_INTEL_PLAN.md`),
+(all nine apps shipped 2026-09-29, see `APPLE_APPS_INTEL_PLAN.md`),
 n8n/Channels, Workspaces, native subagents, and computer use remain
 feasible staged projects with
 explicit backend and Ventura gates. Their product states and order are in
@@ -2016,3 +2016,13 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   a Music automation permission.
 - The plugin migration now scans every installed Apple plugin so names a
   still-loading plugin serves (Messages' `search_messages`) are not stripped.
+
+### Native Apple apps, Release 3 (Messages) — 2026-09-29
+
+- Copied upstream `AppleApps/Messages`; all nine apps now ship. Details in
+  [`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
+- **Re-sync note:** `MessagesService.swift` imports `OsaurusSQLCipher`, not
+  `SQLite3`, and uses `MessagesHandle.normalizedId` instead of upstream's
+  `IMessageConnectionConfiguration` (Channels). Keep both edits.
+- Added `SystemPermission.automationMessages`; the Messages/Music automation
+  request is one helper, `requestAppAutomationPermission(_:appName:)`.

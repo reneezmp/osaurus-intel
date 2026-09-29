@@ -157,6 +157,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             return checkCalendarAutomationPermission()
         case .automationMail:
             return checkMailPermission()
+        case .automationMessages:
+            return permissionStates[.automationMessages] ?? false
         case .automationMusic:
             return permissionStates[.automationMusic] ?? false
         case .calendar:
@@ -208,7 +210,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .screenRecording:
             return SystemPermissionProbe.screenRecordingGranted()
-        case .location, .automation, .automationCalendar, .automationMail, .automationMusic, .notes, .maps:
+        case .location, .automation, .automationCalendar, .automationMail, .automationMessages, .automationMusic,
+            .notes, .maps:
             return nil
         }
     }
@@ -305,8 +308,10 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             requestCalendarAutomationPermission()
         case .automationMail:
             requestMailPermission()
+        case .automationMessages:
+            requestAppAutomationPermission(.automationMessages, appName: "Messages")
         case .automationMusic:
-            requestMusicPermission()
+            requestAppAutomationPermission(.automationMusic, appName: "Music")
         case .calendar:
             requestCalendarPermission()
         case .reminders:
@@ -347,7 +352,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             granted = await AVCaptureDevice.requestAccess(for: .audio)
         case .location:
             return Self.isLocationAuthorized(await requestLocationAuthorizationAndWait())
-        case .automation, .automationCalendar, .automationMail, .automationMusic, .notes, .maps:
+        case .automation, .automationCalendar, .automationMail, .automationMessages, .automationMusic, .notes,
+            .maps:
             requestPermission(permission)
             return permissionStates[permission] ?? false
         case .accessibility, .disk, .screenRecording:
@@ -658,22 +664,22 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
         }
     }
 
-    // MARK: - Music Automation Permission
+    // MARK: - Messages / Music Automation Permission
 
-    /// Same shape as Mail: probe Music.app over Apple Events (this is what
-    /// shows the macOS "control Music" prompt), open Settings when denied.
-    private func requestMusicPermission() {
+    /// Same shape as Mail: probe the app over Apple Events (this is what
+    /// shows the macOS "control <app>" prompt), open Settings when denied.
+    private func requestAppAutomationPermission(_ permission: SystemPermission, appName: String) {
         Task { @MainActor in
-            if permissionStates[.automationMusic] == true {
+            if permissionStates[permission] == true {
                 refreshAllPermissions()
                 return
             }
             let granted: Bool = await Task.detached {
-                SystemPermissionService.debugTestAppAccess(appName: "Music").hasPrefix("SUCCESS")
+                SystemPermissionService.debugTestAppAccess(appName: appName).hasPrefix("SUCCESS")
             }.value
-            setPermission(.automationMusic, isGranted: granted)
+            setPermission(permission, isGranted: granted)
             if !granted {
-                self.openSystemSettings(for: .automationMusic)
+                self.openSystemSettings(for: permission)
             }
         }
     }

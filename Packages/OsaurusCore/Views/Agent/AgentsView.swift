@@ -5956,12 +5956,7 @@ private struct IntelAppleAppsAbilitySection: View {
                     .fixedSize(horizontal: false, vertical: true)
                 if let first = missing.first {
                     HStack(spacing: 8) {
-                        Text(
-                            String(
-                                format: L("Osaurus doesn't have %@ access yet."),
-                                first.displayName
-                            )
-                        )
+                        Text(Self.missingText(for: first))
                         .font(.system(size: 11))
                         .foregroundColor(theme.warningColor)
                         Button(L("Allow Access…")) { request(missing) }
@@ -6019,12 +6014,18 @@ private struct IntelAppleAppsAbilitySection: View {
     }
 
     /// Permissions macOS reports as not granted. Automation (Notes, Mail,
-    /// Music) has no silent probe, so macOS asks the first time the agent
-    /// uses the app instead.
+    /// Messages sending, Music) has no silent probe, so macOS asks the first
+    /// time the agent uses the app instead. Full Disk Access (Messages
+    /// reading) has no dialog at all: the button opens System Settings.
     static func missingPermissions(
         for app: AppleApp, states: [SystemPermission: Bool]
     ) -> [SystemPermission] {
         app.systemPermissions.filter { !$0.isAutomationBased && states[$0] != true }
+    }
+
+    static func missingText(for permission: SystemPermission) -> String {
+        if permission == .disk { return L("Osaurus doesn't have Full Disk Access yet.") }
+        return String(format: L("Osaurus doesn't have %@ access yet."), permission.displayName)
     }
 
     static func summary(for app: AppleApp) -> String {
@@ -6034,10 +6035,10 @@ private struct IntelAppleAppsAbilitySection: View {
         case .contacts: return L("Look up, add and update contacts.")
         case .notes: return L("Search, read, create and add to notes. macOS asks the first time.")
         case .mail: return L("Read, search and file mail; write drafts or send. macOS asks the first time.")
+        case .messages: return L("Read your conversations and send iMessages or texts. Reading needs Full Disk Access; every send asks first.")
         case .maps: return L("Search places, get directions and travel times, and find where this Mac is.")
         case .music: return L("See what's playing, control playback and play from your library. macOS asks the first time.")
         case .shortcuts: return L("List and run your shortcuts.")
-        default: return ""
         }
     }
 }

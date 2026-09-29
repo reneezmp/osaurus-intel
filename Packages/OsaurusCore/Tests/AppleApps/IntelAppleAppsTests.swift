@@ -2,7 +2,7 @@
 //  IntelAppleAppsTests.swift
 //  OsaurusCoreTests
 //
-//  Releases 1–2 of docs/APPLE_APPS_INTEL_PLAN.md: which apps ship, the per-agent
+//  Releases 1–3 of docs/APPLE_APPS_INTEL_PLAN.md: which apps ship, the per-agent
 //  switch (storage, dispatch, prompt), approval defaults including per-call
 //  deletes, the staged plugin migration, and the prompt guidance. Nothing
 //  here reaches real Calendar/Contacts data: tools that would are only ever
@@ -36,12 +36,12 @@ struct IntelAppleAppsTests {
 
     // MARK: - What ships
 
-    @Test("Every app but Messages is registered; Messages waits for Release 3")
+    @Test("All nine apps are registered")
     func registration() {
-        #expect(AppleApp.availableOnIntel == [.calendar, .reminders, .contacts, .notes, .mail, .maps, .music, .shortcuts])
+        #expect(AppleApp.availableOnIntel == AppleApp.allCases)
         let names = Set(ToolRegistry.shared.listTools().map(\.name))
-        #expect(ToolRegistry.appleAppToolNames.isSubset(of: names))
-        #expect(names.isDisjoint(with: AppleApp.messages.toolNames))
+        #expect(ToolRegistry.appleAppToolNames == AppleApp.allToolNames)
+        #expect(AppleApp.allToolNames.isSubset(of: names))
         let (undeclared, missing) = AppleAppToolCatalog.undeclaredOrMissingNames(in: AppleAppToolCatalog.makeTools())
         #expect(undeclared.isEmpty)
         #expect(missing.isEmpty)
@@ -55,7 +55,7 @@ struct IntelAppleAppsTests {
                 let info = ToolRegistry.shared.policyInfo(for: tool.name)
                 #expect(info?.defaultPolicy == (base.isWrite ? .ask : .auto), "\(tool.name)")
             }
-            for name in ["calendar_delete_event", "reminders_delete"] {
+            for name in ["calendar_delete_event", "reminders_delete", "messages_send"] {
                 #expect(ToolRegistry.shared.requiresApprovalEveryCall(name))
                 // Always Allow (or a hand-edited Auto) cannot pre-grant a delete.
                 ToolRegistry.shared.setPolicy(.auto, for: name)
@@ -87,9 +87,12 @@ struct IntelAppleAppsTests {
         }
     }
 
-    @Test("Music needs Automation; Maps needs Location, and tests never show its dialog")
+    @Test("Music and Messages need Automation; Maps needs Location, and tests never show its dialog")
     @MainActor
-    func releaseTwoPermissions() async {
+    func appPermissions() async {
+        #expect(AppleApp.messages.systemPermissions == [.disk, .automationMessages])
+        #expect(SystemPermission.automationMessages.isAutomationBased)
+        #expect(!SystemPermission.disk.isAutomationBased)
         #expect(AppleApp.music.systemPermissions == [.automationMusic])
         #expect(SystemPermission.automationMusic.isAutomationBased)
         #expect(SystemPermission.automationMusic.systemSettingsURL != nil)
@@ -117,11 +120,10 @@ struct IntelAppleAppsTests {
         #expect(ids.contains("search-intel"))
         for id in [
             "osaurus.calendar", "osaurus.reminders", "osaurus.contacts", "osaurus.notes",
-            "osaurus.mail", "osaurus.maps", "osaurus.music",
+            "osaurus.mail", "osaurus.messages", "osaurus.maps", "osaurus.music",
         ] {
             #expect(ids.contains(id), "\(id)")
         }
-        #expect(!ids.contains("osaurus.messages"))
     }
 
     @Test("An installed plugin needs a version folder or a current link")
@@ -132,8 +134,9 @@ struct IntelAppleAppsTests {
         let fm = FileManager.default
         try fm.createDirectory(at: root.appendingPathComponent("osaurus.calendar/1.2.0"), withIntermediateDirectories: true)
         try fm.createDirectory(at: root.appendingPathComponent("osaurus.notes"), withIntermediateDirectories: true)  // empty leftover
-        try fm.createDirectory(at: root.appendingPathComponent("osaurus.messages/1.0.0"), withIntermediateDirectories: true)  // not Intel yet
-        #expect(PluginManager.installedSupersededAppleAppPluginIds(toolsRoot: root) == ["osaurus.calendar"])
+        try fm.createDirectory(at: root.appendingPathComponent("osaurus.messages/current"), withIntermediateDirectories: true)
+        try fm.createDirectory(at: root.appendingPathComponent("unrelated.plugin/1.0.0"), withIntermediateDirectories: true)
+        #expect(PluginManager.installedSupersededAppleAppPluginIds(toolsRoot: root) == ["osaurus.calendar", "osaurus.messages"])
         #expect(PluginManager.installedAppleAppPluginIds(toolsRoot: root) == ["osaurus.calendar", "osaurus.messages"])
     }
 
@@ -158,12 +161,12 @@ struct IntelAppleAppsTests {
     }
 
     @MainActor
-    @Test("Effective apps skip unshipped apps; the built-in agent never gets any")
+    @Test("Effective apps follow the switches; the built-in agent never gets any")
     func effectiveApps() async throws {
         try await ChatHistoryTestStorage.run {
             let agent = Self.makeAgent(apps: [.calendar, .messages], manualTools: ["file_read", "notes_create"])
             AgentManager.shared.add(agent)
-            #expect(AgentManager.shared.effectiveAppleApps(for: agent.id) == [.calendar])
+            #expect(AgentManager.shared.effectiveAppleApps(for: agent.id) == [.calendar, .messages])
 
             AgentManager.shared.updateEnabledAppleApps([.notes], for: agent.id)
             let saved = try #require(AgentManager.shared.agent(for: agent.id))
@@ -252,27 +255,35 @@ struct IntelAppleAppsTests {
     // MARK: - Plugin migration (staged, per app)
 
     @MainActor
-    @Test("Only installed, Intel-shipped plugins migrate; the built-in agent is never touched")
+    @Test("Only installed plugins migrate; the built-in agent is never touched")
     func pureMigration() {
         let agent = Self.makeAgent(
             manualTools: ["create_note", "send_message", "file_read", "calendar_list", "create_note"])
         let outcome = AppleAppsPluginMigration.migrate(
             agent: agent, installedPluginIds: ["osaurus.notes", "osaurus.messages"])
         #expect(outcome.changed)
-        #expect(outcome.enabledApps == [.notes])  // Messages is not on Intel yet
-        #expect(outcome.agent.manualToolNames == ["send_message", "file_read"])  // still served by its plugin
-        #expect(outcome.agent.settings.enabledAppleApps == [.notes])
+        #expect(outcome.enabledApps == [.notes, .messages])
+        #expect(outcome.agent.manualToolNames == ["file_read"])
+        #expect(outcome.agent.settings.enabledAppleApps == [.notes, .messages])
 
-        // `search_messages` ships in both the Mail and Messages plugins. While
-        // Messages still loads as a plugin, migrating Mail must not strip it.
+        // `search_messages` ships in both the Mail and Messages plugins:
+        // Messages wins when both are installed, Mail only when alone.
         let both = Self.makeAgent(manualTools: ["search_messages", "list_mailboxes"])
-        let mailOnly = AppleAppsPluginMigration.migrate(
+        let withMessages = AppleAppsPluginMigration.migrate(
             agent: both, installedPluginIds: ["osaurus.mail", "osaurus.messages"])
-        #expect(mailOnly.enabledApps == [.mail])
-        #expect(mailOnly.agent.manualToolNames == ["search_messages"])
+        #expect(withMessages.renamedTools["search_messages"] == "messages_search")
+        #expect(withMessages.enabledApps == [.mail, .messages])
         let mailAlone = AppleAppsPluginMigration.migrate(agent: both, installedPluginIds: ["osaurus.mail"])
         #expect(mailAlone.agent.manualToolNames == [])
         #expect(mailAlone.renamedTools["search_messages"] == "mail_search")
+
+        // Upgrading from Release 2 (only Messages pending): Release 2 left
+        // `search_messages` in place because the Messages plugin served it.
+        let r2 = Self.makeAgent(manualTools: ["search_messages", "list_mailboxes"])
+        let upgrade = AppleAppsPluginMigration.migrate(
+            agent: r2, installedPluginIds: ["osaurus.mail", "osaurus.messages"], apps: [.messages])
+        #expect(upgrade.enabledApps == [.messages])
+        #expect(upgrade.agent.manualToolNames == ["list_mailboxes"])  // Mail's own sweep is done
 
         // Only the requested apps are mapped (an earlier release's are done).
         let music = Self.makeAgent(manualTools: ["play", "create_note"])
@@ -330,7 +341,7 @@ struct IntelAppleAppsTests {
             installedPluginIds: ["osaurus.calendar", "osaurus.messages"], migratedAgents: [agent.name],
             present: { _, text in shown.append(text) })
         #expect(message?.contains("Calendar") == true)
-        #expect(message?.contains("Messages") == false)  // Messages' plugin still loads on Intel
+        #expect(message?.contains("Messages") == true)
         #expect(AppleAppsPluginMigration.showSupersededNoticeIfNeeded(
             installedPluginIds: ["osaurus.calendar"], present: { _, text in shown.append(text) }) == nil)
         #expect(shown.count == 1)

@@ -19,7 +19,7 @@ enum AppleAppToolCatalog {
         tools += ContactsToolFactory.makeTools()
         tools += NotesToolFactory.makeTools()
         tools += MailToolFactory.makeTools()
-        // Intel Release 3 adds Messages (docs/APPLE_APPS_INTEL_PLAN.md).
+        tools += MessagesToolFactory.makeTools()
         tools += MapsToolFactory.makeTools()
         tools += MusicToolFactory.makeTools()
         tools += ShortcutsToolFactory.makeTools()

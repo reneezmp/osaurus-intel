@@ -198,6 +198,22 @@
         }
       }
     },
+    "Allows Osaurus to send messages through Messages.app via Apple Events." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaubt Osaurus, über Apple Events Nachrichten mit der Nachrichten-App zu senden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许 Osaurus 通过 Apple 事件使用“信息”App 发送信息。"
+          }
+        }
+      }
+    },
     "Allows the Music tools to control playback and browse your library in Music.app via Apple Events." : {
       "localizations" : {
         "de" : {
@@ -354,6 +370,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动命名聊天"
+          }
+        }
+      }
+    },
+    "Automation (Messages)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisierung (Nachrichten)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化（信息）"
           }
         }
       }
@@ -1402,6 +1434,22 @@
         }
       }
     },
+    "Osaurus doesn't have Full Disk Access yet." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus hat noch keinen vollständigen Festplattenzugriff."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 尚未获得全磁盘访问权限。"
+          }
+        }
+      }
+    },
     "Overlay" : {
       "localizations" : {
         "de" : {
@@ -1582,6 +1630,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "私有数据库"
+          }
+        }
+      }
+    },
+    "Read your conversations and send iMessages or texts. Reading needs Full Disk Access; every send asks first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Deine Unterhaltungen lesen und iMessages oder SMS senden. Zum Lesen ist vollständiger Festplattenzugriff nötig; vor jedem Senden wirst du gefragt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阅读你的对话并发送 iMessage 或短信。读取需要全磁盘访问权限；每次发送前都会先询问。"
           }
         }
       }

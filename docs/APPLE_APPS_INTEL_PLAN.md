@@ -127,14 +127,32 @@ section says so.
   approval, permissions, the Maps fallback filter, the clash and the
   Release 1 upgrade.
 
-## Release 3 — Messages (planned)
+## Release 3 — Messages — shipped 2026-09-29 (awaiting Rosy)
 
-- Reading needs Full Disk Access (`chat.db`); sending needs Automation for
-  Messages. `messages_send` is a per-call tool.
-- Bring back `MessagesChatDBFixtureTests` and the Messages helper suite.
-- Guidance: re-add the Messages line from upstream.
+All nine upstream apps now ship: `availableOnIntel == AppleApp.allCases`.
+The list and the staged-migration code stay, so a future upstream app can
+be rolled out the same way.
+
+- Copied `AppleApps/Messages` from upstream/main. **SQLite:** upstream
+  imports the system `SQLite3` module; Intel uses `OsaurusSQLCipher` (the
+  vendored build, which opens plain databases when no key is set) so the app
+  links a single SQLite. `chat.db` is opened read-only (`mode=ro`).
+- Upstream normalises handles with `IMessageConnectionConfiguration`
+  (iMessage channel settings, part of Channels/B3, not on Intel). Intel has
+  the one function it needs as `MessagesHandle.normalizedId`.
+- Permissions: reading needs **Full Disk Access** (`.disk`; no macOS dialog
+  exists, so **Allow Access…** opens System Settings), sending needs
+  `SystemPermission.automationMessages` (added like Music; macOS asks on
+  first send). `messages_send` is a `PerCallApprovalTool`: every send shows
+  the card, never Always Allow.
+- Migration: on the first Release 3 launch only Messages is pending. The
+  `search_messages` name Release 2 deliberately left in place (while the
+  Messages plugin still served it) now maps to `messages_search`, with
+  Messages winning over Mail as upstream does.
+- Tests restored: upstream `MessagesChatDBFixtureTests` (temporary fixture
+  `chat.db`, never the real one) and the Messages helper suite.
 
 ## Rosy checklist
 
-See "Native Apple apps, Release 1" and "…, Release 2" in
+See "Native Apple apps, Release 1", "…, Release 2" and "…, Release 3" in
 [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md).

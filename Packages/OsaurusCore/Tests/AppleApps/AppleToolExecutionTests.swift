@@ -272,8 +272,80 @@ struct ShortcutsToolExecutionTests {
     }
 }
 
-// Intel: the Messages suites arrive with Release 3
-// (docs/APPLE_APPS_INTEL_PLAN.md).
+// MARK: - Messages (pure helpers)
+
+@Suite("Apple tools: Messages chat.db helpers")
+struct MessagesServiceHelperTests {
+
+    @Test("Apple epoch conversion handles nanosecond and second precision")
+    func appleTime() {
+        let date = Date(timeIntervalSinceReferenceDate: 800_000_000)
+        #expect(ChatDBMessagesService.date(fromAppleTime: 800_000_000) == date)
+        #expect(ChatDBMessagesService.date(fromAppleTime: 800_000_000_000_000_000) == date)
+        #expect(ChatDBMessagesService.date(fromAppleTime: 0) == nil)
+        #expect(ChatDBMessagesService.date(fromAppleTime: ChatDBMessagesService.appleTime(from: date)) == date)
+    }
+
+    @Test("attributedBody typedstream text is recovered for short and long payloads")
+    func attributedBody() {
+        func blob(_ text: String) -> Data {
+            var data = Data([0x04, 0x0B, 0x73, 0x74, 0x72, 0x65, 0x61, 0x6D, 0x74, 0x79, 0x70, 0x65, 0x64])
+            data.append(contentsOf: Array("NSString".utf8))
+            data.append(contentsOf: [0x01, 0x94, 0x84, 0x01, 0x2B])  // 5-byte preamble
+            let bytes = Array(text.utf8)
+            if bytes.count < 0x80 {
+                data.append(UInt8(bytes.count))
+            } else {
+                data.append(0x81)
+                data.append(UInt8(bytes.count & 0xFF))
+                data.append(UInt8((bytes.count >> 8) & 0xFF))
+            }
+            data.append(contentsOf: bytes)
+            data.append(contentsOf: [0x86, 0x84, 0x02, 0x69, 0x49])  // trailing attributes
+            return data
+        }
+        #expect(ChatDBMessagesService.decodeAttributedBody(blob("hello there")) == "hello there")
+        let long = String(repeating: "x", count: 300)
+        #expect(ChatDBMessagesService.decodeAttributedBody(blob(long)) == long)
+        #expect(ChatDBMessagesService.decodeAttributedBody(nil) == nil)
+        #expect(ChatDBMessagesService.decodeAttributedBody(Data([0x01, 0x02])) == nil)
+    }
+
+    @Test("messages_send requires a target and validates the service enum")
+    func sendValidation() async throws {
+        final class Fake: MessagesServicing, @unchecked Sendable {
+            var sent: (String?, String?, String, MessagesSendService)?
+            func conversations(limit: Int) async throws -> [MessagesConversation] { [] }
+            func read(_ query: MessagesReadQuery) async throws -> [MessagesMessage] { [] }
+            func unread(limit: Int) async throws -> [MessagesMessage] { [] }
+            func search(_ text: String, limit: Int) async throws -> [MessagesMessage] { [] }
+            func send(to recipient: String?, chatId: String?, text: String, service: MessagesSendService) async throws -> MessagesSendResult {
+                sent = (recipient, chatId, text, service)
+                return MessagesSendResult(service: "iMessage", target: recipient ?? chatId ?? "", delivered: true)
+            }
+        }
+        let fake = Fake()
+        let tool = MessagesSendTool(service: fake)
+        #expect(tool.defaultPermissionPolicy == .ask)
+        #expect(tool.requirements == [SystemPermission.automationMessages.rawValue])
+
+        let noTarget = try envelope(await tool.execute(argumentsJSON: #"{"text":"hi"}"#))
+        #expect(noTarget["kind"] as? String == "invalid_args")
+
+        let badService = try envelope(await tool.execute(argumentsJSON: #"{"text":"hi","to":"+14155551234","service":"carrier-pigeon"}"#))
+        #expect(badService["kind"] as? String == "invalid_args")
+        #expect(badService["field"] as? String == "service")
+
+        let ok = try result(await tool.execute(argumentsJSON: #"{"text":"hi","to":"+14155551234","service":"sms"}"#))
+        #expect(ok["sent"] as? Bool == true)
+        #expect(fake.sent?.3 == .sms)
+        #expect(fake.sent?.0 == "+14155551234")
+
+        let read = MessagesReadTool(service: fake)
+        #expect(read.requirements == [SystemPermission.disk.rawValue])
+        #expect(read.defaultPermissionPolicy == .auto)
+    }
+}
 
 // MARK: - Maps argument contracts (from live proof)
 

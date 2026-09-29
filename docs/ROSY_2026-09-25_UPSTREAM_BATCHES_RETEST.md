@@ -525,3 +525,23 @@ to a real address, so use your own.
 - [ ] If the old osaurus-tools Mail/Maps/Music plugins were installed: one
       toast after the first launch names only the new apps; agents that
       used their tools have them switched on.
+
+## Native Apple apps, Release 3 (Messages)
+
+Same test agent. Items that talk to the model are **(paid)**. Send only to
+yourself (your own phone number or Apple ID email).
+
+- [ ] Overview › Apple Apps now lists all nine apps, including Messages.
+- [ ] Switch on Messages without Full Disk Access: the row says Osaurus
+      doesn't have Full Disk Access yet, and **Allow Access…** opens System
+      Settings › Privacy & Security › Full Disk Access. Add Osaurus there
+      (macOS may ask to quit and reopen it).
+- [ ] **(paid)** "Show my latest conversations" and "any unread messages?"
+      return real conversations (no approval card for reading).
+- [ ] **(paid)** "Text <yourself>: test from Osaurus": macOS asks once to
+      let Osaurus control Messages, then an approval card with **no Always
+      Allow** appears; after Allow, the message arrives.
+- [ ] **(paid)** Ask it to send a second message: the card appears again.
+- [ ] If the old osaurus-tools Messages plugin was installed: one toast after
+      the first launch names Messages; agents that used it have Messages
+      switched on.

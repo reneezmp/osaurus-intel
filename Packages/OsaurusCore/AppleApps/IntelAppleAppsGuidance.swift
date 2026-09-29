@@ -28,13 +28,18 @@ enum IntelAppleAppsGuidance {
             "- You can work directly with the user's \(names) through the \(prefixes) tools. Use them instead of saying you cannot access these apps.",
             "- Resolve relative dates (\"tomorrow\", \"next Monday\", \"this week\") against the current local time given with the user's message; pass dates as ISO 8601 with the local offset. A bare `YYYY-MM-DD` means local midnight and an end date is inclusive.",
             "- Read before you write: look the item up first (its `id`, list or calendar) and reuse the returned identifiers instead of guessing names.",
-            "- Creating, changing and deleting pause for the user's approval; sending an email and deleting ask every single time. State exactly what you will change and let that approval handle confirmation — do not ask for permission yourself first.",
+            "- Creating, changing and deleting pause for the user's approval; sending a message or email and deleting ask every single time. State exactly what you will change and let that approval handle confirmation — do not ask for permission yourself first.",
             "- After a change, report back the exact title, date/time, recipient or list the tool returned so the user can verify it.",
             "- If a tool returns `permission_denied`, tell the user which macOS permission to grant (the message names the System Settings pane) and stop; do not retry in a loop.",
         ]
         if apps.contains(.mail) {
             lines.append(
                 "- Mail: `mail_compose` creates a draft unless `send: true`; quote the recipient, subject, and first line back before sending."
+            )
+        }
+        if apps.contains(.messages) {
+            lines.append(
+                "- Messages: reading uses the local Messages database; `messages_send` sends immediately once approved, so echo the recipient and text first."
             )
         }
         if apps.contains(.maps) {
