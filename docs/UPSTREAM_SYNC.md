@@ -1941,3 +1941,20 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   which is a stub on Intel.
 - #86 N/A and #131 still staged; reasons in the audit rows.
 
+### Context compaction (upstream #136) — 2026-09-29
+
+- **Intel previously sent the entire chat history on every request, with no
+  trimming.** Long chats simply grew until the provider refused them.
+  `IntelContextCompaction` plus `ConversationSummary` is the first mechanism
+  that shrinks them.
+- **On request only.** Upstream compacts automatically; on Intel that is an
+  unrequested paid call, so the composer shows a notice at 80% of the window
+  and the user presses Compact (or uses `/compact` / the token counter menu).
+- **The window is often unknown for cloud models.** The suggestion uses the
+  model catalog's context length, else Settings › General › Chat › Context
+  Length (default 128k).
+- The summary is keyed by covered turn ids (turn ids survive save/load), so
+  edits, regenerations or deletions of covered turns silently retire it.
+- `ChatSessionData` has explicit `CodingKeys`: **a new field needs a case
+  there**, or it is never written.
+

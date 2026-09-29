@@ -429,3 +429,18 @@ Added 2026-09-28; needs a candidate built after this commit.
 - [ ] Agents → a card's **Duplicate**: the copy really appears (before this
       fix it said "Duplicated as …" but saved nothing).
 
+## Context compaction (upstream #136)
+
+- [ ] **(paid)** In a long chat, type `/compact` (or right-click the token
+      counter › **Compact Conversation**): a toast says how many earlier
+      messages were compacted and roughly how many tokens were freed. The
+      chat on screen doesn't change, and the token counter drops.
+- [ ] **(paid)** Ask about something from early in the chat: the model still
+      knows the gist (from the summary).
+- [ ] Quit and relaunch: the compacted chat keeps its lower token count.
+- [ ] **(paid, optional)** Set Settings › General › Chat › Context Length
+      low (for example 8,000), chat until the orange "This chat is getting
+      long…" notice appears above the composer, and press **Compact**. Reset
+      Context Length afterwards.
+- [ ] A short chat (one or two exchanges) says there's nothing to compact yet.
+

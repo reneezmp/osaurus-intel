@@ -119,6 +119,14 @@ extension SlashCommand {
             isBuiltIn: true
         ),
         SlashCommand(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000107")!,
+            name: "compact",
+            description: "Summarize older messages to free up context",
+            icon: "arrow.down.right.and.arrow.up.left",
+            kind: .action,
+            isBuiltIn: true
+        ),
+        SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000103")!,
             name: "help",
             description: "Show available commands and shortcuts",

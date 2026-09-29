@@ -83,6 +83,9 @@ private struct GenerativeGreetingTrigger: ViewModifier {
 @MainActor
 final class ChatSession: ObservableObject {
     @Published var turns: [ChatTurn] = []
+    /// Compaction summary for this chat (upstream #136) and its run state.
+    @Published var conversationSummary: ConversationSummary?
+    @Published var isCompacting = false
     @Published var isStreaming: Bool = false {
         didSet {
             guard isStreaming != oldValue else { return }
@@ -677,7 +680,8 @@ final class ChatSession: ObservableObject {
         let executionMode = estimatedChatExecutionMode(agentId: effectiveId)
 
         let outputTokens = ContextBudgetManager.estimateOutputTokens(for: turns)
-        let conversationTokens = ContextBudgetManager.estimateTokens(for: turns) - outputTokens
+        let conversationTokens =
+            IntelContextCompaction.conversationTokens(turns: turns, summary: conversationSummary) - outputTokens
         var inputTokens = 0
         if !input.isEmpty { inputTokens += ContextBudgetManager.estimateTokens(for: input) }
         for attachment in pendingAttachments { inputTokens += attachment.estimatedTokens }
@@ -1166,6 +1170,7 @@ final class ChatSession: ObservableObject {
         archived = false
         pinned = false
         projectId = nil
+        conversationSummary = nil
         folderState.clearFolder()
         applyAgentDefaultFolder()
         isDirty = false
@@ -1221,6 +1226,60 @@ final class ChatSession: ObservableObject {
             let path = AgentManager.shared.agent(for: id)?.workingFolderPath, !path.isEmpty
         else { return }
         folderState.restore(bookmark: nil, path: path)
+    }
+
+    // MARK: - Context compaction (upstream #136)
+
+    /// Summarize the oldest turns so later requests send the summary instead.
+    /// Only on request (a paid cloud call); the visible chat never changes.
+    func compactConversation() {
+        guard !isCompacting, !isStreaming else { return }
+        isCompacting = true
+        let snapshot = turns
+        let existing = conversationSummary
+        let model = selectedModel
+        Task { @MainActor [weak self] in
+            defer { self?.isCompacting = false }
+            do {
+                let summary = try await IntelContextCompaction.summarize(
+                    turns: snapshot, existingSummary: existing, model: model)
+                guard let self else { return }
+                // The chat may have changed while the model worked.
+                guard IntelContextCompaction.summaryIsValid(summary, for: self.turns) else {
+                    _ = ToastManager.shared.info(
+                        L("Compaction skipped"), message: L("The conversation changed while it was being summarized."))
+                    return
+                }
+                self.conversationSummary = summary
+                self.isDirty = true
+                self.save()
+                _ = ToastManager.shared.success(
+                    L("Compacted \(summary.coveredTurnIds.count) earlier messages"),
+                    message: L("About \(summary.savedTokensEstimate) tokens freed. The full chat stays visible."))
+                await self.refreshContextEstimates()
+            } catch {
+                _ = ToastManager.shared.error(
+                    L("Couldn't compact this chat"), message: error.localizedDescription)
+            }
+        }
+    }
+
+    /// Context window used for the compaction suggestion: the model
+    /// catalog's value, else Settings › General › Chat › Context Length.
+    var compactionContextWindow: Int? {
+        if let model = selectedModel, let ctx = ModelInfo.load(modelId: model)?.model.contextLength {
+            return ctx
+        }
+        return ChatConfiguration.shared.contextLength
+    }
+
+    var shouldSuggestCompaction: Bool {
+        guard !isStreaming, !isCompacting, turns.count >= 2 else { return false }
+        return IntelContextCompaction.shouldSuggest(
+            conversationTokens: IntelContextCompaction.conversationTokens(turns: turns, summary: conversationSummary),
+            contextWindow: compactionContextWindow,
+            turns: turns,
+            summary: conversationSummary)
     }
 
     // MARK: - Composer Drafts
@@ -1435,7 +1494,8 @@ final class ChatSession: ObservableObject {
             capabilities: SessionCapability.derive(from: turnData),
             folderBookmark: folderState.persistedBookmark,
             folderPath: folderState.persistedPath,
-            projectId: projectId
+            projectId: projectId,
+            conversationSummary: conversationSummary
         )
     }
 
@@ -1486,6 +1546,7 @@ final class ChatSession: ObservableObject {
         archived = data.archived
         pinned = data.pinned
         projectId = data.projectId
+        conversationSummary = data.conversationSummary
         folderState.restore(bookmark: data.folderBookmark, path: data.folderPath)
 
         // Restore the persisted model when it's still valid; otherwise
@@ -2642,7 +2703,16 @@ final class ChatSession: ObservableObject {
                     var msgs: [ChatMessage] = []
                     if !sys.isEmpty { msgs.append(ChatMessage(role: "system", content: sys)) }
 
+                    // A valid compaction summary stands in for the turns it
+                    // covers (upstream #136); the transcript stays intact.
+                    let summary = IntelContextCompaction.activeSummary(conversationSummary, for: turns)
+                    if let summary {
+                        msgs.append(ChatMessage(role: "user", content: summary.contextMessageText))
+                    }
+                    let skipCount = summary?.coveredTurnIds.count ?? 0
+
                     for (index, t) in turns.enumerated() {
+                        if index < skipCount { continue }
                         let isLastTurn = index == turns.count - 1
                         if let msg = turnToMessage(t, isLastTurn: isLastTurn) {
                             msgs.append(msg)

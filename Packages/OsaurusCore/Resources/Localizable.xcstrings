@@ -70,6 +70,22 @@
         }
       }
     },
+    "About %lld tokens freed. The full chat stays visible." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Etwa %lld Tokens frei geworden. Der ganze Chat bleibt sichtbar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "约释放 %lld 个 token。完整聊天仍然可见。"
+          }
+        }
+      }
+    },
     "Add a short purpose so the Orchestrator and agent pickers know what this agent is for." : {
       "localizations" : {
         "de" : {
@@ -312,6 +328,22 @@
         }
       }
     },
+    "Choose a model for this chat first." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle zuerst ein Modell für diesen Chat."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "请先为此聊天选择模型。"
+          }
+        }
+      }
+    },
     "Choose…" : {
       "localizations" : {
         "de" : {
@@ -414,6 +446,118 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "顏色 %lld"
+          }
+        }
+      }
+    },
+    "Compact" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Komprimieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩"
+          }
+        }
+      }
+    },
+    "Compact Conversation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat komprimieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩对话"
+          }
+        }
+      }
+    },
+    "Compacted %lld earlier messages" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld frühere Nachrichten komprimiert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已压缩 %lld 条较早的消息"
+          }
+        }
+      }
+    },
+    "Compaction isn't available in this window." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Komprimierung ist in diesem Fenster nicht verfügbar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此窗口不支持压缩。"
+          }
+        }
+      }
+    },
+    "Compaction skipped" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Komprimierung übersprungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已跳过压缩"
+          }
+        }
+      }
+    },
+    "Compaction timed out. Nothing was changed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Komprimierung hat zu lange gedauert. Es wurde nichts geändert."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "压缩超时。未做任何更改。"
+          }
+        }
+      }
+    },
+    "Couldn't compact this chat" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Chat konnte nicht komprimiert werden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法压缩此聊天"
           }
         }
       }
@@ -1018,6 +1162,22 @@
         }
       }
     },
+    "Nothing to compact yet — the recent conversation is already as small as it can get." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch nichts zu komprimieren – der aktuelle Verlauf ist bereits so kurz wie möglich."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂时没有可压缩的内容——最近的对话已经尽可能精简。"
+          }
+        }
+      }
+    },
     "Overlay" : {
       "localizations" : {
         "de" : {
@@ -1380,6 +1540,54 @@
         }
       }
     },
+    "Summarize older messages to free up context" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ältere Nachrichten zusammenfassen, um Kontext freizugeben"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "总结较早的消息以释放上下文"
+          }
+        }
+      }
+    },
+    "Summarizes the older part of this chat with the current model (one cloud request). The full chat stays visible." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fasst den älteren Teil dieses Chats mit dem aktuellen Modell zusammen (eine Cloud-Anfrage). Der ganze Chat bleibt sichtbar."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "使用当前模型总结此聊天中较早的部分（一次云端请求）。完整聊天仍然可见。"
+          }
+        }
+      }
+    },
+    "Summarizing older messages…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ältere Nachrichten werden zusammengefasst …"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在总结较早的消息…"
+          }
+        }
+      }
+    },
     "The agent adds rows when it has something to remember. You can also ask it directly in chat." : {
       "localizations" : {
         "de" : {
@@ -1484,6 +1692,22 @@
         }
       }
     },
+    "The conversation changed while it was being summarized." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Der Chat hat sich während der Zusammenfassung geändert."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在生成摘要期间对话发生了变化。"
+          }
+        }
+      }
+    },
     "The file could not be read as an image. Try a PNG or JPEG." : {
       "localizations" : {
         "de" : {
@@ -1524,6 +1748,22 @@
         }
       }
     },
+    "The model returned an empty summary. Nothing was changed." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Das Modell hat eine leere Zusammenfassung geliefert. Es wurde nichts geändert."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "模型返回了空摘要。未做任何更改。"
+          }
+        }
+      }
+    },
     "The model returned no suggestion. Try again or write one yourself." : {
       "localizations" : {
         "de" : {
@@ -1552,6 +1792,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "表结构会随每个请求发送，智能体读取或写入的行会经过其云服务提供商。数据库文件在此 Mac 上保持加密。"
+          }
+        }
+      }
+    },
+    "This chat is getting long for the model. Compact older messages to keep going." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieser Chat wird für das Modell zu lang. Komprimiere ältere Nachrichten, um weiterzumachen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此聊天对模型来说越来越长。压缩较早的消息以继续。"
           }
         }
       }

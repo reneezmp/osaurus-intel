@@ -338,6 +338,11 @@ struct ChatContentView: View {
                             onGenerateTitle: { [weak observedSession] in
                                 observedSession?.generateTitleFromSlashCommand()
                             },
+                            onCompact: { [weak observedSession] in
+                                observedSession?.compactConversation()
+                            },
+                            isCompacting: observedSession.isCompacting,
+                            suggestCompaction: observedSession.shouldSuggestCompaction,
                             autoSpeakAssistant: $observedSession.autoSpeakAssistant,
                             queuedSend: $observedSession.queuedSend,
                             folderState: observedSession.folderState,

@@ -41,6 +41,11 @@ struct FloatingInputCard: View {
     var onClearChat: (() -> Void)? = nil
     /// Callback to generate an AI title for the current chat (triggered by /title command).
     var onGenerateTitle: (() -> Void)? = nil
+    /// Compact older messages (upstream #136): `/compact`, the token chip's
+    /// context menu, and the near-limit notice.
+    var onCompact: (() -> Void)? = nil
+    var isCompacting: Bool = false
+    var suggestCompaction: Bool = false
     /// Callback when the user selects a skill slash command. Passes the skill UUID so the
     /// caller can inject that skill's instructions as one-off context for the next send.
     var onSkillSelected: ((UUID) -> Void)? = nil
@@ -91,6 +96,9 @@ struct FloatingInputCard: View {
         isCompact: Bool = false,
         onClearChat: (() -> Void)? = nil,
         onGenerateTitle: (() -> Void)? = nil,
+        onCompact: (() -> Void)? = nil,
+        isCompacting: Bool = false,
+        suggestCompaction: Bool = false,
         onSkillSelected: ((UUID) -> Void)? = nil,
         pendingSkillId: Binding<UUID?> = .constant(nil),
         autoSpeakAssistant: Binding<Bool> = .constant(false),
@@ -123,6 +131,9 @@ struct FloatingInputCard: View {
         self.isCompact = isCompact
         self.onClearChat = onClearChat
         self.onGenerateTitle = onGenerateTitle
+        self.onCompact = onCompact
+        self.isCompacting = isCompacting
+        self.suggestCompaction = suggestCompaction
         self.onSkillSelected = onSkillSelected
         self._pendingSkillId = pendingSkillId
         self._autoSpeakAssistant = autoSpeakAssistant
@@ -1260,6 +1271,13 @@ extension FloatingInputCard {
                 ToastManager.shared.infoLocalized(
                     "Chat Title", message: "Pass an onGenerateTitle handler to enable /title")
             }
+        case "compact":
+            if let compact = onCompact {
+                compact()
+            } else {
+                ToastManager.shared.infoLocalized(
+                    "Compact", message: "Compaction isn't available in this window.")
+            }
         case "help":
             ToastManager.shared.infoLocalized(
                 "Slash Commands",
@@ -1568,6 +1586,20 @@ extension FloatingInputCard {
                 }
             } else {
                 showContextBreakdown = false
+            }
+        }
+        .contextMenu {
+            if let compact = onCompact {
+                Button {
+                    compact()
+                } label: {
+                    Label {
+                        Text("Compact Conversation", bundle: .module)
+                    } icon: {
+                        Image(systemName: "arrow.down.right.and.arrow.up.left")
+                    }
+                }
+                .disabled(isCompacting || isStreaming)
             }
         }
         .popover(isPresented: $showContextBreakdown, arrowEdge: .top) {
@@ -2569,11 +2601,56 @@ extension FloatingInputCard {
         showModelPicker = false
     }
 
+    // MARK: - Compaction notice
+
+    /// Offered when the chat nears the context limit (upstream #136). Intel
+    /// never compacts on its own: it's a paid call, so the user decides.
+    private var compactionNotice: some View {
+        HStack(spacing: 8) {
+            if isCompacting {
+                ProgressView().controlSize(.small).scaleEffect(0.7)
+                Text("Summarizing older messages…", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+            } else {
+                Image(systemName: "exclamationmark.bubble")
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.warningColor)
+                Text("This chat is getting long for the model. Compact older messages to keep going.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                Spacer(minLength: 6)
+                Button {
+                    onCompact?()
+                } label: {
+                    Text("Compact", bundle: .module)
+                }
+                .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
+                .controlSize(.small)
+                .disabled(isStreaming)
+                .localizedHelp("Summarizes the older part of this chat with the current model (one cloud request). The full chat stays visible.")
+            }
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.warningColor.opacity(0.08))
+                .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.warningColor.opacity(0.3), lineWidth: 1))
+        )
+    }
+
     // MARK: - Input Card
 
     private var inputCard: some View {
         let hasChipRow = !pendingAttachments.isEmpty || pendingSkillId != nil || queuedSend != nil
         return VStack(alignment: .leading, spacing: 0) {
+            if (suggestCompaction || isCompacting), onCompact != nil {
+                compactionNotice
+                    .padding(.horizontal, 12)
+                    .padding(.top, 10)
+            }
             if hasChipRow {
                 HStack(alignment: .center, spacing: 6) {
                     queuedSendChipView

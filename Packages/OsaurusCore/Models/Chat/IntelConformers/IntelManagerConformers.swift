@@ -929,6 +929,9 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
     /// `agentId`. Optional so old on-disk sessions (no key present) decode
     /// to `nil` via synthesized Codable's `decodeIfPresent`.
     var projectId: UUID? = nil
+    /// Compacted summary of the oldest turns (upstream #136). Replaces those
+    /// turns in outbound requests only; nil when never compacted.
+    var conversationSummary: ConversationSummary? = nil
 
     init(
         id: UUID = UUID(),
@@ -947,7 +950,8 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         capabilities: Set<SessionCapability> = [],
         folderBookmark: Data? = nil,
         folderPath: String? = nil,
-        projectId: UUID? = nil
+        projectId: UUID? = nil,
+        conversationSummary: ConversationSummary? = nil
     ) {
         self.id = id
         self.title = title
@@ -966,6 +970,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         self.folderBookmark = folderBookmark
         self.folderPath = folderPath
         self.projectId = projectId
+        self.conversationSummary = conversationSummary
     }
 
     // MARK: - Tolerant decoding
@@ -998,6 +1003,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
             try c.decodeIfPresent(Set<SessionCapability>.self, forKey: .capabilities) ?? []
         folderBookmark = try c.decodeIfPresent(Data.self, forKey: .folderBookmark)
         folderPath = try c.decodeIfPresent(String.self, forKey: .folderPath)
+        conversationSummary = try? c.decodeIfPresent(ConversationSummary.self, forKey: .conversationSummary)
         projectId = try c.decodeIfPresent(UUID.self, forKey: .projectId)
     }
 
@@ -1005,6 +1011,7 @@ public struct ChatSessionData: Identifiable, Codable, @unchecked Sendable {
         case id, title, createdAt, updatedAt, agentId, source, sourcePluginId
         case externalSessionKey, dispatchTaskId, archived, pinned, selectedModel
         case turns, capabilities, folderBookmark, folderPath, projectId
+        case conversationSummary
     }
 
     /// Derive a chat title from the first user message — mirrors the upstream
