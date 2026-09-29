@@ -1854,9 +1854,12 @@ final class SystemPromptComposer: @unchecked Sendable {
                 not called the tool this turn, you do not know the answer. Do not \
                 describe running a command in prose; actually call the tool. \
                 Documents are built in: `file_read` and `file_search` handle PDF, Word, \
-                PowerPoint, Excel and images (OCR), and `file_write` produces .docx and \
-                .pdf from Markdown and .xlsx from CSV or JSON rows. Never shell out to \
-                pandoc, pdftotext or Python for these.
+                PowerPoint, Excel and images (OCR); `file_write` produces .docx and \
+                .pdf from Markdown, .pptx slides from Markdown and .xlsx from CSV or \
+                JSON rows; and `file_edit` changes an existing .docx/.xlsx/.pptx/.pdf \
+                in place with `operations` (read it with `file_read` mode "structure" \
+                first) so its formatting is kept — prefer that over regenerating it. \
+                Never shell out to pandoc, pdftotext or Python for these.
                 """
         } else {
             toolDirective = ""

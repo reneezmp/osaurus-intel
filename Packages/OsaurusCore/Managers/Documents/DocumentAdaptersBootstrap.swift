@@ -31,11 +31,12 @@ public enum DocumentAdaptersBootstrap {
         registry.register(adapter: PPTXAdapter())
         registry.register(adapter: RichDocumentAdapter())
         registry.register(adapter: XLSXAdapter())
+        registry.register(emitter: CSVEmitter(delimiter: .comma))
+        registry.register(emitter: CSVEmitter(delimiter: .tab))
         registry.register(emitter: XLSXEmitter())
-        // Upstream #91: Markdown/HTML → Word and PDF for file_write.
-        // (PPTXEmitter waits for upstream's OOXML writer stack.)
         registry.register(emitter: DOCXEmitter())
         registry.register(emitter: PDFEmitter())
+        registry.register(emitter: PPTXEmitter())
         if registry === DocumentFormatRegistry.shared {
             didRegisterShared = true
         }

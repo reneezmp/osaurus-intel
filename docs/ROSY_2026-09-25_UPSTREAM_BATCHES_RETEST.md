@@ -645,3 +645,25 @@ With a working folder, **(paid)**:
       Preview and is identical; the agent used `file_copy` (not `cp`).
 - [ ] Ask it to copy another file over an existing one: it asks/uses
       overwrite; then undo the file change: the original file comes back.
+
+## In-place document editing
+
+Working folder with a Word file, a spreadsheet, a slide deck and a PDF
+(make them with the agent if needed). All **(paid)**.
+
+- [ ] "In plan.docx, change Q3 to Q4 everywhere": the file keeps its fonts,
+      headings and images; only the text changed. Undo the file change: the
+      original returns.
+- [ ] "Show me the structure of budget.xlsx" then "set B2 to 1200 and B3 to
+      =B2*1.1": the workbook opens in Numbers/Excel with the new value and a
+      working formula.
+- [ ] "Make a 3-slide deck about pantry planning as deck.pptx": it opens in
+      Keynote/PowerPoint with 3 slides. Then "change slide 2's title to
+      Shopping": only that title changes.
+- [ ] PDF: "delete page 2 of report.pdf" and "rotate page 1": correct in
+      Preview.
+- [ ] **PDF form (important on Ventura):** a PDF with text fields, a checkbox
+      and a **radio group** — "fill the form: Name Ada, Agree yes, Plan Pro":
+      open it in Preview and check the **radio button** shows Pro selected
+      (macOS 27's PDFKit loses it; Ventura's may not). Note the result.
+- [ ] Ask for a preview first ("dry run"): nothing changes until confirmed.

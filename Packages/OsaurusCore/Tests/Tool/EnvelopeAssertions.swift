@@ -53,6 +53,14 @@ enum EnvelopeAssertions {
         return text
     }
 
+    /// The success envelope's `result` object (upstream helper).
+    static func successPayload(_ result: String) -> [String: Any]? {
+        guard let dict = envelopeDict(result),
+            let inner = dict["result"] as? [String: Any]
+        else { return nil }
+        return inner
+    }
+
     private static func envelopeDict(_ result: String) -> [String: Any]? {
         guard let data = result.data(using: .utf8),
             let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]

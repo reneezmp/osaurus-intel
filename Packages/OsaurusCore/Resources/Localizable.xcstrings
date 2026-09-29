@@ -102,6 +102,22 @@
         }
       }
     },
+    "%lld unchanged lines" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld unveränderte Zeilen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 行未更改"
+          }
+        }
+      }
+    },
     "About %lld tokens freed. The full chat stays visible." : {
       "localizations" : {
         "de" : {
@@ -826,6 +842,22 @@
         }
       }
     },
+    "Couldn't write the zip archive: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "ZIP-Archiv konnte nicht geschrieben werden: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法写入 ZIP 归档：%@"
+          }
+        }
+      }
+    },
     "Create your own agent and turn on its Database ability to give it an encrypted database it can build and query." : {
       "localizations" : {
         "de" : {
@@ -1478,6 +1510,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可用的模型。请连接提供商或设置核心模型。"
+          }
+        }
+      }
+    },
+    "no text changes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "keine Textänderungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文本无更改"
           }
         }
       }
@@ -2432,6 +2480,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "無法將該檔案讀取為圖片。請嘗試 PNG 或 JPEG。"
+          }
+        }
+      }
+    },
+    "The file is not a zip archive." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Datei ist kein Zip-Archiv."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "该文件不是 zip 压缩包。"
           }
         }
       }

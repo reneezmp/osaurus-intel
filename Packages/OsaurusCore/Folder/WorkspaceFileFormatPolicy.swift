@@ -156,7 +156,7 @@ enum WorkspaceFileFormatPolicy {
     /// Model-facing summary of what `file_write` produces.
     static let writableFormatsSummary =
         "UTF-8 text/code (any extension), `.xlsx` from CSV/TSV text or JSON rows, "
-        + "and `.docx`/`.pdf` from Markdown or HTML"
+        + "`.docx`/`.pdf` from Markdown or HTML, and `.pptx` slides from Markdown"
 
     /// Files whose successful persistence is not evidence that the delivered
     /// program or interactive artifact actually runs.

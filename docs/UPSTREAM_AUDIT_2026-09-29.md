@@ -100,7 +100,8 @@ and object store onto Intel storage (encrypted storage root, test-storage
 safety), capture from Intel's folder tools and `shell_run`, a Ventura-safe
 pane, migration of the existing undo log. Largest part.
 
-**B. In-place document editing.** `file_edit` `operations` for
+**B. In-place document editing — core shipped 2026-09-29** (see
+`UPSTREAM_SYNC.md`). `file_edit` `operations` for
 .docx/.xlsx/.pptx/.pdf (validate-then-swap), `file_read` `mode: "structure"`
 listing addressable paragraphs/cells/slides/pages, plus the #2914 hardening
 (tolerant run/paragraph matching, AcroForm `fill_form`, argument

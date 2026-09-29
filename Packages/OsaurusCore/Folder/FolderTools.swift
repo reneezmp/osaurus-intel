@@ -438,7 +438,8 @@ struct FileReadTool: OsaurusTool {
         + ". Documents come back as extracted text; images and scanned PDFs as text recognized "
         + "on this Mac (OCR). **Use this instead of `cat` / `head` / `tail` or pandoc/pdftotext in "
         + "`shell_run`.** Optionally specify start_line and end_line for partial reads. Line numbers "
-        + "are 1-indexed."
+        + "are 1-indexed. Pass `mode: \"structure\"` on a .docx/.xlsx/.pptx/.pdf to get the numbered "
+        + "paragraphs, cells, slides/shapes, or pages (and form fields) that `file_edit` `operations` address."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -454,6 +455,13 @@ struct FileReadTool: OsaurusTool {
             "end_line": .object([
                 "type": .string("integer"),
                 "description": .string("Optional end line number (1-indexed, inclusive)"),
+            ]),
+            "mode": .object([
+                "type": .string("string"),
+                "enum": .array([.string("content"), .string("structure")]),
+                "description": .string(
+                    "Optional. `structure` returns a .docx/.xlsx/.pptx/.pdf outline with the ids `file_edit` operations use (default: content)"
+                ),
             ]),
         ]),
         "required": .array([.string("path")]),
@@ -505,6 +513,32 @@ struct FileReadTool: OsaurusTool {
         }
 
         let ext = fileURL.pathExtension.lowercased()
+        // Upstream #2907: an outline of what `file_edit` operations address.
+        if let mode = (args["mode"] as? String)?.lowercased(), mode == "structure" {
+            var isDirectory: ObjCBool = false
+            FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
+            guard DocumentEditService.isEditable(ext), !isDirectory.boolValue else {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "`mode: \"structure\"` outlines .docx, .xlsx, .pptx and .pdf files; read other files normally.",
+                    field: "mode",
+                    expected: "a .docx/.xlsx/.pptx/.pdf path, or omit `mode`",
+                    tool: name
+                )
+            }
+            do {
+                var outline = try await DocumentEditService.structure(of: fileURL)
+                outline["path"] = relativePath
+                return ToolEnvelope.success(tool: name, result: outline)
+            } catch {
+                return ToolEnvelope.failure(
+                    kind: .executionError,
+                    message: "Couldn't outline \(relativePath): \(error.localizedDescription)",
+                    field: "path",
+                    tool: name
+                )
+            }
+        }
         // Upstream #91: recognised document formats without a built-in
         // reader get an honest message naming the sibling format that works.
         if case .unsupportedDocument(let family) = WorkspaceFileFormatPolicy.readSupport(for: ext) {
@@ -730,7 +764,7 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
             "content": .object([
                 "type": .string("string"),
                 "description": .string(
-                    "Content to write. For .docx/.pdf: Markdown or HTML. For .xlsx: CSV/TSV text or JSON rows."
+                    "Content to write. For .docx/.pdf: Markdown or HTML. For .xlsx: CSV/TSV text or JSON rows. For .pptx: Markdown (each `#`/`##` heading starts a slide)."
                 ),
             ]),
             "dry_run": .object([
@@ -785,16 +819,33 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
         // emitters; recognised document formats we can't produce are
         // refused instead of getting Markdown bytes under a binary extension.
         let documentTarget = FileWriteDocumentRouting.target(forExtension: ext)
-        if documentTarget == nil, WorkspaceFileFormatPolicy.prefersDocumentExtraction(ext) || ext == "pptx" {
+        if documentTarget == nil, WorkspaceFileFormatPolicy.prefersDocumentExtraction(ext) {
             return ToolEnvelope.failure(
                 kind: .invalidArgs,
                 message:
                     "file_write can't produce .\(ext) files. It writes "
                     + WorkspaceFileFormatPolicy.writableFormatsSummary
-                    + ". Pick one of those extensions (for slides, write a .docx or .pdf outline).",
+                    + ". Pick one of those extensions.",
                 field: "path",
                 tool: name,
                 retryable: false
+            )
+        }
+        // Upstream #2914: `content` that is a `file_edit` operations array
+        // would replace the document with that JSON as text. Point at
+        // `file_edit` instead; nothing is written.
+        if let operations = Self.fileEditOperationsPayload(content) {
+            let opNames = operations.compactMap { $0["op"] as? String }
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "`content` is a list of `file_edit` operations (\(opNames.joined(separator: ", "))), not a document body — writing it would replace '\(relativePath)' with that JSON as text. "
+                    + "Call `file_edit` with {\"path\": \"\(relativePath)\", \"operations\": \(Self.compactJSON(operations))} instead; the file was not changed.",
+                field: "content",
+                expected: "the document body, or use file_edit for operations",
+                tool: name,
+                retryable: false,
+                metadata: ["retry_with": ["path": relativePath, "operations": operations]]
             )
         }
         var documentPlan: FileWriteDocumentRouting.Plan?
@@ -875,6 +926,37 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
             text: "\(action) \(relativePath) (\(lineCount) lines, \(content.count) characters)"
         )
     }
+
+    /// `content` parsed as a `file_edit` operations array (upstream #2914): a
+    /// JSON array (optionally `{"operations": [...]}`) whose every element has
+    /// an `op` the document editors know. Anything else — including a bare
+    /// array of rows for `.xlsx` — is nil.
+    static func fileEditOperationsPayload(_ content: String) -> [[String: Any]]? {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("[") || trimmed.hasPrefix("{"),
+            let data = trimmed.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data)
+        else { return nil }
+        let list: [[String: Any]]?
+        if let array = object as? [[String: Any]] {
+            list = array
+        } else if let dict = object as? [String: Any], dict.count == 1 {
+            list = dict["operations"] as? [[String: Any]]
+        } else {
+            list = nil
+        }
+        guard let list, !list.isEmpty else { return nil }
+        let known = Set(DocumentEditService.allOperationNames)
+        guard list.allSatisfy({ ($0["op"] as? String).map(known.contains) == true }) else { return nil }
+        return list
+    }
+
+    static func compactJSON(_ value: Any) -> String {
+        guard let data = try? JSONSerialization.data(withJSONObject: value, options: .osaurusCanonical),
+            let text = String(data: data, encoding: .utf8)
+        else { return "[…]" }
+        return text.count > 400 ? String(text.prefix(400)) + "…" : text
+    }
 }
 
 // MARK: - Coding Tools
@@ -898,7 +980,11 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         + "(\"exact\" when it matched byte-for-byte); the file's own whitespace is kept for "
         + "unchanged lines. Fails if `old_string` is not found or matches multiple locations; "
         + "pass `replace_all: true` to replace every occurrence. You MUST provide the strings "
-        + "in the parameters."
+        + "in the parameters. "
+        + "Documents (.docx/.xlsx/.pptx/.pdf) are edited in place with `operations` (formatting, styles, media and "
+        + "untouched content are kept): call `file_read` with `mode: \"structure\"` first to get paragraph numbers, "
+        + "cells, slides/shapes, or pages and form fields. For .docx/.pptx, `old_string`/`new_string` also works "
+        + "(text is matched across formatting runs). Pass `dry_run: true` to preview a document edit."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -925,8 +1011,34 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
                     "Replace every occurrence of old_string instead of requiring a unique match (default false)"
                 ),
             ]),
+            "operations": .object([
+                "type": .string("array"),
+                "description": .string(
+                    "Document edits for .docx/.xlsx/.pptx/.pdf, applied in order and atomically (all or nothing), each {\"op\": name, …}; `op` may be left out when the keys name a content edit (e.g. {old_string, new_string} or {cells}). "
+                        + "`sheet`, `slide`, `cells`, `page` and every other operation key go INSIDE the operation object, never at the top level of the call. "
+                        + ".docx: replace_text {old_string, new_string, replace_all?}, insert_paragraph {text, after|before, style?}, delete_paragraph {index}, "
+                        + "set_table_cell {table, row, column, text}, append_markdown {markdown}. "
+                        + "Example: {\"path\": \"brief.docx\", \"operations\": [{\"op\": \"replace_text\", \"old_string\": \"Q3\", \"new_string\": \"Q4\", \"replace_all\": true}]}. "
+                        + ".xlsx: set_cells {sheet?, cells: {\"B3\": 42, \"C3\": \"=SUM(B1:B2)\", \"D3\": null}}, insert_rows / delete_rows {sheet?, at, count?}, "
+                        + "add_sheet {name}, rename_sheet {sheet, name}, delete_sheet {sheet}. "
+                        + "Example: {\"path\": \"q3.xlsx\", \"operations\": [{\"op\": \"set_cells\", \"sheet\": \"Summary\", \"cells\": {\"B2\": 1200, \"B3\": \"=B2*1.1\"}}]}. "
+                        + ".pptx: replace_text {old_string, new_string, replace_all?, slide?}, set_slide_text {slide, shape: title|subtitle|body|number, text}, "
+                        + "duplicate_slide {slide}, delete_slide {slide}, reorder_slides {order}. "
+                        + "Example: {\"path\": \"deck.pptx\", \"operations\": [{\"op\": \"set_slide_text\", \"slide\": 2, \"shape\": \"title\", \"text\": \"Roadmap\"}]}. "
+                        + ".pdf: delete_pages {pages}, reorder_pages {order}, rotate_pages {pages?, degrees}, merge {files}, fill_form {fields: {\"Name\": \"Ada\", \"Agree\": true, \"Plan\": \"Pro\"}} (`file_read` mode \"structure\" lists form_fields with types and options), "
+                        + "add_text {page, text, x?, y?}, add_note {page, text}, highlight {text, page?}. "
+                        + "Example: {\"path\": \"intake.pdf\", \"operations\": [{\"op\": \"fill_form\", \"fields\": {\"Name\": \"Ada Lovelace\", \"Agree\": true}}]}. Numbers are 1-based."
+                ),
+                // Free-form on purpose: see `DocumentEditService.operationItemSchema`
+                // (schema-constrained decoders drop undeclared keys otherwise).
+                "items": DocumentEditService.operationItemSchema,
+            ]),
+            "dry_run": .object([
+                "type": .string("boolean"),
+                "description": .string("Documents: preview the edit (with a text diff) without writing it"),
+            ]),
         ]),
-        "required": .array([.string("path"), .string("old_string"), .string("new_string")]),
+        "required": .array([.string("path")]),
     ])
 
     var requirements: [String] { [] }
@@ -951,6 +1063,25 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         )
         guard case .value(let relativePath) = pathReq else {
             return pathReq.failureEnvelope ?? ""
+        }
+
+        // Upstream #2907/#2914: documents are edited in place.
+        let documentExtension = URL(fileURLWithPath: relativePath).pathExtension.lowercased()
+        if DocumentEditService.isEditable(documentExtension) {
+            return try await editDocument(
+                args: args, relativePath: relativePath, ext: documentExtension, rootPath: rootPath,
+                dryRun: coerceBool(args["dry_run"]) ?? false,
+                replaceAll: coerceBool(args["replace_all"]) ?? false)
+        }
+        if args["operations"] != nil {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "`operations` edits .docx, .xlsx, .pptx and .pdf documents. For this file use `old_string`/`new_string`.",
+                field: "operations",
+                expected: "old_string/new_string for text files",
+                tool: name
+            )
         }
 
         // Empty `old_string` is ambiguous — `requireString` (default
@@ -979,17 +1110,18 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         }
 
         let fileURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
-        // Upstream #91: binary documents are rebuilt, not text-edited.
+        // Other binary documents (legacy .doc/.xls/.ppt, .rtf, …) can't be
+        // text-edited: they are regenerated with file_write.
         let editExt = fileURL.pathExtension.lowercased()
         if FileWriteDocumentRouting.target(forExtension: editExt) != nil
-            || WorkspaceFileFormatPolicy.prefersDocumentExtraction(editExt) || editExt == "pptx"
+            || WorkspaceFileFormatPolicy.prefersDocumentExtraction(editExt)
         {
             return ToolEnvelope.failure(
                 kind: .invalidArgs,
                 message:
-                    "file_edit changes text files; `\(relativePath)` is a .\(editExt) document. "
+                    "file_edit changes text files and .docx/.xlsx/.pptx/.pdf documents; `\(relativePath)` is a .\(editExt) file. "
                     + "Read it with file_read, then write the whole updated document with file_write "
-                    + "(Markdown for .docx/.pdf, CSV or JSON rows for .xlsx).",
+                    + "(" + WorkspaceFileFormatPolicy.writableFormatsSummary + ").",
                 field: "path",
                 tool: name,
                 retryable: false
@@ -1097,6 +1229,119 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
             ],
             warnings: warnings
         )
+    }
+
+    /// In-place document edit (upstream #2907/#2914 `editDocument`, Intel
+    /// host-folder version): prepare on a staged copy, re-open it with the
+    /// app's own parsers, diff the text, then swap atomically. Undo is logged
+    /// through `FileOperationLog` (binary-safe) before the swap.
+    private func editDocument(
+        args: [String: Any], relativePath: String, ext: String, rootPath: URL,
+        dryRun: Bool, replaceAll: Bool
+    ) async throws -> String {
+        let fileURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
+        guard FileManager.default.fileExists(atPath: fileURL.path) else {
+            throw FolderToolError.fileNotFound(relativePath)
+        }
+
+        let operations: [[String: Any]]
+        if let raw = args["operations"] {
+            guard let list = raw as? [[String: Any]], !list.isEmpty else {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "`operations` must be a non-empty array of {\"op\": …} objects.",
+                    field: "operations", expected: "array of operation objects", tool: name)
+            }
+            operations = list
+        } else if args["old_string"] != nil {
+            guard ext == "docx" || ext == "pptx" else {
+                let hint =
+                    ext == "pdf"
+                    ? "PDF body text can't be rewritten in place. Edit the source document and export again, or regenerate with `file_write`; `operations` can still delete/reorder/rotate pages, fill forms, and add text boxes or highlights."
+                    : "Use `operations` with `set_cells` (e.g. {\"op\": \"set_cells\", \"cells\": {\"B3\": 42}}); `file_read` with `mode: \"structure\"` lists the cells."
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "old_string/new_string text edits aren't supported for .\(ext). \(hint)",
+                    field: "old_string", expected: "`operations` for .\(ext)", tool: name)
+            }
+            guard let old = args["old_string"] as? String, !old.isEmpty, let new = args["new_string"] as? String else {
+                // Only an empty old_string WITH new text is an insert; name the
+                // operations that add text in that case alone (upstream).
+                let isInsert = (args["old_string"] as? String)?.isEmpty == true && args["new_string"] is String
+                let insertHint = !isInsert ? "" :
+                    ext == "docx"
+                    ? " To add text without replacing any, use `operations`: {\"op\": \"append_markdown\", \"markdown\": \"## Heading\\n- item\"} or {\"op\": \"insert_paragraph\", \"text\": \"…\", \"after\": N} (`file_read` mode \"structure\" numbers paragraphs)."
+                    : " To add text without replacing any, use `operations` with `set_slide_text` (or `duplicate_slide` then `set_slide_text`)."
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "Pass a non-empty `old_string` and a `new_string`." + insertHint,
+                    field: "old_string", expected: "document text to replace", tool: name)
+            }
+            operations = [["op": "replace_text", "old_string": old, "new_string": new, "all": replaceAll]]
+        } else {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    (ext == "docx" || ext == "pptx"
+                        ? "Nothing to apply: pass `old_string` + `new_string` (text is matched across runs) or `operations` "
+                        : "Pass `operations` ")
+                    + "to edit this .\(ext) (\(DocumentEditService.operationNames(for: ext).joined(separator: ", "))). "
+                    + "Call `file_read` with `mode: \"structure\"` to see what can be addressed.",
+                field: "operations", expected: "`operations` array", tool: name)
+        }
+
+        let prepared: DocumentEditService.PreparedEdit
+        do {
+            prepared = try await DocumentEditService.prepare(
+                fileURL: fileURL,
+                displayPath: relativePath,
+                operations: operations,
+                resolvePath: { try FolderToolHelpers.resolvePath($0, rootPath: rootPath) }
+            )
+        } catch let error as DocumentEditError {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message: error.message + (error.message.contains("unchanged") ? "" : " Nothing was changed."),
+                field: "operations", expected: "operations valid for this document", tool: name)
+        }
+
+        var payload: [String: Any] = [
+            "path": relativePath,
+            "format": ext,
+            "action": "update",
+            "dry_run": dryRun,
+            "operations_applied": prepared.summaries,
+        ]
+        if let diff = prepared.diffText {
+            payload["diff"] = diff
+            payload["diff_truncated"] = prepared.diffTruncated
+        }
+        var warnings = prepared.warnings
+        if dryRun {
+            prepared.discard()
+            warnings.append(
+                "PREVIEW ONLY - nothing was written. The document is unchanged. Repeat the same call WITHOUT dry_run to apply it.")
+            return ToolEnvelope.success(tool: name, result: payload, warnings: warnings)
+        }
+        if let sessionId = ChatExecutionContext.currentSessionId {
+            let previous = FileOperation.encodePreviousContent(prepared.originalData)
+            await FileOperationLog.shared.log(
+                FileOperation(
+                    type: .write,
+                    path: relativePath,
+                    previousContent: previous.content,
+                    previousContentEncoding: previous.encoding,
+                    sessionId: sessionId,
+                    batchId: ChatExecutionContext.currentBatchId
+                )
+            )
+        }
+        do {
+            try prepared.commit()
+        } catch let error as DocumentEditError {
+            return ToolEnvelope.failure(kind: .executionError, message: error.message, field: "path", tool: name)
+        }
+        return ToolEnvelope.success(tool: name, result: payload, warnings: warnings)
     }
 
     /// Truthful diagnosis for a 0-match `old_string` (upstream #2914). The

@@ -3,6 +3,7 @@
 //  OsaurusCoreTests
 //
 //  Upstream #91 on Intel: folder tools read, write and search documents.
+//  (In-place editing, #2907/#2914, is covered by IntelDocumentEditingTests.)
 //  Every test works in its own temporary folder through the real tools.
 //
 
@@ -81,27 +82,27 @@ struct IntelRichFolderFormatsTests {
         #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("draft.pdf").path))
     }
 
-    @Test("Unsupported document targets are refused with a pointer to what works")
+    @Test("Unreadable legacy formats are refused with a pointer to what works")
     func refusals() async throws {
         let root = try Self.makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
-        let pptx = try await FileWriteTool(rootPath: root).execute(
-            argumentsJSON: Self.json(["path": "deck.pptx", "content": Self.markdown]))
-        #expect(Self.isFailure(pptx))
-        #expect(pptx.contains(".docx"))
-        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("deck.pptx").path))
-
         try Data([0x50, 0x4B, 0x03, 0x04]).write(to: root.appendingPathComponent("old.xls"))
         let xls = try await FileReadTool(rootPath: root).execute(argumentsJSON: Self.json(["path": "old.xls"]))
         #expect(Self.isFailure(xls))
         #expect(xls.contains(".xlsx"))
+    }
 
-        _ = try await FileWriteTool(rootPath: root).execute(
-            argumentsJSON: Self.json(["path": "plan.docx", "content": Self.markdown]))
-        let edit = try await FileEditTool(rootPath: root).execute(
-            argumentsJSON: Self.json(["path": "plan.docx", "old_string": "Rice", "new_string": "Oats"]))
-        #expect(Self.isFailure(edit))
-        #expect(edit.contains("file_write"))
+    @Test("file_write makes a .pptx from Markdown that file_read reads back")
+    func powerPointWrite() async throws {
+        let root = try Self.makeRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+        let deck = "# Pantry Plan\n\n- Rice\n- Lentils\n\n# Shopping\n\n- Oats\n"
+        let result = try await FileWriteTool(rootPath: root).execute(
+            argumentsJSON: Self.json(["path": "deck.pptx", "content": deck]))
+        #expect(!Self.isFailure(result), "\(result)")
+        #expect(result.contains("\"slides\":2"))
+        let text = try await FileReadTool(rootPath: root).execute(argumentsJSON: Self.json(["path": "deck.pptx"]))
+        #expect(text.contains("Lentils"), "\(text.prefix(300))")
     }
 
     @Test("file_search finds text inside documents with a locator")

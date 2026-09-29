@@ -72,10 +72,7 @@ enum FileWriteDocumentRouting {
     }
 
     static func target(forExtension ext: String) -> Target? {
-        // Intel: no PowerPoint writer yet (see the `.pptx` plan branch), so
-        // `.pptx` is not a write target; file_write refuses it with a pivot.
-        guard let target = Target(rawValue: ext.lowercased()), target != .pptx else { return nil }
-        return target
+        Target(rawValue: ext.lowercased())
     }
 
     // MARK: - Plan (shared by dry run and write)
@@ -160,12 +157,12 @@ enum FileWriteDocumentRouting {
                 security: .notInspected(formatId: "pptx", fileExtension: "pptx", sourceTrust: .generatedArtifact),
                 textFallback: content
             )
-            // Intel: PowerPoint output needs upstream's OOXML writer stack
-            // (PPTXEmitter/OOXMLText/ZipArchiveWriter), which arrived after
-            // #91. `target(forExtension:)` never returns `.pptx`, so this is
-            // unreachable until that stack is ported.
-            _ = document
-            throw RoutingError.missingEmitter("pptx")
+            let slides = PPTXEmitter.slides(fromMarkdown: content, fallbackTitle: title)
+            return Plan(
+                target: target,
+                document: document,
+                summary: ["input": "markdown", "slides": slides.count, "slide_titles": slides.prefix(30).map(\.title)]
+            )
         }
     }
 

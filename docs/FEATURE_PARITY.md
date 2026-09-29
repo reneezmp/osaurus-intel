@@ -122,8 +122,9 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
   reads-auto/changes-ask approvals, per-call deletes and sends, and plugin
   migration. Awaiting Rosy.
   See [`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
-- Upstream Privacy filtering, Browser Use/Computer Use, and rich document
-  generation remain absent. Each needs a separate Intel capability and
+- Rich document generation and in-place editing shipped 2026-09-29
+  (Word/Excel/PowerPoint/PDF). Upstream Privacy filtering and Browser
+  Use/Computer Use remain absent. Each needs a separate Intel capability and
   authorization design; the upstream audit records their commit slices.
 - **Full sweep 2026-09-29:** every upstream feature Intel lacks is listed,
   sized and ordered in [`INTEL_MISSING_FEATURES_BACKLOG.md`](INTEL_MISSING_FEATURES_BACKLOG.md)

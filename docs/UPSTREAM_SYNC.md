@@ -2170,3 +2170,36 @@ calling a sync complete.
   through `FileOperationLog` (new destination = create, overwrite =
   binary-safe write). The shared prompt template now points copies at
   `file_copy`. Re-sync note: do not overwrite this file with upstream's.
+
+### In-place document editing (#2907 part B + #2914 document slice) — 2026-09-29
+
+- Ported from upstream/main unchanged: `Services/Documents/DocumentEditService`,
+  `DocumentOperation`, `OOXML/{OOXMLPackage, OOXMLText, DOCXEditor, XLSXEditor,
+  XLSXFormula, PPTXEditor}`, `PDFEditor`, `PPTXEmitter`, `CSVEmitter`,
+  `Utils/ZipArchive.swift` (now with `ZipArchiveWriter`/`rewrite`; a superset
+  of Intel's reader), `Models/Chat/FileDiff.swift`, and the upstream
+  `FileWriteDocumentRouting` / `DocumentAdaptersBootstrap` (PowerPoint and
+  CSV/TSV emitters registered again).
+- `Services/FileHistory/FileDiffEngine.swift` is **trimmed**: only the pure
+  text/document diff. The journal-backed parts (`FileDiffContent`,
+  `diff(key:before:after:journal:)`) arrive with `W-file-history`.
+  `FileDiff` inlines the path-key synonyms from `SchemaValidator` (not
+  compiled on Intel yet).
+- Intel `FolderTools`: `file_edit` gains `operations` (upstream description
+  verbatim; free-form item schema on purpose), `dry_run`, and old/new text
+  matching across runs for .docx/.pptx; undo is logged through
+  `FileOperationLog` (binary-safe) before the staged swap. `file_read` gains
+  `mode: "structure"`. `file_write` writes `.pptx` from Markdown and refuses
+  `content` that is a `file_edit` operations array. The Intel folder
+  directive tells models to edit documents in place.
+- **Platform finding:** macOS 27's PDFKit drops a radio group's choice and
+  `/NeedAppearances` when it re-saves a filled form (reproduced natively on
+  arm64 — not Rosetta, not the port). `PDFEditor` already warns when the flag
+  is missing. `DocumentEditTests` marks those four checks as a known issue
+  on macOS ≥ 27 and runs them on older systems; Rosy (Ventura) must confirm
+  radio filling by hand.
+- Tests: upstream `DocumentEditTests` (28 of 32; the 4 dropped need the
+  journal, the argument normaliser or `SchemaValidator`) and
+  `ZipArchiveWriterTests`; Intel `IntelDocumentEditingTests`.
+  `FileWriteDocumentFormatsTests` was not ported (upstream test helpers and
+  journal); PowerPoint writing is covered in `IntelRichFolderFormatsTests`.
