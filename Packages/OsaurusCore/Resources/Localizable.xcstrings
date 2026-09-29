@@ -198,6 +198,22 @@
         }
       }
     },
+    "Allows the Music tools to control playback and browse your library in Music.app via Apple Events." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erlaubt den Musik-Tools, über Apple Events die Wiedergabe in der Musik-App zu steuern und deine Mediathek zu durchsuchen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许音乐工具通过 Apple 事件在“音乐”App 中控制播放并浏览你的资料库。"
+          }
+        }
+      }
+    },
     "Already have an identity on another Mac?" : {
       "localizations" : {
         "de" : {
@@ -338,6 +354,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动命名聊天"
+          }
+        }
+      }
+    },
+    "Automation (Music)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisierung (Musik)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动化（音乐）"
           }
         }
       }
@@ -1586,6 +1618,22 @@
         }
       }
     },
+    "Read, search and file mail; write drafts or send. macOS asks the first time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "E-Mails lesen, durchsuchen und ablegen; Entwürfe schreiben oder senden. macOS fragt beim ersten Mal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阅读、搜索和归档邮件；撰写草稿或发送。macOS 会在首次使用时询问。"
+          }
+        }
+      }
+    },
     "Reading runs on its own. Creating or changing anything asks you first, and deleting asks every time. What the agent reads passes through its cloud provider." : {
       "localizations" : {
         "de" : {
@@ -1748,6 +1796,22 @@
         }
       }
     },
+    "Search places, get directions and travel times, and find where this Mac is." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orte suchen, Routen und Fahrzeiten abrufen und den Standort dieses Macs finden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索地点、获取路线和行程时间，并查找这台 Mac 的位置。"
+          }
+        }
+      }
+    },
     "Search, read, create and add to notes. macOS asks the first time." : {
       "localizations" : {
         "de" : {
@@ -1760,6 +1824,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索、阅读、创建和补充备忘录。macOS 会在首次使用时询问。"
+          }
+        }
+      }
+    },
+    "See what's playing, control playback and play from your library. macOS asks the first time." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sehen, was läuft, die Wiedergabe steuern und aus deiner Mediathek abspielen. macOS fragt beim ersten Mal."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看正在播放的内容、控制播放并从你的资料库中播放。macOS 会在首次使用时询问。"
           }
         }
       }

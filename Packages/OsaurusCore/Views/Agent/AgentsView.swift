@@ -6002,21 +6002,25 @@ private struct IntelAppleAppsAbilitySection: View {
         request(Self.missingPermissions(for: app, states: permissions.permissionStates))
     }
 
-    /// Ask macOS for each missing permission (the system dialog, or System
-    /// Settings when macOS no longer shows one), then refresh the badges.
+    /// Ask macOS for each missing permission and wait for the answer. When
+    /// macOS no longer shows a dialog (already denied), open the matching
+    /// System Settings pane instead. Then refresh the badges.
     private func request(_ missing: [SystemPermission]) {
         guard !missing.isEmpty else { return }
         Task { @MainActor in
             for permission in missing {
                 let granted = await permissions.requestPermissionAndWait(permission)
-                if !granted { permissions.requestPermission(permission) }
+                if !granted, let url = permission.systemSettingsURL {
+                    NSWorkspace.shared.open(url)
+                }
             }
             permissions.refreshAllPermissions()
         }
     }
 
-    /// Permissions macOS reports as not granted. Automation (Notes) has no
-    /// silent probe, so macOS asks the first time the agent uses it instead.
+    /// Permissions macOS reports as not granted. Automation (Notes, Mail,
+    /// Music) has no silent probe, so macOS asks the first time the agent
+    /// uses the app instead.
     static func missingPermissions(
         for app: AppleApp, states: [SystemPermission: Bool]
     ) -> [SystemPermission] {
@@ -6029,6 +6033,9 @@ private struct IntelAppleAppsAbilitySection: View {
         case .reminders: return L("Read, add, complete and change reminders.")
         case .contacts: return L("Look up, add and update contacts.")
         case .notes: return L("Search, read, create and add to notes. macOS asks the first time.")
+        case .mail: return L("Read, search and file mail; write drafts or send. macOS asks the first time.")
+        case .maps: return L("Search places, get directions and travel times, and find where this Mac is.")
+        case .music: return L("See what's playing, control playback and play from your library. macOS asks the first time.")
         case .shortcuts: return L("List and run your shortcuts.")
         default: return ""
         }

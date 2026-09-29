@@ -83,26 +83,49 @@ releases so each app gets its own Ventura permission check before it ships.
   (`App/osaurus/osaurus.entitlements`, `Info.plist`): Apple Events,
   address book, calendars (+ Reminders string).
 
-### Privacy
+### Privacy (all releases)
 
 Every Intel model is remote, so anything a tool reads (event titles,
 contact details, note text) goes to the agent's cloud provider. The UI
 section says so.
 
-## Release 2 — Mail, Maps & Location, Music (planned)
+## Release 2 — Mail, Maps & Location, Music — shipped 2026-09-29 (awaiting Rosy)
 
-- Copy `AppleApps/Mail`, `Maps`, `Music` from upstream; add them to
-  `availableOnIntel` and the catalog; restore their permissions in
-  `AppleApp.systemPermissions` (Music automation, Mail automation,
-  Location).
-- Mail's send path needs `ArgumentAwarePerCallApprovalTool` (a draft can be
-  pre-approved; `send: true` must ask every time). Port that protocol and
-  check it in `ToolRegistry.requiresApprovalEveryCall(name, argumentsJSON:)`.
-- Bring back the Maps/Location test suites removed from
-  `AppleToolExecutionTests.swift` and the Mail/Music script tests.
-- Check `CLLocationManager` authorization on Ventura and MapKit APIs
-  newer than macOS 13.
-- Guidance: re-add the Mail line from upstream.
+- Copied `AppleApps/Mail`, `Maps`, `Music` from upstream/main and added them
+  to `availableOnIntel` and the catalog. Their `osaurus.*` plugins are now
+  superseded.
+- **Mail sends ask every time.** Ported `ArgumentAwarePerCallApprovalTool`:
+  `mail_compose` / `mail_reply` drafts follow the normal Ask/Always Allow
+  policy, but `send: true` always shows the card (no Always Allow).
+  `ToolRegistry.effectivePolicy(for:argumentsJSON:)` is now the single
+  per-call answer; both CloudChatEngine approval sites and
+  `ToolPermissionPromptService` use it. **Any new approval site must call it
+  too**, never the bare `policyInfo(for:).effectivePolicy`.
+- **Music automation permission** (`SystemPermission.automationMusic`) added
+  to Intel's older permission model, with an Apple Events probe
+  (`debugTestAppAccess(appName:)`, shared with Mail). Like Notes and Mail,
+  the UI does not show a missing badge for it; macOS asks on first use.
+- **Location:** ported upstream's `requestLocationAuthorizationAndWait`
+  (waits for the user's answer, 120 s cap; returns `.denied` under tests
+  so no dialog ever appears there), `isLocationAuthorized` (accepts
+  `.authorized` and `.authorizedAlways`) and `locationAuthorizationStatus`.
+  `requestPermissionAndWait(.location)` now waits too. When macOS no longer
+  shows a dialog (already denied), the UI opens the System Settings pane.
+- **MapKit `regionPriority = .required` is macOS 15+.** On Ventura/Sonoma
+  `MapKitMapsService.regionFallbackFilter` drops search results farther than
+  4× the requested radius (at least 25 km) from `near`, since MapKit may
+  otherwise rank by the Mac's own location (upstream saw results 600 km away).
+- **Migration clash fixed:** `search_messages` ships in both the Mail and
+  Messages plugins. While Messages is still a plugin on Intel, migrating
+  Mail leaves names an installed not-yet-native plugin serves. The launch
+  scan is now `installedAppleAppPluginIds` (all Apple plugins), and
+  `migrate(…, apps:)` maps only the pending apps. Upgrading from Release 1
+  sweeps only Mail/Maps/Music plugins and notices only those apps.
+- Tests restored: upstream Maps argument contracts (run through the tool body
+  directly, as Intel has no schema validator), `MailScriptsTests`,
+  `MusicScriptsTests`, `AppleLocationGateTests`; Intel cases for Mail send
+  approval, permissions, the Maps fallback filter, the clash and the
+  Release 1 upgrade.
 
 ## Release 3 — Messages (planned)
 
@@ -113,5 +136,5 @@ section says so.
 
 ## Rosy checklist
 
-See "Native Apple apps, Release 1" in
+See "Native Apple apps, Release 1" and "…, Release 2" in
 [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md).

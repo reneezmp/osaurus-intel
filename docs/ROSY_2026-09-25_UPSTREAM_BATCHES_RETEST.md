@@ -499,3 +499,29 @@ delete what you create afterwards.
       Contacts/Notes plugins: after the first launch a toast says they're
       built in now, agents that used them already have the app switched on,
       and the toast does not come back on the next launch.
+
+## Native Apple apps, Release 2 (Mail, Maps & Location, Music)
+
+Same test agent. Items that talk to the model are **(paid)**. Mail sends go
+to a real address, so use your own.
+
+- [ ] Overview › Apple Apps now also lists Mail, Maps & Location and Music.
+- [ ] Switch on Maps & Location: macOS asks for Location access and the app
+      waits for your answer. If you already denied it, **Allow Access…**
+      opens System Settings › Location Services.
+- [ ] **(paid)** "Where am I?" and "How long to drive to <a nearby place>?"
+      return sensible answers.
+- [ ] **(paid)** "Find cafés near <a place in your city>": results are local
+      (not in another state). Ventura has no strict region option, so this
+      checks the Intel distance filter.
+- [ ] **(paid)** Mail: "list my last 5 emails" (macOS asks once to let
+      Osaurus control Mail), then "draft a reply to the newest one": an
+      approval card appears, then a draft opens in Mail and nothing is sent.
+- [ ] **(paid)** "Send a test email to <your address>": the card appears and
+      has **no Always Allow**. Choose Always Allow on a later *draft*, then
+      ask it to send one: the send still shows a card.
+- [ ] **(paid)** Music: "what's playing?", "pause", "play <a playlist>"
+      (macOS asks once to let Osaurus control Music; changes ask first).
+- [ ] If the old osaurus-tools Mail/Maps/Music plugins were installed: one
+      toast after the first launch names only the new apps; agents that
+      used their tools have them switched on.

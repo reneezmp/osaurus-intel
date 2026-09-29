@@ -52,10 +52,10 @@ enum ToolPermissionPromptService {
         defer { releasePresentationSlot() }
         // Revalidate after waiting: a sibling prompt may have chosen Always
         // Allow (or the user changed the policy) while this one was queued.
-        switch ToolRegistry.shared.policyInfo(for: toolName)?.effectivePolicy {
-        case .auto?: return true
-        case .deny?: return false
-        default: break
+        switch ToolRegistry.shared.effectivePolicy(for: toolName, argumentsJSON: argumentsJSON) {
+        case .auto: return true
+        case .deny: return false
+        case .ask: break
         }
         if Task.isCancelled { return false }
         return await presentApproval(
@@ -107,7 +107,8 @@ enum ToolPermissionPromptService {
                 onAllow: onAllow,
                 onDeny: onDeny,
                 onAlwaysAllow: onAlwaysAllow,
-                allowsAlwaysAllow: !ToolRegistry.shared.requiresApprovalEveryCall(toolName)
+                allowsAlwaysAllow: !ToolRegistry.shared.requiresApprovalEveryCall(
+                    toolName, argumentsJSON: argumentsJSON)
             )
             .environment(\.theme, themeManager.currentTheme)
 

@@ -157,6 +157,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             return checkCalendarAutomationPermission()
         case .automationMail:
             return checkMailPermission()
+        case .automationMusic:
+            return permissionStates[.automationMusic] ?? false
         case .calendar:
             return checkCalendarPermission()
         case .reminders:
@@ -206,7 +208,7 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             return AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
         case .screenRecording:
             return SystemPermissionProbe.screenRecordingGranted()
-        case .location, .automation, .automationCalendar, .automationMail, .notes, .maps:
+        case .location, .automation, .automationCalendar, .automationMail, .automationMusic, .notes, .maps:
             return nil
         }
     }
@@ -303,6 +305,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
             requestCalendarAutomationPermission()
         case .automationMail:
             requestMailPermission()
+        case .automationMusic:
+            requestMusicPermission()
         case .calendar:
             requestCalendarPermission()
         case .reminders:
@@ -342,9 +346,8 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
         case .microphone:
             granted = await AVCaptureDevice.requestAccess(for: .audio)
         case .location:
-            requestLocationPermission()
-            return checkLocationPermission()
-        case .automation, .automationCalendar, .automationMail, .notes, .maps:
+            return Self.isLocationAuthorized(await requestLocationAuthorizationAndWait())
+        case .automation, .automationCalendar, .automationMail, .automationMusic, .notes, .maps:
             requestPermission(permission)
             return permissionStates[permission] ?? false
         case .accessibility, .disk, .screenRecording:
@@ -448,20 +451,66 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
 
     // MARK: - Location Permission
 
+    /// Longest `requestLocationAuthorizationAndWait` waits for the user to
+    /// answer the system dialog (upstream, for the built-in Maps tools). The
+    /// dialog has no timeout of its own; this only bounds a user who walked away.
+    static let locationDialogTimeout: TimeInterval = 120
+
+    /// `.authorized` is macOS's legacy spelling of `.authorizedAlways`.
+    nonisolated static func isLocationAuthorized(_ status: CLAuthorizationStatus) -> Bool {
+        status == .authorizedAlways || status == .authorized
+    }
+
+    /// Current Location authorization via the single shared manager.
+    var locationAuthorizationStatus: CLAuthorizationStatus {
+        if RuntimeEnvironment.isUnderTests { return .denied }
+        return locationManager.authorizationStatus
+    }
+
     private func checkLocationPermission() -> Bool {
-        let status = locationManager.authorizationStatus
-        return status == .authorizedAlways
+        Self.isLocationAuthorized(locationManager.authorizationStatus)
     }
 
     private func requestLocationPermission() {
         locationManager.requestAlwaysAuthorization()
     }
 
+    /// Pending `requestLocationAuthorizationAndWait` callers, resumed once the
+    /// status leaves `.notDetermined` (or by their own timeout).
+    private var locationAuthorizationWaiters: [UUID: CheckedContinuation<CLAuthorizationStatus, Never>] = [:]
+
+    /// Show the Location dialog (when still undecided) and wait for the
+    /// user's answer instead of sampling the status right away.
+    func requestLocationAuthorizationAndWait(timeout: TimeInterval = locationDialogTimeout) async -> CLAuthorizationStatus {
+        if RuntimeEnvironment.isUnderTests { return .denied }
+        let current = locationManager.authorizationStatus
+        guard current == .notDetermined else { return current }
+        let token = UUID()
+        let status: CLAuthorizationStatus = await withCheckedContinuation { continuation in
+            locationAuthorizationWaiters[token] = continuation
+            Task { @MainActor [weak self] in
+                try? await Task.sleep(nanoseconds: UInt64(max(timeout, 0) * 1_000_000_000))
+                guard let self, let pending = self.locationAuthorizationWaiters.removeValue(forKey: token) else { return }
+                pending.resume(returning: self.locationManager.authorizationStatus)
+            }
+            requestLocationPermission()
+        }
+        setPermission(.location, isGranted: Self.isLocationAuthorized(status))
+        return status
+    }
+
+    private func resumeLocationWaiters(with status: CLAuthorizationStatus) {
+        guard status != .notDetermined, !locationAuthorizationWaiters.isEmpty else { return }
+        let pending = locationAuthorizationWaiters
+        locationAuthorizationWaiters.removeAll()
+        for continuation in pending.values { continuation.resume(returning: status) }
+    }
+
     nonisolated func locationManagerDidChangeAuthorization(_ manager: CLLocationManager) {
         let status = manager.authorizationStatus
         Task { @MainActor in
-            let granted = status == .authorizedAlways
-            self.setPermission(.location, isGranted: granted)
+            self.setPermission(.location, isGranted: Self.isLocationAuthorized(status))
+            self.resumeLocationWaiters(with: status)
         }
     }
 
@@ -605,6 +654,26 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
 
             if !granted {
                 self.openSystemSettings(for: .automationMail)
+            }
+        }
+    }
+
+    // MARK: - Music Automation Permission
+
+    /// Same shape as Mail: probe Music.app over Apple Events (this is what
+    /// shows the macOS "control Music" prompt), open Settings when denied.
+    private func requestMusicPermission() {
+        Task { @MainActor in
+            if permissionStates[.automationMusic] == true {
+                refreshAllPermissions()
+                return
+            }
+            let granted: Bool = await Task.detached {
+                SystemPermissionService.debugTestAppAccess(appName: "Music").hasPrefix("SUCCESS")
+            }.value
+            setPermission(.automationMusic, isGranted: granted)
+            if !granted {
+                self.openSystemSettings(for: .automationMusic)
             }
         }
     }
@@ -1060,9 +1129,15 @@ final class SystemPermissionService: NSObject, ObservableObject, CLLocationManag
 
     /// Debug function to test if Mail access works via AppleScript.
     nonisolated static func debugTestMailAccess() -> String {
+        debugTestAppAccess(appName: "Mail")
+    }
+
+    /// `tell application <appName> to return name` — the Apple Events probe
+    /// shared by Mail and Music. Launches the app if needed.
+    nonisolated static func debugTestAppAccess(appName: String) -> String {
         let script = NSAppleScript(
             source: """
-                tell application "Mail"
+                tell application "\(appName)"
                     return name
                 end tell
                 """

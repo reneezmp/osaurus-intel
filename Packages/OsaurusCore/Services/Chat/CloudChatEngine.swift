@@ -820,7 +820,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
-                                let policy = ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
+                                let policy = ToolRegistry.shared.effectivePolicy(
+                                    for: call.name, argumentsJSON: call.arguments)
                                 let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                                 let approved: Bool
                                 switch policy {
@@ -1017,8 +1018,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Enforce the user's per-tool permission policy
                             // (Tools / Permissions tab). Deny blocks the tool;
                             // Ask shows a confirmation before running; Auto runs.
-                            let policy =
-                                ToolRegistry.shared.policyInfo(for: call.name)?.effectivePolicy ?? .auto
+                            let policy = ToolRegistry.shared.effectivePolicy(
+                                for: call.name, argumentsJSON: call.arguments)
                             let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                             let approved: Bool
                             switch policy {

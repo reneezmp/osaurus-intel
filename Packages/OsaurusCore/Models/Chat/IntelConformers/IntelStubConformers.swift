@@ -1398,6 +1398,24 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         (toolsByName[name] as? any PerCallApprovalTool)?.requiresApprovalEveryCall == true
     }
 
+    /// Per-call check for one concrete call: static per-call tools, plus
+    /// `ArgumentAwarePerCallApprovalTool`s whose arguments demand it (for
+    /// example `mail_compose` with `send: true`).
+    func requiresApprovalEveryCall(_ name: String, argumentsJSON: String) -> Bool {
+        if requiresApprovalEveryCall(name) { return true }
+        return (toolsByName[name] as? any ArgumentAwarePerCallApprovalTool)?
+            .requiresApprovalEveryCall(argumentsJSON: argumentsJSON) == true
+    }
+
+    /// The policy that applies to this exact call: the tool's effective
+    /// policy, raised from Auto to Ask when the call must be approved every
+    /// time. Every approval site uses this, never the bare policy.
+    func effectivePolicy(for name: String, argumentsJSON: String) -> ToolPermissionPolicy {
+        let policy = policyInfo(for: name)?.effectivePolicy ?? .auto
+        if policy == .auto, requiresApprovalEveryCall(name, argumentsJSON: argumentsJSON) { return .ask }
+        return policy
+    }
+
     func handlesOwnApproval(for name: String) -> Bool {
         (toolsByName[name] as? any PermissionedTool)?.handlesOwnApproval == true
     }

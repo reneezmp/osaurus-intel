@@ -43,7 +43,7 @@ The near-term implementation queue is MCP argument and canonical-name safety,
 chat-history migration, schedule slot accounting, Core Model fallback,
 theme/attachment/window fixes, and remaining hosted-model catalog/profile
 work. Rich folder formats (shipped 2026-09-29), native Apple app tools
-(Release 1 shipped 2026-09-29, see `APPLE_APPS_INTEL_PLAN.md`),
+(Releases 1–2 shipped 2026-09-29, see `APPLE_APPS_INTEL_PLAN.md`),
 n8n/Channels, Workspaces, native subagents, and computer use remain
 feasible staged projects with
 explicit backend and Ventura gates. Their product states and order are in
@@ -2002,3 +2002,17 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   pre-check; the plan doc records how each is covered.
 - Migration markers are per app so later releases migrate their own plugins;
   only shipped apps' `osaurus.*` plugins are superseded.
+
+### Native Apple apps, Release 2 (Mail, Maps, Music) — 2026-09-29
+
+- Copied upstream `AppleApps/Mail`, `Maps`, `Music`; details in
+  [`APPLE_APPS_INTEL_PLAN.md`](APPLE_APPS_INTEL_PLAN.md).
+- **Approval rule:** every approval site must use
+  `ToolRegistry.effectivePolicy(for:argumentsJSON:)`, which folds in
+  per-call and argument-aware per-call tools (Mail `send: true`).
+- **Ventura gaps covered:** `MKLocalSearch.Request.regionPriority` is
+  macOS 15+ (Intel filters far results instead), and Intel's older
+  `SystemPermissionService` gained upstream's awaited Location request and
+  a Music automation permission.
+- The plugin migration now scans every installed Apple plugin so names a
+  still-loading plugin serves (Messages' `search_messages`) are not stripped.

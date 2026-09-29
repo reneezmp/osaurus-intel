@@ -118,7 +118,8 @@ public enum AppleAppsPluginMigration {
     /// Messages plugins: Messages wins when installed, Mail only when the
     /// Messages plugin is not.
     nonisolated static func legacyMap(
-        installedPluginIds: Set<String>
+        installedPluginIds: Set<String>,
+        apps: Set<AppleApp> = Set(AppleApp.availableOnIntel)
     ) -> [String: (app: AppleApp, native: String)] {
         var map: [String: (app: AppleApp, native: String)] = [:]
         // Deterministic precedence: apply Mail first so Messages overwrites
@@ -132,11 +133,21 @@ public enum AppleAppsPluginMigration {
             // Intel: only apps shipped natively so far; the others' plugins
             // still load and keep their names.
             guard let app = AppleApp.app(forSupersededPlugin: pluginId), app.isAvailableOnIntel,
+                apps.contains(app),
                 let names = AppleApp.legacyPluginToolNamesByPlugin[pluginId]
             else { continue }
             for (legacy, native) in names {
                 map[legacy] = (app, native)
             }
+        }
+        // Intel: a name also shipped by an installed plugin whose app is not
+        // native yet (e.g. `search_messages` from osaurus.messages while
+        // Messages waits for Release 3) stays: that plugin still serves it.
+        for pluginId in installedPluginIds {
+            guard let app = AppleApp.app(forSupersededPlugin: pluginId), !app.isAvailableOnIntel,
+                let names = AppleApp.legacyPluginToolNamesByPlugin[pluginId]
+            else { continue }
+            for legacy in names.keys { map.removeValue(forKey: legacy) }
         }
         return map
     }
@@ -146,13 +157,17 @@ public enum AppleAppsPluginMigration {
     /// (a second pass finds no legacy names). Any Apple native name that
     /// somehow sits in `manualToolNames` is stripped as well (picker
     /// invariant). The Default agent is returned unchanged.
-    nonisolated public static func migrate(agent: Agent, installedPluginIds: Set<String>) -> Outcome {
+    nonisolated public static func migrate(
+        agent: Agent,
+        installedPluginIds: Set<String>,
+        apps: Set<AppleApp> = Set(AppleApp.availableOnIntel)
+    ) -> Outcome {
         guard agent.id != Agent.defaultId, let names = agent.manualToolNames, !names.isEmpty,
             !installedPluginIds.isEmpty
         else {
             return Outcome(agent: agent, changed: false, enabledApps: [], renamedTools: [:])
         }
-        let mapping = legacyMap(installedPluginIds: installedPluginIds)
+        let mapping = legacyMap(installedPluginIds: installedPluginIds, apps: apps)
         var renamed: [String: String] = [:]
         var apps: Set<AppleApp> = []
         var next: [String] = []
@@ -215,15 +230,15 @@ public enum AppleAppsPluginMigration {
         let pending = Set(AppleApp.availableOnIntel).subtracting(config.migratedApps)
         guard !pending.isEmpty else { return [] }
 
-        // Only plugins whose app is pending; apps migrated by an earlier
-        // release are never swept again.
-        let installed = (installedPluginIds ?? PluginManager.installedSupersededAppleAppPluginIds())
-            .filter { AppleApp.app(forSupersededPlugin: $0).map(pending.contains) ?? false }
+        // Only apps still pending are mapped (an earlier release's apps are
+        // never swept again); the full installed set is passed so names a
+        // still-loading plugin serves are left alone.
+        let installed = installedPluginIds ?? PluginManager.installedAppleAppPluginIds()
         let source = agents ?? AgentManager.shared.agents
         var migrated: [String] = []
         var allPersisted = true
         for agent in source {
-            let outcome = migrate(agent: agent, installedPluginIds: installed)
+            let outcome = migrate(agent: agent, installedPluginIds: installed, apps: pending)
             guard outcome.changed else { continue }
             do {
                 if let persist {
@@ -255,7 +270,7 @@ public enum AppleAppsPluginMigration {
             // Agent files live in the storage root; wait for the headless
             // storage migration like the database openers do.
             StorageMigrationCoordinator.blockingAwaitReady()
-            return PluginManager.installedSupersededAppleAppPluginIds()
+            return PluginManager.installedAppleAppPluginIds()
         }.value
         let migratedAgents = migrateIfNeeded(installedPluginIds: installed)
         showSupersededNoticeIfNeeded(installedPluginIds: installed, migratedAgents: migratedAgents)

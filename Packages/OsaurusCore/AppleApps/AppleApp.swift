@@ -69,11 +69,11 @@ public enum AppleApp: String, CaseIterable, Codable, Sendable, Hashable {
         case .contacts: return [.contacts]
         case .notes: return [.notes]
         case .mail: return [.automationMail]
-        // Intel: Messages/Music automation permissions arrive with their
-        // releases (R3/R2); these apps are not offered before then.
+        // Intel: Messages' automation permission arrives with Release 3;
+        // the app is not offered before then.
         case .messages: return [.disk]
         case .maps: return [.location]
-        case .music: return []
+        case .music: return [.automationMusic]
         case .shortcuts: return []
         }
     }
@@ -131,7 +131,9 @@ public enum AppleApp: String, CaseIterable, Codable, Sendable, Hashable {
     /// Apps shipped on Intel so far (staged: docs/APPLE_APPS_INTEL_PLAN.md).
     /// Only these are offered in the agent editor, gated in prompts, and
     /// registered as tools.
-    public static let availableOnIntel: [AppleApp] = [.calendar, .reminders, .contacts, .notes, .shortcuts]
+    public static let availableOnIntel: [AppleApp] = [
+        .calendar, .reminders, .contacts, .notes, .mail, .maps, .music, .shortcuts,
+    ]
 
     public var isAvailableOnIntel: Bool { Self.availableOnIntel.contains(self) }
 

@@ -272,8 +272,123 @@ struct ShortcutsToolExecutionTests {
     }
 }
 
-// Intel: the Messages and Maps suites arrive with their staged releases
+// Intel: the Messages suites arrive with Release 3
 // (docs/APPLE_APPS_INTEL_PLAN.md).
+
+// MARK: - Maps argument contracts (from live proof)
+
+private final class FakeMapsService: MapsServicing, @unchecked Sendable {
+    var lastSearch: (query: String, near: MapsSearchRegion?)?
+    var lastETA: (from: MapsPlaceReference, to: MapsPlaceReference, transport: MapsTransportType)?
+    var lastDirections: (from: MapsPlaceReference, to: MapsPlaceReference, transport: MapsTransportType)?
+
+    func currentLocation() async throws -> CurrentLocationInfo { throw AppleToolError.unavailable("no location in tests") }
+    func geocode(_ address: String, limit: Int) async throws -> [PlaceInfo] { [] }
+    func reverseGeocode(_ coordinate: GeoCoordinate) async throws -> [PlaceInfo] { [] }
+    func search(_ query: String, near: MapsSearchRegion?, limit: Int) async throws -> [PlaceInfo] {
+        lastSearch = (query, near)
+        return []
+    }
+    func explore(category: String, near: MapsSearchRegion, limit: Int) async throws -> [PlaceInfo] { [] }
+    func directions(from: MapsPlaceReference, to: MapsPlaceReference, transport: MapsTransportType, alternatives: Bool) async throws -> [RouteInfo] {
+        lastDirections = (from, to, transport)
+        return []
+    }
+    func eta(from: MapsPlaceReference, to: MapsPlaceReference, transport: MapsTransportType) async throws -> ETAInfo {
+        lastETA = (from, to, transport)
+        return ETAInfo(expectedTravelSeconds: 800, distanceMeters: 14_000, transportType: transport.rawValue, expectedDeparture: nil, expectedArrival: nil)
+    }
+}
+
+/// Intel: no pre-dispatch schema validator (upstream `SchemaValidator` is not
+/// compiled), so the registry runs the tool body directly; the tools' own
+/// argument parsing is the contract under test.
+private func validated(_ tool: OsaurusTool, _ argsJSON: String) async throws -> String {
+    try await tool.execute(argumentsJSON: argsJSON)
+}
+
+@Suite("Apple tools: Maps argument contracts")
+struct MapsToolArgumentContractTests {
+
+    @Test("maps_eta / maps_directions accept `driving` and place objects at the schema layer")
+    func drivingAliasAndPlaceObjects() async throws {
+        let fake = FakeMapsService()
+        let eta = MapsETATool(service: fake)
+
+        // The word models actually use for `automobile`.
+        _ = try result(await validated(eta, #"{"from":"37.33,-122.0","to":"San Jose, CA","mode":"driving"}"#))
+        #expect(fake.lastETA?.transport == .automobile)
+        #expect(fake.lastETA?.from == .coordinate(GeoCoordinate(latitude: 37.33, longitude: -122.0)))
+        #expect(fake.lastETA?.to == .query("San Jose, CA"))
+
+        // `{latitude, longitude}` objects pass validation and parse to coordinates.
+        _ = try result(await validated(eta, #"{"from":{"latitude":37.3349,"longitude":-122.009},"to":{"latitude":37.3377,"longitude":-121.8875}}"#))
+        #expect(fake.lastETA?.to == .coordinate(GeoCoordinate(latitude: 37.3377, longitude: -121.8875)))
+
+        // A place echoed back from a previous result: `{name, coordinate: {…}}`.
+        let echoed = try result(await validated(eta, #"{"from":{"name":"Espresso Bar","coordinate":{"latitude":37.3361,"longitude":-122.0105}},"to":"San Jose, CA"}"#))
+        #expect(fake.lastETA?.from == .coordinate(GeoCoordinate(latitude: 37.3361, longitude: -122.0105)))
+        let etaPayload = try #require(echoed["eta"] as? [String: Any])
+        #expect(etaPayload["expectedTravelText"] as? String == "13 min")
+        #expect(etaPayload["distanceText"] as? String == "14.0 km (8.7 mi)")
+        #expect(MapsFormatting.duration(20) == "under a minute")
+        #expect(MapsFormatting.duration(7_500) == "2 h 5 min")
+        #expect(MapsFormatting.distance(420) == "420 m")
+
+        // Missing `from` → current location; `transit` only where MapKit supports it.
+        _ = try result(await validated(eta, #"{"to":"Cupertino","mode":"transit"}"#))
+        #expect(fake.lastETA?.from == .currentLocation)
+        #expect(fake.lastETA?.transport == .transit)
+
+        let directions = MapsDirectionsTool(service: fake)
+        let rejected = try envelope(await validated(directions, #"{"to":"Cupertino","mode":"transit"}"#))
+        #expect(rejected["ok"] as? Bool == false)
+        _ = try result(await validated(directions, #"{"to":"Cupertino","mode":"driving"}"#))
+        #expect(fake.lastDirections?.transport == .automobile)
+    }
+
+    @Test("maps_search forwards the `near` region with a clamped radius")
+    func nearRegion() async throws {
+        let fake = FakeMapsService()
+        let tool = MapsSearchTool(service: fake)
+        _ = try result(await validated(tool, #"{"query":"coffee","near":{"latitude":37.3349,"longitude":-122.009,"radius_meters":2000}}"#))
+        #expect(fake.lastSearch?.near == MapsSearchRegion(center: GeoCoordinate(latitude: 37.3349, longitude: -122.009), radiusMeters: 2000))
+        _ = try result(await validated(tool, #"{"query":"coffee","near":{"latitude":0,"longitude":0,"radius_meters":999999}}"#))
+        #expect(fake.lastSearch?.near?.radiusMeters == 50_000)
+        _ = try result(await validated(tool, #"{"query":"coffee"}"#))
+        #expect(fake.lastSearch?.near == nil)
+    }
+
+    @Test("out-of-range \"lat,lng\" strings and objects are invalid_args, never a MapKit region crash")
+    func coordinateRangeValidation() async throws {
+        let fake = FakeMapsService()
+        let eta = MapsETATool(service: fake)
+        let bad = try envelope(await validated(eta, #"{"from":"500,900","to":"San Jose, CA"}"#))
+        #expect(bad["ok"] as? Bool == false)
+        #expect(bad["kind"] as? String == "invalid_args")
+        #expect(bad["field"] as? String == "from")
+        #expect(fake.lastETA == nil)
+
+        let badObject = try envelope(await validated(eta, #"{"from":{"latitude":91,"longitude":0},"to":"San Jose, CA"}"#))
+        #expect(badObject["kind"] as? String == "invalid_args")
+
+        let search = MapsSearchTool(service: fake)
+        let badNear = try envelope(await validated(search, #"{"query":"coffee","near":{"latitude":37,"longitude":-181}}"#))
+        #expect(badNear["kind"] as? String == "invalid_args")
+        #expect(fake.lastSearch == nil)
+    }
+
+    @Test("maps_open uses dirflg=c for cycling and d/w/r for the others")
+    func dirflg() throws {
+        for (mode, flag) in [("cycling", "c"), ("driving", "d"), ("walking", "w"), ("transit", "r"), ("automobile", "d")] {
+            let url = try MapsOpenTool.buildURL(["directions_to": "Cupertino", "mode": mode]).absoluteString
+            #expect(url.contains("dirflg=\(flag)"), "\(mode) → \(url)")
+            #expect(url.contains("daddr=Cupertino"))
+        }
+        let pin = try MapsOpenTool.buildURL(["latitude": 37.33, "longitude": -122.0]).absoluteString
+        #expect(pin.contains("ll=37.33,-122.0"))
+    }
+}
 
 // MARK: - Contacts argument contracts
 

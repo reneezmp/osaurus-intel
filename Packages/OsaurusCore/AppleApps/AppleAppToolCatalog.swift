@@ -18,8 +18,10 @@ enum AppleAppToolCatalog {
         tools += RemindersToolFactory.makeTools()
         tools += ContactsToolFactory.makeTools()
         tools += NotesToolFactory.makeTools()
-        // Intel Release 2 adds Mail, Maps and Music; Release 3 adds Messages
-        // (docs/APPLE_APPS_INTEL_PLAN.md).
+        tools += MailToolFactory.makeTools()
+        // Intel Release 3 adds Messages (docs/APPLE_APPS_INTEL_PLAN.md).
+        tools += MapsToolFactory.makeTools()
+        tools += MusicToolFactory.makeTools()
         tools += ShortcutsToolFactory.makeTools()
         return tools
     }

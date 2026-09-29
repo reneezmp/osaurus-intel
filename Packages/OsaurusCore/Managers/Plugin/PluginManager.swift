@@ -1601,16 +1601,23 @@ public final class PluginManager: ObservableObject {
         Set(AppleApp.availableOnIntel.compactMap(\.supersededPluginId))
     }
 
-    /// Superseded Apple app plugins whose folder is still installed under
-    /// `Tools/` (a version directory or `current` link inside). The plugin
-    /// → native migration keys off this: legacy names like `create_note`
-    /// are only rewritten when the plugin that shipped them was installed.
-    /// Synchronous file I/O; `root` is a test seam.
+    /// Superseded Apple app plugins whose folder is still installed.
     nonisolated static func installedSupersededAppleAppPluginIds(toolsRoot root: URL? = nil) -> Set<String> {
+        installedAppleAppPluginIds(toolsRoot: root).intersection(supersededAppleAppPluginIds)
+    }
+
+    /// Every osaurus-tools Apple app plugin (shipped natively on Intel or
+    /// not) whose folder is still installed under `Tools/` (a version
+    /// directory or `current` link inside). The plugin → native migration
+    /// keys off this: legacy names like `create_note` are only rewritten
+    /// when the plugin that shipped them was installed, and never while a
+    /// still-loading plugin (an app not shipped yet) also provides the name.
+    /// Synchronous file I/O; `root` is a test seam.
+    nonisolated static func installedAppleAppPluginIds(toolsRoot root: URL? = nil) -> Set<String> {
         let root = root ?? OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
         let fm = FileManager.default
         var installed: Set<String> = []
-        for pluginId in supersededAppleAppPluginIds {
+        for pluginId in AppleApp.allCases.compactMap(\.supersededPluginId) {
             let dir = root.appendingPathComponent(pluginId, isDirectory: true)
             var isDir: ObjCBool = false
             guard fm.fileExists(atPath: dir.path, isDirectory: &isDir), isDir.boolValue else { continue }
