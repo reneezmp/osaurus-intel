@@ -636,3 +636,12 @@ and each self-scheduled wake is another paid run.
       including tool calls. The zip also carries any attachments.
 - [ ] On the options page, turn on timestamps and token usage: the Markdown
       shows times and "tok / tok/s" next to replies.
+
+## file_copy
+
+With a working folder, **(paid)**:
+
+- [ ] "Make a copy of report.pdf called report-draft.pdf": the copy opens in
+      Preview and is identical; the agent used `file_copy` (not `cp`).
+- [ ] Ask it to copy another file over an existing one: it asks/uses
+      overwrite; then undo the file change: the original file comes back.

@@ -614,7 +614,8 @@ public enum SystemPromptTemplates {
         - Search: `file_search` for content (case-insensitive substring), or `target:"files"` to find files by name (case-insensitive substring, e.g. `q4`).
         - Find a file by name: use `file_search` with `target:"files"` and a short distinctive token from the name (not the whole phrase).
         - Edit: `file_edit` for targeted in-place edits, `file_write` for new files or full rewrites.
-        - Shell: `shell_run` for `mv` / `cp` / `rm` / `mkdir` (write/exec ops are logged and undoable).
+        - Copy a file: `file_copy` (binary-safe, undoable).
+        - Shell: `shell_run` for `mv` / `rm` / `mkdir` (write/exec ops are logged and undoable).
         """
 
     /// Folder-mode-specific reminder: filesystem changes ARE visible to

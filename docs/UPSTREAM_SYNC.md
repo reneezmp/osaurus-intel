@@ -2160,3 +2160,13 @@ calling a sync complete.
   callback `begin`; per-call tool durations are not recorded on Intel;
   repeated-call detection uses a local sorted-key JSON canonicalizer until
   `AgentTaskState` is ported.
+
+### `file_copy` — 2026-09-29
+
+- Intel had removed `file_copy` "by design" (use `shell_run cp`), but a shell
+  copy bypasses undo. `Folder/FileCopyTool.swift` is an Intel version of
+  upstream's tool (same arguments, 512 MB cap, staged atomic overwrite)
+  without upstream's VM-sandbox routing or file-change journal: undo goes
+  through `FileOperationLog` (new destination = create, overwrite =
+  binary-safe write). The shared prompt template now points copies at
+  `file_copy`. Re-sync note: do not overwrite this file with upstream's.

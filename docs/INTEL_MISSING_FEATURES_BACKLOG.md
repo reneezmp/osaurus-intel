@@ -60,7 +60,7 @@ feature had been labelled before this sweep.
 | `W-methods` | Methods (saved procedures) | — | ~~Silently absent~~ **Re-checked 2026-09-29: retired upstream.** Upstream removed method creation (`MethodTools.swift`) in April 2026 (#893, "Deprecate Work Mode"); `upstream/main` only lets `capabilities_load` find methods saved by older upstream builds. Intel never had methods, so an Intel port would be an empty database nothing can fill. | Nothing to port on its own. If `W-tool-discovery` is ported, its search simply returns no method hits. Revisit only if upstream brings method creation back. |
 | `W-tool-discovery` | Automatic tool discovery (semantic search over tools/skills, `capabilities_search`/`capabilities_load`, session tool state) | M (4.9k) | Silently absent: Intel "Auto" mode sends every tool. | Port the index/search; embeddings via Intel's local embedder. |
 | `W-description-backfill` | Background fill of missing agent descriptions | S (0.2k) | Omitted (automatic paid calls). | **Shipped 2026-09-29** as an opt-in switch, off by default (Settings › Chat › Agent Descriptions), including #2897 stale-prompt handling and #2898 purposes in agent lists. |
-| `W-doc-editing` | In-place .docx/.xlsx/.pptx/.pdf editing, PDF form filling, `.pptx` writing, business-document and CSV workflows, `file_copy` | L (6.6k) | #2907 part B staged; `file_copy` "removed by design". | Plan in [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md). `file_copy` returns (copying binaries through `shell_run cp` bypasses undo). |
+| `W-doc-editing` | In-place .docx/.xlsx/.pptx/.pdf editing, PDF form filling, `.pptx` writing, business-document and CSV workflows | L (6.6k) | #2907 part B staged. | Plan in [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md). **`file_copy` shipped 2026-09-29** (Intel host-folder version with undo). |
 | `W-chat-export` | Export chats (Markdown, PDF, zip with attachments; optional timestamps, deltas and token usage) | S (0.7k) | Removed in 1.0.34. | **Shipped 2026-09-29** — right-click a chat (or its "…" menu) › Export…. |
 
 ### 3b. Chat and everyday UX
@@ -133,8 +133,8 @@ cloud models if the fork wants its own eval suite; no user-facing effect.
 
 1. **Wrongly dropped, small:** `W-agent-loop-tools` (core shipped),
    `W-self-scheduling` (shipped), `W-description-backfill` (opt-in),
-   `W-chat-export`, `file_copy`. (`W-methods` turned out to be retired
-   upstream.)
+   `W-chat-export` (shipped), `file_copy` (shipped). (`W-methods` turned
+   out to be retired upstream.)
 2. **Medium, high value:** `W-doc-editing`, `W-voice`, `W-tool-discovery`,
    `W-knowledge-write`, `W-chat-tabs` + cross-block selection,
    `W-tool-catalog-ui`, `W-media-generation`.

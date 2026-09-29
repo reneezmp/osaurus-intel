@@ -1918,7 +1918,7 @@ enum FolderToolFactory {
     ///
     /// Lean by design: filesystem mutations (`mv`, `cp`, `rm`, `mkdir`)
     /// go through `shell_run` rather than discrete `file_move` /
-    /// `file_copy` / `file_delete` / `dir_create` tools so the model
+    /// `file_delete` / `dir_create` tools so the model
     /// picks "shell command" once instead of differentiating four
     /// near-identical tool names. `shell_run` is loaded on every folder
     /// mount (not gated on a detected project type) so the prompt's
@@ -1932,6 +1932,7 @@ enum FolderToolFactory {
             FileReadTool(rootPath: rootPath),
             FileWriteTool(rootPath: rootPath),
             FileEditTool(rootPath: rootPath),
+            FileCopyTool(rootPath: rootPath),
             FileSearchTool(rootPath: rootPath),
             ShellRunTool(rootPath: rootPath),
         ]
