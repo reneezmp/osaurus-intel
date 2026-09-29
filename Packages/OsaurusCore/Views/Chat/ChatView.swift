@@ -272,6 +272,10 @@ final class ChatSession: ObservableObject {
     /// run was cancelled by the user (or by `sendNowInterrupting`) and must
     /// not auto-flush a queued send. Reset to false at the top of `send(...)`.
     private var stopRequested: Bool = false
+    /// Set by the `prompt_working_folder` intercept after a mid-run pick;
+    /// `completeRunCleanup` then continues with `send("")`. Cleared by every
+    /// fresh send and by stop, so it can never continue an unrelated run.
+    private var pendingWorkingFolderContinuation = false
     /// Guards one-shot LLM title generation (Intel). Set true once we attempt
     /// a model-generated title for a session so we don't regenerate each turn.
     private var llmTitleAttempted: Bool = false
@@ -1076,6 +1080,7 @@ final class ChatSession: ObservableObject {
         )
         #endif
         stopRequested = true
+        pendingWorkingFolderContinuation = false
         let task = currentTask
         task?.cancel()
         if let runId = activeRunId {
@@ -1984,6 +1989,21 @@ final class ChatSession: ObservableObject {
         rebuildVisibleBlocks()
         save()
         flushQueuedSendIfEligible()
+        continueAfterWorkingFolderAttachIfEligible()
+    }
+
+    /// Auto-continue after a mid-run `prompt_working_folder` pick (upstream
+    /// #2918). Runs after the queued-send flush: a message the user queued
+    /// while the picker was up already carries the chat forward (and `send`
+    /// clears the flag). Stopped or errored runs leave the transcript as is;
+    /// the folder stays attached and the user decides what happens next.
+    private func continueAfterWorkingFolderAttachIfEligible() {
+        guard pendingWorkingFolderContinuation else { return }
+        pendingWorkingFolderContinuation = false
+        guard !stopRequested, lastStreamError == nil else { return }
+        guard activeRunId == nil, !isStreaming else { return }
+        guard folderState.hasActiveFolder else { return }
+        send("")
     }
 
     /// Dispatch any queued send when the run ended naturally (no `stop()`
@@ -2442,6 +2462,7 @@ final class ChatSession: ObservableObject {
         // auto-flush in completeRunCleanup keys off this, so clear it
         // before the new run can finalize.
         stopRequested = false
+        pendingWorkingFolderContinuation = false
 
         // Any new user input clears a prior completion banner — we're
         // moving on to a follow-up. Clarify prompts (when active) live
@@ -2571,6 +2592,10 @@ final class ChatSession: ObservableObject {
                 // without its project/chat working folder.
                 _ = await folderState.contextWaitingForRestore()
                 guard isRunActive(runId) else { return }
+                // Upstream #2918: an attended, folder-less chat offers
+                // `prompt_working_folder` and hands the tool this session.
+                let offersFolderPrompt = canPromptForWorkingFolder
+                let folderPromptBox: WeakChatSessionBox? = offersFolderPrompt ? WeakChatSessionBox(self) : nil
                 let context = await SystemPromptComposer.composeChatContext(
                     agentId: effectiveAgentId,
                     executionMode: executionMode,
@@ -2583,7 +2608,8 @@ final class ChatSession: ObservableObject {
                     frozenAlwaysLoadedNames: cachedSession?.initialAlwaysLoadedNames,
                     trace: ttftTrace,
                     projectId: projectId,
-                    folderContext: folderState.context
+                    folderContext: folderState.context,
+                    offerFolderPrompt: offersFolderPrompt
                 )
                 guard isRunActive(runId) else { return }
 
@@ -2966,10 +2992,12 @@ final class ChatSession: ObservableObject {
                                         try await ChatExecutionContext.$currentSessionId.withValue(sessionIdForTools) {
                                             try await ChatExecutionContext.$currentAssistantTurnId.withValue(assistantTurn.id) {
                                                 try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
-                                                    try await ToolRegistry.shared.execute(
-                                                        name: inv.toolName,
-                                                        argumentsJSON: inv.jsonArguments
-                                                    )
+                                                    try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
+                                                        try await ToolRegistry.shared.execute(
+                                                            name: inv.toolName,
+                                                            argumentsJSON: inv.jsonArguments
+                                                        )
+                                                    }
                                                 }
                                             }
                                         }
@@ -3010,6 +3038,20 @@ final class ChatSession: ObservableObject {
                                 // Fall through — let the model see the
                                 // failure envelope and try again with a
                                 // proper summary.
+                            }
+                            if inv.toolName == PromptWorkingFolderTool.toolName, !ToolEnvelope.isError(resultText) {
+                                // The user picked a folder inside the tool
+                                // call. Nothing in THIS run can use it: the
+                                // folder root, the file tools and the schema
+                                // were fixed when the turn started. End the
+                                // run; `completeRunCleanup` re-enters
+                                // `send("")`, which recomposes with the folder
+                                // bound. Cancel/failure falls through so the
+                                // model sees it and answers without a folder.
+                                turns.append(recordToolTurn(resultText))
+                                rebuildVisibleBlocks()
+                                pendingWorkingFolderContinuation = true
+                                break outer
                             }
                             if inv.toolName == "clarify" {
                                 if !ToolEnvelope.isError(resultText),

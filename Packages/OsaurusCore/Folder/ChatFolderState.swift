@@ -31,15 +31,17 @@ public final class ChatFolderState: ObservableObject {
         lastKnownPath ?? context?.rootPath.standardizedFileURL.path
     }
 
+    /// `message` overrides the panel's explanatory line: `prompt_working_folder`
+    /// passes the model's reason so the user sees why the agent is asking.
     @discardableResult
-    public func selectFolder(from window: NSWindow? = nil) async -> FolderContext? {
+    public func selectFolder(from window: NSWindow? = nil, message: String? = nil) async -> FolderContext? {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
         panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.title = L("Select Working Directory")
-        panel.message = L("Choose a folder for the AI to work with")
+        panel.message = message ?? L("Choose a folder for the AI to work with")
         panel.prompt = L("Select")
 
         let response: NSApplication.ModalResponse

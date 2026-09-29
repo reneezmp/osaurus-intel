@@ -239,7 +239,12 @@ enum ContentBlockKind: Equatable {
     case sharedArtifact(artifact: SharedArtifact)
     case pendingToolCall(toolName: String, argPreview: String?, argSize: Int)
     case preflightCapabilities(items: [PreflightCapabilityItem])
-    case generationStats(ttft: TimeInterval?, tokensPerSecond: Double?, tokenCount: Int?, unclosedReasoning: Bool)
+    /// `totalDuration` (upstream #2916, "Worked for"): wall clock from the
+    /// user's message to the end of the reply, tool steps and approval
+    /// prompts included. Only on the reply's last assistant turn.
+    case generationStats(
+        ttft: TimeInterval?, tokensPerSecond: Double?, tokenCount: Int?, unclosedReasoning: Bool,
+        totalDuration: TimeInterval?)
     case typingIndicator
     case groupSpacer
     case chart(spec: ChartSpec)
@@ -263,8 +268,12 @@ enum ContentBlockKind: Equatable {
             return lName == rName && lSize == rSize
         case let (.preflightCapabilities(lItems), .preflightCapabilities(rItems)):
             return lItems == rItems
-        case let (.generationStats(lTtft, lTps, lCount, lUnclosed), .generationStats(rTtft, rTps, rCount, rUnclosed)):
+        case let (
+            .generationStats(lTtft, lTps, lCount, lUnclosed, lTotal),
+            .generationStats(rTtft, rTps, rCount, rUnclosed, rTotal)
+        ):
             return lTtft == rTtft && lTps == rTps && lCount == rCount && lUnclosed == rUnclosed
+                && lTotal == rTotal
         case (.typingIndicator, .typingIndicator), (.groupSpacer, .groupSpacer): return true
         case let (.chart(lSpec), .chart(rSpec)): return lSpec == rSpec
         case let (.assistantActions(lId), .assistantActions(rId)): return lId == rId
@@ -1517,6 +1526,8 @@ final class BlockMemoizer: @unchecked Sendable {
         // belonged to, so a header is emitted only when the side flips.
         // Consecutive assistant + tool turns (a tool round) share one header.
         var prevSideIsUser: Bool?
+        // Start of the reply being built: the user message that asked for it.
+        var replyStartedAt: Date?
         let visibleTurns = turns.filter { $0.role != .tool }
         for (visibleIndex, turn) in visibleTurns.enumerated() {
             // M12 Gap 3: `.tool`-role turns exist ONLY to carry the tool result
@@ -1529,6 +1540,7 @@ final class BlockMemoizer: @unchecked Sendable {
             if turn.role == .tool { continue }
 
             let isUser = turn.role == .user
+            if isUser { replyStartedAt = turn.createdAt }
 
             // Header only when the conversation side flips (or at the very top).
             if prevSideIsUser != isUser {
@@ -1616,9 +1628,12 @@ final class BlockMemoizer: @unchecked Sendable {
                 visibleIndex + 1 < visibleTurns.count ? visibleTurns[visibleIndex + 1].role : nil
             let isLastInGroup = nextRole != turn.role
 
+            let totalDuration = Self.workedFor(
+                isUser: isUser, isLastInGroup: isLastInGroup, isStreaming: isStreaming,
+                startedAt: replyStartedAt, completedAt: turn.completedAt)
             if !isUser, !isStreaming,
                 turn.timeToFirstToken != nil || turn.generationTokensPerSecond != nil
-                    || turn.generationTokenCount != nil || turn.unclosedReasoning
+                    || turn.generationTokenCount != nil || turn.unclosedReasoning || totalDuration != nil
             {
                 blocks.append(ContentBlock(
                     id: "stats-\(turn.id.uuidString)",
@@ -1627,7 +1642,8 @@ final class BlockMemoizer: @unchecked Sendable {
                         ttft: turn.timeToFirstToken,
                         tokensPerSecond: turn.generationTokensPerSecond,
                         tokenCount: turn.generationTokenCount,
-                        unclosedReasoning: turn.unclosedReasoning
+                        unclosedReasoning: turn.unclosedReasoning,
+                        totalDuration: totalDuration
                     )
                 ))
             }
@@ -1645,6 +1661,17 @@ final class BlockMemoizer: @unchecked Sendable {
         }
         return blocks
     }
+    /// "Worked for" (upstream #2916): the finished reply's last assistant
+    /// turn, measured from the user message. Nil while streaming, for user
+    /// turns, mid-reply turns, or implausible clocks.
+    static func workedFor(
+        isUser: Bool, isLastInGroup: Bool, isStreaming: Bool, startedAt: Date?, completedAt: Date?
+    ) -> TimeInterval? {
+        guard !isUser, isLastInGroup, !isStreaming, let startedAt, let completedAt else { return nil }
+        let seconds = completedAt.timeIntervalSince(startedAt)
+        return seconds > 0 ? seconds : nil
+    }
+
     var groupHeaderMap: [UUID: UUID] { [:] }
     func memoized<T>(forKey key: String, build: () -> T) -> T { build() }
     func clear() {}
@@ -1782,7 +1809,7 @@ final class SystemPromptComposer: @unchecked Sendable {
     // we CAN honor the one thing that matters here: the agent's effective
     // system prompt (custom prompt for custom agents, global config prompt
     // for Default). Memory/tools stay inert, matching the amputated build.
-    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil, projectId: UUID? = nil, folderContext: FolderContext? = nil) async -> ComposedContext {
+    static func composeChatContext(agentId: Any? = nil, executionMode: Any? = nil, model: String? = nil, query: String? = nil, messages: [Any] = [], toolsDisabled: Bool = false, cachedPreflight: Any? = nil, additionalToolNames: [String] = [], frozenAlwaysLoadedNames: Any? = nil, trace: Any? = nil, projectId: UUID? = nil, folderContext: FolderContext? = nil, offerFolderPrompt: Bool = false) async -> ComposedContext {
         let id = (agentId as? UUID) ?? Agent.defaultId
         // Keep these snapshots separate. A single six-element actor-returned
         // tuple trips a Swift 6 compiler diagnostic-generation bug in the
@@ -1928,6 +1955,12 @@ final class SystemPromptComposer: @unchecked Sendable {
                     databaseActive || !ToolRegistry.databaseToolNames.contains($0.function.name)
                 }
                 .filter {
+                    // `prompt_working_folder`: only when the attended chat
+                    // offers it (no folder yet; upstream #2918).
+                    $0.function.name != PromptWorkingFolderTool.toolName
+                        || (offerFolderPrompt && folder == nil && id != Agent.defaultId)
+                }
+                .filter {
                     // Apple app tools: only the apps this agent switched on.
                     !AppleApp.allToolNames.contains($0.function.name)
                         || appleAppToolNames.contains($0.function.name)
@@ -1966,6 +1999,8 @@ final class SystemPromptComposer: @unchecked Sendable {
                 }
                 // And for Apple apps: the per-app toggle is the grant.
                 allowed.formUnion(appleAppToolNames)
+                // The folder ask is a chat-surface affordance, not a capability.
+                allowed.insert(PromptWorkingFolderTool.toolName)
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }

@@ -81,4 +81,9 @@ public enum ChatExecutionContext {
     /// enforcement (spec §11.3). Bound by
     /// `BackgroundTaskManager.dispatchChat` alongside `currentRunId`.
     @TaskLocal public static var currentBackgroundId: UUID?
+
+    /// The attended chat running this tool call, bound by `ChatSession` only
+    /// when it offered `prompt_working_folder` (upstream #2918). Nil for
+    /// background dispatches, delegated children and every other surface.
+    @TaskLocal static var currentChatSessionBox: WeakChatSessionBox?
 }

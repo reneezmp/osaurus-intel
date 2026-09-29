@@ -545,3 +545,34 @@ yourself (your own phone number or Apple ID email).
 - [ ] If the old osaurus-tools Messages plugin was installed: one toast after
       the first launch names Messages; agents that used it have Messages
       switched on.
+
+## Upstream batch 2026-09-29
+
+Use a **custom test agent** and a tool-capable model. Items that talk to the
+model are **(paid)**.
+
+- [ ] **(paid)** New chat with **no** folder: "Write a short packing list to
+      packing.md". The folder picker opens as a sheet on the chat window and
+      its message is the agent's reason. Pick a throwaway folder: the chat
+      continues on its own, the file appears, and the folder chip shows it.
+- [ ] **(paid)** Same again but press **Cancel**: the agent says no folder
+      was attached and gives the list in the chat instead (no loop of
+      pickers). The Orchestrator (built-in agent) never opens the picker.
+- [ ] **(paid)** With a folder: ask it to change one line of a file that
+      uses tabs, phrasing the old text with spaces: the edit applies, the
+      tabs stay tabs. Ask it to replace a word that appears several times:
+      it either asks for more context or uses "replace all".
+- [ ] **(paid)** Put a Windows-style (CRLF) text file in the folder and ask
+      for line 10: the agent quotes the same line your editor shows as 10.
+- [ ] Every finished reply's stats row starts with "Worked for …" (for
+      example "Worked for 8.4s"); a reply with tool steps counts all of them.
+      Old chats show it too after relaunch.
+- [ ] Scroll up during a long reply and wait for it to finish: the view
+      stays where you were reading (no jump to older messages).
+- [ ] In a very long chat (100+ messages) the collapsed minimap on the right
+      fits without being cut off; hovering still expands it into the list.
+- [ ] Settings › Server › Advanced HTTP › Max Request Body (MB): select the
+      value and type `0`, then `64`. The field shows what you typed while
+      editing (it used to snap to the clamped value), and after leaving it
+      shows the saved number (`64`; a lone `0` becomes `1`). Put the old
+      value back afterwards.

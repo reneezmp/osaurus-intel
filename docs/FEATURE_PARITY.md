@@ -189,7 +189,9 @@ implementations compile unchanged on Intel.
 2. **Reliability:** schedule due-slot accounting and Core Model timeout/fallback.
 3. **Small scoped ports:** theme alpha, file attachment types, window sizing,
    hosted model catalog/profiles and prompt-cache accounting.
-4. **Staged feature clusters:** rich folder formats, Apple app tools (B6),
+4. **Staged feature clusters:** file change history and in-place document
+   editing (upstream #2907, plan in `UPSTREAM_AUDIT_2026-09-29.md`),
+   rich folder formats, Apple app tools (B6),
    Channels/n8n (B3), Workspaces (B1/B2/B7), and native subagent/computer-use
    capability spikes. Each cluster is a feasible backlog, not a rejection.
 

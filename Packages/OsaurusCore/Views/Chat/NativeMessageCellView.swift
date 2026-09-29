@@ -1088,9 +1088,16 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
 
 // MARK: - NativeStatsView
 
-/// Lightweight AppKit view that displays generation benchmarks (TTFT and tok/s).
+/// Lightweight AppKit view that displays generation benchmarks (total time, TTFT and tok/s).
 final class NativeStatsView: NSView {
     private let label = NSTextField(labelWithString: "")
+
+    /// "12.3s" under a minute, "2m5s" beyond (upstream `formatLoad`).
+    nonisolated static func formatDuration(_ seconds: TimeInterval) -> String {
+        if seconds < 60 { return String(format: "%.1fs", seconds) }
+        let whole = Int(seconds.rounded())
+        return "\(whole / 60)m\(whole % 60)s"
+    }
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -1114,9 +1121,15 @@ final class NativeStatsView: NSView {
         tokensPerSecond: Double?,
         tokenCount: Int?,
         unclosedReasoning: Bool = false,
+        totalDuration: TimeInterval? = nil,
         theme: any ThemeProtocol
     ) {
         var parts: [String] = []
+        // Wall clock from the user's message to the end of the reply
+        // (upstream #2916). Leads the row: it's the number people look for.
+        if let totalDuration {
+            parts.append(String(format: L("Worked for %@"), Self.formatDuration(totalDuration)))
+        }
         if let ttft {
             if ttft < 0.01 {
                 parts.append(String(format: "TTFT %.0fms", ttft * 1000))
@@ -1336,12 +1349,13 @@ final class NativeMessageCellView: NSTableCellView {
         case let .preflightCapabilities(items):
             configureAsPreflight(block: block, items: items, context: context, sameKind: sameKind)
 
-        case let .generationStats(ttft, tokensPerSecond, tokenCount, unclosedReasoning):
+        case let .generationStats(ttft, tokensPerSecond, tokenCount, unclosedReasoning, totalDuration):
             configureAsStats(
                 ttft: ttft,
                 tokensPerSecond: tokensPerSecond,
                 tokenCount: tokenCount,
                 unclosedReasoning: unclosedReasoning,
+                totalDuration: totalDuration,
                 context: context,
                 sameKind: sameKind
             )
@@ -1929,6 +1943,7 @@ final class NativeMessageCellView: NSTableCellView {
         tokensPerSecond: Double?,
         tokenCount: Int?,
         unclosedReasoning: Bool,
+        totalDuration: TimeInterval?,
         context: CellRenderingContext,
         sameKind: Bool
     ) {
@@ -1951,6 +1966,7 @@ final class NativeMessageCellView: NSTableCellView {
             tokensPerSecond: tokensPerSecond,
             tokenCount: tokenCount,
             unclosedReasoning: unclosedReasoning,
+            totalDuration: totalDuration,
             theme: context.theme
         )
     }

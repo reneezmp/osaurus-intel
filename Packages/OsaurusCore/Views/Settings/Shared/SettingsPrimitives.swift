@@ -123,6 +123,9 @@ struct StyledSettingsTextField: View {
     let placeholder: String
     let help: String
 
+    /// Called when the field gains/loses focus (upstream #2893).
+    var onEditingChanged: ((Bool) -> Void)? = nil
+
     @State private var isFocused = false
 
     var body: some View {
@@ -148,6 +151,7 @@ struct StyledSettingsTextField: View {
                         "",
                         text: $text,
                         onEditingChanged: { editing in
+                            onEditingChanged?(editing)
                             withAnimation(.easeOut(duration: 0.15)) {
                                 isFocused = editing
                             }

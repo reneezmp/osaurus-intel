@@ -8,6 +8,10 @@
 //  and single-line preview of the user message. Clicking a row scrolls
 //  the thread to that turn.
 //
+//  Long chats (upstream #2912, simplified): the collapsed rail packs its
+//  ticks to fit 280 pt, and past about 130 messages each tick stands for a
+//  group (lit when the current message is in it), so no tick is clipped.
+//
 
 import SwiftUI
 
@@ -30,13 +34,63 @@ struct ChatMinimap: View {
 
     private let expandAnimation = Animation.spring(response: 0.36, dampingFraction: 0.86)
 
-    var body: some View {
-        let rows = VStack(alignment: .leading, spacing: isExpanded ? 1 : 6) {
-            ForEach(markers) { m in
-                row(for: m)
+    /// Collapsed rail layout (upstream #2912, simplified for Intel): ticks
+    /// pack tighter to fit `collapsedMaxHeight`; when even 1 pt ticks with
+    /// 1 pt gaps cannot fit, each tick stands for a group of messages.
+    struct CollapsedLayout: Equatable {
+        let tickHeight: CGFloat
+        let spacing: CGFloat
+        /// Marker groups, one tick each (single-marker groups when every
+        /// message fits).
+        let groups: [[Marker]]
+    }
+
+    nonisolated static let collapsedMaxHeight: CGFloat = 280
+    nonisolated private static let collapsedPadding: CGFloat = 10
+
+    nonisolated static func collapsedLayout(for markers: [Marker], maxHeight: CGFloat = collapsedMaxHeight) -> CollapsedLayout {
+        let usable = maxHeight - collapsedPadding * 2
+        let count = CGFloat(markers.count)
+        let gaps = max(count - 1, 0)
+        for tick in [CGFloat(2), 1] {
+            let spacing = gaps > 0 ? (usable - count * tick) / gaps : 0
+            if spacing >= 1 {
+                return CollapsedLayout(tickHeight: tick, spacing: min(spacing, 6), groups: markers.map { [$0] })
             }
         }
-        .padding(.vertical, isExpanded ? 6 : 10)
+        // Too many for one tick each: as many 1 pt ticks + 1 pt gaps as fit.
+        let slots = max(Int((usable + 1) / 2), 1)
+        let perGroup = Int((Double(markers.count) / Double(slots)).rounded(.up))
+        let groups = stride(from: 0, to: markers.count, by: perGroup).map {
+            Array(markers[$0 ..< min($0 + perGroup, markers.count)])
+        }
+        return CollapsedLayout(tickHeight: 1, spacing: 1, groups: groups)
+    }
+
+    var body: some View {
+        let collapsed = Self.collapsedLayout(for: markers)
+        let oneTickEach = collapsed.groups.count == markers.count
+        let rows = Group {
+            if isExpanded || oneTickEach {
+                // Same views in both states so the tick-to-row morph animates.
+                VStack(alignment: .leading, spacing: isExpanded ? 1 : collapsed.spacing) {
+                    ForEach(markers) { m in
+                        row(for: m, collapsedTickHeight: collapsed.tickHeight)
+                    }
+                }
+            } else {
+                VStack(alignment: .trailing, spacing: collapsed.spacing) {
+                    ForEach(collapsed.groups, id: \.first!.id) { group in
+                        handle(
+                            isActive: group.contains { $0.id == activeMarkerId },
+                            collapsedHeight: collapsed.tickHeight
+                        )
+                        .frame(maxWidth: .infinity, alignment: .trailing)
+                    }
+                }
+            }
+        }
+        .padding(.vertical, isExpanded ? 6 : Self.collapsedPadding)
         .padding(.horizontal, isExpanded ? 6 : 7)
 
         return Group {
@@ -90,7 +144,7 @@ struct ChatMinimap: View {
 
     // MARK: - Row
 
-    private func row(for marker: Marker) -> some View {
+    private func row(for marker: Marker, collapsedTickHeight: CGFloat = 2) -> some View {
         let isActive = marker.id == activeMarkerId
 
         return Button {
@@ -98,7 +152,7 @@ struct ChatMinimap: View {
             onSelect(marker.id)
         } label: {
             HStack(spacing: 10) {
-                handle(isActive: isActive)
+                handle(isActive: isActive, collapsedHeight: collapsedTickHeight)
 
                 if isExpanded {
                     Text(displayText(for: marker))
@@ -118,10 +172,10 @@ struct ChatMinimap: View {
         .buttonStyle(.plain)
     }
 
-    private func handle(isActive: Bool) -> some View {
+    private func handle(isActive: Bool, collapsedHeight: CGFloat = 2) -> some View {
         let color: Color = isActive ? theme.accentColor : theme.secondaryText.opacity(0.5)
         let width: CGFloat = isExpanded ? 3 : (isActive ? 12 : 10)
-        let height: CGFloat = isExpanded ? 14 : 2
+        let height: CGFloat = isExpanded ? 14 : collapsedHeight
         return Capsule(style: .continuous)
             .fill(color)
             .frame(width: width, height: height)

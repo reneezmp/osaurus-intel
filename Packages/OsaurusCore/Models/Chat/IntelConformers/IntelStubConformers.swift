@@ -1186,6 +1186,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         registerDatabaseTools()
         registerAppleAppTools()
         registerWebSearchTools()
+        let folderPrompt = PromptWorkingFolderTool()
+        toolsByName[folderPrompt.name] = folderPrompt
+        builtInToolNames.insert(folderPrompt.name)
         registerIntelOrchestratorTools()
     }
 
@@ -1454,6 +1457,11 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 tool: name
             )
         }
+
+        // `prompt_working_folder` is a chat-surface affordance, not an agent
+        // capability: the attended chat offers it (bypassing the Tools-tab
+        // allowlist) and the tool itself refuses without that chat.
+        if name == PromptWorkingFolderTool.toolName { return nil }
 
         // Apple app tools always need an agent that switched the app on;
         // with no agent context (or the Default agent) they never run.

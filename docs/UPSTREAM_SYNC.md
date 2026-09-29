@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -2026,3 +2026,26 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   `IMessageConnectionConfiguration` (Channels). Keep both edits.
 - Added `SystemPermission.automationMessages`; the Messages/Music automation
   request is one helper, `requestAppAutomationPermission(_:appName:)`.
+
+### Upstream batch `a4daf94c4..3dad2dad4` — 2026-09-29
+
+- 33 commits classified in [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md);
+  the next review starts after `3dad2dad4`.
+- Shipped: logical line numbers (#2894), integer settings fields (#2893
+  slice), scroll-anchor jump fix (#2909), tolerant `file_edit` with
+  `replace_all` (#2914 text slice, upstream `FileEditMatcher.swift`
+  unchanged), `prompt_working_folder` (#2918, per-chat only on Intel),
+  "Worked for" in the stats row (#2916, derived from existing timestamps),
+  collapsed-minimap packing (#2912, simplified).
+- Staged: #2907 as three features (file change history, in-place document
+  editing with the #2914 document slice, chat window IA); mobile/iOS
+  (#2875, #2930, #2931) with B1; workspace pool billing (#2915) with B7.
+- **Re-sync notes:** Intel's `FolderTools.swift`, `ScrollAnchorManager.swift`,
+  `MessageTableRepresentable.swift` and `ChatMinimap.swift` diverge from
+  upstream; these ports were hand-applied and must not be overwritten by a
+  file copy. Static helpers on SwiftUI views that tests call need
+  `nonisolated` (signal 5 otherwise).
+- **Approval/attended-chat rule:** a tool that needs a person at the window
+  (`prompt_working_folder`) gets the session only through
+  `ChatExecutionContext.currentChatSessionBox`, which only an attended,
+  window-backed, non-dispatch `ChatSession` binds.

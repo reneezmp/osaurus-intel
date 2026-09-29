@@ -30,8 +30,8 @@ enum DatabaseFilePathResolver {
     }
 
     static let noFolderMessageSuffix =
-        "Ask the user to choose a working folder with the Folder button in the chat bar, "
-        + "then retry. Fallback for tabular data already in context: one `db_insert` "
+        PromptWorkingFolderTool.attachFolderSteer
+        + " Then retry. Fallback for tabular data already in context: one `db_insert` "
         + "with a `rows` array instead of row-by-row inserts."
 
     /// Resolve a path for reading an existing file (import / SQL script).

@@ -68,6 +68,13 @@ final class ScrollAnchorManager {
     var onScrolledToBottom: (() -> Void)?
     var onScrolledAwayFromBottom: (() -> Void)?
 
+    /// Maps a table row to its block id. Must reflect the rows currently in
+    /// the table at capture time (upstream #2909).
+    var blockIdForRow: ((Int) -> String?)?
+
+    /// Maps a block id to its row after a snapshot applies.
+    var rowForBlockId: ((String) -> Int?)?
+
     // MARK: - Private State
 
     private weak var scrollView: NSScrollView?
@@ -112,8 +119,14 @@ final class ScrollAnchorManager {
     /// that was captured before the user scrolled (it would yank them back).
     /// `restoreAnchor` and `noteRowHeightsChanged` both gate on
     /// `isUserScrollingRecently` for that reason.
+    /// Block-based (upstream #2909): the block in the topmost visible row
+    /// plus the pixel offset from that row's top. A snapshot can insert rows
+    /// above the reader (the streaming window widening when a run ends), so a
+    /// bare row index would land on older content; `row` is only the fallback
+    /// for a block that left the thread.
     struct Anchor {
         let row: Int
+        let blockId: String?
         let offsetFromRowTop: CGFloat
     }
 
@@ -180,7 +193,7 @@ final class ScrollAnchorManager {
         let topRow = tableView.row(at: NSPoint(x: 0, y: topY))
         guard topRow >= 0 else { return nil }
         let rowRect = tableView.rect(ofRow: topRow)
-        return Anchor(row: topRow, offsetFromRowTop: topY - rowRect.origin.y)
+        return Anchor(row: topRow, blockId: blockIdForRow?(topRow), offsetFromRowTop: topY - rowRect.origin.y)
     }
 
     /// Scroll the clip view so the anchor row sits at its recorded offset
@@ -192,9 +205,16 @@ final class ScrollAnchorManager {
     /// `updateNSView` → `applyBlocks` → ... loops back here.
     func applyAnchor(_ anchor: Anchor) {
         guard let tableView, let scrollView else { return }
-        let clampedRow = min(anchor.row, tableView.numberOfRows - 1)
-        guard clampedRow >= 0 else { return }
-        let rowRect = tableView.rect(ofRow: clampedRow)
+        let row: Int
+        if let blockId = anchor.blockId, let resolved = rowForBlockId?(blockId),
+            resolved < tableView.numberOfRows
+        {
+            row = resolved
+        } else {
+            row = min(anchor.row, tableView.numberOfRows - 1)
+        }
+        guard row >= 0 else { return }
+        let rowRect = tableView.rect(ofRow: row)
         let targetY = rowRect.origin.y + anchor.offsetFromRowTop
         let curY = scrollView.contentView.bounds.origin.y
         guard abs(curY - targetY) > 1.0 else { return }

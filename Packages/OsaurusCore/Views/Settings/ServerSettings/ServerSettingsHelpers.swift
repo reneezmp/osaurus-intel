@@ -129,7 +129,10 @@ struct OptionalIntField: View {
             label: label,
             text: $text,
             placeholder: placeholder,
-            help: help
+            help: help,
+            onEditingChanged: { editing in
+                if !editing { text = Self.stringValue(value) }
+            }
         )
         .onAppear {
             guard !initialized else { return }
@@ -137,7 +140,7 @@ struct OptionalIntField: View {
             text = Self.stringValue(value)
         }
         .onChange(of: value) { newValue in
-            let desired = Self.stringValue(newValue)
+            let desired = OptionalIntFieldEditing.reconcile(text, value: newValue, clamp: clamp)
             if text != desired { text = desired }
         }
         .onChange(of: text) { _ in commit() }
@@ -250,5 +253,22 @@ struct OptionalStringField: View {
             let normalized: String? = trimmed.isEmpty ? nil : trimmed
             if value != normalized { value = normalized }
         }
+    }
+}
+
+/// Binding echoes must not replace a partially typed number with its clamped
+/// value (upstream #2893): typing "1" on the way to "15" in a 5…100 field
+/// used to snap to "5". The binding stays valid immediately (Save while
+/// focused works); leaving the field canonicalizes the display. A different
+/// external value still replaces the draft.
+enum OptionalIntFieldEditing {
+    static func reconcile(_ text: String, value: Int?, clamp: ClosedRange<Int>?) -> String {
+        let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        if trimmed.isEmpty, value == nil { return text }
+        if let parsed = Int(trimmed) {
+            let resolved = clamp.map { min(max(parsed, $0.lowerBound), $0.upperBound) } ?? parsed
+            if resolved == value { return text }
+        }
+        return value.map(String.init) ?? ""
     }
 }

@@ -78,6 +78,20 @@ enum FolderToolError: LocalizedError {
 
 /// Shared utilities for folder tools
 enum FolderToolHelpers {
+    /// Lines of file content, not separator-delimited fields (upstream
+    /// #2894). A final line terminator does not introduce another empty
+    /// line, and CRLF is one newline (`components(separatedBy: .newlines)`
+    /// counted it as two, shifting every later line number). An empty file
+    /// stays one empty line.
+    static func contentLines(_ text: String) -> [String] {
+        var lines = text.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
+            .map(String.init)
+        if text.last?.isNewline == true, lines.count > 1 {
+            lines.removeLast()
+        }
+        return lines
+    }
+
     /// Runtime tools carry no global folder. Directly constructed test tools
     /// may provide a fixed root; otherwise the executing chat's TaskLocal root
     /// is authoritative.
@@ -510,7 +524,7 @@ struct FileReadTool: OsaurusTool {
             relativePath: relativePath,
             ext: ext
         )
-        let lines = content.components(separatedBy: .newlines)
+        let lines = FolderToolHelpers.contentLines(content)
 
         let startLine = coerceInt(args["start_line"]) ?? 1
         let endLine = coerceInt(args["end_line"]) ?? lines.count
@@ -854,7 +868,7 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
         // Write content
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
 
-        let lineCount = content.components(separatedBy: .newlines).count
+        let lineCount = FolderToolHelpers.contentLines(content).count
         let action = existed ? "Updated" : "Created"
         return ToolEnvelope.success(
             tool: name,
@@ -877,8 +891,14 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
     let description =
         "Edit a file by replacing specific text. **Use this instead of `sed` / `awk` in "
         + "`shell_run`.** `old_string` must uniquely match exactly one location in the file — "
-        + "include surrounding context lines if needed to ensure uniqueness. Fails if `old_string` "
-        + "is not found or matches multiple locations. You MUST provide the strings in the parameters."
+        + "include surrounding context lines if needed to ensure uniqueness. Copy the RAW file "
+        + "text only: never include the `N|` line-number prefixes shown in `file_read` output. "
+        + "Small drift is tolerated when the match stays unique — indentation, tabs vs spaces, "
+        + "blank-line count, curly vs straight quotes — and the result reports `match_strategy` "
+        + "(\"exact\" when it matched byte-for-byte); the file's own whitespace is kept for "
+        + "unchanged lines. Fails if `old_string` is not found or matches multiple locations; "
+        + "pass `replace_all: true` to replace every occurrence. You MUST provide the strings "
+        + "in the parameters."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -897,6 +917,12 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
                 "type": .string("string"),
                 "description": .string(
                     "The replacement text"
+                ),
+            ]),
+            "replace_all": .object([
+                "type": .string("boolean"),
+                "description": .string(
+                    "Replace every occurrence of old_string instead of requiring a unique match (default false)"
                 ),
             ]),
         ]),
@@ -976,23 +1002,53 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
 
         // Capture pre-edit contents for the operation log (undo support).
         let originalContent = try String(contentsOf: fileURL, encoding: .utf8)
-        var content = originalContent
+        let replaceAll = coerceBool(args["replace_all"]) ?? false
 
-        guard let range = content.range(of: oldString) else {
-            throw FolderToolError.operationFailed(
-                "Could not find the specified text in the file. Make sure old_string exactly matches the file content."
+        // Upstream #2914: exact → whitespace → blank lines → unicode
+        // punctuation cascade, byte-preserving outside the match; relaxed
+        // matches only when unique (or `replace_all`).
+        let applied: FileEditMatcher.Applied
+        switch FileEditMatcher.apply(
+            oldString: oldString, newString: newString, to: originalContent, replaceAll: replaceAll)
+        {
+        case .noOp:
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "`old_string` and `new_string` are identical in \(relativePath) — there is nothing to change. "
+                    + "If the file already has the intended text, the edit is done; otherwise fix `new_string`.",
+                field: "new_string",
+                expected: "replacement text that differs from old_string",
+                tool: name
             )
-        }
-
-        let matches = content.ranges(of: oldString)
-        if matches.count > 1 {
-            throw FolderToolError.operationFailed(
-                "Found \(matches.count) matches for old_string — include more context to uniquely identify the location."
+        case .notFound:
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "Could not find `old_string` in \(relativePath). "
+                    + Self.noMatchDiagnosis(oldString: oldString, content: originalContent),
+                field: "old_string",
+                expected: "exact non-empty text present in the target file",
+                tool: name
             )
+        case .ambiguous(let count, let strategy):
+            let how = strategy.isRelaxed ? " (matching \(strategy.explanation))" : ""
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message:
+                    "Found \(count) matches for `old_string` in \(relativePath)\(how). "
+                    + "To replace EVERY occurrence, retry the same call with the added argument "
+                    + "\"replace_all\": true. To replace only one occurrence, include more surrounding "
+                    + "context in `old_string`.",
+                field: "old_string",
+                expected: "the same call plus \"replace_all\": true (or a uniquely matching old_string)",
+                tool: name,
+                metadata: ["retry_with": ["replace_all": true]]
+            )
+        case .applied(let result):
+            applied = result
         }
-
-        content.replaceSubrange(range, with: newString)
-        try content.write(to: fileURL, atomically: true, encoding: .utf8)
+        try applied.content.write(to: fileURL, atomically: true, encoding: .utf8)
 
         // Log for undo parity with `file_write`. Skipped when no session.
         if let sid = ChatExecutionContext.currentSessionId {
@@ -1007,13 +1063,89 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
             )
         }
 
-        let beforeLines = oldString.components(separatedBy: .newlines).count
-        let afterLines = newString.components(separatedBy: .newlines).count
-
+        let beforeLines = FolderToolHelpers.contentLines(oldString).count
+        let afterLines = FolderToolHelpers.contentLines(newString).count
+        let lineLabels = applied.matchedLines.map {
+            $0.lowerBound == $0.upperBound ? "\($0.lowerBound)" : "\($0.lowerBound)-\($0.upperBound)"
+        }
+        var warnings: [String] = []
+        if applied.strategy.isRelaxed {
+            let where_ = applied.matchedLines.first.map { range in
+                range.lowerBound == range.upperBound
+                    ? "line \(range.lowerBound)" : "lines \(range.lowerBound)-\(range.upperBound)"
+            } ?? "the matched region"
+            var note =
+                "`old_string` did not match the file byte-for-byte; it was matched at \(where_) "
+                + "with \(applied.strategy.explanation). The file's own indentation, blank lines and line "
+                + "endings were kept for unchanged lines"
+            if applied.replacements > 1 { note += " (\(applied.replacements) occurrences)" }
+            note += "."
+            if let matched = applied.matchedText {
+                note += " The file text there was:\n\(Self.boundedQuote(matched))"
+            }
+            warnings.append(note)
+        }
+        let occurrences = applied.replacements > 1 ? " in \(applied.replacements) places" : ""
         return ToolEnvelope.success(
             tool: name,
-            text: "Edited \(relativePath): replaced \(beforeLines) line(s) with \(afterLines) line(s)"
+            result: [
+                "text":
+                    "Edited \(relativePath): replaced \(beforeLines) line(s) with \(afterLines) line(s)\(occurrences)",
+                "match_strategy": applied.strategy.rawValue,
+                "replacements": applied.replacements,
+                "matched_lines": lineLabels,
+            ],
+            warnings: warnings
         )
+    }
+
+    /// Truthful diagnosis for a 0-match `old_string` (upstream #2914). The
+    /// generic "make sure it matches" message left models re-issuing the
+    /// identical failing call.
+    static func noMatchDiagnosis(oldString: String, content: String) -> String {
+        let fallback = "Make sure it exactly matches the file content."
+        let oldLines = oldString.components(separatedBy: "\n")
+
+        // 1. Line-number prefix contamination (`   42|item 042 ...`).
+        let prefixPattern = #"^\s*\d+\|"#
+        if oldLines.contains(where: { $0.range(of: prefixPattern, options: .regularExpression) != nil }) {
+            return "Your `old_string` contains `N|` line-number prefixes from file_read output — "
+                + "those prefixes are display metadata, not file content. Copy the raw file text only."
+        }
+
+        let contentLines = content.components(separatedBy: "\n")
+        let trimmedOldLines = oldLines.map { $0.trimmingCharacters(in: .whitespaces) }
+
+        // 2. Closest-line anchor: quote the most similar file line when it is
+        // a plausible anchor (the line changed after the model last read it).
+        if let needle = trimmedOldLines.first(where: { !$0.isEmpty }), needle.count >= 4 {
+            let needleLower = needle.lowercased()
+            var best: (index: Int, line: String, score: Int)?
+            for (index, line) in contentLines.enumerated() {
+                let trimmedLine = line.trimmingCharacters(in: .whitespaces)
+                guard !trimmedLine.isEmpty else { continue }
+                let lineLower = trimmedLine.lowercased()
+                let score: Int
+                if lineLower.contains(needleLower) || needleLower.contains(lineLower) {
+                    score = min(needle.count, trimmedLine.count)
+                } else {
+                    score = zip(needleLower, lineLower).prefix(while: { $0 == $1 }).count
+                }
+                if score > (best?.score ?? 0) { best = (index, line, score) }
+            }
+            let minScore = max(4, needle.count / 2)
+            if let best, best.score >= minScore {
+                return "The closest matching line in the file is line \(best.index + 1):\n"
+                    + "\(Self.boundedQuote(best.line))\n"
+                    + "Compare it against your `old_string` — they differ. \(fallback)"
+            }
+        }
+        return fallback
+    }
+
+    private static func boundedQuote(_ text: String, cap: Int = 600) -> String {
+        guard text.count > cap else { return text }
+        return String(text.prefix(cap)) + "… (excerpt truncated)"
     }
 }
 
@@ -1206,7 +1338,7 @@ struct FileSearchTool: OsaurusTool {
     ) -> [String]? {
         guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
 
-        let lines = content.components(separatedBy: .newlines)
+        let lines = FolderToolHelpers.contentLines(content)
         var matches: [String] = []
         var relativePath: String?
 
