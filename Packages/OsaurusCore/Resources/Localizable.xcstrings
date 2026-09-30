@@ -102,6 +102,22 @@
         }
       }
     },
+    "%d connected · %d tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%d verbunden · %d Tools"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已连接 %d 个 · %d 个工具"
+          }
+        }
+      }
+    },
     "%lld unchanged lines" : {
       "localizations" : {
         "de" : {
@@ -502,6 +518,38 @@
         }
       }
     },
+    "Applied configuration changes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsänderungen angewendet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已应用配置更改"
+          }
+        }
+      }
+    },
+    "Applying configuration changes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsänderungen werden angewendet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在应用配置更改"
+          }
+        }
+      }
+    },
     "Approvals for folder file, shell and git tools, not macOS permissions." : {
       "localizations" : {
         "de" : {
@@ -646,6 +694,22 @@
         }
       }
     },
+    "Browse and install native plugins" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Native Plugins durchsuchen und installieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "浏览并安装原生插件"
+          }
+        }
+      }
+    },
     "Cancel (Esc)" : {
       "localizations" : {
         "de" : {
@@ -740,6 +804,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "輸入時檢查拼字"
+          }
+        }
+      }
+    },
+    "Checked Osaurus status" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Status geprüft"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已检查 Osaurus 状态"
+          }
+        }
+      }
+    },
+    "Checking Osaurus status" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Status wird geprüft"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在检查 Osaurus 状态"
           }
         }
       }
@@ -1070,6 +1166,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在“设置”中配置一次，所有语音模式共用。"
+          }
+        }
+      }
+    },
+    "Configured Osaurus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus konfiguriert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已配置 Osaurus"
+          }
+        }
+      }
+    },
+    "Configuring Osaurus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus wird konfiguriert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在配置 Osaurus"
           }
         }
       }
@@ -1466,6 +1594,22 @@
         }
       }
     },
+    "Directory" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verzeichnis"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "目录"
+          }
+        }
+      }
+    },
     "Disable Tools" : {
       "localizations" : {
         "de" : {
@@ -1542,6 +1686,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "每个空聊天都会用核心模型生成新的问候语和快捷操作。静态问候语仍会立即显示。各智能体的设置优先。"
+          }
+        }
+      }
+    },
+    "Each service adds tools your agents can use." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jeder Dienst fügt Tools hinzu, die deine Agenten nutzen können."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个服务都会添加智能体可用的工具。"
           }
         }
       }
@@ -1752,6 +1912,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已展开"
+          }
+        }
+      }
+    },
+    "Exported Osaurus configuration" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Konfiguration exportiert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已导出 Osaurus 配置"
+          }
+        }
+      }
+    },
+    "Exporting Osaurus configuration" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Konfiguration wird exportiert"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在导出 Osaurus 配置"
           }
         }
       }
@@ -2020,6 +2212,70 @@
         }
       }
     },
+    "Inspected an Osaurus item" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Osaurus-Element untersucht"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已查看一个 Osaurus 项目"
+          }
+        }
+      }
+    },
+    "Inspected Osaurus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus untersucht"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已查看 Osaurus"
+          }
+        }
+      }
+    },
+    "Inspecting an Osaurus item" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ein Osaurus-Element wird untersucht"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看一个 Osaurus 项目"
+          }
+        }
+      }
+    },
+    "Inspecting Osaurus" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus wird untersucht"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在查看 Osaurus"
+          }
+        }
+      }
+    },
     "It was moved or deleted, so it was removed from Recent Folders." : {
       "localizations" : {
         "de" : {
@@ -2200,6 +2456,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "列出并运行你的快捷指令。"
+          }
+        }
+      }
+    },
+    "Listed Osaurus items" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Elemente aufgelistet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已列出 Osaurus 项目"
+          }
+        }
+      }
+    },
+    "Listing Osaurus items" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Elemente werden aufgelistet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在列出 Osaurus 项目"
           }
         }
       }
@@ -2504,6 +2792,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有可用的模型。请连接提供商或设置核心模型。"
+          }
+        }
+      }
+    },
+    "No services yet" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Dienste"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有服务"
           }
         }
       }
@@ -3076,6 +3380,54 @@
         }
       }
     },
+    "Pick a service below to give your agents more tools." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle unten einen Dienst, um deinen Agenten mehr Tools zu geben."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在下方选择一个服务，为你的智能体提供更多工具。"
+          }
+        }
+      }
+    },
+    "Planned configuration changes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsänderungen geplant"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已规划配置更改"
+          }
+        }
+      }
+    },
+    "Planning configuration changes" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsänderungen werden geplant"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在规划配置更改"
+          }
+        }
+      }
+    },
     "Premium" : {
       "localizations" : {
         "de" : {
@@ -3088,6 +3440,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "高级"
+          }
+        }
+      }
+    },
+    "Preparing tool call" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tool-Aufruf wird vorbereitet"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출 준비 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подготовка вызова инструмента"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备工具调用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在準備工具調用"
+          }
+        }
+      }
+    },
+    "Preparing tool call (%@)" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tool-Aufruf wird vorbereitet (%@)"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "도구 호출 준비 중 (%@)"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Подготовка вызова инструмента (%@)"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在准备工具调用 (%@)"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在準備工具調用 (%@)"
           }
         }
       }
@@ -3204,6 +3624,54 @@
         }
       }
     },
+    "Read config templates" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsvorlagen gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已读取配置模板"
+          }
+        }
+      }
+    },
+    "Read the config schema" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsschema gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已读取配置架构"
+          }
+        }
+      }
+    },
+    "Read the Osaurus guide" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Anleitung gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已阅读 Osaurus 指南"
+          }
+        }
+      }
+    },
     "Read your conversations and send iMessages or texts. Reading needs Full Disk Access; every send asks first." : {
       "localizations" : {
         "de" : {
@@ -3268,6 +3736,22 @@
         }
       }
     },
+    "Reading config templates" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsvorlagen werden gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在读取配置模板"
+          }
+        }
+      }
+    },
     "Reading runs on its own. Creating or changing anything asks you first, and deleting asks every time. What the agent reads passes through its cloud provider." : {
       "localizations" : {
         "de" : {
@@ -3280,6 +3764,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "读取会自动进行。创建或更改任何内容前都会先询问你，删除时每次都会询问。智能体读取的内容会经过其云服务提供商。"
+          }
+        }
+      }
+    },
+    "Reading the config schema" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Konfigurationsschema wird gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在读取配置架构"
+          }
+        }
+      }
+    },
+    "Reading the Osaurus guide" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus-Anleitung wird gelesen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在阅读 Osaurus 指南"
           }
         }
       }
@@ -3650,6 +4166,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索地点、获取路线和行程时间，并查找这台 Mac 的位置。"
+          }
+        }
+      }
+    },
+    "Search services" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dienste suchen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "搜索服务"
           }
         }
       }
@@ -6404,6 +6936,40 @@
         }
       }
     },
+    "%lld plugins need system permissions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Plugins brauchen Systemberechtigungen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%lld plugins need system permissions"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%lld plugins need system permissions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个插件需要系统权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個插件需要系統權限"
+          }
+        }
+      }
+    },
     "%lld provider%@ configured" : {
       "localizations" : {
         "de" : {
@@ -6826,6 +7392,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "启用%1$lld工具和%2$lld技能·%3$@"
+          }
+        }
+      }
+    },
+    "%lld tools need permission" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Tools brauchen eine Berechtigung"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%lld tools need permission"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "%lld tools need permission"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 个工具需要权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld 個工具需要權限"
           }
         }
       }
@@ -7506,6 +8106,40 @@
         }
       }
     },
+    "1 plugin needs system permissions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Plugin braucht Systemberechtigungen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 plugin needs system permissions"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 plugin needs system permissions"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个插件需要系统权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 個插件需要系統權限"
+          }
+        }
+      }
+    },
     "1 setting matches \"%@\"" : {
       "localizations" : {
         "de" : {
@@ -7536,6 +8170,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "1 個設定匹配 \"%@\""
+          }
+        }
+      }
+    },
+    "1 tool needs permission" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 Tool braucht eine Berechtigung"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 tool needs permission"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "1 tool needs permission"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 个工具需要权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "1 個工具需要權限"
           }
         }
       }
@@ -9595,6 +10263,110 @@
         }
       }
     },
+    "All Sources" : {
+      "comment" : "Source filter option: show tools from every source in the Tool Exposure Control Center.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle Quellen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "모든 출처"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Все источники"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有来源"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有來源"
+          }
+        }
+      }
+    },
+    "All Statuses" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Status"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "All Statuses"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "All Statuses"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有状态"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有狀態"
+          }
+        }
+      }
+    },
+    "All Tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Tools"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "All Tools"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "All Tools"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有工具"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有工具"
+          }
+        }
+      }
+    },
     "Allow" : {
       "localizations" : {
         "de" : {
@@ -9642,6 +10414,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允许音频"
+          }
+        }
+      }
+    },
+    "Allow automatically" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Automatisch erlauben"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Allow automatically"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Allow automatically"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动允许"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動允許"
           }
         }
       }
@@ -11003,6 +11809,74 @@
         }
       }
     },
+    "Ask before running" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Vor dem Ausführen fragen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ask before running"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Ask before running"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "运行前询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "運行前詢問"
+          }
+        }
+      }
+    },
+    "Ask first" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Frag zuerst"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "먼저 묻기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сначала спроси"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先询问"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "先提問"
+          }
+        }
+      }
+    },
     "Ask for something real. It uses the web, your files, and your apps to finish the job, then double-checks before answering." : {
       "localizations" : {
         "de" : {
@@ -11139,6 +12013,40 @@
         }
       }
     },
+    "Asking for a folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fragt nach einem Ordner"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더를 요청하는 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Запрашиваю папку"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在请求文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在請求資料夾"
+          }
+        }
+      }
+    },
     "Assistant" : {
       "localizations" : {
         "de" : {
@@ -11242,6 +12150,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "附加来自 %@ 的代码片段"
+          }
+        }
+      }
+    },
+    "Attached a folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner angehängt"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더를 연결함"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Папка подключена"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已附加文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已附加資料夾"
           }
         }
       }
@@ -11484,6 +12426,108 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "自动朗读回复"
+          }
+        }
+      }
+    },
+    "Auto-Allow All" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle automatisch erlauben"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "모두 자동 허용"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Разрешать все"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "全部自动允许"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "全部自動允許"
+          }
+        }
+      }
+    },
+    "Auto-Allow All Tool Calls" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle Tool-Aufrufe automatisch erlauben"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "모든 도구 호출 자동 허용"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматически разрешать все вызовы инструментов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动允许所有工具调用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動允許所有工具呼叫"
+          }
+        }
+      }
+    },
+    "Auto-Allow All Tool Calls?" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Alle Tool-Aufrufe automatisch erlauben?"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "모든 도구 호출을 자동 허용하시겠습니까?"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Автоматически разрешать все вызовы инструментов?"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自动允许所有工具调用？"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "自動允許所有工具呼叫？"
           }
         }
       }
@@ -12928,6 +13972,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "留空 = 使用 providers/mcp.json"
+          }
+        }
+      }
+    },
+    "Block" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Blockieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "차단"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Блокировать"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "阻止"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "塊"
           }
         }
       }
@@ -15553,6 +16631,40 @@
         }
       }
     },
+    "Choose what each tool may do" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Festlegen, was jedes Tool darf"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "각 도구가 할 수 있는 작업 선택"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Выберите, что разрешено каждому инструменту"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "选择每个工具可以执行的操作"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "選擇每個工具可以執行的操作"
+          }
+        }
+      }
+    },
     "Choose your OpenAI access" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -17364,6 +18476,40 @@
         }
       }
     },
+    "Connect services to give your agents more tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dienste verbinden, um deinen Agenten mehr Tools zu geben"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "서비스를 연결하여 에이전트에 더 많은 도구 제공"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Подключайте сервисы, чтобы дать агентам больше инструментов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "连接服务，为智能体提供更多工具"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "連接服務，為智能體提供更多工具"
+          }
+        }
+      }
+    },
     "Connect to %@" : {
       "localizations" : {
         "de" : {
@@ -17619,6 +18765,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "联系"
+          }
+        }
+      }
+    },
+    "Connections" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Verbindungen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Connections"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Connections"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "连接"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "連線"
           }
         }
       }
@@ -23769,6 +24949,40 @@
         }
       }
     },
+    "Edited the image" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bild bearbeitet"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Edited the image"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Отредактировал изображение"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已编辑图片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已編輯圖片"
+          }
+        }
+      }
+    },
     "Editing \"%@\"" : {
       "localizations" : {
         "de" : {
@@ -23813,6 +25027,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在沙盒中编辑文件"
+          }
+        }
+      }
+    },
+    "Editing the image" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bild wird bearbeitet"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Editing the image"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Редактирование изображения"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在编辑图片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在編輯圖片"
           }
         }
       }
@@ -25916,6 +27164,40 @@
         }
       }
     },
+    "Exported data from the database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daten aus der Datenbank exportiert"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터베이스에서 데이터를 내보냈습니다"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Данные экспортированы из базы данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已从数据库导出数据"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已從數據庫導出數據"
+          }
+        }
+      }
+    },
     "Exported on %@" : {
       "comment" : "Auto-extracted format-string key (Apple String.LocalizationValue canonical form).",
       "extractionState" : "manual",
@@ -25936,6 +27218,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "导出于 %@"
+          }
+        }
+      }
+    },
+    "Exporting data from the database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Exportiert Daten aus der Datenbank"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터베이스에서 데이터 내보내는 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Экспорт данных из базы данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在从数据库导出数据"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在從數據庫導出數據"
           }
         }
       }
@@ -26000,6 +27316,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暴露于网络"
+          }
+        }
+      }
+    },
+    "Exposure source filter" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter nach Quelle"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Exposure source filter"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Exposure source filter"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暴露来源筛选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暴露來源篩選"
+          }
+        }
+      }
+    },
+    "Exposure state filter" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Filter nach Zustand"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Exposure state filter"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Exposure state filter"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暴露状态筛选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暴露狀態篩選"
           }
         }
       }
@@ -26559,6 +27943,40 @@
         }
       }
     },
+    "Failed: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Fehlgeschlagen: %@"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "실패: %@"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Не удалось: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失败：%@"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "失敗：%@"
+          }
+        }
+      }
+    },
     "Fallback available" : {
       "localizations" : {
         "de" : {
@@ -26804,6 +28222,74 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "筛选"
+          }
+        }
+      }
+    },
+    "Filter by source" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach Quelle filtern"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Filter by source"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Filter by source"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按来源筛选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按來源篩選"
+          }
+        }
+      }
+    },
+    "Filter by status" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nach Status filtern"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Filter by status"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Filter by status"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按状态筛选"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "按狀態篩選"
           }
         }
       }
@@ -27644,6 +29130,40 @@
         }
       }
     },
+    "Generated an image" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bild erstellt"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Generated an image"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Сгенерировано изображение"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已生成图片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已生成圖片"
+          }
+        }
+      }
+    },
     "Generated: %@" : {
       "localizations" : {
         "de" : {
@@ -27656,6 +29176,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "已生成：%@"
+          }
+        }
+      }
+    },
+    "Generating an image" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bild wird erstellt"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Generating an image"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Создание изображения"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在生成图片"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在生成圖片"
           }
         }
       }
@@ -30246,6 +31800,40 @@
         }
       }
     },
+    "Imported data into the database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daten in die Datenbank importiert"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터베이스로 데이터를 가져왔습니다"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Данные импортированы в базу данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已将数据导入数据库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已將數據導入數據庫"
+          }
+        }
+      }
+    },
     "Imported from input" : {
       "localizations" : {
         "de" : {
@@ -30298,6 +31886,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在导入第 %lld 个，共 %lld 个"
+          }
+        }
+      }
+    },
+    "Importing data into the database" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Importiert Daten in die Datenbank"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "데이터베이스로 데이터 가져오는 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Импорт данных в базу данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在将数据导入数据库"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在將數據導入數據庫"
           }
         }
       }
@@ -31036,6 +32658,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "安装插件"
+          }
+        }
+      }
+    },
+    "Install a plugin, add a service, or create a custom tool to get started" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Installiere ein Plugin, füge einen Dienst hinzu oder erstelle ein eigenes Tool, um loszulegen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "플러그인 설치, 서비스 추가 또는 사용자 정의 도구 생성으로 시작하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Установите плагин, добавьте сервис или создайте собственный инструмент, чтобы начать"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "安装插件、添加服务或创建自定义工具以开始使用"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "安裝插件、新增服務或建立自訂工具以開始使用"
           }
         }
       }
@@ -36456,6 +38112,42 @@
         }
       }
     },
+    "Native" : {
+      "comment" : "Tool source: a registered tool that does not belong to the other source buckets.",
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nativ"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "네이티브"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Родной"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原生"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "原生"
+          }
+        }
+      }
+    },
     "Native MTP" : {
       "localizations" : {
         "de" : {
@@ -38847,6 +40539,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此插件中没有定义工具"
+          }
+        }
+      }
+    },
+    "No tools yet" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Tools"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No tools yet"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "No tools yet"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暂无工具"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "暫無工具"
           }
         }
       }
@@ -48333,6 +50059,74 @@
         }
       }
     },
+    "Redacted personal information" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Persönliche Daten geschwärzt"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "개인정보를 마스킹함"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Личные данные скрыты"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已隐去个人信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已隱去個人資訊"
+          }
+        }
+      }
+    },
+    "Redacting personal information" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Persönliche Daten werden geschwärzt"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "개인정보 마스킹 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Скрытие личных данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在隐去个人信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在隱去個人資訊"
+          }
+        }
+      }
+    },
     "Referenced in place; Osaurus does not copy or mutate this bundle." : {
       "localizations" : {
         "de" : {
@@ -52901,6 +54695,74 @@
         }
       }
     },
+    "Scanned for personal information" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Nach persönlichen Daten gesucht"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "개인정보 검사 완료"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Поиск личных данных завершён"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已扫描个人信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "已掃描個人資訊"
+          }
+        }
+      }
+    },
+    "Scanning for personal information" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Suche nach persönlichen Daten"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "개인정보 검사 중"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Поиск личных данных"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在扫描个人信息"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "正在掃描個人資訊"
+          }
+        }
+      }
+    },
     "Scanning…" : {
       "localizations" : {
         "de" : {
@@ -54925,6 +56787,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "服务：com.osaurus.storage"
+          }
+        }
+      }
+    },
+    "Services" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Dienste"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "서비스"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сервисы"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "服务"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "服務"
           }
         }
       }
@@ -62279,6 +64175,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工具 (%lld)"
+          }
+        }
+      }
+    },
+    "Tools & MCP" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Tools & MCP"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "도구 및 MCP"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Инструменты и MCP"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "工具与 MCP"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "工具與 MCP"
           }
         }
       }

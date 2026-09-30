@@ -370,8 +370,10 @@ final class NativePendingToolCallView: NSView {
         categoryIcon.image = SymbolImageCache.image(category.icon, accessibilityDescription: nil)
         categoryIcon.contentTintColor = NSColor(theme.secondaryText)
 
-        nameLabel.stringValue = toolName
-        nameLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        // Upstream `W-tool-catalog-ui`: the call being written reads as plain
+        // words ("Writing a file…") instead of the raw tool name.
+        nameLabel.stringValue = ToolDisplayName.friendly(for: toolName, running: true, pendingBytes: argSize)
+        nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
         nameLabel.textColor = NSColor(theme.primaryText)
 
         if argSize > 0 {

@@ -125,7 +125,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .orchestrator: L("Orchestrator")
         case .plugins: L("Plugins")
         case .sandbox: L("Sandbox")
-        case .tools: L("Tools")
+        case .tools: L("Tools & MCP")
         case .search: L("Web Search")
         case .skills: L("Skills")
         case .commands: L("Commands")

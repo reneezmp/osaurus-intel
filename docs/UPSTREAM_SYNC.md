@@ -2347,3 +2347,15 @@ calling a sync complete.
   (upstream test; 50 ms sleep while unordered `Task`s append snapshots) failed
   once in a full run and passed 3/3 alone and on the rerun. Not caused by
   Settings work; rerun before investigating.
+
+### Settings redesign step 3 + tool catalog (`W-settings-ux-2950`, `W-tool-catalog-ui`) — 2026-09-30
+
+- Tools → **Tools & MCP** with Services / All Tools / Plugins; upstream's
+  catalog files compiled; Intel `ToolIndexService` stand-in; Auto-Allow
+  (`ToolApprovalSettings`, engine check keeps per-call tools asking, as
+  upstream); MCP Directory on Services; friendly tool names in chat rows.
+  Details: [`SETTINGS_REDESIGN_INTEL.md`](SETTINGS_REDESIGN_INTEL.md#step-3--tools--mcp-and-the-tool-catalog-2026-09-30).
+- **Re-sync notes:** `ToolsManagerView.swift` is upstream's file with the
+  `VStack` change; `ProvidersView.swift` stays Intel's (older than upstream's
+  hub, `W-mcp-providers`); `IntelToolIndexService.swift` must stay in sync with
+  upstream `ToolIndexService.exposureDiagnostic` row semantics.

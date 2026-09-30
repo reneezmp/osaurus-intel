@@ -840,6 +840,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         approved = true
                                         break
                                     }
+                                    // Upstream #2241: the global auto-allow switch
+                                    // replaces the card, except for per-call tools.
+                                    if ToolApprovalSettings.skipsApprovalCard(
+                                        perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
+                                            call.name, argumentsJSON: call.arguments))
+                                    {
+                                        approved = true
+                                        break
+                                    }
                                     let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
                                     approved = await ToolPermissionPromptService.requestApproval(
                                         toolName: call.name,
@@ -1064,6 +1073,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 approved = true
                             case .ask:
                                 if ownsApproval {
+                                    approved = true
+                                    break
+                                }
+                                // Upstream #2241: the global auto-allow switch
+                                // replaces the card, except for per-call tools.
+                                if ToolApprovalSettings.skipsApprovalCard(
+                                    perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
+                                        call.name, argumentsJSON: call.arguments))
+                                {
                                     approved = true
                                     break
                                 }

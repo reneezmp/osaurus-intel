@@ -326,8 +326,32 @@ public enum SettingsSearchIndex {
             id: "memory.clear", tab: .memory, title: "Clear All Memory",
             keywords: ["delete memory", "wipe", "forget everything"]),
         .init(
-            id: "tools.overview", tab: .tools, title: "Tools",
-            keywords: ["tool permissions", "ask", "deny", "auto", "mcp", "approval"]),
+            id: "tools.overview", tab: .tools, title: "Tools & MCP",
+            keywords: ["tool permissions", "ask", "deny", "auto", "mcp", "approval", "tool catalog", "tools"]),
+        // Upstream #2950 Tools & MCP tabs (subTab = ToolsTab raw value).
+        .init(
+            id: "tools.services", tab: .tools, section: "Services", title: "Services",
+            keywords: ["mcp services", "mcp servers", "connections", "connected services", "remote tools", "mcp"],
+            subTab: "Services"),
+        .init(
+            id: "tools.addService", tab: .tools, section: "Services", title: "Add Service",
+            keywords: ["add mcp", "add connection", "add provider", "connect service", "new mcp server"],
+            subTab: "Services"),
+        .init(
+            id: "tools.directory", tab: .tools, section: "Services", title: "Directory",
+            keywords: ["browse services", "mcp directory", "discover mcp", "provider catalog", "custom server"],
+            subTab: "Services"),
+        .init(
+            id: "tools.allTools", tab: .tools, section: "All Tools", title: "All Tools",
+            keywords: ["tool list", "per tool permission", "auto ask deny", "enable tools", "disable tools"],
+            subTab: "All"),
+        .init(
+            id: "tools.autoAllowAll", tab: .tools, section: "All Tools", title: "Auto-Allow All Tool Calls",
+            keywords: [
+                "auto allow", "auto-allow", "allow all tools", "approve tools", "approval", "always allow",
+                "never ask", "tool prompt",
+            ],
+            subTab: "All"),
         .init(
             id: "skills.overview", tab: .skills, title: "Skills",
             keywords: ["skill", "instructions", "github import"]),

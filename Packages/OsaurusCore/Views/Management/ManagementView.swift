@@ -174,6 +174,9 @@ private extension ManagementView {
         if entry.tab == .voice, let subTab = entry.subTab {
             stateManager.voiceSubTabRequest = subTab
         }
+        if entry.tab == .tools, let subTab = entry.subTab {
+            stateManager.pendingToolsSubTab = subTab
+        }
         withAnimation(.easeOut(duration: 0.2)) {
             stateManager.selectedTab = entry.tab
         }

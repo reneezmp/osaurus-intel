@@ -910,3 +910,30 @@ Ventura in **both** light and dark themes, with the window active and inactive.
       **(paid)**.
 - [ ] Edit that command: **Save** stays disabled until you change something;
       the change shows in the list and in chat.
+
+### Step 3 — Tools & MCP
+
+- [ ] Capabilities shows **Tools & MCP** (not Tools); it opens on **Services**.
+      The tabs are Services, All Tools, Plugins. An **Add Service** button sits
+      in the header on Services.
+- [ ] Services: your MCP services as before, with "N connected · N tools"
+      beside the title; below them a **Directory** list. Search it for
+      "github"; click a service: the add sheet opens straight on its setup.
+      **Custom Server** opens the custom editor.
+- [ ] All Tools: **Auto-Allow All Tool Calls** at the top. Turning it on asks
+      for confirmation first. Below: filter menus, service cards, plugin
+      cards, and a Built-in list that now includes Knowledge, Database,
+      Apple apps and Orchestrator tools. Switching a tool off or changing
+      Auto/Ask/Block updates just that row. Advanced diagnostics at the bottom
+      exports a report file.
+- [ ] **(paid)** With Auto-Allow on, a tool set to Ask runs without the card.
+      Asking the agent to delete a Knowledge document **still** shows the
+      card. Turn Auto-Allow off again.
+- [ ] Plugins: your native plugins with Installed / Browse, update, settings
+      (gear) and uninstall, without a second page title. The Plugins sidebar
+      tab still works.
+- [ ] **(paid)** In a chat, collapsed tool rows read "Reading a file" /
+      "Read a file" (not `file_read`); expanding one shows the raw name. A
+      failed call reads in the past tense as failed.
+- [ ] Search Settings for "auto-allow", "add service", "mcp directory":
+      each opens the right Tools & MCP sub-tab.

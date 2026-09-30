@@ -140,15 +140,33 @@ private struct AnimatedTabButton<Tab: AnimatedTabItem>: View {
 // MARK: - Tools Tab (for ToolsManagerView)
 
 enum ToolsTab: String, CaseIterable, AnimatedTabItem {
-    case available = "Available"
-    case remote = "Remote"
-    case sandbox = "Sandbox"
+    /// MCP services: configured services + the browsable Directory. Default tab.
+    case services = "Services"
+    /// Every usable tool grouped by source, with per-tool permissions.
+    case all = "All"
+    /// Raw value predates the "Plugins" title; kept for deep-link stability.
+    case nativePlugins = "Native Plugins"
 
     var title: String {
         switch self {
-        case .available: return L("Available")
-        case .remote: return L("Remote")
-        case .sandbox: return L("Sandbox")
+        case .services: return L("Services")
+        case .all: return L("All Tools")
+        case .nativePlugins: return L("Plugins")
+        }
+    }
+
+    /// Resolves a deep-link raw value, accepting the legacy tab names
+    /// ("Connections" / "MCP" / "Remote" / "Available" / "Sandbox") that
+    /// pre-date the current Services / All Tools / Plugins layout (upstream
+    /// #2950; Intel's own old names were Available / Remote / Sandbox).
+    static func resolved(from rawValue: String) -> ToolsTab? {
+        if let tab = ToolsTab(rawValue: rawValue) { return tab }
+        switch rawValue.lowercased() {
+        case "connections", "connection", "mcp", "remote", "services", "service": return .services
+        case "available", "all tools": return .all
+        case "sandbox", "custom": return .all
+        case "plugins", "native plugins": return .nativePlugins
+        default: return nil
         }
     }
 }

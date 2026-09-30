@@ -5,6 +5,7 @@
 //  Centralized workarounds for SwiftUI bugs and platform-specific UI quirks.
 //
 
+import AppKit
 import Foundation
 
 extension Task where Success == Never, Failure == Never {
@@ -16,5 +17,17 @@ extension Task where Success == Never, Failure == Never {
     @MainActor
     static func sleepForPopoverDismiss() async throws {
         try await Task.sleep(nanoseconds: 300_000_000)
+    }
+}
+
+extension NSSavePanel {
+    /// Presents the panel without spinning a nested modal run loop on the
+    /// main thread (upstream helper; the Tools diagnostics export uses it).
+    /// Covers `NSOpenPanel` too, since it subclasses `NSSavePanel`.
+    @MainActor
+    func beginModal() async -> NSApplication.ModalResponse {
+        await withCheckedContinuation { continuation in
+            begin { continuation.resume(returning: $0) }
+        }
     }
 }

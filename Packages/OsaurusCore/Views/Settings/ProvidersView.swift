@@ -13,19 +13,35 @@
 import AppKit
 import SwiftUI
 
+/// Where the Add Service sheet starts (upstream #2950): the catalog, a
+/// directory template, or the custom-server editor.
+enum MCPAddServiceStart: Equatable {
+    case catalog
+    case template(MCPProviderTemplate)
+    case custom
+}
+
 struct ProvidersView: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var manager = MCPProviderManager.shared
     @ObservedObject private var managementState = ManagementStateManager.shared
-    @State private var showAddSheet = false
+    /// Owned by the Tools & MCP shell so its header "Add Service" button can
+    /// open the sheet from outside this view (upstream #2950).
+    @Binding var showAddSheet: Bool
     @State private var editingProvider: MCPProvider?
+    /// Starting step for the add sheet; set by the inline Directory.
+    @State private var addSheetStart: MCPAddServiceStart = .catalog
+    @State private var directoryQuery: String = ""
     @State private var hasAppeared = false
+
+    init(showAddSheet: Binding<Bool> = .constant(false)) {
+        _showAddSheet = showAddSheet
+    }
 
     var body: some View {
         ScrollView {
-            LazyVStack(spacing: 16) {
-                // Header with add button
-                headerSection
+            LazyVStack(alignment: .leading, spacing: 16) {
+                SettingsSectionHeader(title: "Services", caption: servicesCaption)
 
                 if manager.configuration.providers.isEmpty {
                     emptyState
@@ -87,6 +103,9 @@ struct ProvidersView: View {
                         )
                     }
                 }
+
+                directorySection
+                    .padding(.top, 12)
             }
             .padding(24)
         }
@@ -100,8 +119,8 @@ struct ProvidersView: View {
         .onChange(of: managementState.pendingMCPProviderEditId) { _ in
             applyPendingEditRequest()
         }
-        .sheet(isPresented: $showAddSheet) {
-            ProviderEditSheet(provider: nil) { provider, token in
+        .sheet(isPresented: $showAddSheet, onDismiss: { addSheetStart = .catalog }) {
+            ProviderEditSheet(provider: nil, start: addSheetStart) { provider, token in
                 manager.addProvider(provider, token: token)
             }
         }
@@ -123,64 +142,83 @@ struct ProvidersView: View {
         managementState.pendingMCPProviderEditId = nil
     }
 
-    private var headerSection: some View {
-        SectionHeader(
-            title: "MCP Providers",
-            description: "Connect to remote MCP servers to access additional tools"
-        ) {
-            Button(action: { showAddSheet = true }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus")
-                        .font(.system(size: 12, weight: .semibold))
-                    Text("Add Provider", bundle: .module)
-                        .font(.system(size: 13, weight: .semibold))
+    /// "2 connected · 14 tools" beside the Services title.
+    private var servicesCaption: String {
+        let providers = manager.configuration.providers
+        guard !providers.isEmpty else { return "" }
+        let connected = providers.filter { manager.providerStates[$0.id]?.isConnected == true }.count
+        let tools = providers.reduce(0) { $0 + (manager.providerStates[$1.id]?.discoveredToolCount ?? 0) }
+        return String(format: L("%d connected · %d tools"), connected, tools)
+    }
+
+    /// With no services configured, a one-line invitation; the Directory
+    /// below does the rest.
+    private var emptyState: some View {
+        SettingsGroup {
+            HStack(spacing: 12) {
+                Image(systemName: "server.rack")
+                    .font(.system(size: 15, weight: .medium))
+                    .foregroundColor(theme.tertiaryText)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("No services yet", bundle: .module)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                    Text("Pick a service below to give your agents more tools.", bundle: .module)
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
                 }
-                .foregroundColor(.white)
-                .padding(.horizontal, 14)
-                .padding(.vertical, 8)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.accentColor)
-                )
+                Spacer()
             }
-            .buttonStyle(PlainButtonStyle())
         }
     }
 
-    private var emptyState: some View {
-        VStack(spacing: 16) {
-            ZStack {
-                Circle()
-                    .fill(theme.accentColor.opacity(0.1))
-                    .frame(width: 80, height: 80)
-                Image(systemName: "server.rack")
-                    .font(.system(size: 32, weight: .light))
-                    .foregroundColor(theme.accentColor)
+    // MARK: - Directory
+
+    private var directoryTemplates: [MCPProviderTemplate] {
+        MCPProviderDirectoryView.templates(matching: directoryQuery)
+    }
+
+    /// Always-visible provider directory as a flat list (upstream #2950).
+    /// Tapping a row opens the Add Service sheet on that service's setup step.
+    private var directorySection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: "Directory") {
+                SearchField(text: $directoryQuery, placeholder: "Search services", width: 200, compact: true)
             }
 
-            Text("No MCP providers yet", bundle: .module)
-                .font(.system(size: 17, weight: .semibold))
-                .foregroundColor(theme.primaryText)
-
-            Text("Connect to a remote MCP server to give Osaurus more tools.", bundle: .module)
-                .font(.system(size: 14))
-                .foregroundColor(theme.secondaryText)
-                .multilineTextAlignment(.center)
-
-            Button(action: { showAddSheet = true }) {
-                HStack(spacing: 6) {
-                    Image(systemName: "plus.circle.fill")
-                        .font(.system(size: 14))
-                    Text("Connect a Service", bundle: .module)
-                        .font(.system(size: 14, weight: .medium))
+            SettingsGroup {
+                MCPProviderDirectoryRow(
+                    icon: "slider.horizontal.3",
+                    title: "Custom Server",
+                    tagline: "Connect to any other MCP-compatible server"
+                ) {
+                    addSheetStart = .custom
+                    showAddSheet = true
                 }
-                .foregroundColor(theme.accentColor)
+                ForEach(directoryTemplates) { template in
+                    MCPProviderDirectoryRow(
+                        icon: template.iconSystemName,
+                        title: template.displayName,
+                        tagline: template.tagline
+                    ) {
+                        addSheetStart = .template(template)
+                        showAddSheet = true
+                    }
+                }
+                if directoryTemplates.isEmpty {
+                    Text(
+                        "No services match \"\(directoryQuery.trimmingCharacters(in: .whitespaces))\". Try another name, or pick Custom Server above.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.tertiaryText)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                }
             }
-            .buttonStyle(PlainButtonStyle())
-            .padding(.top, 8)
+
+            SettingsGroupFooter("Each service adds tools your agents can use.")
         }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 60)
+        .settingsLandingAnchor("tools.directory")
     }
 }
 
@@ -797,6 +835,8 @@ private struct ProviderEditSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let provider: MCPProvider?
+    /// Add-mode starting step (upstream #2950 inline Directory).
+    var start: MCPAddServiceStart = .catalog
     let onSave: (MCPProvider, String?) -> Void
 
     /// Stable identity for "draft" providers (sheet not yet saved). Reused so OAuth
@@ -1189,108 +1229,14 @@ private struct ProviderEditSheet: View {
 
     // MARK: - Catalog Grid (Phase 1)
 
+    /// The catalog grid is upstream #2950's shared `MCPProviderDirectoryView`,
+    /// the same list the Services page shows inline.
     private var catalogGridBody: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            catalogSearchField
-
-            LazyVGrid(
-                columns: [GridItem(.adaptive(minimum: 160), spacing: 12)],
-                spacing: 12
-            ) {
-                ProviderCatalogCard(
-                    icon: "slider.horizontal.3",
-                    title: "Custom Server",
-                    tagline: "Connect to any other MCP-compatible server",
-                    action: selectCustomServer
-                )
-                ForEach(filteredTemplates) { template in
-                    ProviderCatalogCard(
-                        icon: template.iconSystemName,
-                        title: template.displayName,
-                        tagline: template.tagline,
-                        action: { selectTemplate(template) }
-                    )
-                }
-            }
-
-            if filteredTemplates.isEmpty && !trimmedCatalogQuery.isEmpty {
-                catalogNoMatchesHint
-            }
-        }
-    }
-
-    /// Templates that match the current `catalogQuery`. Empty query returns the
-    /// full catalog. Match is case-insensitive across `displayName` and
-    /// `tagline` so users can find Linear by typing "issues".
-    private var filteredTemplates: [MCPProviderTemplate] {
-        let query = trimmedCatalogQuery
-        guard !query.isEmpty else { return MCPProviderTemplate.allTemplates }
-        return MCPProviderTemplate.allTemplates.filter {
-            $0.displayName.localizedCaseInsensitiveContains(query)
-                || $0.tagline.localizedCaseInsensitiveContains(query)
-        }
-    }
-
-    private var trimmedCatalogQuery: String {
-        catalogQuery.trimmingCharacters(in: .whitespaces)
-    }
-
-    @ViewBuilder
-    private var catalogSearchField: some View {
-        HStack(spacing: 8) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 12, weight: .medium))
-                .foregroundColor(themeManager.currentTheme.tertiaryText)
-
-            ZStack(alignment: .leading) {
-                if catalogQuery.isEmpty {
-                    Text("Search providers", bundle: .module)
-                        .font(.system(size: 13))
-                        .foregroundColor(themeManager.currentTheme.placeholderText)
-                        .allowsHitTesting(false)
-                }
-                TextField("", text: $catalogQuery)
-                    .textFieldStyle(.plain)
-                    .font(.system(size: 13))
-                    .foregroundColor(themeManager.currentTheme.primaryText)
-            }
-
-            if !catalogQuery.isEmpty {
-                Button(action: { catalogQuery = "" }) {
-                    Image(systemName: "xmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(themeManager.currentTheme.tertiaryText)
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
-        .padding(.horizontal, 10)
-        .padding(.vertical, 8)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(themeManager.currentTheme.inputBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(themeManager.currentTheme.inputBorder, lineWidth: 1)
-                )
+        MCPProviderDirectoryView(
+            query: $catalogQuery,
+            onSelectTemplate: selectTemplate,
+            onSelectCustom: selectCustomServer
         )
-    }
-
-    @ViewBuilder
-    private var catalogNoMatchesHint: some View {
-        VStack(spacing: 6) {
-            Image(systemName: "magnifyingglass")
-                .font(.system(size: 22, weight: .light))
-                .foregroundColor(themeManager.currentTheme.tertiaryText)
-            Text("No services match \"\(trimmedCatalogQuery)\"", bundle: .module)
-                .font(.system(size: 13, weight: .medium))
-                .foregroundColor(themeManager.currentTheme.secondaryText)
-            Text("Try a different name, or pick Custom Server above.", bundle: .module)
-                .font(.system(size: 11))
-                .foregroundColor(themeManager.currentTheme.tertiaryText)
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 24)
     }
 
     private func selectTemplate(_ template: MCPProviderTemplate) {
@@ -2114,10 +2060,14 @@ private struct ProviderEditSheet: View {
 
     private func loadProvider() {
         guard let provider = provider else {
-            // Add-mode: stay on the catalog grid. The draftId is preserved so
-            // anything OAuth-saved mid-flow ends up on this id and persists
-            // through save().
-            phase = .chooseProvider
+            // Add-mode: start where the caller asked (catalog grid by
+            // default). The draftId is preserved so anything OAuth-saved
+            // mid-flow ends up on this id and persists through save().
+            switch start {
+            case .catalog: phase = .chooseProvider
+            case .template(let template): selectTemplate(template)
+            case .custom: selectCustomServer()
+            }
             return
         }
         // Edit-mode: jump straight to the freeform editor. Re-use the existing
@@ -2368,73 +2318,6 @@ extension ProviderEditSheet.TestResult {
     var isSuccess: Bool {
         if case .success = self { return true }
         return false
-    }
-}
-
-// MARK: - Provider Catalog Card
-
-/// One cell in the catalog grid: icon, title, two-line tagline, full-cell tap target.
-private struct ProviderCatalogCard: View {
-    @ObservedObject private var themeManager = ThemeManager.shared
-    let icon: String
-    let title: String
-    let tagline: String
-    let action: () -> Void
-
-    @State private var isHovering = false
-
-    var body: some View {
-        Button(action: action) {
-            VStack(alignment: .leading, spacing: 10) {
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(themeManager.currentTheme.accentColor.opacity(0.12))
-                    Image(systemName: icon)
-                        .font(.system(size: 18, weight: .semibold))
-                        .foregroundColor(themeManager.currentTheme.accentColor)
-                }
-                .frame(width: 40, height: 40)
-
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(LocalizedStringKey(title), bundle: .module)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(themeManager.currentTheme.primaryText)
-                        .lineLimit(1)
-                    Text(LocalizedStringKey(tagline), bundle: .module)
-                        .font(.system(size: 11))
-                        .foregroundColor(themeManager.currentTheme.secondaryText)
-                        .lineLimit(2)
-                        .multilineTextAlignment(.leading)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-
-                Spacer(minLength: 0)
-            }
-            .padding(14)
-            .frame(maxWidth: .infinity, minHeight: 130, alignment: .topLeading)
-            .background(
-                RoundedRectangle(cornerRadius: 12)
-                    .fill(
-                        isHovering
-                            ? themeManager.currentTheme.accentColor.opacity(0.06)
-                            : themeManager.currentTheme.tertiaryBackground
-                    )
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(
-                        isHovering
-                            ? themeManager.currentTheme.accentColor.opacity(0.4)
-                            : themeManager.currentTheme.primaryBorder,
-                        lineWidth: 1
-                    )
-            )
-            .contentShape(Rectangle())
-        }
-        .buttonStyle(PlainButtonStyle())
-        .onHover { hovering in
-            withAnimation(.easeOut(duration: 0.15)) { isHovering = hovering }
-        }
     }
 }
 

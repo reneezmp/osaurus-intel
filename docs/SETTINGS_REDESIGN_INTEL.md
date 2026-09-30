@@ -10,7 +10,7 @@ touched file diverges, so the port is by hand, in five steps:
 
 1. Kit + header restyle — **done 2026-09-30**
 2. General / Conversation split, Advanced → Data & Storage, search anchors — **done 2026-09-30**
-3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory — **waits:** it sits on the tool-catalog work (`W-tool-catalog-ui`) and needs the Auto-Allow decision
+3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory — **done 2026-09-30** (with the tool catalog, `W-tool-catalog-ui`)
 4. Voice tabs (Chat Voice, Transcription) on top of the Intel voice port — **done 2026-09-30**
 5. Providers, Themes, slash-command editor sheet (the CLI card already moved in step 2) — **done 2026-09-30** (editor; the rest waits, see below)
 
@@ -140,3 +140,59 @@ touched file diverges, so the port is by hand, in five steps:
   Voice tab aliases, Conversation saving only its own fields, and the
   Advanced anchor sets. Static helpers on these views are `nonisolated`
   (tests trap with signal 5 otherwise).
+
+## Step 3 — Tools & MCP and the tool catalog (2026-09-30)
+
+- **Tab:** Capabilities → **Tools & MCP** (was Tools) with sub-tabs
+  **Services** (default), **All Tools**, **Plugins**. `ToolsTab.resolved(from:)`
+  still accepts Intel's old names (Available / Remote / Sandbox) and
+  upstream's (Connections / MCP); settings-search results can open a sub-tab
+  (`pendingToolsSubTab`).
+- **All Tools** is upstream's catalog (`ToolsManagerView`, `ToolCatalogRows`,
+  `ToolCatalogPresentation`, `ToolAvailability`, `ToolExposureDiagnostic`,
+  `ToolPermissionBanner`, `ToolAdvancedDiagnosticsSection`, `ToolDisplayName`,
+  `ToolAvailabilityBadge`): the **Auto-Allow All Tool Calls** switch on top,
+  source / status filters, connected-service cards, custom tools, plugin
+  cards, and a **Built-in** group that now also lists Intel's always-on tools
+  (Knowledge, Database, Apple apps, Orchestrator…) which the old Intel page
+  never showed, then Advanced diagnostics with a reporter-safe export.
+  - Intel keeps an eager `VStack` for the list (Rosy found a `LazyVStack` of
+    collapsible cards left blank gaps when the tab reappeared).
+  - Exposure rows come from `Services/Tool/IntelToolIndexService.swift`, an
+    Intel stand-in for upstream's `ToolIndexService` (excluded with its tool
+    index database). Intel's capability search reads the live registry, so
+    every registered, enabled tool counts as indexed.
+  - Intel `ToolRegistry` gained `availability(forTool:)`, `entry(named:)`,
+    `requiresPerCallApproval(_:)`, `isBuiltInTool(_:)`. Registry lookups must
+    run on the main actor (`folderToolNames` asserts it; tests are
+    `@MainActor`).
+- **Auto-Allow** (Renée: exactly like upstream): `ToolApprovalSettings`
+  (`chatAutoAllowAllTools`, off by default, confirmation alert when turning it
+  on). `CloudChatEngine` checks `ToolApprovalSettings.skipsApprovalCard` in both
+  `.ask` branches, after tools that run their own review. Upstream's own
+  registry keeps per-call tools asking (`!perCallApproval`), so
+  `delete_knowledge`, `db_execute`-style per-call tools still show the card;
+  `.deny` still denies.
+- **Services** is Intel's MCP list (cards) under a "Services" title with a
+  connected/tools caption, plus upstream's inline **Directory**
+  (`MCPProviderDirectoryView` / `MCPProviderDirectoryRow`): tapping a row
+  opens the add sheet on that service (`MCPAddServiceStart`). The sheet's
+  catalog step reuses the same directory view. Upstream's health/probe hub on
+  this page waits for `W-mcp-providers`.
+- **Plugins** embeds Intel's own plugin manager (`PluginsView(embedded:
+  true)` via `NativePluginsBrowseView`) without its page header. The Plugins
+  sidebar tab stays (it is the same view with a header) until the two are
+  merged.
+- **Chat:** collapsed tool rows and the "writing a tool call" row now show
+  friendly names ("Reading a file", "Read a file"; failures in the past tense)
+  instead of raw tool names; the expanded detail keeps the raw name.
+- Left for later in `W-tool-catalog-ui`: `AgentCapabilityReadiness` (agent
+  editor readiness panel) and `ToolExecutionSurface` (where a call runs, on
+  the approval card).
+- Folder tool permissions stay on Conversation too: folder tools are only
+  registered while a folder is attached, so the catalog cannot always list
+  them.
+- Tests: upstream `ToolCatalogPresentationTests`,
+  `ToolDisplayNameFailedTenseTests`, `ToolDisplayNameRedactionTests`
+  (`ConfigToolDisplayTests` not ported: it covers upstream's `osaurus_config`
+  chip), plus `IntelToolCatalogTests`.

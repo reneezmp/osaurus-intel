@@ -76,3 +76,25 @@ protocol KnowledgeWritePreviewingTool {
     /// from being reviewed at all.
     func approvalPreview(argumentsJSON: String) async -> KnowledgeWritePreview?
 }
+
+/// Global "auto-allow all tool calls" chat setting (upstream #2241, default
+/// off; Renée 2026-09-30: port exactly like upstream). When on, tools whose
+/// effective policy is `.ask` run without the interactive approval card.
+/// It only replaces the prompt: `.deny` still denies, tools that run their
+/// own review (`handlesOwnApproval`) are unchanged, and per-call tools
+/// (`PerCallApprovalTool`, e.g. `delete_knowledge`) still ask, as upstream.
+enum ToolApprovalSettings {
+    static let autoAllowAllDefaultsKey = "chatAutoAllowAllTools"
+
+    static var autoAllowAll: Bool {
+        UserDefaults.standard.bool(forKey: autoAllowAllDefaultsKey)
+    }
+
+    /// The engine's decision at an `.ask` call that would show a card: skip
+    /// it when auto-allow is on, unless this call must be approved every time.
+    static func skipsApprovalCard(
+        perCallRequired: Bool, autoAllowAll: Bool = ToolApprovalSettings.autoAllowAll
+    ) -> Bool {
+        autoAllowAll && !perCallRequired
+    }
+}

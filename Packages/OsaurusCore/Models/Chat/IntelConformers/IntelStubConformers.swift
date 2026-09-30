@@ -1252,6 +1252,10 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 
     func isMCPTool(_ name: String) -> Bool { mcpToolNames.contains(name) }
 
+    /// Built-in (always-registered) tools; the Tools catalog files them
+    /// under Built-in.
+    func isBuiltInTool(_ name: String) -> Bool { builtInToolNames.contains(name) }
+
     /// Plugin, MCP and other non-built-in tools: in Auto mode these are
     /// loaded on demand through `capabilities` instead of being sent up
     /// front (docs/TOOL_DISCOVERY_INTEL.md). Built-ins, folder tools and the
@@ -1342,6 +1346,83 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// True for `PerCallApprovalTool`s: every call needs its own approval.
     func requiresApprovalEveryCall(_ name: String) -> Bool {
         (toolsByName[name] as? any PerCallApprovalTool)?.requiresApprovalEveryCall == true
+    }
+
+    /// Upstream's name for `requiresApprovalEveryCall(_:)`, used by the
+    /// Tools catalog (the policy menu hides Auto for these tools).
+    func requiresPerCallApproval(_ name: String) -> Bool {
+        requiresApprovalEveryCall(name)
+    }
+
+    /// O(1) single-tool lookup as a `ToolEntry` (upstream API; the Tools
+    /// catalog patches one row after a toggle instead of relisting).
+    func entry(named name: String) -> ToolEntry? {
+        guard let tool = toolsByName[name] else { return nil }
+        return ToolEntry(
+            name: tool.name,
+            description: tool.description,
+            enabled: !disabledToolNames.contains(tool.name),
+            parameters: tool.parameters
+        )
+    }
+
+    /// Why a tool is callable now, loadable through the `capabilities`
+    /// gateway, or unavailable (upstream #W-tool-catalog-ui). Read-only
+    /// diagnostic: the composer and `runtimeCapabilityDenial` still enforce
+    /// what is offered. Intel has no execution modes or preflight search, so
+    /// those parameters only exist for signature parity.
+    func availability(
+        forTool toolName: String,
+        agentAllowedNames: Set<String>? = nil,
+        executionMode: Any? = nil,
+        selectedPreflightNames: Set<String>? = nil
+    ) -> ToolAvailability {
+        guard toolsByName[toolName] != nil else {
+            return ToolAvailability(
+                toolName: toolName,
+                runtime: nil,
+                groupName: nil,
+                reasonCodes: [.notRegistered],
+                detail: L("tool is not registered; install or enable the plugin/provider that owns it")
+            )
+        }
+        let isEnabled = !disabledToolNames.contains(toolName)
+        let builtIn = builtInToolNames.contains(toolName)
+        let runtimeManaged = runtimeManagedToolNames.contains(toolName)
+        let dynamic = !builtIn && !runtimeManaged
+        let runtime: String =
+            isMCPTool(toolName) ? "mcp" : isPluginTool(toolName) ? L("plugin") : builtIn ? L("builtin") : L("native")
+        var reasons: [ToolAvailabilityReasonCode] = []
+        var details: [String] = []
+        func append(_ reason: ToolAvailabilityReasonCode, _ detail: String) {
+            if !reasons.contains(reason) { reasons.append(reason) }
+            details.append(detail)
+        }
+        if dynamic, !isEnabled { append(.disabled, L("globally disabled")) }
+        if dynamic, let agentAllowedNames, !agentAllowedNames.contains(toolName) {
+            append(.hiddenByAgentScope, L("not enabled for this agent"))
+        }
+        if let policy = policyInfo(for: toolName) {
+            if policy.effectivePolicy == .deny { append(.permissionBlocked, L("permission policy is deny")) }
+            let missing = policy.systemPermissionStates.filter { !$0.value }.map { $0.key.displayName }.sorted()
+            if !missing.isEmpty {
+                append(.missingPermission, L("missing system permission(s): \(missing.joined(separator: ", "))"))
+            }
+        }
+        if reasons.isEmpty {
+            if dynamic {
+                append(.loadableViaCapabilitiesLoad, L("registered \(runtime) tool; load with capabilities_load"))
+            } else {
+                append(.alreadyLoaded, L("registered \(runtime) tool; already in the active baseline"))
+            }
+        }
+        return ToolAvailability(
+            toolName: toolName,
+            runtime: runtime,
+            groupName: groupName(for: toolName),
+            reasonCodes: reasons,
+            detail: details.joined(separator: "; ")
+        )
     }
 
     /// Per-call check for one concrete call: static per-call tools, plus

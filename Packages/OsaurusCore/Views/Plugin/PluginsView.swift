@@ -13,6 +13,10 @@ struct PluginsView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     private let repoService = PluginRepositoryService.shared
 
+    /// Shown inside Tools & MCP → Plugins (upstream #2950): no page header,
+    /// just the Installed / Browse row with its search and actions.
+    var embedded: Bool = false
+
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
     @State private var selectedTab: PluginsTab = .installed
@@ -238,10 +242,14 @@ struct PluginsView: View {
 
     private var gridContent: some View {
         VStack(spacing: 0) {
-            headerBar
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : -10)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+            Group {
+                if embedded {
+                    embeddedTabsRow
+                } else {
+                    headerBar
+                }
+            }
+            .managerHeaderEntrance(hasAppeared: hasAppeared)
 
             Group {
                 switch selectedTab {
@@ -277,46 +285,66 @@ struct PluginsView: View {
         #endif
     }
 
+    /// Embedded (Tools & MCP → Plugins) variant of `headerBar`: the tab row
+    /// plus the refresh / settings actions, without a second page title.
+    private var embeddedTabsRow: some View {
+        HStack(spacing: 8) {
+            pluginTabsRow
+            headerActions
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 12)
+        .padding(.bottom, 8)
+    }
+
+    @ViewBuilder private var headerActions: some View {
+        HeaderIconButton(
+            "arrow.clockwise",
+            isLoading: isRefreshButtonLoading,
+            help: isRefreshButtonLoading ? "Refreshing..." : "Refresh repository"
+        ) {
+            Task {
+                isRefreshButtonLoading = true
+                await repoService.refresh()
+                await PluginManager.shared.loadAll()
+                reload()
+                isRefreshButtonLoading = false
+            }
+        }
+        #if OSAURUS_INTEL
+        // Settings for natively-loaded x86_64 plugins that declare config.
+        HeaderIconButton(
+            "gearshape",
+            help: "Native plugin settings"
+        ) {
+            showIntelPluginConfig = true
+        }
+        #endif
+    }
+
+    private var pluginTabsRow: some View {
+        HeaderTabsRow(
+            selection: $selectedTab,
+            counts: [
+                .installed: installedTabCount,
+                .browse: filteredPlugins.count,
+            ],
+            badges: updatesAvailableCount > 0
+                ? [.installed: updatesAvailableCount]
+                : nil,
+            searchText: $searchText,
+            searchPlaceholder: "Search plugins"
+        )
+    }
+
     private var headerBar: some View {
         ManagerHeaderWithTabs(
             title: L("Plugins"),
             subtitle: L("Browse and manage plugins")
         ) {
-            HeaderIconButton(
-                "arrow.clockwise",
-                isLoading: isRefreshButtonLoading,
-                help: isRefreshButtonLoading ? "Refreshing..." : "Refresh repository"
-            ) {
-                Task {
-                    isRefreshButtonLoading = true
-                    await repoService.refresh()
-                    await PluginManager.shared.loadAll()
-                    reload()
-                    isRefreshButtonLoading = false
-                }
-            }
-            #if OSAURUS_INTEL
-            // Settings for natively-loaded x86_64 plugins that declare config.
-            HeaderIconButton(
-                "gearshape",
-                help: "Native plugin settings"
-            ) {
-                showIntelPluginConfig = true
-            }
-            #endif
+            headerActions
         } tabsRow: {
-            HeaderTabsRow(
-                selection: $selectedTab,
-                counts: [
-                    .installed: installedTabCount,
-                    .browse: filteredPlugins.count,
-                ],
-                badges: updatesAvailableCount > 0
-                    ? [.installed: updatesAvailableCount]
-                    : nil,
-                searchText: $searchText,
-                searchPlaceholder: "Search plugins"
-            )
+            pluginTabsRow
         }
     }
 
@@ -2044,5 +2072,17 @@ private struct PluginRoutesSummary: View {
         case .verify: return .orange
         case .owner: return .blue
         }
+    }
+}
+
+// MARK: - Native Plugins Browse (Tools & MCP → Plugins)
+
+/// Upstream #2950 shows the plugin browser as the third tab of Tools & MCP.
+/// On Intel it is Intel's own plugin manager (native x86_64 plugins, update,
+/// settings, uninstall) without its page header; the Plugins sidebar tab
+/// still shows the full page.
+struct NativePluginsBrowseView: View {
+    var body: some View {
+        PluginsView(embedded: true)
     }
 }
