@@ -2286,3 +2286,26 @@ calling a sync complete.
 - Intel knowledge index schema is now v3 (v2 tickets, v3 `inferred_type` with a
   backfill for existing rows). Upstream numbers its schema differently; an
   upstream-created index is still quarantined and rebuilt on Intel.
+
+### Upstream batch `3dad2dad4..b023f2c1e` — 2026-09-30
+
+- 13 commits classified in [`UPSTREAM_AUDIT_2026-09-30.md`](UPSTREAM_AUDIT_2026-09-30.md);
+  the next review starts after `b023f2c1e`.
+- Shipped: Claude Code pipe drain (#2937, upstream patch unchanged), decimal
+  settings editing (#2939, latent on Intel), and four #2936 slices mapped onto
+  Intel's own Orchestrator: relaxed `find_setting`, "Add all agents" for an
+  empty delegation list (with an actionable `orchestrator_targets` message and
+  a settings-search entry), high-risk warning on plans that empty the list
+  (`IntelDeclarativeConfigurationPlan.warnings`), and `new_chat_agent`
+  (`DefaultAgentConfiguration.newChatAgentId`; `ChatWindowManager` opens new
+  windows on `AgentManager.newChatAgentId` instead of `activeAgentId`).
+- Staged: #2950 Settings redesign as `W-settings-ux-2950` (five-step plan in
+  the audit); "Auto-Allow All Tool Calls" (#2241, never ported) needs Renée's
+  decision. Needs work: #2935 (B1), #2936 spawn slices (`W-subagents`).
+- **Intel design note:** Intel's Orchestrator keeps its full folder tool
+  surface because its delegates are tool-free; upstream narrowed its
+  Orchestrator to `file_read`/`file_search`. Revisit with `W-subagents`.
+- `classify_gap.py`: #2950's new files (`ChatSettingsView`,
+  `MCPProviderDirectoryView`, `TranscriptionSettingsTab`,
+  `ToolAutoAllowToggle`) now belong to `W-settings-ux-2950`; the rule sits
+  before `COV-intel-own` so it wins.

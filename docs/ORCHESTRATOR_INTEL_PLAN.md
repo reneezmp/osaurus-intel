@@ -549,3 +549,20 @@ the new Settings status and live tool result before claiming parity.
 The built-in chat selector and empty state now render `Agent.default.avatar`
 through the same mascot view used by custom agents, instead of hardcoding a
 grey person. Visual acceptance on Rosy remains pending.
+
+## Upstream #2936 slices (2026-09-30)
+
+- `orchestrator_config` gains a third domain, `new_chat_agent` (an existing
+  agent id, or `"orchestrator"`/null to clear), stored as
+  `DefaultAgentConfiguration.newChatAgentId` and reviewed like every other
+  change. New chat windows open on `AgentManager.newChatAgentId` (the
+  Orchestrator unless set; a deleted agent falls back to it), no longer on
+  the agent the last window was browsing. There is no Settings control for it,
+  as upstream.
+- Plans that empty `delegation.allowed_agent_ids` carry a high-risk warning
+  (`IntelDeclarativeConfigurationPlan.warnings`) on the chat card, the Settings
+  sheet and the tool result. Lists in the document replace the whole list.
+- An empty allowlist while custom agents exist is reported by
+  `orchestrator_targets` with the repair, and Settings → Orchestrator offers
+  **Add all agents** (allows agents only; models stay separately admitted).
+- `find_setting` retries without intent words and reports `relaxed_query`.

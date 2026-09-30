@@ -276,6 +276,22 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
 
     func setActiveAgent(_ id: UUID) { activeAgentId = id }
 
+    /// The agent brand-new chats open with (upstream #2936). The Orchestrator
+    /// unless `new_chat_agent` was applied through `orchestrator_config`; an
+    /// agent that no longer exists falls back to the Orchestrator. Separate
+    /// from `activeAgentId` (the agent the foreground window is browsing), so
+    /// opening a custom agent's chat never re-targets the next new chat.
+    var newChatAgentId: UUID {
+        Self.resolveNewChatAgentId(
+            configured: DefaultAgentConfigurationStore.load().newChatAgentId,
+            existingAgentIds: agents.map(\.id))
+    }
+
+    static func resolveNewChatAgentId(configured: UUID?, existingAgentIds: [UUID]) -> UUID {
+        guard let configured, existingAgentIds.contains(configured) else { return Agent.defaultId }
+        return configured
+    }
+
     func add(_ agent: Agent) {
         persist(agent)
         reload()

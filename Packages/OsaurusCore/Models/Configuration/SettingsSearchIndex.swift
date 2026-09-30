@@ -287,6 +287,14 @@ public enum SettingsSearchIndex {
             id: "orchestrator.delegation", tab: .orchestrator, title: "Delegation",
             keywords: ["delegate", "subagents", "targets", "roster"]),
         .init(
+            id: "orchestrator.delegation.addAllAgents", tab: .orchestrator, title: "Add all agents",
+            keywords: [
+                "add all agents", "empty allowlist", "allowed custom agents", "cannot delegate",
+                "orchestrator cannot delegate", "restore delegation", "agents not in list",
+            ],
+            disambiguation:
+                "Shown only while no custom agent is allowed; allows every listed agent (their models still need to be admitted)."),
+        .init(
             id: "orchestrator.declarative", tab: .orchestrator, title: "Declarative Configuration",
             keywords: ["osaurus config", "configuration", "yaml", "apply plan"]),
         .init(

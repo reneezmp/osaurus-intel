@@ -69,13 +69,18 @@ public struct IntelDeclarativeConfigurationDocument: Sendable, Equatable {
 
     public var defaultAgent: IntelDeclarativeDefaultAgentPatch?
     public var delegation: IntelDeclarativeDelegationPatch?
+    /// The agent new chats open with (upstream #2936). `.clear` (JSON null or
+    /// "orchestrator") returns new chats to the Orchestrator.
+    public var newChatAgent: IntelDeclarativeField<UUID> = .unchanged
 
     public init(
         defaultAgent: IntelDeclarativeDefaultAgentPatch? = nil,
-        delegation: IntelDeclarativeDelegationPatch? = nil
+        delegation: IntelDeclarativeDelegationPatch? = nil,
+        newChatAgent: IntelDeclarativeField<UUID> = .unchanged
     ) {
         self.defaultAgent = defaultAgent
         self.delegation = delegation
+        self.newChatAgent = newChatAgent
     }
 
     public static func decode(json data: Data) throws -> Self {
@@ -83,7 +88,7 @@ public struct IntelDeclarativeConfigurationDocument: Sendable, Equatable {
               let root = object as? [String: Any]
         else { throw IntelDeclarativeConfigurationError.invalidJSON }
         try rejectSecretShapedKeys(in: root, path: "$")
-        try requireOnly(root, keys: ["version", "default_agent", "delegation"], path: "$")
+        try requireOnly(root, keys: ["version", "default_agent", "delegation", "new_chat_agent"], path: "$")
         guard let version = root["version"] as? Int, version == Self.version else {
             throw IntelDeclarativeConfigurationError.invalidVersion
         }
@@ -100,6 +105,18 @@ public struct IntelDeclarativeConfigurationDocument: Sendable, Equatable {
                 throw IntelDeclarativeConfigurationError.invalidValue(path: "delegation")
             }
             result.delegation = try decodeDelegation(object)
+        }
+        if let value = root["new_chat_agent"] {
+            if value is NSNull {
+                result.newChatAgent = .clear
+            } else if let raw = value as? String,
+                      raw.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "orchestrator" {
+                result.newChatAgent = .clear
+            } else if let raw = value as? String, let id = UUID(uuidString: raw) {
+                result.newChatAgent = id == Agent.defaultId ? .clear : .set(id)
+            } else {
+                throw IntelDeclarativeConfigurationError.invalidValue(path: "new_chat_agent")
+            }
         }
         return result
     }
@@ -122,6 +139,7 @@ public struct IntelDeclarativeConfigurationDocument: Sendable, Equatable {
             target.delegation.maximumOutputCharacters = apply(patch.maximumOutputCharacters, to: target.delegation.maximumOutputCharacters)
             target.delegation.timeoutSeconds = apply(patch.timeoutSeconds, to: target.delegation.timeoutSeconds)
         }
+        target.newChatAgentId = apply(newChatAgent, to: target.newChatAgentId)
         return target
     }
 
@@ -268,6 +286,9 @@ public struct IntelDeclarativeConfigurationPlan: Sendable, Equatable, Identifiab
     public let targetStateFingerprint: String
     public let changes: [IntelDeclarativeConfigurationChange]
     public let target: DefaultAgentConfiguration
+    /// High-risk consequences shown on the review card above the changes
+    /// (upstream #2936 flags a plan that empties the delegation list).
+    public var warnings: [String] = []
 
     public var isNoOp: Bool { changes.isEmpty }
 }
@@ -340,6 +361,7 @@ public actor IntelDeclarativeConfigurationService {
             "version": IntelDeclarativeConfigurationDocument.version,
             "default_agent": defaultAgent,
             "delegation": delegationObject,
+            "new_chat_agent": configuration.newChatAgentId?.uuidString ?? "orchestrator",
         ]
         return try JSONSerialization.data(withJSONObject: object, options: [.prettyPrinted, .sortedKeys])
     }
@@ -393,8 +415,20 @@ public actor IntelDeclarativeConfigurationService {
             currentStateFingerprint: currentFingerprint,
             targetStateFingerprint: targetFingerprint,
             changes: changes,
-            target: target
+            target: target,
+            warnings: Self.warnings(from: current, to: target)
         )
+    }
+
+    /// `allowed_agent_ids` replaces the whole list, so a plan meant to
+    /// "adjust" it can silently leave the Orchestrator with no target.
+    static func warnings(from before: DefaultAgentConfiguration, to after: DefaultAgentConfiguration) -> [String] {
+        var result: [String] = []
+        if !before.delegation.customAgentAllowlist.isEmpty, after.delegation.customAgentAllowlist.isEmpty {
+            result.append(
+                "High risk: this removes every allowed agent, so the Orchestrator will not be able to delegate until agents are allowed again.")
+        }
+        return result
     }
 
     private func fingerprint(of configuration: DefaultAgentConfiguration) -> String {
@@ -427,6 +461,7 @@ public actor IntelDeclarativeConfigurationService {
         append("delegation.max_input_characters", before.delegation.maximumInputCharacters, after.delegation.maximumInputCharacters, into: &result)
         append("delegation.max_output_characters", before.delegation.maximumOutputCharacters, after.delegation.maximumOutputCharacters, into: &result)
         append("delegation.timeout_seconds", before.delegation.timeoutSeconds, after.delegation.timeoutSeconds, into: &result)
+        append("new_chat_agent", before.newChatAgentId?.uuidString ?? "orchestrator", after.newChatAgentId?.uuidString ?? "orchestrator", into: &result)
         return result
     }
 

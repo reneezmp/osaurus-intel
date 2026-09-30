@@ -124,7 +124,19 @@ enum IntelOrchestratorAdmission {
                     purpose: agent.routingDescription))
         }
         if configuration.customAgentAllowlist.isEmpty {
-            blocked.append("No custom agent is allowed.")
+            // Upstream #2936: an empty list while agents exist is the silent
+            // "cannot delegate" state, so name the repair instead of letting it
+            // read as "no agents".
+            let customCount = byID.values.filter { !$0.isBuiltIn }.count
+            if customCount > 0 {
+                blocked.append(
+                    "No custom agent is allowed although \(customCount) custom agent(s) exist. "
+                        + "The user can restore delegation in Settings → Orchestrator → Add all agents, "
+                        + "or you can plan a `delegation.allowed_agent_ids` change with `orchestrator_config` "
+                        + "(the list replaces the current one).")
+            } else {
+                blocked.append("No custom agent is allowed.")
+            }
         }
         if configuration.admittedCloudModelIDs.isEmpty {
             blocked.append("No remote cloud model is admitted.")

@@ -182,6 +182,22 @@
         }
       }
     },
+    "Add all agents" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Agenten hinzufügen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加所有智能体"
+          }
+        }
+      }
+    },
     "Add custom provider" : {
       "localizations" : {
         "de" : {
@@ -290,6 +306,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "允许访问…"
+          }
+        }
+      }
+    },
+    "Allows every custom agent listed here. Their models still need to be admitted." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Lässt alle hier aufgeführten eigenen Agenten zu. Ihre Modelle müssen weiterhin zugelassen werden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "允许此处列出的所有自定义智能体。它们的模型仍需获准。"
           }
         }
       }
@@ -2070,6 +2102,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文本无更改"
+          }
+        }
+      }
+    },
+    "None of your %d agents is allowed, so the Orchestrator cannot delegate. Allow them here (or use Add all agents); their models must also be admitted below." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keiner deiner %d Agenten ist zugelassen, daher kann der Orchestrator nicht delegieren. Lass sie hier zu (oder nutze „Alle Agenten hinzufügen“); ihre Modelle müssen außerdem unten zugelassen werden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "你的 %d 个智能体都未被允许，因此编排器无法委派。请在此允许它们（或使用“添加所有智能体”）；它们的模型也必须在下方获准。"
           }
         }
       }

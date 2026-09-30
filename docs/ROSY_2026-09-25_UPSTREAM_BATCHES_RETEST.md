@@ -794,3 +794,29 @@ Items marked **(paid)** use the chat model.
       frontmatter `type` in that folder are included.
 - [ ] Upgrade: your existing collections still search normally after updating
       (the index upgrades in place; no rebuild needed).
+
+## Upstream batch 2026-09-30
+
+Audit: [`UPSTREAM_AUDIT_2026-09-30.md`](UPSTREAM_AUDIT_2026-09-30.md). Items
+that talk to the model are **(paid)**.
+
+- [ ] Settings › Orchestrator with at least one custom agent on a cloud model
+      but **none** allowed: a warning says none of your agents is allowed and
+      shows **Add all agents**. Click it: every listed agent's switch turns on.
+      The warning says their models must still be admitted (the button does not
+      admit models). Put your switches back afterwards.
+- [ ] Search Settings for "add all agents": the result opens Orchestrator.
+- [ ] **(paid)** Ask the Orchestrator "where do I turn off memory?": it quotes
+      the Memory setting's path (it used to find nothing for that wording).
+- [ ] **(paid)** Ask the Orchestrator to "remove every agent from delegation":
+      the review card shows a red **High risk** line above the changes. Press
+      **Cancel**; nothing changes.
+- [ ] Open a custom agent's chat, then open a **new chat window** (menu bar or
+      global hotkey): it opens on the Orchestrator, not on that custom agent.
+- [ ] **(paid)** Ask the Orchestrator "make new chats open with <one of your
+      agents>": the review card shows `new_chat_agent`. Apply, open a new chat
+      window: it opens on that agent. Then ask it to open new chats on the
+      Orchestrator again, and check a new window does.
+- [ ] **(paid, only if Claude Code is set up)** A Claude Code reply that ends
+      with a long paragraph shows the whole ending (the last output is no
+      longer cut off when the process exits).

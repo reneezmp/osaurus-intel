@@ -120,7 +120,10 @@ public final class ChatWindowManager: NSObject, ObservableObject {
         showImmediately: Bool
     ) -> UUID {
         let windowId = UUID()
-        let effectiveAgentId = agentId ?? AgentManager.shared.activeAgentId
+        // A brand-new chat opens on the new-chat agent (the Orchestrator
+        // unless `new_chat_agent` says otherwise), not on whichever agent the
+        // last window happened to be browsing (upstream #2936).
+        let effectiveAgentId = agentId ?? AgentManager.shared.newChatAgentId
 
         let info = ChatWindowInfo(
             id: windowId,
@@ -952,10 +955,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     private var toolbarDelegates: [UUID: IntelChatToolbarDelegate] = [:]
 
     public func createWindow(agentId: UUID? = nil) -> UUID {
-        // M12 Gap 1: default to the user's active agent instead of a
-        // throwaway UUID, so a freshly opened window is tied to a real
-        // agent (Default unless overridden) and the toolbar pill shows it.
-        let resolvedAgentId = agentId ?? AgentManager.shared.activeAgentId
+        // M12 Gap 1: tie a freshly opened window to a real agent so the
+        // toolbar pill shows it. Upstream #2936: that is the new-chat agent
+        // (the Orchestrator unless `new_chat_agent` says otherwise), not the
+        // agent the last window was browsing.
+        let resolvedAgentId = agentId ?? AgentManager.shared.newChatAgentId
         let info = ChatWindowInfo(agentId: resolvedAgentId)
         windows[info.id] = info
         lastFocusedWindowId = info.id

@@ -81,6 +81,9 @@ struct OrchestratorDelegationSettings: View {
                         .foregroundColor(theme.secondaryText)
                 } else {
                     VStack(spacing: 8) {
+                        if admittedAgents.isEmpty {
+                            emptyAllowlistNotice
+                        }
                         ForEach(eligibleAgents) { agent in
                             HStack(spacing: 12) {
                                 VStack(alignment: .leading, spacing: 2) {
@@ -277,6 +280,48 @@ struct OrchestratorDelegationSettings: View {
                             .stroke(theme.inputBorder, lineWidth: 1)
                     )
             )
+        }
+    }
+
+    /// Upstream #2936: agents exist but none is allowed, so the Orchestrator
+    /// has no target and cannot delegate. Say so and offer the one-click
+    /// repair. Intel still requires each agent's model to be admitted below;
+    /// adding agents never admits a model on the user's behalf.
+    private var emptyAllowlistNotice: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .top, spacing: 6) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.warningColor)
+                Text(
+                    String(
+                        format: L(
+                            "None of your %d agents is allowed, so the Orchestrator cannot delegate. Allow them here (or use Add all agents); their models must also be admitted below."
+                        ),
+                        eligibleAgents.count
+                    )
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+            Button {
+                addAllEligibleAgents()
+            } label: {
+                HStack(spacing: 4) {
+                    Image(systemName: "plus.circle").font(.system(size: 10, weight: .bold))
+                    Text("Add all agents", bundle: .module)
+                }
+            }
+            .buttonStyle(SettingsButtonStyle())
+            .help(Text("Allows every custom agent listed here. Their models still need to be admitted.", bundle: .module))
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func addAllEligibleAgents() {
+        mutate { configuration in
+            for agent in eligibleAgents { configuration.customAgentAllowlist.insert(agent.id) }
         }
     }
 

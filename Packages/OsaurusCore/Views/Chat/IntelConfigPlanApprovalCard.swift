@@ -66,6 +66,25 @@ struct IntelConfigPlanApprovalCard: View {
                     .foregroundColor(theme.tertiaryText)
             }
 
+            ForEach(request.plan.warnings, id: \.self) { warning in
+                HStack(alignment: .top, spacing: 6) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.errorColor)
+                    Text(warning)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(9)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.errorColor.opacity(0.1))
+                        .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.errorColor.opacity(0.4), lineWidth: 1))
+                )
+            }
+
             if request.plan.changes.isEmpty {
                 Text("This plan contains no changes.", bundle: .module)
                     .font(.system(size: 12))

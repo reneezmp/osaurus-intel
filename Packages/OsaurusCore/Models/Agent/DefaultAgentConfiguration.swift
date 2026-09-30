@@ -27,6 +27,11 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
     /// from older `default-agent.json` files means no target or model is
     /// admitted, and every possible launcher/target pair defaults to Ask.
     public var delegation: OrchestratorDelegationConfiguration
+    /// The agent brand-new chats open with (upstream #2936 `new_chat_agent`).
+    /// Nil (and any id that no longer exists) means the Orchestrator. Kept
+    /// apart from the agent the foreground window is browsing, so opening a
+    /// custom agent's chat never re-targets the next new chat.
+    public var newChatAgentId: UUID?
 
     public init(
         displayName: String? = nil,
@@ -34,7 +39,8 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         defaultModel: String? = nil,
         temperature: Float? = nil,
         maxTokens: Int? = nil,
-        delegation: OrchestratorDelegationConfiguration = .default
+        delegation: OrchestratorDelegationConfiguration = .default,
+        newChatAgentId: UUID? = nil
     ) {
         self.displayName = displayName
         self.systemPrompt = systemPrompt
@@ -42,6 +48,7 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         self.temperature = temperature
         self.maxTokens = maxTokens
         self.delegation = delegation
+        self.newChatAgentId = newChatAgentId
     }
 
     /// A trimmed custom name, or nil when the built-in name should render.
@@ -60,6 +67,7 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
         case temperature
         case maxTokens
         case delegation
+        case newChatAgentId
     }
 
     /// Older Gate 1 files have no delegation field. Decode them as a
@@ -76,5 +84,6 @@ public struct DefaultAgentConfiguration: Codable, Equatable, Sendable {
             OrchestratorDelegationConfiguration.self,
             forKey: .delegation
         ) ?? .default
+        newChatAgentId = try container.decodeIfPresent(UUID.self, forKey: .newChatAgentId)
     }
 }

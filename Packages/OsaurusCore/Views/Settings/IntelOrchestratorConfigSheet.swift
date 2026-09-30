@@ -102,7 +102,9 @@ struct LiveIntelOrchestratorConfigurationUIBridge: IntelOrchestratorConfiguratio
                     field: change.path,
                     before: change.before,
                     after: change.after,
-                    risk: "Requires approval"
+                    risk: change.path == "delegation.allowed_agent_ids" && !plan.warnings.isEmpty
+                        ? plan.warnings.joined(separator: " ")
+                        : "Requires approval"
                 )
             },
             unsupportedDomains: []
@@ -305,9 +307,12 @@ struct IntelOrchestratorConfigSheet: View {
                     .foregroundColor(theme.primaryText)
                 Spacer()
                 if let risk = change.risk {
+                    let isHighRisk = risk.hasPrefix("High risk")
                     Text(risk)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(theme.accentColor)
+                        .font(.system(size: 10, weight: isHighRisk ? .semibold : .medium))
+                        .foregroundColor(isHighRisk ? theme.errorColor : theme.accentColor)
+                        .multilineTextAlignment(.trailing)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
             }
             HStack(alignment: .top, spacing: 8) {
