@@ -136,7 +136,7 @@ public enum SettingsSearchIndex {
     ]
 
     public static let entries: [SettingsSearchEntry] = [
-        // MARK: General › General
+        // MARK: General (upstream #2950 layout)
         .init(
             id: "settings.general.hotkey", tab: .settings, section: "General",
             title: "Global Hotkey", keywords: ["shortcut", "keybinding", "hotkey", "summon"]),
@@ -150,77 +150,9 @@ public enum SettingsSearchIndex {
             id: "settings.general.updates", tab: .settings, section: "General",
             title: "Beta Updates", keywords: ["beta", "prerelease", "updates", "channel", "sparkle"]),
         .init(
-            id: "settings.general.coreModel", tab: .settings, section: "General",
+            id: "settings.general.coreModel", tab: .settings, section: "Core Model",
             title: "Core Model",
             keywords: ["default model", "background model", "titles", "memory model", "utility model"]),
-        .init(
-            id: "settings.general.cli", tab: .settings, section: "General",
-            title: "Command Line Tool", keywords: ["cli", "terminal", "symlink", "install"]),
-        .init(
-            id: "settings.general.maintenance", tab: .settings, section: "General",
-            title: "Maintenance", keywords: ["factory reset", "reset", "wipe", "erase"]),
-
-        // MARK: General › Chat
-        .init(
-            id: "settings.chat.temperature", tab: .settings, section: "Chat",
-            title: "Temperature", keywords: ["creativity", "randomness", "sampling"],
-            disambiguation: "The chat default; agents can override it, and Work has its own."),
-        .init(
-            id: "settings.chat.maxTokens", tab: .settings, section: "Chat",
-            title: "Max Tokens", keywords: ["output length", "response length", "limit"]),
-        .init(
-            id: "settings.chat.contextLength", tab: .settings, section: "Chat",
-            title: "Context Length", keywords: ["context window", "history", "tokens"]),
-        .init(
-            id: "settings.chat.topP", tab: .settings, section: "Chat",
-            title: "Top P Override", keywords: ["top p", "nucleus", "sampling"]),
-        .init(
-            id: "settings.chat.maxToolAttempts", tab: .settings, section: "Chat",
-            title: "Max Tool Attempts", keywords: ["tool calls", "loop", "retries", "tool limit"]),
-        .init(
-            id: "settings.chat.capabilitySearch", tab: .settings, section: "Chat",
-            title: "Capability Search", keywords: ["preflight", "tool selection", "relevant tools"]),
-        .init(
-            id: "settings.chat.disableTools", tab: .settings, section: "Chat",
-            title: "Disable tools", anchorLabel: "Tools", keywords: ["tools", "tool calling", "no tools", "plain chat"]),
-        .init(
-            id: "settings.chat.memory", tab: .settings, section: "Chat",
-            title: "Enable memory", anchorLabel: "Memory", keywords: ["memory", "remember", "recall", "pinned facts"],
-            disambiguation: "Turns memory on or off for chats; the Memory tab has the details."),
-        .init(
-            id: "settings.chat.clipboard", tab: .settings, section: "Chat",
-            title: "Enable clipboard monitoring", anchorLabel: "Clipboard", keywords: ["clipboard", "paste", "grab selection"]),
-        .init(
-            id: "settings.chat.titles", tab: .settings, section: "Chat",
-            title: "Automatically name chats", anchorLabel: "Chat Titles", keywords: ["chat titles", "rename", "auto title"]),
-        .init(
-            id: "settings.chat.agentDescriptions", tab: .settings, section: "Chat",
-            title: "Fill in missing agent descriptions", anchorLabel: "Agent Descriptions",
-            keywords: ["agent description", "purpose", "backfill", "orchestrator"]),
-        .init(
-            id: "settings.chat.newChatShortcut", tab: .settings, section: "Chat",
-            title: "⌘+N Starts a New Chat in the Current Window",
-            keywords: ["cmd n", "command n", "new chat", "new window", "shortcut"]),
-        .init(
-            id: "settings.chat.spellCheck", tab: .settings, section: "Chat",
-            title: "Check Spelling While Typing",
-            keywords: ["spelling", "spell check", "spellcheck", "typos", "underline", "typing"]),
-        .init(
-            id: "settings.chat.greetings", tab: .settings, section: "Chat",
-            title: "AI-generated greetings", anchorLabel: "Generative Greetings",
-            keywords: ["greeting", "empty state", "quick actions", "personality"]),
-
-        // MARK: General › Work
-        .init(
-            id: "settings.work.maxIterations", tab: .settings, section: "Work",
-            title: "Max Iterations", keywords: ["work mode", "agent loop", "steps"]),
-        .init(
-            id: "settings.work.permissions", tab: .settings, section: "Work",
-            title: "Permissions",
-            keywords: ["file", "shell", "git", "write", "delete", "approve", "folder tools"],
-            disambiguation: "Approvals for folder file, shell and git tools, not macOS permissions."),
-
-        // MARK: General › Notifications
         .init(
             id: "settings.notifications.toasts", tab: .settings, section: "Notifications",
             title: "Show Toast Notifications", keywords: ["toast", "notifications", "popups"]),
@@ -228,13 +160,86 @@ public enum SettingsSearchIndex {
             id: "settings.notifications.position", tab: .settings, section: "Notifications",
             title: "Toast Position", keywords: ["toast", "corner", "placement"]),
         .init(
-            id: "settings.notifications.timeout", tab: .settings, section: "Notifications",
-            title: "Default Timeout", keywords: ["toast", "duration", "dismiss"]),
+            id: "settings.notifications.timeout", tab: .settings, section: "Advanced",
+            title: "Default Timeout", keywords: ["toast", "duration", "dismiss", "notifications"]),
         .init(
-            id: "settings.notifications.maxConcurrentTasks", tab: .settings, section: "Notifications",
+            id: "settings.notifications.maxVisible", tab: .settings, section: "Advanced",
+            title: "Max Visible Toasts", keywords: ["toast", "stack", "notifications"]),
+        .init(
+            id: "settings.notifications.maxConcurrentTasks", tab: .settings, section: "Advanced",
             title: "Max Concurrent Tasks", keywords: ["background tasks", "parallel", "schedules"]),
+        .init(
+            id: "storage.backup", tab: .settings, section: "Advanced", title: "Backup & key",
+            keywords: ["backup", "export data", "encryption key", "rotate key", "storage key", "data & storage"]),
+        .init(
+            id: "storage.encryption", tab: .settings, section: "Advanced", title: "About encrypted storage",
+            keywords: ["encryption", "sqlcipher", "keychain", "at rest", "storage", "data & storage"]),
+        .init(
+            id: "settings.general.maintenance", tab: .settings, section: "Reset",
+            title: "Factory Reset", keywords: ["factory reset", "reset", "wipe", "erase", "maintenance"]),
 
-        // MARK: Themes, Credits, Identity, Permissions, Storage
+        // MARK: Conversation
+        .init(
+            id: "settings.chat.spellCheck", tab: .chat, section: "Appearance",
+            title: "Check Spelling While Typing",
+            keywords: ["spelling", "spell check", "spellcheck", "typos", "underline", "typing"]),
+        .init(
+            id: "settings.chat.titles", tab: .chat, section: "Behavior",
+            title: "Automatically Name Chats", keywords: ["chat titles", "rename", "auto title"]),
+        .init(
+            id: "settings.chat.agentDescriptions", tab: .chat, section: "Behavior",
+            title: "Fill In Missing Agent Descriptions",
+            keywords: ["agent description", "purpose", "backfill", "orchestrator"]),
+        .init(
+            id: "settings.chat.clipboard", tab: .chat, section: "Behavior",
+            title: "Clipboard Monitoring", keywords: ["clipboard", "paste", "grab selection"]),
+        .init(
+            id: "settings.chat.newChatShortcut", tab: .chat, section: "Behavior",
+            title: "⌘+N Starts a New Chat in the Current Window",
+            keywords: ["cmd n", "command n", "new chat", "new window", "shortcut"]),
+        .init(
+            id: "settings.chat.disableTools", tab: .chat, section: "Behavior",
+            title: "Disable Tools", keywords: ["tools", "tool calling", "no tools", "plain chat"]),
+        .init(
+            id: "settings.chat.memory", tab: .chat, section: "Behavior",
+            title: "Enable Memory", keywords: ["memory", "remember", "recall", "pinned facts"],
+            disambiguation: "Turns memory on or off for chats; the Memory tab has the details."),
+        .init(
+            id: "settings.chat.greetings", tab: .chat, section: "Greetings",
+            title: "AI-Generated Greetings",
+            keywords: ["greeting", "empty state", "quick actions", "personality"]),
+        .init(
+            id: "settings.work.permissions", tab: .chat, section: "Folder Tool Permissions",
+            title: "Folder Tool Permissions",
+            keywords: ["file", "shell", "git", "write", "delete", "approve", "folder tools", "permissions"],
+            disambiguation: "Approvals for folder file, shell and git tools, not macOS permissions."),
+        .init(
+            id: "settings.chat.systemPrompt", tab: .chat, section: "Advanced",
+            title: "System Prompt", keywords: ["instructions", "persona", "orchestrator prompt"],
+            disambiguation: "Used by the Orchestrator when it has no prompt of its own."),
+        .init(
+            id: "settings.chat.temperature", tab: .chat, section: "Advanced",
+            title: "Temperature", keywords: ["creativity", "randomness", "sampling"],
+            disambiguation: "The Orchestrator's fallback; agents have their own."),
+        .init(
+            id: "settings.chat.maxTokens", tab: .chat, section: "Advanced",
+            title: "Max Tokens", keywords: ["output length", "response length", "limit"]),
+        .init(
+            id: "settings.chat.contextLength", tab: .chat, section: "Advanced",
+            title: "Context Length", keywords: ["context window", "history", "tokens"]),
+        .init(
+            id: "settings.chat.topP", tab: .chat, section: "Advanced",
+            title: "Top P Override", keywords: ["top p", "nucleus", "sampling"]),
+        .init(
+            id: "settings.chat.maxToolAttempts", tab: .chat, section: "Advanced",
+            title: "Max Tool Attempts", keywords: ["tool calls", "loop", "retries", "tool limit"]),
+
+        // MARK: Developer Tools › Server
+        .init(
+            id: "server.cli", tab: .server,
+            title: "Command Line Tool", keywords: ["cli", "terminal", "symlink", "install"]),
+
+        // MARK: Themes, Credits, Identity, Permissions
         .init(
             id: "themes.overview", tab: .themes, title: "Themes",
             keywords: ["appearance", "colors", "dark mode", "light mode", "fonts", "accent"]),
@@ -266,12 +271,6 @@ public enum SettingsSearchIndex {
             id: "permissions.overview", tab: .permissions, title: "Permissions",
             keywords: ["accessibility", "screen recording", "calendar", "contacts", "microphone", "tcc"],
             disambiguation: "macOS system permissions for Osaurus."),
-        .init(
-            id: "storage.backup", tab: .storage, title: "Backup & key",
-            keywords: ["backup", "export data", "encryption key", "rotate key", "storage key"]),
-        .init(
-            id: "storage.encryption", tab: .storage, title: "About encrypted storage",
-            keywords: ["encryption", "sqlcipher", "keychain", "at rest"]),
 
         // MARK: Models and agents
         .init(

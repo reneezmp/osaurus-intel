@@ -67,20 +67,39 @@ struct SettingsSearchIndexTests {
         }
     }
 
-    @Test("General-page entries resolve to an anchor inside their section")
-    func generalEntriesAnchor() throws {
-        let general = try Self.source("Settings/ConfigurationView.swift")
-        for entry in SettingsSearchIndex.entries where entry.tab == .settings {
-            #expect(!entry.isTabLevel)
-            #expect(general.contains("title: \"\(entry.section)\""), "\(entry.id): section missing")
-            let label = entry.anchorLabel ?? entry.title
-            #expect(general.contains("\"\(label)\""), "\(entry.id): control \"\(label)\" missing")
-            #expect(SettingsSearchIndex.anchorID(section: entry.section, label: label) == entry.id)
+    /// General and Conversation (upstream #2950 layout): every entry lands on
+    /// a control, either through an explicit `anchorId` or through its
+    /// (section, label) pair; entries in Advanced must also open the
+    /// disclosure.
+    @Test("General and Conversation entries resolve to an anchor on their control")
+    func generalAndConversationEntriesAnchor() throws {
+        let pages: [(ManagementTab, String, Set<String>)] = [
+            (.settings, try Self.source("Settings/ConfigurationView.swift") + (try Self.source("Settings/StorageSettingsView.swift")),
+             ConfigurationView.advancedAnchorIds),
+            (.chat, try Self.source("Settings/ChatSettingsView.swift"), ChatSettingsView.advancedAnchorIds),
+        ]
+        for (tab, source, advancedIDs) in pages {
+            for entry in SettingsSearchIndex.entries where entry.tab == tab {
+                #expect(!entry.isTabLevel)
+                let explicit =
+                    source.contains("anchorId: \"\(entry.id)\"")
+                    || source.contains("settingsLandingAnchor(\"\(entry.id)\")")
+                    || source.contains("? \"\(entry.id)\" :")
+                if !explicit {
+                    #expect(source.contains("title: \"\(entry.section)\""), "\(entry.id): section missing")
+                    let label = entry.anchorLabel ?? entry.title
+                    #expect(source.contains("\"\(label)\""), "\(entry.id): control \"\(label)\" missing")
+                    #expect(SettingsSearchIndex.anchorID(section: entry.section, label: label) == entry.id)
+                }
+                if entry.section == "Advanced" {
+                    #expect(advancedIDs.contains(entry.id), "\(entry.id) sits in Advanced but cannot open it")
+                }
+            }
         }
         // Same label in another section must not steal the anchor.
-        #expect(SettingsSearchIndex.anchorID(section: "Chat", label: "Temperature") == "settings.chat.temperature")
+        #expect(SettingsSearchIndex.anchorID(section: "Advanced", label: "Temperature") == "settings.chat.temperature")
         #expect(SettingsSearchIndex.anchorID(section: "Work", label: "Temperature") == nil)
-        #expect(SettingsSearchIndex.anchorID(section: "Chat", label: "Tools") == "settings.chat.disableTools")
+        #expect(SettingsSearchIndex.anchorID(section: "Behavior", label: "Disable Tools") == "settings.chat.disableTools")
     }
 
     @Test("Search ranks title hits first and needs every word")
@@ -102,6 +121,6 @@ struct SettingsSearchIndexTests {
         let hotkey = try #require(SettingsSearchIndex.entries.first { $0.id == "settings.general.hotkey" })
         #expect(hotkey.breadcrumbPath == "General › Global Hotkey")
         let temp = try #require(SettingsSearchIndex.entries.first { $0.id == "settings.chat.temperature" })
-        #expect(temp.breadcrumbPath == "General › Chat › Temperature")
+        #expect(temp.breadcrumbPath == "Conversation › Advanced › Temperature")
     }
 }

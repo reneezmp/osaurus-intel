@@ -46,10 +46,11 @@ struct SettingsField<Content: View>: View {
 
     let label: String
     var hint: String? = nil
+    var anchorId: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(label)
+        bodyContent.settingsAutoAnchor(label, explicit: anchorId)
     }
 
     @ViewBuilder private var bodyContent: some View {
@@ -75,10 +76,11 @@ struct SettingsSubsection<Content: View>: View {
     @ObservedObject private var themeManager = ThemeManager.shared
 
     let label: String
+    var anchorId: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(label)
+        bodyContent.settingsAutoAnchor(label, explicit: anchorId)
     }
 
     @ViewBuilder private var bodyContent: some View {
@@ -102,6 +104,7 @@ struct StyledSettingsTextField: View {
     @Binding var text: String
     let placeholder: String
     let help: String
+    var anchorId: String? = nil
 
     /// Called when the field gains/loses focus (upstream #2893).
     var onEditingChanged: ((Bool) -> Void)? = nil
@@ -109,7 +112,7 @@ struct StyledSettingsTextField: View {
     @State private var isFocused = false
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(label)
+        bodyContent.settingsAutoAnchor(label, explicit: anchorId)
     }
 
     @ViewBuilder private var bodyContent: some View {
@@ -180,6 +183,7 @@ struct SettingsSliderField: View {
     let step: Float
     let defaultValue: Float
     let formatString: String
+    var anchorId: String? = nil
 
     @State private var sliderValue: Float = 0
     @State private var isInitialized = false
@@ -196,7 +200,7 @@ struct SettingsSliderField: View {
     }
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(label)
+        bodyContent.settingsAutoAnchor(label, explicit: anchorId)
     }
 
     @ViewBuilder private var bodyContent: some View {
@@ -287,6 +291,7 @@ struct SettingsStepperField: View {
     let range: ClosedRange<Int>
     let step: Int
     let defaultValue: Int
+    var anchorId: String? = nil
 
     @State private var isFocused = false
 
@@ -298,7 +303,7 @@ struct SettingsStepperField: View {
     }
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(label)
+        bodyContent.settingsAutoAnchor(label, explicit: anchorId)
     }
 
     @ViewBuilder private var bodyContent: some View {
@@ -420,18 +425,21 @@ extension View {
     /// Anchors a settings control for search landing when the index has an
     /// entry for (enclosing section, this label). Lets the shared primitives
     /// anchor themselves instead of every call site repeating ids.
-    func settingsAutoAnchor(_ label: String) -> some View {
-        modifier(SettingsAutoAnchorModifier(label: label))
+    /// An explicit `anchorId` wins (controls inside `SettingsAdvancedDisclosure`
+    /// have no section title to resolve from).
+    func settingsAutoAnchor(_ label: String, explicit anchorId: String? = nil) -> some View {
+        modifier(SettingsAutoAnchorModifier(label: label, explicit: anchorId))
     }
 }
 
 private struct SettingsAutoAnchorModifier: ViewModifier {
     let label: String
+    let explicit: String?
     @Environment(\.settingsSectionTitle) private var section
 
     func body(content: Content) -> some View {
         content.settingsLandingAnchor(
-            section.flatMap { SettingsSearchIndex.anchorID(section: $0, label: label) })
+            explicit ?? section.flatMap { SettingsSearchIndex.anchorID(section: $0, label: label) })
     }
 }
 
@@ -491,10 +499,11 @@ struct SettingsToggle: View {
     let title: String
     let description: String
     var badge: String? = nil
+    var anchorId: String? = nil
     @Binding var isOn: Bool
 
     var body: some View {
-        bodyContent.settingsAutoAnchor(title)
+        bodyContent.settingsAutoAnchor(title, explicit: anchorId)
     }
 
     // Thin wrapper over the shared `SettingsRow` (SettingsKit.swift) so

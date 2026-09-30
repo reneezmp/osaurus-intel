@@ -20,7 +20,7 @@ struct IntelAuditLeftoversTests {
     func findSetting() throws {
         let result = IntelOrchestratorConfigurationTool.findSettingResult(query: "spell check")
         let matches = try #require(result["matches"] as? [[String: Any]])
-        #expect(matches.first?["path"] as? String == "General › Chat › Check Spelling While Typing")
+        #expect(matches.first?["path"] as? String == "Conversation › Appearance › Check Spelling While Typing")
         #expect((matches.first?["open_with"] as? String)?.contains("⌘,") == true)
 
         let none = IntelOrchestratorConfigurationTool.findSettingResult(query: "zzqxv")

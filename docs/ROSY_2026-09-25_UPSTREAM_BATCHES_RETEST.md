@@ -842,3 +842,40 @@ Ventura in **both** light and dark themes, with the window active and inactive.
       Save button with nothing to save, where a page has one).
 - [ ] Search Settings for a switch inside a section (e.g. "voice input"):
       the page scrolls to it and it glows as before.
+
+### Step 2 — General and Conversation
+
+- [ ] The sidebar's first group reads General, **Conversation**, Voice, …;
+      **Storage** is gone from it.
+- [ ] General: sections General, Core Model, Notifications, a collapsed
+      **Advanced** row, then Reset. There is no Save button.
+- [ ] Change the global hotkey, then switch tabs and come back: it kept the
+      new value, and the hotkey works. Same for Start at Login (check System
+      Settings › Login Items) and the Core Model.
+- [ ] Notifications: turn toasts off and on; change Toast Position; **Test
+      Toast** shows a toast in the new position. Open Advanced: Default
+      Timeout, Max Visible Toasts and Max Concurrent Tasks are there and take
+      effect.
+- [ ] Advanced › Data & Storage shows the encryption status and the backup /
+      rotate actions (what the old Storage tab showed). Export a plaintext
+      backup to a throwaway folder: it works as before.
+- [ ] Conversation: Appearance, Behavior, Greetings, Folder Tool Permissions,
+      Advanced. Every switch keeps its value after leaving and reopening the
+      tab and after relaunch (compare with what General used to show).
+- [ ] **(paid)** Turn **Disable Tools** on: a new chat with a folder offers
+      no tools. Turn it off again.
+- [ ] Greetings: the personality editor appears only while AI-Generated
+      Greetings is on.
+- [ ] Folder Tool Permissions: set Run Shell Commands to Deny, run a shell
+      request in a folder chat **(paid)**: it is refused. Reset All to
+      Default puts it back to Ask.
+- [ ] Conversation › Advanced › System Prompt: with the Orchestrator's own
+      prompt empty (Orchestrator › Restore Defaults), text typed here changes
+      how the Orchestrator answers **(paid)**.
+- [ ] Developer Tools › Server › Overview has the **Command Line Tool** card
+      with a terminal icon; Install CLI reports where it installed.
+- [ ] Search Settings for "temperature", "toast timeout", "backup",
+      "command line": each opens the right page, expands Advanced where
+      needed, scrolls to the control and it glows.
+- [ ] What's New "Storage" action (if a release note shows one) opens General
+      with Advanced expanded at Data & Storage.

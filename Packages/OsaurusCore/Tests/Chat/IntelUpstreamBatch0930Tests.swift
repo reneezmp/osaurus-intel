@@ -25,7 +25,7 @@ struct IntelUpstreamBatch0930Tests {
         #expect(SettingsSearchIndex.search("please turn off memory").isEmpty)
         let lookup = IntelOrchestratorConfigurationTool.findSettings("please turn off memory")
         #expect(lookup.relaxedQuery == "memory")
-        #expect(lookup.entries.contains { $0.title == "Enable memory" })
+        #expect(lookup.entries.contains { $0.title == "Enable Memory" })
 
         let result = IntelOrchestratorConfigurationTool.findSettingResult(query: "please turn off memory")
         #expect(result["relaxed_query"] as? String == "memory")

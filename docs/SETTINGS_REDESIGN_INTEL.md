@@ -9,10 +9,10 @@ Settings–style grouped form. Intel's Settings were an older layout and every
 touched file diverges, so the port is by hand, in five steps:
 
 1. Kit + header restyle — **done 2026-09-30**
-2. General / Conversation split, Advanced → Data & Storage, search anchors
+2. General / Conversation split, Advanced → Data & Storage, search anchors — **done 2026-09-30**
 3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory
 4. Voice tabs (Chat Voice, Transcription) on top of the Intel voice port
-5. Providers, Themes, slash-command editor sheet, CLI card → Developer Tools
+5. Providers, Themes, slash-command editor sheet (the CLI card already moved in step 2)
 
 ## Step 1 — kit and header (2026-09-30)
 
@@ -53,3 +53,53 @@ touched file diverges, so the port is by hand, in five steps:
   so whole pages come out blank below the header. `ConfigurationView` needs
   an `UpdaterViewModel` environment object; do not create one in tests
   (Sparkle). Delete such scratch tests before committing.
+
+## Step 2 — General / Conversation split (2026-09-30)
+
+- **General** (`ConfigurationView`, rewritten on `SettingsPage`): General
+  (hotkey, login, dock, beta), Core Model, Notifications (show toasts,
+  position, test toast), Advanced (toast timeout, max visible toasts, max
+  concurrent tasks, **Data & Storage** = `StorageSettingsView(embedded: true)`),
+  Reset (Factory Reset). No Save button any more: edits auto-save ~0.6 s after
+  the last change (upstream's debounced save), flushed when leaving the tab.
+- **Conversation** (`ChatSettingsView`, new tab `ManagementTab.chat`, Intel's
+  own file): Appearance (spell check), Behavior (chat titles, Core Model link,
+  agent-description filler, clipboard, ⌘N, Disable Tools, Enable Memory),
+  Greetings (AI greetings + personality), Folder Tool Permissions, Advanced
+  (System Prompt / Temperature / Max Tokens as **Orchestrator fallbacks**,
+  Context Length, Top P, Max Tool Attempts). Same auto-save; it writes only
+  its own `ChatConfiguration` fields (`ChatSettingsView.apply`).
+- **Storage tab** left the sidebar. `ManagementTab.storage` still exists and
+  routes to General; What's New "open storage" lands on General and the
+  `storage.encryption` landing opens Advanced.
+- **Command Line Tool** → Developer Tools → Server → Overview
+  (`CommandLineToolSection`, upstream file). Its icon is `terminal`:
+  `apple.terminal` is macOS 14+ and the SF Symbol guard caught it.
+- **Dropped because nothing on Intel reads them:** the Work generation
+  sliders (`workTemperature`, `workMaxTokens`, `workTopPOverride`,
+  `workMaxIterations`: only upstream's excluded local agent loop used them),
+  the Capability Search picker (`preflightSearchMode`: preflight search is
+  not compiled), the "Voice (Advanced)" status card (the Voice tab shows the
+  same status), the "Server settings moved" search card, the Apple-Silicon-
+  only models-directory placeholder, and General's in-page search filter
+  (the sidebar search replaces the page with global results). Stored values
+  are kept.
+- **Kept although upstream moved them:** Disable Tools and Enable Memory
+  (upstream: Agents / Memory; Intel's Memory tab has no off switch), Folder
+  Tool Permissions (upstream: Tools & MCP — step 3), Context Length
+  (upstream: Server → Cache, hidden on Intel), System Prompt / Temperature /
+  Max Tokens (upstream: Orchestrator; on Intel they are the Orchestrator's
+  inherited values, `AgentManager.effective*`), notification position /
+  timeout / stack size (upstream hid them).
+- **Not on Intel yet** (upstream Conversation switches): smooth streaming,
+  group thinking & tool activity, expand thinking while streaming,
+  compaction model, suggest follow-ups (`W-chat-ux`); keep Mac awake while
+  agents run (`W-ui-misc`). No Legal links: upstream's terms cover upstream's
+  service.
+- ⌘N default stays **off** on Intel (upstream's `@AppStorage` default is on);
+  existing users keep their value either way.
+- Primitives gained an optional explicit `anchorId` (SettingsToggle, fields,
+  slider, stepper, subsection): controls inside `SettingsAdvancedDisclosure`
+  have no section title for the automatic anchor. `SettingsSearchIndexTests`
+  now checks General and Conversation entries land on a control and that
+  Advanced entries are in the page's `advancedAnchorIds`.

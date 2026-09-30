@@ -3500,7 +3500,13 @@ struct ChatView: View {
                 case .openSandboxSettings: showMgmtWindow(.sandbox)
                 case .openAPIKeysSettings: showMgmtWindow(.server)
                 case .openSecurityDoc(let url): NSWorkspace.shared.open(url)
-                case .openStorageSettings, .exportPlaintextBackup: showMgmtWindow(.storage)
+                case .openStorageSettings, .exportPlaintextBackup:
+                    // Storage lives in General → Advanced → Data & Storage
+                    // (upstream #2950); the landing opens the disclosure.
+                    showMgmtWindow(.settings)
+                    DispatchQueue.main.async {
+                        SettingsHighlightCoordinator.shared.request("storage.encryption")
+                    }
                 }
             }
         )

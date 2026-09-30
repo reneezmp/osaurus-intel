@@ -36,44 +36,37 @@ public struct StorageSettingsView: View {
 
     @State private var hasAppeared = false
 
-    public init() {}
+    /// Upstream #2950: rendered inside General → Advanced → Data & Storage
+    /// (no header, no own scroll view). Settings no longer shows the
+    /// standalone page; it is kept for previews and direct use.
+    private let embedded: Bool
+
+    public init(embedded: Bool = false) {
+        self.embedded = embedded
+    }
 
     public var body: some View {
-        VStack(spacing: 0) {
-            headerView
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : -10)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+        Group {
+            if embedded {
+                cards
+                    .settingsLandingAnchor("storage.encryption")
+            } else {
+                VStack(spacing: 0) {
+                    headerView
+                        .managerHeaderEntrance(hasAppeared: hasAppeared)
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 24) {
-                    aboutCard
-                    statusCard
-
-                    if !coreMismatchTargets.isEmpty {
-                        coreKeyMismatchCard
-                    } else if !pluginMismatchTargets.isEmpty {
-                        pluginOrphanCard
+                    ScrollView {
+                        cards
+                            .padding(.horizontal, 24)
+                            .padding(.vertical, 24)
+                            .frame(maxWidth: .infinity)
                     }
-
-                    if let outcome = lastOutcome, !outcome.failedTargets.isEmpty {
-                        partialFailureCard(outcome: outcome)
-                    }
-                    if let outcome = lastOutcome, outcome.jsonFilesRecovered > 0 {
-                        recoveryCard(outcome: outcome)
-                    }
-
-                    actionsCard
-                    footnote
+                    .opacity(hasAppeared ? 1 : 0)
                 }
-                .padding(.horizontal, 24)
-                .padding(.vertical, 24)
-                .frame(maxWidth: .infinity)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .background(theme.primaryBackground)
             }
-            .opacity(hasAppeared ? 1 : 0)
         }
-        .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .background(theme.primaryBackground)
         .environment(\.theme, themeManager.currentTheme)
         .task { await refresh() }
         .onAppear {
@@ -100,6 +93,30 @@ public struct StorageSettingsView: View {
             Text(
                 "\(pluginMismatchTargets.count) plugin database(s) can't be opened with the current encryption key. They're almost always left over from uninstalled plugins or development test runs. Removing them deletes the corresponding folders under ~/.osaurus/Tools/. Real plugin data won't be touched."
             )
+        }
+    }
+
+    private var cards: some View {
+        VStack(alignment: .leading, spacing: 24) {
+            aboutCard
+            statusCard
+
+            if !coreMismatchTargets.isEmpty {
+                coreKeyMismatchCard
+            } else if !pluginMismatchTargets.isEmpty {
+                pluginOrphanCard
+            }
+
+            if let outcome = lastOutcome, !outcome.failedTargets.isEmpty {
+                partialFailureCard(outcome: outcome)
+            }
+            if let outcome = lastOutcome, outcome.jsonFilesRecovered > 0 {
+                recoveryCard(outcome: outcome)
+            }
+
+            actionsCard
+                .settingsLandingAnchor(embedded ? "storage.backup" : nil)
+            footnote
         }
     }
 

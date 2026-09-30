@@ -43,7 +43,10 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         switch self {
         // Voice sits after Settings as upstream orders it (available on Intel
         // since the Apple Speech port).
-        case .general: [.settings, .voice, .themes, .credits, .identity, .permissions, .storage]
+        // Upstream #2950: Conversation follows General; Storage folded into
+        // General → Advanced → Data & Storage (the `.storage` case stays for
+        // deep links and routes to General).
+        case .general: [.settings, .chat, .voice, .themes, .credits, .identity, .permissions]
         case .models: [.providers]
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
@@ -79,6 +82,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case identity
     case storage
     case settings
+    /// Upstream #2950 "Conversation": how chats look and behave.
+    case chat
 
     public var id: String { rawValue }
 
@@ -107,6 +112,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .identity: "person.badge.key.fill"
         case .storage: "externaldrive.fill.badge.checkmark"
         case .settings: "gearshape.fill"
+        case .chat: "text.bubble.fill"
         }
     }
 
@@ -135,6 +141,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .identity: L("Identity")
         case .storage: L("Storage")
         case .settings: L("General")
+        case .chat: L("Conversation")
         }
     }
 

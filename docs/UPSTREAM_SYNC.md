@@ -2318,3 +2318,14 @@ calling a sync complete.
   `SettingsSubsection` / `SettingsToggle` onto it, and the `ManagerHeader`
   look. The kit reads `ThemeManager.shared`, not `@Environment(\.theme)`
   (light default in un-injected sheets).
+
+### Settings redesign, step 2 (`W-settings-ux-2950`) — 2026-09-30
+
+- General rebuilt on `SettingsPage` with auto-save; new Conversation tab
+  (Intel's own `ChatSettingsView`); Storage folded into General → Advanced;
+  CLI card moved to Server → Overview. Inert Intel controls dropped (Work
+  generation, Capability Search) — see
+  [`SETTINGS_REDESIGN_INTEL.md`](SETTINGS_REDESIGN_INTEL.md#step-2--general--conversation-split-2026-09-30).
+  **Re-sync note:** Intel's `ConfigurationView.swift` and
+  `ChatSettingsView.swift` are Intel files; never overwrite them with
+  upstream's.

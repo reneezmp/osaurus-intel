@@ -253,10 +253,12 @@ private extension ManagementView {
             PermissionsView()
         case .identity:
             IdentityView()
-        case .storage:
-            StorageSettingsView()
-        case .settings:
-            ConfigurationView(searchText: $searchText)
+        case .storage, .settings:
+            // Upstream #2950: Storage lives in General → Advanced →
+            // Data & Storage; `.storage` is kept for old deep links.
+            ConfigurationView()
+        case .chat:
+            ChatSettingsView()
         case .none:
             Text("Unknown tab", bundle: .module)
         }

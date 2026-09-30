@@ -278,6 +278,22 @@
         }
       }
     },
+    "AI-Generated Greetings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "KI-generierte Begrüßungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "AI 生成的问候语"
+          }
+        }
+      }
+    },
     "All Collections" : {
       "localizations" : {
         "de" : {
@@ -402,6 +418,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "此 Mac 上的加密数据库，智能体可以使用 db_* 工具构建和查询。"
+          }
+        }
+      }
+    },
+    "App behavior, the Core Model, notifications, and data" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "App-Verhalten, Kernmodell, Benachrichtigungen und Daten"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "应用行为、核心模型、通知和数据"
           }
         }
       }
@@ -662,6 +694,22 @@
         }
       }
     },
+    "Chat titles are written by the Core Model set under General." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chat-Titel schreibt das unter „Allgemein“ eingestellte Kernmodell."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天标题由“通用”中设置的核心模型生成。"
+          }
+        }
+      }
+    },
     "Check Spelling While Typing" : {
       "localizations" : {
         "de" : {
@@ -804,6 +852,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "云端模型"
+          }
+        }
+      }
+    },
+    "Collapsed" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eingeklappt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已折叠"
           }
         }
       }
@@ -974,6 +1038,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩超时。未做任何更改。"
+          }
+        }
+      }
+    },
+    "Context window assumed for remote models." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Angenommenes Kontextfenster für entfernte Modelle."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为远程模型假定的上下文窗口。"
           }
         }
       }
@@ -1162,6 +1242,22 @@
         }
       }
     },
+    "Data & Storage" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Daten & Speicher"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "数据与存储"
+          }
+        }
+      }
+    },
     "Database is on" : {
       "localizations" : {
         "de" : {
@@ -1306,6 +1402,22 @@
         }
       }
     },
+    "Disable Tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Tools deaktivieren"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "禁用工具"
+          }
+        }
+      }
+    },
     "Discard and Add Provider" : {
       "localizations" : {
         "de" : {
@@ -1350,6 +1462,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "未找到文档"
+          }
+        }
+      }
+    },
+    "Each empty chat generates a fresh greeting and quick actions on the Core Model. The static greeting still shows instantly. Per-agent settings still win." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Jeder leere Chat erzeugt mit dem Kernmodell eine neue Begrüßung und Schnellaktionen. Die feste Begrüßung erscheint trotzdem sofort. Einstellungen einzelner Agenten haben Vorrang."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每个空聊天都会用核心模型生成新的问候语和快捷操作。静态问候语仍会立即显示。各智能体的设置优先。"
           }
         }
       }
@@ -1482,6 +1610,22 @@
         }
       }
     },
+    "Enter instructions for the Orchestrator..." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anweisungen für den Orchestrator eingeben…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "输入给编排器的指令…"
+          }
+        }
+      }
+    },
     "Everything agents have written to your collections, newest first. Reverting puts the document back the way it was before that run." : {
       "localizations" : {
         "de" : {
@@ -1498,7 +1642,39 @@
         }
       }
     },
+    "Expanded" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ausgeklappt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已展开"
+          }
+        }
+      }
+    },
     "Fill in missing agent descriptions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fehlende Agentenbeschreibungen ergänzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "补全缺失的智能体描述"
+          }
+        }
+      }
+    },
+    "Fill In Missing Agent Descriptions" : {
       "localizations" : {
         "de" : {
           "stringUnit" : {
@@ -1602,6 +1778,22 @@
         }
       }
     },
+    "Give each chat a short descriptive title after its first reply. Runs in the background; manual renames always win." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gibt jedem Chat nach der ersten Antwort einen kurzen, beschreibenden Titel. Läuft im Hintergrund; manuelle Umbenennungen haben immer Vorrang."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在第一次回复后为每个聊天生成简短的描述性标题。在后台运行；手动重命名始终优先。"
+          }
+        }
+      }
+    },
     "Give this agent an encrypted database it can build and query. Raw SQL and migrations ask before running." : {
       "localizations" : {
         "de" : {
@@ -1618,6 +1810,70 @@
         }
       }
     },
+    "Greetings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Begrüßungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "问候语"
+          }
+        }
+      }
+    },
+    "How chats look and behave. The Orchestrator's own persona lives under Orchestrator." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wie Chats aussehen und sich verhalten. Die eigene Persona des Orchestrators findest du unter Orchestrator."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天的外观和行为。编排器自己的人设在“编排器”中设置。"
+          }
+        }
+      }
+    },
+    "How many background tasks (indexing, scheduled runs, watchers) may run at once. Empty uses the default of 5." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wie viele Hintergrundaufgaben (Indexierung, geplante Läufe, Watcher) gleichzeitig laufen dürfen. Leer bedeutet den Standardwert von 5."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可同时运行的后台任务数（索引、计划运行、监听器）。留空则使用默认值 5。"
+          }
+        }
+      }
+    },
+    "How your local data is protected on disk." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wie deine lokalen Daten auf der Festplatte geschützt sind."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地数据在磁盘上的保护方式。"
+          }
+        }
+      }
+    },
     "I understand: agents get new addresses, existing access keys are revoked, and the current identity's recovery phrase will no longer restore this Mac unless I saved it." : {
       "localizations" : {
         "de" : {
@@ -1630,6 +1886,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "我明白：代理将获得新地址，现有的访问密钥将被吊销，并且当前身份的恢复短语将无法再恢复此 Mac，除非我已保存它。"
+          }
+        }
+      }
+    },
+    "Inject persistent memory (identity, pinned facts, episodes) into chats. A relevance gate decides per turn whether memory is needed. The Memory tab has the details." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Fügt Chats dauerhaftes Gedächtnis hinzu (Identität, angeheftete Fakten, Episoden). Ein Relevanzfilter entscheidet pro Runde, ob es gebraucht wird. Details findest du im Tab „Gedächtnis“."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "向聊天注入持久记忆（身份、置顶事实、片段）。相关性判断会在每一轮决定是否需要记忆。详情见“记忆”标签页。"
           }
         }
       }
@@ -1898,6 +2170,38 @@
         }
       }
     },
+    "Maximum consecutive tool calls per turn before the agent must answer." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maximale aufeinanderfolgende Tool-Aufrufe pro Runde, bevor der Agent antworten muss."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "每轮中智能体必须作答前允许的最大连续工具调用次数。"
+          }
+        }
+      }
+    },
+    "Maximum response tokens for the Orchestrator when it has no value of its own." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Maximale Antwort-Tokens für den Orchestrator, wenn er keinen eigenen Wert hat."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编排器没有自己的值时的最大回复 token 数。"
+          }
+        }
+      }
+    },
     "May change Osaurus settings" : {
       "localizations" : {
         "de" : {
@@ -1910,6 +2214,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可以更改 Osaurus 设置"
+          }
+        }
+      }
+    },
+    "Model used in the background for memory, chat titles and transcription cleanup. If unset, your active chat model is used." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Modell, das im Hintergrund für Gedächtnis, Chat-Titel und die Bereinigung von Transkriptionen genutzt wird. Ohne Auswahl wird dein aktives Chat-Modell verwendet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在后台用于记忆、聊天标题和转录清理的模型。未设置时使用你当前的聊天模型。"
           }
         }
       }
@@ -1974,6 +2294,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "与此智能体的新聊天会在此文件夹中打开，除非其项目有自己的文件夹。你也可以在聊天中通过文件夹标签设置。"
+          }
+        }
+      }
+    },
+    "New Window moves to ⇧+⌘+N, matching other chat apps. Turn off to keep ⌘+N opening a new window." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„Neues Fenster“ wandert auf ⇧+⌘+N, wie in anderen Chat-Apps. Schalte es aus, damit ⌘+N weiter ein neues Fenster öffnet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "“新建窗口”改为 ⇧+⌘+N，与其他聊天应用一致。关闭后 ⌘+N 仍会打开新窗口。"
           }
         }
       }
@@ -2234,6 +2570,22 @@
         }
       }
     },
+    "Offer text you've just copied in any app as context, and grab the current selection when you summon Osaurus." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Bietet Text, den du gerade in einer beliebigen App kopiert hast, als Kontext an und übernimmt die aktuelle Auswahl, wenn du Osaurus aufrufst."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将你刚在任意应用中复制的文本作为上下文提供，并在唤起 Osaurus 时获取当前选中内容。"
+          }
+        }
+      }
+    },
     "On this Mac" : {
       "localizations" : {
         "de" : {
@@ -2294,6 +2646,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开智能体"
+          }
+        }
+      }
+    },
+    "Open Osaurus from anywhere" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus von überall öffnen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从任意位置打开 Osaurus"
           }
         }
       }
@@ -2530,6 +2898,22 @@
         }
       }
     },
+    "Permanently deletes all data and settings — chat history, agents, memory, and your identity keys — then quits Osaurus. This cannot be undone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Löscht alle Daten und Einstellungen dauerhaft – Chatverlauf, Agenten, Gedächtnis und deine Identitätsschlüssel – und beendet dann Osaurus. Das lässt sich nicht rückgängig machen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "永久删除所有数据和设置（聊天记录、智能体、记忆和你的身份密钥），然后退出 Osaurus。此操作无法撤销。"
+          }
+        }
+      }
+    },
     "Pick a language in the Recognition tab" : {
       "localizations" : {
         "de" : {
@@ -2638,6 +3022,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "快速反应"
+          }
+        }
+      }
+    },
+    "Randomness (0–2) for the Orchestrator when it has no value of its own." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zufälligkeit (0–2) für den Orchestrator, wenn er keinen eigenen Wert hat."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编排器没有自己的值时使用的随机性（0–2）。"
           }
         }
       }
@@ -2852,6 +3252,22 @@
         }
       }
     },
+    "Reset all work tool permissions to default" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Berechtigungen der Ordner-Tools zurücksetzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将所有文件夹工具权限恢复为默认"
+          }
+        }
+      }
+    },
     "Restore Identity" : {
       "localizations" : {
         "de" : {
@@ -3060,6 +3476,22 @@
         }
       }
     },
+    "Sampling diversity (0–1) for chats." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sampling-Vielfalt (0–1) für Chats."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "聊天的采样多样性（0–1）。"
+          }
+        }
+      }
+    },
     "Search places, get directions and travel times, and find where this Mac is." : {
       "localizations" : {
         "de" : {
@@ -3088,6 +3520,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "搜索、阅读、创建和补充备忘录。macOS 会在首次使用时询问。"
+          }
+        }
+      }
+    },
+    "Seconds before a toast dismisses itself. Empty uses the default of 5 seconds." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sekunden, bis eine Benachrichtigung von selbst verschwindet. Leer bedeutet den Standardwert von 5 Sekunden."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知自动消失前的秒数。留空则使用默认的 5 秒。"
           }
         }
       }
@@ -3140,6 +3588,22 @@
         }
       }
     },
+    "Send messages directly to the model with no tool specs or capability injection. Turn off to let agents use built-in and plugin tools." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sendet Nachrichten direkt an das Modell, ohne Tool-Beschreibungen oder Fähigkeiten. Schalte es aus, damit Agenten eingebaute und Plugin-Tools nutzen können."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "直接将消息发送给模型，不附带工具说明或能力注入。关闭后，智能体即可使用内置工具和插件工具。"
+          }
+        }
+      }
+    },
     "Sends text to any server implementing the OpenAI /v1/audio/speech API, such as openai-edge-tts or Kokoro." : {
       "localizations" : {
         "de" : {
@@ -3184,6 +3648,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "为显示而缩短，并非完整文档。"
+          }
+        }
+      }
+    },
+    "Show a sample notification" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eine Beispiel-Benachrichtigung anzeigen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示一条示例通知"
           }
         }
       }
@@ -3932,6 +4412,22 @@
         }
       }
     },
+    "Underline misspelled words in the chat input and offer corrections on right-click, using your macOS language and dictionary." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Unterstreicht falsch geschriebene Wörter im Chat-Eingabefeld und bietet per Rechtsklick Korrekturen an – mit deiner macOS-Sprache und deinem Wörterbuch."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天输入框中为拼写错误的单词加下划线，并在右键菜单中提供更正，使用你的 macOS 语言和词典。"
+          }
+        }
+      }
+    },
     "Underline misspelled words in the chat input and offer suggestions on right-click. Text is never corrected automatically." : {
       "localizations" : {
         "de" : {
@@ -4056,6 +4552,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "使用文件夹"
+          }
+        }
+      }
+    },
+    "Used by the Orchestrator when it has no prompt of its own (Orchestrator settings)." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird vom Orchestrator verwendet, wenn er keinen eigenen Prompt hat (Orchestrator-Einstellungen)."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当编排器没有自己的提示词时使用（见编排器设置）。"
           }
         }
       }
@@ -11044,6 +11556,40 @@
         }
       }
     },
+    "Automatically Name Chats" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats automatisch benennen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채팅 이름 자동 생성"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Автоматически называть чаты"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自动命名聊天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自動命名聊天"
+          }
+        }
+      }
+    },
     "Automatically sends message after a brief pause" : {
       "localizations" : {
         "de" : {
@@ -13786,6 +14332,40 @@
         }
       }
     },
+    "Change" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ändern"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "변경"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Изменить"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更改"
+          }
+        }
+      }
+    },
     "Change Folder" : {
       "localizations" : {
         "de" : {
@@ -15252,6 +15832,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "剪贴板"
+          }
+        }
+      }
+    },
+    "Clipboard Monitoring" : {
+      "comment" : "Toggle that enables or disables automatic detection and offering of text from any app as context. Includes 'grab selection' feature when summoning Osaurus.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zwischenablage überwachen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Clipboard Monitoring"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Clipboard Monitoring"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剪贴板监控"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "剪貼板監控"
           }
         }
       }
@@ -20691,6 +21307,40 @@
         }
       }
     },
+    "Developer Tools" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Entwicklerwerkzeuge"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "개발자 도구"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Инструменты разработчика"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "开发者工具"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "開發者工具"
+          }
+        }
+      }
+    },
     "Developer tools and API reference" : {
       "localizations" : {
         "de" : {
@@ -23161,6 +23811,42 @@
         }
       }
     },
+    "Enable Memory" : {
+      "comment" : "Label for a toggle that enables or disables memory management.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gedächtnis aktivieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enable Memory"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Enable Memory"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "启用记忆"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "啓用記憶"
+          }
+        }
+      }
+    },
     "Enable microphone button in the chat input area" : {
       "localizations" : {
         "de" : {
@@ -25214,6 +25900,40 @@
         }
       }
     },
+    "Factory Reset" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Auf Werkseinstellungen zurücksetzen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "공장 초기화"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Сброс к заводским настройкам"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "恢复出厂设置"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "回復原廠設定"
+          }
+        }
+      }
+    },
     "Factory Reset Osaurus?" : {
       "localizations" : {
         "de" : {
@@ -26035,6 +26755,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "文件夹"
+          }
+        }
+      }
+    },
+    "Folder Tool Permissions" : {
+      "extractionState" : "stale",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Berechtigungen für Ordner-Tools"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "폴더 도구 권한"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Разрешения для инструментов папок"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "文件夹工具权限"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "資料夾工具權限"
           }
         }
       }
@@ -30115,6 +30870,42 @@
         }
       }
     },
+    "Install the `osaurus` CLI into your PATH for terminal access. If installed to ~/.local/bin, make sure that folder is in your PATH." : {
+      "comment" : "A description of the command line tool.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Installiere die `osaurus`-CLI in deinem PATH für den Terminalzugriff. Bei Installation nach ~/.local/bin stelle sicher, dass dieser Ordner in deinem PATH liegt."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "터미널에서 사용할 수 있도록 `osaurus` CLI를 PATH에 설치합니다. ~/.local/bin에 설치한 경우 해당 폴더가 PATH에 포함되어 있는지 확인하세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Установите CLI `osaurus` в ваш PATH для доступа из терминала. Если установлено в ~/.local/bin, убедитесь, что эта папка есть в PATH."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将 `osaurus` 命令行工具安装到你的 PATH 以便在终端中使用。如果安装到 ~/.local/bin，请确保该文件夹在你的 PATH 中。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將 `osaurus` 命令列工具安裝到你的 PATH 以便在終端機中使用。如果安裝到 ~/.local/bin，請確保該資料夾在你的 PATH 中。"
+          }
+        }
+      }
+    },
     "Install the latest update" : {
       "localizations" : {
         "de" : {
@@ -32516,6 +33307,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "本地模型（已检测到）"
+          }
+        }
+      }
+    },
+    "Local Models" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Lokale Modelle"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "로컬 모델"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Локальные модели"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地模型"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "本地模型"
           }
         }
       }
@@ -39901,6 +40726,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "或输入自定义回答…"
+          }
+        }
+      }
+    },
+    "Orchestrator" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Orchestrator"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "오케스트레이터"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Оркестратор"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "编排器"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "編排器"
           }
         }
       }
@@ -58269,6 +59128,41 @@
         }
       }
     },
+    "Test Notification" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Test-Benachrichtigung"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Test Notification"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Тестовое уведомление"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "测试通知"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "測試通知"
+          }
+        }
+      }
+    },
     "Test Toast" : {
       "localizations" : {
         "de" : {
@@ -60549,6 +61443,41 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "发送"
+          }
+        }
+      }
+    },
+    "Toast notifications are working!" : {
+      "extractionState" : "manual",
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toast-Benachrichtigungen funktionieren!"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Toast notifications are working!"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Всплывающие уведомления работают!"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Toast 通知正常工作！"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "通知消息已生效！"
           }
         }
       }
