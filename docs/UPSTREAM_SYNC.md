@@ -2273,3 +2273,16 @@ calling a sync complete.
   coercion in both the tools and the preview.
 - Upstream #2950 (Settings UX) and six other commits landed on 09-30 and are
   filed as `W-settings-ux-2950`; audit them with the next batch.
+
+### Knowledge writing, part 2 (`W-knowledge-write`) — 2026-09-30
+
+- Tickets (`flag_knowledge_stale`, `list_knowledge_tickets`,
+  `update_knowledge_ticket`) with a Curation list on the Knowledge page; git
+  Sync for collections in a repo folder; clickable knowledge paths in chat
+  replies; inferred document types.
+- **Upstream bug noted:** `update_knowledge_ticket` still checks the retired
+  curator flag although the composer offers it to every granted agent; Intel
+  gates on the grant only. Re-check when syncing that file.
+- Intel knowledge index schema is now v3 (v2 tickets, v3 `inferred_type` with a
+  backfill for existing rows). Upstream numbers its schema differently; an
+  upstream-created index is still quarantined and rebuilt on Intel.

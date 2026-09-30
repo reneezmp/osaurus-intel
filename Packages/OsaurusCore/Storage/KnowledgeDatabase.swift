@@ -31,9 +31,22 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     public static let shared = KnowledgeDatabase()
     private var db: OpaquePointer?
     private let queue = DispatchQueue(label: "ai.osaurus.knowledge.database")
-    private static let schemaVersion = 1
-    private init() {}
+    /// Intel's own schema numbering (its v1 differs from upstream's): v2 adds
+    /// upstream's `tickets` table, v3 upstream's `inferred_type` column
+    /// (docs/KNOWLEDGE_WRITE_INTEL.md).
+    private static let schemaVersion = 3
+    /// Internal (not private) so tests can build isolated instances, as upstream.
+    init() {}
     deinit { close() }
+
+    /// Open a plaintext in-memory database for tests (upstream helper).
+    public func openInMemory() throws {
+        try queue.sync {
+            guard db == nil else { return }
+            db = try EncryptedSQLiteOpener.open(path: ":memory:", key: nil, applyPerfPragmas: false)
+            do { try migrate() } catch { closeLocked(); throw error }
+        }
+    }
 
     public var isOpen: Bool { queue.sync { db != nil } }
 
@@ -107,7 +120,12 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         var version = 0
         try query(connection, "PRAGMA user_version") { statement in if sqlite3_step(statement) == SQLITE_ROW { version = Int(sqlite3_column_int(statement, 0)) } }
         guard version <= Self.schemaVersion else { throw KnowledgeDatabaseError.sqlite("schema v\(version) is newer than this build") }
-        guard version == 0 else { return }
+        if version < 1 { try migrateToV1(connection) }
+        if version < 2 { try migrateToV2(connection) }
+        if version < 3 { try migrateToV3(connection) }
+    }
+
+    private func migrateToV1(_ connection: OpaquePointer) throws {
         try execute(connection, "BEGIN")
         do {
             try execute(connection, """
@@ -138,6 +156,57 @@ public final class KnowledgeDatabase: @unchecked Sendable {
             try execute(connection, "COMMIT")
         } catch { try? execute(connection, "ROLLBACK"); throw error }
     }
+
+    /// Upstream v2's `tickets` (agent-filed staleness reports). Upstream's
+    /// `proposals` table belongs to its retired proposal queue and is not
+    /// created on Intel.
+    private func migrateToV2(_ connection: OpaquePointer) throws {
+        try execute(connection, "BEGIN")
+        do {
+            try execute(connection, """
+                CREATE TABLE IF NOT EXISTS tickets (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    collection_id TEXT NOT NULL, rel_path TEXT NOT NULL,
+                    reason TEXT NOT NULL, evidence TEXT NOT NULL DEFAULT '',
+                    status TEXT NOT NULL DEFAULT 'open', created_by TEXT NOT NULL DEFAULT '',
+                    created_at TEXT NOT NULL, updated_at TEXT NOT NULL
+                )
+                """)
+            try execute(connection, "CREATE INDEX IF NOT EXISTS idx_tickets_status ON tickets(status)")
+            try execute(connection, "PRAGMA user_version = 2")
+            try execute(connection, "COMMIT")
+        } catch { try? execute(connection, "ROLLBACK"); throw error }
+    }
+
+    /// Upstream v3: the category the indexer infers from a document's folder
+    /// when frontmatter has no `type` (`KnowledgeTypeInference`). Readers
+    /// use the explicit `doc_type` when present, else this.
+    private func migrateToV3(_ connection: OpaquePointer) throws {
+        try execute(connection, "BEGIN")
+        do {
+            try execute(connection, "ALTER TABLE documents ADD COLUMN inferred_type TEXT NOT NULL DEFAULT ''")
+            // Documents indexed before v3 are skipped by the hash check, so
+            // fill their category now (it depends on the path alone).
+            var rows: [(Int64, String)] = []
+            try query(connection, "SELECT id, rel_path FROM documents") { statement in
+                while sqlite3_step(statement) == SQLITE_ROW {
+                    rows.append((sqlite3_column_int64(statement, 0), columnText(statement, 1)))
+                }
+            }
+            for (id, relPath) in rows {
+                let inferred = KnowledgeTypeInference.infer(relPath: relPath)
+                guard !inferred.isEmpty else { continue }
+                try query(connection, "UPDATE documents SET inferred_type = ?1 WHERE id = ?2", bind: { statement in
+                    bindText(statement, 1, inferred); sqlite3_bind_int64(statement, 2, id)
+                }) { _ = sqlite3_step($0) }
+            }
+            try execute(connection, "PRAGMA user_version = 3")
+            try execute(connection, "COMMIT")
+        } catch { try? execute(connection, "ROLLBACK"); throw error }
+    }
+
+    /// Effective category: explicit frontmatter `type`, else the inferred one.
+    private static let effectiveTypeSQL = "CASE WHEN d.doc_type = '' THEN d.inferred_type ELSE d.doc_type END"
 
     public func documentHashes(collectionId: String) throws -> [String: String] {
         try sync { connection in
@@ -183,16 +252,16 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         }
     }
 
-    public func upsertDocument(collectionId: String, relPath: String, title: String, docType: String, summary: String, tagsCSV: String, contentHash: String, sizeBytes: Int, modifiedAt: String) throws -> Int {
+    public func upsertDocument(collectionId: String, relPath: String, title: String, docType: String, summary: String, tagsCSV: String, contentHash: String, sizeBytes: Int, modifiedAt: String, inferredType: String = "") throws -> Int {
         try sync { connection in
             var id = 0
             try query(connection, """
-                INSERT INTO documents(collection_id,rel_path,title,doc_type,summary,tags_csv,content_hash,size_bytes,modified_at,indexed_at)
-                VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10)
-                ON CONFLICT(collection_id,rel_path) DO UPDATE SET title=excluded.title,doc_type=excluded.doc_type,summary=excluded.summary,tags_csv=excluded.tags_csv,content_hash=excluded.content_hash,size_bytes=excluded.size_bytes,modified_at=excluded.modified_at,indexed_at=excluded.indexed_at
+                INSERT INTO documents(collection_id,rel_path,title,doc_type,summary,tags_csv,content_hash,size_bytes,modified_at,indexed_at,inferred_type)
+                VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)
+                ON CONFLICT(collection_id,rel_path) DO UPDATE SET title=excluded.title,doc_type=excluded.doc_type,summary=excluded.summary,tags_csv=excluded.tags_csv,content_hash=excluded.content_hash,size_bytes=excluded.size_bytes,modified_at=excluded.modified_at,indexed_at=excluded.indexed_at,inferred_type=excluded.inferred_type
                 RETURNING id
                 """, bind: { statement in
-                    bindText(statement, 1, collectionId); bindText(statement, 2, relPath); bindText(statement, 3, title); bindText(statement, 4, docType); bindText(statement, 5, summary); bindText(statement, 6, tagsCSV); bindText(statement, 7, contentHash); sqlite3_bind_int(statement, 8, Int32(sizeBytes)); bindText(statement, 9, modifiedAt); bindText(statement, 10, now())
+                    bindText(statement, 1, collectionId); bindText(statement, 2, relPath); bindText(statement, 3, title); bindText(statement, 4, docType); bindText(statement, 5, summary); bindText(statement, 6, tagsCSV); bindText(statement, 7, contentHash); sqlite3_bind_int(statement, 8, Int32(sizeBytes)); bindText(statement, 9, modifiedAt); bindText(statement, 10, now()); bindText(statement, 11, inferredType)
                 }) { statement in if sqlite3_step(statement) == SQLITE_ROW { id = Int(sqlite3_column_int64(statement, 0)) } }
             guard id != 0 else { throw KnowledgeDatabaseError.sqlite("document upsert did not return an id") }
             return id
@@ -238,6 +307,119 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         try sync { connection in
             try query(connection, "DELETE FROM chunks WHERE document_id IN (SELECT id FROM documents WHERE collection_id=?1)", bind: { bindText($0, 1, collectionId) }) { _ = sqlite3_step($0) }
             try query(connection, "DELETE FROM documents WHERE collection_id=?1", bind: { bindText($0, 1, collectionId) }) { _ = sqlite3_step($0) }
+            // Upstream: a collection's tickets go with it.
+            try query(connection, "DELETE FROM tickets WHERE collection_id=?1", bind: { bindText($0, 1, collectionId) }) { _ = sqlite3_step($0) }
+        }
+    }
+
+    // MARK: - Tickets (upstream curation)
+
+    private static let ticketColumns =
+        "id, collection_id, rel_path, reason, evidence, status, created_by, created_at, updated_at"
+
+    private func readTicket(_ statement: OpaquePointer) -> KnowledgeTicket {
+        KnowledgeTicket(
+            id: Int(sqlite3_column_int64(statement, 0)), collectionId: columnText(statement, 1),
+            relPath: columnText(statement, 2), reason: columnText(statement, 3), evidence: columnText(statement, 4),
+            status: KnowledgeTicketStatus(rawValue: columnText(statement, 5)) ?? .open,
+            createdBy: columnText(statement, 6), createdAt: columnText(statement, 7), updatedAt: columnText(statement, 8))
+    }
+
+    /// File a staleness ticket. Returns the new row id.
+    public func createTicket(collectionId: String, relPath: String, reason: String, evidence: String, createdBy: String) throws -> Int {
+        try sync { connection in
+            var ticketId = 0
+            let stamp = now()
+            try query(connection, """
+                INSERT INTO tickets (collection_id, rel_path, reason, evidence, status, created_by, created_at, updated_at)
+                VALUES (?1, ?2, ?3, ?4, 'open', ?5, ?6, ?6) RETURNING id
+                """, bind: { statement in
+                    bindText(statement, 1, collectionId); bindText(statement, 2, relPath); bindText(statement, 3, reason)
+                    bindText(statement, 4, evidence); bindText(statement, 5, createdBy); bindText(statement, 6, stamp)
+                }) { statement in if sqlite3_step(statement) == SQLITE_ROW { ticketId = Int(sqlite3_column_int64(statement, 0)) } }
+            guard ticketId != 0 else { throw KnowledgeDatabaseError.sqlite("createTicket returned no id") }
+            return ticketId
+        }
+    }
+
+    /// The open ticket for a document, if any — used to dedupe repeat flags.
+    public func openTicket(collectionId: String, relPath: String) throws -> KnowledgeTicket? {
+        try sync { connection in
+            var ticket: KnowledgeTicket?
+            try query(connection, "SELECT \(Self.ticketColumns) FROM tickets WHERE collection_id = ?1 AND rel_path = ?2 AND status = 'open' ORDER BY id DESC LIMIT 1", bind: { bindText($0, 1, collectionId); bindText($0, 2, relPath) }) { statement in
+                if sqlite3_step(statement) == SQLITE_ROW { ticket = readTicket(statement) }
+            }
+            return ticket
+        }
+    }
+
+    public func getTicket(id: Int) throws -> KnowledgeTicket? {
+        try sync { connection in
+            var ticket: KnowledgeTicket?
+            try query(connection, "SELECT \(Self.ticketColumns) FROM tickets WHERE id = ?1 LIMIT 1", bind: { sqlite3_bind_int64($0, 1, Int64(id)) }) { statement in
+                if sqlite3_step(statement) == SQLITE_ROW { ticket = readTicket(statement) }
+            }
+            return ticket
+        }
+    }
+
+    /// Tickets in the given collections (nil = all, for the Knowledge tab;
+    /// empty = none), optionally by status, newest first.
+    public func listTickets(collectionIds: [String]?, status: KnowledgeTicketStatus? = nil, limit: Int = 100) throws -> [KnowledgeTicket] {
+        if let collectionIds, collectionIds.isEmpty { return [] }
+        return try sync { connection in
+            var clauses: [String] = []
+            var index = 1
+            var idsStart = 0
+            if let collectionIds {
+                idsStart = index
+                clauses.append("collection_id IN (\(collectionIds.indices.map { "?\($0 + index)" }.joined(separator: ",")))")
+                index += collectionIds.count
+            }
+            let statusIndex = index
+            if status != nil { clauses.append("status = ?\(statusIndex)"); index += 1 }
+            let limitIndex = index
+            var sql = "SELECT \(Self.ticketColumns) FROM tickets"
+            if !clauses.isEmpty { sql += " WHERE " + clauses.joined(separator: " AND ") }
+            sql += " ORDER BY id DESC LIMIT ?\(limitIndex)"
+            var tickets: [KnowledgeTicket] = []
+            try query(connection, sql, bind: { statement in
+                if let collectionIds {
+                    for (offset, id) in collectionIds.enumerated() { bindText(statement, Int32(idsStart + offset), id) }
+                }
+                if let status { bindText(statement, Int32(statusIndex), status.rawValue) }
+                sqlite3_bind_int(statement, Int32(limitIndex), Int32(limit))
+            }) { statement in while sqlite3_step(statement) == SQLITE_ROW { tickets.append(readTicket(statement)) } }
+            return tickets
+        }
+    }
+
+    public func updateTicketStatus(id: Int, status: KnowledgeTicketStatus) throws {
+        try sync { connection in
+            try query(connection, "UPDATE tickets SET status = ?1, updated_at = ?2 WHERE id = ?3", bind: { statement in
+                bindText(statement, 1, status.rawValue); bindText(statement, 2, now()); sqlite3_bind_int64(statement, 3, Int64(id))
+            }) { _ = sqlite3_step($0) }
+        }
+    }
+
+    /// One indexed document's metadata (upstream), with the effective type.
+    public func getDocument(collectionId: String, relPath: String) throws -> KnowledgeDocument? {
+        try sync { connection in
+            var document: KnowledgeDocument?
+            try query(connection, """
+                SELECT d.id,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.summary,d.tags_csv,d.content_hash,d.size_bytes,d.modified_at,d.indexed_at
+                FROM documents d WHERE d.collection_id = ?1 AND d.rel_path = ?2 LIMIT 1
+                """, bind: { bindText($0, 1, collectionId); bindText($0, 2, relPath) }) { statement in
+                    if sqlite3_step(statement) == SQLITE_ROW {
+                        document = KnowledgeDocument(
+                            id: Int(sqlite3_column_int64(statement, 0)), collectionId: columnText(statement, 1),
+                            relPath: columnText(statement, 2), title: columnText(statement, 3), docType: columnText(statement, 4),
+                            summary: columnText(statement, 5), tagsCSV: columnText(statement, 6), contentHash: columnText(statement, 7),
+                            sizeBytes: Int(sqlite3_column_int64(statement, 8)), modifiedAt: columnText(statement, 9),
+                            indexedAt: columnText(statement, 10))
+                    }
+                }
+            return document
         }
     }
 
@@ -246,7 +428,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         return try sync { connection in
             let placeholders = collectionIds.indices.map { "?\($0 + 2)" }.joined(separator: ",")
             let sql = """
-                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,d.doc_type,d.tags_csv
+                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
                 FROM chunks c JOIN chunks_fts ON chunks_fts.rowid=c.id JOIN documents d ON d.id=c.document_id
                 WHERE chunks_fts MATCH ?1 AND d.collection_id IN (\(placeholders)) ORDER BY bm25(chunks_fts) LIMIT ?\(collectionIds.count + 2)
                 """
@@ -266,7 +448,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
             let placeholders = collectionIds.indices.map { "?\($0 + 2)" }.joined(separator: ",")
             var result: [KnowledgeVectorChunk] = []
             try query(connection, """
-                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,d.doc_type,d.tags_csv,c.embedding,c.embedding_model
+                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv,c.embedding,c.embedding_model
                 FROM chunks c JOIN documents d ON d.id=c.document_id
                 WHERE c.embedding_model=?1 AND d.collection_id IN (\(placeholders))
                 """, bind: { statement in bindText(statement, 1, model); for (index, id) in collectionIds.enumerated() { bindText(statement, Int32(index + 2), id) } }) { statement in
@@ -280,7 +462,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         try sync { connection in
             var result: [KnowledgeChunkHit] = []
             try query(connection, """
-                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,d.doc_type,d.tags_csv
+                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
                 FROM chunks c JOIN documents d ON d.id=c.document_id
                 WHERE d.collection_id=?1 ORDER BY d.rel_path,c.chunk_index
                 """, bind: { bindText($0, 1, collectionId) }) { statement in
@@ -310,7 +492,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         try sync { connection in
             var result: [KnowledgeChunkHit] = []
             try query(connection, """
-                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,d.doc_type,d.tags_csv
+                SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
                 FROM chunks c JOIN documents d ON d.id=c.document_id
                 WHERE d.collection_id=?1 AND (c.embedding IS NULL OR c.embedding_model != ?2)
                 ORDER BY d.rel_path,c.chunk_index LIMIT ?3
@@ -327,7 +509,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         let placeholders = collectionIds.indices.map { "?\($0 + 2)" }.joined(separator: ",")
         var hits: [KnowledgeChunkHit] = []
         try query(connection, """
-            SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,d.doc_type,d.tags_csv
+            SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
             FROM chunks c JOIN documents d ON d.id=c.document_id
             WHERE c.content LIKE '%' || ?1 || '%' AND d.collection_id IN (\(placeholders)) LIMIT ?\(collectionIds.count + 2)
             """, bind: { statement in bindText(statement, 1, text); for (index, id) in collectionIds.enumerated() { bindText(statement, Int32(index + 2), id) }; sqlite3_bind_int(statement, Int32(collectionIds.count + 2), Int32(limit)) }) { statement in while sqlite3_step(statement) == SQLITE_ROW { hits.append(readHit(statement)) } }

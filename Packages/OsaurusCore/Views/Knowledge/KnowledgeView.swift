@@ -42,6 +42,8 @@ struct KnowledgeView: View {
     /// docs/KNOWLEDGE_WRITE_INTEL.md). The tab appears once there are any.
     @State private var writeRuns: [KnowledgeWriteRun] = []
     @State private var selectedTab: KnowledgeTab = .collections
+    /// Open staleness tickets agents filed (upstream curation list).
+    @State private var openTickets: [KnowledgeTicket] = []
 
     var body: some View {
         VStack(spacing: 0) {
@@ -86,6 +88,10 @@ struct KnowledgeView: View {
         .onReceive(NotificationCenter.default.publisher(for: .knowledgeWritesChanged)) { _ in
             reloadWriteHistory()
         }
+        .onReceive(NotificationCenter.default.publisher(for: .knowledgeCurationChanged)) { _ in
+            reloadTickets()
+        }
+        .onAppear { reloadTickets() }
         .onReceive(managementState.$pendingKnowledgeCreate) { _ in
             applyPendingRequests()
         }
@@ -247,6 +253,117 @@ struct KnowledgeView: View {
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 
+    /// Upstream "Sync": pull (fast-forward only) and push; the outcome message
+    /// says what happened or what needs attention.
+    private func syncCollection(_ id: UUID) {
+        guard let collection = KnowledgeManager.shared.collection(for: id) else { return }
+        showToast(L("Syncing \"\(collection.name)\"…"))
+        Task {
+            let outcome = await KnowledgeManager.shared.syncNow(collection)
+            switch outcome {
+            case .upToDate, .updated: showToast(outcome.message)
+            case .needsAttention, .failed: showToast(outcome.message, isError: true)
+            }
+            integration.reload()
+        }
+    }
+
+    // MARK: - Tickets (upstream curation)
+
+    @ViewBuilder
+    private var ticketsSection: some View {
+        if !openTickets.isEmpty {
+            VStack(alignment: .leading, spacing: 12) {
+                Text("Curation", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(
+                    "Agents leave a note here when a document looks out of date but fixing it was not the task at hand. Open one in a chat to have an agent correct it; you review the change before it is saved.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+
+                ForEach(openTickets) { ticket in
+                    HStack(spacing: 10) {
+                        Image(systemName: "exclamationmark.bubble")
+                            .font(.system(size: 13))
+                            .foregroundColor(.orange)
+                        VStack(alignment: .leading, spacing: 1) {
+                            Text(String(format: L("Ticket #%lld: %@"), ticket.id, ticket.relPath))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(theme.primaryText)
+                            Text(ticket.reason)
+                                .font(.system(size: 11))
+                                .foregroundColor(theme.tertiaryText)
+                                .lineLimit(2)
+                        }
+                        Spacer(minLength: 8)
+                        Button {
+                            startTicketFix(for: ticket)
+                        } label: {
+                            Text("Fix in a chat", bundle: .module)
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .buttonStyle(ThemedBorderedButtonStyle())
+                        Button {
+                            Task.detached(priority: .userInitiated) {
+                                try? await KnowledgeCurationService.shared.dismissTicket(ticketId: ticket.id)
+                            }
+                        } label: {
+                            Text("Dismiss", bundle: .module)
+                                .font(.system(size: 11, weight: .medium))
+                        }
+                        .buttonStyle(ThemedBorderedButtonStyle())
+                    }
+                    .padding(10)
+                    .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
+                }
+            }
+            .padding(.horizontal, 24)
+            .padding(.top, 20)
+        }
+    }
+
+    private func reloadTickets() {
+        Task.detached(priority: .utility) {
+            if !KnowledgeDatabase.shared.isOpen { try? KnowledgeDatabase.shared.open() }
+            guard KnowledgeDatabase.shared.isOpen else { return }
+            let tickets = (try? KnowledgeDatabase.shared.listTickets(collectionIds: nil, status: .open)) ?? []
+            await MainActor.run {
+                if tickets.map(\.id) != openTickets.map(\.id) { openTickets = tickets }
+            }
+        }
+    }
+
+    /// Upstream: open a chat with an agent granted this collection, its
+    /// composer pre-filled with a briefing; the fix goes through the write
+    /// tools and their approval card.
+    private func startTicketFix(for ticket: KnowledgeTicket) {
+        let manager = AgentManager.shared
+        guard let collectionUUID = UUID(uuidString: ticket.collectionId),
+            let agent = manager.agents.first(where: {
+                manager.knowledgeEnabled(for: $0.id)
+                    && manager.knowledgeCollectionIds(for: $0.id).contains(collectionUUID)
+            })
+        else {
+            showToast(L("No agent has this collection yet. Grant it to one in the collection's details."), isError: true)
+            return
+        }
+        let windowId = ChatWindowManager.shared.createWindow(agentId: agent.id)
+        let collectionName = KnowledgeManager.shared.collection(for: collectionUUID)?.name ?? ""
+        let collectionClause = collectionName.isEmpty ? "" : " in the \"\(collectionName)\" collection"
+        let briefing =
+            "Please work knowledge ticket #\(ticket.id) for `\(ticket.relPath)`\(collectionClause).\n"
+            + "Reported issue: \(ticket.reason)\n\n"
+            + "Read the current document, and if it is out of date, use "
+            + "edit_knowledge (or write_knowledge) to correct it. Keep the existing frontmatter. "
+            + "I will review the diff before it is saved."
+        ChatWindowManager.shared.windowState(id: windowId)?.session.input = briefing
+        showToast(L("Opened \(agent.name) with a briefing for ticket #\(ticket.id). Review it and hit send."))
+    }
+
     /// Load recent writes off the main thread. The write log is primary data
     /// (not the rebuildable index), so it opens on its own.
     private func reloadWriteHistory() {
@@ -307,6 +424,7 @@ struct KnowledgeView: View {
 
     private var collectionGrid: some View {
         ScrollView {
+            ticketsSection
             LazyVGrid(
                 columns: [
                     GridItem(.flexible(minimum: 300), spacing: 20),
@@ -326,6 +444,7 @@ struct KnowledgeView: View {
                             integration.reindexCollection(collection.id)
                             showToast("Re-indexing \"\(collection.name)\"")
                         },
+                        onSync: { syncCollection(collection.id) },
                         onEdit: { editingCollection = collection },
                         onDelete: { presentDeleteConfirmation(for: collection) },
                         onOpenDetail: { selectedCollection = collection }
@@ -466,6 +585,7 @@ private struct KnowledgeCollectionCard: View {
     let hasAppeared: Bool
     let onToggle: (Bool) -> Void
     let onReindex: () -> Void
+    var onSync: () -> Void = {}
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onOpenDetail: () -> Void
@@ -634,6 +754,13 @@ private struct KnowledgeCollectionCard: View {
                 Button("Details", action: onOpenDetail)
                     .buttonStyle(.borderless)
                 Spacer()
+                if collection.gitRemoteURL != nil {
+                    // Upstream: fast-forward pull + push for a git repo folder.
+                    Button(action: onSync) {
+                        Label("Sync", systemImage: "arrow.triangle.2.circlepath.circle")
+                    }
+                    .buttonStyle(.borderless)
+                }
                 Button(action: onReindex) {
                     Label("Re-index", systemImage: "arrow.clockwise")
                 }

@@ -779,3 +779,18 @@ Items marked **(paid)** use the chat model.
       another app; within ~10 s a search finds the new text (no Re-index click).
 - [ ] An agent without a grant to the collection cannot write to it.
 - [ ] Relaunch: History is still there.
+- [ ] Tickets: ask the agent to "flag pantry.md as out of date: prices changed"
+      **(paid)**. Knowledge shows it under **Curation**. **Fix in a chat** opens
+      a chat with the briefing filled in; send it and approve the edit. Then
+      **Dismiss** another ticket: it disappears.
+- [ ] Clickable paths: ask "which document covers soup?" **(paid)**; a path in
+      the reply (like `Recipes/soup.md`) is underlined. Click opens it;
+      right-click shows Open / Open With / Show in Finder / Copy Path.
+- [ ] Git (only if you have a collection folder that is a git repo): its card
+      shows a **git** label and **Sync**. Sync reports "up to date" or what
+      changed; with no network it says it needs attention instead of hanging.
+- [ ] Types: a collection with subfolders (e.g. `recipes/`, `notes/`) — ask
+      the agent to list documents of type `recipes` **(paid)**; files without a
+      frontmatter `type` in that folder are included.
+- [ ] Upgrade: your existing collections still search normally after updating
+      (the index upgrades in place; no rebuild needed).

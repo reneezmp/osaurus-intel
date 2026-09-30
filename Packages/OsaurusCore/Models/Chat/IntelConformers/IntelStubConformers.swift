@@ -1031,6 +1031,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         // and the write log makes every change revertable
         // (docs/KNOWLEDGE_WRITE_INTEL.md).
         "write_knowledge", "edit_knowledge", "delete_knowledge",
+        // Staleness tickets (annotations; never change a document).
+        "flag_knowledge_stale", "list_knowledge_tickets", "update_knowledge_ticket",
     ]
 
     /// Private agent database tools (docs/AGENT_DATABASE_INTEL_PLAN.md).
@@ -1119,6 +1121,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             WriteKnowledgeTool(),
             EditKnowledgeTool(),
             DeleteKnowledgeTool(),
+            FlagKnowledgeStaleTool(),
+            ListKnowledgeTicketsTool(),
+            UpdateKnowledgeTicketTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool

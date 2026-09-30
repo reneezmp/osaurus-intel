@@ -145,7 +145,9 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
 - **Knowledge writing (part 1) shipped 2026-09-30**
   ([`KNOWLEDGE_WRITE_INTEL.md`](KNOWLEDGE_WRITE_INTEL.md)): agents write, edit
   and delete markdown in granted collections after a diff approval; History
-  tab reverts; outside edits re-index automatically. Awaiting Rosy.
+  tab reverts; outside edits re-index automatically. Part 2 (same day): staleness
+  tickets with "Fix in a chat", git Sync for repo folders, clickable knowledge
+  paths in replies, inferred document types. Awaiting Rosy.
 
 ### Intentionally omitted
 

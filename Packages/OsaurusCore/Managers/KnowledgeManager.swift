@@ -55,7 +55,12 @@ public final class KnowledgeManager: ObservableObject {
         let name = name.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !name.isEmpty else { throw KnowledgeManagerError.emptyName }
         guard !collections.contains(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) else { throw KnowledgeManagerError.duplicateName }
-        let collection = KnowledgeCollection(name: name, summary: summary, folderPath: folderPath, includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
+        var collection = KnowledgeCollection(name: name, summary: summary, folderPath: folderPath, includeGlobs: includeGlobs, excludeGlobs: excludeGlobs)
+        // Upstream: adopting a folder that is already a git repo remembers its
+        // `origin`, so the card offers Sync.
+        if collection.isGitRepository {
+            collection.gitRemoteURL = await KnowledgeGitSyncService.shared.remoteURL(of: collection.folderURL)
+        }
         try KnowledgeCollectionStore.save(collection)
         upsert(collection)
         scheduleIndex(of: collection)
@@ -73,7 +78,26 @@ public final class KnowledgeManager: ObservableObject {
         guard KnowledgeCollectionStore.delete(id: id) else { return }
         collections.removeAll { $0.id == id }
         NotificationCenter.default.post(name: .knowledgeCollectionsChanged, object: id)
-        Task.detached(priority: .utility) { await KnowledgeIndexService.shared.removeCollectionArtifacts(collectionId: id) }
+        // Resolved here, not in the detached task: tests swap the storage root.
+        let managedContentDir = OsaurusPaths.knowledge().appendingPathComponent(id.uuidString, isDirectory: true)
+        Task.detached(priority: .utility) {
+            await KnowledgeIndexService.shared.removeCollectionArtifacts(collectionId: id)
+            // Upstream: nothing can be reverted into a deleted collection, and
+            // orphan history rows would offer a Revert that can only fail.
+            if KnowledgeWriteLogDatabase.shared.isOpen {
+                try? KnowledgeWriteLogDatabase.shared.deleteRecords(collectionId: id.uuidString)
+            }
+            // A cloned collection's managed folder (never a user-chosen one).
+            try? FileManager.default.removeItem(at: managedContentDir)
+        }
+    }
+
+    /// Upstream: pull (fast-forward only) and push a git-backed collection,
+    /// re-indexing when the pull brought changes.
+    public func syncNow(_ collection: KnowledgeCollection) async -> KnowledgeSyncOutcome {
+        let outcome = await KnowledgeGitSyncService.shared.sync(collection)
+        if case .updated = outcome { scheduleIndex(of: collection) }
+        return outcome
     }
 
     public func scheduleIndex(of collection: KnowledgeCollection, force: Bool = false) {

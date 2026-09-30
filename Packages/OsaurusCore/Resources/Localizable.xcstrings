@@ -246,6 +246,22 @@
         }
       }
     },
+    "Agents leave a note here when a document looks out of date but fixing it was not the task at hand. Open one in a chat to have an agent correct it; you review the change before it is saved." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Agenten hinterlassen hier eine Notiz, wenn ein Dokument veraltet wirkt, das Korrigieren aber nicht ihre Aufgabe war. Öffne eine in einem Chat, damit ein Agent es berichtigt; du prüfst die Änderung, bevor sie gespeichert wird."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当某个文档看起来已过时、但修复它并非当前任务时，智能体会在这里留下备注。在聊天中打开一条，让智能体来修正；保存前你会先审阅更改。"
+          }
+        }
+      }
+    },
     "All Collections" : {
       "localizations" : {
         "de" : {
@@ -1082,6 +1098,22 @@
         }
       }
     },
+    "Curation" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Pflege"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "整理"
+          }
+        }
+      }
+    },
     "Current identity" : {
       "localizations" : {
         "de" : {
@@ -1274,6 +1306,22 @@
         }
       }
     },
+    "Document Not Found" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dokument nicht gefunden"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未找到文档"
+          }
+        }
+      }
+    },
     "Embeddings" : {
       "localizations" : {
         "de" : {
@@ -1430,6 +1478,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "补全缺失的智能体描述"
+          }
+        }
+      }
+    },
+    "Fix in a chat" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "In einem Chat beheben"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在聊天中修复"
           }
         }
       }
@@ -1882,6 +1946,22 @@
         }
       }
     },
+    "No agent has this collection yet. Grant it to one in the collection's details." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch kein Agent hat Zugriff auf diese Sammlung. Gewähre ihn einem Agenten in den Details der Sammlung."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有智能体可访问此集合。请在集合详情中授权给某个智能体。"
+          }
+        }
+      }
+    },
     "No changes match these filters." : {
       "localizations" : {
         "de" : {
@@ -2166,6 +2246,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "打开智能体"
+          }
+        }
+      }
+    },
+    "Open With" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffnen mit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开方式"
+          }
+        }
+      }
+    },
+    "Opened %@ with a briefing for ticket #%lld. Review it and hit send." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$@ mit einer Einweisung für Ticket #%2$lld geöffnet. Prüfe sie und sende sie ab."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已打开 %1$@，并附上工单 #%2$lld 的说明。请检查后发送。"
           }
         }
       }
@@ -3028,6 +3140,22 @@
         }
       }
     },
+    "Show in Finder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Finder zeigen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在访达中显示"
+          }
+        }
+      }
+    },
     "Show reverted" : {
       "localizations" : {
         "de" : {
@@ -3232,6 +3360,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "正在总结较早的消息…"
+          }
+        }
+      }
+    },
+    "Syncing \"%@\"…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "„%@“ wird synchronisiert …"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "正在同步“%@”…"
           }
         }
       }
@@ -3556,6 +3700,22 @@
         }
       }
     },
+    "This knowledge document no longer exists in its collection." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Dieses Wissensdokument existiert in seiner Sammlung nicht mehr."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此知识文档已不在其集合中。"
+          }
+        }
+      }
+    },
     "This language can't be recognised on this Mac. Allow Apple's servers below, or pick another language." : {
       "localizations" : {
         "de" : {
@@ -3600,6 +3760,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "这将永久删除此智能体存储的所有表、行和已保存视图，以及其数据库历史记录。智能体及其设置会保留。此操作无法撤销。"
+          }
+        }
+      }
+    },
+    "Ticket #%lld: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ticket #%1$lld: %2$@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工单 #%1$lld：%2$@"
           }
         }
       }

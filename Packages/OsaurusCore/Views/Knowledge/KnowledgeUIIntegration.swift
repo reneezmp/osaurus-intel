@@ -219,7 +219,9 @@ extension KnowledgeManager: KnowledgeUIProviding {
                 isAvailable: indexStatuses[collection.id]?.isAvailable ?? true,
                 statusMessage: indexStatuses[collection.id]?.message,
                 isIndexing: indexingCollectionIds.contains(collection.id),
-                gitRemoteURL: nil,
+                // Upstream: a repo folder shows the git badge and Sync; the
+                // remote is "" for a repo with no `origin`.
+                gitRemoteURL: collection.isGitRepository ? (collection.gitRemoteURL ?? "") : nil,
                 includeGlobs: collection.includeGlobs,
                 excludeGlobs: collection.excludeGlobs,
                 createdAt: collection.createdAt,

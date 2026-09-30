@@ -71,12 +71,64 @@ tests; list checks for concepts Intel lacks are replaced by Intel equivalents,
 see the comments). Intel: `IntelKnowledgeWriteTests` (grant-based offering,
 preview hook, per-call delete, registry write + revert, rotation coverage).
 
-## Part 2 — tickets, git sync, clickable paths, type inference (next)
+## Part 2 — tickets, git sync, clickable paths, inferred types (shipped 2026-09-30)
 
-Upstream pieces not yet ported: `flag_knowledge_stale` /
-`list_knowledge_tickets` / `update_knowledge_ticket` + the tickets table and
-Knowledge-tab ticket list, `KnowledgeGitSyncService` (clone from a remote,
-fast-forward sync, commit/push writes), `KnowledgeLinkResolver` (clickable
-knowledge paths in chat), and index use of `KnowledgeTypeInference`
-(`inferred_type`; the helper is compiled and tested, the index does not use it
-yet).
+### Stale-document tickets
+
+| Tool | What it does |
+|---|---|
+| `flag_knowledge_stale` | File a ticket against a document (annotation only; one open ticket per document). |
+| `list_knowledge_tickets` | Browse tickets in the agent's granted collections. |
+| `update_knowledge_ticket` | Claim (`in_progress`) or release (`open`) a ticket. |
+
+- All three follow the collection grant, like the other Knowledge tools.
+- **Deliberate divergence:** upstream removed the Curator switch and offers
+  `update_knowledge_ticket` with the ordinary grant, but its body still
+  requires the retired `knowledgeCuratorEnabled` flag, so it refuses nearly
+  everyone upstream. Intel drops that leftover check (grant = boundary) and
+  rewords the description (no more "proposal approval").
+- The Knowledge page shows open tickets under **Curation** with **Fix in a
+  chat** (opens a chat with a granted agent, briefing pre-filled; the fix goes
+  through the write tools and their approval card) and **Dismiss**.
+- Tickets live in the derived knowledge index (as upstream); deleting a
+  collection deletes its tickets. Upstream's proposal queue and its
+  `proposals` table are not ported (Intel never had proposals).
+- `KnowledgeCurationService` on Intel holds only `dismissTicket` /
+  `resolveTicket`.
+
+### Index schema
+
+Intel numbers its own index schema (its v1 differs from upstream's):
+**v2** adds `tickets`, **v3** adds `inferred_type`. The v3 migration fills
+`inferred_type` for existing documents (it depends only on the path), because
+the hash check would otherwise skip them. Readers use the explicit frontmatter
+`type` when present, else the inferred one (search hits, `list_knowledge`,
+`getDocument`); the Knowledge detail's "uncategorized" check still reports
+missing *frontmatter* types. `KnowledgeDatabase` gained an internal `init()` and
+`openInMemory()` for tests, as upstream.
+
+### Git sync
+
+As upstream ships it: the "clone from a git URL" option stays **hidden**
+(upstream commented it out), but a collection whose folder is already a git
+repo shows a **git** badge and a **Sync** button (fast-forward pull, then push,
+using the user's own git credentials; divergence is reported, never merged).
+`KnowledgeCollection.gitRemoteURL` records the detected `origin`. Deleting a
+collection removes a managed clone folder (never a user folder) and its write
+history.
+
+### Clickable paths
+
+`KnowledgeLinkResolver` + `SelectableTextView`: a knowledge path mentioned in a
+reply (code span or prose, e.g. `Recipes/soup.md`) becomes a link when it
+resolves to a real file in a registered collection. Click opens it;
+right-click gives Open, Open With, Show in Finder, Copy Path. A link to a
+document that has since gone shows a "Document Not Found" toast.
+
+### Tests (part 2)
+
+Upstream: `KnowledgeCurationTests` and `KnowledgeSyncAndDiffTests` (proposal
+and external-list cases removed), `KnowledgeGitSyncTests` (real `git` in temp
+repos). Intel: `IntelKnowledgeWriteTests` adds the v1 → v3 upgrade on an
+encrypted Intel v1 file, ticket flag + claim without a curator flag, link
+resolution and git detection.

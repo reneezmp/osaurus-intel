@@ -60,7 +60,10 @@ public actor KnowledgeIndexService {
                     docType: parsed.frontmatter.docType, summary: parsed.frontmatter.summary,
                     tagsCSV: parsed.frontmatter.tagsCSV, contentHash: hash,
                     sizeBytes: values?.fileSize ?? data.count,
-                    modifiedAt: values?.contentModificationDate.map { ISO8601DateFormatter().string(from: $0) } ?? ""
+                    modifiedAt: values?.contentModificationDate.map { ISO8601DateFormatter().string(from: $0) } ?? "",
+                    // Upstream: a category from the folder when frontmatter has no `type`.
+                    inferredType: parsed.frontmatter.docType.isEmpty
+                        ? KnowledgeTypeInference.infer(relPath: relative) : ""
                 )
                 _ = try KnowledgeDatabase.shared.replaceChunks(documentId: id, chunks: chunks)
                 let hits = chunks.enumerated().map { index, chunk in
