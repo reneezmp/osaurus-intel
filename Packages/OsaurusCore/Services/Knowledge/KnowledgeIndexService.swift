@@ -15,6 +15,12 @@ public struct KnowledgeIndexSummary: Sendable, Equatable {
 public actor KnowledgeIndexService {
     public static let shared = KnowledgeIndexService()
     private static let extensions: Set<String> = ["md", "markdown", "mdx", "txt"]
+    /// Markdown sources, the only ones knowledge writes may target (upstream).
+    static let markdownExtensions: Set<String> = ["md", "markdown", "mdx"]
+
+    static func isMarkdown(_ url: URL) -> Bool {
+        markdownExtensions.contains(url.pathExtension.lowercased())
+    }
     private static let excludedDirectories: Set<String> = [".git", "node_modules", "build", "dist", ".build", "DerivedData", "Pods", "vendor", "__pycache__"]
     private static let maxMarkdownBytes = 2 * 1024 * 1024
     private static let maxAdapterBytes = 10 * 1024 * 1024

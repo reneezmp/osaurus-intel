@@ -162,6 +162,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         Task { @MainActor in
             await KnowledgeManager.shared.ensureLoaded()
             KnowledgeManager.shared.scheduleIndexAll()
+            // Upstream: edits made to a collection folder outside Osaurus
+            // re-index within seconds (FSEvents, 5 s debounce).
+            KnowledgeFolderWatcher.shared.start()
         }
         #endif
 
@@ -443,6 +446,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // Stop the microphone and playback first (bounded by nothing
             // slow: engine stops are quick; see IntelVoiceLaunch.shutdown).
             await IntelVoiceLaunch.shutdown()
+            KnowledgeFolderWatcher.shared.stop()
             await ClaudeCodeProcessRegistry.shared.terminateAll()
             await MCPBridge.shared.stop()
             await server.stop()

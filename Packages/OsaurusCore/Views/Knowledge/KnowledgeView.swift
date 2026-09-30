@@ -9,6 +9,20 @@
 import AppKit
 import SwiftUI
 
+/// Sub-navigation for the Knowledge tab (upstream). History has its own tab
+/// because it is unbounded; it stays hidden until an agent has written.
+enum KnowledgeTab: String, CaseIterable, AnimatedTabItem {
+    case collections
+    case history
+
+    var title: String {
+        switch self {
+        case .collections: return L("Collections")
+        case .history: return L("History")
+        }
+    }
+}
+
 struct KnowledgeView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var integration = KnowledgeUIIntegration.shared
@@ -24,6 +38,10 @@ struct KnowledgeView: View {
     @State private var editingCollection: KnowledgeUICollection?
     @State private var toastMessage: String?
     @State private var toastIsError = false
+    /// Agent writes, grouped by run, for the History tab (upstream; see
+    /// docs/KNOWLEDGE_WRITE_INTEL.md). The tab appears once there are any.
+    @State private var writeRuns: [KnowledgeWriteRun] = []
+    @State private var selectedTab: KnowledgeTab = .collections
 
     var body: some View {
         VStack(spacing: 0) {
@@ -35,6 +53,8 @@ struct KnowledgeView: View {
             ZStack {
                 if integration.collections.isEmpty {
                     emptyState
+                } else if selectedTab == .history, !writeRuns.isEmpty {
+                    ScrollView { historySection }
                 } else {
                     collectionGrid
                 }
@@ -61,6 +81,10 @@ struct KnowledgeView: View {
             }
             integration.reload()
             applyPendingRequests()
+            reloadWriteHistory()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .knowledgeWritesChanged)) { _ in
+            reloadWriteHistory()
         }
         .onReceive(managementState.$pendingKnowledgeCreate) { _ in
             applyPendingRequests()
@@ -120,12 +144,32 @@ struct KnowledgeView: View {
         }
     }
 
+    /// Upstream: tabs join the header only once an agent has written
+    /// something, so the common case keeps the plain header.
+    @ViewBuilder
     private var header: some View {
-        ManagerHeaderWithActions(
-            title: L("Knowledge"),
-            subtitle: L("Searchable folders of guides, policies, and templates"),
-            count: integration.collections.count
-        ) {
+        if writeRuns.isEmpty {
+            ManagerHeaderWithActions(
+                title: L("Knowledge"),
+                subtitle: L("Searchable folders of guides, policies, and templates"),
+                count: integration.collections.count
+            ) { headerActions }
+        } else {
+            ManagerHeaderWithTabs(
+                title: L("Knowledge"),
+                subtitle: L("Searchable folders of guides, policies, and templates"),
+                count: integration.collections.count,
+                actions: { headerActions },
+                tabsRow: {
+                    HeaderTabsRow(selection: $selectedTab, counts: [.history: writeRuns.count])
+                }
+            )
+        }
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        Group {
             HeaderIconButton(
                 "arrow.clockwise",
                 isLoading: integration.isRefreshing,
@@ -143,6 +187,87 @@ struct KnowledgeView: View {
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(RoundedRectangle(cornerRadius: 8).fill(theme.accentColor))
+        }
+    }
+
+    // MARK: - History (agent writes)
+
+    /// Upstream's History tab: every agent write, grouped by run, with revert.
+    private var historySection: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Text(
+                "Everything agents have written to your collections, newest first. Reverting puts the document back the way it was before that run.",
+                bundle: .module
+            )
+            .font(.system(size: 11))
+            .foregroundColor(theme.tertiaryText)
+            .fixedSize(horizontal: false, vertical: true)
+
+            KnowledgeWriteHistoryView(
+                runs: writeRuns,
+                onRevertRun: { run in
+                    Task {
+                        let failures = await KnowledgeWriteService.shared.revertRun(runId: run.runId)
+                        if let only = run.records.first, run.records.count == 1 {
+                            if failures.isEmpty {
+                                showToast(L("Reverted \(only.relPath)"))
+                            } else {
+                                showToast(
+                                    L("Did not revert \(only.relPath): the document changed after the agent wrote it."),
+                                    isError: true)
+                            }
+                        } else if failures.isEmpty {
+                            showToast(L("Reverted \(run.records.count) documents"))
+                        } else {
+                            showToast(
+                                L(
+                                    "Reverted \(run.records.count - failures.count) of \(run.records.count) documents. The rest changed after the agent wrote them, so they were left alone."
+                                ),
+                                isError: true)
+                        }
+                        reloadWriteHistory()
+                    }
+                },
+                onRevertRecord: { record in
+                    Task {
+                        do {
+                            try await KnowledgeWriteService.shared.revert(recordId: record.id)
+                            showToast(L("Reverted \(record.relPath)"))
+                        } catch {
+                            showToast(L("Could not revert: \(error.localizedDescription)"), isError: true)
+                        }
+                        reloadWriteHistory()
+                    }
+                }
+            )
+        }
+        .padding(.horizontal, 24)
+        .padding(.top, 20)
+        .padding(.bottom, 24)
+        .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    /// Load recent writes off the main thread. The write log is primary data
+    /// (not the rebuildable index), so it opens on its own.
+    private func reloadWriteHistory() {
+        Task.detached(priority: .utility) {
+            if !KnowledgeWriteLogDatabase.shared.isOpen {
+                try? KnowledgeWriteLogDatabase.shared.open()
+            }
+            guard KnowledgeWriteLogDatabase.shared.isOpen else { return }
+            let writes = (try? KnowledgeWriteLogDatabase.shared.recentRecords(limit: 200)) ?? []
+            let names = await MainActor.run {
+                Dictionary(
+                    KnowledgeManager.shared.collections.map { ($0.id.uuidString, $0.name) },
+                    uniquingKeysWith: { first, _ in first })
+            }
+            let runs = KnowledgeWriteRun.group(writes, collectionNames: names)
+            await MainActor.run {
+                let incoming = runs.flatMap { $0.records.map { "\($0.id):\($0.isReverted)" } }
+                let current = writeRuns.flatMap { $0.records.map { "\($0.id):\($0.isReverted)" } }
+                if incoming != current { writeRuns = runs }
+                if runs.isEmpty { selectedTab = .collections }
+            }
         }
     }
 

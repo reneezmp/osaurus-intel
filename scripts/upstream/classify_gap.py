@@ -62,6 +62,7 @@ F=[
 ("W-chat-tabs","W",r"ChatTab|ThreadScrollPosition|LiveChatSessionRegistry|SessionActivityMonitor|NewAgentHighlightStore"),
 ("W-chat-export","W",r"ChatSessionExport|ChatExportOptions"),
 ("W-voice","W",r"Speech|TTSService|OpenAICompatibleTTSClient|Transcription|VAD|LiveVoiceAudio|Models/Voice|Services/Voice"),
+("W-settings-ux-2950","W",r"Views/Settings/(CommandLineToolSection|Shared/SettingsKit)|Views/SlashCommand/SlashCommandEditorSheet|Views/Voice/(ChatVoiceSettingsTab|VoiceSharedComponents)"),
 ("W-knowledge-write","W",r"Knowledge(Write|Curation|Diff|FolderWatcher|GitSync|LinkResolver|TypeInference)|KnowledgeWriteLogDatabase|Views/Knowledge/"),
 ("W-skills-plugins-import","W",r"Skill|ClaudeMarketplace|ClaudePlugin|GitHubImportSheet|GitHubTokenViews|GitHubAuth|PluginProcessHost|PluginHost/main|ExternalTool"),
 ("W-media-generation","W",r"MediaGeneration|VideoTool|ImageAPI"),

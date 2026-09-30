@@ -2258,3 +2258,18 @@ calling a sync complete.
   test run came from the installed upstream `osaurus.app` (4-hour plugin
   catalog refresh), not a test — recorded in
   [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).
+
+### Knowledge writing, part 1 (`W-knowledge-write`) — 2026-09-30
+
+- Manual: [`KNOWLEDGE_WRITE_INTEL.md`](KNOWLEDGE_WRITE_INTEL.md). Ported
+  upstream's direct-write design (not the retired proposal queue): write/edit/
+  delete tools gated by the collection grant, consent on the approval card with
+  a per-document diff (`KnowledgeWritePreviewingTool`, now threaded through
+  `CloudChatEngine` → `ToolPermissionPromptService` → `ToolPermissionView`),
+  the write log with History/revert, and `KnowledgeFolderWatcher` at launch.
+- The write log is primary data: Intel encrypted opener, never quarantined,
+  and added to `StorageMigrator.databaseTargets()` for key rotation.
+- `KnowledgeWriteArguments.coerce` stands in for upstream's `SchemaValidator`
+  coercion in both the tools and the preview.
+- Upstream #2950 (Settings UX) and six other commits landed on 09-30 and are
+  filed as `W-settings-ux-2950`; audit them with the next batch.

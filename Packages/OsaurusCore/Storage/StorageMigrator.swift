@@ -611,6 +611,10 @@ public actor StorageMigrator {
             // No new migration step is required because there's no
             // legacy plaintext file to convert.
             .init(label: "scheduler", path: OsaurusPaths.schedulerDatabaseFile().path),
+            // Knowledge write log (docs/KNOWLEDGE_WRITE_INTEL.md): primary
+            // data — the only copy of what agent writes replaced — so it must
+            // follow a key rotation (the derived knowledge index just rebuilds).
+            .init(label: "knowledge write log", path: OsaurusPaths.knowledgeWriteLogDatabaseFile().path),
         ]
         // Plugin DBs — one per installed plugin. We can discover them
         // by walking `Tools/<pluginId>/data/data.db`.

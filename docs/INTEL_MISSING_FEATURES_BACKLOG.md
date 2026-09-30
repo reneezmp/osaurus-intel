@@ -74,12 +74,13 @@ feature had been labelled before this sweep.
 | `W-ui-misc` | Chat layout tour, onboarding design system, theme library management, system accent colour, in-app guide, keep-awake during agent runs, keychain helpers, shared UI components | M (3.2k) | Small pieces; keep-awake during long runs is useful on laptops. |
 | `W-providers-ux` | Provider catalog, connectivity centre, credential prompt sheet, replay diagnostics, wire probe, Fireworks, Codex CLI integration, favourite models | M (3.2k) | Codex CLI mirrors the existing Claude Code integration. |
 | `W-media-generation` | Cloud image/video generation (Venice, Osaurus Cloud), `video` tool, OpenAI image API on the server | M (2.9k) | Cloud-based: runs on Intel. Local image generation stays in `INC-mlx`. |
+| `W-settings-ux-2950` | Upstream #2950 (2026-09-30) Settings UX/IA cleanup: grouped-form `SettingsKit`, renamed tabs, Tools & MCP Services rework, a separate chat voice settings tab, slash-command editor sheet, command-line tool section | M (6.0k changed) | Found by the 2026-09-30 fetch; not audited yet. Touches the just-ported Voice views. Audit with the next upstream batch (`47fcad49f`, `61127dc20`, `1d5c4c7a7`, `b8bd4a406`, `5e79d3304`, `d1d65ec32` also landed since the 09-29 audit). |
 
 ### 3c. Capabilities
 
 | Id | Feature | Size | Notes |
 |---|---|---|---|
-| `W-knowledge-write` | Knowledge writing/curation (agents add and edit notes with preview, diff, write log), folder watcher, git sync, link resolver | M (4.6k) | Intel Knowledge is read-only today. |
+| `W-knowledge-write` | Knowledge writing/curation (agents add and edit notes with preview, diff, write log), folder watcher, git sync, link resolver | M (4.6k) | **Part 1 shipped 2026-09-30** ([`KNOWLEDGE_WRITE_INTEL.md`](KNOWLEDGE_WRITE_INTEL.md)): `write_knowledge` / `edit_knowledge` / `delete_knowledge` with a diff on the approval card, write log + History tab with revert, folder watcher. Part 2 next: tickets, git sync, clickable paths, inferred types. |
 | `W-skills-plugins-import` | Skill import policy/update tool, GitHub skill import, Claude marketplace and plugin installer, out-of-process plugin host | L (10.3k) | Intel has skills (local store) and in-process dylib plugins. |
 | `W-mcp-providers` | MCP provider probe and health, child-spawn limiter, capture-capability policy, OAuth HTTP transport extras | S (1.2k) | Intel has remote MCP providers; these are hardening/diagnostics. |
 | `W-server-api` | Server-side pieces: live request registry, which models the API lists, evidence reports, owner auth, local network helpers, **`/v1/embeddings`** (Intel ships a local embedder for memory; the #2768 fix lands with it) | S (1.0k+) | Check each upstream route against Intel's `HTTPHandler`. |

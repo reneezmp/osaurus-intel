@@ -118,6 +118,38 @@
         }
       }
     },
+    "%lld → %lld lines" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld → %lld Zeilen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld → %lld 行"
+          }
+        }
+      }
+    },
+    "+%lld -%lld" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld -%lld"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "+%lld -%lld"
+          }
+        }
+      }
+    },
     "About %lld tokens freed. The full chat stays visible." : {
       "localizations" : {
         "de" : {
@@ -210,6 +242,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "智能体描述"
+          }
+        }
+      }
+    },
+    "All Collections" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle Sammlungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "所有集合"
           }
         }
       }
@@ -712,6 +760,38 @@
         }
       }
     },
+    "Collection" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "集合"
+          }
+        }
+      }
+    },
+    "Collections" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlungen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "集合"
+          }
+        }
+      }
+    },
     "Color %lld" : {
       "comment" : "Auto-extracted format-string key (Apple String.LocalizationValue canonical form).",
       "extractionState" : "manual",
@@ -862,6 +942,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "核心模型"
+          }
+        }
+      }
+    },
+    "Could not revert: %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zurücksetzen nicht möglich: %@"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "无法还原：%@"
           }
         }
       }
@@ -1130,6 +1226,22 @@
         }
       }
     },
+    "Did not revert %@: the document changed after the agent wrote it." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ nicht zurückgesetzt: Das Dokument wurde geändert, nachdem der Agent es geschrieben hat."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "未还原 %@：该文档在智能体写入后已被更改。"
+          }
+        }
+      }
+    },
     "Discard and Add Provider" : {
       "localizations" : {
         "de" : {
@@ -1286,6 +1398,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "请输入有效短语"
+          }
+        }
+      }
+    },
+    "Everything agents have written to your collections, newest first. Reverting puts the document back the way it was before that run." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alles, was Agenten in deine Sammlungen geschrieben haben, das Neueste zuerst. Zurücksetzen stellt das Dokument so wieder her, wie es vor diesem Lauf war."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "智能体写入你集合中的所有内容，最新的在前。还原会将文档恢复到该次运行之前的状态。"
           }
         }
       }
@@ -1754,6 +1882,22 @@
         }
       }
     },
+    "No changes match these filters." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Keine Änderungen passen zu diesen Filtern."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有符合这些筛选条件的更改。"
+          }
+        }
+      }
+    },
     "No description yet — add one in the agent's Configure tab so the Orchestrator knows when to use it." : {
       "localizations" : {
         "de" : {
@@ -1926,6 +2070,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "暂时没有可压缩的内容——最近的对话已经尽可能精简。"
+          }
+        }
+      }
+    },
+    "Nothing to show." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Nichts anzuzeigen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "没有可显示的内容。"
           }
         }
       }
@@ -2612,6 +2772,118 @@
         }
       }
     },
+    "Revert" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zurücksetzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还原"
+          }
+        }
+      }
+    },
+    "Revert all" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle zurücksetzen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "全部还原"
+          }
+        }
+      }
+    },
+    "Reverted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zurückgesetzt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已还原"
+          }
+        }
+      }
+    },
+    "reverted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "zurückgesetzt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已还原"
+          }
+        }
+      }
+    },
+    "Reverted %@" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%@ zurückgesetzt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已还原 %@"
+          }
+        }
+      }
+    },
+    "Reverted %lld documents" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%lld Dokumente zurückgesetzt"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已还原 %lld 个文档"
+          }
+        }
+      }
+    },
+    "Reverted %lld of %lld documents. The rest changed after the agent wrote them, so they were left alone." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "%1$lld von %2$lld Dokumenten zurückgesetzt. Die übrigen wurden nach dem Schreiben des Agenten geändert und daher nicht angetastet."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "已还原 %2$lld 个文档中的 %1$lld 个。其余文档在智能体写入后已被更改，因此未作改动。"
+          }
+        }
+      }
+    },
     "Runs on this Mac. Audio never leaves it." : {
       "localizations" : {
         "de" : {
@@ -2736,6 +3008,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "快捷指令"
+          }
+        }
+      }
+    },
+    "Shortened for display. Not the whole document." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Für die Anzeige gekürzt. Nicht das ganze Dokument."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "为显示而缩短，并非完整文档。"
+          }
+        }
+      }
+    },
+    "Show reverted" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Zurückgesetzte anzeigen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示已还原的"
           }
         }
       }

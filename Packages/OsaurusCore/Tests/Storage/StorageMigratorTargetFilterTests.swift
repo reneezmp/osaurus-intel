@@ -102,7 +102,13 @@ struct StorageMigratorTargetFilterTests {
             // can rotate its key alongside the other four.
             let targets = StorageMigrator.databaseTargets()
             let labels = Set(targets.map(\.label))
-            #expect(labels == ["chat history", "memory", "methods", "tool index", "scheduler"])
+            // `knowledge write log` (2026-09-30, docs/KNOWLEDGE_WRITE_INTEL.md):
+            // primary data (what agent writes replaced), so it must follow a
+            // key rotation too.
+            #expect(
+                labels == [
+                    "chat history", "memory", "methods", "tool index", "scheduler", "knowledge write log",
+                ])
         }
     }
 }

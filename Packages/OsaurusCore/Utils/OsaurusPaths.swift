@@ -136,6 +136,12 @@ public enum OsaurusPaths {
         knowledge().appendingPathComponent("agent-grants.json")
     }
 
+    /// Knowledge write log (upstream path): what each agent write replaced,
+    /// so it can be reverted. User data — never quarantined or rebuilt.
+    public static func knowledgeWriteLogDatabaseFile() -> URL {
+        knowledge().appendingPathComponent("write_log.sqlite")
+    }
+
     /// Archive directory used by the chat-history SQLite migration to retain
     /// the original per-session JSON files (never deleted).
     public static func sessionsArchive() -> URL {

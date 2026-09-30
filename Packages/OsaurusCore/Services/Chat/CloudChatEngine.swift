@@ -844,7 +844,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     approved = await ToolPermissionPromptService.requestApproval(
                                         toolName: call.name,
                                         description: description,
-                                        argumentsJSON: call.arguments
+                                        argumentsJSON: call.arguments,
+                                        knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
+                                            for: call.name, argumentsJSON: call.arguments)
                                     )
                                 }
                                 let result: String
@@ -1075,7 +1077,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 approved = await ToolPermissionPromptService.requestApproval(
                                     toolName: call.name,
                                     description: toolDescription,
-                                    argumentsJSON: call.arguments)
+                                    argumentsJSON: call.arguments,
+                                    knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
+                                        for: call.name, argumentsJSON: call.arguments))
                             }
 
                             if !approved {

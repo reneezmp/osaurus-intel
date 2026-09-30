@@ -142,6 +142,10 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
   ([`TOOL_DISCOVERY_INTEL.md`](TOOL_DISCOVERY_INTEL.md)): Auto mode loads
   plugin/MCP tools and skills on demand through `capabilities`; skills now reach
   the model (slash popup and discovery). Awaiting Rosy.
+- **Knowledge writing (part 1) shipped 2026-09-30**
+  ([`KNOWLEDGE_WRITE_INTEL.md`](KNOWLEDGE_WRITE_INTEL.md)): agents write, edit
+  and delete markdown in granted collections after a diff approval; History
+  tab reverts; outside edits re-index automatically. Awaiting Rosy.
 
 ### Intentionally omitted
 

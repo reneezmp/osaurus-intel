@@ -1026,6 +1026,11 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
 
     static let knowledgeToolNames: Set<String> = [
         "list_knowledge", "read_knowledge", "search_knowledge",
+        // Writing follows the collection grant (upstream): the grant is the
+        // boundary, the per-call approval card (paths + diff) is the consent,
+        // and the write log makes every change revertable
+        // (docs/KNOWLEDGE_WRITE_INTEL.md).
+        "write_knowledge", "edit_knowledge", "delete_knowledge",
     ]
 
     /// Private agent database tools (docs/AGENT_DATABASE_INTEL_PLAN.md).
@@ -1111,6 +1116,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             SearchKnowledgeTool(),
             ReadKnowledgeTool(),
             ListKnowledgeTool(),
+            WriteKnowledgeTool(),
+            EditKnowledgeTool(),
+            DeleteKnowledgeTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -1347,6 +1355,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let policy = policyInfo(for: name)?.effectivePolicy ?? .auto
         if policy == .auto, requiresApprovalEveryCall(name, argumentsJSON: argumentsJSON) { return .ask }
         return policy
+    }
+
+    /// The approval-card manifest for a knowledge write tool (upstream
+    /// `KnowledgeWritePreviewingTool`), or nil for every other tool.
+    func knowledgeWritePreview(for name: String, argumentsJSON: String) async -> KnowledgeWritePreview? {
+        guard let tool = toolsByName[name] as? any KnowledgeWritePreviewingTool else { return nil }
+        return await tool.approvalPreview(argumentsJSON: argumentsJSON)
     }
 
     func handlesOwnApproval(for name: String) -> Bool {

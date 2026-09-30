@@ -755,3 +755,27 @@ one plugin (osaurus-tools) or MCP provider connected. All **(paid)**.
       type `/` — the skill is listed; pick it and send: the reply follows it.
       With Auto on, ask for something the skill covers: the agent may load
       `skill/<name>` and follow it.
+
+## Knowledge writing
+
+Manual: [`KNOWLEDGE_WRITE_INTEL.md`](KNOWLEDGE_WRITE_INTEL.md). Use a test
+collection folder (a copy, not your real notes) granted to a custom agent.
+Items marked **(paid)** use the chat model.
+
+- [ ] "Add a document how-to-bake.md with a short recipe" **(paid)**: the
+      approval card lists the path as a new document with a diff (not raw JSON)
+      and is wide enough to read. Allow: the file appears in the folder and the
+      agent can find it with a search.
+- [ ] "In how-to-bake.md change 200°C to 180°C" **(paid)**: it uses
+      `edit_knowledge`; the card shows a one-line diff; only that line changes.
+- [ ] Deny a write on the card: nothing changes and the agent says so.
+- [ ] "Delete how-to-bake.md" **(paid)**: the card appears and has **no**
+      Always Allow; after allowing, the file is gone.
+- [ ] Knowledge → a **History** tab has appeared, listing those runs. Revert the
+      edit: the file returns to 200°C. Revert the delete: the file is back.
+- [ ] Edit a file by hand after an agent wrote it, then try to revert that
+      agent write: it refuses and says the document changed.
+- [ ] Folder watcher: edit or add a markdown file in the collection folder with
+      another app; within ~10 s a search finds the new text (no Re-index click).
+- [ ] An agent without a grant to the collection cannot write to it.
+- [ ] Relaunch: History is still there.

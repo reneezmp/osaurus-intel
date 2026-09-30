@@ -241,6 +241,22 @@ enum WorkspaceWriteSafety {
         path.split(separator: "/").map(String.init)
     }
 
+    /// Upstream helper used by the knowledge write preview.
+    static func unifiedDiffText(
+        old: String,
+        new: String,
+        path: String,
+        existed: Bool
+    ) -> (text: String, truncated: Bool) {
+        unifiedDiff(
+            old: old,
+            new: new,
+            path: path,
+            oldLabel: existed ? "before" : "before (new file)",
+            newLabel: "after"
+        )
+    }
+
     private static func unifiedDiff(
         old: String,
         new: String,

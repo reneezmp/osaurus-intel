@@ -17,6 +17,9 @@ struct ToolPermissionView: View {
     let onAlwaysAllow: () -> Void
     /// False for per-call tools (deletions): no Always Allow button.
     var allowsAlwaysAllow: Bool = true
+    /// Knowledge writes (upstream): paths, create/replace/delete and a diff
+    /// per document replace the raw JSON arguments.
+    var knowledgeWritePreview: KnowledgeWritePreview? = nil
 
     @ObservedObject private var themeManager = ThemeManager.shared
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -85,7 +88,13 @@ struct ToolPermissionView: View {
                         .offset(y: appeared ? 0 : -4)
                 }
 
-                if hasArguments {
+                if let knowledgeWritePreview {
+                    KnowledgeWritePreviewView(preview: knowledgeWritePreview)
+                        .padding(.top, 12)
+                        .padding(.horizontal, 24)
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 4)
+                } else if hasArguments {
                     argumentsBlock
                         .padding(.top, 12)
                         .padding(.horizontal, 24)
@@ -107,7 +116,8 @@ struct ToolPermissionView: View {
                     .offset(y: appeared ? 0 : 8)
             }
         }
-        .frame(width: 380)
+        // A knowledge write manifest needs room for its diffs.
+        .frame(width: knowledgeWritePreview == nil ? 380 : 560)
         .fixedSize(horizontal: true, vertical: true)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(

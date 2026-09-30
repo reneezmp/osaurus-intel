@@ -43,10 +43,13 @@ enum ToolPermissionPromptService {
         }
     }
 
+    /// `knowledgeWritePreview` (upstream): the knowledge write tools' review
+    /// manifest, shown instead of the JSON arguments.
     static func requestApproval(
         toolName: String,
         description: String,
-        argumentsJSON: String
+        argumentsJSON: String,
+        knowledgeWritePreview: KnowledgeWritePreview? = nil
     ) async -> Bool {
         await acquirePresentationSlot()
         defer { releasePresentationSlot() }
@@ -61,14 +64,16 @@ enum ToolPermissionPromptService {
         return await presentApproval(
             toolName: toolName,
             description: description,
-            argumentsJSON: argumentsJSON
+            argumentsJSON: argumentsJSON,
+            knowledgeWritePreview: knowledgeWritePreview
         )
     }
 
     private static func presentApproval(
         toolName: String,
         description: String,
-        argumentsJSON: String
+        argumentsJSON: String,
+        knowledgeWritePreview: KnowledgeWritePreview? = nil
     ) async -> Bool {
         return await withCheckedContinuation { continuation in
             var hasResumed = false
@@ -108,7 +113,8 @@ enum ToolPermissionPromptService {
                 onDeny: onDeny,
                 onAlwaysAllow: onAlwaysAllow,
                 allowsAlwaysAllow: !ToolRegistry.shared.requiresApprovalEveryCall(
-                    toolName, argumentsJSON: argumentsJSON)
+                    toolName, argumentsJSON: argumentsJSON),
+                knowledgeWritePreview: knowledgeWritePreview
             )
             .environment(\.theme, themeManager.currentTheme)
 
