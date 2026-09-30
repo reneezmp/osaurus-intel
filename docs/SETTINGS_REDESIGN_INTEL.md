@@ -10,8 +10,8 @@ touched file diverges, so the port is by hand, in five steps:
 
 1. Kit + header restyle — **done 2026-09-30**
 2. General / Conversation split, Advanced → Data & Storage, search anchors — **done 2026-09-30**
-3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory
-4. Voice tabs (Chat Voice, Transcription) on top of the Intel voice port
+3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory — **waits:** it sits on the tool-catalog work (`W-tool-catalog-ui`) and needs the Auto-Allow decision
+4. Voice tabs (Chat Voice, Transcription) on top of the Intel voice port — **done 2026-09-30**
 5. Providers, Themes, slash-command editor sheet (the CLI card already moved in step 2)
 
 ## Step 1 — kit and header (2026-09-30)
@@ -103,3 +103,21 @@ touched file diverges, so the port is by hand, in five steps:
   have no section title for the automatic anchor. `SettingsSearchIndexTests`
   now checks General and Conversation entries land on a control and that
   Advanced entries are in the page's `advancedAnchorIds`.
+
+## Step 4 — Voice tabs (2026-09-30)
+
+- Upstream's new files `ChatVoiceSettingsTab`, `TranscriptionSettingsTab`
+  and `VoiceSharedComponents` replace Intel's `TranscriptionModeSettingsTab`
+  (deleted, as upstream). `VADModeSettingsTab`, `VoiceSetupTab`, `VoiceView`
+  were three-way merged (`git merge-file` Intel / upstream parent / upstream
+  new), then Intel's edits re-applied; `TTSModeSettingsTab` was restructured by
+  hand (Intel has system voices + OpenAI-compatible, not PocketTTS).
+- Intel edits carried over: Apple Speech requirement rows ("Speech
+  Recognition Allowed", "Language Ready" / "Language Recognised on This Mac"),
+  the cleanup wording that says transcripts go to the Core Model's provider,
+  single-value `onChange` everywhere, themed switches, the Recognition tab
+  title (plus a "recognition" alias in `VoiceTab.resolved(from:)`).
+- Settings search: Chat Voice / Transcription / Wake Word / TTS Engine
+  entries follow upstream (`voice.chat.enable`, `voice.transcription.enable`,
+  `voice.stt.stopMode`, `voice.tts.engine`).
+- Details for the voice manual: [`VOICE_INTEL.md`](VOICE_INTEL.md).

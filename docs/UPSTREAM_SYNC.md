@@ -2329,3 +2329,10 @@ calling a sync complete.
   **Re-sync note:** Intel's `ConfigurationView.swift` and
   `ChatSettingsView.swift` are Intel files; never overwrite them with
   upstream's.
+
+### Settings redesign, step 4 (`W-settings-ux-2950`) — 2026-09-30
+
+- Voice tabs moved to upstream's layout (Chat Voice, Transcription, Wake Word;
+  engine under TTS → Advanced) on top of the Intel voice port; Intel edits
+  re-applied and listed in [`VOICE_INTEL.md`](VOICE_INTEL.md). Step 3 (Tools &
+  MCP) waits for `W-tool-catalog-ui` and the Auto-Allow decision.

@@ -370,32 +370,44 @@ public enum SettingsSearchIndex {
             title: "Use Apple's servers when needed",
             keywords: ["apple servers", "server recognition", "privacy", "on device"],
             subTab: "Models"),
+        // Upstream #2950: Speech To Text split into Chat Voice and
+        // Transcription; VAD Mode is titled Wake Word (raw values unchanged).
         .init(
-            id: "voice.stt.hotkey", tab: .voice, section: "Speech to Text",
+            id: "voice.chat.enable", tab: .voice, section: "Chat Voice",
+            title: "Enable Voice Input",
+            keywords: ["microphone", "mic", "speak to chat", "voice input", "chat voice", "speech to text"],
+            subTab: "Speech To Text"),
+        .init(
+            id: "voice.transcription.enable", tab: .voice, section: "Transcription",
+            title: "Enable Transcription Mode",
+            keywords: ["transcription mode", "dictation", "type with voice", "voice typing", "any app"],
+            subTab: "Transcription"),
+        .init(
+            id: "voice.stt.hotkey", tab: .voice, section: "Transcription",
             title: "Activation Hotkey",
             keywords: [
                 "dictation hotkey", "push to talk", "voice hotkey", "transcription mode", "dictate",
             ],
-            subTab: "Speech To Text"),
+            subTab: "Transcription"),
         .init(
-            id: "voice.stt.chat", tab: .voice, section: "Speech to Text",
-            title: "Voice Input in Chat",
-            keywords: ["microphone", "mic", "speak to chat", "voice input"],
-            subTab: "Speech To Text"),
-        .init(
-            id: "voice.stt.cleanup", tab: .voice, section: "Speech to Text",
+            id: "voice.stt.cleanup", tab: .voice, section: "Transcription",
             title: "Clean Up Transcription",
             keywords: ["filler words", "uh", "um", "post-process", "tidy"],
-            subTab: "Speech To Text"),
+            subTab: "Transcription"),
         .init(
-            id: "voice.stt.pause", tab: .voice, section: "Speech to Text",
+            id: "voice.stt.stopMode", tab: .voice, section: "Transcription",
+            title: "Stop Mode",
+            keywords: ["stop mode", "automatic", "manual", "finished speaking"],
+            subTab: "Transcription"),
+        .init(
+            id: "voice.stt.pause", tab: .voice, section: "Transcription",
             title: "Pause Detection",
             keywords: ["pause", "auto stop", "auto send", "stop after silence"],
-            subTab: "Speech To Text"),
+            subTab: "Transcription"),
         .init(
-            id: "voice.stt.vad", tab: .voice, section: "VAD Mode",
-            title: "VAD Mode",
-            keywords: ["wake word", "always listening", "hey", "voice activation", "vad"],
+            id: "voice.stt.vad", tab: .voice, section: "Wake Word",
+            title: "Wake Word",
+            keywords: ["wake word", "always listening", "hey", "voice activation", "vad", "agent name"],
             subTab: "VAD Mode"),
         .init(
             id: "voice.setup.sensitivity", tab: .voice, section: "Setup",
@@ -411,6 +423,11 @@ public enum SettingsSearchIndex {
             id: "voice.tts.enable", tab: .voice, section: "Text to Speech",
             title: "Enable Text-to-Speech",
             keywords: ["tts", "read aloud", "speak", "speaker button", "speech synthesis"],
+            subTab: "Text To Speech"),
+        .init(
+            id: "voice.tts.engine", tab: .voice, section: "Text to Speech",
+            title: "Engine",
+            keywords: ["tts engine", "system voices", "openai compatible tts"],
             subTab: "Text To Speech"),
         .init(
             id: "voice.tts.remote", tab: .voice, section: "Text to Speech",

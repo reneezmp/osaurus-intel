@@ -41,6 +41,16 @@ auto-speak, the per-agent voice, and the `speak` tool.
 - `Services/Voice/IntelVoiceLaunch.swift` — the launch hooks upstream keeps in
   its AppDelegate (Intel's AppDelegate is a trimmed rewrite).
 - `Views/Voice/*` — upstream views; Intel edits are marked `Intel:`.
+- **Voice tabs (upstream #2950 layout, 2026-09-30):** Setup, **Chat Voice**
+  (`ChatVoiceSettingsTab`: the composer mic switch), **Transcription**
+  (`TranscriptionSettingsTab`: Transcription Mode, its hotkey, and the stop /
+  cleanup behaviour shared with chat voice), Text To Speech (engine and server
+  fields under Advanced), **Wake Word** (VAD Mode's new title), Recognition
+  (Intel's language tab, raw value `Models`). Raw values are deep-link ids and
+  never change; `VoiceTab.resolved(from:)` also accepts titles and old names
+  (Intel adds "recognition"). Re-apply Intel edits when upstream changes these
+  files: Apple Speech requirement rows, the cleanup cost wording, single-value
+  `onChange`, `ThemedSwitchToggleStyle`.
 - Settings files: `~/.osaurus*/voice/{speech,tts,vad,transcription}.json`.
   The TTS server API key is in the Keychain (`ai.osaurus.tts.remote`).
 

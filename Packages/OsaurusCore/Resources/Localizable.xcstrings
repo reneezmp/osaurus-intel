@@ -840,6 +840,22 @@
         }
       }
     },
+    "Cleanup runs on the Core Model set under General." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die Bereinigung läuft auf dem unter „Allgemein“ eingestellten Kernmodell."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "清理由“通用”中设置的核心模型完成。"
+          }
+        }
+      }
+    },
     "Cloud Models" : {
       "localizations" : {
         "de" : {
@@ -1038,6 +1054,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "压缩超时。未做任何更改。"
+          }
+        }
+      }
+    },
+    "Configured once in Setup and shared by every voice mode." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wird einmal unter „Einrichtung“ festgelegt und von allen Sprachmodi genutzt."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在“设置”中配置一次，所有语音模式共用。"
           }
         }
       }
@@ -1242,6 +1274,22 @@
         }
       }
     },
+    "Custom Phrase" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Eigene Phrase"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "自定义短语"
+          }
+        }
+      }
+    },
     "Data & Storage" : {
       "localizations" : {
         "de" : {
@@ -1382,6 +1430,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "删除数据也会清除此智能体的数据库历史记录。智能体本身会保留。"
+          }
+        }
+      }
+    },
+    "Detection Sensitivity" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Erkennungsempfindlichkeit"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "检测灵敏度"
           }
         }
       }
@@ -1558,6 +1622,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "启用语音输入"
+          }
+        }
+      }
+    },
+    "Enable Wake Word" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Aktivierungswort aktivieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "호출어 활성화"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Включить фразу активации"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "启用唤醒词"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "啟用喚醒詞"
           }
         }
       }
@@ -1854,6 +1952,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "可同时运行的后台任务数（索引、计划运行、监听器）。留空则使用默认值 5。"
+          }
+        }
+      }
+    },
+    "How Osaurus knows you've finished speaking, and whether it tidies up filler words. Shared with Transcription Mode." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Woran Osaurus erkennt, dass du fertig gesprochen hast, und ob Füllwörter entfernt werden. Gilt auch für den Transkriptionsmodus."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Osaurus 如何判断你已说完，以及是否清理口头禅。与转写模式共用。"
           }
         }
       }
@@ -2662,6 +2776,38 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "从任意位置打开 Osaurus"
+          }
+        }
+      }
+    },
+    "Open Setup" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Einrichtung öffnen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开设置"
+          }
+        }
+      }
+    },
+    "Open Transcription" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Transkription öffnen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开转写"
           }
         }
       }
@@ -3812,6 +3958,22 @@
         }
       }
     },
+    "Stop Behavior & Cleanup" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Stoppverhalten & Bereinigung"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "停止方式与清理"
+          }
+        }
+      }
+    },
     "Stop Using a Default Folder" : {
       "localizations" : {
         "de" : {
@@ -4160,6 +4322,22 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "该文件不是 zip 压缩包。"
+          }
+        }
+      }
+    },
+    "The macOS system voices need no setup. Choose a server to use any OpenAI-compatible speech API." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Die macOS-Systemstimmen brauchen keine Einrichtung. Wähle einen Server, um eine beliebige OpenAI-kompatible Sprach-API zu nutzen."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "macOS 系统语音无需设置。选择服务器即可使用任何兼容 OpenAI 的语音 API。"
           }
         }
       }
@@ -9951,6 +10129,40 @@
         }
       }
     },
+    "Always listening for agent names" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Hört ständig auf Agentennamen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "에이전트 이름을 항상 듣기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Постоянно слушает имена агентов"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "始终聆听智能体名称"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "始終聆聽智能體名稱"
+          }
+        }
+      }
+    },
     "Always listening for wake words" : {
       "localizations" : {
         "de" : {
@@ -14616,6 +14828,40 @@
         }
       }
     },
+    "Chat Voice" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Spracheingabe im Chat"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "채팅 음성"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Голос в чате"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "聊天语音"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "聊天語音"
+          }
+        }
+      }
+    },
     "Chat with this Agent" : {
       "localizations" : {
         "de" : {
@@ -16446,6 +16692,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "完成以下步骤以启用 VAD 模式"
+          }
+        }
+      }
+    },
+    "Complete these steps to enable Wake Word" : {
+      "comment" : "A description of the setup required to enable",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Schließe diese Schritte ab, um das Aktivierungswort zu aktivieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호출어를 활성화하려면 다음 단계를 완료하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выполните эти шаги, чтобы включить фразу активации"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成以下步骤以启用唤醒词"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "完成以下步驟以啟用喚醒詞"
           }
         }
       }
@@ -52568,6 +52850,40 @@
         }
       }
     },
+    "Say an agent's name to open a chat with it" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Sag den Namen eines Agenten, um einen Chat mit ihm zu öffnen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "에이전트 이름을 말하면 해당 에이전트와의 채팅이 열립니다"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Произнесите имя агента, чтобы открыть чат с ним"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "说出智能体名称即可与其开始聊天"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "說出智能體名稱即可與其開始聊天"
+          }
+        }
+      }
+    },
     "Say hi to your dino" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -53895,6 +54211,42 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "至少选择一个代理以启用VAD"
+          }
+        }
+      }
+    },
+    "Select at least one agent to enable Wake Word" : {
+      "comment" : "A warning message displayed when no agents are selected.",
+      "isCommentAutoGenerated" : true,
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle mindestens einen Agenten, um das Aktivierungswort zu aktivieren"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "호출어를 활성화하려면 에이전트를 하나 이상 선택하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите хотя бы одного агента, чтобы включить фразу активации"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "至少选择一个智能体以启用唤醒词"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "至少選擇一個智能體以啟用喚醒詞"
           }
         }
       }

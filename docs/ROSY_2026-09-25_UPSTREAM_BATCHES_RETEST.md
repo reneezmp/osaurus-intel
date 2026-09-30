@@ -879,3 +879,25 @@ Ventura in **both** light and dark themes, with the window active and inactive.
       needed, scrolls to the control and it glows.
 - [ ] What's New "Storage" action (if a release note shows one) opens General
       with Advanced expanded at Data & Storage.
+
+### Step 4 — Voice tabs
+
+- [ ] Voice tabs read Setup, **Chat Voice**, **Transcription**, Text To
+      Speech, **Wake Word**, Recognition.
+- [ ] Chat Voice: the switch turns the chat microphone button on and off;
+      **Open Transcription** jumps to the Transcription tab.
+- [ ] Transcription: Transcription Mode switch, its hotkey, and Stop Behavior
+      & Cleanup (cleanup, stop mode, pause, confirmation delay, silence
+      timeout). With cleanup on, the text says each transcript goes to the
+      Core Model's provider. The Stop Mode picker is readable on Ventura.
+- [ ] Before speech access is granted, the Transcription and Wake Word tabs
+      list "Speech Recognition Allowed" and a language step (not "Speech
+      Model Downloaded"); clicking them asks for access / opens Recognition.
+- [ ] Text To Speech: with speech on and system voices, the Voice card shows;
+      **Advanced** holds the Engine menu; choosing OpenAI-Compatible Server
+      shows the server fields there, and speech still plays after switching
+      back.
+- [ ] Wake Word: the switch, agent list, Custom Phrase and sensitivity work
+      as before VAD Mode was renamed.
+- [ ] Search Settings for "wake word", "stop mode", "voice input", "tts
+      engine": each opens the right Voice tab.

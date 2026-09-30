@@ -56,16 +56,18 @@ struct TTSModeSettingsTab: View {
             VStack(spacing: 24) {
                 enableCard
 
-                if config.enabled {
-                    if config.provider == .system {
-                        voiceCard
-                    } else {
-                        remoteServerCard
-                    }
+                if config.enabled && config.provider == .system {
+                    voiceCard
                 }
 
                 if config.enabled && ttsService.isModelReady {
                     previewCard
+                }
+
+                // Upstream #2950: engine choice + remote server fields are
+                // power-user knobs; the system voices need none of them.
+                if config.enabled {
+                    advancedSection
                 }
 
                 Spacer()
@@ -90,55 +92,34 @@ struct TTSModeSettingsTab: View {
 
     private var enableCard: some View {
         SettingsSection(title: "Text-to-Speech", icon: "speaker.wave.2") {
-            VStack(alignment: .leading, spacing: 12) {
-                SettingsToggle(
-                    title: L("Enable Text-to-Speech"),
-                    description: config.enabled
-                        ? "Speaker button appears on assistant messages"
-                        : "Enable to read assistant replies aloud",
-                    isOn: $config.enabled
-                )
-                .onChange(of: config.enabled) { _ in saveSettings() }
+            SettingsToggle(
+                title: L("Enable Text-to-Speech"),
+                description: config.enabled
+                    ? "Speaker button appears on assistant messages"
+                    : "Enable to read assistant replies aloud",
+                isOn: $config.enabled
+            )
+            .onChange(of: config.enabled) { _ in saveSettings() }
 
-                if config.enabled {
-                    HStack {
-                        Text("Engine", bundle: .module)
-                            .font(.system(size: 12))
-                            .foregroundColor(theme.secondaryText)
-                        Spacer()
-                        Picker("", selection: $config.provider) {
-                            Text("On This Mac (System Voices)", bundle: .module)
-                                .tag(TTSProvider.system)
-                            Text("OpenAI-Compatible Server", bundle: .module)
-                                .tag(TTSProvider.openAICompatible)
-                        }
-                        .labelsHidden()
-                        .pickerStyle(MenuPickerStyle())
-                        .frame(maxWidth: 240)
-                        .onChange(of: config.provider) { _ in saveSettings() }
-                    }
-                }
-
-                HStack(alignment: .top, spacing: 8) {
-                    Image(systemName: "info.circle")
-                        .font(.system(size: 12))
-                        .foregroundColor(theme.accentColor)
-
-                    Text(
-                        config.provider == .system
-                            ? "Uses the voices built into macOS, on this Mac. Add more voices in System Settings → Accessibility → Spoken Content."
-                            : "Sends text to any server implementing the OpenAI /v1/audio/speech API, such as openai-edge-tts or Kokoro.",
-                        bundle: .module
-                    )
+            HStack(alignment: .top, spacing: 8) {
+                Image(systemName: "info.circle")
                     .font(.system(size: 12))
-                    .foregroundColor(theme.secondaryText)
-                }
-                .padding(12)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.accentColor.opacity(0.1))
+                    .foregroundColor(theme.accentColor)
+
+                Text(
+                    config.provider == .system
+                        ? "Uses the voices built into macOS, on this Mac. Add more voices in System Settings → Accessibility → Spoken Content."
+                        : "Sends text to any server implementing the OpenAI /v1/audio/speech API, such as openai-edge-tts or Kokoro.",
+                    bundle: .module
                 )
+                .font(.system(size: 12))
+                .foregroundColor(theme.secondaryText)
             }
+            .padding(12)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.accentColor.opacity(0.1))
+            )
         }
     }
 
@@ -182,6 +163,32 @@ struct TTSModeSettingsTab: View {
                     }
                 }
                 .settingsLandingAnchor("voice.tts.rate")
+            }
+        }
+    }
+
+    // MARK: - Advanced (engine + remote server)
+
+    static let advancedAnchorIds: Set<String> = ["voice.tts.engine", "voice.tts.remote"]
+
+    private var advancedSection: some View {
+        SettingsAdvancedDisclosure(anchorIds: Self.advancedAnchorIds) {
+            SettingsPickerRow(
+                title: "Engine",
+                description: "The macOS system voices need no setup. Choose a server to use any OpenAI-compatible speech API.",
+                anchorId: "voice.tts.engine",
+                style: .menu,
+                selection: $config.provider,
+                options: [
+                    .init(TTSProvider.system, L("On This Mac (System Voices)")),
+                    .init(TTSProvider.openAICompatible, L("OpenAI-Compatible Server")),
+                ]
+            )
+            .onChange(of: config.provider) { _ in saveSettings() }
+
+            if config.provider == .openAICompatible {
+                remoteServerCard
+                    .settingsLandingAnchor("voice.tts.remote")
             }
         }
     }
