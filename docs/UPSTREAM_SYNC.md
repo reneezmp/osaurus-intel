@@ -2309,3 +2309,12 @@ calling a sync complete.
   `MCPProviderDirectoryView`, `TranscriptionSettingsTab`,
   `ToolAutoAllowToggle`) now belong to `W-settings-ux-2950`; the rule sits
   before `COV-intel-own` so it wins.
+
+### Settings redesign, step 1 (`W-settings-ux-2950`) — 2026-09-30
+
+- Manual: [`SETTINGS_REDESIGN_INTEL.md`](SETTINGS_REDESIGN_INTEL.md). Ported
+  `SettingsKit.swift` (grouped form) with `_VariadicView` in place of the
+  macOS 15 `Group(subviews:)`, restyled `SettingsSection` /
+  `SettingsSubsection` / `SettingsToggle` onto it, and the `ManagerHeader`
+  look. The kit reads `ThemeManager.shared`, not `@Environment(\.theme)`
+  (light default in un-injected sheets).

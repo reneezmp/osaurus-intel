@@ -12,41 +12,30 @@ import SwiftUI
 
 // MARK: - Settings Section
 
+/// A titled group in the grouped-form language (see `SettingsKit.swift`,
+/// upstream #2950): a sentence-case title above one flat `SettingsGroup`
+/// surface. Direct children render as inset rows separated by hairlines.
 struct SettingsSection<Content: View>: View {
-    @ObservedObject private var themeManager = ThemeManager.shared
-
     let title: String
+    /// Retained for call-site compatibility; the grouped form does not draw
+    /// section icons.
     let icon: String
+    /// Settings-search landing anchor for section-level results (no single
+    /// control to point at).
+    var anchorId: String? = nil
     @ViewBuilder let content: () -> Content
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.accentColor)
-
-                Text(LocalizedStringKey(title), bundle: .module)
-                    .textCase(.uppercase)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(themeManager.currentTheme.secondaryText)
-                    .tracking(0.5)
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsGroupTitle(title: title)
+            SettingsGroup {
+                content()
+                    // Controls inside resolve their search-landing anchor from
+                    // (section title, own label); see `settingsAutoAnchor`.
+                    .environment(\.settingsSectionTitle, title)
             }
-
-            content()
-                // Controls inside resolve their search-landing anchor from
-                // (section title, own label); see `settingsAutoAnchor`.
-                .environment(\.settingsSectionTitle, title)
         }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(themeManager.currentTheme.cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(themeManager.currentTheme.cardBorder, lineWidth: 1)
-                )
-        )
+        .settingsLandingAnchor(anchorId)
     }
 }
 
@@ -93,23 +82,14 @@ struct SettingsSubsection<Content: View>: View {
     }
 
     @ViewBuilder private var bodyContent: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 6) {
-                Rectangle()
-                    .fill(themeManager.currentTheme.accentColor)
-                    .frame(width: 3, height: 14)
-                    .clipShape(RoundedRectangle(cornerRadius: 1.5))
-
-                Text(LocalizedStringKey(label), bundle: .module)
-                    .textCase(.uppercase)
-                    .font(.system(size: 10, weight: .bold))
-                    .foregroundColor(themeManager.currentTheme.tertiaryText)
-                    .tracking(0.5)
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            Text(LocalizedStringKey(label), bundle: .module)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(themeManager.currentTheme.secondaryText)
 
             content()
-                .padding(.leading, 9)
         }
+        .frame(maxWidth: .infinity, alignment: .leading)
     }
 }
 
@@ -517,41 +497,17 @@ struct SettingsToggle: View {
         bodyContent.settingsAutoAnchor(title)
     }
 
+    // Thin wrapper over the shared `SettingsRow` (SettingsKit.swift) so
+    // toggles, pickers and link rows share one chrome: flat inside a group,
+    // a self-contained card elsewhere.
     @ViewBuilder private var bodyContent: some View {
-        HStack {
-            VStack(alignment: .leading, spacing: 3) {
-                HStack(spacing: 6) {
-                    Text(LocalizedStringKey(title), bundle: .module)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundStyle(themeManager.currentTheme.primaryText)
-                    if let badge {
-                        Text(LocalizedStringKey(badge), bundle: .module)
-                            .font(.system(size: 11, weight: .medium))
-                            .foregroundStyle(themeManager.currentTheme.accentColor)
-                    }
-                }
-                Text(LocalizedStringKey(description), bundle: .module)
-                    .font(.system(size: 11))
-                    .foregroundStyle(themeManager.currentTheme.tertiaryText)
-            }
-
-            Spacer()
-
+        SettingsRow(title: title, description: description, badge: badge) {
             // Themed rather than native: Ventura fades the native switch to
             // near-invisible whenever the window is inactive.
             Toggle("", isOn: $isOn)
                 .toggleStyle(ThemedSwitchToggleStyle())
                 .labelsHidden()
         }
-        .padding(12)
-        .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(themeManager.currentTheme.inputBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(themeManager.currentTheme.inputBorder, lineWidth: 1)
-                )
-        )
     }
 }
 

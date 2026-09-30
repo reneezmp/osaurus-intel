@@ -820,3 +820,25 @@ that talk to the model are **(paid)**.
 - [ ] **(paid, only if Claude Code is set up)** A Claude Code reply that ends
       with a long paragraph shows the whole ending (the last output is no
       longer cut off when the process exits).
+
+## Settings redesign
+
+Manual: [`SETTINGS_REDESIGN_INTEL.md`](SETTINGS_REDESIGN_INTEL.md). Check on
+Ventura in **both** light and dark themes, with the window active and inactive.
+
+### Step 1 — grouped layout and header
+
+- [ ] Every Settings page header: a smaller, non-rounded title with no
+      separate coloured band behind it; it fades in when you open the page.
+- [ ] Settings › Voice, Orchestrator, Web Search, a cloud provider's edit
+      sheet: each section has a plain title **above** one rounded box, and
+      the rows inside are separated by thin lines. No row text is cut off or
+      overlaps its switch.
+- [ ] Switches in those boxes are visible and clickable in dark mode and
+      while the window is inactive.
+- [ ] A switch row without a description has its title vertically centred
+      with the switch.
+- [ ] Header buttons that are unavailable look greyed out (for example a
+      Save button with nothing to save, where a page has one).
+- [ ] Search Settings for a switch inside a section (e.g. "voice input"):
+      the page scrolls to it and it glows as before.

@@ -8,6 +8,29 @@
 
 import SwiftUI
 
+// MARK: - Header Entrance
+
+extension View {
+    /// The standard management-tab header entrance (upstream #2950): fade +
+    /// small downward settle on the house spring. The −10pt slide collapses to
+    /// an opacity-only fade under Reduce Motion.
+    func managerHeaderEntrance(hasAppeared: Bool) -> some View {
+        modifier(ManagerHeaderEntranceModifier(hasAppeared: hasAppeared))
+    }
+}
+
+private struct ManagerHeaderEntranceModifier: ViewModifier {
+    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    let hasAppeared: Bool
+
+    func body(content: Content) -> some View {
+        content
+            .opacity(hasAppeared ? 1 : 0)
+            .offset(y: hasAppeared || reduceMotion ? 0 : -10)
+            .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+    }
+}
+
 // MARK: - Manager Header
 
 /// A unified header component for management views.
@@ -35,7 +58,7 @@ struct ManagerHeader: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
                         Text(LocalizedStringKey(title), bundle: .module)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(theme.primaryText)
 
                         if let count = count {
@@ -53,7 +76,7 @@ struct ManagerHeader: View {
 
                     if let subtitle = subtitle, !subtitle.isEmpty {
                         Text(LocalizedStringKey(subtitle), bundle: .module)
-                            .font(.system(size: 14))
+                            .font(.system(size: 13))
                             .foregroundColor(theme.secondaryText)
                     }
                 }
@@ -64,7 +87,8 @@ struct ManagerHeader: View {
         .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, 16)
-        .background(theme.secondaryBackground)
+        // Same surface as the content below: no header band (upstream #2950).
+        .background(theme.primaryBackground)
     }
 }
 
@@ -97,7 +121,7 @@ struct ManagerHeaderWithActions<Actions: View>: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
                         Text(LocalizedStringKey(title), bundle: .module)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(theme.primaryText)
 
                         if let count = count {
@@ -115,7 +139,7 @@ struct ManagerHeaderWithActions<Actions: View>: View {
 
                     if let subtitle = subtitle, !subtitle.isEmpty {
                         Text(LocalizedStringKey(subtitle), bundle: .module)
-                            .font(.system(size: 14))
+                            .font(.system(size: 13))
                             .foregroundColor(theme.secondaryText)
                     }
                 }
@@ -130,7 +154,8 @@ struct ManagerHeaderWithActions<Actions: View>: View {
         .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, 16)
-        .background(theme.secondaryBackground)
+        // Same surface as the content below: no header band (upstream #2950).
+        .background(theme.primaryBackground)
     }
 }
 
@@ -166,7 +191,7 @@ struct ManagerHeaderWithTabs<Actions: View, TabsRow: View>: View {
                 VStack(alignment: .leading, spacing: 4) {
                     HStack(spacing: 10) {
                         Text(LocalizedStringKey(title), bundle: .module)
-                            .font(.system(size: 28, weight: .bold, design: .rounded))
+                            .font(.system(size: 22, weight: .semibold))
                             .foregroundColor(theme.primaryText)
 
                         if let count = count {
@@ -184,7 +209,7 @@ struct ManagerHeaderWithTabs<Actions: View, TabsRow: View>: View {
 
                     if let subtitle = subtitle, !subtitle.isEmpty {
                         Text(LocalizedStringKey(subtitle), bundle: .module)
-                            .font(.system(size: 14))
+                            .font(.system(size: 13))
                             .foregroundColor(theme.secondaryText)
                     }
                 }
@@ -201,7 +226,8 @@ struct ManagerHeaderWithTabs<Actions: View, TabsRow: View>: View {
         .padding(.horizontal, 24)
         .padding(.top, 24)
         .padding(.bottom, 16)
-        .background(theme.secondaryBackground)
+        // Same surface as the content below: no header band (upstream #2950).
+        .background(theme.primaryBackground)
     }
 }
 
@@ -210,6 +236,8 @@ struct ManagerHeaderWithTabs<Actions: View, TabsRow: View>: View {
 /// Accent-filled button for primary actions (Create, Add, etc.)
 struct HeaderPrimaryButton: View {
     @Environment(\.theme) private var theme
+    /// Greys the button out when a caller attaches `.disabled(...)` (upstream #2950).
+    @Environment(\.isEnabled) private var isEnabled
 
     let title: String
     let icon: String?
@@ -235,17 +263,19 @@ struct HeaderPrimaryButton: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundColor(.white)
+            .foregroundColor(isEnabled ? .white : theme.tertiaryText)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(theme.accentColor)
-                    .opacity(isHovering ? 0.9 : 1)
+                    .fill(isEnabled ? theme.accentColor : theme.tertiaryBackground)
+                    .opacity(isEnabled && isHovering ? 0.9 : 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
+        .disabled(!isEnabled)
         .onHover { hovering in
+            guard isEnabled else { return }
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovering = hovering
             }
@@ -258,6 +288,8 @@ struct HeaderPrimaryButton: View {
 /// Subtle background button for secondary actions (Import, Reset, etc.)
 struct HeaderSecondaryButton: View {
     @Environment(\.theme) private var theme
+    /// Greys the button out when a caller attaches `.disabled(...)` (upstream #2950).
+    @Environment(\.isEnabled) private var isEnabled
 
     let title: String
     let icon: String?
@@ -283,7 +315,7 @@ struct HeaderSecondaryButton: View {
                     .lineLimit(1)
                     .fixedSize(horizontal: true, vertical: false)
             }
-            .foregroundColor(theme.primaryText)
+            .foregroundColor(isEnabled ? theme.primaryText : theme.tertiaryText)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
@@ -293,11 +325,12 @@ struct HeaderSecondaryButton: View {
                         RoundedRectangle(cornerRadius: 8)
                             .stroke(theme.inputBorder, lineWidth: 1)
                     )
-                    .opacity(isHovering ? 0.8 : 1)
+                    .opacity(isEnabled && isHovering ? 0.8 : 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
         .onHover { hovering in
+            guard isEnabled else { return }
             withAnimation(.easeOut(duration: 0.15)) {
                 isHovering = hovering
             }
@@ -310,6 +343,8 @@ struct HeaderSecondaryButton: View {
 /// Icon-only button for compact actions (Refresh, etc.)
 struct HeaderIconButton: View {
     @Environment(\.theme) private var theme
+    /// Greys the button out when a caller attaches `.disabled(...)` (upstream #2950).
+    @Environment(\.isEnabled) private var isEnabled
 
     let icon: String
     let action: () -> Void
@@ -337,12 +372,12 @@ struct HeaderIconButton: View {
                         .font(.system(size: 13, weight: .medium))
                 }
             }
-            .foregroundColor(theme.secondaryText)
+            .foregroundColor(isEnabled ? theme.secondaryText : theme.tertiaryText)
             .frame(width: 32, height: 32)
             .background(
                 RoundedRectangle(cornerRadius: 8)
                     .fill(theme.tertiaryBackground)
-                    .opacity(isHovering ? 0.8 : 1)
+                    .opacity(isEnabled && isHovering ? 0.8 : 1)
             )
         }
         .buttonStyle(PlainButtonStyle())
