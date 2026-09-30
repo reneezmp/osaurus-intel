@@ -1,190 +1,12 @@
-#if !OSAURUS_INTEL
 //
-//  SlashCommandsSettingsSection.swift
+//  SlashCommandEditorSheet.swift
 //  osaurus
 //
-//  Settings section for creating and managing custom slash commands.
-//  Embedded in ConfigurationView under Chat settings.
+//  Editor sheet for creating and editing custom slash commands.
+//  Presented from SlashCommandsView (Capabilities → Commands).
 //
 
 import SwiftUI
-
-// MARK: - Slash Commands Settings Section
-
-struct SlashCommandsSettingsSection: View {
-    @ObservedObject private var themeManager = ThemeManager.shared
-    private var registry = SlashCommandRegistry.shared
-
-    @State private var showAddSheet = false
-    @State private var editingCommand: SlashCommand? = nil
-
-    private var theme: ThemeProtocol { themeManager.currentTheme }
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header row
-            HStack {
-                Text(
-                    "Define reusable prompt shortcuts. Type / in the chat input to invoke them.",
-                    bundle: .module
-                )
-                .font(.system(size: 12))
-                .foregroundColor(theme.secondaryText)
-
-                Spacer()
-
-                Button {
-                    showAddSheet = true
-                } label: {
-                    HStack(spacing: 4) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 11, weight: .semibold))
-                        Text("Add Command", bundle: .module)
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                }
-                .buttonStyle(SlashCommandButtonStyle(isPrimary: true, theme: theme))
-            }
-
-            if registry.customCommands.isEmpty {
-                emptyState
-            } else {
-                commandList
-            }
-        }
-        .sheet(isPresented: $showAddSheet) {
-            SlashCommandEditorSheet(command: nil) { newCmd in
-                registry.create(
-                    name: newCmd.name,
-                    description: newCmd.description,
-                    icon: newCmd.icon,
-                    template: newCmd.template ?? ""
-                )
-            }
-        }
-        .sheet(item: $editingCommand) { cmd in
-            SlashCommandEditorSheet(command: cmd) { updated in
-                registry.update(updated)
-            }
-        }
-    }
-
-    // MARK: - Empty State
-
-    private var emptyState: some View {
-        HStack {
-            Spacer()
-            VStack(spacing: 6) {
-                Image(systemName: "terminal")
-                    .font(.system(size: 20))
-                    .foregroundColor(theme.tertiaryText)
-                Text("No custom commands yet", bundle: .module)
-                    .font(.system(size: 12, weight: .medium))
-                    .foregroundColor(theme.secondaryText)
-                Text("Click \"Add Command\" to create your first shortcut.", bundle: .module)
-                    .font(.system(size: 11))
-                    .foregroundColor(theme.tertiaryText)
-                    .multilineTextAlignment(.center)
-            }
-            Spacer()
-        }
-        .padding(.vertical, 20)
-    }
-
-    // MARK: - Command List
-
-    private var commandList: some View {
-        VStack(spacing: 0) {
-            ForEach(Array(registry.customCommands.enumerated()), id: \.element.id) { idx, cmd in
-                commandRow(cmd, isLast: idx == registry.customCommands.count - 1)
-            }
-        }
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(theme.inputBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 8)
-                        .stroke(theme.inputBorder, lineWidth: 1)
-                )
-        )
-    }
-
-    private func commandRow(_ cmd: SlashCommand, isLast: Bool) -> some View {
-        VStack(spacing: 0) {
-            HStack(spacing: 10) {
-                // Icon badge
-                ZStack {
-                    RoundedRectangle(cornerRadius: 5)
-                        .fill(theme.tertiaryBackground)
-                    Image(systemName: cmd.icon)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(theme.accentColor)
-                }
-                .frame(width: 24, height: 24)
-
-                // Name + description
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("/\(cmd.name)")
-                        .font(.system(size: 13, weight: .semibold, design: .monospaced))
-                        .foregroundColor(theme.primaryText)
-                    if !cmd.description.isEmpty {
-                        Text(cmd.description)
-                            .font(.system(size: 11))
-                            .foregroundColor(theme.secondaryText)
-                            .lineLimit(1)
-                    }
-                }
-
-                Spacer()
-
-                // Template preview
-                if let template = cmd.template, !template.isEmpty {
-                    Text(template)
-                        .font(.system(size: 10, design: .monospaced))
-                        .foregroundColor(theme.tertiaryText)
-                        .lineLimit(1)
-                        .frame(maxWidth: 160, alignment: .trailing)
-                        .truncationMode(.tail)
-                }
-
-                // Actions
-                HStack(spacing: 2) {
-                    Button {
-                        editingCommand = cmd
-                    } label: {
-                        Image(systemName: "pencil")
-                            .font(.system(size: 11))
-                            .foregroundColor(theme.secondaryText)
-                            .frame(width: 26, height: 26)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .localizedHelp("Edit command")
-
-                    Button {
-                        registry.delete(id: cmd.id)
-                    } label: {
-                        Image(systemName: "trash")
-                            .font(.system(size: 11))
-                            .foregroundColor(theme.errorColor)
-                            .frame(width: 26, height: 26)
-                            .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .localizedHelp("Delete command")
-                }
-            }
-            .padding(.horizontal, 12)
-            .padding(.vertical, 10)
-
-            if !isLast {
-                Divider()
-                    .padding(.leading, 46)
-                    .opacity(0.4)
-            }
-        }
-    }
-}
 
 // MARK: - Editor Sheet
 
@@ -203,6 +25,18 @@ struct SlashCommandEditorSheet: View {
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
     private var isEditing: Bool { command != nil }
+
+    /// True when an edited command still differs from what's stored, so
+    /// "Save" can disable itself once there's nothing to apply. Create
+    /// mode is always "changed" so its button keeps surfacing the
+    /// name-required validation on click.
+    private var hasChanges: Bool {
+        guard let command else { return true }
+        return name.trimmingCharacters(in: .whitespacesAndNewlines) != command.name
+            || description != command.description
+            || template != (command.template ?? "")
+            || icon != command.icon
+    }
 
     private let availableIcons = [
         "text.bubble", "wand.and.stars", "doc.text", "globe", "scissors",
@@ -280,7 +114,7 @@ struct SlashCommandEditorSheet: View {
                                 .font(.system(size: 10))
                                 .foregroundColor(theme.tertiaryText)
                         }
-                        TextField("/command-name", text: $name)
+                        TextField(L("/command-name"), text: $name)
                             .textFieldStyle(.plain)
                             .font(.system(size: 13, design: .monospaced))
                             .foregroundColor(theme.primaryText)
@@ -392,6 +226,7 @@ struct SlashCommandEditorSheet: View {
                     Text(isEditing ? "Save" : "Add Command", bundle: .module)
                 }
                 .buttonStyle(SlashCommandButtonStyle(isPrimary: true, theme: theme))
+                .disabled(isEditing && !hasChanges)
             }
             .padding(16)
         }
@@ -432,16 +267,17 @@ struct SlashCommandEditorSheet: View {
 struct SlashCommandButtonStyle: ButtonStyle {
     var isPrimary: Bool = false
     let theme: ThemeProtocol
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 12, weight: .medium))
-            .foregroundColor(isPrimary ? .white : theme.primaryText)
+            .foregroundColor(primaryForeground)
             .padding(.horizontal, 14)
             .padding(.vertical, 8)
             .background(
                 RoundedRectangle(cornerRadius: 7)
-                    .fill(isPrimary ? theme.accentColor : theme.tertiaryBackground)
+                    .fill(primaryFill)
                     .overlay(
                         RoundedRectangle(cornerRadius: 7)
                             .stroke(isPrimary ? Color.clear : theme.inputBorder, lineWidth: 1)
@@ -449,37 +285,18 @@ struct SlashCommandButtonStyle: ButtonStyle {
             )
             .opacity(configuration.isPressed ? 0.8 : 1.0)
     }
-}
-#else
-import SwiftUI
 
-struct SlashCommandsSettingsSection: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Slash Commands Settings", symbol: "apple.logo")
-    }
-}
-
-/// Intel stub for the editor sheet that lives in this file upstream.
-/// `SlashCommandsView` (un-body-swapped in M11 Phase 11.A.1) presents
-/// this sheet for both create and edit flows. Init signature mirrors
-/// the upstream `SlashCommandEditorSheet` at line 191 of this same
-/// file (only visible in the `#if !OSAURUS_INTEL` branch). The Intel
-/// body is the standard placeholder — the editor's color pickers and
-/// icon grid depend on UI patterns we haven't reconstituted for Intel
-/// yet, and per Phase 11.A.0 discipline we extend the conformer
-/// surface first and restore real bodies in their own focused phase.
-struct SlashCommandEditorSheet: View {
-    let command: SlashCommand?
-    let onSave: (SlashCommand) -> Void
-
-    init(command: SlashCommand?, onSave: @escaping (SlashCommand) -> Void) {
-        self.command = command
-        self.onSave = onSave
+    private var primaryForeground: Color {
+        if isPrimary {
+            return isEnabled ? .white : theme.tertiaryText
+        }
+        return theme.primaryText
     }
 
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Slash Command Editor", symbol: "apple.logo")
-            .frame(minWidth: 480, minHeight: 360)
+    private var primaryFill: Color {
+        if isPrimary {
+            return isEnabled ? theme.accentColor : theme.tertiaryBackground
+        }
+        return theme.tertiaryBackground
     }
 }
-#endif

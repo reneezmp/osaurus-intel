@@ -2336,3 +2336,14 @@ calling a sync complete.
   engine under TTS → Advanced) on top of the Intel voice port; Intel edits
   re-applied and listed in [`VOICE_INTEL.md`](VOICE_INTEL.md). Step 3 (Tools &
   MCP) waits for `W-tool-catalog-ui` and the Auto-Allow decision.
+
+### Settings redesign, step 5 (`W-settings-ux-2950`) — 2026-09-30
+
+- Found and fixed a silent gap: the slash-command editor on Intel was the M11
+  "Apple Silicon only" placeholder. Upstream's `SlashCommandEditorSheet.swift`
+  is now compiled. Themes and cloud-provider sheet edits in #2950 wait for
+  `W-ui-misc` / `W-providers-ux`.
+- **Flaky test seen:** `LiveExecRegistryTests.entriesPublisherEmitsOnRegister`
+  (upstream test; 50 ms sleep while unordered `Task`s append snapshots) failed
+  once in a full run and passed 3/3 alone and on the rerun. Not caused by
+  Settings work; rerun before investigating.

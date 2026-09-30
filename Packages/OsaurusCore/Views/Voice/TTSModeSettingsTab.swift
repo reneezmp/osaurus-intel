@@ -169,7 +169,7 @@ struct TTSModeSettingsTab: View {
 
     // MARK: - Advanced (engine + remote server)
 
-    static let advancedAnchorIds: Set<String> = ["voice.tts.engine", "voice.tts.remote"]
+    nonisolated static let advancedAnchorIds: Set<String> = ["voice.tts.engine", "voice.tts.remote"]
 
     private var advancedSection: some View {
         SettingsAdvancedDisclosure(anchorIds: Self.advancedAnchorIds) {

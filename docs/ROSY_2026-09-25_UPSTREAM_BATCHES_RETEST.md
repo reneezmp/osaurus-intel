@@ -901,3 +901,12 @@ Ventura in **both** light and dark themes, with the window active and inactive.
       as before VAD Mode was renamed.
 - [ ] Search Settings for "wake word", "stop mode", "voice input", "tts
       engine": each opens the right Voice tab.
+
+### Step 5 — Commands editor
+
+- [ ] Capabilities › Commands › **New Command**: a real editor opens (icon
+      grid, name, description, template), not an "Apple Silicon only" panel.
+      Save a command, then use it in a chat by typing `/` and its name
+      **(paid)**.
+- [ ] Edit that command: **Save** stays disabled until you change something;
+      the change shows in the list and in chat.

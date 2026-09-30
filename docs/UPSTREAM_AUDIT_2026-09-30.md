@@ -66,10 +66,10 @@ hand-port, not a copy. Nothing in it needs Apple Silicon.
 | Tab renames: Tools → **Tools & MCP**, sub-tabs Services / All Tools / Plugins (old deep links kept) | **Port** | Intel's tab titles change with it. Chat → Conversation arrives with the split. Osaurus Connect → Mobile and Media → Images: **Needs work** (Intel has neither tab; B1, `W-media-generation`). |
 | Tools & MCP → Services: configured MCP services + browsable **MCP directory** (`MCPProviderDirectoryView`) | **Port** | Intel has `MCPProviderTemplate`. |
 | "Auto-Allow All Tool Calls" master switch (`ToolAutoAllowToggle`, upstream #2241) | **Needs work + decision** | Intel never had it: a blanket auto-approval of every tool call conflicts with Intel's per-call approval (for example `delete_knowledge`, `db_execute`). Renée decides whether Intel gets it and whether per-call tools stay exempt. |
-| Slash command editor sheet (moved from the settings section) | **Port** | Intel's Commands tab still uses the inline section. |
+| Slash command editor sheet (moved from the settings section) | **Port** — shipped | Intel's editor was still the M11 "Apple Silicon only" placeholder; upstream's sheet is now compiled (step 5). |
 | Voice: separate **Chat Voice** tab, `TranscriptionSettingsTab` (renamed + regrouped), `VoiceSharedComponents`, restyled TTS/VAD tabs | **Port** | Re-apply on top of the Intel Voice port (Apple Speech, system voices, Recognition tab instead of Models) — see [`VOICE_INTEL.md`](VOICE_INTEL.md). |
-| Providers and remote provider sheet restyle | **Port** | With the kit. |
-| Themes restyle | **Port** | With the kit; keep Intel's Ventura theme fixes. |
+| Providers and remote provider sheet restyle | **Port** (step 3) / **Needs work** | `ProvidersView` is the MCP services list (Tools & MCP → Services, step 3). The cloud provider sheet's only change renames an MCP redirect Intel lacks (`W-providers-ux`). |
+| Themes restyle | **Needs work** | Only swaps the filter-tab row; Intel's Themes page has no filter tabs (`W-ui-misc` theme library). Header restyle shipped in step 1. |
 | Privacy Filter view, Image Generation view, Agent Channels views, Osaurus Connect / iMessage views | **Needs work** | Intel lacks the features (`W-privacy-filter`, `W-media-generation`, `W-channels`, B1). |
 | Guide markdown, docs, translations | **Port** | Only for the pieces Intel ships. |
 

@@ -12,7 +12,7 @@ touched file diverges, so the port is by hand, in five steps:
 2. General / Conversation split, Advanced → Data & Storage, search anchors — **done 2026-09-30**
 3. Tools & MCP rename (Services / All Tools / Plugins) and the MCP directory — **waits:** it sits on the tool-catalog work (`W-tool-catalog-ui`) and needs the Auto-Allow decision
 4. Voice tabs (Chat Voice, Transcription) on top of the Intel voice port — **done 2026-09-30**
-5. Providers, Themes, slash-command editor sheet (the CLI card already moved in step 2)
+5. Providers, Themes, slash-command editor sheet (the CLI card already moved in step 2) — **done 2026-09-30** (editor; the rest waits, see below)
 
 ## Step 1 — kit and header (2026-09-30)
 
@@ -121,3 +121,22 @@ touched file diverges, so the port is by hand, in five steps:
   entries follow upstream (`voice.chat.enable`, `voice.transcription.enable`,
   `voice.stt.stopMode`, `voice.tts.engine`).
 - Details for the voice manual: [`VOICE_INTEL.md`](VOICE_INTEL.md).
+
+## Step 5 — Commands editor, Themes, provider sheet (2026-09-30)
+
+- **Silent gap fixed:** Intel's `SlashCommandEditorSheet` was still the M11
+  placeholder (`AppleSiliconOnlyTab`), so New / Edit on Capabilities →
+  Commands opened an "Apple Silicon only" panel although the store and the
+  list worked. Upstream's standalone `Views/SlashCommand/SlashCommandEditorSheet.swift`
+  (with its "nothing changed" Save guard) is now compiled; Intel's
+  `Views/Settings/SlashCommandsSettingsSection.swift` (unused inline section
+  + the stub) is deleted, as upstream deleted it.
+- **Themes:** #2950 only swaps the filter-tab row for `HeaderTabsRow(tabs:)`.
+  Intel's Themes page has no filter tabs or search (upstream's theme-library
+  work, `W-ui-misc`), so nothing to apply beyond step 1's header.
+- **Cloud provider sheet:** #2950 renames "Add as MCP Connection" to "Add as
+  MCP Service". Intel's sheet lacks that MCP redirect (`W-providers-ux`).
+- `IntelSettingsRedesignTests` covers the sidebar grouping, the real editor,
+  Voice tab aliases, Conversation saving only its own fields, and the
+  Advanced anchor sets. Static helpers on these views are `nonisolated`
+  (tests trap with signal 5 otherwise).

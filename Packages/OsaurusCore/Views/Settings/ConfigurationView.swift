@@ -55,7 +55,7 @@ struct ConfigurationView: View {
 
     /// Landing anchors rendered inside the Advanced disclosure, so a search
     /// result for one of them opens it before scrolling.
-    static let advancedAnchorIds: Set<String> = [
+    nonisolated static let advancedAnchorIds: Set<String> = [
         "settings.notifications.timeout", "settings.notifications.maxVisible",
         "settings.notifications.maxConcurrentTasks", "storage.encryption", "storage.backup",
     ]

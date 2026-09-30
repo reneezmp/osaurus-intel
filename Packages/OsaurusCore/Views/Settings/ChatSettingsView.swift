@@ -61,7 +61,7 @@ struct ChatSettingsView: View {
 
     /// Landing anchors rendered inside the Advanced disclosure, so a search
     /// result for one of them opens it before scrolling.
-    static let advancedAnchorIds: Set<String> = [
+    nonisolated static let advancedAnchorIds: Set<String> = [
         "settings.chat.systemPrompt", "settings.chat.temperature", "settings.chat.maxTokens",
         "settings.chat.contextLength", "settings.chat.topP", "settings.chat.maxToolAttempts",
     ]
@@ -391,7 +391,7 @@ struct ChatSettingsView: View {
 
     /// Writes only the Conversation-owned fields (the hotkey and Core Model
     /// belong to General). Blank numeric fields mean "use the default".
-    static func apply(_ form: SaveableFormState, to chat: ChatConfiguration) {
+    nonisolated static func apply(_ form: SaveableFormState, to chat: ChatConfiguration) {
         func trimmed(_ s: String) -> String { s.trimmingCharacters(in: .whitespacesAndNewlines) }
         chat.systemPrompt = form.systemPrompt
         chat.temperature = Float(trimmed(form.temperature)).map { max(0, min(2, $0)) }
