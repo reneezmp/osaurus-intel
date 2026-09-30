@@ -471,8 +471,6 @@ struct AppChatConfigStub: Sendable {
     var enableClipboardMonitoring = true
 }
 
-final class CapabilityLoadBuffer: @unchecked Sendable { static let shared = CapabilityLoadBuffer(); func loadInBackground() {}; func drain() -> [IntelTool] { [] } }
-
 /// Intel ChatConfigurationStore. Folds the passed instance into the shared
 /// singleton AND persists it to `~/.osaurus/config/chat.json` via
 /// `ChatConfiguration.persistToDisk()` — so Settings (core model, temperature,
@@ -767,11 +765,6 @@ struct SessionToolState: @unchecked Sendable {
     }
 }
 
-struct IntelSkillInfo: Sendable {
-    let id: UUID
-    let name: String
-}
-
 // `SkillsView` (un-body-swapped in M11 Phase 11.A.2) reads
 // `skillManager.skills`, `skillManager.isRefreshing`,
 // `skillManager.enabledCount`, and mutates via the full CRUD
@@ -783,10 +776,9 @@ struct IntelSkillInfo: Sendable {
 // `SkillStore` (NOT excluded on Intel — see
 // `Models/Agent/SkillStore.swift`).
 //
-// The legacy `IntelSkillInfo` overloads stay for the chat-side
-// callers (FloatingInputCard popup, etc.) that haven't been
-// migrated; the new methods use the real `Skill` type from
-// `Models/Agent/Skill.swift`. `@MainActor` matches upstream.
+// Chat-side lookups (`skill(for:)`, `buildFullInstructions`) use the real
+// `Skill` type too (docs/TOOL_DISCOVERY_INTEL.md). `@MainActor` matches
+// upstream.
 @MainActor
 final class SkillManager: ObservableObject, @unchecked Sendable {
     static let shared = SkillManager()
@@ -800,10 +792,22 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         Task { @MainActor in await refresh() }
     }
 
+    /// Refreshes run one after another: the launch refresh could otherwise
+    /// finish after a later one (e.g. right after `create`) and put back a
+    /// list read before the change. Each call returns once its own read —
+    /// started after every earlier one — has been published.
+    private var lastRefresh: Task<Void, Never>?
+
     func refresh() async {
-        isRefreshing = true
-        defer { isRefreshing = false }
-        skills = await SkillStore.loadAll()
+        let previous = lastRefresh
+        let task = Task { @MainActor in
+            await previous?.value
+            self.isRefreshing = true
+            self.skills = await SkillStore.loadAll()
+            self.isRefreshing = false
+        }
+        lastRefresh = task
+        await task.value
     }
 
     @discardableResult
@@ -964,8 +968,104 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
 
     // Legacy chat-side overloads (unchanged surface for
     // FloatingInputCard's slash popup).
-    func skill(for id: UUID) -> IntelSkillInfo? { nil }
-    func buildFullInstructions(for skill: IntelSkillInfo, agentId: Any? = nil) -> String? { nil }
+    /// Intel: real lookups (these returned nil, so a slash-selected skill and
+    /// skill loading never reached the model). Reads the refreshed list.
+    func skill(for id: UUID) -> Skill? { skills.first { $0.id == id } }
+
+    func skill(named name: String) -> Skill? {
+        skills.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+    }
+
+    // Upstream `SkillManager.buildFullInstructions` / `loadReferenceContents`.
+    func buildFullInstructions(
+        for skill: Skill,
+        referenceBudget: Int = .max
+    ) async -> String {
+        var sections: [String] = []
+
+        // A skill body may refer to bundled files with paths such as
+        // `scripts/main.py` or `references/schema.json`. The execution cwd is
+        // the selected workspace, not the skill directory, so the model needs
+        // this source-of-truth anchor to construct the correct absolute path.
+        let directoryURL = SkillStore.skillDirectory(for: skill).standardizedFileURL
+        var isDirectory: ObjCBool = false
+        if FileManager.default.fileExists(
+            atPath: directoryURL.path,
+            isDirectory: &isDirectory
+        ), isDirectory.boolValue {
+            sections.append(
+                "Skill directory: `\(directoryURL.path)`. "
+                    + "Resolve relative paths in this skill against that directory."
+            )
+        }
+
+        sections.append(skill.instructions)
+
+        if !skill.references.isEmpty {
+            let refs = await loadReferenceContents(for: skill, budget: referenceBudget)
+            if !refs.isEmpty {
+                sections.append("\n## Reference Materials\n\n\(refs)")
+            }
+        }
+
+        return sections.joined(separator: "\n")
+    }
+
+    private func loadReferenceContents(for skill: Skill, budget: Int = .max) async -> String {
+        let textExtensions: Set<String> = [
+            "md", "txt", "json", "yaml", "yml", "xml", "html", "css", "js", "ts",
+            "swift", "py", "rb", "go", "rs", "java", "kt", "c", "cpp", "h", "hpp",
+            "sql", "sh", "bash", "zsh", "toml", "ini", "cfg", "conf",
+        ]
+
+        var contents: [String] = []
+        var usedBudget = 0
+        var omittedNames: [String] = []
+        for file in skill.references {
+            let ext = (file.name as NSString).pathExtension.lowercased()
+            guard textExtensions.contains(ext) || ext.isEmpty else { continue }
+            guard file.size < 100_000 else {
+                contents.append("### \(file.name)\n*File too large (>\(formatSize(file.size)))*\n")
+                continue
+            }
+            // Once the budget is exhausted, keep scanning only to name what
+            // was left out — a silent drop would let the model assume the
+            // skill has no further reference material.
+            guard usedBudget < budget else {
+                omittedNames.append(file.name)
+                continue
+            }
+
+            do {
+                let data = try await SkillStore.readFile(from: skill, relativePath: file.relativePath)
+                if let text = String(data: data, encoding: .utf8) {
+                    if usedBudget + text.count > budget {
+                        omittedNames.append(file.name)
+                        continue
+                    }
+                    usedBudget += text.count
+                    contents.append("### \(file.name)\n\n```\n\(text)\n```\n")
+                }
+            } catch {
+                // Skip unreadable files
+            }
+        }
+        if !omittedNames.isEmpty {
+            contents.append(
+                "### Omitted references\n*\(omittedNames.count) reference file(s) omitted to keep "
+                    + "this load small: \(omittedNames.joined(separator: ", ")). Invoking the skill "
+                    + "with its slash command includes them in full.*\n"
+            )
+        }
+        return contents.joined(separator: "\n")
+    }
+
+    private func formatSize(_ bytes: Int64) -> String {
+        if bytes < 1024 { return "\(bytes) B" }
+        if bytes < 1024 * 1024 { return String(format: "%.1f KB", Double(bytes) / 1024) }
+        return String(format: "%.1f MB", Double(bytes) / (1024 * 1024))
+    }
+
 }
 
 // `SlashCommandsView` (un-body-swapped in M11 Phase 11.A.1) and
@@ -1013,7 +1113,7 @@ final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
     func filtered(query: String) -> [SlashCommand] {
         var seen = Set<String>()
         var all: [SlashCommand] = []
-        for cmd in SlashCommand.builtIns + customCommands {
+        for cmd in SlashCommand.builtIns + customCommands + skillCommands() {
             let key = cmd.name.lowercased()
             guard !seen.contains(key) else { continue }
             seen.insert(key)
@@ -1022,6 +1122,31 @@ final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
         let q = query.lowercased()
         guard !q.isEmpty else { return all }
         return all.filter { $0.name.lowercased().hasPrefix(q) }
+    }
+
+    /// Upstream `allCommands`' skill entries: every installed skill as a
+    /// `/slug` command (user skills, then built-ins, then plugin skills), so
+    /// a skill can be applied to one message (docs/TOOL_DISCOVERY_INTEL.md).
+    private func skillCommands() -> [SlashCommand] {
+        let precedenceOrdered = SkillManager.shared.skills.sorted { a, b in
+            func tier(_ s: Skill) -> Int {
+                if s.isFromPlugin { return 2 }
+                return s.isBuiltIn ? 1 : 0
+            }
+            if tier(a) != tier(b) { return tier(a) < tier(b) }
+            return a.id.uuidString < b.id.uuidString
+        }
+        return precedenceOrdered.compactMap { skill in
+            let slug = skill.name
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "-")
+                .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+            guard !slug.isEmpty else { return nil }
+            let desc = skill.description.isEmpty ? "Apply \(skill.name) skill" : skill.description
+            return SlashCommand(
+                id: skill.id, name: slug, description: desc, icon: "wand.and.stars", kind: .skill,
+                isBuiltIn: false)
+        }
     }
 
     @discardableResult
@@ -1890,7 +2015,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         // Surface the registered tools, honoring the agent's capability picker
         // (M12 follow-up): in Manual mode, restrict to the agent's enabled
         // allowlist; in Auto mode (or un-seeded), send everything registered.
-        let tools: [Tool]
+        var tools: [Tool]
         if toolsDisabled || agentToolsDisabled {
             tools = []
         } else {
@@ -1975,6 +2100,37 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // is excluded on the very next turn in both Auto and Manual
                 // modes. Auto controls discovery strategy, not authorization.
                 tools = allSpecs
+            }
+        }
+        // Automatic tool discovery (upstream "Design C",
+        // docs/TOOL_DISCOVERY_INTEL.md). In Auto mode a custom agent's
+        // plugin/MCP tools stay out of the schema until `capabilities` loads
+        // them (this session's loads arrive as `additionalToolNames`); the
+        // prompt lists what can be loaded. Manual mode sends the enabled set.
+        tools.removeAll { $0.function.name == CapabilitiesTool.toolName }
+        if !tools.isEmpty, id != Agent.defaultId {
+            let toolMode = await MainActor.run { AgentManager.shared.effectiveToolSelectionMode(for: id) }
+            if toolMode == .auto {
+                let catalog = await MainActor.run { CapabilityCatalog.build(agentId: id) }
+                let loadable = Set(catalog.tools.map(\.name))
+                let loaded = Set(additionalToolNames).intersection(loadable)
+                // `isLoadableDynamicTool` reads the folder tool set, which is
+                // main-actor state.
+                let offeredNames = tools.map(\.function.name)
+                let dynamicNames = await MainActor.run {
+                    Set(offeredNames.filter { ToolRegistry.shared.isLoadableDynamicTool($0) })
+                }
+                tools.removeAll { dynamicNames.contains($0.function.name) && !loaded.contains($0.function.name) }
+                let present = Set(tools.map(\.function.name))
+                tools += ToolRegistry.shared.openAISpecs(named: loaded.sorted().filter { !present.contains($0) })
+                if let manifest = CapabilityManifest.render(catalog) {
+                    tools += ToolRegistry.shared.openAISpecs(named: [CapabilitiesTool.toolName])
+                    let block = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
+                    prompt += block
+                    sections.append(
+                        PromptSection(
+                            id: "enabledManifest", label: "Enabled Capabilities", text: block, tint: .blue))
+                }
             }
         }
         // Append plugin-declared `instructions` for any plugin whose tools are

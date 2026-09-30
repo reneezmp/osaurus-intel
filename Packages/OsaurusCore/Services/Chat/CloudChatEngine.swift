@@ -635,6 +635,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 var insightToolCalls: [ToolCallLog] = []
                 var didLogInference = false
 
+                // Automatic tool discovery (docs/TOOL_DISCOVERY_INTEL.md):
+                // `capabilities` loads tools mid-run; they join the request
+                // (and so the offered-tool check) from the next round on.
+                var activeTools: [Tool]? = request.tools
+                var liveToolSpecs = toolSpecs
+                let loadBuffer = CapabilityLoadBuffer()
+
                 func captureResponseText(_ emission: String) {
                     guard !StreamingToolHint.isSentinel(emission),
                         StreamingReasoningHint.decode(emission) == nil,
@@ -688,8 +695,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             "messages": wireMessages,
                             "stream": true,
                         ]
-                        if let toolSpecs {
-                            body["tools"] = toolSpecs
+                        if let liveToolSpecs {
+                            body["tools"] = liveToolSpecs
                             body["tool_choice"] = "auto"
                         }
                         if endpoint.isCodex {
@@ -741,7 +748,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             try await OsaurusRouterAuthSigner().sign(
                                 request: &urlRequest, body: urlRequest.httpBody)
                         }
-                        NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(toolSpecs?.count ?? 0)")
+                        NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(liveToolSpecs?.count ?? 0)")
 
                         let (asyncBytes, response) = try await self.session.bytes(for: urlRequest)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -766,7 +773,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var announcedNames: Set<Int> = []
 
                         if endpoint.isCodex {
-                            let allowedTools = Set(request.tools?.map { $0.function.name } ?? [])
+                            let allowedTools = Set(activeTools?.map { $0.function.name } ?? [])
                             var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: allowedTools)
                             var buffer = Data()
                             for try await byte in asyncBytes {
@@ -807,10 +814,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 try Task.checkCancellation()
                                 let call = IntelCodexResponsesToolCall(
                                     callID: rawCall.callID,
-                                    name: Self.resolvedOfferedToolName(rawCall.name, offered: request.tools),
+                                    name: Self.resolvedOfferedToolName(rawCall.name, offered: activeTools),
                                     arguments: rawCall.arguments
                                 )
-                                guard request.tools?.contains(where: { $0.function.name == call.name }) == true else {
+                                guard activeTools?.contains(where: { $0.function.name == call.name }) == true else {
                                     continuation.yield(
                                         StreamingToolHint.encodeDone(
                                             callId: call.callID,
@@ -833,7 +840,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         approved = true
                                         break
                                     }
-                                    let description = request.tools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
+                                    let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
                                     approved = await ToolPermissionPromptService.requestApproval(
                                         toolName: call.name,
                                         description: description,
@@ -853,10 +860,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         result = try await ChatExecutionContext.$currentToolCallId.withValue(
                                             call.callID
                                         ) {
-                                            try await ToolRegistry.shared.execute(
-                                                name: call.name,
-                                                argumentsJSON: call.arguments
-                                            )
+                                            try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                                try await ToolRegistry.shared.execute(
+                                                    name: call.name,
+                                                    argumentsJSON: call.arguments
+                                                )
+                                            }
                                         }
                                     } catch {
                                         result = ToolEnvelope.fromError(error, tool: call.name)
@@ -870,6 +879,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         result: result
                                     )
                                 )
+                                if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
+                                    activeTools = adopted
+                                    liveToolSpecs = Self.encodeTools(adopted)
+                                }
                                 insightToolCalls.append(
                                     ToolCallLog(
                                         name: call.name,
@@ -994,7 +1007,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // continuation context.
                         let orderedCalls = partials.sorted { $0.key < $1.key }.map { entry in
                             var call = entry.value
-                            call.name = Self.resolvedOfferedToolName(call.name, offered: request.tools)
+                            call.name = Self.resolvedOfferedToolName(call.name, offered: activeTools)
                             return call
                         }
                         wireMessages.append([
@@ -1015,7 +1028,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
-                            guard request.tools?.contains(where: { $0.function.name == call.name }) == true else {
+                            guard activeTools?.contains(where: { $0.function.name == call.name }) == true else {
                                 // A stale provider-side tool choice is still a
                                 // security rejection, but the card already
                                 // exists because its name/arguments streamed
@@ -1056,7 +1069,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 // ToolPermissionPromptService) — Allow / Deny / Always Allow.
                                 // "Always Allow" persists the policy internally.
                                 let toolDescription =
-                                    request.tools?
+                                    activeTools?
                                     .first(where: { $0.function.name == call.name })?
                                     .function.description ?? ""
                                 approved = await ToolPermissionPromptService.requestApproval(
@@ -1076,10 +1089,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
                                 do {
                                     result = try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
-                                        try await ToolRegistry.shared.execute(
-                                            name: call.name,
-                                            argumentsJSON: call.arguments
-                                        )
+                                        try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                            try await ToolRegistry.shared.execute(
+                                                name: call.name,
+                                                argumentsJSON: call.arguments
+                                            )
+                                        }
                                     }
                                     NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                                 } catch {
@@ -1095,6 +1110,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     result: result
                                 )
                             )
+                            if let adopted = await Self.adoptingLoadedTools(from: loadBuffer, into: activeTools) {
+                                activeTools = adopted
+                                liveToolSpecs = Self.encodeTools(adopted)
+                            }
                             insightToolCalls.append(
                                 ToolCallLog(
                                     name: call.name,
@@ -1406,6 +1425,22 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if provider.providerType == .openaiLegacy, isOpenRouterHost(provider.host) {
             body["session_id"] = sessionId
         }
+    }
+
+    /// The request's tools plus anything `capabilities` loaded during the
+    /// last call, or nil when nothing was loaded
+    /// (docs/TOOL_DISCOVERY_INTEL.md).
+    nonisolated static func adoptingLoadedTools(
+        from buffer: CapabilityLoadBuffer, into tools: [Tool]?
+    ) async -> [Tool]? {
+        let names = await buffer.drain()
+        guard !names.isEmpty else { return nil }
+        var current = tools ?? []
+        for spec in ToolRegistry.shared.openAISpecs(named: names)
+        where !current.contains(where: { $0.function.name == spec.function.name }) {
+            current.append(spec)
+        }
+        return current
     }
 
     nonisolated static func unofferedToolResult(_ name: String) -> String {

@@ -3144,7 +3144,10 @@ final class ChatSession: ObservableObject {
                                 inv.toolName == "capabilities_load"
                                     || inv.toolName == "sandbox_plugin_register"
                             {
-                                let newTools = await CapabilityLoadBuffer.shared.drain()
+                                // Intel: this upstream intercept path never runs (the
+                                // engine executes tools itself); `capabilities` loads are
+                                // adopted inside `CloudChatEngine` (docs/TOOL_DISCOVERY_INTEL.md).
+                                let newTools: [Tool] = []
                                 for tool in newTools {
                                     if let existing = toolSpecs.firstIndex(where: {
                                         $0.function.name == tool.function.name

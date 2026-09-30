@@ -1071,6 +1071,10 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         let folderPrompt = PromptWorkingFolderTool()
         toolsByName[folderPrompt.name] = folderPrompt
         builtInToolNames.insert(folderPrompt.name)
+        // Automatic tool discovery (docs/TOOL_DISCOVERY_INTEL.md).
+        let capabilities = CapabilitiesTool()
+        toolsByName[capabilities.name] = capabilities
+        builtInToolNames.insert(capabilities.name)
         registerIntelOrchestratorTools()
     }
 
@@ -1234,6 +1238,24 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     func isMCPTool(_ name: String) -> Bool { mcpToolNames.contains(name) }
+
+    /// Plugin, MCP and other non-built-in tools: in Auto mode these are
+    /// loaded on demand through `capabilities` instead of being sent up
+    /// front (docs/TOOL_DISCOVERY_INTEL.md). Built-ins, folder tools and the
+    /// Orchestrator's tools never are. Main actor: reads the folder tools.
+    @MainActor
+    func isLoadableDynamicTool(_ name: String) -> Bool {
+        toolsByName[name] != nil
+            && !builtInToolNames.contains(name)
+            && !runtimeManagedToolNames.contains(name)
+            && !Self.orchestratorOnlyToolNames.contains(name)
+    }
+
+    /// Specs for the named registered tools (loaded capabilities), skipping
+    /// names that are no longer registered.
+    func openAISpecs(named names: [String]) -> [Tool] {
+        names.compactMap { toolsByName[$0]?.asOpenAITool() }
+    }
 
     /// Native x86_64 plugin tools (this fork). True for tools registered via
     /// `registerPluginTool` so the picker buckets them under their plugin.
@@ -1418,6 +1440,20 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 return ToolEnvelope.failure(
                     kind: .unavailable,
                     message: "The Database ability is off for this agent.",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if name == CapabilitiesTool.toolName {
+            // Discovery belongs to custom agents in Auto mode (the composer
+            // only offers it there); the load itself is authorised against
+            // the agent's catalog inside the tool.
+            let mode = AgentManager.shared.effectiveToolSelectionMode(for: agentId)
+            guard agentId != Agent.defaultId, mode == .auto else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Capability discovery is only available to agents in Auto tool mode.",
                     tool: name
                 )
             }

@@ -14,9 +14,9 @@
 //  The picker is the single source of truth for what reaches the model. A top-level
 //  "Auto-discover" toggle decides whether the model sees the entire enabled set every
 //  turn (Manual) or a small always-loaded hot set that it grows on demand via
-//  `capabilities_discover` / `capabilities_load` (Auto). Either way, the per-item
-//  Enabled toggles in the table are honored at runtime — see `CapabilitySearch` and
-//  `SystemPromptComposer.compose` for the wiring.
+//  the `capabilities` gateway (Auto). Either way, the per-item Enabled toggles in
+//  the table are honored at runtime — see `Tools/CapabilityTools.swift` and the
+//  Intel `SystemPromptComposer.composeChatContext` (docs/TOOL_DISCOVERY_INTEL.md).
 //
 
 import SwiftUI

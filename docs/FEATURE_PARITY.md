@@ -138,6 +138,10 @@ upstream checkpoint. The existing build 53 acceptance gates above remain open.
   auto-speak, per-agent voice and the `speak` tool, on Apple Speech and the
   macOS system voices (plus upstream's OpenAI-compatible TTS server). Awaiting
   Rosy.
+- **Automatic tool discovery shipped 2026-09-30**
+  ([`TOOL_DISCOVERY_INTEL.md`](TOOL_DISCOVERY_INTEL.md)): Auto mode loads
+  plugin/MCP tools and skills on demand through `capabilities`; skills now reach
+  the model (slash popup and discovery). Awaiting Rosy.
 
 ### Intentionally omitted
 

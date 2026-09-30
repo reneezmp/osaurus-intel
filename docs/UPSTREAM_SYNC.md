@@ -2238,3 +2238,23 @@ calling a sync complete.
   the `speak` checks in `AgentLoopToolsTests`; Intel `IntelVoiceTests`.
 - `LiveVoiceAudioInputRegistry` (direct audio for local omni models) stays
   excluded and is now classified `INC-mlx` in `classify_gap.py`.
+
+### Automatic tool discovery (`W-tool-discovery`) — 2026-09-30
+
+- Manual: [`TOOL_DISCOVERY_INTEL.md`](TOOL_DISCOVERY_INTEL.md). Auto mode now
+  follows upstream "Design C": built-ins + the `capabilities` gateway + an
+  Enabled capabilities manifest; plugin/MCP tools and skills load on demand.
+  The capability picker had promised this all along; Intel sent every tool.
+- Intel-specific: live in-memory catalog and ranking (BM25 + the local static
+  embedder when on disk) instead of upstream's SQLite/VecturaKit index;
+  `CloudChatEngine` adopts loaded tools into the request for the next round
+  (per-run `CapabilityLoadBuffer`), so the offered-tool check admits them.
+  Loads are authorised against the agent's allowlist.
+- **Found and fixed:** skills never reached the model on Intel
+  (`SkillManager.skill(for:)` / `buildFullInstructions` were nil stubs, the `/`
+  popup listed no skills), and `SkillManager.refresh()` could publish a stale
+  list when two refreshes overlapped (now serialised).
+- **Test-safety note:** a live-data hit on `~/.osaurus/PluginSpecs` during a
+  test run came from the installed upstream `osaurus.app` (4-hour plugin
+  catalog refresh), not a test — recorded in
+  [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).

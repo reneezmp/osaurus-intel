@@ -732,3 +732,26 @@ Speaking:
       plays.
 - [ ] Quit Osaurus while something is playing or the mic is on: it quits
       cleanly and the mic indicator goes off.
+
+## Automatic tool discovery
+
+Manual: [`TOOL_DISCOVERY_INTEL.md`](TOOL_DISCOVERY_INTEL.md). Needs at least
+one plugin (osaurus-tools) or MCP provider connected. All **(paid)**.
+
+- [ ] Agent → Tools: **Auto-discover relevant capabilities** on. Ask something
+      a plugin/MCP tool answers (e.g. "what's the weather in Lisbon?" with a
+      weather tool): the chat shows a `capabilities` call, then the real tool
+      call, then the answer — in one turn.
+- [ ] Ask "what tools can you load?": it answers from its Enabled capabilities
+      list (or a bare `capabilities` call) without inventing names.
+- [ ] Next message in the same chat uses that tool again without another
+      `capabilities` call (it stayed loaded).
+- [ ] Turn a tool off in that agent's Tools list, then ask for it in a new
+      chat: it is not loaded, and the agent says it isn't enabled.
+- [ ] Switch the agent to Manual (Auto-discover off): the enabled tools are
+      used directly, no `capabilities` call.
+- [ ] The Orchestrator (built-in agent) behaves as before.
+- [ ] Skills: Skills tab → create a skill ("Always answer in haiku"). In chat
+      type `/` — the skill is listed; pick it and send: the reply follows it.
+      With Auto on, ask for something the skill covers: the agent may load
+      `skill/<name>` and follow it.

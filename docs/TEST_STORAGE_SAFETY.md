@@ -104,6 +104,16 @@ After the run:
 - Rebuild only after the storage checks pass, so the delivered app and the test
   evidence refer to the same commit.
 
+**Known non-test writer (2026-09-30):** on the dev Mac the installed
+`/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`
+and, while it runs, re-downloads its plugin catalog into
+`~/.osaurus/PluginSpecs/` every 4 hours (upstream `PluginRepositoryService`),
+plus writes `.storage-maintenance.json`. A `find ~/.osaurus -newer <marker>`
+hit on those paths is that app, not a test: confirm with `ps -o lstart= -p
+$(pgrep -f /Applications/osaurus.app)` and the test log (no PluginSpecs
+mention). Intel code under test writes only to the test root; outside tests
+its live root is `~/.osaurus-intel`. Any other hit is still a failed run.
+
 ## 2026-09-14 automation-test residue
 
 The first `ExecutionContextFolderActivationTests` implementation constructed a
