@@ -2345,12 +2345,18 @@ calling a sync complete.
   "Apple Silicon only" placeholder. Upstream's `SlashCommandEditorSheet.swift`
   is now compiled. Themes and cloud-provider sheet edits in #2950 wait for
   `W-ui-misc` / `W-providers-ux`.
-- **Flaky test seen:** `LiveExecRegistryTests.entriesPublisherEmitsOnRegister`
-  (upstream test; 50 ms sleep while unordered `Task`s append snapshots) failed
-  once in a full run and passed 3/3 alone and on the rerun. Not caused by
-  Settings work; rerun before investigating. Seen again 2026-10-01 during
-  the file history port, same pattern (passed 3/3 alone and on the rerun),
-  and once more in the cross-selection full run (green on the rerun).
+- **Flaky test seen (fixed 2026-10-01):**
+  `LiveExecRegistryTests.entriesPublisherEmitsOnRegister` (upstream test; 50 ms
+  sleep while unordered `Task`s append snapshots) failed once in a full run
+  and passed 3/3 alone and on the rerun. Not caused by Settings work. Seen
+  again 2026-10-01 during the file history port and once more in the
+  cross-selection full run (green on both reruns). **Fixed** by taking
+  upstream's version of the test from #1480 (`8c40df602`, "Stabilize
+  CI-sensitive tests", never ported before): instead of one sleep and
+  `history.last`, it polls the collected snapshots every 10 ms for up to 2 s
+  until one holds both `live-1` and `live-2`, then checks that snapshot. The
+  file now matches upstream main exactly. The rest of #1480 (agent loop,
+  model manager, xAI OAuth and skill search tests) was not checked here.
 
 ### Settings redesign step 3 + tool catalog (`W-settings-ux-2950`, `W-tool-catalog-ui`) — 2026-09-30
 
