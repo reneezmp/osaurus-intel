@@ -415,7 +415,12 @@ struct ChatContentView: View {
                             },
                             onWillRehydrate: { [weak observedSession] in
                                 observedSession?.promoteComposerDraft()
-                            }
+                            },
+                            inputHistoryProvider: { [weak observedSession] in
+                                guard let observedSession else { return [] }
+                                return ChatInputHistory.entries(from: observedSession.turns)
+                            },
+                            inputHistoryKey: observedSession.sessionId
                         )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)

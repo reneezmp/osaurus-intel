@@ -1260,3 +1260,18 @@ Manual: [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 - [ ] Inspect response on a reply whose chat also generated a title still
       opens the **reply**, not the title row.
 
+
+## Chat UX batch (`W-chat-ux`)
+
+Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
+
+- [ ] **(paid)** After sending two messages, press ↑ in an empty composer:
+      the last message comes back; ↑ again gives the one before; ↓ walks
+      forward and finally restores what you had typed. In a multi-line
+      draft, ↑ moves the caret normally until the first line.
+- [ ] Type `@` with a work folder set: its files and folders list (folders
+      first). Arrow + Return on a folder drills in (`@…/`); on a file it
+      inserts the path. Escape removes just the `@…` token. `@~/` browses
+      home. Escape with the menu open doesn't close the window.
+- [ ] A Chinese/Japanese input method in a search field (e.g. Insights
+      search): the placeholder disappears as soon as composition starts.

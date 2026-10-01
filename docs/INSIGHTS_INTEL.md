@@ -77,7 +77,6 @@ Work is in stages:
 | `onKeyPress` / `focusEffectDisabled` list navigation | `InsightsKeyMonitor` (window-scoped local key monitor, ignored while a text field edits) | macOS 14 APIs |
 | Two-value `onChange` (3) | Single-value | macOS 13 |
 | `.toggleStyle(.checkbox)`, `.borderedProminent` in the export sheet | `ThemedCheckboxToggleStyle`, `ThemedBorderedButtonStyle`; the sheet also gets `.intelControlRendering` | Ventura control sweep (UPSTREAM_SYNC) |
-| `SearchField(fillsAvailableWidth:)` with `IMEAwareTextField` | Only `fillsAvailableWidth` added | IME field is a separate upstream change |
 | `MCPActivityLogger` scrubs `sandbox_secret_set` via `SecretArgumentScrubber` | Arguments pass through unchanged (still `redactCredentials`) | No sandbox secrets on Intel |
 | `SearchActivityLogger` records `structuredFormat` | Line dropped | Intel's `SearchReadability` predates #2656 |
 | `ChannelActivityLogger` | Excluded in `Package.swift` | Lands with `W-channels` |
