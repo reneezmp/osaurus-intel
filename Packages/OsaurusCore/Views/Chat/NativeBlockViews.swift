@@ -762,7 +762,7 @@ final class NativeCodeBlockView: NSView {
 
     private let headerView = NSView()
     private let langLabel = NSTextField(labelWithString: L("code"))
-    private let copyButton = NSButton()
+    private let copyButton = PointingHandButton()
     private var codeView: CodeNSTextView?
     private var codeHeightConstraint: NSLayoutConstraint?
 
@@ -993,14 +993,46 @@ final class NativeCodeBlockView: NSView {
     @objc private func copyCode() {
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(lastCode, forType: .string)
+        ToastManager.shared.success(L("Code copied to clipboard"))
         copyButton.image = SymbolImageCache.image("checkmark", accessibilityDescription: nil)
         copyButton.contentTintColor = .systemGreen
         copyResetTask?.cancel()
-        copyResetTask = Task { @MainActor in
-            try? await Task.sleep(nanoseconds: 2_000_000_000)
+        copyResetTask = Task { @MainActor [weak self] in
+            // A repeat tap cancels this task. `try?` alone would swallow the
+            // CancellationError and run the reset at once, wiping the new
+            // checkmark, so bail on cancellation instead.
+            guard (try? await Task.sleep(nanoseconds: 2_000_000_000)) != nil,
+                let self
+            else { return }
             self.copyButton.image = SymbolImageCache.image("doc.on.doc", accessibilityDescription: nil)
             self.copyButton.contentTintColor = nil
         }
+    }
+}
+
+// MARK: - PointingHandButton
+
+/// Borderless button that shows the pointing-hand cursor on hover. Uses a
+/// `.cursorUpdate` tracking area rather than cursor rects, which don't
+/// survive layer-backed table-cell recycling in the message list.
+private final class PointingHandButton: NSButton {
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let cursorTrackingArea { removeTrackingArea(cursorTrackingArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
+    }
+
+    override func cursorUpdate(with event: NSEvent) {
+        NSCursor.pointingHand.set()
     }
 }
 

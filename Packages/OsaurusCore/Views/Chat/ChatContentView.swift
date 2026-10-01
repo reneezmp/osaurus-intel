@@ -221,9 +221,12 @@ struct ChatContentView: View {
         )
     }
 
-    private func publishRailGeometry(sidebarAutoHidden: Bool, inspectorWidth: CGFloat) {
+    private func publishRailGeometry(sidebarAutoHidden: Bool, sidebarWidth: CGFloat, inspectorWidth: CGFloat) {
         if windowState.isSidebarAutoHidden != sidebarAutoHidden {
             windowState.isSidebarAutoHidden = sidebarAutoHidden
+        }
+        if windowState.sidebarColumnWidth != sidebarWidth {
+            windowState.sidebarColumnWidth = sidebarWidth
         }
         if windowState.inspectorColumnWidth != inspectorWidth {
             windowState.inspectorColumnWidth = inspectorWidth
@@ -483,20 +486,34 @@ struct ChatContentView: View {
             // and tab strip describe the sidebar actually on screen.
             // Intel: single-value `onChange` plus `onAppear` (macOS 13).
             .onAppear {
-                publishRailGeometry(sidebarAutoHidden: sidebarAutoHidden, inspectorWidth: inspectorWidth)
+                publishRailGeometry(
+                    sidebarAutoHidden: sidebarAutoHidden, sidebarWidth: sidebarWidth, inspectorWidth: inspectorWidth)
             }
             .onChange(of: sidebarAutoHidden) { hidden in
-                publishRailGeometry(sidebarAutoHidden: hidden, inspectorWidth: inspectorWidth)
+                publishRailGeometry(
+                    sidebarAutoHidden: hidden, sidebarWidth: sidebarWidth, inspectorWidth: inspectorWidth)
             }
-            // Same for the right rail's width: the strip insets its trailing
-            // edge by it so the tabs end where the chat column ends (#2910).
+            // The rails' on-screen widths: the strip insets its leading and
+            // trailing edges by them so the tabs span exactly the chat column
+            // (#2910, #2963). `sidebarWidth` is already 0 while hidden or
+            // stepped aside and live during a resize drag, so the strip never
+            // lags the rail.
+            .onChange(of: sidebarWidth) { width in
+                publishRailGeometry(
+                    sidebarAutoHidden: sidebarAutoHidden, sidebarWidth: width, inspectorWidth: inspectorWidth)
+            }
             .onChange(of: inspectorWidth) { width in
-                publishRailGeometry(sidebarAutoHidden: sidebarAutoHidden, inspectorWidth: width)
+                publishRailGeometry(
+                    sidebarAutoHidden: sidebarAutoHidden, sidebarWidth: sidebarWidth, inspectorWidth: width)
             }
-            .onDisappear {
-                windowState.isSidebarAutoHidden = false
-                windowState.inspectorColumnWidth = 0
-            }
+            // Deliberately NO `.onDisappear` reset of these published values
+            // (upstream #2963). The window root remounts `ChatView` (`.id` on
+            // the session) for every tab switch / new tab, and SwiftUI runs
+            // the incoming instance's publish BEFORE the outgoing instance's
+            // `onDisappear`. A reset there found the value already equal, so
+            // the incoming publish was skipped and the reset then zeroed it:
+            // the tabs ran under the open inspector until its width next
+            // changed. A window that closes takes its state with it.
         }
         .frame(
             minWidth: windowState.minimumContentSize.width,

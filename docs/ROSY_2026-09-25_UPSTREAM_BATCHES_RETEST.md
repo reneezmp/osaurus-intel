@@ -1169,3 +1169,23 @@ table.
       from the first window is copied.
 - [ ] Ventura: the highlight is visible in light and dark themes and in a
       custom theme; text stays readable on top of it.
+
+## Upstream batch 2026-10-01
+
+Manual: [`UPSTREAM_AUDIT_2026-10-01.md`](UPSTREAM_AUDIT_2026-10-01.md).
+
+- [ ] **(paid)** Under a finished reply there is no stats line any more.
+      Click "…" ▸ **Inspect response**: a submenu lists Worked for, TTFT,
+      tok/s and tokens, then "Open request and response log" (opens
+      Insights).
+- [ ] Code block: click Copy twice quickly — the checkmark stays for about
+      two seconds after the second click; a "Code copied to clipboard" toast
+      appears; the cursor is a pointing hand over the button.
+- [ ] System Settings ▸ Appearance ▸ Show scroll bars: **Always**. In a long
+      chat, copy a code block and scroll: the messages don't shift sideways
+      or rewrap. Set it back afterwards.
+- [ ] Drag the sidebar's edge wider and narrower: the tabs follow the edge
+      during the drag (not only on release). Open the right panel, then open
+      a new tab (⌘T): the tabs still stop at the panel's edge.
+- [ ] **(paid)** An agent with Notes on: "list my Notes folders" and "make a
+      note in folder X" work (no −1708 error).

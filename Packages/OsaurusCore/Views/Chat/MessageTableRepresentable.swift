@@ -97,6 +97,15 @@ final class CenteredMessageScrollView: NSScrollView {
         }
     }
 
+    /// Content width the last `sizeLastColumnToFit()` ran at. `tile()` fires
+    /// on every scroll/layout pass, and `sizeLastColumnToFit()` makes
+    /// NSTableView re-derive its frame via `_totalHeightOfTableView` — a
+    /// `heightOfRow` delegate walk over every row. On long conversations
+    /// that walk per tile pass adds up to visible main-thread hangs, so the
+    /// column fit only reruns when the effective width actually changes.
+    /// (Upstream; arrived on Intel with #2960.)
+    private var lastFittedContentWidth: CGFloat = -1
+
     override func tile() {
         let hInset = max(0, (bounds.width - maxContentWidth) / 2)
         if contentInsets.left != hInset || contentInsets.right != hInset {
@@ -115,8 +124,23 @@ final class CenteredMessageScrollView: NSScrollView {
             f.origin.x = bounds.width - f.width
             vs.frame = f
         }
-        (documentView as? NSTableView)?.sizeLastColumnToFit()
+        let contentWidth = contentSize.width
+        if contentWidth != lastFittedContentWidth {
+            lastFittedContentWidth = contentWidth
+            let tableView = documentView as? NSTableView
+            tableView?.sizeLastColumnToFit()
+            // Report the fitted column width, not `contentSize`: the latter
+            // ignores the centering insets and would overshoot the column.
+            if let columnWidth = tableView?.tableColumns.first?.width {
+                onContentWidthChanged?(columnWidth)
+            }
+        }
     }
+
+    /// Fired from `tile()` with the column width after it is refitted. This
+    /// is the width cells actually get, which is narrower than SwiftUI's
+    /// width whenever a legacy (always-visible) scroller takes up room.
+    var onContentWidthChanged: ((CGFloat) -> Void)?
 
     /// Fired before a wheel / trackpad scroll is applied, so programmatic
     /// position holds (restore, bottom re-pin) can stand down for the user.
@@ -196,6 +220,9 @@ struct MessageTableRepresentable: NSViewRepresentable {
         )
         coordinator.setupHoverTracking(on: tableView)
         scrollView.onUserScroll = { [weak coordinator] in coordinator?.userDidScroll() }
+        scrollView.onContentWidthChanged = { [weak coordinator] width in
+            coordinator?.tiledContentWidthDidChange(width)
+        }
 
         // sync session store into coordinator's expand cache for the initial load
         coordinator.expandedIds = expandedBlocksStore.expandedIds
@@ -262,7 +289,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
         }
 
         let rctx = renderingContext(for: coordinator)
-        coordinator.lastSwiftUIWidth = rctx.width
+        coordinator.lastSwiftUIWidth = max(100, width)
         coordinator.applyBlocks(
             blocks,
             groupHeaderMap: groupHeaderMap,
@@ -304,7 +331,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
 
     private func renderingContext(for coordinator: Coordinator) -> CellRenderingContext {
         CellRenderingContext(
-            width: max(100, width),
+            width: coordinator.resolvedContentWidth(swiftUIWidth: max(100, width)),
             agentName: agentName,
             agentAvatar: agentAvatar,
             agentCustomAvatarPath: agentCustomAvatarPath,
@@ -426,6 +453,18 @@ extension MessageTableRepresentable {
         /// Width last provided by SwiftUI (effectiveContentWidth, already clamped to maxContentWidth).
         /// Used by the frame-change debounce to avoid reading the clip view before tile() has run.
         var lastSwiftUIWidth: CGFloat = 100
+        /// Metrics per assistant turn for the Inspect response menu (#2959).
+        private var responseStatsByTurn: [UUID: String] = [:]
+        /// Content width from the scroll view's last `tile()`, 0 until the
+        /// first real layout. Cells must render at this width, not SwiftUI's:
+        /// a legacy scroller makes the column narrower than SwiftUI's width,
+        /// and any later SwiftUI update would otherwise re-render every cell
+        /// wider than its column (upstream #2960).
+        private var tiledContentWidth: CGFloat = 0
+
+        func resolvedContentWidth(swiftUIWidth: CGFloat) -> CGFloat {
+            tiledContentWidth > 100 ? tiledContentWidth : swiftUIWidth
+        }
         /// Clip-view width the table column was last fitted to; gates
         /// `sizeLastColumnToFit` in `updateNSView` to real width changes.
         var lastFitColumnClipWidth: CGFloat = -1
@@ -659,20 +698,31 @@ extension MessageTableRepresentable {
                 return
             }
 
-            // only reconfigure after the frame stops changing
-            // to avoid expensive per-frame work
+            scheduleWidthReconfigure()
+        }
+
+        /// `tile()` laid the column out at a new width (window resize, or a
+        /// legacy scroller appearing/disappearing). Reconfigure the cells
+        /// only if they were rendered for a different width, so overlay
+        /// scrollers (where the two always agree) keep the no-rewrap mount.
+        func tiledContentWidthDidChange(_ width: CGFloat) {
+            guard width > 100 else { return }
+            tiledContentWidth = width
+            guard abs(ctx.width - width) > 1.0 else { return }
+            scheduleWidthReconfigure()
+        }
+
+        /// Reconfigure every cell for the current content width once the
+        /// width stops changing, to avoid expensive per-frame work.
+        private func scheduleWidthReconfigure() {
             frameDebounceWork?.cancel()
             let work = DispatchWorkItem { [weak self] in
                 guard let self, let tableView else { return }
-                // use SwiftUI's pre-computed effectiveContentWidth (already clamped to
-                // maxContentWidth). Reading contentView.bounds.width here is unreliable
-                // because tile() may not have applied centering insets yet at this point.
-                let contentWidth = self.lastSwiftUIWidth
+                // By now tile() has run, so prefer its content width (which
+                // accounts for a legacy scroller) over SwiftUI's.
+                let contentWidth = self.resolvedContentWidth(swiftUIWidth: self.lastSwiftUIWidth)
                 self.ctx.width = contentWidth
                 self.heightCache.removeAll()
-                // set column width explicitly to match SwiftUI's effective content width
-                // (tile() may not have updated clip view insets yet, so sizeLastColumnToFit
-                // could give a stale value).
                 if let col = tableView.tableColumns.first {
                     col.width = contentWidth
                 }
@@ -836,6 +886,26 @@ extension MessageTableRepresentable {
             lastAssistantTurnId: UUID?,
             autoScrollEnabled: Bool
         ) {
+            // Keep the measured values for Inspect response (upstream #2959),
+            // including restored chats whose request log has expired. Refresh
+            // before the no-change path: final statistics can arrive without
+            // another text delta.
+            responseStatsByTurn.removeAll(keepingCapacity: true)
+            for block in blocks {
+                if case let .generationStats(ttft, rate, count, unclosed, total) = block.kind {
+                    responseStatsByTurn[block.turnId] = NativeStatsView.statsText(
+                        ttft: ttft, tokensPerSecond: rate, tokenCount: count,
+                        unclosedReasoning: unclosed, totalDuration: total
+                    )
+                }
+            }
+            // Only an incomplete-response warning needs a visible footer row.
+            // The original blocks and persisted generation measurements remain
+            // unchanged; this filters the table's presentation only.
+            let blocks = blocks.filter { block in
+                if case let .generationStats(_, _, _, unclosed, _) = block.kind { return unclosed }
+                return true
+            }
             let widthChanged = abs(ctx.width - context.width) > 1.0
             let expandedIdsChanged = context.expandedIds != ctx.expandedIds
             let previousEditingTurnId = ctx.editingTurnId
@@ -1221,6 +1291,7 @@ extension MessageTableRepresentable {
                 var context = ctx
                 context.expandedIds = expandedIds
                 context.isTurnHovered = hoveredGroupId == groupId
+                context.responseStatsForTurn = { [weak self] in self?.responseStatsByTurn[$0] }
                 cell.configure(block: block, context: context)
             }
         }

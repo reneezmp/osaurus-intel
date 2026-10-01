@@ -2475,3 +2475,17 @@ calling a sync complete.
   `Color(hex:)` fix in `Theme.swift`. Notes and the tracking-loop finding:
   [`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md).
 
+### Upstream batch `b023f2c1e..fec69aa53` — 2026-10-01
+
+- 16 commits classified in [`UPSTREAM_AUDIT_2026-10-01.md`](UPSTREAM_AUDIT_2026-10-01.md);
+  the next review starts after `fec69aa53`.
+- Shipped: #2954 NUL-safe process launch, #2961 Notes −1708 fix, #2963 tab
+  strip follows the live sidebar width (and no rail-width reset on tab
+  switch), #2960 code-block copy fixes and tiled-width rendering (with
+  upstream's `lastFittedContentWidth` gate), #2959 response metrics in
+  Inspect response.
+- Staged: `W-model-picker-2947` (#2947, #2958) and `W-insights-sync`
+  (#2926 with #1595/#1350; the log redactor hardening first). Covered:
+  #2955, #2921. Needs work: #2965 (`W-channels`). Five MLX pins and the
+  appcast are incompatible.
+

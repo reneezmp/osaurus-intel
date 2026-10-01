@@ -660,6 +660,14 @@ final class ChatWindowState: ObservableObject {
     /// stop the tabs at the chat column's trailing edge (#2910).
     @Published var inspectorColumnWidth: CGFloat = 0
 
+    /// Width of the left rail actually on screen (the Agents | Projects
+    /// sidebar), 0 while hidden or stepping aside for the inspector.
+    /// `ChatContentView` sets it from its geometry, LIVE during a resize drag
+    /// (the persisted `chatSidebarWidth` default only updates on release),
+    /// so the tab strip tracks the rail's edge without lagging it. Mirror
+    /// of `inspectorColumnWidth` (upstream #2963).
+    @Published var sidebarColumnWidth: CGFloat = 0
+
     /// Whether the sidebar is on screen. The toolbar toggle and the tab
     /// strip inset read this, not `showSidebar`.
     var isSidebarVisible: Bool { showSidebar && !isSidebarAutoHidden }

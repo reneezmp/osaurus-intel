@@ -42,6 +42,9 @@ struct CellRenderingContext {
     /// to also delete the prompting user message. Distinct from `onDelete`,
     /// which truncates a user turn and everything after it.
     var onDeleteMessage: ((UUID) -> Void)? = nil
+    /// Read at menu-open time so late generation statistics do not leave a
+    /// recycled action row showing a stale response's metrics (#2959).
+    var responseStatsForTurn: ((UUID) -> String?)? = nil
     /// attachment or shared-artifact id string → full screen preview from ChatView
     var onUserImagePreview: ((String) -> Void)? = nil
     /// Active in-conversation find query (Cmd+F). Empty when the find bar is
@@ -505,6 +508,7 @@ final class NativeAssistantActionsView: NSView {
     private var onRegenerate: ((UUID) -> Void)?
     var onSpeak: ((UUID) -> Void)?
     private var onDeleteMessage: ((UUID) -> Void)?
+    private var responseStatsForTurn: ((UUID) -> String?)?
 
     nonisolated(unsafe) private var ttsObservation: NSObjectProtocol?
     nonisolated(unsafe) private var ttsConfigObservation: NSObjectProtocol?
@@ -715,9 +719,11 @@ final class NativeAssistantActionsView: NSView {
         onCopy: ((UUID) -> Void)?,
         onRegenerate: ((UUID) -> Void)?,
         onSpeak: ((UUID) -> Void)?,
-        onDeleteMessage: ((UUID) -> Void)? = nil
+        onDeleteMessage: ((UUID) -> Void)? = nil,
+        responseStatsForTurn: ((UUID) -> String?)? = nil
     ) {
         self.turnId = turnId
+        self.responseStatsForTurn = responseStatsForTurn
         self.onCopy = onCopy
         self.onRegenerate = onRegenerate
         self.onSpeak = onSpeak
@@ -763,6 +769,26 @@ final class NativeAssistantActionsView: NSView {
         )
         inspect.target = self
         inspect.isEnabled = true
+        // Upstream #2959: the response's metrics, then the log.
+        if let stats = responseStatsForTurn?(turnId), !stats.isEmpty {
+            let details = NSMenu()
+            details.autoenablesItems = false
+            for value in stats.components(separatedBy: " \u{2022} ") {
+                let item = NSMenuItem(title: value, action: nil, keyEquivalent: "")
+                item.isEnabled = false
+                details.addItem(item)
+            }
+            details.addItem(.separator())
+            let log = NSMenuItem(
+                title: L("Open request and response log"),
+                action: #selector(inspectResponse),
+                keyEquivalent: ""
+            )
+            log.target = self
+            details.addItem(log)
+            inspect.action = nil
+            inspect.submenu = details
+        }
         menu.addItem(inspect)
 
         if onDeleteMessage != nil {
@@ -1191,7 +1217,9 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
 
 // MARK: - NativeStatsView
 
-/// Lightweight AppKit view that displays generation benchmarks (total time, TTFT and tok/s).
+/// Incomplete-response warning. Generation metrics are available in the
+/// response's overflow menu instead of occupying a row in the conversation
+/// (upstream #2959).
 final class NativeStatsView: NSView {
     private let label = NSTextField(labelWithString: "")
 
@@ -1227,48 +1255,54 @@ final class NativeStatsView: NSView {
         totalDuration: TimeInterval? = nil,
         theme: any ThemeProtocol
     ) {
-        var parts: [String] = []
-        // Wall clock from the user's message to the end of the reply
-        // (upstream #2916). Leads the row: it's the number people look for.
-        if let totalDuration {
-            parts.append(String(format: L("Worked for %@"), Self.formatDuration(totalDuration)))
-        }
-        if let ttft {
-            if ttft < 0.01 {
-                parts.append(String(format: "TTFT %.0fms", ttft * 1000))
-            } else {
-                parts.append(String(format: "TTFT %.2fs", ttft))
-            }
-        }
-        if let tps = tokensPerSecond {
-            parts.append(String(format: "%.1f tok/s", tps))
-        }
-        if let count = tokenCount {
-            parts.append("\(count) tokens")
-        }
-        // Trailing diagnostic chip — vmlx tells us the model never emitted
-        // `</think>` (or the family's close tag) before EOS / max_tokens.
-        // Three observed scenarios all benefit from the same hint:
-        //   1. Reasoning-trained Qwen3.6-A3B / DSV4 fine-tunes loop on
-        //      validation prompts ("give me a 20-digit number") — answer
-        //      buried in reasoning; user should toggle the model's
-        //      "Disable Thinking" option for the next turn (verified live).
-        //   2. Gemma-4 / harmony-channel models capped early by
-        //      `max_tokens` — analysis channel didn't close; user should
-        //      raise the cap (verified live, gemma-4-e2b at 32 tok cap).
-        //   3. Any thinking model that emitted EOS while still in
-        //      reasoning — answer is in the pane above.
-        // Text intentionally does NOT name a specific toggle so the chip
-        // reads accurately for every model family.
-        if unclosedReasoning {
-            parts.append("⚠ thinking didn't close — answer may be in reasoning above")
-        }
-        label.stringValue = parts.joined(separator: " \u{2022} ")
+        // Upstream #2959: the metrics live in the response's "…" menu
+        // (Inspect response); this row only carries the incomplete-response
+        // warning.
+        label.stringValue = unclosedReasoning
+            ? L("⚠ thinking didn't close — answer may be in reasoning above") : ""
         label.font = NSFont.monospacedDigitSystemFont(
             ofSize: CGFloat(theme.captionSize) - 1,
             weight: .regular
         )
         label.textColor = NSColor(theme.tertiaryText)
+    }
+
+    /// The response's metrics as one " • "-separated line (the Inspect
+    /// response submenu lists each part). Pure, so it is unit-testable.
+    /// Intel: no model-load or cached-input chips (cloud models only report
+    /// what Intel records).
+    nonisolated static func statsText(
+        ttft: TimeInterval?,
+        tokensPerSecond: Double?,
+        tokenCount: Int?,
+        unclosedReasoning: Bool = false,
+        totalDuration: TimeInterval? = nil
+    ) -> String {
+        var parts: [String] = []
+        // Wall clock from the user's message to the end of the reply
+        // (upstream #2916). Leads the line: it's the number people look for.
+        if let totalDuration {
+            parts.append(String(format: L("Worked for %@"), Self.formatDuration(totalDuration)))
+        }
+        if let ttft {
+            if ttft < 0.01 {
+                parts.append(String(format: L("TTFT %.0fms"), ttft * 1000))
+            } else {
+                parts.append(String(format: L("TTFT %.2fs"), ttft))
+            }
+        }
+        if let tps = tokensPerSecond {
+            parts.append(String(format: L("%.1f tok/s"), tps))
+        }
+        if let count = tokenCount {
+            parts.append(count == 1 ? L("1 token") : L("\(count) tokens"))
+        }
+        // The model never closed its reasoning before EOS / max_tokens; the
+        // answer may be in the reasoning pane above.
+        if unclosedReasoning {
+            parts.append(L("⚠ thinking didn't close — answer may be in reasoning above"))
+        }
+        return parts.joined(separator: " \u{2022} ")
     }
 }
 
@@ -2105,7 +2139,8 @@ final class NativeMessageCellView: NSTableCellView {
             onCopy: context.onCopy,
             onRegenerate: context.onRegenerate,
             onSpeak: context.onSpeak,
-            onDeleteMessage: context.onDeleteMessage
+            onDeleteMessage: context.onDeleteMessage,
+            responseStatsForTurn: context.responseStatsForTurn
         )
     }
 
