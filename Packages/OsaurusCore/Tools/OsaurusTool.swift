@@ -36,12 +36,50 @@ protocol OsaurusTool: Sendable {
     /// + their own optional inactivity timeout as the safety net.
     /// Default `false`: every other tool keeps the 120s safety net.
     var bypassRegistryTimeout: Bool { get }
+
+    /// When `true`, executing this tool can create/edit/delete files in
+    /// the agent's sandbox workspace (agent home / `/workspace/shared`).
+    /// The registry wraps such calls in a `FileChangeJournal` capture so
+    /// every change lands in the chat's file history. Default `false`.
+    /// Intel: no sandbox, so no tool sets it; kept for the journal's API.
+    var mutatesSandboxWorkspace: Bool { get }
+
+    /// When `true`, executing this tool can create/edit/delete files in the
+    /// user-selected host folder (the "Folder" chip). The registry wraps such
+    /// calls in a host-folder capture so those mutations land in the same
+    /// file history. Mutually exclusive with `mutatesSandboxWorkspace`.
+    /// Default `false`.
+    var mutatesHostFolder: Bool { get }
+
+    /// The exact paths (as the model passed them) this call will mutate, so
+    /// the journal can snapshot just those instead of scanning the whole
+    /// tree. `nil` means the tool is opaque (a shell) and gets a full
+    /// before/after scan. Directories expand to their subtree.
+    func declaredMutationTargets(argumentsJSON: String) -> [String]?
+
+    /// Best-effort precise targets for an opaque tool, used only when the
+    /// tree is too large to scan (e.g. the paths of a simple `rm`/`mv`).
+    /// `nil` when the call can't be parsed faithfully.
+    func fallbackMutationTargets(argumentsJSON: String) -> [String]?
 }
 
 extension OsaurusTool {
     /// Default: every tool gets the registry's wall-clock safety net.
     /// Streaming tools (`sandbox_exec`, `shell_run`) override to `true`.
     var bypassRegistryTimeout: Bool { false }
+
+    /// Default: tools do not mutate the sandbox workspace.
+    var mutatesSandboxWorkspace: Bool { false }
+
+    /// Default: tools do not mutate the selected host folder. Folder
+    /// write/edit/copy/shell tools override to `true`.
+    var mutatesHostFolder: Bool { false }
+
+    /// Default: opaque — the journal scans the root before and after.
+    func declaredMutationTargets(argumentsJSON: String) -> [String]? { nil }
+
+    /// Default: no fallback; an over-budget root stays untracked.
+    func fallbackMutationTargets(argumentsJSON: String) -> [String]? { nil }
 
     /// Build OpenAI-compatible Tool specification
     func asOpenAITool() -> Tool {

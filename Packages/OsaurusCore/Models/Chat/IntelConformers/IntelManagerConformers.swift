@@ -1183,6 +1183,9 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         Self.persistQueue.async { [self] in
             removeFromDisk(at: fileURL)
         }
+        // Drop the session's file history and collect its now-unreferenced
+        // snapshot blobs (upstream #2907 part A).
+        Task { await FileChangeJournal.shared.purgeSession(id.uuidString) }
     }
     func rename(id: UUID, title: String) {
         if var s = sessions[id] {
@@ -1473,6 +1476,10 @@ final class ChatConfiguration: @unchecked Sendable {
     /// default on Intel** (Renée, 2026-09-29): every call is a paid cloud
     /// request with the agent's own model.
     var backfillAgentDescriptions: Bool = false
+    /// Upstream #2907 part A: how long per-chat file history is kept
+    /// (Privacy → Storage → File History). Default: until the chat is
+    /// deleted, as upstream.
+    var fileHistoryRetention: FileHistoryRetention = .keepUntilChatDeleted
     var defaultToolSelectionMode: Any? = nil
     var defaultManualToolNames: [String]? = nil
     var defaultManualSkillNames: [String]? = nil
@@ -1587,6 +1594,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
         self.autoGenerateChatTitles = other.autoGenerateChatTitles
         self.backfillAgentDescriptions = other.backfillAgentDescriptions
+        self.fileHistoryRetention = other.fileHistoryRetention
         self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
         self.greetingPersona = other.greetingPersona
     }
@@ -1621,6 +1629,7 @@ final class ChatConfiguration: @unchecked Sendable {
         var enableClipboardMonitoring: Bool? = nil
         var autoGenerateChatTitles: Bool? = nil
         var backfillAgentDescriptions: Bool? = nil
+        var fileHistoryRetention: FileHistoryRetention? = nil
         var defaultManualToolNames: [String]? = nil
         var defaultManualSkillNames: [String]? = nil
         var coreModelProvider: String? = nil
@@ -1657,6 +1666,7 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
         if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
         if let v = s.backfillAgentDescriptions { backfillAgentDescriptions = v }
+        if let v = s.fileHistoryRetention { fileHistoryRetention = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
         if let v = s.defaultManualSkillNames { defaultManualSkillNames = v }
         if let v = s.coreModelProvider { coreModelProvider = v }
@@ -1685,6 +1695,7 @@ final class ChatConfiguration: @unchecked Sendable {
         s.enableClipboardMonitoring = enableClipboardMonitoring
         s.autoGenerateChatTitles = autoGenerateChatTitles
         s.backfillAgentDescriptions = backfillAgentDescriptions
+        s.fileHistoryRetention = fileHistoryRetention
         s.defaultManualToolNames = defaultManualToolNames
         s.defaultManualSkillNames = defaultManualSkillNames
         s.coreModelProvider = coreModelProvider

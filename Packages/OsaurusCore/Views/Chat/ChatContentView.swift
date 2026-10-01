@@ -159,6 +159,18 @@ struct ChatContentView: View {
     /// The left rail (Agents | Projects), with every window-level handoff
     /// it needs. Upstream `navigatorRail(width:)`, minus workspace and
     /// network agents (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
+    /// First line of the user message that led to `turnId`, for the File
+    /// Changes timeline's turn headers. Upstream (`ChatView`).
+    private func userPromptExcerpt(for turnId: UUID) -> String? {
+        let turns = session.turns
+        guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return nil }
+        guard let user = turns[..<index].last(where: { $0.role == .user }) else { return nil }
+        let line = user.content.split(whereSeparator: \.isNewline).first.map(String.init) ?? ""
+        let trimmed = line.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return nil }
+        return trimmed.count > 120 ? String(trimmed.prefix(120)) + "…" : trimmed
+    }
+
     private func navigatorRail(width sidebarWidth: CGFloat) -> some View {
         ChatSessionSidebar(
             sessions: windowState.filteredSessions,
@@ -444,6 +456,7 @@ struct ChatContentView: View {
                             width: inspectorWidth,
                             sessionId: session.sessionId,
                             focusSetId: $windowState.changesPanelFocusSetId,
+                            userPrompt: { userPromptExcerpt(for: $0) },
                             // Same route as a sidebar row: the chat opens in
                             // the current tab and the rail stays up.
                             onSelectSession: { [weak windowState] data in

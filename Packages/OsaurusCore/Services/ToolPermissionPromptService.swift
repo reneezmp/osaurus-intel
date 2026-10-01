@@ -45,27 +45,35 @@ enum ToolPermissionPromptService {
 
     /// `knowledgeWritePreview` (upstream): the knowledge write tools' review
     /// manifest, shown instead of the JSON arguments.
+    /// `perCallApprovalOnly` (upstream): a question about this one call that
+    /// the tool's policy can't answer (file history's "can't snapshot this
+    /// folder" prompt), so the policy is not consulted and the card offers
+    /// no Always Allow.
     static func requestApproval(
         toolName: String,
         description: String,
         argumentsJSON: String,
-        knowledgeWritePreview: KnowledgeWritePreview? = nil
+        knowledgeWritePreview: KnowledgeWritePreview? = nil,
+        perCallApprovalOnly: Bool = false
     ) async -> Bool {
         await acquirePresentationSlot()
         defer { releasePresentationSlot() }
         // Revalidate after waiting: a sibling prompt may have chosen Always
         // Allow (or the user changed the policy) while this one was queued.
-        switch ToolRegistry.shared.effectivePolicy(for: toolName, argumentsJSON: argumentsJSON) {
-        case .auto: return true
-        case .deny: return false
-        case .ask: break
+        if !perCallApprovalOnly {
+            switch ToolRegistry.shared.effectivePolicy(for: toolName, argumentsJSON: argumentsJSON) {
+            case .auto: return true
+            case .deny: return false
+            case .ask: break
+            }
         }
         if Task.isCancelled { return false }
         return await presentApproval(
             toolName: toolName,
             description: description,
             argumentsJSON: argumentsJSON,
-            knowledgeWritePreview: knowledgeWritePreview
+            knowledgeWritePreview: knowledgeWritePreview,
+            perCallApprovalOnly: perCallApprovalOnly
         )
     }
 
@@ -73,7 +81,8 @@ enum ToolPermissionPromptService {
         toolName: String,
         description: String,
         argumentsJSON: String,
-        knowledgeWritePreview: KnowledgeWritePreview? = nil
+        knowledgeWritePreview: KnowledgeWritePreview? = nil,
+        perCallApprovalOnly: Bool = false
     ) async -> Bool {
         return await withCheckedContinuation { continuation in
             var hasResumed = false
@@ -112,8 +121,9 @@ enum ToolPermissionPromptService {
                 onAllow: onAllow,
                 onDeny: onDeny,
                 onAlwaysAllow: onAlwaysAllow,
-                allowsAlwaysAllow: !ToolRegistry.shared.requiresApprovalEveryCall(
-                    toolName, argumentsJSON: argumentsJSON),
+                allowsAlwaysAllow: !perCallApprovalOnly
+                    && !ToolRegistry.shared.requiresApprovalEveryCall(
+                        toolName, argumentsJSON: argumentsJSON),
                 knowledgeWritePreview: knowledgeWritePreview
             )
             .environment(\.theme, themeManager.currentTheme)

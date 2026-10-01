@@ -88,8 +88,6 @@ activity ring were reverted to upstream's behaviour.
 | Upstream | Intel | Why |
 |---|---|---|
 | Project new chat via `switchAgent` (can land on an existing chat and stamp the project on it) | `startNewChat(with:)` | Bug fix: never re-files an existing conversation into a project |
-| Background / scheduled runs attach as tabs | Not attached yet | Layout step 5 |
-| Full-screen themed header | None yet | Layout step 6 |
 | `IntelLastChatStore` (pre-tabs Intel) | Read once by `legacyLastChatRecord`, then removed | Migration from the 2026-09-25 analogue |
 
 Toolbar changes, as upstream: the centred agent pill moved into the

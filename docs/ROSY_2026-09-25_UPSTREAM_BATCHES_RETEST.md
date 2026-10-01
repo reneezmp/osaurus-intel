@@ -1079,3 +1079,55 @@ except that agents are now picked in the sidebar, not a toolbar pill.
       with the sidebar button, tabs and the right-panel/pin buttons; no grey
       system strip. Leaving full screen brings the normal toolbar back.
 
+
+## Per-chat file history (`W-file-history`)
+
+Manual: [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md). Use a throwaway
+working folder (a copy, not real work). Items marked **(paid)** need a model
+call.
+
+- [ ] **(paid)** In a chat with a working folder, ask the agent to create a
+      file, edit it, and copy it. The right-panel button shows a count; open
+      the panel: **File Changes | History**, File Changes lists three
+      entries under your message ("Write file", "Edit file", "Copy file").
+- [ ] Expand an entry, then a file: the diff shows added/removed lines with
+      the changed words highlighted. "Open before / Open after" open the
+      versions in their default app. For a .docx or .xlsx the diff says
+      "Showing changed paragraphs/cells".
+- [ ] **Files** chip: one row per file with Created/Modified/Deleted; hover
+      shows Reveal in Finder and Revert File.
+- [ ] Revert one entry: the file goes back, the entry reads "Reverted", a
+      toast offers **Undo**; Undo puts the change back.
+- [ ] Revert All: a dialog lists every file with what will happen ("back to
+      before this chat", "will be deleted"); confirm, and the folder matches
+      how it was before the chat. Folders the chat created are removed too.
+- [ ] Edit one of the agent's files yourself (TextEdit), then Revert All:
+      the dialog flags it "edited since" and offers Skip Edited Files /
+      Overwrite Edited Files. Skip leaves your edit; Overwrite replaces it
+      and can still be undone.
+- [ ] Roll Back to Before This (on an older entry) undoes it and everything
+      after it.
+- [ ] **(paid)** Ask for a shell command that moves or deletes a file
+      (`mv a.txt b.txt`, `rm`): after approving shell, the tool row shows
+      "N files changed"; clicking it opens File Changes on that entry, which
+      shows the rename. Revert brings the file back.
+- [ ] **(paid)** Under the agent's reply: "N files changed · View changes"
+      opens File Changes on the first change of that reply.
+- [ ] **(paid)** Ask the agent "undo your last change" / "what files did you
+      change?": it uses `file_undo` / `file_operation_history`, and the panel
+      updates (the undo appears as its own revertible entry).
+- [ ] History rows: chats that changed files show a small ±N badge; click it
+      to open that chat with File Changes.
+- [ ] Quit and relaunch: File Changes for an old chat still lists its
+      entries, and reverting still works.
+- [ ] Delete a chat that changed files: its history is gone (Settings shows
+      less used space after a moment).
+- [ ] Settings ▸ General ▸ Advanced ▸ Data & Storage ▸ **File History**:
+      Keep File History (until the chat is deleted / 90 / 30 days) and a
+      size limit with "Currently using …". Searching Settings for "file
+      history" lands there.
+- [ ] A chat with no file changes: File Changes says "No file changes".
+- [ ] Ventura: the lens bar, chips, rows, diffs, the confirmation dialog's
+      file list and the toast render and respond; no clipped text.
+- [ ] The first-run layout tour's third stop now reads "Past chats and file
+      changes" (Help ▸ Chat Layout Tour to replay).

@@ -615,6 +615,9 @@ public actor StorageMigrator {
             // data — the only copy of what agent writes replaced — so it must
             // follow a key rotation (the derived knowledge index just rebuilds).
             .init(label: "knowledge write log", path: OsaurusPaths.knowledgeWriteLogDatabaseFile().path),
+            // File history rows (docs/FILE_HISTORY_INTEL.md): the index of every
+            // snapshot Revert can restore, so it follows a key rotation too.
+            .init(label: "file history", path: OsaurusPaths.fileHistoryDatabaseFile().path),
         ]
         // Plugin DBs — one per installed plugin. We can discover them
         // by walking `Tools/<pluginId>/data/data.db`.

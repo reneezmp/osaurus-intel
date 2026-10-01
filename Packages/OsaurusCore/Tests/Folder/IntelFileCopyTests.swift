@@ -41,19 +41,23 @@ struct IntelFileCopyTests {
         let bytes = Data([0x25, 0x50, 0x44, 0x46, 0x00, 0xFF, 0x10])  // binary
         try bytes.write(to: root.appendingPathComponent("report.pdf"))
         let sessionId = "copy-\(UUID().uuidString)"
-        await FileOperationLog.shared.setRootPath(root)
-        defer { Task { await FileOperationLog.shared.setRootPath(nil) } }
+        // Undo goes through the file history journal (upstream #2907 part A).
+        let env = try FileHistoryTestEnv.make()
+        defer { env.cleanup() }
 
-        let result = try await ChatExecutionContext.$currentSessionId.withValue(sessionId) {
-            try await FileCopyTool(rootPath: root).execute(
-                argumentsJSON: Self.json(["source": "report.pdf", "destination": "drafts/report-v2.pdf"]))
-        }
+        let result = try await env.run(
+            FileCopyTool(rootPath: root),
+            Self.json(["source": "report.pdf", "destination": "drafts/report-v2.pdf"]),
+            sessionId: sessionId, folder: root)
         #expect(!Self.isFailure(result), "\(result)")
+        #expect(result.contains("operation_id"), "\(result)")
         let copy = root.appendingPathComponent("drafts/report-v2.pdf")
         #expect(try Data(contentsOf: copy) == bytes)
 
-        _ = try await FileOperationLog.shared.undoLast(sessionId: sessionId)
+        let undo = try await env.call(FileUndoTool(rootPath: root, journal: env.journal), "{}", sessionId: sessionId)
+        #expect(!Self.isFailure(undo), "\(undo)")
         #expect(!FileManager.default.fileExists(atPath: copy.path))
+        #expect(!FileManager.default.fileExists(atPath: root.appendingPathComponent("drafts").path))
         #expect(FileManager.default.fileExists(atPath: root.appendingPathComponent("report.pdf").path))
     }
 
@@ -72,16 +76,15 @@ struct IntelFileCopyTests {
         #expect(try Data(contentsOf: root.appendingPathComponent("b.bin")) == original)
 
         let sessionId = "copy-\(UUID().uuidString)"
-        await FileOperationLog.shared.setRootPath(root)
-        defer { Task { await FileOperationLog.shared.setRootPath(nil) } }
-        let replaced = try await ChatExecutionContext.$currentSessionId.withValue(sessionId) {
-            try await tool.execute(
-                argumentsJSON: Self.json(["source": "a.bin", "destination": "b.bin", "overwrite": true]))
-        }
+        let env = try FileHistoryTestEnv.make()
+        defer { env.cleanup() }
+        let replaced = try await env.run(
+            tool, Self.json(["source": "a.bin", "destination": "b.bin", "overwrite": true]),
+            sessionId: sessionId, folder: root)
         #expect(!Self.isFailure(replaced), "\(replaced)")
         #expect(try Data(contentsOf: root.appendingPathComponent("b.bin")) == Data([1, 2, 3]))
 
-        _ = try await FileOperationLog.shared.undoLast(sessionId: sessionId)
+        _ = try await env.call(FileUndoTool(rootPath: root, journal: env.journal), "{}", sessionId: sessionId)
         #expect(try Data(contentsOf: root.appendingPathComponent("b.bin")) == original)
     }
 

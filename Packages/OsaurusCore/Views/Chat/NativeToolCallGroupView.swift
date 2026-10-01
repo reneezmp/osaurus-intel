@@ -514,6 +514,17 @@ final class NativeToolCallRowView: NSView {
     /// `nonisolated(unsafe)` so deinit can read it; only ever set in
     /// init on the main actor.
     nonisolated(unsafe) private var ttsObservation: NSObjectProtocol?
+    /// "N files changed" link on a collapsed completed row whose call
+    /// changed files (shell commands, copies…); opens the File Changes
+    /// inspector on that change set. Write/edit calls get the diff card
+    /// instead. Upstream #2907 part A.
+    private let fileChangesButton = NSButton()
+    private var fileChangeSet: FileChangeSet?
+    private var fileChangeLookupCallId: String?
+    nonisolated(unsafe) private var fileChangeObservation: NSObjectProtocol?
+    /// The arg preview yields to the link while it shows.
+    private var argPreviewToChevron: NSLayoutConstraint?
+    private var argPreviewToFileChanges: NSLayoutConstraint?
 
     // MARK: Callbacks
 
@@ -534,12 +545,25 @@ final class NativeToolCallRowView: NSView {
                 self?.refreshStatusIndicator()
             }
         }
+        fileChangeObservation = NotificationCenter.default.addObserver(
+            forName: .fileChangesDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                self?.fileChangeLookupCallId = nil
+                self?.refreshFileChangesLink()
+            }
+        }
     }
 
     required init?(coder: NSCoder) { fatalError() }
 
     deinit {
         if let observation = ttsObservation {
+            NotificationCenter.default.removeObserver(observation)
+        }
+        if let observation = fileChangeObservation {
             NotificationCenter.default.removeObserver(observation)
         }
     }
@@ -625,6 +649,13 @@ final class NativeToolCallRowView: NSView {
 
         separatorView.isHidden = !isExpanded
         contentContainer.isHidden = !isExpanded
+
+        if isNew {
+            fileChangeLookupCallId = nil
+            fileChangeSet = nil
+            setFileChangesLinkHidden(true)
+        }
+        refreshFileChangesLink(expanded: isExpanded)
 
         if isExpanded {
             applyToolDetailSectionHeading(to: argumentsSectionTitle, text: "ARGUMENTS", theme: theme)
@@ -994,6 +1025,18 @@ final class NativeToolCallRowView: NSView {
         headerButton.target = self; headerButton.action = #selector(tapped)
         addSubview(headerButton)  // added last → front of Z-order
 
+        // The file changes link sits above the header button so its clicks
+        // open File Changes instead of toggling the row.
+        fileChangesButton.translatesAutoresizingMaskIntoConstraints = false
+        fileChangesButton.isBordered = false
+        fileChangesButton.bezelStyle = .inline
+        fileChangesButton.focusRingType = .none
+        fileChangesButton.isHidden = true
+        fileChangesButton.setContentCompressionResistancePriority(.required, for: .horizontal)
+        fileChangesButton.target = self
+        fileChangesButton.action = #selector(openFileChanges)
+        addSubview(fileChangesButton)
+
         let rowH: CGFloat = 40
 
         // self-sizing height constraint
@@ -1031,7 +1074,10 @@ final class NativeToolCallRowView: NSView {
 
             argPreviewLabel.leadingAnchor.constraint(equalTo: nameLabel.trailingAnchor, constant: 6),
             argPreviewLabel.centerYAnchor.constraint(equalTo: categoryBg.centerYAnchor),
-            argPreviewLabel.trailingAnchor.constraint(lessThanOrEqualTo: chevron.leadingAnchor, constant: -8),
+            fileChangesButton.trailingAnchor.constraint(equalTo: chevron.leadingAnchor, constant: -8),
+            fileChangesButton.centerYAnchor.constraint(equalTo: categoryBg.centerYAnchor),
+            fileChangesButton.leadingAnchor.constraint(
+                greaterThanOrEqualTo: nameLabel.trailingAnchor, constant: 10),
 
             chevron.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -12),
             chevron.centerYAnchor.constraint(equalTo: categoryBg.centerYAnchor),
@@ -1061,6 +1107,15 @@ final class NativeToolCallRowView: NSView {
             rowSep.bottomAnchor.constraint(equalTo: bottomAnchor),
             rowSep.heightAnchor.constraint(equalToConstant: 1),
         ])
+
+        // Intel: the row also shows an argument preview after the name
+        // (upstream's row doesn't), so it ends at the chevron or, while the
+        // file changes link shows, at the link.
+        argPreviewToChevron = argPreviewLabel.trailingAnchor.constraint(
+            lessThanOrEqualTo: chevron.leadingAnchor, constant: -8)
+        argPreviewToFileChanges = argPreviewLabel.trailingAnchor.constraint(
+            lessThanOrEqualTo: fileChangesButton.leadingAnchor, constant: -8)
+        argPreviewToChevron?.isActive = true
     }
 
     private func ensureArgsView() -> NativeMarkdownView {
@@ -1247,4 +1302,63 @@ final class NativeToolCallRowView: NSView {
     }
 
     @objc private func tapped() { onToggle?() }
+
+    // MARK: - File changes link (upstream #2907 part A)
+
+    private func setFileChangesLinkHidden(_ hidden: Bool) {
+        fileChangesButton.isHidden = hidden
+        argPreviewToFileChanges?.isActive = !hidden
+        argPreviewToChevron?.isActive = hidden
+    }
+
+    private func refreshFileChangesLink(expanded: Bool? = nil) {
+        guard let item = currentItem, item.result != nil, !(expanded ?? isExpanded),
+            !FileDiff.diffProducingToolNames.contains(item.call.function.name)
+        else {
+            setFileChangesLinkHidden(true)
+            return
+        }
+        let callId = item.call.id
+        guard fileChangeLookupCallId != callId else {
+            applyFileChangesLink()
+            return
+        }
+        fileChangeLookupCallId = callId
+        Task { @MainActor [weak self] in
+            let set = await FileChangeJournal.shared.changeSet(forToolCallId: callId)
+            guard let self, self.currentItemId == callId else { return }
+            self.fileChangeSet = set
+            self.applyFileChangesLink()
+        }
+    }
+
+    private func applyFileChangesLink() {
+        guard let set = fileChangeSet, !isExpanded, let theme = lastConfiguredTheme,
+            !set.entries.isEmpty || set.status == .untracked
+        else {
+            setFileChangesLinkHidden(true)
+            return
+        }
+        let count = set.entries.count
+        var title: String
+        switch set.status {
+        case .untracked: title = L("Changes not tracked")
+        default: title = L("\(count) files changed")
+        }
+        if set.status == .reverted { title += " · " + L("reverted") }
+        fileChangesButton.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: 11, weight: .semibold),
+                .foregroundColor: NSColor(set.status == .reverted ? theme.tertiaryText : theme.accentColor),
+            ]
+        )
+        fileChangesButton.toolTip = L("Show in File Changes")
+        setFileChangesLinkHidden(false)
+    }
+
+    @objc private func openFileChanges() {
+        guard let set = fileChangeSet else { return }
+        FileChangeSummaryStore.requestPanel(sessionId: set.sessionId, focusing: set.id)
+    }
 }

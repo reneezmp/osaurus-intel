@@ -12,10 +12,39 @@
 
 import Foundation
 
-// Intel: the journal-backed pieces (`FileDiffContent`, the
-// `FileChangeJournal` export and `diff(key:before:after:journal:)`) arrive
-// with the file-history port (`W-file-history`). This file carries the pure
-// text/document diff used by in-place document editing.
+struct FileDiffContent: Sendable, Equatable {
+    enum Body: Sendable, Equatable {
+        case text(FileDiff)
+        /// Both sides are images; render `beforeURL` / `afterURL`.
+        case image
+        /// Opaque bytes: compare sizes, offer Open.
+        case binary
+        case directory
+        case symlink(before: String?, after: String?)
+        case unavailable(String)
+    }
+
+    let path: String
+    let body: Body
+    /// Plain caption for document comparisons ("Showing changed cells").
+    let caption: String?
+    let beforeURL: URL?
+    let afterURL: URL?
+    let beforeSize: Int64?
+    let afterSize: Int64?
+}
+
+extension FileChangeJournal {
+    /// A temp copy of a recorded file state (named like the original so
+    /// document adapters and "Open" pick the right app). Nil when the
+    /// state is not a stored file.
+    func exportedURL(for state: FilePathState?, filename: String, label: String) -> URL? {
+        guard let state, state.type == .file, let hash = state.objectHash, canRestore(state) else {
+            return nil
+        }
+        return try? objects.exportTemp(hash: hash, filename: filename, label: label)
+    }
+}
 
 enum FileDiffEngine {
     /// Largest side diffed as text / document; bigger files get a summary.
@@ -42,6 +71,67 @@ enum FileDiffEngine {
         "pptx": "Showing changed slides",
         "pdf": "Showing changed pages",
     ]
+
+    static func diff(
+        key: FilePathKey,
+        before: FilePathState?,
+        after: FilePathState?,
+        journal: FileChangeJournal = .shared
+    ) async -> FileDiffContent {
+        let path = key.displayPath
+        let filename = key.filename
+        let ext = (filename as NSString).pathExtension.lowercased()
+        let beforeURL = await journal.exportedURL(for: before, filename: filename, label: "before")
+        let afterURL = await journal.exportedURL(for: after, filename: filename, label: "after")
+
+        func content(_ body: FileDiffContent.Body, caption: String? = nil) -> FileDiffContent {
+            FileDiffContent(
+                path: path, body: body, caption: caption, beforeURL: beforeURL,
+                afterURL: afterURL, beforeSize: before?.type == .file ? before?.size : nil,
+                afterSize: after?.type == .file ? after?.size : nil)
+        }
+
+        if before?.type == .directory || after?.type == .directory {
+            if before?.type == .file || after?.type == .file {
+                return content(.unavailable(L("Replaced a folder with a file (or the reverse).")))
+            }
+            return content(.directory)
+        }
+        if before?.type == .symlink || after?.type == .symlink {
+            func target(_ s: FilePathState?) -> String? {
+                guard let s, s.type == .symlink else { return nil }
+                return String(s.signature.dropFirst("link:".count))
+            }
+            return content(.symlink(before: target(before), after: target(after)))
+        }
+        if [before, after].contains(where: { $0?.type == .file && $0?.isRestorable == false }) {
+            return content(.unavailable(L("Too large to keep in history; only its size is known.")))
+        }
+        if (before != nil && beforeURL == nil) || (after != nil && afterURL == nil) {
+            return content(.unavailable(L("This version is no longer in history.")))
+        }
+        if imageExtensions.contains(ext) { return content(.image) }
+        let tooBig = [before?.size, after?.size].contains { ($0 ?? 0) > maxDiffBytes }
+        if tooBig { return content(.binary) }
+
+        if let caption = documentExtensions[ext] {
+            let old = await documentLines(beforeURL)
+            let new = await documentLines(afterURL)
+            if let old, let new {
+                return content(
+                    .text(textDiff(old: old, new: new, path: path, existed: before != nil)),
+                    caption: L(String.LocalizationValue(caption)))
+            }
+            return content(.binary)
+        }
+
+        let old = beforeURL.flatMap(textContent)
+        let new = afterURL.flatMap(textContent)
+        if (beforeURL == nil || old != nil) && (afterURL == nil || new != nil) {
+            return content(.text(textDiff(old: old ?? "", new: new ?? "", path: path, existed: before != nil)))
+        }
+        return content(.binary)
+    }
 
     // MARK: - Text
 

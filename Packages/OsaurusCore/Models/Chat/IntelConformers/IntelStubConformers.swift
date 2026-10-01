@@ -1340,6 +1340,30 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 tool: name
             )
         }
+        // File history (upstream #2907 part A, docs/FILE_HISTORY_INTEL.md):
+        // wrap mutating calls in a journal capture so every file the call
+        // creates, edits, or deletes lands in the owning chat's history (and
+        // can be reverted). Only when the call is attributable (session id
+        // bound), and only the EXECUTING chat's folder (TaskLocal, never a
+        // process-wide folder). Intel has no sandbox or bridge roots.
+        if let sessionId = ChatExecutionContext.currentSessionId, !sessionId.isEmpty,
+            tool.mutatesSandboxWorkspace || tool.mutatesHostFolder
+        {
+            let context = FileChangeCapture.Context(
+                sessionId: sessionId,
+                toolName: name,
+                toolCallId: ChatExecutionContext.currentToolCallId,
+                turnId: ChatExecutionContext.currentAssistantTurnId,
+                folderRoot: ChatExecutionContext.currentFolderRoot
+            )
+            return try await FileChangeCapture.run(
+                tool: tool,
+                argumentsJSON: argumentsJSON,
+                context: context
+            ) {
+                try await tool.execute(argumentsJSON: argumentsJSON)
+            }
+        }
         return try await tool.execute(argumentsJSON: argumentsJSON)
     }
 

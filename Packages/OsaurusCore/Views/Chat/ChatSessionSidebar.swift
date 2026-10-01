@@ -1019,8 +1019,7 @@ private struct SessionRow: View {
 
     @Environment(\.theme) private var theme
     @Environment(\.themedAlertScope) private var alertScope
-    // Intel: no file change history yet (`W-file-history`), so no
-    // "N files changed" badge on rows.
+    @ObservedObject private var fileChanges = FileChangeSummaryStore.shared
     @State private var isHovered = false
     @State private var showActionsPopover = false
     /// Drill-in page state for the actions popover: false shows the main
@@ -1109,6 +1108,10 @@ private struct SessionRow: View {
 
                         if !session.capabilities.isEmpty {
                             capabilityBadges
+                        }
+
+                        if let summary = fileChanges.summary(for: session.id), summary.setCount > 0 {
+                            fileChangesBadge(summary)
                         }
                     }
 
@@ -1475,6 +1478,41 @@ private struct SessionRow: View {
                     .fill(theme.secondaryText.opacity(theme.isDark ? 0.16 : 0.12))
             )
             .help(Text(LocalizedStringKey(cap.label), bundle: .module))
+    }
+
+    /// File history badge: outstanding changed files (or a dimmed icon when
+    /// every change was reverted). Opens the chat's File Changes inspector.
+    private func fileChangesBadge(_ summary: FileChangeSessionSummary) -> some View {
+        let active = summary.outstandingFiles > 0
+        let color = active ? theme.accentColor : theme.tertiaryText
+        return Button {
+            onShowFileChanges?()
+        } label: {
+            HStack(spacing: 2) {
+                Image(systemName: "plus.forwardslash.minus")
+                    .font(.system(size: 7.5, weight: .bold))
+                if active {
+                    Text(verbatim: "\(summary.outstandingFiles)")
+                        .font(.system(size: 8.5, weight: .semibold).monospacedDigit())
+                }
+            }
+            .foregroundColor(color)
+            .padding(.horizontal, 4)
+            .frame(height: 14)
+            .background(
+                RoundedRectangle(cornerRadius: 4, style: .continuous)
+                    .fill(color.opacity(theme.isDark ? 0.16 : 0.12))
+            )
+        }
+        .buttonStyle(.plain)
+        .help(
+            active
+                ? (summary.outstandingFiles == 1
+                    ? Text("1 file changed in this chat", bundle: .module)
+                    : Text("\(summary.outstandingFiles) files changed in this chat", bundle: .module))
+                : Text("File changes in this chat were reverted", bundle: .module)
+        )
+        .accessibilityLabel(Text("Show file changes", bundle: .module))
     }
 
     // MARK: - Source Badge
@@ -2035,7 +2073,11 @@ struct ChatHistoryList: View {
                                 onExport: { onExport(session, $0) },
                                 onStop: onStop.map { stop in { stop(session.id) } },
                                 onOpenInNewWindow: onOpenInNewWindow.map { open in { open(session) } },
-                                onOpenInNewTab: onOpenInNewTab.map { open in { open(session) } }
+                                onOpenInNewTab: onOpenInNewTab.map { open in { open(session) } },
+                                onShowFileChanges: {
+                                    onSelect(session)
+                                    FileChangeSummaryStore.requestPanel(sessionId: session.id.uuidString)
+                                }
                             )
                             .id(session.id)
                         }

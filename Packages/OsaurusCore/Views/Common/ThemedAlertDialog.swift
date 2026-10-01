@@ -483,7 +483,9 @@ private struct ThemedAlertModifier: ViewModifier {
     let title: String
     @Binding var isPresented: Bool
     let message: String?
+    let accessory: AnyView?
     let buttons: [AlertButtonConfig]
+    let width: CGFloat?
     let presentationStyle: ThemedAlertPresentationStyle
 
     func body(content: Content) -> some View {
@@ -493,11 +495,11 @@ private struct ThemedAlertModifier: ViewModifier {
                     ThemedAlertDialogContent(
                         title: title,
                         message: message,
-                        accessory: nil,
+                        accessory: accessory,
                         buttons: buttons,
                         showsCloseButton: false,
                         customContent: nil,
-                        width: nil,
+                        width: width,
                         presentationStyle: presentationStyle,
                         onDismiss: {
                             isPresented = false
@@ -516,6 +518,7 @@ private struct ThemedAlertPresenterModifier: ViewModifier {
     let title: String
     @Binding var isPresented: Bool
     let message: String?
+    let accessory: AnyView?
     let buttons: [AlertButtonConfig]
 
     @State private var requestId = UUID()
@@ -530,6 +533,7 @@ private struct ThemedAlertPresenterModifier: ViewModifier {
                                 id: requestId,
                                 title: title,
                                 message: message,
+                                accessory: accessory,
                                 buttons: buttons,
                                 onDismiss: { isPresented = false }
                             ),
@@ -550,6 +554,7 @@ private struct ThemedAlertPresenterModifier: ViewModifier {
                                 id: requestId,
                                 title: title,
                                 message: message,
+                                accessory: accessory,
                                 buttons: buttons,
                                 onDismiss: { isPresented = false }
                             ),
@@ -606,12 +611,17 @@ public struct ThemedAlertHost: View {
 extension View {
     /// Present a themed alert dialog with glass effects and spring animations.
     /// Supports 1–3 (or more) buttons; when 3+, buttons stack vertically for better ergonomics.
+    /// `accessory` renders between the message and the buttons (upstream;
+    /// e.g. File Changes' per-file revert outcomes). `width` overrides the
+    /// standard 340pt dialog width (honoured by the `.contained` style only).
     @ViewBuilder
     func themedAlert(
         _ title: String,
         isPresented: Binding<Bool>,
         message: String? = nil,
+        accessory: AnyView? = nil,
         buttons: [AlertButtonConfig],
+        width: CGFloat? = nil,
         presentationStyle: ThemedAlertPresentationStyle = .window
     ) -> some View {
         if presentationStyle == .contained {
@@ -620,7 +630,9 @@ extension View {
                     title: title,
                     isPresented: isPresented,
                     message: message,
+                    accessory: accessory,
                     buttons: buttons,
+                    width: width,
                     presentationStyle: .contained
                 )
             )
@@ -631,6 +643,7 @@ extension View {
                     title: title,
                     isPresented: isPresented,
                     message: message,
+                    accessory: accessory,
                     buttons: buttons
                 )
             )

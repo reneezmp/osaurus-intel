@@ -9,9 +9,8 @@
 //  badge counts changed files only while the rail is closed, and at narrow
 //  widths the two rails take turns rather than crushing the chat column.
 //
-//  Intel: upstream's file minus the File Changes deep-link cases (file
-//  history not ported); layout statics live on
-//  `ChatContentView` (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
+//  Intel: upstream's file; layout statics live on `ChatContentView`
+//  (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
 //
 
 import Foundation
@@ -71,6 +70,25 @@ struct ChatWindowStateInspectorTests {
         }
     }
 
+    @Test("opening the changes panel shows File Changes focused on the set, even over History")
+    func openChangesPanelFocusesSet() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+            let setId = UUID()
+
+            window.showInspector(.history)
+            window.openChangesPanel(focusing: setId)
+            #expect(window.inspectorPane == .fileChanges)
+            #expect(window.changesPanelFocusSetId == setId)
+
+            // Re-opening without a focus clears the stale focus.
+            window.openChangesPanel()
+            #expect(window.inspectorPane == .fileChanges)
+            #expect(window.changesPanelFocusSetId == nil)
+        }
+    }
+
     @Test("an unpinned File Changes falls back to History while the chat has no change sets")
     func fileChangesFallsBackToHistory() {
         #expect(ChatWindowState.effectiveInspectorPane(requested: nil, fileChangeSetCount: 0, isPinned: false) == nil)
@@ -84,7 +102,7 @@ struct ChatWindowStateInspectorTests {
         #expect(ChatWindowState.effectiveInspectorPane(requested: .fileChanges, fileChangeSetCount: 2, isPinned: false) == .fileChanges)
     }
 
-    @Test("the lens bar pins the pane; the toggle reopens unpinned")
+    @Test("the lens bar pins the pane; the toggle reopens unpinned; a new tab on screen unpins")
     func pinFollowsExplicitPicks() async throws {
         try await ChatHistoryTestStorage.run {
             let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
@@ -107,7 +125,13 @@ struct ChatWindowStateInspectorTests {
             #expect(window.inspectorPanePinned == false)
             #expect(window.effectiveInspectorPane == .history)
 
-            // Intel: no File Changes deep links until file history is ported.
+            // A deep link pins too, and a new chat on screen clears the pin.
+            window.openChangesPanel()
+            #expect(window.inspectorPanePinned)
+            #expect(window.effectiveInspectorPane == .fileChanges)
+            window.startNewChat()
+            #expect(window.inspectorPanePinned == false)
+            #expect(window.effectiveInspectorPane == .history)
         }
     }
 

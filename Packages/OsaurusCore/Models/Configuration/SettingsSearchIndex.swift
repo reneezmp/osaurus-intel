@@ -175,6 +175,23 @@ public enum SettingsSearchIndex {
             id: "storage.encryption", tab: .settings, section: "Advanced", title: "About encrypted storage",
             keywords: ["encryption", "sqlcipher", "keychain", "at rest", "storage", "data & storage"]),
         .init(
+            id: "storage.fileHistory.retention", tab: .settings, section: "Advanced",
+            title: "Keep File History",
+            keywords: [
+                "file history retention", "undo history", "revert history", "file changes", "change history",
+                "file snapshots", "keep changes", "delete old changes", "30 days", "90 days",
+            ],
+            disambiguation:
+                "How long reverting agent file changes stays possible. Deleting a chat always deletes its file history."
+        ),
+        .init(
+            id: "storage.fileHistory.sizeLimit", tab: .settings, section: "Advanced",
+            title: "File History Size Limit",
+            keywords: [
+                "file history size", "file history disk", "undo storage", "snapshot storage", "revert storage",
+                "file changes disk usage",
+            ]),
+        .init(
             id: "settings.general.maintenance", tab: .settings, section: "Reset",
             title: "Factory Reset", keywords: ["factory reset", "reset", "wipe", "erase", "maintenance"]),
 

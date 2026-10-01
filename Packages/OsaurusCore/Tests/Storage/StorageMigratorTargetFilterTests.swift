@@ -104,10 +104,13 @@ struct StorageMigratorTargetFilterTests {
             let labels = Set(targets.map(\.label))
             // `knowledge write log` (2026-09-30, docs/KNOWLEDGE_WRITE_INTEL.md):
             // primary data (what agent writes replaced), so it must follow a
-            // key rotation too.
+            // key rotation too. `file history` (2026-10-01,
+            // docs/FILE_HISTORY_INTEL.md): the index of every snapshot Revert
+            // can restore.
             #expect(
                 labels == [
                     "chat history", "memory", "methods", "tool index", "scheduler", "knowledge write log",
+                    "file history",
                 ])
         }
     }

@@ -122,8 +122,8 @@ struct IntelRichFolderFormatsTests {
         let root = try Self.makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         let sessionId = "rich-formats-\(UUID().uuidString)"
-        await FileOperationLog.shared.setRootPath(root)
-        defer { Task { await FileOperationLog.shared.setRootPath(nil) } }
+        let env = try FileHistoryTestEnv.make()
+        defer { env.cleanup() }
 
         let target = root.appendingPathComponent("report.xlsx")
         _ = try await FileWriteTool(rootPath: root).execute(
@@ -131,12 +131,11 @@ struct IntelRichFolderFormatsTests {
         let original = try Data(contentsOf: target)
         #expect(String(data: original, encoding: .utf8) == nil)  // binary
 
-        try await ChatExecutionContext.$currentSessionId.withValue(sessionId) {
-            _ = try await FileWriteTool(rootPath: root).execute(
-                argumentsJSON: Self.json(["path": "report.xlsx", "content": "a,b\n9,9\n"]))
-        }
+        _ = try await env.run(
+            FileWriteTool(rootPath: root), Self.json(["path": "report.xlsx", "content": "a,b\n9,9\n"]),
+            sessionId: sessionId, folder: root)
         #expect(try Data(contentsOf: target) != original)
-        _ = try await FileOperationLog.shared.undoLast(sessionId: sessionId)
+        _ = try await env.call(FileUndoTool(rootPath: root, journal: env.journal), "{}", sessionId: sessionId)
         #expect(try Data(contentsOf: target) == original)
     }
 

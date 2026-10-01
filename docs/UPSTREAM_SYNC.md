@@ -2183,9 +2183,10 @@ calling a sync complete.
   of Intel's reader), `Models/Chat/FileDiff.swift`, and the upstream
   `FileWriteDocumentRouting` / `DocumentAdaptersBootstrap` (PowerPoint and
   CSV/TSV emitters registered again).
-- `Services/FileHistory/FileDiffEngine.swift` is **trimmed**: only the pure
-  text/document diff. The journal-backed parts (`FileDiffContent`,
-  `diff(key:before:after:journal:)`) arrive with `W-file-history`.
+- `Services/FileHistory/FileDiffEngine.swift` was **trimmed** here to the
+  pure text/document diff; the full upstream file (journal-backed
+  `FileDiffContent`, `diff(key:before:after:journal:)`) arrived with
+  `W-file-history` on 2026-10-01.
   `FileDiff` inlines the path-key synonyms from `SchemaValidator` (not
   compiled on Intel yet).
 - Intel `FolderTools`: `file_edit` gains `operations` (upstream description
@@ -2423,4 +2424,27 @@ calling a sync complete.
   window layout (`W-chat-tabs` stage 2, #2907 part C) is complete except
   File Changes (`W-file-history`) and retained runs across relaunch. Notes:
   [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-6-notes-tour-window-size-full-screen).
+
+### Per-chat file history, stage 1 (`W-file-history`, #2907 part A) — 2026-10-01
+
+- Ported from upstream/main: `Services/FileHistory/*` (journal, revert,
+  capture, object store, summary store, full diff engine),
+  `SandboxWorkspaceChange.swift` (root kinds), `ShellMutationPlanner`,
+  `FileChangesPanel`, `FileHistoryRetentionSection`, `file_undo` and
+  `file_operation_history`, the four `OsaurusTool` capture hooks,
+  `currentChangeSetId`, the History-row badge, the tool-row and
+  end-of-turn links, the File Changes lens in `ChatInspectorPanel` (now
+  identical to upstream), and the layout tour's upstream third-stop copy.
+- Intel adaptations (full table in
+  [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md#intel-differences-keep-on-re-sync)):
+  rows in a new encrypted `Storage/FileHistoryDatabase.swift` (upstream:
+  chat-history DB v20), opened lazily by the shared journal and enrolled in
+  `StorageMigrator` key rotation; no sandbox roots, legacy import or
+  ownership repair; untracked-call prompt through Intel's approval card
+  (`perCallApprovalOnly` added) with a test seam instead of headless lanes;
+  capture in Intel's `ToolRegistry.execute`; `FileOperationLog` and
+  `FileOperation` removed, as upstream; `themedAlert(accessory:width:)`
+  added. Re-sync the journal files by diffing against upstream and keeping
+  the "Intel:" edits.
+- Not yet: stage 2, inline diff cards (`NativeFileDiffView`, `.fileDiff`).
 

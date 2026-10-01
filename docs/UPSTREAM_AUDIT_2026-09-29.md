@@ -90,7 +90,9 @@ the prerequisite". Every commit is one of:
 commit is +19.8k/−7.5k lines), so each should be its own release with its own
 Rosy checklist, like the Apple apps.
 
-**A. Per-chat file change history.** Every mutating tool call is journaled as
+**A. Per-chat file change history — stage 1 shipped 2026-10-01** (see
+[`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md); inline diff cards are
+stage 2). Every mutating tool call is journaled as
 a change set with exact before/after content in a content-addressed store
 (`Services/FileHistory/*`, ~3.3k lines), shown in a File Changes inspector
 pane (Timeline | Files, per-file and Revert All with preview and conflicts)
@@ -113,6 +115,8 @@ OOXML package/DOM and ZIP writer that #91 skipped, so it also unlocks
 Projects), right inspector (File Changes | History), projects as folders of
 chats. Intel's chat window has diverged (no tabs, Ventura-themed controls);
 treat as a design decision, not a port. Depends on A for the File Changes pane.
+**Shipped 2026-10-01** (Renée: follow upstream; [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md)),
+File Changes included once A landed.
 
 Suggested order: B (smallest, extends shipped #91), then A, then decide C.
 

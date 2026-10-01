@@ -487,6 +487,18 @@ final class NativeAssistantActionsView: NSView {
     private let regenerateButton: HeaderCircleActionControl
     let speakButton: HeaderCircleActionControl
     private let overflowButton: HeaderCircleActionControl
+    /// "3 files changed · View changes" — the end-of-turn entry point into
+    /// the File Changes panel. Hidden until the journal reports this turn
+    /// recorded something; refreshed when history changes (e.g. a revert).
+    /// Upstream #2907 part A.
+    private let fileChangesButton = NSButton(title: "", target: nil, action: nil)
+    private var fileChangesSummary: FileChangeTurnSummary?
+    private var fileChangesLookupTurnId: UUID?
+    nonisolated(unsafe) private var fileChangesObservation: NSObjectProtocol?
+    /// Intel: this view hugs its last control exactly (see the overflow
+    /// constraint), so the trailing pin moves to the link while it shows.
+    private var overflowTrailingConstraint: NSLayoutConstraint?
+    private var fileChangesTrailingConstraint: NSLayoutConstraint?
 
     private var turnId: UUID = UUID()
     private var onCopy: ((UUID) -> Void)?
@@ -572,8 +584,36 @@ final class NativeAssistantActionsView: NSView {
             // so nothing pinned our width to our content. Harmless while the row has
             // room, but leaves the row's own frame undefined the moment it doesn't —
             // hug the last button exactly instead.
-            overflowButton.trailingAnchor.constraint(equalTo: trailingAnchor),
         ])
+        let overflowTrailing = overflowButton.trailingAnchor.constraint(equalTo: trailingAnchor)
+        overflowTrailing.isActive = true
+        overflowTrailingConstraint = overflowTrailing
+
+        fileChangesButton.translatesAutoresizingMaskIntoConstraints = false
+        fileChangesButton.isBordered = false
+        fileChangesButton.bezelStyle = .inline
+        fileChangesButton.imagePosition = .imageLeading
+        fileChangesButton.setButtonType(.momentaryChange)
+        fileChangesButton.isHidden = true
+        fileChangesButton.target = self
+        fileChangesButton.action = #selector(openFileChanges)
+        addSubview(fileChangesButton)
+        NSLayoutConstraint.activate([
+            fileChangesButton.leadingAnchor.constraint(equalTo: overflowButton.trailingAnchor, constant: 10),
+            fileChangesButton.centerYAnchor.constraint(equalTo: centerYAnchor),
+        ])
+        fileChangesTrailingConstraint = fileChangesButton.trailingAnchor.constraint(equalTo: trailingAnchor)
+        fileChangesObservation = NotificationCenter.default.addObserver(
+            forName: .fileChangesDidChange,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            MainActor.assumeIsolated {
+                guard let self else { return }
+                self.fileChangesLookupTurnId = nil
+                self.refreshFileChangesSummary()
+            }
+        }
 
         ttsObservation = NotificationCenter.default.addObserver(
             forName: .ttsPlaybackStateChanged,
@@ -605,6 +645,68 @@ final class NativeAssistantActionsView: NSView {
         if let observation = ttsConfigObservation {
             NotificationCenter.default.removeObserver(observation)
         }
+        if let observation = fileChangesObservation {
+            NotificationCenter.default.removeObserver(observation)
+        }
+    }
+
+    // MARK: - File changes summary
+
+    private func setFileChangesHidden(_ hidden: Bool) {
+        fileChangesButton.isHidden = hidden
+        fileChangesTrailingConstraint?.isActive = !hidden
+        overflowTrailingConstraint?.isActive = hidden
+    }
+
+    private func refreshFileChangesSummary() {
+        let turn = turnId
+        guard fileChangesLookupTurnId != turn else {
+            applyFileChangesSummary()
+            return
+        }
+        fileChangesLookupTurnId = turn
+        fileChangesSummary = nil
+        setFileChangesHidden(true)
+        Task { @MainActor [weak self] in
+            let summary = await FileChangeJournal.shared.turnSummary(turnId: turn)
+            guard let self, self.turnId == turn else { return }
+            self.fileChangesSummary = summary
+            self.applyFileChangesSummary()
+        }
+    }
+
+    private func applyFileChangesSummary() {
+        guard let summary = fileChangesSummary, let theme = currentTheme else {
+            setFileChangesHidden(true)
+            return
+        }
+        let count = summary.fileCount
+        var title = L("\(count) files changed")
+        title += summary.allReverted ? " · " + L("reverted") : " · " + L("View changes")
+        let tint = NSColor(summary.allReverted ? theme.tertiaryText : theme.accentColor)
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.lineBreakMode = .byTruncatingTail
+        fileChangesButton.attributedTitle = NSAttributedString(
+            string: title,
+            attributes: [
+                .font: NSFont.systemFont(ofSize: CGFloat(theme.captionSize), weight: .medium),
+                .foregroundColor: tint,
+                .paragraphStyle: paragraph,
+            ]
+        )
+        let cfg = NSImage.SymbolConfiguration(pointSize: CGFloat(theme.captionSize) - 1, weight: .medium)
+        fileChangesButton.image = SymbolImageCache.image(
+            "clock.arrow.circlepath", accessibilityDescription: nil
+        )?.withSymbolConfiguration(cfg)
+        fileChangesButton.contentTintColor = tint
+        fileChangesButton.toolTip = L("Show in File Changes")
+        fileChangesButton.setAccessibilityLabel(title)
+        setFileChangesHidden(false)
+    }
+
+    @objc private func openFileChanges() {
+        guard let summary = fileChangesSummary else { return }
+        FileChangeSummaryStore.requestPanel(sessionId: summary.sessionId, focusing: summary.firstSetId)
     }
 
     func configure(
@@ -647,6 +749,7 @@ final class NativeAssistantActionsView: NSView {
         )
         applyTTSVisibility()
         refreshSpeakIcon()
+        refreshFileChangesSummary()
     }
 
     private func presentOverflowMenu() {

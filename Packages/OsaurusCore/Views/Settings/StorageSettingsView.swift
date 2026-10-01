@@ -117,6 +117,7 @@ public struct StorageSettingsView: View {
             actionsCard
                 .settingsLandingAnchor(embedded ? "storage.backup" : nil)
             footnote
+            FileHistoryRetentionSection()
         }
     }
 

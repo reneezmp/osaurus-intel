@@ -112,6 +112,11 @@ public enum ChatExecutionContext {
     /// can swap its check for a spinner while its audio plays
     @TaskLocal public static var currentToolCallId: String?
 
+    /// File history change set recording the executing tool call (bound by
+    /// the registry's journal capture). Tools report it as `operation_id`
+    /// so `file_undo` can target exactly this call.
+    @TaskLocal public static var currentChangeSetId: UUID?
+
     /// The current `agent_runs.id` row (`SchedulerDatabase`) so every
     /// mutation done by `db.*` tools or scheduling tools can stamp its
     /// originating run on the `_changelog` audit trail (spec §1.4,

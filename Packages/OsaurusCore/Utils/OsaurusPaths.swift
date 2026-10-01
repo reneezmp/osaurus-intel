@@ -360,6 +360,14 @@ public enum OsaurusPaths {
         root().appendingPathComponent("scheduler.sqlite")
     }
 
+    /// File history rows (`FileHistoryDatabase`, Intel: upstream keeps these
+    /// tables in its chat-history database). Lives beside the journal's
+    /// object store under `file-history/`.
+    public static func fileHistoryDatabaseFile() -> URL {
+        root().appendingPathComponent("file-history", isDirectory: true)
+            .appendingPathComponent("history.sqlite")
+    }
+
     /// Plugin binaries directory (`~/.osaurus/Tools/`)
     public static func tools() -> URL {
         root().appendingPathComponent("Tools", isDirectory: true)

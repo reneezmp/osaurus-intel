@@ -575,9 +575,7 @@ enum ChatTabScope: Hashable {
 }
 
 /// The panes of the chat window's right-hand inspector. One rail, two
-/// contents, both about the tab on screen. Intel has no file change
-/// history yet (`W-file-history`), so only History is ever shown; the case
-/// stays so the rail's code matches upstream.
+/// contents, both about the tab on screen.
 enum ChatInspectorPane: Hashable {
     /// This chat's file history: timeline, per-file net state, revert.
     case fileChanges
@@ -593,7 +591,10 @@ final class ChatWindowState: ObservableObject {
     /// (`.id(ObjectIdentifier(session))`). The didSet keeps the tab entry in
     /// sync when in-tab navigation replaces the instance.
     @Published private(set) var session: ChatSession {
-        didSet { syncActiveTabSession() }
+        didSet {
+            syncActiveTabSession()
+            observeActiveSessionFileChanges()
+        }
     }
     let foundationModelAvailable: Bool = false
 
@@ -730,9 +731,121 @@ final class ChatWindowState: ObservableObject {
         isProjectPageVisible ? showProjectInspector : isInspectorOpen
     }
 
-    /// File change history is not ported (`W-file-history`): always zero.
-    let fileChangesCount: Int = 0
-    let fileChangeSetCount: Int = 0
+    // MARK: File Changes (upstream #2907 part A)
+
+    /// Files whose current state differs from before this chat touched them.
+    @Published private(set) var fileChangesCount: Int = 0
+
+    /// Change sets recorded for the chat (including reverts). Zero lets an
+    /// unpinned File Changes request fall back to History.
+    @Published private(set) var fileChangeSetCount: Int = 0
+
+    /// True while a background job spawned by the current session may still
+    /// be mutating the workspace (undo is disabled meanwhile). Intel has no
+    /// background jobs, so it stays false; kept for upstream parity.
+    @Published private(set) var fileChangesHaveActiveJob: Bool = false
+
+    /// A sidebar badge or card asked for File Changes of a chat this window
+    /// hasn't switched to yet; honoured if the switch lands within 3s.
+    private var pendingChangesPanelRequest: (sessionId: String, setId: UUID?, at: Date)?
+    private var fileChangeCancellables: Set<AnyCancellable> = []
+    private var activeSessionIdCancellable: AnyCancellable?
+    /// The conversation the file change state was last computed for.
+    private var fileChangesSessionKey: (session: ObjectIdentifier, sessionId: UUID?)?
+
+    /// Show the File Changes inspector, optionally revealing one change set.
+    func openChangesPanel(focusing setId: UUID? = nil) {
+        changesPanelFocusSetId = setId
+        showInspector(.fileChanges)
+    }
+
+    /// Re-query the journal for the current session's outstanding file
+    /// count, set count, and active-job flag. Cheap (actor cache hit) and
+    /// safe to call on every chat switch / journal notification. Every
+    /// conversation change goes through here, so this is also where the
+    /// inspector's explicit pane pick is forgotten; a journal notification
+    /// for the same chat passes `conversationChanged: false`. Upstream.
+    func refreshFileChanges(conversationChanged: Bool = true) {
+        if conversationChanged { inspectorPanePinned = false }
+        if let pending = pendingChangesPanelRequest {
+            if Date().timeIntervalSince(pending.at) > 3 {
+                pendingChangesPanelRequest = nil
+            } else if pending.sessionId == session.sessionId?.uuidString {
+                pendingChangesPanelRequest = nil
+                openChangesPanel(focusing: pending.setId)
+            }
+        }
+        // A new chat has no session id until the first send.
+        guard let sessionId = session.sessionId?.uuidString else {
+            fileChangesCount = 0
+            fileChangeSetCount = 0
+            fileChangesHaveActiveJob = false
+            return
+        }
+        Task { [weak self] in
+            let journal = FileChangeJournal.shared
+            let count = await journal.outstandingCount(for: sessionId)
+            let setCount = await journal.changeSets(for: sessionId).count
+            let hasJob = await journal.hasActiveBackgroundJobs(sessionId: sessionId)
+            await MainActor.run {
+                guard let self, self.session.sessionId?.uuidString == sessionId else { return }
+                self.fileChangesCount = count
+                self.fileChangeSetCount = setCount
+                self.fileChangesHaveActiveJob = hasJob
+            }
+        }
+    }
+
+    /// Journal notifications: refresh the count for the chat on screen, and
+    /// open File Changes when a card, chip or sidebar badge asks for it.
+    /// Upstream registers these in `setupNotificationObservers()`.
+    private func observeFileChanges() {
+        NotificationCenter.default.publisher(for: .fileChangesOpenPanel)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                guard let self, let target = notification.userInfo?["sessionId"] as? String else { return }
+                let setId = notification.userInfo?["setId"] as? UUID
+                if self.session.sessionId?.uuidString == target {
+                    self.openChangesPanel(focusing: setId)
+                } else {
+                    // The sidebar badge selects the chat first; the switch
+                    // can land after this (e.g. a pending rename commits).
+                    self.pendingChangesPanelRequest = (target, setId, Date())
+                }
+            }
+            .store(in: &fileChangeCancellables)
+        NotificationCenter.default.publisher(for: .fileChangesDidChange)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] notification in
+                guard let self, let current = self.session.sessionId?.uuidString else { return }
+                let changed = notification.userInfo?["sessionId"] as? String
+                guard changed == nil || changed == current else { return }
+                self.refreshFileChanges(conversationChanged: false)
+            }
+            .store(in: &fileChangeCancellables)
+        observeActiveSessionFileChanges()
+    }
+
+    /// Intel: upstream calls `refreshFileChanges()` from each switch site
+    /// (new tab, load, reset, agent switch…). Intel follows the active
+    /// session and its id instead, which covers every one of them: a new
+    /// instance or a different saved chat is a conversation change; a new
+    /// chat gaining its id on the first send is not.
+    private func observeActiveSessionFileChanges() {
+        activeSessionIdCancellable = session.$sessionId
+            .removeDuplicates()
+            .receive(on: RunLoop.main)
+            .sink { [weak self] sessionId in
+                guard let self else { return }
+                let instance = ObjectIdentifier(self.session)
+                let previous = self.fileChangesSessionKey
+                self.fileChangesSessionKey = (instance, sessionId)
+                let changed =
+                    previous == nil || previous?.session != instance
+                    || (previous?.sessionId != nil && previous?.sessionId != sessionId)
+                self.refreshFileChanges(conversationChanged: changed)
+            }
+    }
 
     /// The pane the rail actually draws. An unpinned File Changes request
     /// for a chat with no change sets shows History instead. Upstream.
@@ -774,14 +887,12 @@ final class ChatWindowState: ObservableObject {
         inspectorPane = nil
     }
 
-    /// Change set the inspector should reveal (File Changes; unused until
-    /// file history is ported).
+    /// Change set the inspector should reveal (from an inline card or chip).
     @Published var changesPanelFocusSetId: UUID?
 
     /// Count shown on the toolbar's inspector toggle: the files this chat
-    /// changed, only while the inspector is closed, only for local chats,
-    /// and never zero. Upstream; always nil on Intel until file history is
-    /// ported (`fileChangesCount` is 0).
+    /// changed, only while the inspector is closed (open, the lens bar
+    /// carries it), only for local chats, and never zero. Upstream.
     nonisolated static func inspectorBadgeCount(
         fileChangesCount: Int,
         isInspectorOpen: Bool,
@@ -898,6 +1009,7 @@ final class ChatWindowState: ObservableObject {
         observeThemeChanges()
         observeAgents()
         observeSessionsManager()
+        observeFileChanges()
     }
 
     init(windowId: UUID, executionContext: Any? = nil) {
@@ -915,6 +1027,7 @@ final class ChatWindowState: ObservableObject {
         observeThemeChanges()
         observeAgents()
         observeSessionsManager()
+        observeFileChanges()
     }
 
     /// Point a session at this window: busy alerts and sidebar refreshes
@@ -997,6 +1110,7 @@ final class ChatWindowState: ObservableObject {
             adoptAgent(newAgentId)
             session.reset(for: newAgentId)
             refreshSessions()
+            refreshFileChanges()
             return
         }
         newTab(agentId: newAgentId)
@@ -1064,6 +1178,9 @@ final class ChatWindowState: ObservableObject {
         TTSService.shared.stop()
         session.reset(for: agentId)
         refreshSessions()
+        // A blank tab reset in place keeps its instance and its nil id, so
+        // the session observer can't see this one; upstream refreshes here.
+        refreshFileChanges()
     }
 
     /// Keep ⌘N in the open project, or in the current session's project.
@@ -1720,6 +1837,8 @@ final class ChatWindowState: ObservableObject {
         agentsCancellable = nil
         sessionsCancellable?.cancel()
         sessionsCancellable = nil
+        fileChangeCancellables.removeAll()
+        activeSessionIdCancellable = nil
         onTabLayoutChanged = nil
         teardownInactiveTabSessions()
         teardownTabSession(session)

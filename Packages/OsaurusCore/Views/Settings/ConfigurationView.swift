@@ -58,6 +58,7 @@ struct ConfigurationView: View {
     nonisolated static let advancedAnchorIds: Set<String> = [
         "settings.notifications.timeout", "settings.notifications.maxVisible",
         "settings.notifications.maxConcurrentTasks", "storage.encryption", "storage.backup",
+        "storage.fileHistory.retention", "storage.fileHistory.sizeLimit",
     ]
 
     var body: some View {

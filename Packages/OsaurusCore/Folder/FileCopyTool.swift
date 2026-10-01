@@ -6,10 +6,10 @@
 //  contract as upstream's tool — a raw byte copy of one file inside the
 //  working folder, `overwrite` to replace, 512 MB cap, staged atomic swap —
 //  written for Intel's host-folder tools: upstream's version routes through
-//  the VM sandbox bridge and the file-change journal, which Intel does not
-//  have. Undo goes through `FileOperationLog` like `file_write`: a new
-//  destination is logged as a create (undo deletes it), an overwrite as a
-//  binary-safe write (undo restores the previous bytes).
+//  the VM sandbox bridge, which Intel does not have. Undo comes from the
+//  registry's file history capture (upstream #2907 part A): the destination
+//  is the declared target, so a new file reverts to absent and an overwrite
+//  to its previous bytes.
 //
 //  Before this, Intel removed the tool "by design" in favour of
 //  `shell_run cp`, which bypasses undo.
@@ -25,6 +25,12 @@ struct FileCopyTool: OsaurusTool, PermissionedTool {
         + "version a file before editing it. Paths are relative to the working folder. Pass "
         + "`overwrite: true` to replace an existing destination (the previous bytes stay undoable). "
         + "Example: {\"source\": \"reports/q3.docx\", \"destination\": \"reports/q3-draft.docx\"}"
+    var mutatesHostFolder: Bool { true }
+
+    func declaredMutationTargets(argumentsJSON: String) -> [String]? {
+        FileChangeCapture.declaredPaths(argumentsJSON, keys: ["destination"])
+    }
+
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -114,22 +120,6 @@ struct FileCopyTool: OsaurusTool, PermissionedTool {
                 field: "overwrite", expected: "`true` to replace the existing file", tool: name, retryable: false)
         }
 
-        // Undo record before touching the destination (same shape as file_write).
-        let previous = FileOperation.encodePreviousContent(
-            destinationExists ? try? Data(contentsOf: destinationURL) : nil)
-        if let sessionId = ChatExecutionContext.currentSessionId {
-            await FileOperationLog.shared.log(
-                FileOperation(
-                    type: destinationExists ? .write : .create,
-                    path: FolderToolHelpers.displayPath(for: destinationURL, under: rootPath),
-                    previousContent: previous.content,
-                    previousContentEncoding: previous.encoding,
-                    sessionId: sessionId,
-                    batchId: ChatExecutionContext.currentBatchId
-                )
-            )
-        }
-
         do {
             try fm.createDirectory(at: destinationURL.deletingLastPathComponent(), withIntermediateDirectories: true)
             if destinationExists {
@@ -153,13 +143,13 @@ struct FileCopyTool: OsaurusTool, PermissionedTool {
 
         return ToolEnvelope.success(
             tool: name,
-            result: [
+            result: FolderToolHelpers.withOperationId([
                 "kind": "file_copy_result",
                 "source": source,
                 "destination": destination,
                 "bytes": sourceBytes,
                 "overwrote": destinationExists,
-            ]
+            ])
         )
     }
 }

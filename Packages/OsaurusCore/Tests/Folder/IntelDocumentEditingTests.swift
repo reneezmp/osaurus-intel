@@ -52,16 +52,16 @@ struct IntelDocumentEditingTests {
         #expect(try Data(contentsOf: url) == original)
 
         let sessionId = "docedit-\(UUID().uuidString)"
-        await FileOperationLog.shared.setRootPath(root)
-        defer { Task { await FileOperationLog.shared.setRootPath(nil) } }
-        let applied = try await ChatExecutionContext.$currentSessionId.withValue(sessionId) {
-            try await tool.execute(argumentsJSON: Self.json(["path": "plan.docx", "old_string": "Q3", "new_string": "Q4"]))
-        }
+        let env = try FileHistoryTestEnv.make()
+        defer { env.cleanup() }
+        let applied = try await env.run(
+            tool, Self.json(["path": "plan.docx", "old_string": "Q3", "new_string": "Q4"]),
+            sessionId: sessionId, folder: root)
         #expect(Self.object(applied)["ok"] as? Bool == true, "\(applied)")
         let text = try await FileReadTool(rootPath: root).execute(argumentsJSON: Self.json(["path": "plan.docx"]))
         #expect(text.contains("Q4") && !text.contains("Q3"), "\(text.prefix(300))")
 
-        _ = try await FileOperationLog.shared.undoLast(sessionId: sessionId)
+        _ = try await env.call(FileUndoTool(rootPath: root, journal: env.journal), "{}", sessionId: sessionId)
         #expect(try Data(contentsOf: url) == original)
     }
 

@@ -15,9 +15,6 @@
 //  included — can cut a spotlight exactly around toolbar items, which live
 //  outside the SwiftUI content view.
 //
-//  Intel: the third stop's copy leaves out file changes (no file history
-//  yet, `W-file-history`); docs/CHAT_WINDOW_LAYOUT_INTEL.md.
-//
 
 import AppKit
 import Combine
@@ -64,11 +61,9 @@ extension ChatTourStop {
             ChatTourStop(
                 id: "history",
                 anchor: .historyButton,
-                // Intel: no File Changes pane yet, so the stop is about
-                // History alone.
-                title: L("Past chats"),
+                title: L("Past chats and file changes"),
                 body: L(
-                    "Open the inspector to search, filter and reopen past chats with this agent."
+                    "Open the inspector to search past chats with this agent and review, or undo, every file a chat changed."
                 )
             ),
         ]

@@ -13,11 +13,6 @@
 //  opens and closes the rail like `sidebar.left` does the sidebar, so
 //  neither rail carries a close button of its own.
 //
-//  Intel: File Changes needs per-chat file history (`W-file-history`,
-//  upstream #2907 part A), not ported yet, so the lens bar lists History
-//  alone and the File Changes pane falls back to History
-//  (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
-//
 
 import SwiftUI
 
@@ -67,9 +62,27 @@ struct ChatInspectorPanel: View {
                 set: { windowState.showInspector($0) }
             ),
             segments: [
-                .init(value: .history, label: "History", icon: "clock.arrow.circlepath")
+                .init(
+                    value: .fileChanges,
+                    label: "File Changes",
+                    icon: "plus.forwardslash.minus",
+                    badge: showsFileChangesBadge ? windowState.fileChangesCount : nil,
+                    accessibilityLabel: fileChangesAccessibilityLabel
+                ),
+                .init(value: .history, label: "History", icon: "clock.arrow.circlepath"),
             ]
         )
+    }
+
+    /// Remote-agent chats have no local file history to count.
+    private var showsFileChangesBadge: Bool {
+        windowState.selectedDiscoveredAgentProviderId == nil
+    }
+
+    private var fileChangesAccessibilityLabel: Text? {
+        guard showsFileChangesBadge, windowState.fileChangesCount > 0 else { return nil }
+        return Text("File Changes", bundle: .module) + Text(", ")
+            + Text("\(windowState.fileChangesCount) files changed", bundle: .module)
     }
 
     // MARK: - Panes
@@ -77,7 +90,13 @@ struct ChatInspectorPanel: View {
     @ViewBuilder
     private var paneBody: some View {
         switch pane {
-        case .fileChanges, .history:
+        case .fileChanges:
+            FileChangesPanel(
+                sessionId: sessionId,
+                focusSetId: $focusSetId,
+                userPrompt: userPrompt
+            )
+        case .history:
             ChatHistoryPaneView(
                 windowState: windowState,
                 scope: .chat(windowState.windowId),

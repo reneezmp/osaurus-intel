@@ -187,24 +187,6 @@ enum WorkspaceWriteSafety {
         return Preview(payload: payload, warnings: warnings, text: text)
     }
 
-    static func operationHistoryEntry(_ operation: FileOperation) -> [String: Any] {
-        var entry: [String: Any] = [
-            "id": operation.id.uuidString,
-            "type": operation.type.rawValue,
-            "display_name": operation.type.displayName,
-            "path": operation.path,
-            "timestamp": ISO8601DateFormatter().string(from: operation.timestamp),
-            "can_undo": true,
-        ]
-        if let destinationPath = operation.destinationPath {
-            entry["destination_path"] = destinationPath
-        }
-        if let batchId = operation.batchId {
-            entry["batch_id"] = batchId.uuidString
-        }
-        return entry
-    }
-
     private static func riskWarnings(
         path: String,
         fileURL: URL,

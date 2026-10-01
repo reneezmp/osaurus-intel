@@ -19,9 +19,9 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   Window.
 - **Right rail, "inspector":** File Changes | History. History lists the past
   chats of the tab's agent, with search, filters, New Chat and Import. It
-  replaces the old chats sidebar. File Changes needs per-chat file history
-  (`W-file-history`, #2907 part A), not ported yet, so Intel shows the
-  History pane alone until then.
+  replaces the old chats sidebar. File Changes (per-chat file history,
+  `W-file-history`, #2907 part A) shipped 2026-10-01; see
+  [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md).
 - When the window is too narrow for both rails, the left one steps aside.
 
 ## Steps
@@ -38,7 +38,9 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
 - No workspace/teammate agents, relay agents or LAN-discovered agent rows:
   Intel has no workspaces, and its chat window never wired the Bonjour or
   relay lists (`discoveredAgents` stays empty). Their sections are left out.
-- File Changes pane: absent until `W-file-history`.
+- File Changes pane: shipped with `W-file-history` (2026-10-01,
+  [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md)); `ChatInspectorPanel`
+  is now identical to upstream's.
 - History pane, Default agent: lists every chat (Intel's
   `ChatSessionsManager.sessions(for:)`), not only Default-tagged ones.
   Intel saves chats with no agent under a random agent id, so upstream's
@@ -131,8 +133,9 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
 - `Views/Tour/ChatLayoutTour.swift` is upstream's file. It offers its
   three-stop coachmark tour once per user (`chatLayoutTourCompleted`) when a
   chat window becomes key, and waits while any alert, sheet or modal is up.
-  Intel edits: single-value `onChange` with a remembered step, and the third
-  stop's copy ("Past chats") drops file changes. Anchors: the navigator's
+  Intel edit: single-value `onChange` with a remembered step. (Until File
+  Changes shipped the third stop said "Past chats" only; it now uses
+  upstream's "Past chats and file changes" copy.) Anchors: the navigator's
   lens bar, the tab strip, the inspector toggle.
 - Help ▸ **Chat Layout Tour** replays it. Intel adds this one item after the
   system Help item; upstream's full Help menu (docs, Discord, report an
