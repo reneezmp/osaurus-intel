@@ -654,6 +654,14 @@ public final class SpeechService: ObservableObject {
     /// only when the user allowed Apple's servers for a language without
     /// on-device support.
     @Published public private(set) var recognitionRunsOnDevice: Bool = true
+    /// One Insights row per live dictation session (opened at start, closed at stop).
+    private var liveTranscriptionJob: MediaActivityLogger.TranscriptionJob?
+
+    /// Intel: Apple Speech without an on-device model recognizes on Apple's
+    /// servers, so the activity row names that destination.
+    private var transcriptionRemoteLabel: String? {
+        recognitionRunsOnDevice ? nil : "Apple Speech"
+    }
 
     /// Intel: words the recogniser should favour (agent names and the wake
     /// phrase, set by VAD Mode).
@@ -903,12 +911,28 @@ public final class SpeechService: ObservableObject {
         isTranscribing = true
         defer { isTranscribing = false }
 
+        let fileBytes = (try? FileManager.default.attributesOfItem(atPath: audioURL.path)[.size] as? Int) ?? nil
+        let activity = MediaActivityLogger.beginTranscription(
+            model: loadedModelId ?? "unknown",
+            audioSeconds: nil,
+            audioBytes: fileBytes,
+            audioFormat: audioURL.pathExtension.isEmpty ? nil : audioURL.pathExtension.lowercased(),
+            mode: "file",
+            remoteLabel: transcriptionRemoteLabel
+        )
+
         let request = SFSpeechURLRecognitionRequest(url: audioURL)
         request.requiresOnDeviceRecognition = recognitionRunsOnDevice
         request.addsPunctuation = true
         request.shouldReportPartialResults = false
-        let text = try await AppleSpeechSegment.recognizeFile(request: request, recognizer: recognizer)
-        return TranscriptionResult(text: text, durationSeconds: nil)
+        do {
+            let text = try await AppleSpeechSegment.recognizeFile(request: request, recognizer: recognizer)
+            activity?.finish(transcript: text, language: loadedModelId, error: nil)
+            return TranscriptionResult(text: text, durationSeconds: nil)
+        } catch {
+            activity?.finish(transcript: nil, language: loadedModelId, error: error.localizedDescription)
+            throw error
+        }
     }
 
     // MARK: - Streaming Transcription
@@ -990,6 +1014,14 @@ public final class SpeechService: ObservableObject {
         audioBuffer.setActive(true)
         currentTranscription = ""
         confirmedTranscription = ""
+        liveTranscriptionJob = MediaActivityLogger.beginTranscription(
+            model: loadedModelId ?? "unknown",
+            audioSeconds: nil,
+            audioBytes: nil,
+            audioFormat: inputSource == .systemAudio ? "system_audio" : "microphone",
+            mode: "live",
+            remoteLabel: transcriptionRemoteLabel
+        )
         audioLevel = 0.0
         isSpeechDetected = false
         isUsingSystemAudio = (inputSource == .systemAudio)
@@ -1122,6 +1154,10 @@ public final class SpeechService: ObservableObject {
         isRecording = false
         isSpeechDetected = false
         _ = audioBuffer.getAndClear()
+        let activity = liveTranscriptionJob
+        liveTranscriptionJob = nil
+        // Live capture runs in real time, so session wall-clock ≈ audio duration.
+        let sessionSeconds = activity.map { Date().timeIntervalSince($0.started) }
 
         if let finalText, !finalText.isEmpty {
             if confirmedTranscription.isEmpty {
@@ -1130,9 +1166,14 @@ public final class SpeechService: ObservableObject {
                 confirmedTranscription += " " + finalText
             }
             currentTranscription = ""
+            activity?.finish(
+                transcript: confirmedTranscription, language: loadedModelId, error: nil, audioSeconds: sessionSeconds)
             return finalText
         }
 
+        let fullTranscript = [confirmedTranscription, currentTranscription]
+            .filter { !$0.isEmpty }.joined(separator: " ")
+        activity?.finish(transcript: fullTranscript, language: loadedModelId, error: nil, audioSeconds: sessionSeconds)
         return currentTranscription
     }
 

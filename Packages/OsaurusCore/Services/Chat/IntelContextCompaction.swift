@@ -142,7 +142,15 @@ enum IntelContextCompaction {
         )
         let chatEngine = engine ?? ChatEngine(model: model)
         let response = try await withThrowingTaskGroup(of: ChatCompletionResponse.self) { group in
-            group.addTask { try await chatEngine.completeChat(request: request) }
+            // Insights: a compaction row in the chat's name (upstream logs
+            // `/internal/compaction` with the conversation's source).
+            group.addTask {
+                try await ChatEngine.$activityPurpose.withValue("compaction") {
+                    try await ChatEngine.$activitySource.withValue(.chatUI) {
+                        try await chatEngine.completeChat(request: request)
+                    }
+                }
+            }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
                 throw Failure.timedOut

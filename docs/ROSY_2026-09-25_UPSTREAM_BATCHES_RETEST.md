@@ -1216,8 +1216,7 @@ Manual: [`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md).
 
 ## Insights activity log (`W-insights-sync`)
 
-Manual: [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md). Stage B (store, UI, chat
-rows); web search, MCP, Router, voice and compaction rows come with stage C.
+Manual: [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 
 - [ ] **(paid)** Send a chat message, then open Insights. The new layout
       shows four tiles (Events, Left this Mac, Failed, Privacy-filtered), a
@@ -1249,3 +1248,15 @@ rows); web search, MCP, Router, voice and compaction rows come with stage C.
       opens its row, or shows "no longer available".
 - [ ] Ventura, light and dark: tiles, scope tabs, the Filter popover's
       menus and checkbox, and the "…" menu all render.
+- [ ] **(paid)** Rows from other sources, each in the right scope tab:
+      - an agent web search: Web, "Web search sent to …", query and hits;
+      - a page fetch: Web, the page's host;
+      - an MCP tool call: Tools;
+      - opening Credits: System/Router rows such as "Credits";
+      - Read aloud: Audio & Media, "Speech synthesized on this Mac" for a
+        system voice;
+      - dictation: Audio & Media, transcription;
+      - a new chat's title: Models, "Chat title", source System.
+- [ ] Inspect response on a reply whose chat also generated a title still
+      opens the **reply**, not the title row.
+

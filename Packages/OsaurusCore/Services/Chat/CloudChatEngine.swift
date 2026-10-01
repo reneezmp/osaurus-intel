@@ -203,6 +203,36 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     private var codexResponsesLiteSessionIds: [String: String] = [:]
     private var codexResponsesLiteSessionOrder: [String] = []
 
+    // MARK: Insights attribution (upstream CoreModelService / #2964)
+
+    /// Machine label for a one-shot request (`chat_title`,
+    /// `memory_distillation`, `compaction`…). Bound by the caller; the row's
+    /// path becomes `/internal/<purpose>` as upstream's `CoreModelService`
+    /// logs it, and `compaction` rows get the compaction category.
+    @TaskLocal static var activityPurpose: String?
+    /// Who drives the request when it isn't the engine's own `source`
+    /// (delegated helper sessions log as Agent, upstream #2964).
+    @TaskLocal static var activitySource: RequestSource?
+    /// The orchestrator turn that dispatched a delegated helper, recorded as
+    /// `parent_turn_id` (upstream `loggedParentTurnId`).
+    @TaskLocal static var activityParentTurnId: UUID?
+
+    /// Upstream logs one-shots as `.system` with no turn, so a title or
+    /// memory request made during a reply never answers that reply's
+    /// Inspect response (`focus(turnId:)` takes the newest matching row).
+    private static func loggedSource(default engineSource: RequestSource) -> RequestSource {
+        activitySource ?? (activityPurpose == nil ? engineSource : .system)
+    }
+
+    private static var loggedTurnId: UUID? {
+        activityPurpose == nil ? ChatExecutionContext.currentAssistantTurnId : nil
+    }
+
+    private static func loggedPath(endpointURL: String) -> String {
+        if let purpose = activityPurpose { return "/internal/\(purpose)" }
+        return URL(string: endpointURL)?.path ?? "/chat/completions"
+    }
+
     init(
         source: InferenceSource = .httpAPI,
         model: String = "deepseek-v4-pro",
@@ -221,7 +251,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// Keep Intel's replacement engine visible in Insights just like the
     /// upstream engine. Runtime-only request fields are already excluded by
     /// `ChatCompletionRequest.CodingKeys`.
-    private static func serializeRequestForInsights(_ request: ChatCompletionRequest) -> String? {
+    fileprivate static func serializeRequestForInsights(_ request: ChatCompletionRequest) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         guard let data = try? encoder.encode(request),
@@ -258,7 +288,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return result as String
     }
 
-    private static func estimatedInputTokens(_ request: ChatCompletionRequest) -> Int {
+    fileprivate static func estimatedInputTokens(_ request: ChatCompletionRequest) -> Int {
         let messageCharacters = request.messages.reduce(0) { partial, message in
             partial + (message.content?.count ?? 0)
                 + (message.tool_calls?.reduce(0) {
@@ -658,7 +688,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // Insights attribution (upstream #1350 / #2964): ChatView binds the
         // assistant turn, agent and chat around `streamChat`; capture them
         // here, since task-locals aren't reliable on the stream's end path.
-        let loggedTurnId = ChatExecutionContext.currentAssistantTurnId
+        let loggedTurnId = Self.loggedTurnId
+        let loggedPath = Self.loggedPath(endpointURL: endpoint.url)
+        let loggedSource = Self.loggedSource(default: source)
+        let loggedParentTurnId = Self.activityParentTurnId
         let loggedAgentId = ChatExecutionContext.currentAgentId
         let loggedSessionId = ChatExecutionContext.currentSessionId.flatMap(UUID.init(uuidString:))
         let connection = RequestConnectionInfo(
@@ -704,8 +737,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         ?? max(responseText.isEmpty ? 0 : 1, responseText.count / 4)
                     let wire = wireProbe.snapshot()
                     InsightsService.logInference(
-                        source: self.source,
+                        source: loggedSource,
                         turnId: loggedTurnId,
+                        parentTurnId: loggedParentTurnId,
                         model: resolvedModel,
                         inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
                         outputTokens: outputTokens,
@@ -720,7 +754,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireRequestBody: wire.request,
                         wireResponseBody: wire.response.isEmpty ? nil : wire.response,
                         connection: connection,
-                        path: URL(string: endpoint.url)?.path ?? "/chat/completions",
+                        path: loggedPath,
                         agentId: loggedAgentId,
                         sessionId: loggedSessionId
                     )
@@ -1321,27 +1355,103 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             try await OsaurusRouterAuthSigner().sign(request: &urlRequest, body: urlRequest.httpBody)
         }
 
-        let (data, response) = try await session.data(for: urlRequest)
+        // Insights: one row per one-shot request (titles, follow-ups, memory,
+        // compaction, delegation…), as upstream's `CoreModelService` logs
+        // them. Captured before the await; task-locals are the caller's.
+        let activity = OneShotActivity(
+            source: Self.loggedSource(default: source),
+            turnId: Self.loggedTurnId,
+            parentTurnId: Self.activityParentTurnId,
+            agentId: ChatExecutionContext.currentAgentId,
+            sessionId: ChatExecutionContext.currentSessionId.flatMap(UUID.init(uuidString:)),
+            model: resolvedModel,
+            path: Self.loggedPath(endpointURL: endpoint.url),
+            connection: RequestConnectionInfo(
+                providerId: endpoint.provider?.id,
+                remoteEndpoint: endpoint.url,
+                transport: .direct,
+                mode: .remoteInference
+            ),
+            request: request,
+            wireRequestBody: urlRequest.httpBody
+        )
+
+        let data: Data
+        let response: URLResponse
+        do {
+            (data, response) = try await session.data(for: urlRequest)
+        } catch {
+            activity.finish(response: nil, wireResponse: nil, error: error)
+            throw error
+        }
         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
         if !(200...299).contains(statusCode) {
             let message = extractAPIErrorMessage(String(data: data, encoding: .utf8) ?? "")
             NSLog("[CloudChatEngine] completeChat HTTP \(statusCode) error body: \(message)")
-            throw CloudChatError.httpError(
+            let error = CloudChatError.httpError(
                 provider: endpoint.providerLabel, status: statusCode, message: message)
+            activity.finish(response: nil, wireResponse: data, error: error)
+            throw error
         }
         do {
-            return try Self.decodeCompletionResponse(data)
+            let decoded = try Self.decodeCompletionResponse(data)
+            activity.finish(response: decoded, wireResponse: data, error: nil)
+            return decoded
         } catch DecodingError.dataCorrupted(let context)
             where context.debugDescription == "Completion SSE reached its output-token limit before assistant text" {
-            throw CloudChatError.outputLimit(
+            let error = CloudChatError.outputLimit(
                 provider: endpoint.providerLabel,
                 diagnostic: Self.safeResponseDiagnostic(data)
             )
+            activity.finish(response: nil, wireResponse: data, error: error)
+            throw error
         } catch {
-            throw CloudChatError.responseDecoding(
+            let wrapped = CloudChatError.responseDecoding(
                 provider: endpoint.providerLabel,
                 message: error.localizedDescription,
                 diagnostic: Self.safeResponseDiagnostic(data)
+            )
+            activity.finish(response: nil, wireResponse: data, error: wrapped)
+            throw wrapped
+        }
+    }
+
+    /// The facts a `completeChat` row needs, captured before the request.
+    private struct OneShotActivity: Sendable {
+        let source: RequestSource
+        let turnId: UUID?
+        let parentTurnId: UUID?
+        let agentId: UUID?
+        let sessionId: UUID?
+        let model: String
+        let path: String
+        let connection: RequestConnectionInfo
+        let request: ChatCompletionRequest
+        let wireRequestBody: Data?
+        let started = Date()
+
+        func finish(response: ChatCompletionResponse?, wireResponse: Data?, error: Error?) {
+            let text = response?.choices.first?.message?.content
+            InsightsService.logInference(
+                source: source,
+                turnId: turnId,
+                parentTurnId: parentTurnId,
+                model: model,
+                inputTokens: response?.usage?.prompt_tokens ?? ChatEngine.estimatedInputTokens(request),
+                outputTokens: response?.usage?.completion_tokens ?? ((text?.count ?? 0) / 4),
+                durationMs: Date().timeIntervalSince(started) * 1_000,
+                temperature: request.temperature.map(Float.init),
+                maxTokens: request.max_tokens ?? 0,
+                finishReason: error == nil ? .stop : .error,
+                errorMessage: error?.localizedDescription,
+                requestBody: ChatEngine.serializeRequestForInsights(request),
+                responseBody: text,
+                wireRequestBody: wireRequestBody,
+                wireResponseBody: wireResponse,
+                connection: connection,
+                path: path,
+                agentId: agentId,
+                sessionId: sessionId
             )
         }
     }

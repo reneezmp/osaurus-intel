@@ -1024,7 +1024,9 @@ final class ChatSession: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let resp = try await engine.completeChat(request: req)
+                let resp = try await ChatEngine.$activityPurpose.withValue("chat_title") {
+                    try await engine.completeChat(request: req)
+                }
                 let raw = resp.choices.first?.message?.content ?? ""
                 let cleaned = Self.cleanTitle(raw)
                 print("[ChatSession] title raw='\(raw.prefix(60))' cleaned='\(cleaned)'")
@@ -1101,7 +1103,9 @@ final class ChatSession: ObservableObject {
         Task { @MainActor [weak self] in
             guard let self else { return }
             do {
-                let resp = try await engine.completeChat(request: req)
+                let resp = try await ChatEngine.$activityPurpose.withValue("chat_title") {
+                    try await engine.completeChat(request: req)
+                }
                 let raw = resp.choices.first?.message?.content ?? ""
                 let cleaned = Self.cleanTitle(raw)
                 guard !cleaned.isEmpty else {

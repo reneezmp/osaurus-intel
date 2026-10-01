@@ -157,6 +157,139 @@ struct IntelInsightsTests {
             "privacy.activityLog.openInsights",
         ]))
     }
+
+    // MARK: - Stage C: Intel call sites
+
+    private static let completionJSON = #"""
+        {"id":"c1","object":"chat.completion","created":1,"model":"fixture-model",
+         "choices":[{"index":0,"message":{"role":"assistant","content":"Short title"},"finish_reason":"stop"}],
+         "usage":{"prompt_tokens":12,"completion_tokens":3,"total_tokens":15}}
+        """#
+
+    /// Runs `completeChat` against the fixture under the given bindings and
+    /// returns the row for `model`.
+    private func runOneShot(
+        model: String,
+        status: Int = 200,
+        purpose: String?,
+        source: RequestSource? = nil,
+        turnId: UUID? = nil
+    ) async throws -> RequestLog? {
+        InsightsFixtureProtocol.configure(status: status, body: Self.completionJSON)
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [InsightsFixtureProtocol.self]
+        let engine = ChatEngine(provider: Self.provider(), session: URLSession(configuration: configuration))
+        let request = ChatCompletionRequest(model: model, messages: [ChatMessage(role: "user", content: "Name it")])
+        _ = try? await ChatExecutionContext.$currentAssistantTurnId.withValue(turnId) {
+            try await ChatEngine.$activityPurpose.withValue(purpose) {
+                try await ChatEngine.$activitySource.withValue(source) {
+                    try await engine.completeChat(request: request)
+                }
+            }
+        }
+        for _ in 0 ..< 100 {
+            let row = await MainActor.run { InsightsService.shared.logs.first { $0.model == model } }
+            if let row { return row }
+            try await Task.sleep(nanoseconds: 20_000_000)
+        }
+        return nil
+    }
+
+    @Test("A title request logs as an /internal one-shot: System, no turn")
+    func oneShotTitleRow() async throws {
+        let model = "title-probe-\(UUID().uuidString.prefix(6))"
+        let turnId = UUID()
+        let log = try #require(try await runOneShot(model: model, purpose: "chat_title", turnId: turnId))
+        #expect(log.path == "/internal/chat_title")
+        #expect(log.internalPurposeLabel == "Chat title")
+        #expect(log.category == .inference)
+        #expect(log.source == .system)
+        // A one-shot never answers the reply's Inspect response.
+        #expect(log.turnId == nil)
+        #expect(log.locality == .remote)
+        #expect(log.inputTokens == 12)
+        #expect(log.outputTokens == 3)
+        #expect(log.responseBody == "Short title")
+        #expect(log.wireRequestBody?.contains("Name it") == true)
+        #expect(log.wireResponseBody?.contains("Short title") == true)
+    }
+
+    @Test("Compaction rows get the compaction category in the chat's name")
+    func compactionRow() async throws {
+        let model = "compact-probe-\(UUID().uuidString.prefix(6))"
+        let log = try #require(try await runOneShot(model: model, purpose: "compaction", source: .chatUI))
+        #expect(log.path == "/internal/compaction")
+        #expect(log.category == .compaction)
+        #expect(log.source == .chatUI)
+    }
+
+    @Test("A delegated helper step logs as Agent on the dispatching turn")
+    func delegatedRow() async throws {
+        let model = "helper-probe-\(UUID().uuidString.prefix(6))"
+        let turnId = UUID()
+        let log = try #require(try await runOneShot(model: model, purpose: nil, source: .agent, turnId: turnId))
+        #expect(log.source == .agent)
+        #expect(log.turnId == turnId)
+        #expect(log.path == "/v1/chat/completions")
+    }
+
+    @Test("A failed one-shot is an error row")
+    func oneShotFailure() async throws {
+        let model = "fail-probe-\(UUID().uuidString.prefix(6))"
+        let log = try #require(try await runOneShot(model: model, status: 500, purpose: "memory_distillation"))
+        #expect(log.isError)
+        #expect(log.path == "/internal/memory_distillation")
+    }
+
+    @Test("Local API chat completions are cloud rows to DeepSeek")
+    func proxiedChatRow() async throws {
+        let model = "proxy-probe-\(UUID().uuidString.prefix(6))"
+        HTTPHandler.logProxiedChat(
+            model: model, statusCode: 200, durationMs: 40,
+            requestBody: #"{"model":"x","messages":[{"role":"user","content":"hi"}],"tools":[]}"#,
+            responseBody: nil, errorMessage: nil)
+        var row: RequestLog?
+        for _ in 0 ..< 100 where row == nil {
+            row = await MainActor.run { InsightsService.shared.logs.first { $0.model == model } }
+            if row == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        let log = try #require(row)
+        #expect(log.source == .httpAPI)
+        #expect(log.category == .inference)
+        #expect(log.locality == .remote)
+        #expect(log.egress?.destinationHost == "api.deepseek.com")
+        #expect(log.egress?.dataClasses.contains("tools") == true)
+    }
+
+    @Test("Apple Speech on Apple's servers is a cloud transcription row")
+    func appleSpeechServerRow() async throws {
+        let model = "speech-probe-\(UUID().uuidString.prefix(6))"
+        let job = try #require(
+            MediaActivityLogger.beginTranscription(
+                model: model, audioSeconds: nil, audioBytes: 1200, audioFormat: "m4a", mode: "file",
+                remoteLabel: "Apple Speech"))
+        job.finish(transcript: "hello there", language: "en-US", error: nil)
+        let onDevice = "speech-local-\(UUID().uuidString.prefix(6))"
+        MediaActivityLogger.beginTranscription(
+            model: onDevice, audioSeconds: nil, audioBytes: nil, audioFormat: "microphone", mode: "live"
+        )?.finish(transcript: "hi", language: nil, error: nil, audioSeconds: 2)
+        var remote: RequestLog?
+        var local: RequestLog?
+        for _ in 0 ..< 100 where remote == nil || local == nil {
+            remote = await MainActor.run { InsightsService.shared.logs.first { $0.model == model } }
+            local = await MainActor.run { InsightsService.shared.logs.first { $0.model == onDevice } }
+            if remote == nil || local == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        let cloud = try #require(remote)
+        #expect(cloud.category == .audioTranscription)
+        #expect(cloud.locality == .remote)
+        #expect(cloud.egress?.destinationLabel == "Apple Speech")
+        #expect(cloud.egress?.dataClasses == ["audio"])
+        #expect(cloud.egress?.details["audio_bytes"] == "1200")
+        let device = try #require(local)
+        #expect(device.locality == .local)
+        #expect(device.egress?.destinationLabel == nil)
+    }
 }
 
 private final class InsightsFixtureProtocol: URLProtocol, @unchecked Sendable {

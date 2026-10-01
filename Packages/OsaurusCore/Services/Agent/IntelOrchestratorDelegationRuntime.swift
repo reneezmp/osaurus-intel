@@ -262,7 +262,11 @@ actor IntelOrchestratorDelegationRuntime {
         return await withTaskGroup(of: RaceResult.self, returning: RaceResult.self) { group in
             group.addTask {
                 do {
-                    let response = try await engine.completeChat(request: request)
+                    // Insights: a delegated helper step logs as Agent and
+                    // inherits the dispatching turn (upstream #2964).
+                    let response = try await ChatEngine.$activitySource.withValue(.agent) {
+                        try await engine.completeChat(request: request)
+                    }
                     return Task.isCancelled ? .cancelled : .response(response)
                 } catch is CancellationError {
                     return .cancelled

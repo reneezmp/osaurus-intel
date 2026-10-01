@@ -831,7 +831,11 @@ public actor MemoryService {
         // call: a hung provider must not hold the distill queue for the full
         // transport timeout. Cancellation propagates to the request.
         let response = try await withThrowingTaskGroup(of: ChatCompletionResponse.self) { group in
-            group.addTask { try await engine.completeChat(request: request) }
+            group.addTask {
+                try await ChatEngine.$activityPurpose.withValue("memory_distillation") {
+                    try await engine.completeChat(request: request)
+                }
+            }
             group.addTask {
                 try await Task.sleep(nanoseconds: UInt64(Self.distillDeadline * 1_000_000_000))
                 throw DistillDeadlineExceeded()

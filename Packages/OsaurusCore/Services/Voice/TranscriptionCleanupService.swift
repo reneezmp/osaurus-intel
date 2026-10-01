@@ -40,7 +40,9 @@ public final class TranscriptionCleanupService {
             temperature: 0.1,
             max_tokens: maxTokens
         )
-        let response = try await ChatEngine(model: model).completeChat(request: request)
+        let response = try await ChatEngine.$activityPurpose.withValue("transcription_cleanup") {
+            try await ChatEngine(model: model).completeChat(request: request)
+        }
         return response.choices.first?.message?.content ?? ""
     }
 

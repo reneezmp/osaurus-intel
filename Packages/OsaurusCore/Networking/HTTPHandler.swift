@@ -187,6 +187,65 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         /// M13 (Insights): wall-clock when the request head arrived, so
         /// `sendResponse` can report request duration to InsightsService.
         var requestStartedAt: Date?
+        /// Insights: the model and request body of a proxied chat completion,
+        /// so its row says where it went (set by `serveChatCompletions`).
+        var activityModel: String?
+        var activityRequestBody: String?
+    }
+
+    /// Intel's `/chat/completions` proxies to DeepSeek, so its activity row
+    /// is cloud egress (upstream logs API inference with the provider's
+    /// connection the same way).
+    static let deepSeekProxyConnection = RequestConnectionInfo(
+        remoteEndpoint: "https://api.deepseek.com/v1/chat/completions",
+        transport: .direct,
+        mode: .remoteInference
+    )
+
+    /// Paths whose handler logs its own Insights row (see
+    /// `RequestLog.mediaCategory(forPath:)`); in-process emitters on the same
+    /// code path skip when `ChatExecutionContext.currentRequestSource` is
+    /// `.httpAPI`. Upstream, verbatim; Intel serves none of these paths yet,
+    /// so nothing binds the guard.
+    static func handlerWritesOwnActivityRow(path: String) -> Bool {
+        RequestLog.mediaCategory(forPath: path) != nil
+    }
+
+    /// Row facts for `/v1/embeddings` and `/api/embed`. Never the texts.
+    /// Upstream, verbatim (no Intel endpoint yet).
+    static func embeddingActivityDetails(texts: [String], dimensions: Int?) -> [String: String] {
+        var details: [String: String] = [
+            "texts": String(texts.count),
+            "chars": String(texts.reduce(0) { $0 + $1.count }),
+        ]
+        if let dimensions { details["dims"] = String(dimensions) }
+        return details
+    }
+
+    /// One Insights row for a proxied chat completion (streamed or not).
+    static func logProxiedChat(
+        model: String,
+        statusCode: Int,
+        durationMs: Double,
+        requestBody: String?,
+        responseBody: String?,
+        errorMessage: String?
+    ) {
+        let connection = deepSeekProxyConnection
+        InsightsService.logRequest(
+            source: .httpAPI,
+            method: "POST",
+            path: "/chat/completions",
+            statusCode: statusCode,
+            durationMs: durationMs,
+            requestBody: requestBody,
+            responseBody: responseBody,
+            model: model,
+            finishReason: errorMessage == nil ? .stop : .error,
+            errorMessage: errorMessage,
+            connection: connection,
+            egress: InsightsService.inferenceEgress(connection: connection, requestBody: requestBody)
+        )
     }
     let stateRef: NIOLoopBound<RequestState>
 
@@ -222,6 +281,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case .head(let head):
             stateRef.value.requestHead = head
             stateRef.value.requestStartedAt = Date()
+            stateRef.value.activityModel = nil
+            stateRef.value.activityRequestBody = nil
             stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: 0)
             stateRef.value.isStreaming = false
             stateRef.value.streamingDone = false
@@ -308,6 +369,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
         let shouldStream = request.stream ?? false
         let model = request.model ?? "deepseek-v4-pro"
+        stateRef.value.activityModel = model
+        stateRef.value.activityRequestBody = String(data: bodyData, encoding: .utf8)
 
         guard let apiKey = DeepSeekAPIKeyStore.shared.load() else {
             sendJSONError(context: context, status: .internalServerError, message: "DEEPSEEK_API_KEY not set")
@@ -417,6 +480,20 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
         let eventLoop = context.eventLoop
         let stateRef = self.stateRef
+        // Insights: SSE responses bypass `sendResponse`, so the stream logs
+        // its own row when it ends.
+        let started = stateRef.value.requestStartedAt ?? Date()
+        let loggedRequestBody = stateRef.value.activityRequestBody
+        func logStream(status: Int, error: String?) {
+            Self.logProxiedChat(
+                model: model,
+                statusCode: status,
+                durationMs: Date().timeIntervalSince(started) * 1000,
+                requestBody: loggedRequestBody,
+                responseBody: nil,
+                errorMessage: error
+            )
+        }
 
         Task {
             do {
@@ -424,6 +501,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 guard let httpResponse = response as? HTTPURLResponse,
                       httpResponse.statusCode == 200 else {
                     let status = (response as? HTTPURLResponse)?.statusCode ?? 502
+                    logStream(status: status, error: "Upstream returned \(status)")
                     eventLoop.execute {
                         guard let ctx = stateRef.value.contextBox else { return }
                         self.sendSSEError(context: ctx, message: "Upstream returned \(status)")
@@ -445,11 +523,13 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                     if isDone { break }
                 }
 
+                logStream(status: 200, error: nil)
                 eventLoop.execute {
                     guard let ctx = stateRef.value.contextBox else { return }
                     self.sendSSEEnd(context: ctx)
                 }
             } catch {
+                logStream(status: 502, error: error.localizedDescription)
                 eventLoop.execute {
                     guard let ctx = stateRef.value.contextBox else { return }
                     self.sendSSEError(context: ctx, message: error.localizedDescription)
@@ -632,6 +712,18 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         if let head = stateRef.value.requestHead {
             let started = stateRef.value.requestStartedAt
             let durationMs = started.map { Date().timeIntervalSince($0) * 1000 } ?? 0
+            if let model = stateRef.value.activityModel {
+                let isError = !(200 ..< 300).contains(Int(status.code))
+                Self.logProxiedChat(
+                    model: model,
+                    statusCode: Int(status.code),
+                    durationMs: durationMs,
+                    requestBody: stateRef.value.activityRequestBody,
+                    responseBody: body,
+                    errorMessage: isError ? body : nil
+                )
+                return
+            }
             InsightsService.logRequest(
                 source: .httpAPI,
                 method: head.method.rawValue,

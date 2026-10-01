@@ -16,8 +16,8 @@ Work is in stages:
 | Stage | Commit | What |
 |---|---|---|
 | A | `4ffa176fb` | Redactor hardening (upstream's table verbatim). |
-| B | this change | Store, service, Insights UI, settings, chat-engine attribution, Inspect response, Credits links. |
-| C | pending | Per-feature emitters (list below). |
+| B | `d7272257f` | Store, service, Insights UI, settings, chat-engine attribution, Inspect response, Credits links. |
+| C | this change | Per-feature emitters (below). |
 
 ## What the user gets (stage B)
 
@@ -89,34 +89,45 @@ Work is in stages:
 caches, upstream verbatim) live on Intel's managers in
 `IntelManagerConformers.swift` / `IntelStubConformers.swift`.
 
-## Stage C: emitters still to port
+## Stage C: what each source logs (shipped 2026-10-01)
 
-`InsightsService.logEgress` / `ActivityAttribution` and the upstream logger
-files (`SearchActivityLogger`, `MCPActivityLogger`, `MediaActivityLogger`)
-compile but nothing calls them yet. Intel's matching call sites:
+| Source | Row | Intel call site |
+|---|---|---|
+| Web search (tools, Try it, provider test) | `web_search`, one per operation: query, providers tried, hits, destination host | `SearchProviderManager.runSearch` / `runHostedFirstSearch` / `testProvider` (upstream wrapping, `runCascade` split) |
+| Page fetch | `url_extract`, destination = the page's host | `SearchReadability.extract` → `fetchAndExtract` (Intel keeps its older fetch body) |
+| Hosted contents (Osaurus Router) | `url_extract` via the Router | `SearchProviderManager.hostedExtract` |
+| MCP tool call | `mcp_tool_call`, remote host or local stdio | `MCPProviderManager.executeTool` (+ `reconnectAndRetry` split, upstream) |
+| Router control plane (credits, account, workspaces…) | `router_control`, plain-language purpose; hosted search/contents excluded | `OsaurusRouterAPIClient.perform` |
+| Cloud TTS | `speech_synthesis`, remote, text + voice + audio seconds | `TTSService.startRemotePlayback` (upstream) |
+| macOS system voice | `speech_synthesis`, local, `AVSpeechSynthesizer` | `TTSService.startSystemPlayback` / `systemUtteranceEnded` / `stop` (Intel's stand-in for upstream's PocketTTS row) |
+| Dictation / file transcription | `audio_transcription`, live or file | `SpeechService` (Apple Speech) |
+| Titles, memory distillation, compaction, transcript cleanup, agent descriptions | `/internal/<purpose>` inference rows (compaction → `compaction` category, source Chat UI); others source System, **no turn** | `ChatEngine.completeChat` now logs every call; callers bind `ChatEngine.$activityPurpose` |
+| Delegated helper steps | source Agent, the dispatching turn | `IntelOrchestratorDelegationRuntime`, `IntelDelegationProbe` bind `ChatEngine.$activitySource` |
+| Local API `/chat/completions` (DeepSeek proxy) | inference row, **remote** to `api.deepseek.com`, streamed and non-streamed | `HTTPHandler.logProxiedChat` (SSE responses log when the stream ends) |
 
-- `SearchProviderManager`: web search rows. `SearchReadability`: URL
-  extract rows.
-- `MCPProviderManager`: MCP tool calls.
-- `OsaurusRouterAPIClient`: Router control-plane rows
-  (`shouldLogControlPlaneCall`, `controlPlanePurpose`).
-- `HTTPHandler`:
-  - Inbound rows lack upstream's media / embedding details
-    (`handlerWritesOwnActivityRow`, `mediaActivityDetails`,
-    `embeddingActivityDetails`).
-  - SSE streaming chat isn't logged.
-- `TTSService` (speech synthesis) and `SpeechService` (transcription).
-- `IntelContextCompaction`: compaction rows (`/internal/compaction`).
-- `CloudChatEngine.completeChat` callers (titles, follow-ups, memory
-  distillation, agent description): `/internal/*` inference rows.
-- Delegation (`IntelOrchestratorDelegationRuntime`): source Agent plus
-  `parent_turn_id`.
-- Upstream `Tests/Insights/ActivityEmitterTests.swift`: ported with stage C,
-  minus the channel cases.
+Intel-specific decisions:
 
-Not applicable on Intel: local embeddings (`MetalSafeEmbedder`, excluded),
-local image generation, P2P inbound, plugin host rows (`PluginHostAPI`
-excluded).
+- **Apple Speech can leave the Mac.** Without an on-device model for the
+  language, `SFSpeechRecognizer` sends audio to Apple. Those rows are
+  `remote` with destination "Apple Speech" (`TranscriptionJob.remoteLabel`,
+  an Intel addition to `MediaActivityLogger`). Upstream's local-model rows
+  are always `local`.
+- **One-shots carry no turn id.** This matches upstream's `CoreModelService`
+  (source System). A title request made during a reply would otherwise be
+  the newest row for that turn, and Inspect response would open it instead
+  of the reply.
+- `completeChat` via Codex goes through `streamChat`, which uses the same
+  purpose / source rules.
+- `HTTPHandler.handlerWritesOwnActivityRow` / `embeddingActivityDetails`
+  are ported for parity. Intel serves no media or embedding endpoints, so
+  nothing binds the double-write guard. `mediaActivityDetails` is not ported
+  (no `MediaGenerationBackend`).
+
+Not applicable on Intel: channel deliveries (`W-channels`), local
+embeddings (`MetalSafeEmbedder` excluded), local image generation, P2P
+inbound and plugin host rows (`PluginHostAPI` excluded). Intel's own plugin
+inference (`IntelPluginExecution`) logs as an ordinary
+`/chat/completions` row through `completeChat`.
 
 ## Tests
 
@@ -131,6 +142,9 @@ excluded).
   - `InsightsWireBodyRoundTripTests.swift`
   - `Tests/Chat/InsightsImageRedactionTests.swift` (Intel's engine is also
     named `ChatEngine`)
+- Upstream `Tests/Insights/ActivityEmitterTests.swift`, adapted: no channel
+  cases, and only the embedding half of the HTTP media-details check. Intel's
+  `SearchReadability.Extraction` has no structured-page fields.
 - Intel, `Tests/Insights/IntelInsightsTests.swift`, with the engine run
   against an in-process fixture:
   - The row's turn, agent, chat, connection, host, path and wire bytes.
@@ -139,6 +153,9 @@ excluded).
   - Storage enrollment and paths.
   - Name caches.
   - Settings search ids.
+  - Stage C: the title one-shot (System, no turn, tokens, wire bytes), the
+    compaction category, a delegated Agent row, a failed one-shot, the
+    DeepSeek proxy row, and Apple Speech remote vs on-device rows.
 - Updated:
   - `StorageMigratorTargetFilterTests`: "activity log".
   - `SettingsSearchIndexTests`: the new section's source.
@@ -160,6 +177,9 @@ excluded).
   without German or Chinese, so Intel filled both: German with informal
   "du", Chinese with 聊天, 智能体 and 你. "Insights" is 「Einblicke」 / 「洞察」,
   as elsewhere in the catalog.
+- Stage C added 7 strings: Router purposes and "OpenAI-compatible TTS".
+  "Account" and "Workspaces" come from upstream's catalog; the rest Intel
+  translated.
 - The missing-key count rises from 126 to **149**: upstream's 26 sentences
   built with interpolation inside `L("…\(x)…")`, which no catalog entry can
   match (the same gap exists upstream), minus 3 keys now covered.
@@ -169,7 +189,7 @@ excluded).
 | Commit | Verdict |
 |---|---|
 | `2f953db29` #2969 | **Incompatible** (MLX runtime pin) |
-| `3176b8b5a` #2964 | **Port**: stage B shipped here; stage C pending |
+| `3176b8b5a` #2964 | **Port**: stages B and C shipped |
 | `4064a6fde` #2971 | **Incompatible** (MLX runtime pin) |
 
 The next audit starts after `4064a6fde`.

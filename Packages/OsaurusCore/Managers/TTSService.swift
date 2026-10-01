@@ -223,6 +223,9 @@ public final class TTSService: NSObject, ObservableObject {
     /// The utterance the current system playback is waiting on. Delegate
     /// callbacks for any other utterance (a stopped one) are ignored.
     private var currentUtterance: AVSpeechUtterance?
+    /// Intel: the Insights row for the system-voice utterance in flight
+    /// (upstream logs its local PocketTTS synthesis the same way).
+    private var systemSpeechActivity: MediaActivityLogger.SpeechJob?
 
     /// All AVAudioEngine work lives here, serialized on the pipeline's own
     /// queue, because engine construction and `start()` block on coreaudiod
@@ -302,6 +305,8 @@ public final class TTSService: NSObject, ObservableObject {
         if currentUtterance != nil {
             currentUtterance = nil
             synthesizer.stopSpeaking(at: .immediate)
+            systemSpeechActivity?.finish(audioSeconds: nil, error: nil, cancelled: true)
+            systemSpeechActivity = nil
         }
         playingMessageId = nil
     }
@@ -356,6 +361,16 @@ public final class TTSService: NSObject, ObservableObject {
         utterance.voice = SystemVoiceCatalog.voice(for: requested, text: text)
         utterance.rate = SystemVoiceCatalog.utteranceRate(multiplier: config.rate)
         currentUtterance = utterance
+        // Activity log: local synthesis, one row per utterance (Intel's
+        // stand-in for upstream's PocketTTS row).
+        systemSpeechActivity = MediaActivityLogger.beginSpeech(
+            text: text,
+            model: "AVSpeechSynthesizer",
+            voice: utterance.voice?.identifier ?? requested,
+            provider: "macOS system voice",
+            endpoint: nil,
+            trigger: activeSpeakCallId != nil ? .speakTool : .readAloud
+        )
         synthesizer.speak(utterance)
     }
 
@@ -363,6 +378,8 @@ public final class TTSService: NSObject, ObservableObject {
     fileprivate func systemUtteranceEnded(_ utterance: ObjectIdentifier) {
         guard let current = currentUtterance, ObjectIdentifier(current) == utterance else { return }
         currentUtterance = nil
+        systemSpeechActivity?.finish(audioSeconds: nil, error: nil)
+        systemSpeechActivity = nil
         playingMessageId = nil
     }
 
@@ -375,6 +392,16 @@ public final class TTSService: NSObject, ObservableObject {
 
         let trimmedOverride = voiceOverride?.trimmingCharacters(in: .whitespacesAndNewlines)
         let voice = (trimmedOverride?.isEmpty == false ? trimmedOverride! : config.remoteVoice)
+        // Activity log: the text is about to leave this Mac for the TTS
+        // provider. One Cloud row per utterance with the destination host.
+        let activity = MediaActivityLogger.beginSpeech(
+            text: text,
+            model: config.remoteModel,
+            voice: voice,
+            provider: EgressInfo.host(from: config.remoteEndpoint) ?? L("OpenAI-compatible TTS"),
+            endpoint: OpenAICompatibleTTSClient.resolvedEndpoint(config.remoteEndpoint),
+            trigger: activeSpeakCallId != nil ? .speakTool : .readAloud
+        )
 
         playbackTask = Task { [weak self] in
             // Keychain read is blocking XPC; a detached task keeps it off the
@@ -382,7 +409,10 @@ public final class TTSService: NSObject, ObservableObject {
             let apiKey = await Task.detached(priority: .userInitiated) {
                 TTSRemoteAPIKeyStore.loadSync()
             }.value
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                activity.finish(audioSeconds: nil, error: nil, cancelled: true)
+                return
+            }
             let client = OpenAICompatibleTTSClient(
                 endpoint: config.remoteEndpoint,
                 model: config.remoteModel,
@@ -395,19 +425,28 @@ public final class TTSService: NSObject, ObservableObject {
             } catch {
                 self?.lastRemoteError = error.localizedDescription
                 self?.playingMessageId = nil
+                activity.finish(audioSeconds: nil, error: error.localizedDescription)
                 return
             }
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled else {
+                activity.finish(audioSeconds: nil, error: nil, cancelled: true)
+                return
+            }
+            var sampleCount = 0
             do {
                 let stream = try client.synthesizeStreaming(text: text)
                 for try await samples in stream {
                     if Task.isCancelled { break }
+                    sampleCount += samples.count
                     self?.schedule(samples: samples)
                 }
                 self?.markStreamFinished(for: messageId)
+                activity.finish(audioSeconds: Double(sampleCount) / 24_000.0, error: nil, cancelled: Task.isCancelled)
             } catch is CancellationError {
                 // stop() already cleared state
+                activity.finish(audioSeconds: Double(sampleCount) / 24_000.0, error: nil, cancelled: true)
             } catch {
+                activity.finish(audioSeconds: Double(sampleCount) / 24_000.0, error: error.localizedDescription)
                 self?.handleRemoteStreamError(error, for: messageId)
             }
         }

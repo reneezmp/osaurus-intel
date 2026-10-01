@@ -65,7 +65,9 @@ enum IntelAgentDescriptionGenerator {
             temperature: 0.2,
             max_tokens: 400
         )
-        let response = try await (engine ?? ChatEngine(model: model)).completeChat(request: request)
+        let response = try await ChatEngine.$activityPurpose.withValue("agent_description") {
+            try await (engine ?? ChatEngine(model: model)).completeChat(request: request)
+        }
         guard let summary = sanitize(response.choices.first?.message?.content ?? "") else {
             throw Failure.emptyReply
         }

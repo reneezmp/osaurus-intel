@@ -123,6 +123,9 @@ enum MediaActivityLogger {
         let audioFormat: String?
         let mode: String
         let attribution: InsightsService.ActivityAttribution
+        /// Intel: set when Apple Speech recognizes on Apple's servers (no
+        /// on-device model for the language), so the row is Cloud, not Local.
+        var remoteLabel: String? = nil
         let started = Date()
 
         func finish(transcript: String?, language: String?, error: String?, audioSeconds measured: Double? = nil) {
@@ -145,8 +148,10 @@ enum MediaActivityLogger {
                 finishReason: error == nil ? .stop : .error,
                 errorMessage: error,
                 category: .audioTranscription,
-                locality: .local,
-                egress: EgressInfo(details: details),
+                locality: remoteLabel == nil ? .local : .remote,
+                egress: remoteLabel.map {
+                    EgressInfo(destinationLabel: $0, dataClasses: ["audio"], details: details)
+                } ?? EgressInfo(details: details),
                 agentId: attribution.agentId,
                 agentName: attribution.agentName,
                 sessionId: attribution.sessionId
@@ -161,12 +166,13 @@ enum MediaActivityLogger {
         audioSeconds: Double?,
         audioBytes: Int?,
         audioFormat: String?,
-        mode: String
+        mode: String,
+        remoteLabel: String? = nil
     ) -> TranscriptionJob? {
         guard !servingHTTPRequest() else { return nil }
         return TranscriptionJob(
             model: model, audioSeconds: audioSeconds, audioBytes: audioBytes, audioFormat: audioFormat,
-            mode: mode, attribution: .current()
+            mode: mode, attribution: .current(), remoteLabel: remoteLabel
         )
     }
 

@@ -2514,8 +2514,11 @@ calling a sync complete.
   `WireTransportProbe` itself), HTTP errors logged, image redaction,
   Inspect response and Credits links focus their row. Ventura: key monitor
   instead of `onKeyPress`, single-value `onChange`, themed export controls.
-- Stage C (emitters for search, MCP, Router, HTTP media, voice, compaction,
-  internal one-shots, delegation) is listed in
+- Stage C: rows from web search / page fetch / hosted contents, MCP, Router
+  control plane, cloud TTS and the macOS system voice, Apple Speech (cloud
+  when not on device), every `completeChat` one-shot as
+  `/internal/<purpose>` (System, no turn; compaction in the chat's name),
+  delegated helpers as Agent, and the local API's DeepSeek proxy. Table in
   [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 - Audit `fec69aa53..4064a6fde`: #2969 and #2971 MLX pins (incompatible),
   #2964 port. The next review starts after `4064a6fde`.

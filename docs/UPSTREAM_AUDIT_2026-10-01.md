@@ -63,8 +63,8 @@ dropdown (`ModelPickerView`) over Intel's own provider manager.
 Upstream replaced Insights with a persisted activity log in #2964 a few hours
 after this audit, so Intel ported that design instead of the plan staged
 here. Stage A (redactor hardening, `4ffa176fb`) and stage B (store, UI,
-chat rows, Inspect response) are done; stage C (per-feature emitters) is
-listed in [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
+chat rows, Inspect response) and stage C (per-feature emitters) are done;
+details in [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 
 Manual QA for the shipped slices:
 [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md#upstream-batch-2026-10-01).
