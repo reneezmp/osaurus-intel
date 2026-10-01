@@ -103,8 +103,8 @@ struct ChatSessionSidebar: View {
             // child it owns the window-control clearance the header used to
             // provide (the container's 40pt only clears the traffic lights).
             sidebarTabBar
-                // Intel: tour spotlight anchor arrives with the layout tour
-                // (docs/CHAT_WINDOW_LAYOUT_INTEL.md, step 6).
+                // Tour spotlight anchor (invisible; reports the lens bar's frame).
+                .background(TourAnchorMarker(anchor: .sidebarLensBar))
                 .padding(.horizontal, 12)
                 .padding(.top, 16)
                 .padding(.bottom, 12)

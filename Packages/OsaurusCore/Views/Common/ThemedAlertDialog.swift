@@ -27,6 +27,12 @@ public final class ThemedAlertCenter: ObservableObject {
 
     @Published private var activeByScope: [ThemedAlertScope: ThemedAlertRequest] = [:]
 
+    /// True while any scope has an alert up (upstream). The layout tour
+    /// waits for a clear moment before it starts.
+    public var hasAnyActiveAlert: Bool {
+        !activeByScope.isEmpty
+    }
+
     func present(_ request: ThemedAlertRequest, scope: ThemedAlertScope) {
         activeByScope[scope] = request
     }

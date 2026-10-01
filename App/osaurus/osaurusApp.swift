@@ -47,6 +47,7 @@ struct osaurusApp: SwiftUI.App {
             chatShortcutCommands
             viewMenuCommands
             settingsCommand
+            helpMenuCommands
         }
     }
 }
@@ -105,6 +106,20 @@ private extension osaurusApp {
                 "n",
                 modifiers: cmdNStartsNewChatInCurrentWindow ? [.command, .shift] : .command
             )
+        }
+    }
+
+    /// Help ▸ Chat Layout Tour replays the coachmark tour of the chat
+    /// window (upstream #2630). Intel adds it after the system Help item
+    /// instead of replacing the menu: the rest of upstream's Help menu
+    /// (docs, Discord, report an issue…) is not part of this port.
+    var helpMenuCommands: some Commands {
+        CommandGroup(after: .help) {
+            Button {
+                Task { @MainActor in ChatLayoutTour.shared.start() }
+            } label: {
+                Text(verbatim: L("Chat Layout Tour"))
+            }
         }
     }
 

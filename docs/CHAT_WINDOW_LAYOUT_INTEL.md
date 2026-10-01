@@ -31,7 +31,7 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
 | 1–3 | Shipped together 2026-10-01 (a chats list in both rails in between made no sense): window state and toolbar (inspector toggle + Pin Window, step-aside, #2910 strip inset); inspector rail with History; navigator with Agents and Projects; agent pill and Settings gear gone from the toolbar; follow-upstream fixes to stage 1 (⌘N opens a tab, `startNewChat(with:)` always a tab) | Shipped |
 | 4 | Upstream's project page: `ProjectDetailView` (the project's chats in the content area) + `ProjectInspectorPanel` (Project Settings in the right rail, same toolbar toggle) in place of Intel's `ProjectPageView` | Shipped 2026-10-01 |
 | 5 | Background, scheduled and watcher runs as tabs of their agent; Stop from the navigator for detached runs; "view task" focuses the run's tab | Shipped 2026-10-01 |
-| 6 | Layout tour (`ChatLayoutTour`, #2664), Help menu entry, full-screen themed header | Planned |
+| 6 | Layout tour (`ChatLayoutTour`) with its Help menu entry, #2664 window size, full-screen themed header | Shipped 2026-10-01 |
 
 ## Intel adaptations (filled in per step)
 
@@ -63,7 +63,6 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   Liquid Glass circle (macOS 26).
 - `/agent` slash command: posts `chatToolbarOpenAgentPicker`, which nothing
   observes since the pill left the toolbar. Same as upstream.
-- No layout tour anchors until step 6.
 
 ## Files (steps 1–3)
 
@@ -126,4 +125,27 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   registry still auto-finalizes a finished run after 15 seconds; its tab
   stays and simply becomes an ordinary saved chat. Retained runs across
   relaunch are not ported (Intel never persisted the registry).
+
+## Step 6 notes (tour, window size, full screen)
+
+- `Views/Tour/ChatLayoutTour.swift` is upstream's file. It offers its
+  three-stop coachmark tour once per user (`chatLayoutTourCompleted`) when a
+  chat window becomes key, and waits while any alert, sheet or modal is up.
+  Intel edits: single-value `onChange` with a remembered step, and the third
+  stop's copy ("Past chats") drops file changes. Anchors: the navigator's
+  lens bar, the tab strip, the inspector toggle.
+- Help ▸ **Chat Layout Tour** replays it. Intel adds this one item after the
+  system Help item; upstream's full Help menu (docs, Discord, report an
+  issue) is not part of this port.
+- Upstream's onboarding hand-off (`holdAutoStart` / `releaseAutoStart`
+  around first-run dialogs) has no Intel counterpart: Intel has no
+  onboarding window flow. The tour's own wait for open dialogs covers it.
+- New chat windows open at the visible size of the screen under the
+  pointer, cascade 25pt per extra window, and share the `ChatWindow` frame
+  autosave slot written by the first window (#2664). Before this Intel
+  opened every window at 900×650, centred.
+- Full screen: the NSToolbar is detached on entering full screen and
+  restored on exit; the root view shows `ChatFullScreenHeaderView` (sidebar
+  toggle, tab strip, inspector/pin row) on the theme background, as upstream.
+  `ThemedAlertCenter.hasAnyActiveAlert` added for the tour.
 

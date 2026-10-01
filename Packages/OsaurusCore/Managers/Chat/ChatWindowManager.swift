@@ -974,8 +974,14 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         let state = ChatWindowState(windowId: info.id, agentId: resolvedAgentId)
         windowStates[info.id] = state
 
+        // Upstream #2664: new chat windows open at the visible screen size of
+        // the screen under the pointer (cascaded for more windows), so the
+        // navigator and inspector never squeeze the chat column.
+        let mouse = NSEvent.mouseLocation
+        let screen = NSScreen.screens.first { NSMouseInRect(mouse, $0.frame, false) } ?? NSScreen.main
+        let initialRect = Self.initialFrame(on: screen, cascadeIndex: windows.count - 1)
         let window = IntelChatWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
+            contentRect: initialRect,
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
@@ -984,9 +990,12 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         window.title = "Osaurus (Intel)"
         // Unified toolbar look that matches the Apple Silicon chat window:
         // transparent titlebar + full-size content so the SwiftUI ChatView
-        // flows under the toolbar that hosts the centered agent pill.
+        // flows under the toolbar.
         window.titleVisibility = .hidden
         window.titlebarAppearsTransparent = true
+        // No hairline under the toolbar in full screen (upstream).
+        window.titlebarSeparatorStyle = .none
+        window.collectionBehavior.insert(.fullScreenPrimary)
         window.appearance = NSAppearance(named: state.theme.isDark ? .darkAqua : .aqua)
 
         let toolbar = NSToolbar(identifier: "IntelChatToolbar")
@@ -1025,8 +1034,8 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         // window cleanly after the close stack unwinds.
         window.isReleasedWhenClosed = false
         window.delegate = self
+        applyWindowFramePersistence(window, screen: screen)
         fitToScreen(window, state: state)
-        window.center()
         nsWindows[info.id] = window
         // Remembered tabs of windows that are gone (last launch, or a window
         // closed earlier) come back in this one; then track its own tabs.
@@ -1406,6 +1415,43 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// app is what makes a global-hotkey summon work from the background;
     /// `.moveToActiveSpace` makes the window follow to the current Space instead
     /// of appearing on its original (possibly hidden) one.
+    /// Default chat window size: the screen's visible frame (upstream #2664).
+    static func defaultWindowSize(fitting screen: NSScreen?) -> NSSize {
+        guard let visible = screen?.visibleFrame else { return NSSize(width: 1200, height: 800) }
+        return visible.size
+    }
+
+    /// Centered on `screen`, offset 25pt per extra window, kept on screen.
+    static func initialFrame(on screen: NSScreen?, cascadeIndex: Int) -> NSRect {
+        let size = defaultWindowSize(fitting: screen)
+        guard let visible = screen?.visibleFrame else { return NSRect(origin: .zero, size: size) }
+        let offset = CGFloat(max(0, cascadeIndex)) * 25
+        var origin = NSPoint(x: visible.midX - size.width / 2 + offset, y: visible.midY - size.height / 2 - offset)
+        if origin.x + size.width > visible.maxX { origin.x = visible.minX + 50 }
+        if origin.y < visible.minY { origin.y = visible.maxY - size.height - 50 }
+        return NSRect(origin: origin, size: size)
+    }
+
+    /// Upstream's `WindowFrameAutosaveKey.chat` (that enum lives in the
+    /// excluded `WindowManager.swift`).
+    static let frameAutosaveName = "ChatWindow"
+
+    /// Frame autosave (upstream): every window opens at the size the first
+    /// window last had; only the first window writes the slot back.
+    private func applyWindowFramePersistence(_ window: NSWindow, screen: NSScreen?) {
+        _ = window.setFrameUsingName(Self.frameAutosaveName)
+        if windows.count > 1 {
+            let recentered = Self.initialFrame(on: screen, cascadeIndex: windows.count - 1)
+            let size = window.frame.size
+            window.setFrameOrigin(
+                NSPoint(
+                    x: recentered.midX - size.width / 2,
+                    y: recentered.midY - size.height / 2))
+        } else {
+            window.setFrameAutosaveName(Self.frameAutosaveName)
+        }
+    }
+
     /// Height the unified titlebar + toolbar strip adds above the root view.
     static let chatChromeHeight: CGFloat = 66
 
@@ -1454,6 +1500,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         windowStates[id]?.cleanup()
         windowStates.removeValue(forKey: id)
         toolbarDelegates.removeValue(forKey: id)
+        stashedToolbars.removeValue(forKey: id)
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
@@ -1463,7 +1510,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
 
     // MARK: - NSWindowDelegate (Intel chat windows)
 
-    private func windowId(for window: NSWindow) -> UUID? {
+    func windowId(for window: NSWindow) -> UUID? {
         nsWindows.first(where: { $0.value === window })?.key
     }
 
@@ -1480,11 +1527,47 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         windowStates[id]?.cleanup()
         windowStates.removeValue(forKey: id)
         toolbarDelegates.removeValue(forKey: id)
+        stashedToolbars.removeValue(forKey: id)
         if lastFocusedWindowId == id {
             lastFocusedWindowId = windows.keys.first
         }
         // VAD Mode resumes once the last chat window is gone (IntelVoiceLaunch).
         NotificationCenter.default.post(name: .chatViewClosed, object: id)
+    }
+
+    // MARK: Full screen (upstream)
+
+    /// Toolbars detached while their window is in full screen, by window.
+    private var stashedToolbars: [UUID: NSToolbar] = [:]
+
+    /// AppKit draws the full-screen toolbar with an opaque system backdrop
+    /// that can't be themed. Detach the NSToolbar in full screen (rather
+    /// than hiding it: AppKit manages toolbar visibility across the
+    /// transition and can override a manual `isVisible`); the SwiftUI
+    /// content shows `ChatFullScreenHeaderView` instead.
+    public func windowWillEnterFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, let id = windowId(for: window) else { return }
+        stashedToolbars[id] = window.toolbar
+        window.toolbar = nil
+        windowStates[id]?.isFullScreen = true
+    }
+
+    public func windowDidExitFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, let id = windowId(for: window) else { return }
+        if let toolbar = stashedToolbars.removeValue(forKey: id) {
+            window.toolbar = toolbar
+            IntelNativeWindowRendering.restoreTitlebarControls(in: window)
+        }
+        windowStates[id]?.isFullScreen = false
+    }
+
+    /// If AppKit restored a toolbar while entering, drop the stash so a
+    /// second one is never attached later.
+    public func windowDidEnterFullScreen(_ notification: Notification) {
+        guard let window = notification.object as? NSWindow, window.toolbar != nil,
+            let id = windowId(for: window)
+        else { return }
+        stashedToolbars.removeValue(forKey: id)
     }
 
     /// Track the genuinely-focused window so "Ask AI" / dock reopen target the
@@ -1494,6 +1577,9 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             let id = windowId(for: window)
         else { return }
         lastFocusedWindowId = id
+        // Once-per-user layout tour (upstream #2630 / #2664); it defers
+        // itself while first-run dialogs are up.
+        ChatLayoutTour.shared.autoStartIfEligible(windowId: id)
         // Upstream pauses VAD Mode whenever the chat is shown, so the chat's
         // microphone never competes with the wake-word listener.
         if VADService.shared.state != .idle {
@@ -1532,6 +1618,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         nsWindows.removeAll()
         windowStates.removeAll()
         toolbarDelegates.removeAll()
+        stashedToolbars.removeAll()
     }
 }
 
@@ -1546,9 +1633,35 @@ private struct IntelChatWindowRootView: View {
     @ObservedObject var windowState: ChatWindowState
 
     var body: some View {
-        ChatView(windowState: windowState)
-            .id(ObjectIdentifier(windowState.session))
-            .environment(\.theme, windowState.theme)
+        VStack(spacing: 0) {
+            if windowState.isFullScreen {
+                ChatFullScreenHeaderView(windowState: windowState)
+            }
+            ChatView(windowState: windowState)
+                .id(ObjectIdentifier(windowState.session))
+        }
+        .environment(\.theme, windowState.theme)
+    }
+}
+
+/// Themed replacement for the NSToolbar while in native full screen, where
+/// AppKit's toolbar backdrop can't be themed. Mirrors the toolbar layout:
+/// sidebar toggle leading, tab strip, the inspector / pin row trailing.
+/// Upstream.
+private struct ChatFullScreenHeaderView: View {
+    @ObservedObject var windowState: ChatWindowState
+
+    var body: some View {
+        HStack(spacing: 8) {
+            IntelToolbarSidebarView(windowState: windowState)
+            // Trailing fallback: two 28pt buttons, their 8pt gap, the HStack
+            // spacing and the row's horizontal padding — until measured.
+            ChatTabStripView(windowState: windowState, leadingChromeWidth: 76, trailingChromeWidth: 84)
+            IntelToolbarTrailingView(windowState: windowState)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(windowState.theme.primaryBackground)
     }
 }
 
@@ -1777,6 +1890,8 @@ private struct IntelToolbarTrailingView: View {
             )
             .accessibilityLabel(
                 Text(LocalizedStringKey(railToggleHelp(isProject: isProject, isOpen: isOpen)), bundle: .module))
+            // Tour spotlight anchor (invisible; reports the button's frame).
+            .background(TourAnchorMarker(anchor: .historyButton))
 
             if !isProject {
                 HeaderActionButton(

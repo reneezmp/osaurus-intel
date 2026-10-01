@@ -1067,4 +1067,15 @@ except that agents are now picked in the sidebar, not a toolbar pill.
       jumps to the run's tab instead of opening another window.
 - [ ] Delete a running scheduled chat from its tab's right-click menu: the
       run stops and the chat is gone.
+- [ ] First chat window after updating: a three-step tour spotlights the
+      sidebar's Agents | Projects bar, the tabs, then the right-panel button.
+      Next / Back / Done work; Esc skips; it never comes back on its own.
+      It waits if a dialog is open.
+- [ ] Help ▸ **Chat Layout Tour** replays it.
+- [ ] A new chat window opens filling the screen under the pointer; resize
+      it, close it, open another: the new one uses your size. A second
+      window cascades and stays on screen.
+- [ ] Full screen (green button): the toolbar is replaced by a themed row
+      with the sidebar button, tabs and the right-panel/pin buttons; no grey
+      system strip. Leaving full screen brings the normal toolbar back.
 

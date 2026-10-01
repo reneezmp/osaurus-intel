@@ -2416,3 +2416,11 @@ calling a sync complete.
   Intel keeps its 15-second auto-finalize and has no retained runs across
   relaunch; see [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-5-notes-runs-as-tabs).
 
+### Chat window layout, step 6 (tour, window size, full screen) — 2026-10-01
+
+- `ChatLayoutTour` ported with a Help menu entry, #2664's full-screen-size
+  windows with frame autosave, and the full-screen themed header. Chat
+  window layout (`W-chat-tabs` stage 2, #2907 part C) is complete except
+  File Changes (`W-file-history`) and retained runs across relaunch. Notes:
+  [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-6-notes-tour-window-size-full-screen).
+

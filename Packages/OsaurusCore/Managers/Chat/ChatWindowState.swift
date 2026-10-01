@@ -686,6 +686,11 @@ final class ChatWindowState: ObservableObject {
     /// Floating window (Pin Window in the toolbar).
     @Published var isWindowPinned: Bool = false
 
+    /// True while the window is in native full screen: the NSToolbar is
+    /// detached there and the root view shows a themed header row instead
+    /// (upstream `ChatFullScreenHeaderView`).
+    @Published var isFullScreen: Bool = false
+
     // MARK: Inspector (upstream #2907 part C)
 
     /// Which pane the right-hand inspector shows, or nil while it is closed.

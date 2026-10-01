@@ -9,6 +9,7 @@
 //  search.
 //
 
+import AppKit
 import Foundation
 import Testing
 
@@ -200,6 +201,34 @@ struct IntelChatWindowLayoutTests {
             #expect(window.session === task.chatSession)
             #expect(!window.tabLayoutSnapshot().tabs.contains { $0.sessionId == task.id },
                 "registry runs are not remembered as tabs")
+        }
+    }
+}
+
+/// Step 6: window sizing (#2664) and the full-screen header state.
+@MainActor
+struct IntelChatWindowSizingTests {
+    @Test func newWindowsOpenAtTheVisibleScreenSizeAndCascade() {
+        let screen = NSScreen.main
+        let first = ChatWindowManager.initialFrame(on: screen, cascadeIndex: 0)
+        #expect(first.size == ChatWindowManager.defaultWindowSize(fitting: screen))
+        if let visible = screen?.visibleFrame {
+            #expect(first.size == visible.size)
+            // Full-size windows leave no room to cascade, so upstream's rule
+            // re-anchors the second one (AppKit keeps it on screen when shown).
+            let second = ChatWindowManager.initialFrame(on: screen, cascadeIndex: 1)
+            #expect(second.origin != first.origin)
+            #expect(second.size == first.size)
+        }
+        #expect(ChatWindowManager.initialFrame(on: nil, cascadeIndex: 0).size == NSSize(width: 1200, height: 800))
+        #expect(ChatWindowManager.frameAutosaveName == "ChatWindow")
+    }
+
+    @Test func fullScreenHeaderStateDefaultsOff() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+            #expect(window.isFullScreen == false)
         }
     }
 }
