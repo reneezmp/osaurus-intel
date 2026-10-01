@@ -82,6 +82,34 @@ public final class BackgroundTaskManager: ObservableObject {
         backgroundTasks[id]
     }
 
+    /// Fires when a run that belongs in a tab strip registers (upstream).
+    public let taskRegistered = PassthroughSubject<BackgroundTaskState, Never>()
+
+    /// Whether a task belongs in a chat window's tab strip: user-visible.
+    /// (Upstream also excludes subagent mirrors, which Intel doesn't have.)
+    private static func isTabWorthy(_ state: BackgroundTaskState) -> Bool {
+        state.showToast
+    }
+
+    /// Every registered run a freshly opened chat window should surface as
+    /// a tab, oldest first. Headless (`showToast == false`) runs excluded.
+    public func tasksForTabs() -> [BackgroundTaskState] {
+        backgroundTasks.values
+            .filter(Self.isTabWorthy)
+            .sorted { $0.createdAt < $1.createdAt }
+    }
+
+    /// The registry task whose run `session` displays, if any: the live
+    /// instance itself, or the task whose id is the session's persisted id
+    /// (dispatch task id == session id by construction). Upstream.
+    func task(owning session: ChatSession) -> BackgroundTaskState? {
+        if let live = backgroundTasks.values.first(where: { $0.chatSession === session }) {
+            return live
+        }
+        guard let sessionId = session.sessionId else { return nil }
+        return backgroundTasks[sessionId]
+    }
+
     /// The live (active) registry task currently driving the given persisted
     /// session id, if any (upstream). On Intel these are dispatched runs:
     /// schedules, watchers and the Orchestrator's delegations.
@@ -149,20 +177,13 @@ public final class BackgroundTaskManager: ObservableObject {
         print("[BackgroundTaskManager] Detached chat window \(windowId) as task \(state.id)")
     }
 
-    /// Open a window for a background task
+    /// Bring a background task on screen: as a tab of its agent (upstream
+    /// `revealTask`). The tab keeps the run's live session; closing a
+    /// finished run's tab dismisses the task.
     public func openTaskWindow(_ backgroundId: UUID) {
-        guard let state = backgroundTasks[backgroundId] else { return }
-
-        if let context = state.executionContext {
-            let windowId = ChatWindowManager.shared.createWindowForContext(context, showImmediately: true)
-            // Bind window→task so closing this window doesn't kill the
-            // still-running task — gated in `ChatWindowManager.windowWillClose`.
-            taskIdByWindow[windowId] = backgroundId
-        }
-
-        if !state.status.isActive {
-            finalizeTask(backgroundId)
-        }
+        guard backgroundTasks[backgroundId] != nil else { return }
+        cancelAutoFinalize(backgroundId)
+        ChatWindowManager.shared.revealTask(backgroundId)
     }
 
     /// Remove a background task from management, cancelling all observers and timers.
@@ -578,6 +599,11 @@ public final class BackgroundTaskManager: ObservableObject {
         backgroundTasks[state.id] = state
         state.appendActivity(kind: .info, title: "Running in background")
         emitPluginEvent(state, type: .started, json: PluginHostContext.serializeStartedEvent(state: state))
+        // Upstream #2630: a user-visible run surfaces as a tab of its agent
+        // in the frontmost chat window (`ChatWindowManager` listens).
+        if Self.isTabWorthy(state), state.chatSession != nil {
+            taskRegistered.send(state)
+        }
 
         #if OSAURUS_INTEL
         // M13 follow-up (Renée 2026-06-04): surface non-interactive background

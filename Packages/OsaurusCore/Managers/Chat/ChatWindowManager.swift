@@ -1031,6 +1031,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         // Remembered tabs of windows that are gone (last launch, or a window
         // closed earlier) come back in this one; then track its own tabs.
         restoreRememberedTabs(into: state, focusesRememberedChat: focusesRememberedChat)
+        // Remembered tabs first (so a hibernated stand-in never shadows a
+        // live run: `restoreTabs` skips registry-owned ids), then the
+        // registry's own runs. Upstream.
+        ensureTaskRegistrationObserver()
+        attachRegistryRuns(to: state)
         observeTabLayout(of: state)
         // Activate + front (works when summoned via hotkey from another app).
         bringToFront(window)
@@ -1140,6 +1145,63 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             return
         }
         createWindow(agentId: data.agentId, sessionData: data)
+    }
+
+    // MARK: Background runs as tabs (upstream #2630)
+
+    private var taskRegisteredCancellable: AnyCancellable?
+
+    /// Armed on first window creation rather than in `init`: the two
+    /// singletons reference each other, so subscribing from `init` could
+    /// re-enter a singleton still being constructed. Upstream.
+    private func ensureTaskRegistrationObserver() {
+        guard taskRegisteredCancellable == nil else { return }
+        taskRegisteredCancellable = BackgroundTaskManager.shared.taskRegistered
+            .sink { [weak self] state in
+                self?.surfaceRegisteredTask(state)
+            }
+    }
+
+    /// A run was just registered: surface it as a tab of its agent in the
+    /// frontmost window, without stealing focus. Runs the user detached
+    /// (`.chat` source) are skipped. No window is created for a headless
+    /// launch.
+    private func surfaceRegisteredTask(_ state: BackgroundTaskState) {
+        guard state.source != .chat else { return }
+        if findWindow(bySessionId: state.id) != nil { return }
+        guard let targetId = preferredWindowId(), let target = windowStates[targetId] else { return }
+        target.attachBackgroundTab(for: state)
+    }
+
+    /// Surface every registry run not shown in another window as tabs of a
+    /// freshly created window.
+    private func attachRegistryRuns(to state: ChatWindowState) {
+        for task in BackgroundTaskManager.shared.tasksForTabs() where task.chatSession != nil {
+            if let shownIn = findWindow(bySessionId: task.id), shownIn != state.windowId { continue }
+            state.attachBackgroundTab(for: task)
+        }
+    }
+
+    /// Bring a registry run on screen as a tab of its agent: focus the tab
+    /// that already shows it (in whichever window), else attach it to the
+    /// frontmost window and select it, else open a window for it.
+    /// Upstream `revealTask`.
+    public func revealTask(_ taskId: UUID) {
+        guard let state = BackgroundTaskManager.shared.taskState(for: taskId) else { return }
+        if let shownIn = findWindow(bySessionId: taskId), let host = windowStates[shownIn] {
+            host.focusTab(forSessionId: taskId)
+            showWindow(id: shownIn)
+            return
+        }
+        if let targetId = preferredWindowId(), let target = windowStates[targetId] {
+            target.attachBackgroundTab(for: state)
+            target.focusTab(forSessionId: taskId)
+            showWindow(id: targetId)
+            return
+        }
+        // No window: one opens and attaches every registry run itself.
+        let windowId = createWindow(agentId: state.agentId)
+        windowStates[windowId]?.focusTab(forSessionId: taskId)
     }
 
     /// The window new tabs go to: the last focused one, else any.

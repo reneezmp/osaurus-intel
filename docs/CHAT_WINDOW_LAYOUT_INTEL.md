@@ -30,7 +30,7 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
 |---|---|---|
 | 1–3 | Shipped together 2026-10-01 (a chats list in both rails in between made no sense): window state and toolbar (inspector toggle + Pin Window, step-aside, #2910 strip inset); inspector rail with History; navigator with Agents and Projects; agent pill and Settings gear gone from the toolbar; follow-upstream fixes to stage 1 (⌘N opens a tab, `startNewChat(with:)` always a tab) | Shipped |
 | 4 | Upstream's project page: `ProjectDetailView` (the project's chats in the content area) + `ProjectInspectorPanel` (Project Settings in the right rail, same toolbar toggle) in place of Intel's `ProjectPageView` | Shipped 2026-10-01 |
-| 5 | Background, scheduled and watcher runs as tabs; Stop from the navigator for detached runs | Planned |
+| 5 | Background, scheduled and watcher runs as tabs of their agent; Stop from the navigator for detached runs; "view task" focuses the run's tab | Shipped 2026-10-01 |
 | 6 | Layout tour (`ChatLayoutTour`, #2664), Help menu entry, full-screen themed header | Planned |
 
 ## Intel adaptations (filled in per step)
@@ -105,4 +105,25 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   auto-save, knowledge, working folder, shared memory, default agent).
 - `chatWindow.showProjectInspector` (UserDefaults, default on) remembers
   whether Project Settings is open, as upstream.
+
+## Step 5 notes (runs as tabs)
+
+- A dispatched run that registers (schedule, watcher, API; anything with
+  `showToast`) appears as a background tab of its agent in the frontmost
+  window, without taking focus (`BackgroundTaskManager.taskRegistered` →
+  `ChatWindowManager.surfaceRegisteredTask` →
+  `ChatWindowState.attachBackgroundTab`). A window that opens later picks
+  up every registered run (`tasksForTabs`).
+- Closing a running run's tab only unlinks the view; closing a finished
+  run's tab dismisses the task (`finalizeTask`), as upstream.
+- "View" from the menu-bar card or a notification (`openTaskWindow`) now
+  focuses the run's tab, or attaches it to the frontmost window, instead of
+  opening a new window (upstream `revealTask`).
+- Opening a running chat from History attaches its live session
+  (`liveTask(forSessionId:)`), so the reply keeps streaming in view.
+- Intel difference: upstream keeps finished runs in the registry (and
+  across relaunch, as retained tabs) until their tab closes. Intel's
+  registry still auto-finalizes a finished run after 15 seconds; its tab
+  stays and simply becomes an ordinary saved chat. Retained runs across
+  relaunch are not ported (Intel never persisted the registry).
 

@@ -2409,3 +2409,10 @@ calling a sync complete.
   small Intel edits, and are mounted with `.id(project.id)` in
   `ChatContentView` (see [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-4-notes-project-page)).
 
+### Chat window layout, step 5 (runs as tabs) — 2026-10-01
+
+- Upstream's registry-runs-as-tabs path ported (`taskRegistered`,
+  `tasksForTabs`, `task(owning:)`, `attachBackgroundTab`, `revealTask`).
+  Intel keeps its 15-second auto-finalize and has no retained runs across
+  relaunch; see [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-5-notes-runs-as-tabs).
+

@@ -1016,7 +1016,9 @@ private struct ChatTabContextMenu {
         let scope = alertScope
         let windowState = self.windowState
         let perform = {
-            // Intel: no registry-owned chat runs to cancel first.
+            if let liveTask = BackgroundTaskManager.shared.liveTask(forSessionId: id) {
+                BackgroundTaskManager.shared.cancelTask(liveTask.id)
+            }
             windowState.prepareForSessionDeletion(id: id)
             ChatSessionsManager.shared.delete(id: id)
             windowState.refreshSessions()

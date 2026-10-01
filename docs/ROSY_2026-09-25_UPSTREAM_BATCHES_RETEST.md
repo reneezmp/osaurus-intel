@@ -1055,4 +1055,16 @@ except that agents are now picked in the sidebar, not a toolbar pill.
       and default agent apply). Add Chats moves existing chats in.
 - [ ] The project's "…" menu renames and deletes (delete asks and keeps
       the chats).
+- [ ] **(paid)** With a chat window open, let a schedule or watcher run
+      (Run Now works): a tab for it appears under its agent without taking
+      focus; that agent's sidebar row shows the working ring. Click the
+      agent: the run's tab is there, streaming.
+- [ ] **(paid)** Close the run's tab while it runs: it keeps running (ring
+      stays, menu-bar card updates). Reopen it from History: the reply is
+      still streaming in. After it finishes, closing its tab is just
+      closing a chat.
+- [ ] **(paid)** The menu-bar card's run row (or a notification's View)
+      jumps to the run's tab instead of opening another window.
+- [ ] Delete a running scheduled chat from its tab's right-click menu: the
+      run stops and the chat is gone.
 

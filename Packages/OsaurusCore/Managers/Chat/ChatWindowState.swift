@@ -1151,10 +1151,13 @@ final class ChatWindowState: ObservableObject {
         // session publishes restored state. Otherwise the header keeps the
         // launch-time "Default" agent until the user changes agents manually.
         adoptAgent(sessionData.agentId)
-        // Reopening a chat whose closed tab is still running: attach that
-        // live instance (the stream keeps rendering) instead of a stale copy
-        // from disk that would race its saves.
-        if let live = DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionData.id) {
+        // Reopening a chat that is still running (a closed tab's reply, or
+        // a schedule/watcher run): attach that live instance (the stream
+        // keeps rendering) instead of a stale copy from disk that would race
+        // its saves.
+        if let live = DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionData.id)
+            ?? BackgroundTaskManager.shared.liveTask(forSessionId: sessionData.id)?.chatSession
+        {
             attachDetached(live)
             return
         }
@@ -1366,6 +1369,26 @@ final class ChatWindowState: ObservableObject {
         return true
     }
 
+    // MARK: Background runs as tabs (upstream #2630)
+
+    /// Surface a registry-owned run (schedule, watcher, API dispatch) as a
+    /// tab of its agent WITHOUT taking focus: the live `ChatSession` is
+    /// linked to this window and appended as an inactive tab, so the run
+    /// shows up under its agent while the user keeps working. Execution
+    /// stays with the registry. Returns whether a tab was added.
+    @discardableResult
+    func attachBackgroundTab(for task: BackgroundTaskState) -> Bool {
+        guard let live = task.chatSession else { return false }
+        let alreadyShown = tabs.contains {
+            $0.session === live || ($0.session.sessionId != nil && $0.session.sessionId == live.sessionId)
+        }
+        guard !alreadyShown else { return false }
+        link(live)
+        tabs.append(ChatTab(id: UUID(), session: live))
+        refreshSessions()
+        return true
+    }
+
     /// Bring the tab showing `sessionId` to the front (waking it if
     /// hibernated). Returns false when no tab here shows it.
     @discardableResult
@@ -1412,6 +1435,17 @@ final class ChatWindowState: ObservableObject {
     private func teardownTabSession(_ closingSession: ChatSession) {
         closingSession.onSessionChanged = nil
         closingSession.windowState = nil
+        // A registry-owned run (schedule, watcher, dispatch) shown in this
+        // tab: execution belongs to the registry, so closing the tab only
+        // unlinks the view. Closing the tab of a FINISHED run is how the
+        // user dismisses it: the task leaves the registry. Upstream.
+        if let task = BackgroundTaskManager.shared.task(owning: closingSession) {
+            if !task.status.isActive {
+                if !closingSession.turns.isEmpty { closingSession.save() }
+                BackgroundTaskManager.shared.finalizeTask(task.id)
+            }
+            return
+        }
         if DetachedChatRunRegistry.shared.adopt(closingSession) { return }
         if !closingSession.turns.isEmpty { closingSession.save() }
         closingSession.stop()
@@ -1476,8 +1510,11 @@ final class ChatWindowState: ObservableObject {
     /// `ChatTabLayoutStore`. Blank tabs are skipped (nothing to reopen).
     func tabLayoutSnapshot() -> ChatTabLayoutRecord {
         let entries = tabs.compactMap { tab -> ChatTabLayoutRecord.Tab? in
+            // Registry-owned runs are skipped: the registry surfaces them
+            // itself while they live (upstream).
             guard let sessionId = tab.session.sessionId,
-                tab.isHibernated || !tab.session.turns.isEmpty
+                tab.isHibernated || !tab.session.turns.isEmpty,
+                BackgroundTaskManager.shared.task(owning: tab.session) == nil
             else { return nil }
             return ChatTabLayoutRecord.Tab(sessionId: sessionId, lastActivatedAt: tab.lastActivatedAt)
         }
@@ -1500,7 +1537,10 @@ final class ChatWindowState: ObservableObject {
     @discardableResult
     func restoreTabs(from record: ChatTabLayoutRecord, selectsActive: Bool = true) -> Int {
         var restored = 0
-        for entry in record.tabs where !tabs.contains(where: { $0.session.sessionId == entry.sessionId }) {
+        for entry in record.tabs
+        where !tabs.contains(where: { $0.session.sessionId == entry.sessionId })
+            && BackgroundTaskManager.shared.taskState(for: entry.sessionId) == nil
+        {
             guard var snapshot = ChatSessionsManager.shared.session(for: entry.sessionId) else { continue }
             snapshot.turns = []
             let cold = makeFreshSession(agentId: snapshot.agentId, loading: snapshot)
@@ -1545,8 +1585,12 @@ final class ChatWindowState: ObservableObject {
     }
 
     private func canHibernate(_ s: ChatSession) -> Bool {
-        s.sessionId != nil && !s.turns.isEmpty && !Self.hasWorkInFlight(s)
-            && s.queuedSend == nil
+        guard let sessionId = s.sessionId, !s.turns.isEmpty, !Self.hasWorkInFlight(s),
+            s.queuedSend == nil
+        else { return false }
+        // A registry run that hasn't started yet has no turns to reload;
+        // swapping it for a stand-in would divorce the tab from its run.
+        return BackgroundTaskManager.shared.liveTask(forSessionId: sessionId) == nil
     }
 
     /// Save the tab's session, then swap it for a metadata-only stand-in
