@@ -980,7 +980,17 @@ struct SelectableTextView: NSViewRepresentable {
 /// Custom NSTextView that handles link clicks, cursor changes, blockquote bars, and heading underlines.
 /// Code blocks are now rendered as standalone `CodeBlockView` / `CodeNSTextView` — no code-block
 /// drawing happens here.
-final class SelectableNSTextView: NSTextView {
+final class SelectableNSTextView: NSTextView, CrossSelectableTextView {
+
+    /// Slice of the thread-wide cross-block selection (see ChatCrossSelection).
+    /// Painted at the top of `draw(_:)` — drawsBackground is false here, so
+    /// AppKit's own background/selection pass never runs.
+    var crossSelectionRange: NSRange? {
+        didSet {
+            guard oldValue != crossSelectionRange else { return }
+            needsDisplay = true
+        }
+    }
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
@@ -1043,7 +1053,51 @@ final class SelectableNSTextView: NSTextView {
             }
         }
 
+        // Single-click drags route to the cross-block selection controller
+        // so the highlight can span past this block (each block is its own
+        // text view — native tracking can't cross that boundary, #2129).
+        // Multi-clicks (word/paragraph select) keep native behavior.
+        if event.clickCount == 1 {
+            ChatCrossSelection.shared.beginDrag(from: self, with: event)
+            return
+        }
+        ChatCrossSelection.shared.clear()
         super.mouseDown(with: event)
+    }
+
+    /// Context-menu Copy and Edit > Copy prefer the cross-block selection
+    /// (see `copyCrossSelectionIfActive`).
+    override func copy(_ sender: Any?) {
+        if copyCrossSelectionIfActive() { return }
+        super.copy(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        crossSelectionEnablesCopy(item) || super.validateUserInterfaceItem(item)
+    }
+
+    /// Cursor comes from a `.cursorUpdate` tracking area — legacy cursor
+    /// rects don't survive layer-backed table-cell recycling (see
+    /// `chatTextCursorUpdate`).
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func cursorUpdate(with event: NSEvent) {
+        chatTextCursorUpdate(with: event)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        cursorTrackingArea = area
     }
 
     /// Open the knowledge document a link points at. Falls back to
@@ -1207,6 +1261,7 @@ final class SelectableNSTextView: NSTextView {
     var secondaryBackgroundColor: NSColor = .clear
 
     override func draw(_ dirtyRect: NSRect) {
+        drawCrossSelectionHighlight()
         guard let layoutManager = layoutManager,
             let textContainer = textContainer,
             let textStorage = textStorage

@@ -50,7 +50,7 @@ the prerequisite". Every commit is one of:
 | 11 | `a7d2f37e7` #2897 | **Needs work + decision** | Backfill follow-up; lands with #5. |
 | 12 | `610aa089a` #2898 | **Needs work + decision** | Shows backfilled purposes in pickers; lands with #5. |
 | 13 | `d8d24271b` #2875 | Stage | iOS app integration (mobile relay, phone chats). Needs the mobile/relay backend (B1). |
-| 14 | `f90c8dcb3` #2899 | **Needs work** | Fix for cross-block drag selection. Prerequisite: port that feature first (upstream #2247 `5212ffbc6`, `ChatCrossSelection.swift`, ~320 lines), never ported to Intel. |
+| 14 | `f90c8dcb3` #2899 | **Ported 2026-10-01** | Fix for cross-block drag selection, ported together with the feature itself (upstream #2247 `5212ffbc6`); see [`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md). |
 | 15 | `3479aedc8` #2901 | **Needs work + decision** | Backfill follow-up; lands with #5. |
 | 16 | `c9e2d61a9` #2900 | Covered | Upstream's SQLite history dropped generation metrics; Intel's history already encodes TTFT, tok/s and token counts. |
 | 17 | `12a02a9f7` #2902 | **Needs work** | Export timing for restored chats. Prerequisite: Intel chat export, removed in 1.0.34 because its files are excluded; Renée wants it back (`MEMORY_PLAN.md` §3b). |

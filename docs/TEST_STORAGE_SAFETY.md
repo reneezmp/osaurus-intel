@@ -84,6 +84,11 @@ the shared storage-path lock.
    the validation if it is zero. The Intel define belongs to the production
    target; do not wrap Intel test files in `#if OSAURUS_INTEL` unless the test
    target also defines it, because that silently compiles the tests out.
+10. **Never write the system pasteboard.** `NSPasteboard.general` is the
+   user's real clipboard; a test that calls a view's `copy(_:)` or
+   `ChatCrossSelection.copyIfActive` replaces it (happened once on
+   2026-10-01 while porting cross-block selection). Assert on the string
+   that would be copied, or on menu validation, instead.
 
 ## Preflight and postflight
 

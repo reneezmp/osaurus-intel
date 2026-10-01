@@ -1144,3 +1144,28 @@ call.
       files even on a dry run).
 - [ ] Ventura: cards expand/collapse without overlapping the next row;
       long lines wrap; dark and light themes both readable.
+
+## Cross-block chat selection
+
+Manual: [`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md). Use any
+chat with a long reply that has paragraphs, a list, a code block and a
+table.
+
+- [ ] Drag from the middle of one paragraph down into the next paragraph,
+      the code block and the table: the blue highlight follows across all
+      of them (it used to stop at the end of the first block).
+- [ ] Drag upwards works the same way; dragging back shrinks the highlight.
+- [ ] Drag past the bottom (or top) edge of the chat: it scrolls and the
+      selection keeps growing; it never scrolls past the last message.
+- [ ] ⌘C, then paste into TextEdit: the whole selection, blocks on separate
+      lines. Right-click ▸ Copy and Edit ▸ Copy do the same.
+- [ ] Scroll the start of a long selection off-screen, then ⌘C: still the
+      full text.
+- [ ] Single click elsewhere clears the highlight. Double-click selects a
+      word, triple-click a paragraph, as before.
+- [ ] Links still open on click; the cursor is a pointing hand over links
+      and an I-beam over text.
+- [ ] Select in one chat window, switch to another and press ⌘C: nothing
+      from the first window is copied.
+- [ ] Ventura: the highlight is visible in light and dark themes and in a
+      custom theme; text stays readable on top of it.

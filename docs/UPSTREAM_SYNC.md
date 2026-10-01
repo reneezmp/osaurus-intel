@@ -2349,7 +2349,8 @@ calling a sync complete.
   (upstream test; 50 ms sleep while unordered `Task`s append snapshots) failed
   once in a full run and passed 3/3 alone and on the rerun. Not caused by
   Settings work; rerun before investigating. Seen again 2026-10-01 during
-  the file history port, same pattern (passed 3/3 alone and on the rerun).
+  the file history port, same pattern (passed 3/3 alone and on the rerun),
+  and once more in the cross-selection full run (green on the rerun).
 
 ### Settings redesign step 3 + tool catalog (`W-settings-ux-2950`, `W-tool-catalog-ui`) — 2026-09-30
 
@@ -2459,4 +2460,12 @@ calling a sync complete.
   to ignore `dry_run` for text and write anyway); `WorkspaceWriteSafety`
   took only `overwritesExistingFile` and the empty-side diff fix. Details:
   [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md#stage-2-inline-diff-cards-shipped-2026-10-01).
+
+### Cross-block chat selection (#2247, #2899) — 2026-10-01
+
+- `ChatCrossSelection.swift` verbatim plus an Intel test seam
+  (`dragForTesting`); upstream's additions to `SelectableNSTextView`,
+  `CodeNSTextView`, `CellTextView`, `ChatView`'s ⌘C monitor and the RGBA
+  `Color(hex:)` fix in `Theme.swift`. Notes and the tracking-loop finding:
+  [`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md).
 
