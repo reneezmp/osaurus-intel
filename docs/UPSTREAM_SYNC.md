@@ -2348,7 +2348,8 @@ calling a sync complete.
 - **Flaky test seen:** `LiveExecRegistryTests.entriesPublisherEmitsOnRegister`
   (upstream test; 50 ms sleep while unordered `Task`s append snapshots) failed
   once in a full run and passed 3/3 alone and on the rerun. Not caused by
-  Settings work; rerun before investigating.
+  Settings work; rerun before investigating. Seen again 2026-10-01 during
+  the file history port, same pattern (passed 3/3 alone and on the rerun).
 
 ### Settings redesign step 3 + tool catalog (`W-settings-ux-2950`, `W-tool-catalog-ui`) — 2026-09-30
 
@@ -2446,5 +2447,16 @@ calling a sync complete.
   `FileOperation` removed, as upstream; `themedAlert(accessory:width:)`
   added. Re-sync the journal files by diffing against upstream and keeping
   the "Intel:" edits.
-- Not yet: stage 2, inline diff cards (`NativeFileDiffView`, `.fileDiff`).
+
+### Per-chat file history, stage 2: inline diff cards (#1683, #2907 part A) — 2026-10-01
+
+- Ported: `NativeFileDiffView` (verbatim), `FileDiffStreamingPreviewTests`,
+  `highlightCode`, `ChatTurn.pendingToolArgFull`, the `.fileDiff` block and
+  its cell. The 2026-09-08 triage DEFER of `3bdbebd9` ("file diff cards",
+  #1683) is resolved by this port.
+- Intel: cards are emitted by Intel's `BlockMemoizer`; `file_write` /
+  `file_edit` gained upstream's diff payload and text `dry_run` (Intel used
+  to ignore `dry_run` for text and write anyway); `WorkspaceWriteSafety`
+  took only `overwritesExistingFile` and the empty-side diff fix. Details:
+  [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md#stage-2-inline-diff-cards-shipped-2026-10-01).
 

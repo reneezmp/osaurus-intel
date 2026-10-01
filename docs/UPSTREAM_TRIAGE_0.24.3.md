@@ -80,7 +80,7 @@ Range: `9124d696..4528b56f` (783 commits). 307 auto-eliminated (docs/CI/appcast/
 | c05947f0 | Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn | PORT | HTTPHandler networking/tool fix for cloud inference |
 | a29fe877 | Native image generation/editing + agent delegation (spawn / local_delegate) | SKIP | Image generation (amputated) + MetalGate (amputated) |
 | cc6732d7 | fix context budget popover crash on System Prompt drill-down | PORT | FloatingInputCard UI crash fix |
-| 3bdbebd9 | added file diff cards for folder and sandbox edits | DEFER | Sandbox is amputated; folder diffs might be relevant but needs untangling |
+| 3bdbebd9 | added file diff cards for folder and sandbox edits | DEFER | Sandbox is amputated; folder diffs might be relevant but needs untangling **Ported 2026-10-01** with `W-file-history` stage 2 (folder edits; [`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md)). |
 | 4a4b3bd7 | improved plugin discovery for smaller local models | SKIP | Local model optimization is amputated |
 | 161e6ca5 | fix app hang watchdog stalls across folder, tool listing, permissions, and launch | PORT | FolderContextService + SystemPermissionService stability fix |
 | b76f887e | improved settings ux | PORT | Settings UI improvement across active subsystems |

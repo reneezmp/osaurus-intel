@@ -50,6 +50,34 @@ func ensureHighlightrTheme(for theme: any ThemeProtocol) {
     currentHighlightrTheme = resolved
 }
 
+/// Memoized highlight results (upstream): re-highlighting the same code on
+/// every cell reconfigure can stall the main thread on large outputs.
+nonisolated(unsafe) private let highlightCache = NSCache<NSString, NSAttributedString>()
+
+/// Above this many UTF-16 units, skip syntax highlighting (upstream): the
+/// JavaScriptCore tokenizer's cost grows super-linearly and runs on the main
+/// thread during cell layout.
+private let maxHighlightableLength = 50_000
+
+/// Syntax-highlight `code` for the diff card (upstream `highlightCode`).
+/// Intel: no highlighter lock (Intel's shared Highlightr is only used from
+/// the main thread); otherwise as upstream.
+func highlightCode(
+    _ code: String,
+    language: String?,
+    theme: any ThemeProtocol,
+    cache: Bool = true
+) -> NSAttributedString? {
+    guard code.utf16.count <= maxHighlightableLength else { return nil }
+    ensureHighlightrTheme(for: theme)
+    let key = "\(currentHighlightrTheme)|\(language?.lowercased() ?? "")|\(code)" as NSString
+    if cache, let cached = highlightCache.object(forKey: key) { return cached }
+    guard let highlighted = sharedHighlightr?.highlight(code, as: language?.lowercased(), fastRender: true)
+    else { return nil }
+    if cache { highlightCache.setObject(highlighted, forKey: key, cost: code.utf16.count) }
+    return highlighted
+}
+
 /// Background colors keyed by resolved Highlightr theme name. Reading the
 /// background for a theme other than the active one requires switching the
 /// shared highlighter (a JavaScriptCore call), so callers that only need the

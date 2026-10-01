@@ -1,11 +1,12 @@
 # Per-chat file history on Intel (`W-file-history`)
 
 Upstream #2907 part A (`74e83c6c5`), ported 2026-10-01 after Renée chose it
-ahead of cross-block selection. Stage 1 (this file): the journal, revert,
-the File Changes inspector pane, `file_undo` / `file_operation_history`,
-the sidebar badge, the transcript links and the retention setting. Stage 2:
-upstream's inline diff cards (`NativeFileDiffView`, the `.fileDiff`
-transcript block, #1683 plus #2907's undo hooks), tracked below.
+ahead of cross-block selection, in two stages the same day. Stage 1: the
+journal, revert, the File Changes inspector pane, `file_undo` /
+`file_operation_history`, the sidebar badge, the transcript links and the
+retention setting. Stage 2: upstream's inline diff cards
+(`NativeFileDiffView`, the `.fileDiff` transcript block; #1683 plus
+#2907's undo hooks).
 
 ## What the user gets
 
@@ -25,6 +26,14 @@ transcript block, #1683 plus #2907's undo hooks), tracked below.
   opens that chat with File Changes.
 - Under a reply: "N files changed · View changes". On a collapsed tool row
   that changed files (shell commands, copies): "N files changed".
+- **Diff cards:** every `file_write` / `file_edit` row gets a collapsed card
+  below it: file name, +/− counts, copy, expand to the syntax-highlighted
+  diff, and Revert / Undo / View change (File Changes on that write). While
+  the model is still writing the call, the card grows live with the
+  content ("…" badge); a failed write keeps its streamed content as a
+  "preview" card.
+- `dry_run: true` now previews text writes and edits too (before, Intel
+  honoured it only for documents and **wrote text files anyway**).
 - The agent gets `file_operation_history` (what this chat changed, newest
   first) and `file_undo` (undo the last change, one `operation_id`, or one
   `path` back to before the chat). Every mutating folder tool result now
@@ -67,7 +76,10 @@ transcript block, #1683 plus #2907's undo hooks), tracked below.
 | Untracked prompt: headless lanes `autoApproveToolPrompts` / `denyUnapprovedToolPrompts` | Intel's approval card; a test process refuses unless `FileChangeCapture.untrackedApprovalForTesting` is bound | Intel has no headless approval lanes |
 | `refreshFileChanges()` called at every switch site | Also driven by the active session and its `$sessionId` (`observeActiveSessionFileChanges`), plus explicit calls where a blank tab resets in place | Intel's tab code differs; one observer covers every switch |
 | `ChatConfiguration.fileHistoryRetention` (Codable struct) | Field on Intel's class plus its `chat.json` snapshot | Intel's configuration is a class |
-| `file_write` result carries a diff payload | Text result plus `operation_id` until stage 2 | Inline diff cards are stage 2 |
+| `file_write` / `file_edit` results (upstream folder tools) | Intel's tools gain upstream's diff payload (`WorkspaceWriteSafety.preview`) and text `dry_run`, but keep Intel's result `text` (its line count, its edit summary) and schema; no `mode: append`, batch `edits`, `file_reference`, content hashes or verification notes | Those belong to upstream's folder-tool hardening, a separate port |
+| `WorkspaceWriteSafety` (upstream) | Took only `overwritesExistingFile` (no overwrite warning on edits) and the empty-side diff fix (a new file is `+N −0`) | Rest of upstream's version is the same separate port |
+| Blocks from `ContentBlock.generateBlocks` | Emitted by Intel's own `BlockMemoizer` (`IntelDataConformers.swift`): calls split into groups around each card; the first group keeps `toolgroup-<turn>`, later ones get `-1`, `-2`…; cards are `filediff-<callId>` / `filediff-pending-<turn>` as upstream | Intel's transcript builder is its own |
+| `highlightCode` with a highlighter lock | Same function in Intel's `CodeBlockView.swift`, no lock | Intel's shared Highlightr is main-thread only |
 | `themedAlert(accessory:width:)` | Added to Intel's `ThemedAlertDialog` (the card already supported both) | Needed by the revert confirmation |
 
 Ventura: single-value `onChange` in `FileChangesPanel` (marked "Intel:").
@@ -123,15 +135,22 @@ the data directory; the database that indexes them is encrypted.
   `OsaurusPaths.root()`, so the test gate's `OSAURUS_TEST_ROOT` (or a
   suite's `overrideRoot`) keeps them off the live data directory.
 
-## Stage 2: inline diff cards
+## Stage 2: inline diff cards (shipped 2026-10-01)
 
-Upstream renders a diff card under every `file_write` / `file_edit` call
-(streaming preview while the call is written, Undo/Redo and "View in File
-Changes" on the card). It needs `file_write` / `file_edit` results with the
-upstream diff payload (`WorkspaceWriteSafety.preview` on apply), the
-`.fileDiff` content block in Intel's `ContentBlock`, and
-`NativeFileDiffView` in Intel's message cell. Until it ships, write/edit
-rows have no "N files changed" link (upstream gives them the card instead);
-the end-of-turn row and File Changes cover them.
+- `Views/Chat/NativeFileDiffView.swift` is upstream's file, verbatim.
+- `ContentBlockKind.fileDiff` and the emission live in
+  `IntelDataConformers.swift` (`BlockMemoizer.fileDiff(for:…)`,
+  `knownFileContents`); `NativeMessageCellView` gained
+  `configureAsFileDiff`, the kind tag and the height estimate (upstream).
+- `ChatTurn.pendingToolArgFull` (Intel's turn in `IntelDataConformers`)
+  buffers a file-writing call's full arguments (cap 256 KB) for the live
+  card, as upstream.
+- Tests: upstream `Tests/Chat/FileDiffStreamingPreviewTests.swift`
+  (verbatim); Intel `Tests/Chat/IntelFileDiffCardTests.swift` (diff
+  payload, text `dry_run`, block emission for completed, failed, running
+  and streaming writes). The journal test reads `operation_id` through
+  `FileDiff.from(toolResult:)` again, as upstream.
+- Rendering checked offscreen in light and dark (2026-10-01): header,
+  counts, highlighting and add/remove tints draw correctly.
 
 Manual QA: [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md#per-chat-file-history-w-file-history).

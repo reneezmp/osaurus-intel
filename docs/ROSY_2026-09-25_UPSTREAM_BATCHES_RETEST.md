@@ -1131,3 +1131,16 @@ call.
       file list and the toast render and respond; no clipped text.
 - [ ] The first-run layout tour's third stop now reads "Past chats and file
       changes" (Help ▸ Chat Layout Tour to replay).
+- [ ] **(paid)** Diff cards: when the agent writes or edits a file, a
+      collapsed card appears under the tool row (file name, +N −M). Click it
+      to expand the coloured, syntax-highlighted diff; copy works.
+- [ ] **(paid)** While the agent is still writing a longer file, the card
+      grows as the content streams, then settles into the real diff.
+- [ ] **(paid)** On a card: Revert puts the file back (card shows
+      "Reverted", button becomes Undo); Undo restores the change; View
+      change opens File Changes on that write.
+- [ ] **(paid)** Ask the agent to "preview" a change with `dry_run`: the
+      file on disk does not change (before this build Intel wrote text
+      files even on a dry run).
+- [ ] Ventura: cards expand/collapse without overlapping the next row;
+      long lines wrap; dark and light themes both readable.

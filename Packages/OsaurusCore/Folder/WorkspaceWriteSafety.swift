@@ -14,7 +14,7 @@ import Foundation
 enum WorkspaceWriteSafety {
     struct Preview {
         var payload: [String: Any]
-        let warnings: [String]
+        var warnings: [String]
         let text: String
     }
 
@@ -142,6 +142,7 @@ enum WorkspaceWriteSafety {
         proposedContent: String,
         operation: String,
         dryRun: Bool,
+        overwritesExistingFile: Bool = true,
         createsParentDirectories: Bool,
         fileURL: URL
     ) -> Preview {
@@ -158,6 +159,7 @@ enum WorkspaceWriteSafety {
             path: path,
             fileURL: fileURL,
             existed: existed,
+            overwritesExistingFile: overwritesExistingFile,
             createsParentDirectories: createsParentDirectories,
             proposedContent: proposedContent
         )
@@ -191,11 +193,14 @@ enum WorkspaceWriteSafety {
         path: String,
         fileURL: URL,
         existed: Bool,
+        overwritesExistingFile: Bool,
         createsParentDirectories: Bool,
         proposedContent: String
     ) -> [String] {
         var warnings: [String] = []
-        if existed {
+        // Upstream: an edit changes part of a file, so it gets no
+        // "overwrite" warning.
+        if existed, overwritesExistingFile {
             warnings.append(
                 "This will overwrite an existing file; use dry_run first when replacing more than a small edit."
             )
@@ -246,8 +251,10 @@ enum WorkspaceWriteSafety {
         oldLabel: String,
         newLabel: String
     ) -> (text: String, truncated: Bool) {
-        let oldLines = old.components(separatedBy: .newlines)
-        let newLines = new.components(separatedBy: .newlines)
+        // An empty side has zero lines, not one empty line (upstream): a new
+        // one-line file must diff as `+1 −0`, not a phantom removal.
+        let oldLines = old.isEmpty ? [] : old.components(separatedBy: .newlines)
+        let newLines = new.isEmpty ? [] : new.components(separatedBy: .newlines)
         var lines: [String] = [
             "--- \(path) (\(oldLabel))",
             "+++ \(path) (\(newLabel))",

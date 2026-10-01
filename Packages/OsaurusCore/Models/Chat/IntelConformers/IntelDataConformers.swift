@@ -53,6 +53,13 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     var pendingToolArgPreview: String? = nil
     var pendingToolArgSize: Int = 0
     var pendingToolArgFragmentCount: Int = 0
+    /// Full accumulated tool arguments during streaming, kept only for
+    /// file-writing tools (see `FileDiff.diffProducingToolNames`) so the chat
+    /// can render a live, growing code card while the model writes — the
+    /// truncated `pendingToolArgPreview` can't back that. Capped so a runaway
+    /// arg stream can't balloon memory (upstream #1683).
+    var pendingToolArgFull: String? = nil
+    private static let maxFullArgAccumulation = 262_144
     var preflightCapabilities: Any? = nil
 
     var timeToFirstToken: TimeInterval?
@@ -117,6 +124,7 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         pendingToolArgPreview = nil
         pendingToolArgSize = 0
         pendingToolArgFragmentCount = 0
+        pendingToolArgFull = nil
     }
 
     func appendToolArgFragment(_ fragment: String) {
@@ -126,6 +134,18 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         // query (args) building up live, not just the bare tool name.
         if (pendingToolArgPreview?.count ?? 0) < 600 {
             pendingToolArgPreview = (pendingToolArgPreview ?? "") + fragment
+        }
+        // Upstream: keep the full args for file-writing tools (and while the
+        // name is still unknown) so the live diff card can grow with them.
+        let wantsFull =
+            pendingToolName == nil
+            || pendingToolName == ToolDisplayName.pendingToolSentinel
+            || FileDiff.diffProducingToolNames.contains(pendingToolName!)
+        if wantsFull {
+            let full = pendingToolArgFull ?? ""
+            if full.count < Self.maxFullArgAccumulation {
+                pendingToolArgFull = full + fragment
+            }
         }
     }
 
@@ -249,6 +269,10 @@ enum ContentBlockKind: Equatable {
     case groupSpacer
     case chart(spec: ChartSpec)
     case assistantActions(turnId: UUID)
+    /// GitHub-style diff card under a `file_write` / `file_edit` call
+    /// (upstream #1683 + #2907 part A), or its live preview while the call
+    /// streams.
+    case fileDiff(diff: FileDiff)
 
     static func == (lhs: ContentBlockKind, rhs: ContentBlockKind) -> Bool {
         switch (lhs, rhs) {
@@ -277,6 +301,7 @@ enum ContentBlockKind: Equatable {
         case (.typingIndicator, .typingIndicator), (.groupSpacer, .groupSpacer): return true
         case let (.chart(lSpec), .chart(rSpec)): return lSpec == rSpec
         case let (.assistantActions(lId), .assistantActions(rId)): return lId == rId
+        case let (.fileDiff(lDiff), .fileDiff(rDiff)): return lDiff == rDiff
         default: return false
         }
     }
@@ -293,7 +318,7 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
         case let .header(role, _, _): return role
         case let .paragraph(_, _, _, role): return role
         case .toolCallGroup, .thinking, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
-             .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions:
+             .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff:
             return .assistant
         case .userMessage: return .user
         }
@@ -1597,6 +1622,15 @@ final class BlockMemoizer: @unchecked Sendable {
         var prevSideIsUser: Bool?
         // Start of the reply being built: the user message that asked for it.
         var replyStartedAt: Date?
+        // Files seen in the conversation, for naming a streaming edit's card
+        // before its `path` streams. Built once, only when a card needs it.
+        var knownFilesCache: [(path: String, content: String)]?
+        func knownFiles() -> [(path: String, content: String)] {
+            if let knownFilesCache { return knownFilesCache }
+            let built = Self.knownFileContents(in: turns)
+            knownFilesCache = built
+            return built
+        }
         let visibleTurns = turns.filter { $0.role != .tool }
         for (visibleIndex, turn) in visibleTurns.enumerated() {
             // M12 Gap 3: `.tool`-role turns exist ONLY to carry the tool result
@@ -1676,23 +1710,64 @@ final class BlockMemoizer: @unchecked Sendable {
                         argSize: turn.pendingToolArgSize
                     )
                 ))
+                // File-writing tools stream their whole file through the call
+                // arguments: a live diff card grows with the code below the
+                // chip (upstream), so the finished card doesn't land as one
+                // jarring dump.
+                if let partialArgs = turn.pendingToolArgFull,
+                    let preview = FileDiff.streamingPreview(
+                        toolName: pendingName,
+                        partialArgs: partialArgs,
+                        fallbackPath: FileDiff.inferredEditPath(
+                            partialArgs: partialArgs, knownFiles: knownFiles())
+                    )
+                {
+                    blocks.append(ContentBlock(
+                        id: "filediff-pending-\(turn.id.uuidString)",
+                        turnId: turn.id,
+                        kind: .fileDiff(diff: preview)
+                    ))
+                }
             }
 
             // Tool-call cards (M12 Gap 3): rendered via NativeToolCallGroupView.
             // Each call pairs with its result from `turn.toolResults`, so the
             // result shows inside the (expandable) card — not as a chat bubble.
+            let isStreaming = turn.id == streamingTurnId
             if !isUser, let toolCalls = turn.toolCalls, !toolCalls.isEmpty {
-                let items = toolCalls.map {
-                    ToolCallItem(call: $0, result: turn.toolResults[$0.id])
+                // A file write keeps its tool row with the diff card right
+                // below it (upstream #1683), so the calls split into groups
+                // around each card. The first group keeps the turn's block
+                // id, so its expanded rows survive the split.
+                var regularItems: [ToolCallItem] = []
+                var groupIndex = 0
+                func flushRegularItems() {
+                    guard !regularItems.isEmpty else { return }
+                    let suffix = groupIndex == 0 ? "" : "-\(groupIndex)"
+                    blocks.append(ContentBlock(
+                        id: "toolgroup-\(turn.id.uuidString)\(suffix)",
+                        turnId: turn.id,
+                        kind: .toolCallGroup(calls: regularItems)
+                    ))
+                    regularItems = []
+                    groupIndex += 1
                 }
-                blocks.append(ContentBlock(
-                    id: "toolgroup-\(turn.id.uuidString)",
-                    turnId: turn.id,
-                    kind: .toolCallGroup(calls: items)
-                ))
+                for call in toolCalls {
+                    let result = turn.toolResults[call.id]
+                    regularItems.append(ToolCallItem(call: call, result: result))
+                    guard let diff = Self.fileDiff(
+                        for: call, result: result, isStreaming: isStreaming, knownFiles: knownFiles)
+                    else { continue }
+                    flushRegularItems()
+                    blocks.append(ContentBlock(
+                        id: "filediff-\(call.id)",
+                        turnId: turn.id,
+                        kind: .fileDiff(diff: diff)
+                    ))
+                }
+                flushRegularItems()
             }
 
-            let isStreaming = turn.id == streamingTurnId
             let nextRole: MessageRole? =
                 visibleIndex + 1 < visibleTurns.count ? visibleTurns[visibleIndex + 1].role : nil
             let isLastInGroup = nextRole != turn.role
@@ -1730,6 +1805,89 @@ final class BlockMemoizer: @unchecked Sendable {
         }
         return blocks
     }
+    /// The diff card for one call (upstream `ContentBlock.generateBlocks`):
+    /// the applied diff from a completed write; for a FAILED write, the
+    /// streamed content as a "preview" card so what the user watched stream
+    /// doesn't vanish with the error; for a write still EXECUTING, the
+    /// preview until the result lands under the same block id.
+    static func fileDiff(
+        for call: ToolCall,
+        result: String?,
+        isStreaming: Bool,
+        knownFiles: () -> [(path: String, content: String)]
+    ) -> FileDiff? {
+        let name = call.function.name
+        guard FileDiff.diffProducingToolNames.contains(name) else { return nil }
+        if let result {
+            if let diff = FileDiff.from(toolResult: result) { return diff }
+            guard ToolEnvelope.successPayload(result) == nil else { return nil }
+            return FileDiff.streamingPreview(
+                toolName: name,
+                partialArgs: call.function.arguments,
+                isStreaming: false,
+                fallbackPath: FileDiff.inferredEditPath(
+                    partialArgs: call.function.arguments, knownFiles: knownFiles())
+            )
+        }
+        guard isStreaming else { return nil }
+        return FileDiff.streamingPreview(
+            toolName: name,
+            partialArgs: call.function.arguments,
+            fallbackPath: FileDiff.inferredEditPath(
+                partialArgs: call.function.arguments, knownFiles: knownFiles())
+        )
+    }
+
+    /// Contents of every file the conversation has seen, keyed by path —
+    /// `file_read` result text (line-number display prefixes stripped) and
+    /// `file_write` argument content, latest version per path. Feeds
+    /// `FileDiff.inferredEditPath`. Upstream `ContentBlock.knownFileContents`.
+    static func knownFileContents(in turns: [ChatTurn]) -> [(path: String, content: String)] {
+        var latest: [String: String] = [:]
+        for turn in turns {
+            guard let calls = turn.toolCalls else { continue }
+            for call in calls {
+                switch call.function.name {
+                case "file_read", "sandbox_read_file":
+                    guard let result = turn.toolResults[call.id],
+                        let payload = ToolEnvelope.successPayload(result) as? [String: Any],
+                        (payload["kind"] as? String) != "directory",
+                        (payload["kind"] as? String) != "image",
+                        (payload["kind"] as? String) != "workbook",
+                        (payload["source"] as? String) != "ocr_text",
+                        let path = payload["path"] as? String, !path.isEmpty,
+                        let text = payload["text"] as? String
+                    else { continue }
+                    let content =
+                        payload["line_format"] == nil
+                        ? text
+                        : text.components(separatedBy: "\n")
+                            .map { line -> Substring in
+                                guard let bar = line.firstIndex(of: "|") else { return line[...] }
+                                return line[line.index(after: bar)...]
+                            }
+                            .joined(separator: "\n")
+                    latest[path] = content
+                case "file_write", "sandbox_write_file":
+                    guard let data = call.function.arguments.data(using: .utf8),
+                        let obj = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any],
+                        let path = (obj["path"] as? String), !path.isEmpty,
+                        let content = obj["content"] as? String
+                    else { continue }
+                    latest[path] =
+                        (obj["mode"] as? String) == "append"
+                        ? (latest[path] ?? "") + content
+                        : content
+                default:
+                    continue
+                }
+            }
+        }
+        // Rebuilt on the streaming tick and matched with `contains`: cap each
+        // entry so a huge read can't turn the tick into a main-thread scan.
+        return latest.map { (path: $0.key, content: String($0.value.prefix(262_144))) }
+    }
+
     /// "Worked for" (upstream #2916): the finished reply's last assistant
     /// turn, measured from the user message. Nil while streaming, for user
     /// turns, mid-reply turns, or implausible clocks.

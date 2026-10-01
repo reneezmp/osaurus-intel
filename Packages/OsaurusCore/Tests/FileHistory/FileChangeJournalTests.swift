@@ -420,11 +420,8 @@ struct FileChangeJournalTests {
         let result = try await env.run(
             FileWriteTool(rootPath: root), #"{"path": "card.txt", "content": "two\n"}"#,
             sessionId: Self.session, folder: root, toolCallId: "call-card")
-        // Intel: `file_write`'s result carries no diff payload until the
-        // inline diff cards land, so the id comes from `operation_id`
-        // (upstream reads it through `FileDiff.from(toolResult:)`).
-        let payload = try #require(ToolEnvelope.successPayload(result) as? [String: Any])
-        let setId = try #require((payload["operation_id"] as? String).flatMap(UUID.init(uuidString:)))
+        let diff = try #require(FileDiff.from(toolResult: result))
+        let setId = try #require(diff.operationId)
 
         // A fresh journal has nothing cached: both lookups go to the DB.
         let relaunched = env.relaunched()

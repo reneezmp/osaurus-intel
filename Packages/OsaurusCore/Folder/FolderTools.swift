@@ -761,8 +761,8 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
         + ". The extension picks the format; document generation is built in, so never shell out to "
         + "pandoc or Python for it. **Use this instead of `echo` / `cat` heredoc in `shell_run`.** "
         + "Parent directories will be created if they don't exist. You MUST provide the file "
-        + "contents in the `content` parameter. Pass `dry_run: true` to preview a document without "
-        + "writing it."
+        + "contents in the `content` parameter. Pass `dry_run: true` to preview the diff (text) or the "
+        + "document summary without writing."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -779,7 +779,9 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
             ]),
             "dry_run": .object([
                 "type": .string("boolean"),
-                "description": .string("Preview a document target (.docx/.pdf/.xlsx) without writing it."),
+                "description": .string(
+                    "Preview the write, diff, and risk warnings without modifying the filesystem (default: false)"
+                ),
             ]),
         ]),
         "required": .array([.string("path"), .string("content")]),
@@ -907,8 +909,25 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
             return ToolEnvelope.success(tool: name, result: FolderToolHelpers.withOperationId(result))
         }
 
-        // Create parent directories if needed
+        // Upstream: the result carries the unified diff (the chat's diff card
+        // and `dry_run` previews read it). A file that isn't UTF-8 text is
+        // diffed as new: overwriting it is still allowed, as before on Intel.
+        let previousContent = existed ? try? String(contentsOf: fileURL, encoding: .utf8) : nil
         let parentDir = fileURL.deletingLastPathComponent()
+        var preview = WorkspaceWriteSafety.preview(
+            path: relativePath,
+            previousContent: previousContent,
+            proposedContent: content,
+            operation: name,
+            dryRun: dryRun,
+            createsParentDirectories: !FileManager.default.fileExists(atPath: parentDir.path),
+            fileURL: fileURL
+        )
+        if dryRun {
+            return ToolEnvelope.success(tool: name, result: preview.payload, warnings: preview.warnings)
+        }
+
+        // Create parent directories if needed
         try FileManager.default.createDirectory(
             at: parentDir,
             withIntermediateDirectories: true,
@@ -918,13 +937,15 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
         // Write content
         try content.write(to: fileURL, atomically: true, encoding: .utf8)
 
+        // Intel: keep the line count Intel always reported (upstream counts
+        // separators, so a trailing newline adds one).
         let lineCount = FolderToolHelpers.contentLines(content).count
         let action = existed ? "Updated" : "Created"
+        preview.payload["text"] = "\(action) \(relativePath) (\(lineCount) lines, \(content.count) characters)"
         return ToolEnvelope.success(
             tool: name,
-            result: FolderToolHelpers.withOperationId([
-                "text": "\(action) \(relativePath) (\(lineCount) lines, \(content.count) characters)"
-            ])
+            result: FolderToolHelpers.withOperationId(preview.payload),
+            warnings: preview.warnings
         )
     }
 
@@ -985,7 +1006,8 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         + "Documents (.docx/.xlsx/.pptx/.pdf) are edited in place with `operations` (formatting, styles, media and "
         + "untouched content are kept): call `file_read` with `mode: \"structure\"` first to get paragraph numbers, "
         + "cells, slides/shapes, or pages and form fields. For .docx/.pptx, `old_string`/`new_string` also works "
-        + "(text is matched across formatting runs). Pass `dry_run: true` to preview a document edit."
+        + "(text is matched across formatting runs). Pass `dry_run: true` to preview the edit and its diff "
+        + "without writing."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -1036,7 +1058,9 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
             ]),
             "dry_run": .object([
                 "type": .string("boolean"),
-                "description": .string("Documents: preview the edit (with a text diff) without writing it"),
+                "description": .string(
+                    "Preview the edit and diff without modifying the filesystem (default: false)"
+                ),
             ]),
         ]),
         "required": .array([.string("path")]),
@@ -1186,7 +1210,7 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
         case .applied(let result):
             applied = result
         }
-        try applied.content.write(to: fileURL, atomically: true, encoding: .utf8)
+        let dryRun = coerceBool(args["dry_run"]) ?? false
 
         let beforeLines = FolderToolHelpers.contentLines(oldString).count
         let afterLines = FolderToolHelpers.contentLines(newString).count
@@ -1211,16 +1235,42 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
             warnings.append(note)
         }
         let occurrences = applied.replacements > 1 ? " in \(applied.replacements) places" : ""
+        // Upstream: the result carries the unified diff (the chat's diff card
+        // and `dry_run` previews read it), plus the match details.
+        var preview = WorkspaceWriteSafety.preview(
+            path: relativePath,
+            previousContent: originalContent,
+            proposedContent: applied.content,
+            operation: name,
+            dryRun: dryRun,
+            overwritesExistingFile: false,
+            createsParentDirectories: false,
+            fileURL: fileURL
+        )
+        preview.payload["replacements"] = applied.replacements
+        preview.payload["match_strategy"] = applied.strategy.rawValue
+        preview.payload["matched_lines"] = lineLabels
+        if dryRun {
+            // Unmissable not-applied signal (upstream): a model once read a
+            // dry-run preview as completion.
+            return ToolEnvelope.success(
+                tool: name,
+                result: preview.payload,
+                warnings: preview.warnings + warnings + [
+                    "PREVIEW ONLY - nothing was written. The file is unchanged. "
+                        + "Repeat the same call WITHOUT dry_run to apply the edit."
+                ]
+            )
+        }
+        try applied.content.write(to: fileURL, atomically: true, encoding: .utf8)
+
+        // Intel: keep Intel's edit summary as the result text.
+        preview.payload["text"] =
+            "Edited \(relativePath): replaced \(beforeLines) line(s) with \(afterLines) line(s)\(occurrences)"
         return ToolEnvelope.success(
             tool: name,
-            result: FolderToolHelpers.withOperationId([
-                "text":
-                    "Edited \(relativePath): replaced \(beforeLines) line(s) with \(afterLines) line(s)\(occurrences)",
-                "match_strategy": applied.strategy.rawValue,
-                "replacements": applied.replacements,
-                "matched_lines": lineLabels,
-            ]),
-            warnings: warnings
+            result: FolderToolHelpers.withOperationId(preview.payload),
+            warnings: preview.warnings + warnings
         )
     }
 
