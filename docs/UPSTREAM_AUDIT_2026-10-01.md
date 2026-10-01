@@ -62,11 +62,13 @@ dropdown (`ModelPickerView`) over Intel's own provider manager.
 
 1. `RequestLog`: upstream's `turnId`, `requestId`, wire bodies and
    connection info (Intel has no P2P source; keep the case for parity).
-2. **Redactor hardening (do first):** upstream's log redactor also catches
-   bare `sk-` keys outside JSON strings and unquoted header forms
-   (`x-api-key: v`, `api-key=v`), plus attestation / wallet-signature
-   fields. Intel's patterns only match the JSON-quoted forms, so a provider
-   key written as plain header text could reach the Insights detail pane.
+2. **Redactor hardening — shipped 2026-10-01.** Intel's redactor now matches
+   upstream's (`InsightsService.upstreamRedactors`, verbatim): bare `sk-` /
+   `sk-ant-` keys anywhere (not only as JSON strings), unquoted header forms
+   (`x-api-key: v`, `api-key=v`, `x-goog-api-key: v`) and the Workspaces
+   `attestation` / `wallet_signature` fields; `Bearer …` keeps its scheme
+   word. Before, a key written as plain header text or prose could reach the
+   Insights detail pane. Tests: `Tests/Service/InsightsRedactionTests.swift`.
 3. `InsightsService`: `logs` not `@Published` (#1595 hang fix), `hasLogs`,
    `focus(turnId:)` / `focus(requestId:)` / `hasLog`, and #2926's
    revision-tagged snapshots on a background queue.

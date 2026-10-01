@@ -68,4 +68,47 @@ struct InsightsRedactionTests {
         let scrubbed = InsightsService.redactCredentials(body)
         #expect(scrubbed == body)
     }
+
+    // Upstream's hardened redactor (#1961, #2683): bare `sk-` keys, unquoted
+    // header forms and Workspaces attestation fields. The attestation case is
+    // upstream's `AgentScopePolicyTests` check; Intel doesn't compile that suite.
+
+    @Test
+    func insightsRedactorCatchesAttestationAndWalletSignatureValues() {
+        let body =
+            #"{"team_redeem":{"attestation":"eyJhIjoxfQ.c2ln","wallet_signature":"0xabcdef","agent_address":"0xabc"}}"#
+        let redacted = InsightsService.redactCredentials(body)
+        #expect(!redacted.contains("eyJhIjoxfQ.c2ln"))
+        #expect(!redacted.contains("0xabcdef"))
+        #expect(redacted.contains(#""attestation":"<redacted>""#))
+        #expect(redacted.contains(#""wallet_signature":"<redacted>""#))
+        #expect(redacted.contains("0xabc"))
+    }
+
+    @Test
+    func redactsUnquotedHeaderCredentials() {
+        let body = "x-api-key: plainsecret123\napi-key=othersecret456\nx-goog-api-key: AIzaSecret789"
+        let scrubbed = InsightsService.redactCredentials(body)
+        #expect(!scrubbed.contains("plainsecret123"))
+        #expect(!scrubbed.contains("othersecret456"))
+        #expect(!scrubbed.contains("AIzaSecret789"))
+        #expect(scrubbed.contains("x-api-key: <redacted>"))
+        #expect(scrubbed.contains("api-key=<redacted>"))
+    }
+
+    @Test
+    func redactsBareProviderKeyInProse() {
+        let body = "request failed for key sk-ant-api03-abcdefghijkl while streaming"
+        let scrubbed = InsightsService.redactCredentials(body)
+        #expect(!scrubbed.contains("sk-ant-api03-abcdefghijkl"))
+        #expect(scrubbed.contains("for key <redacted> while"))
+    }
+
+    @Test
+    func bearerAuthorizationKeepsSchemeWord() {
+        let body = #"{"Authorization":"Bearer sk-proj-abcdefghijkl"}"#
+        let scrubbed = InsightsService.redactCredentials(body)
+        #expect(!scrubbed.contains("sk-proj-abcdefghijkl"))
+        #expect(scrubbed.contains("Bearer <redacted>"))
+    }
 }

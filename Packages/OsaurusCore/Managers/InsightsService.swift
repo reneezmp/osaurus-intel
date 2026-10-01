@@ -302,28 +302,45 @@ extension InsightsService {
         )
     }()
 
-    /// Additional redactors covering third-party provider credential shapes
-    /// (custom OpenAI-compatible providers proxied through this app carry
-    /// their own `Authorization`/`x-api-key`-style headers with real
-    /// upstream secrets — not just Osaurus's own `osk-` token — and the
-    /// Insights detail pane echoes logged bodies verbatim).
+    /// Upstream-provider credential regexes. The log ring buffer can capture
+    /// chat bodies forwarded to remote providers, and the request/response
+    /// detail pane echoes headers, so an Authorization/x-api-key header or an
+    /// `sk-`/JWT-shaped value could otherwise land in the buffer verbatim.
+    /// These mirror `ProviderDiagnosticRedactor` so the local log holds to the
+    /// same "no third-party secrets at rest" bar as the provider diagnostics.
     private nonisolated static let upstreamRedactors: [(regex: NSRegularExpression, template: String)] = {
-        let patterns: [(String, String)] = [
-            // Generic `Bearer <token>` scheme, any non-osk token shape.
-            (#"(?i)(bearer\s+)(?!osk-)[A-Za-z0-9._~+/=-]+"#, "$1<redacted>"),
-            // Generic `sk-...`-style API keys embedded as a JSON string value.
-            (#""sk-[A-Za-z0-9._-]+""#, "\"<redacted>\""),
-            // JWT-shaped tokens (header.payload.signature, base64url segments).
+        let specs: [(String, String)] = [
+            // Any Bearer token (not just Osaurus `osk-`): OpenAI/Anthropic/etc.
+            (#"(?i)(bearer\s+)[A-Za-z0-9._~+/=-]{8,}"#, "$1<redacted>"),
+            // `sk-…` / `sk-ant-…` style keys (JSON value, header, prose). The
+            // lookbehind keeps this from matching *inside* other token shapes
+            // — notably the `sk-` tail of Osaurus `osk-v1.…` keys, whose bare
+            // prose form is deliberately left alone (see redactor contract).
+            (#"(?<![A-Za-z0-9])sk-[A-Za-z0-9._-]{8,}"#, "<redacted>"),
+            // JSON-Web-Token shaped values (id/access tokens).
             (#"eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+"#, "<redacted>"),
-            // Header-style credential fields: "x-api-key": "...", "authorization": "...", etc.
+            // Workspaces membership attestations and wallet signatures as
+            // they appear in `/pair-invite` envelopes: `"attestation": "<b64url>.<b64url>"`
+            // (two segments, so the JWT rule above misses it) and
+            // `"wallet_signature": "0x<130 hex>"`. Keyed on the field name
+            // so ordinary two-segment strings elsewhere are left alone.
             (
-                #"(?i)("(?:x-api-key|x-goog-api-key|api-key|authorization)"\s*:\s*)"[^"]*""#,
+                #"(?i)("(?:attestation|wallet_signature|caller_attestation)"\s*:\s*)"[^"]*""#,
                 "$1\"<redacted>\""
             ),
+            // Header-style secret carriers: `x-api-key: v`, `api-key=v`,
+            // `x-goog-api-key: v`, and stringified `"authorization": "v"`.
+            // `Bearer …` authorization values are excluded: the Bearer regex
+            // above already scrubbed the token and must keep the scheme word
+            // visible (`Bearer <redacted>`), so redacting the first token of
+            // the value here would just eat the word "Bearer".
+            (
+                #"(?i)("?(?:x-api-key|x-goog-api-key|api-key|authorization)"?\s*[:=]\s*"?)(?!bearer\b)[^"\s,;}]+"#,
+                "$1<redacted>"
+            ),
         ]
-        return patterns.compactMap { pattern, template in
-            guard let regex = try? NSRegularExpression(pattern: pattern, options: []) else { return nil }
-            return (regex, template)
+        return specs.compactMap { pattern, template in
+            (try? NSRegularExpression(pattern: pattern, options: [])).map { ($0, template) }
         }
     }()
 
