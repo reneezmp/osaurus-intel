@@ -1366,6 +1366,16 @@ final class ChatSession: ObservableObject {
         return ChatConfiguration.shared.contextLength
     }
 
+    /// An older span of the chat can be summarized: the context popover's
+    /// "Compact conversation" (upstream `canCompactConversation`).
+    var canCompactConversation: Bool {
+        guard turns.count >= 2 else { return false }
+        return IntelContextCompaction.compactionCutIndex(
+            turns: turns,
+            existingSummary: IntelContextCompaction.activeSummary(conversationSummary, for: turns)
+        ) != nil
+    }
+
     var shouldSuggestCompaction: Bool {
         guard !isStreaming, !isCompacting, turns.count >= 2 else { return false }
         return IntelContextCompaction.shouldSuggest(

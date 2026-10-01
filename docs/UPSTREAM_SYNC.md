@@ -2489,3 +2489,13 @@ calling a sync complete.
   #2955, #2921. Needs work: #2965 (`W-channels`). Five MLX pins and the
   appcast are incompatible.
 
+### Context budget indicator (upstream ring + popover) — 2026-10-01
+
+- Renée asked to match upstream's context budget icon and popover. Ported
+  upstream's `FloatingContextChip` (ring in the button bar),
+  `ContextBreakdownPopover` (header, usable-budget bar, composition, grouped
+  sources, messages, compaction, settings link) and `PopoverCardModifier`;
+  Intel budget math in `IntelContextBudget` (upstream `assess` rules, window
+  from the model catalog or the Context Length setting). The red state never
+  blocks Send on Intel. Details: [`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md).
+

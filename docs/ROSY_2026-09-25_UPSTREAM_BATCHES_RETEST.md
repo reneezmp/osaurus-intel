@@ -1189,3 +1189,27 @@ Manual: [`UPSTREAM_AUDIT_2026-10-01.md`](UPSTREAM_AUDIT_2026-10-01.md).
       a new tab (⌘T): the tabs still stop at the panel's edge.
 - [ ] **(paid)** An agent with Notes on: "list my Notes folders" and "make a
       note in folder X" work (no −1708 error).
+
+## Context budget indicator
+
+Manual: [`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md).
+
+- [ ] In a chat with some history, a small ring sits in the composer's
+      button bar to the left of Send (the old "~N / M tokens" text at the
+      right of the model row is gone). Typing makes it fill a little.
+- [ ] Hover the ring: the popover opens after a moment; moving into it
+      keeps it open; leaving closes it. Click the ring: it stays open until
+      you click outside or click the ring again.
+- [ ] Popover: "CONTEXT BUDGET" with an "N% used" pill, "~N tokens used",
+      "N remaining of M usable", and "Your context limit 128k · usable
+      budget 85%" for a cloud model (or "Model maximum" when the model's own
+      limit is known). Then Usable budget bar, Composition bar, Sources
+      (System Prompt expands with a click, Memory, Tools), Messages.
+- [ ] **(paid)** In a long chat, the popover offers "Compact conversation";
+      clicking it shows "Summarizing older messages…" and the ring drops
+      afterwards.
+- [ ] "Open Context Length" at the bottom opens Settings › Conversation with
+      Context Length highlighted. Set it very low (e.g. 4096): the ring turns
+      amber/red, and Send still works.
+- [ ] Ventura, light and dark: the ring track is visible, the popover isn't
+      clipped, and it scrolls when System Prompt is expanded.

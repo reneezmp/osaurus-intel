@@ -406,6 +406,7 @@ struct ChatContentView: View {
                             },
                             isCompacting: observedSession.isCompacting,
                             suggestCompaction: observedSession.shouldSuggestCompaction,
+                            canCompactConversation: observedSession.canCompactConversation,
                             autoSpeakAssistant: $observedSession.autoSpeakAssistant,
                             queuedSend: $observedSession.queuedSend,
                             folderState: observedSession.folderState,
