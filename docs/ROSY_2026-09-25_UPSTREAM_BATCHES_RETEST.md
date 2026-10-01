@@ -937,3 +937,57 @@ Ventura in **both** light and dark themes, with the window active and inactive.
       failed call reads in the past tense as failed.
 - [ ] Search Settings for "auto-allow", "add service", "mcp directory":
       each opens the right Tools & MCP sub-tab.
+
+## Chat tabs (`W-chat-tabs`)
+
+Manual: [`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md). Start from a build with a
+few saved chats under two agents.
+
+- [ ] The toolbar reads: sidebar button, agent pill, tabs, "+", Settings
+      gear. With the sidebar open, the pill and tabs start at the chat
+      column's left edge; hiding the sidebar slides them left. Dragging the
+      sidebar wider moves them when you let go.
+- [ ] Resize the window fast, narrow and wide: the tabs never draw over the
+      sidebar or the gear; with many tabs a "N ▾" menu appears and lists the
+      rest.
+- [ ] "+" or ⌘T opens a new blank tab. Sidebar **New Chat** on a blank tab
+      stays in it; on a conversation it opens a new tab.
+- [ ] Click a sidebar chat: it opens in the current tab. Right-click it ›
+      **Open in New Tab**: it opens in a new tab (or reuses a blank one).
+      Clicking a chat that is already in another tab jumps to that tab.
+- [ ] **(paid)** Send a long request, switch to another tab while it
+      replies, come back: the reply kept going, and the tab's avatar showed
+      a spinning ring meanwhile.
+- [ ] **(paid)** Close a tab while it is still replying (×), then reopen
+      that chat from the sidebar before it finishes: the reply is still
+      streaming in, not frozen, and the final text is saved once.
+- [ ] Pick another agent in the pill: the strip shows only that agent's
+      tabs (or one blank tab). Pick the first agent again: its tabs are back
+      and the blank tab you left is gone.
+- [ ] ⌃Tab / ⌃⇧Tab and ⇧⌘] / ⇧⌘[ cycle through this agent's tabs only.
+- [ ] Drag a tab left and right: it reorders, the others slide over.
+- [ ] ⌘W closes the active tab; on the last conversation it leaves a blank
+      chat; on a lone blank tab it closes the window. ⇧⌘T brings closed
+      tabs back in their old place.
+- [ ] Right-click a tab: Rename (the tab and sidebar update), Pin, Move to
+      Project (a folder glyph appears on the tab; clicking it opens the
+      project page), Export…, Archive, Delete (asks first; the tab closes),
+      Close Tab, Open in New Window.
+- [ ] Each tab remembers where you were reading: scroll halfway up in a
+      long chat, switch tabs, come back — same place, and the text doesn't
+      visibly re-wrap. A tab left at the bottom is still at the bottom.
+- [ ] Open 7+ saved chats as tabs, then click the oldest: its transcript
+      shows straight away (it was put to sleep to save memory).
+- [ ] Rename or pin a chat in the sidebar while it is open in a background
+      tab: after switching to that tab and sending, the new name/pin stays.
+- [ ] Quit with several tabs open (two agents), relaunch, open chat: the
+      tabs are back and the window shows the chat you were reading. Menu
+      bar **Ask AI** with no window open: the tabs come back too, but you
+      land in a new blank chat.
+- [ ] Menu bar **Ask AI** with the window open: a new tab (or the blank one)
+      opens instead of only focusing the window.
+- [ ] First launch after updating from a pre-tabs build: the chat you last
+      had open comes back once.
+- [ ] Ventura: the tab chips, × buttons, the "+" and the overflow menu all
+      render (no blank squares); right-clicking a tab shows the chat menu,
+      not the toolbar's "Icon and Text" menu.

@@ -1652,10 +1652,11 @@ x86_64 package build.
 
 Durable facts from this batch:
 
-- **Intel chat windows hold one session; there are no tabs.** Upstream tab
-  features map to per-window equivalents: single-owner routing reveals the
-  window already showing a chat; "restore open tabs" became reopening the
-  last saved chat (`IntelLastChatStore`, key `intelLastOpenChat.v1`).
+- ~~**Intel chat windows hold one session; there are no tabs.**~~
+  **Superseded 2026-10-01:** Intel has chat tabs
+  ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)). Single-owner routing now
+  checks every tab; `IntelLastChatStore` is only read once as a migration
+  into `ChatTabLayoutStore`.
 - **Intel's composer keeps keystrokes in `localText`**; the draft mirror
   hooks (`onDraftChange`, `onWillRehydrate`) live on `FloatingInputCard`
   and are wired in `ChatContentView`.
@@ -2359,3 +2360,26 @@ calling a sync complete.
   `VStack` change; `ProvidersView.swift` stays Intel's (older than upstream's
   hub, `W-mcp-providers`); `IntelToolIndexService.swift` must stay in sync with
   upstream `ToolIndexService.exposureDiagnostic` row semantics.
+
+### Chat tabs, stage 1 (`W-chat-tabs`) — 2026-10-01
+
+- Ported upstream #2630 (tab half), #2721, #2740, #2781, #2802 and #2911
+  onto Intel's window: per-agent tab strip after the agent pill, right-click
+  menu, ⌘T / ⇧⌘T / ⌃Tab / ⇧⌘[ ], ⌘W closes a tab, remembered tabs,
+  hibernation, per-tab scroll. Details and the Intel differences:
+  [`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md).
+- **New Intel piece:** `DetachedChatRunRegistry` keeps a closed tab's (or
+  window's) still-running chat reachable, so reopening it attaches the live
+  instance. Before this, a window closed mid-reply finished headless and
+  reopening it loaded a stale copy that could race its final save.
+- **Re-sync notes:** `ChatTabStripView.swift` is upstream's file with
+  Intel edits (leading accessory, no inspector inset or tour, single-value
+  `onChange`, `ChatTabActivity`); `ChatTabLayoutStore.swift` and
+  `ThreadScrollPositionStore.swift` are verbatim. The #2911 hunks in
+  `MessageTableRepresentable.handlePostSnapshotScroll` /
+  `reportMeasuredHeight` were merged by hand into Intel's own scroll fixes.
+- Stage 2 (agents sidebar, history inspector, layout tour, #2910,
+  background runs as tabs) changes the chat window's layout; it waits for
+  Renée's decision.
+- Upstream moved on during this work (`b023f2c1e` #2952, `b3b9091c7`
+  #2926 and others after `64b0d6a4b`); they belong to the next audit.

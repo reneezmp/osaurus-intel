@@ -381,17 +381,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
     }
 
-    /// Menu-bar popover "Ask AI" action: dismiss the popover, then focus or
-    /// open a chat window. (M12 follow-up — rich Intel status panel.)
+    /// Menu-bar popover "Ask AI" action: dismiss the popover, then start a
+    /// new chat — a tab in the existing chat window (a blank tab is reused),
+    /// or a new window when none is open. Upstream #2781; before tabs this
+    /// only focused the window. (M12 follow-up — rich Intel status panel.)
     ///
     /// The window work is deferred to the next runloop tick: opening/creating
     /// a chat window synchronously from inside the popover's own SwiftUI button
     /// (while `performClose` is tearing the hosting view down) crashed the app.
     public func openChatFromStatusPanel() {
         popover?.performClose(nil)
-        DispatchQueue.main.async { [weak self] in
+        DispatchQueue.main.async {
             NSApp.activate(ignoringOtherApps: true)
-            self?.focusExistingChatWindowOrCreate()
+            let manager = ChatWindowManager.shared
+            if !manager.startNewChatInLastFocusedWindow() {
+                // Ask AI means a new chat, not the remembered one.
+                _ = manager.createWindow(agentId: nil, focusesRememberedChat: false)
+            }
         }
     }
 
@@ -827,10 +833,8 @@ struct IntelStatusPanelView: View {
     private func openTaskSession(_ entry: IntelTaskBanner.Entry) {
         AppDelegate.shared?.dismissStatusPopover()
         if let data = ChatSessionsManager.shared.session(for: entry.id) {
-            _ = ChatWindowManager.shared.createWindow(
-                agentId: data.agentId,
-                sessionData: data
-            )
+            // As a tab of the open chat window (one is created when none is).
+            ChatWindowManager.shared.openSessionAsTab(data)
             NSApp.activate(ignoringOtherApps: true)
         }
         IntelTaskBanner.shared.dismiss()

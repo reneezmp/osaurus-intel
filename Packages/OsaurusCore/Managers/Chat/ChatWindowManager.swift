@@ -954,7 +954,14 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// vanish the moment `createWindow` returns).
     private var toolbarDelegates: [UUID: IntelChatToolbarDelegate] = [:]
 
+    /// A plain open (no agent asked for) reopens on the chat the user was
+    /// last reading; a window opened for a specific agent keeps that
+    /// agent's fresh chat in front, with remembered tabs behind it.
     public func createWindow(agentId: UUID? = nil) -> UUID {
+        createWindow(agentId: agentId, focusesRememberedChat: agentId == nil)
+    }
+
+    func createWindow(agentId: UUID?, focusesRememberedChat: Bool) -> UUID {
         // M12 Gap 1: tie a freshly opened window to a real agent so the
         // toolbar pill shows it. Upstream #2936: that is the new-chat agent
         // (the Orchestrator unless `new_chat_agent` says otherwise), not the
@@ -967,12 +974,13 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         let state = ChatWindowState(windowId: info.id, agentId: resolvedAgentId)
         windowStates[info.id] = state
 
-        let window = NSWindow(
+        let window = IntelChatWindow(
             contentRect: NSRect(x: 0, y: 0, width: 900, height: 650),
             styleMask: [.titled, .closable, .miniaturizable, .resizable, .fullSizeContentView],
             backing: .buffered,
             defer: false
         )
+        window.chatWindowState = state
         window.title = "Osaurus (Intel)"
         // Unified toolbar look that matches the Apple Silicon chat window:
         // transparent titlebar + full-size content so the SwiftUI ChatView
@@ -984,7 +992,6 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         let toolbar = NSToolbar(identifier: "IntelChatToolbar")
         toolbar.allowsUserCustomization = false
         toolbar.autosavesConfiguration = false
-        toolbar.centeredItemIdentifier = IntelChatToolbarDelegate.agentItem
         let toolbarDelegate = IntelChatToolbarDelegate(windowState: state)
         toolbar.delegate = toolbarDelegate
         toolbarDelegates[info.id] = toolbarDelegate
@@ -999,7 +1006,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         // without a matching host in the window's view tree the dialog had
         // nowhere to draw, so "Delete" silently no-op'd. `.chat(info.id)`
         // gives each window its own scope (no cross-window dialog bleed).
-        let chatView = ChatView(windowState: state)
+        let chatView = IntelChatWindowRootView(windowState: state)
             .themedAlertScope(.chat(info.id))
             .overlay(ThemedAlertHost(scope: .chat(info.id)))
         window.contentView = NSHostingView(rootView: chatView)
@@ -1021,6 +1028,10 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         fitToScreen(window, state: state)
         window.center()
         nsWindows[info.id] = window
+        // Remembered tabs of windows that are gone (last launch, or a window
+        // closed earlier) come back in this one; then track its own tabs.
+        restoreRememberedTabs(into: state, focusesRememberedChat: focusesRememberedChat)
+        observeTabLayout(of: state)
         // Activate + front (works when summoned via hotkey from another app).
         bringToFront(window)
 
@@ -1061,9 +1072,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         {
             return owner
         }
-        let id = createWindow(agentId: agentId)
+        let id = createWindow(agentId: agentId, focusesRememberedChat: sessionData == nil)
         if let sessionData, let state = windowStates[id] {
-            state.loadSession(sessionData)
+            // A tab of its own (or the restored tab already showing it), so
+            // it never replaces a remembered tab.
+            state.openSessionInNewTab(sessionData)
         }
         return id
     }
@@ -1072,10 +1085,10 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         windowStates[id]
     }
 
-    /// A persisted conversation has one mutable window owner. Hydrating a
-    /// second copy in another window lets either copy's saves overwrite the
-    /// other's later turns. Upstream `979d53b40`; Intel windows hold one
-    /// session each (no tabs), so ownership is the window's live session.
+    /// A persisted conversation has one mutable window/tab owner. Hydrating
+    /// a second copy lets either copy's saves overwrite the other's later
+    /// turns. Upstream `979d53b40`: ownership is any tab of any window, and
+    /// revealing it focuses that tab.
     @discardableResult
     func revealOpenSession(
         _ sessionId: UUID,
@@ -1083,41 +1096,121 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         showImmediately: Bool = true
     ) -> UUID? {
         guard
-            let (id, _) = windowStates.first(where: {
-                $0.key != excludingWindowId && $0.value.session.sessionId == sessionId
+            let (id, state) = windowStates.first(where: {
+                $0.key != excludingWindowId
+                    && $0.value.tabSessions.contains { $0.sessionId == sessionId }
             })
         else { return nil }
-        if showImmediately { showWindow(id: id) }
+        if showImmediately {
+            state.focusTab(forSessionId: sessionId)
+            showWindow(id: id)
+        }
         return id
     }
 
-    // MARK: Last chat restore (Intel analogue of upstream c240123ed)
-
-    /// Record the saved chat a closing window was showing, if any.
-    private func rememberLastChat(of windowId: UUID) {
-        guard let sessionId = windowStates[windowId]?.session.sessionId,
-            ChatSessionsManager.shared.session(for: sessionId) != nil
-        else { return }
-        IntelLastChatStore.shared.record(sessionId)
+    /// The window whose tabs include `sessionId`, if any.
+    func findWindow(bySessionId sessionId: UUID) -> UUID? {
+        windowStates.first { $0.value.tabSessions.contains { $0.sessionId == sessionId } }?.key
     }
 
-    /// Create a chat window that reopens the most recently closed saved
-    /// chat, used when the dock, menu, or hotkey summons chat and no window
-    /// exists. Falls back to a blank chat when the chat was since deleted,
-    /// or reveals the owner when it is already open elsewhere.
-    @discardableResult
-    func createWindowRestoringLastChat(
-        store: IntelLastChatStore = .shared
-    ) -> UUID {
-        if let data = Self.restorableLastChat(from: store) {
-            return createWindow(agentId: data.agentId, sessionData: data)
+    /// Open a saved chat as a tab: focus the tab that already shows it,
+    /// else open it in the last focused window, creating a window only when
+    /// none is open. Upstream `openHistorySession`.
+    func openSessionAsTab(_ data: ChatSessionData) {
+        if revealOpenSession(data.id) != nil { return }
+        if let targetId = preferredWindowId(), let state = windowStates[targetId] {
+            showWindow(id: targetId)
+            state.openSessionInNewTab(data)
+            return
         }
-        return createWindow()
+        createWindow(agentId: data.agentId, sessionData: data)
     }
 
-    /// The remembered chat, consumed once, if it still exists.
-    static func restorableLastChat(from store: IntelLastChatStore) -> ChatSessionData? {
-        store.take().flatMap { ChatSessionsManager.shared.session(for: $0) }
+    /// The window new tabs go to: the last focused one, else any.
+    private func preferredWindowId() -> UUID? {
+        if let lastId = lastFocusedWindowId, windowStates[lastId] != nil { return lastId }
+        return windowStates.keys.first
+    }
+
+    // MARK: Remembered tabs (upstream c240123ed)
+
+    /// Coalesces the per-window change signals into one write per run-loop
+    /// turn: `tabs` / `activeTabId` mutate several times inside a single
+    /// tab operation.
+    private var tabLayoutPersistScheduled = false
+
+    private func observeTabLayout(of state: ChatWindowState) {
+        state.onTabLayoutChanged = { [weak self] in
+            self?.scheduleTabLayoutPersist()
+        }
+    }
+
+    private func scheduleTabLayoutPersist() {
+        guard !tabLayoutPersistScheduled else { return }
+        tabLayoutPersistScheduled = true
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            self.tabLayoutPersistScheduled = false
+            self.persistTabLayoutNow()
+        }
+    }
+
+    /// Write every open window's tabs to `ChatTabLayoutStore`. Records of
+    /// windows that are no longer open are left as they are: they are what
+    /// the next window restores.
+    func persistTabLayoutNow(store: ChatTabLayoutStore = .shared) {
+        var layout = store.load()
+        for (id, state) in windowStates {
+            layout.windows[id] = state.tabLayoutSnapshot()
+        }
+        store.save(layout)
+    }
+
+    /// Adopt the tabs of every window that is not open any more (the
+    /// previous launch's windows, or one closed earlier in this run) into a
+    /// freshly created window, then forget those records so nothing is
+    /// restored twice. A chat remembered by the pre-tabs Intel build
+    /// (`IntelLastChatStore`) comes back the same way, once.
+    func restoreRememberedTabs(
+        into state: ChatWindowState,
+        focusesRememberedChat: Bool = true,
+        store: ChatTabLayoutStore = .shared,
+        legacyStore: IntelLastChatStore = .shared
+    ) {
+        let orphans = store.orphanRecords(openWindowIds: Set(windowStates.keys))
+        var records = orphans.map(\.record)
+        if let legacy = Self.legacyLastChatRecord(from: legacyStore) {
+            records.insert(legacy, at: 0)
+        }
+        guard !records.isEmpty else { return }
+        // Oldest record first; the first record whose active chat comes
+        // back is the one the merged window opens on.
+        var restored = 0
+        for record in records {
+            restored += state.restoreTabs(from: record, selectsActive: focusesRememberedChat)
+        }
+        store.remove(windowIds: orphans.map(\.id))
+        if restored > 0 {
+            print("[ChatWindowManager] Restored \(restored) remembered tab(s) into window \(state.windowId)")
+        }
+    }
+
+    /// The chat the pre-tabs build remembered, as a one-tab record. Taken
+    /// once: the key is removed whether or not the chat still exists.
+    static func legacyLastChatRecord(from store: IntelLastChatStore) -> ChatTabLayoutRecord? {
+        guard let id = store.take() else { return nil }
+        return ChatTabLayoutRecord(
+            tabs: [.init(sessionId: id, lastActivatedAt: Date())],
+            activeSessionId: id,
+            savedAt: .distantPast
+        )
+    }
+
+    /// Kept for callers that summon chat with no window open: a new window
+    /// restores remembered tabs on its own.
+    @discardableResult
+    func createWindowRestoringLastChat() -> UUID {
+        createWindow()
     }
 
     #if DEBUG
@@ -1188,6 +1281,17 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         guard let targetId, let state = windowStates[targetId] else { return false }
         showWindow(id: targetId)
         state.startNewChatInCurrentProject()
+        return true
+    }
+
+    /// Start a new chat on `agentId` in the frontmost chat window: a blank
+    /// active tab is repurposed, otherwise a new tab opens for the agent.
+    /// Returns false when no chat window exists. Upstream #2781.
+    @discardableResult
+    public func startNewChatInLastFocusedWindow(agentId: UUID) -> Bool {
+        guard let targetId = preferredWindowId(), let state = windowStates[targetId] else { return false }
+        showWindow(id: targetId)
+        state.startNewChat(with: agentId)
         return true
     }
 
@@ -1263,7 +1367,9 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     }
 
     public func closeWindow(id: UUID) {
-        rememberLastChat(of: id)
+        // Snapshot the tabs while they are all still here: cleanup drops
+        // them, and this record is what the next window brings back.
+        persistTabLayoutNow()
         windows.removeValue(forKey: id)
         nsWindows[id]?.close()
         nsWindows.removeValue(forKey: id)
@@ -1290,7 +1396,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         guard let window = notification.object as? NSWindow,
             let id = windowId(for: window)
         else { return }
-        rememberLastChat(of: id)
+        persistTabLayoutNow()
         windows.removeValue(forKey: id)
         nsWindows.removeValue(forKey: id)
         windowStates[id]?.cleanup()
@@ -1329,13 +1435,17 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         Set()
     }
 
-    public var isAnySessionStreaming: Bool { false }
+    public var isAnySessionStreaming: Bool {
+        windowStates.values.contains { $0.tabSessions.contains { $0.isStreaming } }
+            || DetachedChatRunRegistry.shared.sessions.contains { $0.isStreaming }
+    }
 
     public func setWindowPinned(id: UUID, pinned: Bool) {}
 
     public func stopAllSessions() {
-        // Quit teardown: remember the focused window's chat before cleanup.
-        if let id = lastFocusedWindowId ?? windowStates.keys.first { rememberLastChat(of: id) }
+        // Quit teardown: record every window's tabs BEFORE cleanup drops the
+        // inactive ones (cleanup also stops listening for layout changes).
+        persistTabLayoutNow()
         windowStates.values.forEach { $0.cleanup() }
         windows.removeAll()
         nsWindows.removeAll()
@@ -1344,42 +1454,114 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     }
 }
 
-// MARK: - Intel Chat Toolbar (M12 Gap 1 — agent picker)
+// MARK: - Intel Chat Window (tabs)
 
-/// Hosts the centered agent pill (plus a leading sidebar toggle and a
-/// trailing settings/new-chat action) in the Intel chat window's unified
-/// toolbar. Mirrors the Apple Silicon `ChatToolbarDelegate` layout, scoped
-/// to the Intel build because the AS delegate lives inside this file's
-/// `#if !OSAURUS_INTEL` branch alongside the amputated window-lifecycle
-/// machinery (BackgroundTaskManager / ModelRuntime / ServerConfigurationStore).
+/// Swaps `ChatView` whenever the window's session changes (tab switch,
+/// reattaching a running chat). `ChatView` binds `@ObservedObject` to the
+/// session captured at construction, so it must be rebuilt; `.id` keyed on
+/// session identity resets its per-conversation `@State` the way a fresh
+/// window would. Upstream `ChatWindowRootView`.
+private struct IntelChatWindowRootView: View {
+    @ObservedObject var windowState: ChatWindowState
+
+    var body: some View {
+        ChatView(windowState: windowState)
+            .id(ObjectIdentifier(windowState.session))
+            .environment(\.theme, windowState.theme)
+    }
+}
+
+/// The chat window, with browser-style tab shortcuts (upstream
+/// `ChatPanel`). ⌘W closes the active tab; only a lone blank tab closes
+/// the window. Shortcuts are key equivalents so they win over views that
+/// swallow key-downs (the composer).
+final class IntelChatWindow: NSWindow {
+    weak var chatWindowState: ChatWindowState?
+
+    override func performClose(_ sender: Any?) {
+        if let state = chatWindowState, state.closeActiveTabIfPossible() {
+            return
+        }
+        super.performClose(sender)
+    }
+
+    override func performKeyEquivalent(with event: NSEvent) -> Bool {
+        if let state = chatWindowState,
+            let shortcut = ChatTabShortcut(event: event),
+            shortcut.perform(on: state)
+        {
+            return true
+        }
+        return super.performKeyEquivalent(with: event)
+    }
+}
+
+/// The tab shortcuts a chat window handles itself: ⌘T new tab, ⇧⌘T reopen
+/// the last closed tab, ⌃Tab / ⌃⇧Tab and ⇧⌘] / ⇧⌘[ cycle tabs. ⌘N stays
+/// with the File menu, where Settings ▸ Conversation decides whether it
+/// starts a new chat (a new tab) or opens a new window; upstream's window
+/// always takes ⌘N for a new tab.
+enum ChatTabShortcut: Equatable {
+    case newTab
+    case reopenClosedTab
+    case nextTab
+    case previousTab
+
+    init?(keyCode: UInt16, characters: String, flags: NSEvent.ModifierFlags) {
+        let flags = flags.intersection(.deviceIndependentFlagsMask)
+        // Tab key (keyCode 48) with ⌃: next / previous tab.
+        if keyCode == 48, flags.contains(.control) {
+            self = flags.contains(.shift) ? .previousTab : .nextTab
+            return
+        }
+        switch (flags, characters.lowercased()) {
+        case (.command, "t"): self = .newTab
+        case ([.command, .shift], "t"): self = .reopenClosedTab
+        case ([.command, .shift], "]"), ([.command, .shift], "}"): self = .nextTab
+        case ([.command, .shift], "["), ([.command, .shift], "{"): self = .previousTab
+        default: return nil
+        }
+    }
+
+    init?(event: NSEvent) {
+        self.init(
+            keyCode: event.keyCode,
+            characters: event.charactersIgnoringModifiers ?? "",
+            flags: event.modifierFlags)
+    }
+
+    /// Returns false when the shortcut does nothing here, so the key
+    /// travels on (tabs are chat chrome; the project page has none).
+    @MainActor
+    func perform(on state: ChatWindowState) -> Bool {
+        guard !state.isProjectPageVisible else { return false }
+        switch self {
+        case .newTab: state.newTab()
+        case .reopenClosedTab: state.reopenLastClosedTab()
+        case .nextTab: state.selectAdjacentTab(offset: 1)
+        case .previousTab: state.selectAdjacentTab(offset: -1)
+        }
+        return true
+    }
+}
+
+// MARK: - Intel Chat Toolbar
+
+/// Hosts the chat window's unified toolbar: sidebar toggle leading, the
+/// agent pill and tab strip in one flexible middle item, the settings gear
+/// trailing. Upstream (#2630) moved the agent pill into its agents
+/// sidebar; Intel keeps its chats sidebar, so the pill leads the strip and
+/// picks whose tabs it shows. The back-to-project chip that sat beside the
+/// pill is now the folder glyph on each project chat's tab.
 @MainActor
 final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
     static let sidebarItem = NSToolbarItem.Identifier("IntelChatToolbar.sidebar")
-    /// Back-to-project chip — shows the current chat's project name (when
-    /// it has one) and reopens that project's detail sheet. Empty/hidden
-    /// otherwise; always present in the toolbar so we don't need to
-    /// reconfigure `NSToolbar`'s item set at runtime.
-    static let agentItem = NSToolbarItem.Identifier("IntelChatToolbar.agent")
+    static let tabsItem = NSToolbarItem.Identifier("IntelChatToolbar.tabs")
     static let actionItem = NSToolbarItem.Identifier("IntelChatToolbar.action")
 
-    /// Layout: [sidebar, flexibleSpace, agent, flexibleSpace, action].
-    ///
-    /// Diverges from upstream, which carries its back-to-project chip as a
-    /// separate leading item. Two problems with that here, both observed:
-    /// the leading edge sits above the sidebar, so the chip read as sidebar
-    /// chrome and went unnoticed repeatedly; and `centeredItemIdentifier`
-    /// centres on the WINDOW, so with a sidebar open the pill sat left of
-    /// the chat area it belongs to. Moving the chip into the centred group
-    /// fixed discoverability but broke centring, and moving it back fixed
-    /// centring but lost discoverability.
-    ///
-    /// So `projectItem` is gone as a toolbar item: `IntelToolbarAgentView`
-    /// renders the chip and the pill together as one centred item, and
-    /// offsets itself by half the sidebar width so the pair sits centred
-    /// over the chat area rather than the window.
-    private static let ids: [NSToolbarItem.Identifier] = [
-        sidebarItem, .flexibleSpace, agentItem, .flexibleSpace, actionItem,
-    ]
+    /// The tab item is flexible, so it doubles as the space that pushes the
+    /// trailing item to the right edge.
+    private static let ids: [NSToolbarItem.Identifier] = [sidebarItem, tabsItem, actionItem]
 
     private weak var windowState: ChatWindowState?
 
@@ -1405,13 +1587,10 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
         switch itemIdentifier {
         case Self.sidebarItem:
             return host(itemIdentifier, IntelToolbarSidebarView(windowState: windowState))
-        case Self.agentItem:
-            return host(itemIdentifier, IntelToolbarAgentView(windowState: windowState))
+        case Self.tabsItem:
+            return makeTabStripItem(itemIdentifier, IntelToolbarTabsView(windowState: windowState))
         case Self.actionItem:
-            return host(
-                itemIdentifier,
-                IntelToolbarActionView(windowState: windowState, session: windowState.session)
-            )
+            return host(itemIdentifier, IntelToolbarActionView(windowState: windowState))
         default:
             return nil
         }
@@ -1423,12 +1602,42 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
     ) -> NSToolbarItem {
         let item = NSToolbarItem(itemIdentifier: identifier)
         let hosting = NSHostingView(rootView: rootView)
-        // The centered item changes width when its project chip, agent name,
-        // or sidebar padding changes. Let AppKit follow SwiftUI's intrinsic
-        // size instead of freezing the initial fitting size and clipping it.
+        // Let AppKit follow SwiftUI's intrinsic size instead of freezing the
+        // initial fitting size and clipping it.
         hosting.sizingOptions = [.intrinsicContentSize]
         item.view = hosting
         item.isBordered = false
+        return item
+    }
+
+    /// The tab strip's item takes whatever width the toolbar has left, like
+    /// a flexible space. AppKit sizes it in the same layout pass as the
+    /// window resize, so the strip never waits on a measurement of its own
+    /// (upstream #2802: sizing it from its content made the toolbar squeeze,
+    /// jump and draw tabs over the sidebar on a fast resize).
+    private func makeTabStripItem<Content: View>(
+        _ identifier: NSToolbarItem.Identifier,
+        _ rootView: Content
+    ) -> NSToolbarItem {
+        let item = NSToolbarItem(itemIdentifier: identifier)
+        let hosting = NSHostingView(rootView: rootView)
+        hosting.sizingOptions = []
+        hosting.translatesAutoresizingMaskIntoConstraints = false
+        // A min/max RANGE is what makes a toolbar item flexible: AppKit
+        // stretches it into the free space. A large preferred width instead
+        // reads as the space the item needs, and AppKit hides it as too wide.
+        NSLayoutConstraint.activate([
+            hosting.widthAnchor.constraint(
+                greaterThanOrEqualToConstant: ChatTabStripView.minimumItemWidth),
+            hosting.widthAnchor.constraint(lessThanOrEqualToConstant: 10_000),
+            hosting.heightAnchor.constraint(equalToConstant: ChatTabStripView.stripHeight),
+        ])
+        hosting.setContentHuggingPriority(.defaultLow - 1, for: .horizontal)
+        hosting.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
+        item.view = hosting
+        item.isBordered = false
+        // Fold the trailing gear into the overflow menu before the tabs.
+        item.visibilityPriority = .high
         return item
     }
 }
@@ -1452,139 +1661,61 @@ private struct IntelToolbarSidebarView: View {
     }
 }
 
-/// Back-to-project toolbar chip. Renders nothing when the current chat has
-/// no project; otherwise shows the project's name and routes the window's
-/// main content area to the project page (`ChatWindowState.openProjectId`)
-/// — a real "inside the project" state, not the old themed-alert modal
-/// (`ProjectDetailView`) that left you nowhere once closed. Capsule styling
-/// mirrors `AgentPill`'s pill chrome (`pillBackground`/`pillBorder` below)
-/// so it reads as part of the same toolbar family.
-private struct IntelToolbarProjectView: View {
-    @ObservedObject var windowState: ChatWindowState
-    @ObservedObject var session: ChatSession
-    @ObservedObject private var projectManager = ProjectManager.shared
-    @State private var isHovered = false
-
-    var body: some View {
-        Group {
-            // Hidden while a project page is open: that page draws its own
-            // header with the same folder glyph and name, and the chip would
-            // render straight over it — the identical overlap the agent pill
-            // and action items are gated for just above. The chip is a way
-            // back INTO a project from a chat; on the project page there is
-            // nothing to go back to.
-            if windowState.openProjectId == nil,
-                let pid = session.projectId, let project = projectManager.project(for: pid)
-            {
-                Button(action: { windowState.openProjectId = pid }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "folder.fill")
-                            .font(.system(size: 10, weight: .medium))
-                        Text(verbatim: project.name)
-                            .font(.system(size: 11, weight: .medium))
-                            .lineLimit(1)
-                    }
-                    .foregroundColor(windowState.theme.secondaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        Capsule()
-                            .fill(windowState.theme.secondaryBackground.opacity(isHovered ? 0.9 : 0.65))
-                    )
-                }
-                .buttonStyle(.plain)
-                .onHover { isHovered = $0 }
-                .localizedHelp("Back to Project")
-            }
-        }
-        .environment(\.theme, windowState.theme)
-    }
-}
-
-/// Centered agent selector — the headline of M12 Gap 1. Reuses the
-/// upstream `AgentPill` (un-body-swapped for Intel in this same commit).
-private struct IntelToolbarAgentView: View {
+/// The toolbar's middle item: the agent pill, then that agent's tabs.
+/// Reuses the upstream `AgentPill` (un-body-swapped for Intel in M12).
+/// Hidden on the project page, which draws its own header.
+private struct IntelToolbarTabsView: View {
     @ObservedObject var windowState: ChatWindowState
     @State private var openPickerTrigger: Int = 0
-    /// Same key `ChatContentView` persists the sidebar width under, so the
-    /// leading padding below tracks a drag-resize without extra plumbing.
-    @AppStorage("chatSidebarWidth") private var storedSidebarWidth: Double = 240
-
-    /// `centeredItemIdentifier` centres this item on the window. The chat
-    /// area starts after the sidebar, so its centre is half the sidebar
-    /// width to the right of the window's. A centred item's leading padding
-    /// moves its content by half that padding, so use the full sidebar width
-    /// to centre the pill over the conversation it labels.
-    private var chatAreaLeadingPadding: CGFloat {
-        guard windowState.showSidebar else { return 0 }
-        return CGFloat(max(0, min(600, storedSidebarWidth)))
-    }
 
     var body: some View {
-        // Bug fix: when a project page is open in the window's main
-        // content area, this chat-scoped pill used to keep rendering on top
-        // of it, overlapping the project title. Gating on `openProjectId`
-        // mirrors `IntelToolbarProjectView`'s existing empty-else pattern
-        // just below, which already collapses that item out of the toolbar
-        // layout rather than leaving an invisible-but-occupied gap.
-        Group {
-            if windowState.openProjectId == nil {
-                HStack(spacing: 8) {
-                    IntelToolbarProjectView(
-                        windowState: windowState, session: windowState.session)
-                    AgentPill(
-                    agents: windowState.agents,
-                    activeAgentId: windowState.agentId,
-                    onSelectAgent: { windowState.switchAgent(to: $0) },
-                    onOpenActiveAgentSettings: {
-                        let active = windowState.agents.first { $0.id == windowState.agentId }
-                        let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
-                        AppDelegate.shared?.showManagementWindow(
-                            initialTab: .agents,
-                            deeplinkAgentId: deeplinkId
-                        )
-                    },
-                    openPickerTrigger: openPickerTrigger
-                )
-                // Bridge the `/agent` slash command into the Intel toolbar's
-                // agent picker — mirrors the non-Intel branch's listener
-                // (line ~810). (Renée, 2026-06-14.)
-                .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
-                    guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
-                        targetWindowId == windowState.windowId
-                    else { return }
-                    openPickerTrigger &+= 1
-                }
-                }
-                .padding(.leading, chatAreaLeadingPadding)
-            }
-        }
+        ChatTabStripView(
+            windowState: windowState,
+            leadingChromeWidth: 110,
+            leadingAccessory: AnyView(agentPill)
+        )
         .environment(\.theme, windowState.theme)
+    }
+
+    private var agentPill: some View {
+        AgentPill(
+            agents: windowState.agents,
+            activeAgentId: windowState.agentId,
+            onSelectAgent: { windowState.switchAgent(to: $0) },
+            onOpenActiveAgentSettings: {
+                let active = windowState.agents.first { $0.id == windowState.agentId }
+                let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
+                AppDelegate.shared?.showManagementWindow(
+                    initialTab: .agents,
+                    deeplinkAgentId: deeplinkId
+                )
+            },
+            openPickerTrigger: openPickerTrigger
+        )
+        // Bridge the `/agent` slash command into the toolbar's agent picker
+        // (mirrors the non-Intel branch's listener). (Renée, 2026-06-14.)
+        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
+                targetWindowId == windowState.windowId
+            else { return }
+            openPickerTrigger &+= 1
+        }
     }
 }
 
+/// Trailing settings gear. Upstream retired the toolbar's "+ New chat"
+/// button in favour of the strip's "+" (#2630); Intel follows, so the gear
+/// no longer swaps out once a chat has turns. Hidden on the project page,
+/// whose own header has the controls.
 private struct IntelToolbarActionView: View {
     @ObservedObject var windowState: ChatWindowState
-    @ObservedObject var session: ChatSession
 
     var body: some View {
         Group {
-            // Bug fix: the settings gear / "+ New Chat" button used to
-            // render on top of the project page's own header once a project
-            // was open, overlapping its controls. Same gating pattern as
-            // `IntelToolbarAgentView` above.
             if windowState.openProjectId == nil {
-                if session.turns.isEmpty {
-                    SettingsButton(action: {
-                        AppDelegate.shared?.showManagementWindow(initialTab: nil)
-                    })
-                } else {
-                    HeaderActionButton(
-                        icon: "plus",
-                        help: "New chat",
-                        action: { windowState.startNewChatInCurrentProject() }
-                    )
-                }
+                SettingsButton(action: {
+                    AppDelegate.shared?.showManagementWindow(initialTab: nil)
+                })
             }
         }
         .environment(\.theme, windowState.theme)

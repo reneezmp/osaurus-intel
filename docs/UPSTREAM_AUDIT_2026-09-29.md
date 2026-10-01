@@ -59,9 +59,9 @@ the prerequisite". Every commit is one of:
 | 20 | `9e3bde41f` | **Incompatible** | Upstream's own release feed (see #9). |
 | 21 | `74e83c6c5` #2907 | **Stage** | Three features; see the plan below. |
 | 22 | `fcda29d39` #2909 | **Port** | Shipped (hand-ported; Intel's scroll files diverge). |
-| 23 | `1faed06fb` #2910 | **Needs work** | Tab strip vs inspector rail. Prerequisite: browser-style chat tabs (upstream #2630 `ae942a150`, already ROADMAP-feasible in `DEFER_FEASIBILITY_AUDIT_2026-09-08.md`), not yet ported. |
+| 23 | `1faed06fb` #2910 | **Needs work** | Tab strip vs inspector rail. Chat tabs shipped 2026-10-01 ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)); still waits for the inspector rail (chat tabs stage 2). |
 | 24 | `612c48626` #2912 | **Port** (simplified) | Shipped. |
-| 25 | `1eb0faddf` #2911 | **Needs work** | Per-tab scroll memory; lands with chat tabs (#23). |
+| 25 | `1eb0faddf` #2911 | **Ported 2026-10-01** | Per-tab scroll memory, with chat tabs ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)); merged into Intel's own scroll fixes. |
 | 26 | `e1ff79b51` #2913 | Split | Local-model update card: **incompatible**. Osaurus Connect (phone pairing) card: **needs work**, lands with B1. |
 | 27 | `0c27f14c1` #2914 | Split → **Port** | Text slice shipped. Document slice (DOCX/PPTX/PDF editing, AcroForm filling) needs #2907's editors; `ToolWirePropertyOrder` (xAI constrained decoding) and `edits`/`operations` argument normalisation belong with the fuller `file_edit` (batch `edits`, `dry_run`) — staged with #2907 part B. |
 | 28 | `541a1b559` #2916 | **Port** (adapted) | Shipped. |

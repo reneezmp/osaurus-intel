@@ -2,11 +2,12 @@
 //  IntelLastChatStore.swift
 //  OsaurusCore (Intel fork)
 //
-//  Intel analogue of upstream `ChatTabLayoutStore` (c240123ed). Intel chat
-//  windows hold one conversation each (no tabs), so the durable fact worth
-//  keeping across a window close or relaunch is which saved chat was last
-//  showing. Only the id is stored; the transcript stays in
-//  `ChatSessionsManager`. Blank chats are never recorded.
+//  Migration only. Before chat tabs, Intel remembered the one saved chat a
+//  closing window showed (key `intelLastOpenChat.v1`), as its analogue of
+//  upstream `ChatTabLayoutStore` (c240123ed). Tabs replaced it with
+//  `ChatTabLayoutStore`; the first window opened after the update takes
+//  this id once (`ChatWindowManager.legacyLastChatRecord`) and the key is
+//  removed. Nothing writes it any more.
 //
 
 #if OSAURUS_INTEL
@@ -22,11 +23,6 @@ struct IntelLastChatStore: @unchecked Sendable {
 
     init(defaults: UserDefaults = .standard) {
         self.defaults = defaults
-    }
-
-    /// Remember `sessionId` as the most recently closed chat.
-    func record(_ sessionId: UUID) {
-        defaults.set(sessionId.uuidString, forKey: Self.defaultsKey)
     }
 
     /// Return and forget the remembered chat, so it is restored only once.

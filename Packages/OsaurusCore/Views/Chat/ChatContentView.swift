@@ -160,43 +160,45 @@ struct ChatContentView: View {
                             onNewChat: { [weak windowState] in windowState?.startNewChat() },
                             onDelete: { [weak windowState] id in
                                 guard let windowState else { return }
-                                // If the row being deleted is the session
-                                // currently loaded in this window, reset the
-                                // live session FIRST. Otherwise the live
-                                // session still holds that id + its turns and
-                                // re-persists itself on the next send() or via
-                                // the synchronous save() inside reset()→stop()→
-                                // completeRunCleanup — resurrecting the row we
-                                // just deleted. startNewChat may re-save it, so
-                                // delete AFTER to guarantee it's gone.
-                                if windowState.session.sessionId == id {
-                                    windowState.startNewChat()
-                                }
+                                // Move every tab off the doomed row FIRST: a
+                                // live session still holding that id and its
+                                // turns would re-persist itself on the next
+                                // send() or via the save() inside stop() —
+                                // resurrecting the row. Those saves can land
+                                // here, so delete AFTER to guarantee it's gone.
+                                windowState.prepareForSessionDeletion(id: id)
                                 ChatSessionsManager.shared.delete(id: id)
                                 windowState.refreshSessions()
                             },
                             onRename: { [weak windowState] id, title in
                                 ChatSessionsManager.shared.rename(id: id, title: title)
-                                // Keep the open view-model in sync so the next
+                                // Keep every open tab of it in sync so the next
                                 // auto-save doesn't clobber the rename. (upstream #1482)
-                                if session.sessionId == id { session.title = title }
+                                windowState?.syncTabSessions(withId: id) { $0.title = title }
                                 windowState?.refreshSessions()
                             },
                             onSetArchived: { [weak windowState] id, archived in
                                 ChatSessionsManager.shared.setArchived(id: id, archived: archived)
-                                if session.sessionId == id { session.archived = archived }
+                                windowState?.syncTabSessions(withId: id) { $0.archived = archived }
                                 windowState?.refreshSessions()
                             },
                             onSetPinned: { [weak windowState] id, pinned in
                                 ChatSessionsManager.shared.setPinned(id: id, pinned: pinned)
-                                // Keep the open view-model in sync so the next
+                                // Keep every open tab of it in sync so the next
                                 // auto-save doesn't clobber the flag.
-                                if session.sessionId == id { session.pinned = pinned }
+                                windowState?.syncTabSessions(withId: id) { $0.pinned = pinned }
                                 windowState?.refreshSessions()
                             },
                             onExport: { _, _ in
                                 // Rows run export themselves (menu → chooser →
                                 // `ChatSessionExportCoordinator`), as upstream.
+                            },
+                            onOpenInNewWindow: { data in
+                                ChatWindowManager.shared.createWindow(
+                                    agentId: data.agentId, sessionData: data)
+                            },
+                            onOpenInNewTab: { [weak windowState] data in
+                                windowState?.openSessionInNewTab(data)
                             },
                             onOpenProject: { [weak windowState] projectId in
                                 windowState?.openProjectId = projectId

@@ -133,7 +133,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 42 | `246609942` | Stage | Computer Use audit/readiness/verified completion needs Intel Ventura Accessibility and capture capability spike. |
 | 43 | `3a17bc04d` | Port | Orchestrator row selection and small-screen chat geometry fit current Intel UI. **Ported 2026-09-25** (`4e90ed017`): per-window chat floor clamp; the Orchestrator gesture bug is absent on Intel. |
 | 44 | `b2bffc63b` | Split | Label current native-Mac tool approval surface; VM label only after sandbox. **N/A 2026-09-25**: Intel runs tools on one surface (native Mac); nothing to disambiguate. |
-| 45 | `f158416e2` | Port | Right-click chat tab actions and project naming UI. **N/A 2026-09-25**: tab-strip only; Intel has no tabs. |
+| 45 | `f158416e2` | Port | Right-click chat tab actions and project naming UI. **N/A 2026-09-25**: tab-strip only; Intel has no tabs. **Ported 2026-10-01** with chat tabs ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)). |
 | 46 | `40be05cb8` | Stage | Claude plugin GitHub import after Intel plugin/skill installer route is restored; CLI integration already works. |
 | 47 | `879a6a6a9` | Omit | Qwen AR vMLX scheduling pin. |
 | 48 | `dec325484` | Stage | Osaurus ID/Workspace refresh depends on Router identity and Workspaces service. |
@@ -141,7 +141,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 50 | `a609acdb5` | Stage | First-party n8n ingress needs B3 channel store, signed webhook, credential lifecycle, and dispatch. |
 | 51 | `9beb51ef7` | Omit | Upstream 0.25.2 appcast. |
 | 52 | `219640c82` | Port | Repair incomplete chat-history schema/turn persistence in Intel's compiled session store; do not copy upstream SQL migration blindly. **Intel analogue fixed 2026-09-25** (`5bccc4bef`): no SQLite open path on Intel, but queued whole-session metadata writes could overwrite a newer turn; per-session write generations now drop stale snapshots. |
-| 53 | `c240123ed` | Port | Persist open chat tabs through window close/relaunch using Intel chat store. **Intel analogue 2026-09-25** (`4abd1671f`): no tabs, so the last saved chat a window showed reopens once when chat is summoned with no window. |
+| 53 | `c240123ed` | Port | Persist open chat tabs through window close/relaunch using Intel chat store. **Intel analogue 2026-09-25** (`4abd1671f`): no tabs, so the last saved chat a window showed reopens once when chat is summoned with no window. **Superseded 2026-10-01**: real remembered tabs (`ChatTabLayoutStore`); the analogue's key is read once as a migration. |
 | 54 | `7842b4713` | Split | Provider/sidebar QoL can port; keep Intel provider editor and scoped-tab differences. **N/A 2026-09-25**: Intel sidebar has no agent rows; provider-picker regrouping not pursued. |
 | 55 | `83eac58f0` | Split | Main-thread theme/content/agent work can port; MLX model and sandbox-only parts wait or omit. **Theme slice 2026-09-25** (`09c433587`). ModelProfileRegistry memo deliberately not ported (AutoThinkingProfile is runtime-dependent; see #119). |
 | 56 | `dc1a250f7` | Omit | Installed local vision/MLX bundle evidence and admission. |
@@ -163,7 +163,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 72 | `9b3336d68` | Port | Provider-specific prompt-cache keys/TTL and cached token accounting in Intel CloudChatEngine, Router ledger, Credits UI; never send unknown fields to generic gateways. **Intel slice 2026-09-25** (`76f906f8d`): per-chat `prompt_cache_key` (Router, Azure, OpenAI hosts, OpenRouter + `session_id`), Router cache split in usage rows/summary/ledger v3, usage-center Cached input. Anthropic/Gemini wires and the BYOK turn chip do not apply (Intel never surfaces the Router summary frame in chat). |
 | 73 | `6cf600fce` | Split | Xcode 27 theme/crypto compile corrections are feasible where Intel compiles the paths; package pin is not. Verify with Intel toolchain. |
 | 74 | `922bf3cfd` | Omit | Upstream arm64 release script plugin trust; Intel Rosy build has separate script. |
-| 75 | `ccab67125` | Port | Menu-bar Ask AI can open an Intel chat tab in the existing window. **Covered 2026-09-25**: Intel's Ask AI already focuses the existing chat window. |
+| 75 | `ccab67125` | Port | Menu-bar Ask AI can open an Intel chat tab in the existing window. **Covered 2026-09-25**: Intel's Ask AI already focuses the existing chat window. **Ported 2026-10-01**: Ask AI now opens a tab (`startNewChatInLastFocusedWindow`). |
 | 76 | `abfef96fa` | Omit | Upstream 0.25.4 appcast. |
 | 77 | `0b33e116e` | Omit | Raptor 0.6 local-model onboarding default. |
 | 78 | `417da91f0` | Superseded | SSD cache popup replaced by settings-only notice/clear flow in `5c674f087`; local cache itself absent. |
@@ -189,7 +189,7 @@ as of this audit**, unless the row explicitly says otherwise.
 | 98 | `8ef1a9418` | Port | Warn before Add Model discards an agent-creation draft. **Adapted 2026-09-25** (`439b2de28`): Intel's picker offers Add Provider → Providers tab; the editor confirms before discarding a draft. |
 | 99 | `78396083b` | Omit | Upstream 0.25.6 appcast. |
 | 100 | `4c17cba54` | Superseded | SSD-cache popup preference retired by `5c674f087`; no Intel cache surface. |
-| 101 | `4a329449b` | Port | Keep tab strip stable and clear of sidebar during window resize. **N/A 2026-09-25**: Intel has no tab strip. |
+| 101 | `4a329449b` | Port | Keep tab strip stable and clear of sidebar during window resize. **N/A 2026-09-25**: Intel has no tab strip. **Ported 2026-10-01**: flexible toolbar item, as upstream. |
 | 102 | `0901780cc` | Port | Preserve MCP image result payloads in Intel chat/history; account for cloud-provider image wire formats. **Intel analogue 2026-09-25** (`1b3104f92`): Intel is text-only; MCP image/audio base64 is replaced by a size/type placeholder instead of being billed as text. |
 | 103 | `61ba32da8` | Omit | New agent-count product telemetry is not an Intel feature; no user benefit or requested cohort analytics. |
 | 104 | `2d715b51a` | Omit | Bonsai2/native Qwen tokenizer runtime pin. |

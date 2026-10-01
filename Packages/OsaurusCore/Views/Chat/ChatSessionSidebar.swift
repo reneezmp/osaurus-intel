@@ -39,6 +39,8 @@ struct ChatSessionSidebar: View {
     let onExport: (ChatSessionData, ExportFormat) -> Void
     /// Optional callback for opening a session in a new window
     var onOpenInNewWindow: ((ChatSessionData) -> Void)? = nil
+    /// Open a chat in a new tab of this window (browser-style, #2630).
+    var onOpenInNewTab: ((ChatSessionData) -> Void)? = nil
     /// Opens the project page route for the given project id, replacing the
     /// old behavior of presenting `ProjectDetailView` as a modal sheet.
     var onOpenProject: (UUID) -> Void = { _ in }
@@ -822,6 +824,10 @@ struct ChatSessionSidebar: View {
                             onOpenInNewWindow: onOpenInNewWindow != nil
                                 ? {
                                     onOpenInNewWindow?(session)
+                                } : nil,
+                            onOpenInNewTab: onOpenInNewTab != nil
+                                ? {
+                                    onOpenInNewTab?(session)
                                 } : nil
                         )
                         .id(session.id)
@@ -871,6 +877,8 @@ private struct SessionRow: View {
     let onTogglePin: () -> Void
     /// Optional callback for opening in a new window
     var onOpenInNewWindow: (() -> Void)? = nil
+    /// Optional callback for opening in a new tab of the current window
+    var onOpenInNewTab: (() -> Void)? = nil
 
     @Environment(\.theme) private var theme
     @Environment(\.themedAlertScope) private var alertScope
@@ -1020,6 +1028,17 @@ private struct SessionRow: View {
             }
             .animation(theme.springAnimation(responseMultiplier: 0.8), value: isSelected)
             .contextMenu {
+                if let openInNewTab = onOpenInNewTab {
+                    Button {
+                        openInNewTab()
+                    } label: {
+                        Label {
+                            Text("Open in New Tab", bundle: .module)
+                        } icon: {
+                            Image(systemName: "plus.square.on.square")
+                        }
+                    }
+                }
                 if let openInNewWindow = onOpenInNewWindow {
                     Button {
                         openInNewWindow()
@@ -1030,6 +1049,8 @@ private struct SessionRow: View {
                             Image(systemName: "macwindow.badge.plus")
                         }
                     }
+                }
+                if onOpenInNewTab != nil || onOpenInNewWindow != nil {
                     Divider()
                 }
                 Button(action: onStartRename) { Text("Rename", bundle: .module) }
@@ -1586,8 +1607,9 @@ private struct ActionsPopoverButton: View {
 
 /// Checkbox row rendered as the delete-confirmation accessory. Writes
 /// straight to the session-scoped preference so the toggle survives
-/// across consecutive deletes within the same app run.
-private struct DontAskAgainToggle: View {
+/// across consecutive deletes within the same app run. Shared with the tab
+/// strip's Delete item.
+struct DontAskAgainToggle: View {
     @Environment(\.theme) private var theme
     @ObservedObject private var pref = DeleteConfirmationPreference.shared
 

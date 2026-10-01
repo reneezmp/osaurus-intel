@@ -118,6 +118,12 @@ final class ChatSession: ObservableObject {
     /// Tracks expand/collapse state for tool calls, thinking blocks, etc.
     /// Lives on the session so state survives NSTableView cell reuse.
     let expandedBlocksStore = ExpandedBlocksStore()
+
+    /// Where the reader was in this session's thread when its table last
+    /// unmounted (tab switch), so the next mount restores it. `var` so a
+    /// hibernated tab's stand-in can share the live session's store
+    /// (upstream #2911).
+    var scrollPositionStore = ThreadScrollPositionStore()
     @Published var input: String = ""
     /// Mirror of what the composer currently shows. The card keeps
     /// keystrokes local and only writes `input` on send, so this is the
@@ -3870,6 +3876,7 @@ struct ChatView: View {
                 isStreaming: session.isStreaming,
                 lastAssistantTurnId: lastAssistantTurnId,
                 expandedBlocksStore: session.expandedBlocksStore,
+                scrollPositionStore: session.scrollPositionStore,
                 scrollToBottomTrigger: scrollToBottomTrigger,
                 onScrolledToBottom: { isPinnedToBottom = true },
                 onScrolledAwayFromBottom: { isPinnedToBottom = false },
@@ -4078,6 +4085,7 @@ private struct IsolatedThreadView: View {
     let isStreaming: Bool
     let lastAssistantTurnId: UUID?
     let expandedBlocksStore: ExpandedBlocksStore
+    let scrollPositionStore: ThreadScrollPositionStore
     let scrollToBottomTrigger: Int
     let onScrolledToBottom: () -> Void
     let onScrolledAwayFromBottom: () -> Void
@@ -4110,6 +4118,7 @@ private struct IsolatedThreadView: View {
             isStreaming: isStreaming,
             lastAssistantTurnId: lastAssistantTurnId,
             expandedBlocksStore: expandedBlocksStore,
+            scrollPositionStore: scrollPositionStore,
             scrollToBottomTrigger: scrollToBottomTrigger,
             onScrolledToBottom: onScrolledToBottom,
             onScrolledAwayFromBottom: onScrolledAwayFromBottom,
