@@ -9,8 +9,8 @@
 //  badge counts changed files only while the rail is closed, and at narrow
 //  widths the two rails take turns rather than crushing the chat column.
 //
-//  Intel: upstream's file minus the File Changes deep-link and Project
-//  Settings rail cases (not ported); layout statics live on
+//  Intel: upstream's file minus the File Changes deep-link cases (file
+//  history not ported); layout statics live on
 //  `ChatContentView` (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
 //
 
@@ -108,6 +108,45 @@ struct ChatWindowStateInspectorTests {
             #expect(window.effectiveInspectorPane == .history)
 
             // Intel: no File Changes deep links until file history is ported.
+        }
+    }
+
+    @Test("on a project the same toggle drives Project Settings, remembered across windows")
+    func projectInspectorToggle() async throws {
+        let defaults = UserDefaults.standard
+        let key = ChatWindowState.projectInspectorDefaultsKey
+        let previous = defaults.object(forKey: key)
+        defer {
+            if let previous { defaults.set(previous, forKey: key) } else { defaults.removeObject(forKey: key) }
+        }
+        defaults.removeObject(forKey: key)
+
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            #expect(window.showProjectInspector, "open by default: the settings are what the rail is for")
+            // On a chat the rail state is the chat inspector's.
+            #expect(window.isRightRailOpen == false)
+            window.openProjectId = UUID()
+            #expect(window.isRightRailOpen)
+            window.toggleProjectInspector()
+            #expect(window.showProjectInspector == false)
+            #expect(window.isRightRailOpen == false)
+            #expect(window.inspectorPane == nil, "the chat inspector is untouched")
+
+            // The choice survives into the next window.
+            let next = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { next.cleanup() }
+            #expect(next.showProjectInspector == false)
+
+            // Asking for the stepped-aside sidebar back closes the rail on
+            // screen, which on a project is Project Settings.
+            window.toggleProjectInspector()
+            window.isSidebarAutoHidden = true
+            window.toggleSidebar()
+            #expect(window.showProjectInspector == false)
+            #expect(window.showSidebar)
         }
     }
 

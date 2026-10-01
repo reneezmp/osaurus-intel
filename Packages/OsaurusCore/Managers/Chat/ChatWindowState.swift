@@ -669,7 +669,11 @@ final class ChatWindowState: ObservableObject {
     /// visible and leave the button looking broken.
     func toggleSidebar() {
         if showSidebar && isSidebarAutoHidden {
-            inspectorPane = nil
+            if isProjectPageVisible {
+                showProjectInspector = false
+            } else {
+                inspectorPane = nil
+            }
             return
         }
         showSidebar.toggle()
@@ -698,9 +702,28 @@ final class ChatWindowState: ObservableObject {
 
     var isInspectorOpen: Bool { inspectorPane != nil }
 
-    /// The rail is open: the chat inspector (Intel has no Project Settings
-    /// rail yet).
-    var isRightRailOpen: Bool { isInspectorOpen }
+    /// Whether the right rail shows Project Settings while a project is on
+    /// screen. The same toolbar toggle that opens the chat inspector drives
+    /// it there; the choice is remembered across projects and launches
+    /// (open by default: a project's settings are what the rail is for).
+    @Published var showProjectInspector: Bool =
+        UserDefaults.standard.object(forKey: projectInspectorDefaultsKey) as? Bool ?? true
+    {
+        didSet { UserDefaults.standard.set(showProjectInspector, forKey: Self.projectInspectorDefaultsKey) }
+    }
+
+    static let projectInspectorDefaultsKey = "chatWindow.showProjectInspector"
+
+    /// Toolbar toggle while a project is open (mirror of `toggleInspector()`).
+    func toggleProjectInspector() {
+        showProjectInspector.toggle()
+    }
+
+    /// True when a right rail is on screen for the current content: the
+    /// chat inspector for a chat, Project Settings for a project.
+    var isRightRailOpen: Bool {
+        isProjectPageVisible ? showProjectInspector : isInspectorOpen
+    }
 
     /// File change history is not ported (`W-file-history`): always zero.
     let fileChangesCount: Int = 0

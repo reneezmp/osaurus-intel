@@ -29,7 +29,7 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
 | Step | Content | Status |
 |---|---|---|
 | 1–3 | Shipped together 2026-10-01 (a chats list in both rails in between made no sense): window state and toolbar (inspector toggle + Pin Window, step-aside, #2910 strip inset); inspector rail with History; navigator with Agents and Projects; agent pill and Settings gear gone from the toolbar; follow-upstream fixes to stage 1 (⌘N opens a tab, `startNewChat(with:)` always a tab) | Shipped |
-| 4 | Projects lens and upstream's project page (`ProjectDetailView` + `ProjectInspectorPanel`) in place of Intel's `ProjectPageView` | Planned |
+| 4 | Upstream's project page: `ProjectDetailView` (the project's chats in the content area) + `ProjectInspectorPanel` (Project Settings in the right rail, same toolbar toggle) in place of Intel's `ProjectPageView` | Shipped 2026-10-01 |
 | 5 | Background, scheduled and watcher runs as tabs; Stop from the navigator for detached runs | Planned |
 | 6 | Layout tour (`ChatLayoutTour`, #2664), Help menu entry, full-screen themed header | Planned |
 
@@ -88,3 +88,21 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   links and Project Settings), `NewAgentHighlightStoreTests`,
   `SessionActivityMonitorTests`, `ChatSessionSidebarFilterTests`; Intel
   `IntelChatWindowLayoutTests`.
+
+## Step 4 notes (project page)
+
+- `ProjectDetailView.swift` and `ProjectInspectorPanel.swift` are upstream's
+  files. Intel edits: the project's chats come from
+  `ChatSessionsManager.sessions(forProject:)` (the store is keyed by id), and
+  single-value `onChange`.
+- Both are mounted with `.id(project.id)`: switching projects rebuilds them
+  with fresh state. This keeps Intel's fix for instructions written to the
+  wrong project (`3fc23c3eb`), even though upstream's panel also flushes on
+  switch.
+- Intel's `ProjectPageView.swift` (one full-width page: instructions,
+  members, knowledge, folder) is removed. Its jobs now live in the page
+  (chats, Add Chats, rename, delete) and the rail (instructions with
+  auto-save, knowledge, working folder, shared memory, default agent).
+- `chatWindow.showProjectInspector` (UserDefaults, default on) remembers
+  whether Project Settings is open, as upstream.
+

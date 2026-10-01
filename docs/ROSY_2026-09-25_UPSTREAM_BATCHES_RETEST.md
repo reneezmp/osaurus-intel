@@ -1042,3 +1042,17 @@ except that agents are now picked in the sidebar, not a toolbar pill.
 - [ ] ⌘B still toggles the left sidebar.
 - [ ] Ventura: the lens bars, rows, search fields, filter popover and resize
       seams render and respond; no blank squares or clipped corners.
+- [ ] Open a project from Projects: the middle shows the project's name,
+      "N chats", New Chat and Add Chats, and its chats (search, right-click
+      menu as in History). The right panel shows **Project Settings**:
+      instructions (saved as you type), knowledge collections, working
+      folder, shared memory, default agent. The toolbar's right-panel button
+      now reads "Hide project settings"; Pin is hidden.
+- [ ] Edit the instructions of project A, click project B in the sidebar,
+      come back to A: A's text is intact and B's is its own (the old
+      "instructions moved between projects" bug stays fixed).
+- [ ] New Chat on a project page starts a chat in that project (its folder
+      and default agent apply). Add Chats moves existing chats in.
+- [ ] The project's "…" menu renames and deletes (delete asks and keeps
+      the chats).
+

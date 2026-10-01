@@ -50,6 +50,9 @@ struct ChatContentView: View {
     // scrolling behind it. On Ventura the NSScrollView ignores a flexible maxHeight
     // (it inflates to its content height); only an explicit frame bounds it.
     // (Renée, 2026-06-13.)
+    /// Observed so the project page and its settings rail follow renames
+    /// and edits (upstream `ChatView` observes it the same way).
+    @ObservedObject private var projectManager = ProjectManager.shared
     @State private var measuredHeaderHeight: CGFloat = 44
     @State private var measuredComposerHeight: CGFloat = 100
 
@@ -221,7 +224,8 @@ struct ChatContentView: View {
             let inspectorPane = Self.visibleInspectorPane(
                 requested: windowState.effectiveInspectorPane,
                 isProjectPageOpen: windowState.openProjectId != nil)
-            let inspectorVisible = inspectorPane != nil
+            let projectInspectorVisible = windowState.isProjectPageVisible && windowState.showProjectInspector
+            let inspectorVisible = inspectorPane != nil || projectInspectorVisible
             let sidebarAutoHidden =
                 windowState.showSidebar
                 && Self.sidebarStepsAside(
@@ -261,34 +265,34 @@ struct ChatContentView: View {
                 // Main chat area
                 ZStack {
                     chatBackground
-                    if let openProjectId = windowState.openProjectId {
-                        // Bug #5/#6 route: a project is open, so the main
-                        // area renders the project page instead of the
-                        // chat thread/composer. `chatBackground` above
-                        // stays so the window chrome is continuous.
-                        ProjectPageView(
-                            projectId: openProjectId,
-                            onSelectChat: { [weak windowState] data in
+                    if let project = projectManager.project(for: windowState.openProjectId) {
+                        // A project is open: the main area shows upstream's
+                        // project page (a folder of chats) instead of the
+                        // chat thread/composer; its settings are in the
+                        // right rail. `chatBackground` above stays so the
+                        // window chrome is continuous.
+                        ProjectDetailView(
+                            project: project,
+                            windowState: windowState,
+                            onOpenSession: { [weak windowState] data in
+                                windowState?.openProjectId = nil
+                                windowState?.enteredChatFromProjectPage = true
                                 windowState?.loadSession(data)
-                                windowState?.openProjectId = nil
+                                isPinnedToBottom = true
                             },
-                            onNewChat: { [weak windowState] in
-                                guard let windowState else { return }
-                                windowState.startNewChatInCurrentProject()
-                            },
-                            onLeave: { [weak windowState] in
+                            onNewChat: { [weak windowState] in windowState?.startNewChat(in: project) },
+                            onDelete: { [weak windowState] in
+                                ChatSessionsManager.shared.deleteProject(id: project.id)
+                                windowState?.syncTabSessions(withProjectId: project.id) { $0.projectId = nil }
                                 windowState?.openProjectId = nil
+                                windowState?.refreshSessions()
                             }
                         )
-                        // Load-bearing: keying the page to the project id makes
-                        // switching projects a full teardown + rebuild with
-                        // fresh @State, instead of re-pointing a live instance
-                        // whose instructions buffer still holds the PREVIOUS
-                        // project's text. Without this the buffer and its owner
-                        // could desync across the lifecycle transition and the
-                        // text was written to the wrong project — instructions
-                        // appeared to migrate between projects.
-                        .id(openProjectId)
+                        // Intel: keyed to the project id so a switch is a
+                        // full rebuild with fresh state (the instructions
+                        // migration fix, 3fc23c3eb).
+                        .id(project.id)
+                        .transition(.opacity)
                     } else {
                     VStack(spacing: 0) {
                         chatHeader
@@ -419,10 +423,21 @@ struct ChatContentView: View {
                 .onPreferenceChange(ChatComposerHeightKey.self) { measuredComposerHeight = $0 }
 
                 // Right-hand rail: this chat's inspector (History; File
-                // Changes once file history is ported). Mirrors the sidebar
-                // column: same container, clipped to its width.
+                // Changes once file history is ported) or, while a project
+                // is on screen, that project's settings. One toolbar toggle,
+                // one width, one resize seam.
                 VStack(alignment: .leading, spacing: 0) {
-                    if let inspectorPane {
+                    if projectInspectorVisible,
+                        let project = projectManager.project(for: windowState.openProjectId)
+                    {
+                        ProjectInspectorPanel(
+                            project: project,
+                            currentAgentId: windowState.agentId,
+                            width: inspectorWidth
+                        )
+                        // Intel: a fresh instance per project, like the page.
+                        .id(project.id)
+                    } else if let inspectorPane {
                         ChatInspectorPanel(
                             windowState: windowState,
                             pane: inspectorPane,

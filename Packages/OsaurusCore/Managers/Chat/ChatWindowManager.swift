@@ -1686,32 +1686,37 @@ private struct IntelToolbarSidebarView: View {
     }
 }
 
-/// The trailing toolbar item: the inspector toggle and Pin Window. Upstream
-/// `ChatToolbarTrailingView`, minus the Project Settings rail (Intel's
-/// project page keeps its own layout) and the file-count badge (no file
-/// history on Intel yet). Hidden on the project page, which has no chat to
-/// inspect or pin.
+/// The single trailing toolbar item: the right-rail toggle and Pin Window
+/// as one row of `HeaderActionButton`s with one spacing rule. Upstream
+/// `ChatToolbarTrailingView`: the toggle opens the chat inspector for a
+/// chat and Project Settings for a project; only the window pin is
+/// chat-only chrome. No file-count badge on Intel yet (no file history).
 private struct IntelToolbarTrailingView: View {
     @ObservedObject var windowState: ChatWindowState
 
     var body: some View {
         HStack(spacing: 8) {
-            if !windowState.isProjectPageVisible {
-                let isOpen = windowState.isRightRailOpen
-                HeaderActionButton(
-                    icon: "sidebar.right",
-                    help: isOpen ? "Hide inspector" : "Show inspector",
-                    isActive: isOpen,
-                    badge: windowState.inspectorBadgeCount,
-                    action: {
-                        withAnimation(windowState.theme.animationQuick()) {
+            let isProject = windowState.isProjectPageVisible
+            let isOpen = windowState.isRightRailOpen
+            HeaderActionButton(
+                icon: "sidebar.right",
+                help: railToggleHelp(isProject: isProject, isOpen: isOpen),
+                isActive: isOpen,
+                badge: isProject ? nil : windowState.inspectorBadgeCount,
+                action: {
+                    withAnimation(windowState.theme.animationQuick()) {
+                        if isProject {
+                            windowState.toggleProjectInspector()
+                        } else {
                             windowState.toggleInspector()
                         }
                     }
-                )
-                .accessibilityLabel(
-                    Text(LocalizedStringKey(isOpen ? "Hide inspector" : "Show inspector"), bundle: .module))
+                }
+            )
+            .accessibilityLabel(
+                Text(LocalizedStringKey(railToggleHelp(isProject: isProject, isOpen: isOpen)), bundle: .module))
 
+            if !isProject {
                 HeaderActionButton(
                     icon: windowState.isWindowPinned ? "pin.fill" : "pin",
                     help: windowState.isWindowPinned ? "Unpin Window" : "Pin Window",
@@ -1724,6 +1729,16 @@ private struct IntelToolbarTrailingView: View {
             }
         }
         .environment(\.theme, windowState.theme)
+    }
+
+    /// Key of the toggle's tooltip (a `HeaderActionButton.help` string).
+    private func railToggleHelp(isProject: Bool, isOpen: Bool) -> String {
+        switch (isProject, isOpen) {
+        case (true, true): return "Hide project settings"
+        case (true, false): return "Show project settings"
+        case (false, true): return "Hide inspector"
+        case (false, false): return "Show inspector"
+        }
     }
 }
 #endif

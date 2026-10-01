@@ -2400,3 +2400,12 @@ calling a sync complete.
   its layout statics mirror upstream `ChatView`'s.
 - Intel `AgentManager` now orders agents as upstream (`order`, then name);
   it used creation date before.
+
+### Chat window layout, step 4 (project page) — 2026-10-01
+
+- Upstream `ProjectDetailView` + `ProjectInspectorPanel` replace Intel's
+  `ProjectPageView`; the toolbar's right-rail toggle drives Project
+  Settings on a project. **Re-sync note:** both files are upstream's with
+  small Intel edits, and are mounted with `.id(project.id)` in
+  `ChatContentView` (see [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md#step-4-notes-project-page)).
+

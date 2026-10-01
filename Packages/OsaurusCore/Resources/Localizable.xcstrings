@@ -1050,6 +1050,40 @@
         }
       }
     },
+    "Collections every chat in this project can search." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlungen, die jeder Chat in diesem Projekt durchsuchen kann."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 모든 채팅이 검색할 수 있는 컬렉션입니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Коллекции, доступные для поиска каждому чату этого проекта."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目中每个聊天都可以搜索的集合。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此專案中每個聊天都可以搜尋的集合。"
+          }
+        }
+      }
+    },
     "Color %lld" : {
       "comment" : "Auto-extracted format-string key (Apple String.LocalizationValue canonical form).",
       "extractionState" : "manual",
@@ -3736,6 +3770,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "專案名稱"
+          }
+        }
+      }
+    },
+    "Project Settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekteinstellungen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 설정"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Настройки проекта"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "项目设置"
           }
         }
       }
@@ -9784,6 +9846,68 @@
         }
       }
     },
+    "Add Chats" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats hinzufügen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "채팅 추가"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить чаты"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加聊天"
+          }
+        }
+      }
+    },
+    "Add Chats to Project" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats zum Projekt hinzufügen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트에 채팅 추가"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавить чаты в проект"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "将聊天添加到项目"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "將聊天新增至專案"
+          }
+        }
+      }
+    },
     "Add Color" : {
       "localizations" : {
         "de" : {
@@ -9894,6 +10018,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "添加标题"
+          }
+        }
+      }
+    },
+    "Add instructions the assistant should follow in every chat in this project…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Anweisungen hinzufügen, die der Assistent in jedem Chat dieses Projekts befolgen soll …"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 모든 채팅에서 어시스턴트가 따라야 할 지침을 추가하세요…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Добавьте инструкции, которым ассистент должен следовать в каждом чате этого проекта…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加助手在此项目的每个聊天中都应遵循的说明…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增助理在此專案的每個聊天中都應遵循的指示…"
           }
         }
       }
@@ -16759,6 +16917,68 @@
         }
       }
     },
+    "Chats in this project will build shared memory here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats in diesem Projekt bauen hier ein gemeinsames Gedächtnis auf."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 채팅이 여기에 공유 메모리를 쌓습니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Чаты в этом проекте будут накапливать общую память здесь."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目中的聊天将在此建立共享记忆。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此專案中的聊天將在此建立共享記憶。"
+          }
+        }
+      }
+    },
+    "Chats started here or added to the project appear here." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Chats, die hier begonnen oder zum Projekt hinzugefügt werden, erscheinen hier."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "여기에서 시작했거나 프로젝트에 추가한 채팅이 여기에 표시됩니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Здесь появятся чаты, начатые отсюда или добавленные в проект."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在此开始或添加到项目的聊天会显示在这里。"
+          }
+        }
+      }
+    },
     "Chats with this agent appear here." : {
       "localizations" : {
         "de" : {
@@ -17048,6 +17268,40 @@
         }
       }
     },
+    "Choose a folder new chats in this project open with" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Wähle einen Ordner, mit dem neue Chats in diesem Projekt öffnen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 새 채팅이 열릴 폴더를 선택하세요"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выберите папку, с которой будут открываться новые чаты в этом проекте"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择此项目中新聊天打开时使用的文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇此專案中新聊天開啟時使用的資料夾"
+          }
+        }
+      }
+    },
     "Choose a format to export this conversation." : {
       "localizations" : {
         "de" : {
@@ -17168,6 +17422,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "选择文件"
+          }
+        }
+      }
+    },
+    "Choose Folder…" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner wählen…"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 선택…"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Выбрать папку…"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "选择文件夹…"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "選擇資料夾…"
           }
         }
       }
@@ -31404,6 +31692,34 @@
         }
       }
     },
+    "Hide project settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekteinstellungen ausblenden"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 설정 숨기기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Скрыть настройки проекта"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "隐藏项目设置"
+          }
+        }
+      }
+    },
     "Hide sidebar" : {
       "localizations" : {
         "de" : {
@@ -38882,6 +39198,40 @@
         }
       }
     },
+    "More" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Mehr"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "More"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Более"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "更多"
+          }
+        }
+      }
+    },
     "More rows load automatically as you scroll — this fetches the next batch now." : {
       "comment" : "Help text for a button that triggers a fetch of more rows in the Database Tables view.",
       "isCommentAutoGenerated" : true,
@@ -39656,6 +40006,108 @@
         }
       }
     },
+    "New chats in this project open with this folder. Their agent's sandbox is turned off, since a chat uses either a folder or the sandbox." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Chats in diesem Projekt öffnen mit diesem Ordner. Die Sandbox ihres Agenten wird ausgeschaltet, da ein Chat entweder einen Ordner oder die Sandbox verwendet."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 새 채팅은 이 폴더로 시작합니다. 채팅은 폴더 또는 샌드박스 중 하나만 사용하므로 해당 에이전트의 샌드박스는 꺼집니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новые чаты в этом проекте открываются с этой папкой. Песочница их агента отключается, так как чат использует либо папку, либо песочницу."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目中的新聊天将以此文件夹打开。由于聊天只能使用文件夹或沙盒之一，其智能体的沙盒将被关闭。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此專案中的新聊天將以此資料夾開啟。由於聊天只能使用資料夾或沙盒之一，其代理的沙盒將被關閉。"
+          }
+        }
+      }
+    },
+    "New chats started from this project use this agent." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Chats aus diesem Projekt verwenden diesen Agenten."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트에서 시작하는 새 채팅은 이 에이전트를 사용합니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новые чаты, созданные в этом проекте, используют этого агента."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "从此项目开始的新聊天将使用此智能体。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "從此專案開始的新聊天將使用此代理。"
+          }
+        }
+      }
+    },
+    "New Collection" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Neue Sammlung"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "새 컬렉션"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Новая коллекция"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新建集合"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增集合"
+          }
+        }
+      }
+    },
     "New Command" : {
       "localizations" : {
         "de" : {
@@ -40278,6 +40730,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "没有为该提供商保存Codex OAuth令牌。"
+          }
+        }
+      }
+    },
+    "No collections yet. Create one to give this project's chats shared knowledge." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Noch keine Sammlungen. Erstelle eine, um den Chats dieses Projekts gemeinsames Wissen zu geben."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "아직 컬렉션이 없습니다. 컬렉션을 만들어 이 프로젝트의 채팅에 공유 지식을 제공하세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Коллекций пока нет. Создайте одну, чтобы дать чатам этого проекта общие знания."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "还没有集合。创建一个，为此项目的聊天提供共享知识。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "還沒有集合。建立一個，為此專案的聊天提供共享知識。"
           }
         }
       }
@@ -43519,6 +44005,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "在访达中打开"
+          }
+        }
+      }
+    },
+    "Open in Memory" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Im Gedächtnis öffnen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "메모리에서 열기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Открыть в памяти"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在记忆中打开"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "在記憶中開啟"
           }
         }
       }
@@ -52523,6 +53043,40 @@
         }
       }
     },
+    "Remove folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Ordner entfernen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "폴더 제거"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Удалить папку"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "移除資料夾"
+          }
+        }
+      }
+    },
     "Remove from Project" : {
       "localizations" : {
         "de" : {
@@ -59337,6 +59891,74 @@
         }
       }
     },
+    "Shared context added to every chat in this project." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gemeinsamer Kontext, der jedem Chat in diesem Projekt hinzugefügt wird."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 모든 채팅에 추가되는 공유 컨텍스트입니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Общий контекст, добавляемый в каждый чат этого проекта."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "添加到此项目中每个聊天的共享上下文。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "新增到此專案中每個聊天的共享上下文。"
+          }
+        }
+      }
+    },
+    "Shared Memory" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Gemeinsames Gedächtnis"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "공유 메모리"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Общая память"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享记忆"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "共享記憶"
+          }
+        }
+      }
+    },
     "Sharing a file" : {
       "localizations" : {
         "de" : {
@@ -59571,6 +60193,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "显示模型元数据"
+          }
+        }
+      }
+    },
+    "Show project settings" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Projekteinstellungen einblenden"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "프로젝트 설정 표시"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показать настройки проекта"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "显示项目设置"
           }
         }
       }
@@ -68698,6 +69348,40 @@
         }
       }
     },
+    "View collection details" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Sammlungsdetails anzeigen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "컬렉션 세부정보 보기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показать сведения о коллекции"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看集合详情"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "檢視集合詳細資訊"
+          }
+        }
+      }
+    },
     "View Details" : {
       "localizations" : {
         "de" : {
@@ -69758,6 +70442,40 @@
         }
       }
     },
+    "What chats in this project have learned, shared across every agent." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Was die Chats in diesem Projekt gelernt haben – über alle Agenten hinweg geteilt."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 프로젝트의 채팅이 학습한 내용으로, 모든 에이전트에서 공유됩니다."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Что узнали чаты в этом проекте — доступно всем агентам."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此项目中的聊天所学到的内容，在所有智能体间共享。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "此專案中的聊天所學到的內容，在所有代理間共享。"
+          }
+        }
+      }
+    },
     "What do these filters mean?" : {
       "localizations" : {
         "de" : {
@@ -70356,6 +71074,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "工作目录"
+          }
+        }
+      }
+    },
+    "Working Folder" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Arbeitsordner"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "작업 폴더"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Рабочая папка"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作文件夹"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "工作資料夾"
           }
         }
       }
