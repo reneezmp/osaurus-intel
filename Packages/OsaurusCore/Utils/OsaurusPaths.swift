@@ -368,6 +368,18 @@ public enum OsaurusPaths {
             .appendingPathComponent("history.sqlite")
     }
 
+    /// Persisted Insights activity / audit log directory (`~/.osaurus/activity/`).
+    public static func activity() -> URL {
+        root().appendingPathComponent("activity", isDirectory: true)
+    }
+
+    /// Hash-chained Insights activity log: `~/.osaurus/activity/activity.sqlite`
+    /// plus an `activity.head` sidecar holding the last `seq:hash`.
+    public static func activityLogDatabaseFile() -> URL { activity().appendingPathComponent("activity.sqlite") }
+    public static func activityLogHeadFile() -> URL { activity().appendingPathComponent("activity.head") }
+    /// Activity log retention / content policy: `~/.osaurus/config/activity-log.json`.
+    public static func activityLogConfigFile() -> URL { config().appendingPathComponent("activity-log.json") }
+
     /// Plugin binaries directory (`~/.osaurus/Tools/`)
     public static func tools() -> URL {
         root().appendingPathComponent("Tools", isDirectory: true)

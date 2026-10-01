@@ -30,7 +30,7 @@ test files). The next review begins at `fec69aa53` (exclusive).
 | 6 | `4228b9b5f` | **Incompatible** | Upstream's own appcast (0.25.16). |
 | 7 | `94fb98070` #2958 | **Needs work** | Osaurus Cloud starter favourites and the picker's options column. Prerequisites: favourite models (`FavoriteModelsStore`, upstream #1811, part of `W-providers-ux`) and #2947. Lands with `W-model-picker-2947`. |
 | 8 | `8f7721c3b` #2959 | **Port** | Shipped. |
-| 9 | `b3b9091c7` #2926 | **Needs work** (`W-insights-sync`) | Insights snapshots computed off the main queue. Intel's `InsightsService` predates upstream's hang fix (#1595: `logs` not `@Published`) and the focus API (#1350); plan below. |
+| 9 | `b3b9091c7` #2926 | **Port** (via #2964) | Insights snapshots computed off the main queue. Superseded upstream by #2964's store-backed service, which Intel ported on 2026-10-01 together with #1595 and #1350 ([`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md)). |
 | 10 | `106580a0d` #2921 | Covered | Tool grants refreshed between turns and rechecked at dispatch. Intel composes the tool list on every send (no frozen session catalog: `SessionToolStateStore` is not compiled) and `ToolRegistry.runtimeCapabilityDenial` rechecks the live agent settings on every call, after any approval prompt. The `capabilities_load` re-load slice targets upstream's gateway; Intel's gateway authorises each load against the agent's allowlist. |
 | 11 | `bb846bc25` #2961 | **Port** | Shipped. |
 | 12 | `a64231c3e` #2963 | **Port** | Shipped. |
@@ -58,22 +58,13 @@ dropdown (`ModelPickerView`) over Intel's own provider manager.
 5. #2958: starter favourites and the unified options column.
 6. Theme token + editor, guide text, strings.
 
-## Staged: `W-insights-sync` (#2926 and its prerequisites)
+## `W-insights-sync` — shipped 2026-10-01
 
-1. `RequestLog`: upstream's `turnId`, `requestId`, wire bodies and
-   connection info (Intel has no P2P source; keep the case for parity).
-2. **Redactor hardening — shipped 2026-10-01.** Intel's redactor now matches
-   upstream's (`InsightsService.upstreamRedactors`, verbatim): bare `sk-` /
-   `sk-ant-` keys anywhere (not only as JSON strings), unquoted header forms
-   (`x-api-key: v`, `api-key=v`, `x-goog-api-key: v`) and the Workspaces
-   `attestation` / `wallet_signature` fields; `Bearer …` keeps its scheme
-   word. Before, a key written as plain header text or prose could reach the
-   Insights detail pane. Tests: `Tests/Service/InsightsRedactionTests.swift`.
-3. `InsightsService`: `logs` not `@Published` (#1595 hang fix), `hasLogs`,
-   `focus(turnId:)` / `focus(requestId:)` / `hasLog`, and #2926's
-   revision-tagged snapshots on a background queue.
-4. Callers: Intel's chat logging passes the turn id; Inspect response
-   focuses that response's log (#1350).
+Upstream replaced Insights with a persisted activity log in #2964 a few hours
+after this audit, so Intel ported that design instead of the plan staged
+here. Stage A (redactor hardening, `4ffa176fb`) and stage B (store, UI,
+chat rows, Inspect response) are done; stage C (per-feature emitters) is
+listed in [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 
 Manual QA for the shipped slices:
 [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md#upstream-batch-2026-10-01).

@@ -106,11 +106,12 @@ struct StorageMigratorTargetFilterTests {
             // primary data (what agent writes replaced), so it must follow a
             // key rotation too. `file history` (2026-10-01,
             // docs/FILE_HISTORY_INTEL.md): the index of every snapshot Revert
-            // can restore.
+            // can restore. `activity log` (2026-10-01, docs/INSIGHTS_INTEL.md):
+            // the persisted Insights record, encrypted with the storage key.
             #expect(
                 labels == [
                     "chat history", "memory", "methods", "tool index", "scheduler", "knowledge write log",
-                    "file history",
+                    "file history", "activity log",
                 ])
         }
     }

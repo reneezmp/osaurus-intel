@@ -118,6 +118,7 @@ public struct StorageSettingsView: View {
                 .settingsLandingAnchor(embedded ? "storage.backup" : nil)
             footnote
             FileHistoryRetentionSection()
+            ActivityLogSettingsSection()
         }
     }
 

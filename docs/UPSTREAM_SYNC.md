@@ -2499,3 +2499,23 @@ calling a sync complete.
   from the model catalog or the Context Length setting). The red state never
   blocks Send on Intel. Details: [`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md).
 
+
+### Insights activity log (upstream #2964) — 2026-10-01
+
+- Renée picked the Insights catch-up first. Upstream merged #2964 (persisted,
+  hash-chained activity log + Insights redesign, absorbing #2926/#1595/#1350)
+  the same afternoon, so Intel ported that instead of the staged plan.
+- Stage A `4ffa176fb`: redactor table verbatim (bare `sk-`, unquoted header
+  credentials, attestation / wallet-signature fields).
+- Stage B: `ActivityLogStore` (encrypted with the storage key, enrolled in
+  `StorageMigrator`), upstream `InsightsService` / `RequestLog` / views /
+  export, the Activity Log card on Data & Storage, `CloudChatEngine` rows
+  with turn / agent / chat / endpoint / wire bytes (Intel feeds
+  `WireTransportProbe` itself), HTTP errors logged, image redaction,
+  Inspect response and Credits links focus their row. Ventura: key monitor
+  instead of `onKeyPress`, single-value `onChange`, themed export controls.
+- Stage C (emitters for search, MCP, Router, HTTP media, voice, compaction,
+  internal one-shots, delegation) is listed in
+  [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
+- Audit `fec69aa53..4064a6fde`: #2969 and #2971 MLX pins (incompatible),
+  #2964 port. The next review starts after `4064a6fde`.

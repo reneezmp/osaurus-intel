@@ -806,10 +806,43 @@ final class NativeAssistantActionsView: NSView {
         menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: overflowButton)
     }
 
+    /// Opens the Insights tab focused on the request/response log this
+    /// assistant turn produced (upstream #1350). The log is persisted now
+    /// (#2964) but still pruned by retention, so a turn older than the
+    /// retention window (or one logged before the activity log existed)
+    /// gets the upstream alert instead of an unrelated list.
     @objc private func inspectResponse() {
         MainActor.assumeIsolated {
-            AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+            if InsightsService.shared.focus(turnId: turnId) {
+                AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+            } else {
+                presentLogUnavailableAlert()
+            }
         }
+    }
+
+    @MainActor
+    private func presentLogUnavailableAlert() {
+        // Scope the alert to this chat window when we can resolve it, so it
+        // dims and centers over the chat rather than another surface.
+        let scope: ThemedAlertScope =
+            window.flatMap { ChatWindowManager.shared.windowId(for: $0) }
+            .map { .chat($0) } ?? .content
+        let requestId = UUID()
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Insights Unavailable"),
+                message: L(
+                    "Detailed request logs are kept only for a short duration to save storage, so there's nothing to show for this response."
+                ),
+                buttons: [.primary(L("OK")) {}],
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
     }
 
     @objc private func deleteMessage() {

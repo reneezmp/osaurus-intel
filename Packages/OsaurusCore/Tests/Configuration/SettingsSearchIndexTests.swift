@@ -75,7 +75,8 @@ struct SettingsSearchIndexTests {
     func generalAndConversationEntriesAnchor() throws {
         let pages: [(ManagementTab, String, Set<String>)] = [
             (.settings, try Self.source("Settings/ConfigurationView.swift") + (try Self.source("Settings/StorageSettingsView.swift"))
-                + (try Self.source("Settings/FileHistoryRetentionSection.swift")),
+                + (try Self.source("Settings/FileHistoryRetentionSection.swift"))
+                + (try Self.source("Settings/ActivityLogSettingsSection.swift")),
              ConfigurationView.advancedAnchorIds),
             (.chat, try Self.source("Settings/ChatSettingsView.swift"), ChatSettingsView.advancedAnchorIds),
         ]

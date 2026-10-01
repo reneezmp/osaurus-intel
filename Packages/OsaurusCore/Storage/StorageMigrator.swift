@@ -618,6 +618,10 @@ public actor StorageMigrator {
             // File history rows (docs/FILE_HISTORY_INTEL.md): the index of every
             // snapshot Revert can restore, so it follows a key rotation too.
             .init(label: "file history", path: OsaurusPaths.fileHistoryDatabaseFile().path),
+            // Insights activity / audit log (upstream #2964). Encrypted with the
+            // storage key, so it follows the key on rotation and is part of
+            // plaintext export like the other core stores.
+            .init(label: "activity log", path: OsaurusPaths.activityLogDatabaseFile().path),
         ]
         // Plugin DBs — one per installed plugin. We can discover them
         // by walking `Tools/<pluginId>/data/data.db`.

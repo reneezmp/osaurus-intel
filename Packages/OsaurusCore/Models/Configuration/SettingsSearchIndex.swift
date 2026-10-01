@@ -191,6 +191,33 @@ public enum SettingsSearchIndex {
                 "file history size", "file history disk", "undo storage", "snapshot storage", "revert storage",
                 "file changes disk usage",
             ]),
+        // Upstream files these under Privacy → Activity Log; Intel has no
+        // Privacy tab, so the card lives on Data & Storage (same ids).
+        .init(
+            id: "privacy.activityLog.retention", tab: .settings, section: "Advanced",
+            title: "Keep Activity History",
+            keywords: [
+                "activity log", "activity log retention", "audit log retention", "retention", "keep history",
+                "how long", "insights retention", "delete old activity", "7 days", "30 days", "keep forever",
+                "prune",
+            ],
+            disambiguation:
+                "Data & Storage → Activity Log. How many days of Insights activity (model requests, web searches, URL fetches, MCP calls, Router calls) stay on disk before automatic pruning. Not File History."
+        ),
+        .init(
+            id: "privacy.activityLog.storeContent", tab: .settings, section: "Advanced",
+            title: "Store Prompts and Responses",
+            keywords: [
+                "activity log", "audit log", "store content", "store prompts", "log bodies", "metadata only",
+                "prompt logging", "response logging", "wire payload", "insights content",
+            ],
+            disambiguation:
+                "Data & Storage → Activity Log. When off, new Insights records keep metadata (destination, bytes, tokens, timing) but replace prompt/response/tool bodies with a withheld marker."
+        ),
+        .init(
+            id: "privacy.activityLog.openInsights", tab: .settings, section: "Advanced",
+            title: "Review Activity in Insights",
+            keywords: ["open insights", "review activity", "audit", "export log", "verify chain"]),
         .init(
             id: "settings.general.maintenance", tab: .settings, section: "Reset",
             title: "Factory Reset", keywords: ["factory reset", "reset", "wipe", "erase", "maintenance"]),
@@ -399,7 +426,15 @@ public enum SettingsSearchIndex {
             keywords: ["openai compatible", "rest", "documentation", "test endpoint"]),
         .init(
             id: "insights.overview", tab: .insights, title: "Insights",
-            keywords: ["logs", "requests", "latency", "tokens", "diagnostics"]),
+            keywords: [
+                "logs", "requests", "latency", "tokens", "diagnostics",
+                "analytics", "usage", "charts", "metrics", "activity log", "audit log", "audit trail",
+                "activity history", "what was sent to the cloud", "cloud egress", "local vs cloud",
+                "web search log", "mcp call log", "export activity", "verify log", "tamper evident",
+                "request history", "review activity",
+            ],
+            disambiguation:
+                "The Insights tab is the activity log / audit dashboard: every model request, web search, URL fetch, MCP tool call, Router call and inbound API request, with Local/Cloud badges, filters, Verify and Export. Retention and content policy live under Data & Storage → Activity Log."),
         // MARK: Voice (subTab values are VoiceTab raw values; Intel titles)
         .init(
             id: "voice.stt.language", tab: .voice, section: "Recognition",

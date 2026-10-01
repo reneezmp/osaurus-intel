@@ -110,7 +110,30 @@ final class ModelManager: ObservableObject, @unchecked Sendable {
 final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     static let shared = RemoteProviderManager()
 
-    @Published private(set) var configuration: RemoteProviderConfiguration
+    @Published private(set) var configuration: RemoteProviderConfiguration {
+        didSet { Self.refreshProviderNameCache(configuration.providers) }
+    }
+
+    /// Lock-protected id → display-name mirror so nonisolated loggers
+    /// (Insights egress attribution) can label a provider without hopping
+    /// to the main actor. (Upstream #2964, verbatim.)
+    private nonisolated(unsafe) static var providerNameCache: [UUID: String] = [:]
+    private nonisolated static let providerNameLock = NSLock()
+
+    private nonisolated static func refreshProviderNameCache(_ providers: [RemoteProvider]) {
+        var cache: [UUID: String] = [:]
+        for provider in providers { cache[provider.id] = provider.name }
+        providerNameLock.lock()
+        providerNameCache = cache
+        providerNameLock.unlock()
+    }
+
+    /// Display name of a configured remote provider, from any actor.
+    nonisolated static func providerDisplayName(for id: UUID) -> String? {
+        providerNameLock.lock()
+        defer { providerNameLock.unlock() }
+        return providerNameCache[id]
+    }
     @Published private(set) var providerStates: [UUID: RemoteProviderState] = [:]
     @Published private(set) var isOsaurusRouterEnabled = OsaurusRouter.isEnabled
 
@@ -135,6 +158,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
+        Self.refreshProviderNameCache(configuration.providers)
         reconcileManagedOsaurusRouterProvider()
         seedConnectedStates()
         // Discover each enabled provider's models in the background so the
@@ -1058,6 +1082,33 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// baseline. `complete`, `clarify` and `prompt_working_folder` end the run
     /// (see `AgentLoopRunEnd`).
     static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time"]
+
+    /// Upstream's Agent Channel tool names (verbatim). Intel doesn't ship the
+    /// channel tools yet (`W-channels`); the set is here for upstream's
+    /// Insights redaction in `ToolCallLog`, which keys off these names.
+    nonisolated static let agentChannelToolNames: Set<String> = [
+        "agent_channel_list_connections",
+        "agent_channel_diagnostics",
+        "agent_channel_list_spaces",
+        "agent_channel_list_rooms",
+        "agent_channel_read_messages",
+        "agent_channel_read_thread",
+        "agent_channel_search_messages",
+        "agent_channel_draft_message",
+        "agent_channel_send_message",
+        "agent_channel_reply_thread",
+        "agent_channel_edit_message",
+        "agent_channel_delete_message",
+        "agent_channel_add_reaction",
+        "agent_channel_remove_reaction",
+        "agent_channel_send_typing",
+        "agent_channel_imessage_send_attachment",
+        "agent_channel_imessage_send_effect",
+        "agent_channel_imessage_create_poll",
+        "agent_channel_imessage_manage_group",
+        "agent_channel_whatsapp_send_attachment",
+        "agent_channel_publish",
+    ]
 
     /// Self-scheduling tools; the agent's Self-scheduling switch is the grant
     /// (`effectiveSelfSchedulingEnabled`), bypassing the Tools-tab allowlist.

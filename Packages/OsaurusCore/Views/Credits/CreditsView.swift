@@ -495,10 +495,8 @@ struct CreditsView: View {
 
     private var currentActivityRows: [CreditsActivityRow] {
         CreditsActivityProjector(
-            // (Intel) InsightsService doesn't surface per-request logs the same way;
-            // activity rows render without the insights-log affordance.
-            hasInsightsLogForRequestId: { _ in false },
-            hasInsightsLogForTurnId: { _ in false }
+            hasInsightsLogForRequestId: { insightsService.hasLog(requestId: $0) },
+            hasInsightsLogForTurnId: { insightsService.hasLog(turnId: $0) }
         )
         .rows(usageItems: pagedUsageRows, ledgerEntries: ledgerEntries)
     }
@@ -698,10 +696,22 @@ struct CreditsView: View {
     }
 
     private func openInsightsReference(_ reference: CreditsActivityReference) {
-        // (Intel) InsightsService has no per-request `focus` API; open the Insights
-        // management tab without focusing the specific request/turn.
-        _ = reference
-        AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+        if let requestId = reference.requestId,
+            InsightsService.shared.focus(requestId: requestId)
+        {
+            AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+            return
+        }
+        if let turnId = reference.turnUUID,
+            InsightsService.shared.focus(turnId: turnId)
+        {
+            AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+        } else {
+            diagnosticsMessage = String(
+                localized: "The detailed Insights log for this usage row is no longer available.",
+                bundle: .module
+            )
+        }
     }
 
     // MARK: - Shared view helpers

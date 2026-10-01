@@ -1213,3 +1213,39 @@ Manual: [`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md).
       amber/red, and Send still works.
 - [ ] Ventura, light and dark: the ring track is visible, the popover isn't
       clipped, and it scrolls when System Prompt is expanded.
+
+## Insights activity log (`W-insights-sync`)
+
+Manual: [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md). Stage B (store, UI, chat
+rows); web search, MCP, Router, voice and compaction rows come with stage C.
+
+- [ ] **(paid)** Send a chat message, then open Insights. The new layout
+      shows four tiles (Events, Left this Mac, Failed, Privacy-filtered), a
+      local/cloud bar, search + time range + Filter, scope tabs (All, Models,
+      …, System) and the row under "Today".
+- [ ] Click the row. At a wide window it opens beside the list (inspector);
+      narrow the window and it replaces the list with a Back button. Up/Down
+      arrows move between rows; Escape closes the inspector.
+- [ ] Overview names the provider ("Model request sent to DeepSeek —
+      completed"), "Where it went" shows the host and endpoint. Raw ›
+      Request has a **Server** view with the exact JSON that was sent; Raw ›
+      Response › Server shows the raw `data:` stream.
+- [ ] Quit and relaunch: the rows are still there (before, Insights was
+      empty after a relaunch).
+- [ ] In the chat, the reply's "…" › Inspect response › Open request and
+      response log opens Insights **on that reply's row**. For a reply from
+      before this build, an "Insights Unavailable" alert appears instead.
+- [ ] Use a provider with a wrong API key (or a bad model id): the failed
+      request appears as a red row with the provider's error message.
+- [ ] "…" › Verify Integrity: a green "chain intact" banner. Export: the
+      sheet's checkboxes and buttons are visible (Ventura); export JSONL and
+      Markdown to Desktop and open them.
+- [ ] Settings › General › Advanced › Data & Storage: an "Activity Log" card
+      under File History. Turn **Store Prompts and Responses** off, send a
+      message: the new row's Prompt tab says the prompt wasn't stored
+      (Data & Storage › …); turn it back on.
+- [ ] Settings search "activity log" finds Keep Activity History.
+- [ ] Credits › Activity (Osaurus Router): a request row's "Insights" link
+      opens its row, or shows "no longer available".
+- [ ] Ventura, light and dark: tiles, scope tabs, the Filter popover's
+      menus and checkbox, and the "…" menu all render.

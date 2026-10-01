@@ -224,8 +224,38 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     private static func serializeRequestForInsights(_ request: ChatCompletionRequest) -> String? {
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-        guard let data = try? encoder.encode(request) else { return nil }
-        return String(data: data, encoding: .utf8)
+        guard let data = try? encoder.encode(request),
+            let s = String(data: data, encoding: .utf8)
+        else { return nil }
+        // Upstream: inline images (attachments, screenshots) are replaced by a
+        // short marker so the activity log never keeps the base64 bytes.
+        return redactInlineImagePayloads(in: s)
+    }
+
+    /// Upstream `ChatEngine.redactInlineImagePayloads`, verbatim: replace
+    /// each `;base64,<payload>` (64+ chars) with a size marker, keeping the
+    /// request shape and ordinary text intact.
+    static func redactInlineImagePayloads(in json: String) -> String {
+        guard
+            let regex = try? NSRegularExpression(pattern: "(;base64,)([A-Za-z0-9+/=]{64,})")
+        else { return json }
+        let matches = regex.matches(
+            in: json,
+            range: NSRange(location: 0, length: (json as NSString).length)
+        )
+        guard !matches.isEmpty else { return json }
+        var result = json as NSString
+        // Apply replacements back-to-front so earlier ranges stay valid.
+        for match in matches.reversed() {
+            let payload = match.range(at: 2)
+            guard payload.location != NSNotFound else { continue }
+            result =
+                result.replacingCharacters(
+                    in: payload,
+                    with: "[redacted \(payload.length)-char image]"
+                ) as NSString
+        }
+        return result as String
     }
 
     private static func estimatedInputTokens(_ request: ChatCompletionRequest) -> Int {
@@ -625,6 +655,23 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
         NSLog("[CloudChatEngine] Starting streamChat — model=\(resolvedModel), via=\(endpoint.providerLabel), messages=\(request.messages.count), tools=\(request.tools?.count ?? 0)")
 
+        // Insights attribution (upstream #1350 / #2964): ChatView binds the
+        // assistant turn, agent and chat around `streamChat`; capture them
+        // here, since task-locals aren't reliable on the stream's end path.
+        let loggedTurnId = ChatExecutionContext.currentAssistantTurnId
+        let loggedAgentId = ChatExecutionContext.currentAgentId
+        let loggedSessionId = ChatExecutionContext.currentSessionId.flatMap(UUID.init(uuidString:))
+        let connection = RequestConnectionInfo(
+            providerId: endpoint.provider?.id,
+            remoteEndpoint: endpoint.url,
+            transport: .direct,
+            mode: .remoteInference
+        )
+        // Intel builds its own requests (upstream's RemoteProviderService
+        // isn't compiled), so it feeds the probe directly: the first round's
+        // request bytes and the raw response stream, as upstream records them.
+        let wireProbe = WireTransportProbe()
+
         return AsyncThrowingStream { continuation in
             let task = Task {
                 let inferenceStartedAt = Date()
@@ -655,8 +702,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     didLogInference = true
                     let outputTokens = completionTokens
                         ?? max(responseText.isEmpty ? 0 : 1, responseText.count / 4)
+                    let wire = wireProbe.snapshot()
                     InsightsService.logInference(
                         source: self.source,
+                        turnId: loggedTurnId,
                         model: resolvedModel,
                         inputTokens: promptTokens ?? Self.estimatedInputTokens(request),
                         outputTokens: outputTokens,
@@ -667,7 +716,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         finishReason: error == nil ? .stop : .error,
                         errorMessage: error?.localizedDescription,
                         requestBody: requestBody,
-                        responseBody: responseText.isEmpty ? nil : responseText
+                        responseBody: responseText.isEmpty ? nil : responseText,
+                        wireRequestBody: wire.request,
+                        wireResponseBody: wire.response.isEmpty ? nil : wire.response,
+                        connection: connection,
+                        path: URL(string: endpoint.url)?.path ?? "/chat/completions",
+                        agentId: loggedAgentId,
+                        sessionId: loggedSessionId
                     )
                 }
 
@@ -749,6 +804,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 request: &urlRequest, body: urlRequest.httpBody)
                         }
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(liveToolSpecs?.count ?? 0)")
+                        if let httpBody = urlRequest.httpBody { wireProbe.recordRequestBody(httpBody) }
 
                         let (asyncBytes, response) = try await self.session.bytes(for: urlRequest)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
@@ -759,12 +815,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // user sees WHY instead of a silent empty turn.
                             var errorBody = ""
                             for try await line in asyncBytes.lines { errorBody += line }
+                            wireProbe.appendResponseChunk(Data(errorBody.utf8))
                             let message = extractAPIErrorMessage(errorBody)
                             NSLog("[CloudChatEngine] HTTP \(statusCode) error body: \(message)")
-                            continuation.finish(
-                                throwing: CloudChatError.httpError(
-                                    provider: endpoint.providerLabel, status: statusCode, message: message)
-                            )
+                            let httpError = CloudChatError.httpError(
+                                provider: endpoint.providerLabel, status: statusCode, message: message)
+                            // The failed request is on the record too (it reached
+                            // the provider), with its wire bytes.
+                            logInference(error: httpError)
+                            continuation.finish(throwing: httpError)
                             return
                         }
 
@@ -780,6 +839,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 try Task.checkCancellation()
                                 buffer.append(byte)
                                 if buffer.count >= 2_048 {
+                                    wireProbe.appendResponseChunk(buffer)
                                     for emission in try decoder.append(buffer) {
                                         totalChunks += 1
                                         captureResponseText(emission)
@@ -789,6 +849,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 }
                             }
                             if !buffer.isEmpty {
+                                wireProbe.appendResponseChunk(buffer)
                                 for emission in try decoder.append(buffer) {
                                     totalChunks += 1
                                     captureResponseText(emission)
@@ -924,6 +985,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         for try await line in asyncBytes.lines {
                             try Task.checkCancellation()
+                            wireProbe.appendResponseChunk(Data((line + "\n").utf8))
                             guard line.hasPrefix("data: ") else { continue }
                             let dataStr = String(line.dropFirst(6))
                             if dataStr == "[DONE]" { break }

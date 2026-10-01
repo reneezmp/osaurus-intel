@@ -83,6 +83,12 @@ public enum ChatExecutionContext {
     /// The agent ID whose context is active for the current execution.
     @TaskLocal public static var currentAgentId: UUID?
 
+    /// Insights attribution: which surface owns the current unit of work.
+    /// Bound by `HTTPHandler` around media / embedding / transcription
+    /// handlers so the in-process emitters (`MediaActivityLogger`) skip
+    /// their own row and let the inbound HTTP row stand alone.
+    @TaskLocal static var currentRequestSource: RequestSource?
+
     /// The project that owns the active chat, when one is selected. Knowledge
     /// tools union this project's explicitly shared collections with the
     /// running agent's own grants.

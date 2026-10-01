@@ -59,6 +59,7 @@ struct ConfigurationView: View {
         "settings.notifications.timeout", "settings.notifications.maxVisible",
         "settings.notifications.maxConcurrentTasks", "storage.encryption", "storage.backup",
         "storage.fileHistory.retention", "storage.fileHistory.sizeLimit",
+        "privacy.activityLog.retention", "privacy.activityLog.storeContent", "privacy.activityLog.openInsights",
     ]
 
     var body: some View {
