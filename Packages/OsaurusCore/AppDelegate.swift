@@ -522,8 +522,14 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     public func showManagementWindow(
         initialTab: ManagementTab? = nil,
-        deeplinkAgentId: UUID? = nil
+        deeplinkAgentId: UUID? = nil,
+        deeplinkCreateAgent: Bool = false
     ) {
+        // Create-agent rides the shared management state (upstream), so it
+        // works for both a fresh window and a reused one.
+        if deeplinkCreateAgent {
+            ManagementStateManager.shared.pendingCreateAgent = true
+        }
         NSApp.unhide(nil)
         _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
 

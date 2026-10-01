@@ -2,10 +2,10 @@
 //  ChatTabStripView.swift
 //  osaurus
 //
-//  Chrome-style tab strip for chat windows (upstream #2630, #2721, #2802),
-//  hosted in the toolbar's flexible middle item. Intel keeps the agent pill
-//  in the toolbar, as the strip's leading accessory: the strip shows that
-//  agent's tabs (docs/CHAT_TABS_INTEL.md). Follows modern Chrome's
+//  Chrome-style tab strip for chat windows, hosted in the toolbar's
+//  centered slot (the space the agent pill vacated when it moved into the
+//  sidebar) and in the themed full-screen header. Intel edits are marked
+//  "Intel:" (docs/CHAT_TABS_INTEL.md). Follows modern Chrome's
 //  visual grammar: only the ACTIVE tab draws the full tab shape (rounded
 //  top corners, outward-curved "feet" at the bottom); inactive tabs are
 //  flat labels that light up with a rounded rect on hover, separated by
@@ -73,14 +73,15 @@ struct ChatTabStripView: View {
     /// the chrome BEFORE the strip, so it holds still during a window resize.
     @State private var measuredChromeX: CGFloat?
 
-    /// Content ahead of the tabs inside the same toolbar item: Intel's agent
-    /// pill. It rides the sidebar inset with the tabs, so the pair starts at
-    /// the chat column's leading edge.
-    var leadingAccessory: AnyView? = nil
+    /// Fallback for the width of the chrome AFTER this item (the inspector
+    /// toggle and window pin, plus toolbar padding), used only until the
+    /// first live measurement lands (see `measuredTrailingChrome`).
+    var trailingChromeWidth: CGFloat = 80
 
-    /// Laid-out width of `leadingAccessory`, deducted from the tabs' budget.
-    @State private var accessoryWidth: CGFloat = 0
-    private static let accessorySpacing: CGFloat = 8
+    /// Distance from the strip's trailing edge to the window's trailing
+    /// edge, measured from AppKit like `measuredChromeX`. Only depends on
+    /// the chrome after the strip, so it too holds still during a resize.
+    @State private var measuredTrailingChrome: CGFloat?
 
     /// Last laid-out strip width, for drag math that runs outside `body`.
     @State private var lastStripWidth: CGFloat = 0
@@ -92,8 +93,7 @@ struct ChatTabStripView: View {
     /// fast resize can never race a measurement. `footFlare` on each side
     /// keeps the active tab's outward-curving feet inside the item.
     private func stripWidth(in available: CGFloat) -> CGFloat {
-        let accessory = leadingAccessory == nil ? 0 : accessoryWidth + Self.accessorySpacing
-        return max(0, available - leadingInset - accessory - 2 * Self.footFlare)
+        max(0, available - leadingInset - trailingInset - 2 * Self.footFlare)
     }
 
     /// How far the strip must start past its own leading edge so the first
@@ -102,6 +102,15 @@ struct ChatTabStripView: View {
     /// strip. Zero when the sidebar is narrower than that chrome.
     static func leadingInset(sidebarWidth: CGFloat, chromeWidth: CGFloat) -> CGFloat {
         max(0, sidebarWidth - chromeWidth)
+    }
+
+    /// Mirror image for the right rail: the inspector's width less the
+    /// chrome (rail toggle, pin, toolbar padding) already after the strip,
+    /// so the last tab and "+" end at the chat column's trailing edge
+    /// instead of running under the rail. Zero while the rail is closed or
+    /// narrower than that chrome.
+    static func trailingInset(inspectorWidth: CGFloat, chromeWidth: CGFloat) -> CGFloat {
+        max(0, inspectorWidth - chromeWidth)
     }
 
     /// Hover is tracked at strip level (not per item) so separators can
@@ -129,10 +138,20 @@ struct ChatTabStripView: View {
             chromeWidth: measuredChromeX ?? leadingChromeWidth)
     }
 
-    /// Follows the sidebar on screen. Intel has no right-hand inspector
-    /// rail, so there is no trailing counterpart (upstream #2910).
+    /// Follows the sidebar actually on screen — while the inspector pushes
+    /// it aside at narrow widths the tabs return to the window's left edge.
     private var leadingInset: CGFloat {
-        windowState.showSidebar ? sidebarOpenInset : 0
+        windowState.isSidebarVisible ? sidebarOpenInset : 0
+    }
+
+    /// Keeps the tabs clear of the right rail (chat inspector or Project
+    /// Settings). `inspectorColumnWidth` is the rail's on-screen width as
+    /// `ChatView` laid it out — squeezed at narrow windows, live during a
+    /// resize drag — so the strip tracks it without a second computation.
+    private var trailingInset: CGFloat {
+        Self.trailingInset(
+            inspectorWidth: windowState.inspectorColumnWidth,
+            chromeWidth: measuredTrailingChrome ?? trailingChromeWidth)
     }
 
     var body: some View {
@@ -147,19 +166,6 @@ struct ChatTabStripView: View {
                 // computed so the row NEVER exceeds the strip. An overflowing
                 // row would push the "+" button outside the toolbar item's
                 // bounds, where it still draws but no longer hit-tests.
-                HStack(spacing: 0) {
-                    if let leadingAccessory {
-                        leadingAccessory
-                            .fixedSize()
-                            .background(
-                                GeometryReader { geo in
-                                    Color.clear
-                                        .onAppear { accessoryWidth = geo.size.width }
-                                        .onChange(of: geo.size.width) { accessoryWidth = $0 }
-                                }
-                            )
-                            .padding(.trailing, Self.accessorySpacing)
-                    }
                 tabsRow(stripWidth: width)
                     // Tabs slide over when a neighbor closes (Chrome-like).
                     // Opening stays un-animated: `newTab()` disables
@@ -172,13 +178,13 @@ struct ChatTabStripView: View {
                     .frame(width: width, alignment: .leading)
                     .padding(.horizontal, Self.footFlare)
                     .frame(height: Self.stripHeight)
-                }
-                // Nothing draws outside the strip, even for a frame: the
-                // sidebar and trailing buttons stay clear mid-resize.
-                .clipped()
-                .padding(.leading, leadingInset)
-                .onAppear { lastStripWidth = width }
-                .onChange(of: width) { lastStripWidth = $0 }
+                    // Nothing draws outside the strip, even for a frame: the
+                    // sidebar and trailing buttons stay clear mid-resize.
+                    .clipped()
+                    .padding(.leading, leadingInset)
+                    // Intel: single-value `onChange` (macOS 13).
+                    .onAppear { lastStripWidth = width }
+                    .onChange(of: width) { lastStripWidth = $0 }
             }
             .frame(height: Self.stripHeight)
             // Anchored to the strip's OUTER leading edge (the inset lies
@@ -192,7 +198,22 @@ struct ChatTabStripView: View {
                 }
                 .frame(width: 0)
             }
-            .animation(windowState.theme.animationQuick(), value: windowState.showSidebar)
+            // Same at the OUTER trailing edge: the distance from there to
+            // the window's edge is the trailing chrome, whatever AppKit (or
+            // the full-screen header) puts after the strip.
+            .background(alignment: .trailing) {
+                WindowEdgeReader(edge: .trailing) { gap in
+                    if abs((measuredTrailingChrome ?? -1) - gap) > 0.5 {
+                        measuredTrailingChrome = gap
+                    }
+                }
+                .frame(width: 0)
+            }
+            .animation(windowState.theme.animationQuick(), value: windowState.isSidebarVisible)
+            // Rail open/close slides the tabs like the sidebar does; keyed
+            // on presence, not width, so a live resize drag is not lagged
+            // by the animation.
+            .animation(windowState.theme.animationQuick(), value: windowState.inspectorColumnWidth > 0)
             // Leaving the strip ends a close streak: widths relax to fit.
             .onHover { inside in
                 guard !inside, frozenTabWidth != nil else { return }
@@ -308,7 +329,10 @@ struct ChatTabStripView: View {
                     },
                     onOpenProject: {
                         windowState.selectTab(id: tab.id)
-                        windowState.openProjectId = windowState.session.projectId
+                        NotificationCenter.default.post(
+                            name: .chatToolbarBackToProject,
+                            object: nil,
+                            userInfo: ["windowId": windowState.windowId])
                     },
                     onDragChanged: { translation in
                         handleDragChanged(tab.id, translation: translation)
@@ -532,6 +556,9 @@ private struct ChatTabItemView: View {
     let onHover: (Bool) -> Void
 
     @Environment(\.theme) private var theme
+    /// Live activity for this tab's session — drives the avatar's spinning
+    /// ring, the same signal the sidebar rows use.
+    @ObservedObject private var activityMonitor = SessionActivityMonitor.shared
     @ObservedObject private var projectManager = ProjectManager.shared
     @ObservedObject private var agentManager = AgentManager.shared
 
@@ -554,12 +581,13 @@ private struct ChatTabItemView: View {
     }
 
     /// Origin glyph for runs that didn't start from the composer (scheduled,
-    /// watcher, via API…), so such a chat's tab reads as such at a glance.
-    /// Nil for ordinary chats.
+    /// via API / channel, delegated…), so a background run's tab reads as
+    /// such at a glance. Nil for ordinary chats.
     private var originIconName: String? {
         session.source == .chat ? nil : session.source.iconName
     }
 
+    // Intel: no workspaces or paired iPhone, so no workspace origin.
     private var originLabel: String? {
         guard session.source != .chat else { return nil }
         let pluginName = session.sourcePluginId.map(PluginDisplayNameResolver.displayName(for:))
@@ -575,14 +603,13 @@ private struct ChatTabItemView: View {
         agentManager.agent(for: session.agentId ?? Agent.defaultId) ?? .default
     }
 
+    // Intel: every tab is a local agent's (no shared workspace identity).
     private var avatarMascotId: String? { agent.avatar }
     private var avatarName: String { agent.displayName }
     private var avatarCustomImageURL: URL? { agent.customAvatarURL }
 
-    /// Upstream reads `SessionActivityMonitor`; on Intel the tab's own
-    /// session is the whole truth (detached runs have no tab).
-    private var activityStatus: ChatTabActivity? {
-        ChatTabActivity.of(session)
+    private var activityStatus: SessionActivityMonitor.Status? {
+        session.sessionId.flatMap { activityMonitor.statuses[$0] }
     }
 
     private var chipContent: some View {
@@ -789,7 +816,7 @@ private struct ChatTabItemView: View {
 private struct ChatTabContextMenu {
     let windowState: ChatWindowState
     let session: ChatSession
-    let activityStatus: ChatTabActivity?
+    let activityStatus: SessionActivityMonitor.Status?
     let canClose: Bool
     let onClose: () -> Void
 
@@ -989,6 +1016,7 @@ private struct ChatTabContextMenu {
         let scope = alertScope
         let windowState = self.windowState
         let perform = {
+            // Intel: no registry-owned chat runs to cancel first.
             windowState.prepareForSessionDeletion(id: id)
             ChatSessionsManager.shared.delete(id: id)
             windowState.refreshSessions()
@@ -1104,24 +1132,11 @@ private struct WindowEdgeReader: NSViewRepresentable {
     }
 }
 
-/// What a tab's agent is doing, for the avatar ring. Upstream's
-/// `SessionActivityMonitor.Status`, derived from the tab's own session.
-enum ChatTabActivity: Equatable {
-    case working
-    case waitingForInput
-
-    @MainActor
-    static func of(_ session: ChatSession) -> ChatTabActivity? {
-        if session.awaitingClarify != nil { return .waitingForInput }
-        return session.isStreaming ? .working : nil
-    }
-}
-
 /// Compact twin of the sidebar's `SessionActivityRing`, sized for the tab
 /// avatar: spinning accent gradient while the agent works, steady warning
 /// ring while the run waits for input.
 private struct TabActivityRing: View {
-    let status: ChatTabActivity
+    let status: SessionActivityMonitor.Status
 
     @Environment(\.theme) private var theme
     @Environment(\.accessibilityReduceMotion) private var reduceMotion

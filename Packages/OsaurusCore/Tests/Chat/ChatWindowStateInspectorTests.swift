@@ -1,0 +1,210 @@
+//
+//  ChatWindowStateInspectorTests.swift
+//  osaurusTests
+//
+//  The chat window's right-hand rail mirrors the session sidebar: one
+//  toolbar button opens and closes it (reopening on the pane it last
+//  showed), the rail's own lens bar switches between File Changes and
+//  History, "N files changed" rows deep-link to File Changes, the toolbar
+//  badge counts changed files only while the rail is closed, and at narrow
+//  widths the two rails take turns rather than crushing the chat column.
+//
+//  Intel: upstream's file minus the File Changes deep-link and Project
+//  Settings rail cases (not ported); layout statics live on
+//  `ChatContentView` (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
+//
+
+import Foundation
+import Testing
+
+@testable import OsaurusCore
+
+@Suite(.serialized)
+@MainActor
+struct ChatWindowStateInspectorTests {
+
+    @Test("the toolbar toggle opens on History first, then closes")
+    func toggleOpensAndCloses() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            #expect(window.inspectorPane == nil)
+            #expect(window.isInspectorOpen == false)
+            window.toggleInspector()
+            #expect(window.inspectorPane == .history, "a fresh window has no file changes to show")
+            #expect(window.isInspectorOpen)
+            window.toggleInspector()
+            #expect(window.inspectorPane == nil)
+        }
+    }
+
+    @Test("the toggle reopens on the pane the rail last showed")
+    func toggleRemembersLastPane() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            window.showInspector(.fileChanges)
+            #expect(window.inspectorPane == .fileChanges)
+            window.closeInspector()
+            #expect(window.inspectorPane == nil)
+            #expect(window.lastInspectorPane == .fileChanges)
+            window.toggleInspector()
+            #expect(window.inspectorPane == .fileChanges)
+        }
+    }
+
+    @Test("the lens bar switches panes in place; showing never closes")
+    func showSwitchesInPlace() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            window.showInspector(.history)
+            window.showInspector(.fileChanges)
+            #expect(window.inspectorPane == .fileChanges)
+            window.showInspector(.fileChanges)
+            #expect(window.inspectorPane == .fileChanges, "re-selecting the open pane keeps it open")
+            window.showInspector(.history)
+            #expect(window.inspectorPane == .history)
+        }
+    }
+
+    @Test("an unpinned File Changes falls back to History while the chat has no change sets")
+    func fileChangesFallsBackToHistory() {
+        #expect(ChatWindowState.effectiveInspectorPane(requested: nil, fileChangeSetCount: 0, isPinned: false) == nil)
+        #expect(ChatWindowState.effectiveInspectorPane(requested: .history, fileChangeSetCount: 0, isPinned: false) == .history)
+        #expect(
+            ChatWindowState.effectiveInspectorPane(requested: .fileChanges, fileChangeSetCount: 0, isPinned: false) == .history,
+            "nothing to show yet: History is the useful pane")
+        #expect(
+            ChatWindowState.effectiveInspectorPane(requested: .fileChanges, fileChangeSetCount: 0, isPinned: true) == .fileChanges,
+            "the user asked for it: show the empty state, not a different pane")
+        #expect(ChatWindowState.effectiveInspectorPane(requested: .fileChanges, fileChangeSetCount: 2, isPinned: false) == .fileChanges)
+    }
+
+    @Test("the lens bar pins the pane; the toggle reopens unpinned")
+    func pinFollowsExplicitPicks() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            window.toggleInspector()
+            #expect(window.inspectorPanePinned == false)
+            #expect(window.effectiveInspectorPane == .history)
+
+            // Tapping File Changes with nothing in it is an explicit choice.
+            window.showInspector(.fileChanges)
+            #expect(window.inspectorPanePinned)
+            #expect(window.effectiveInspectorPane == .fileChanges)
+
+            // Close and reopen from the toolbar: the remembered pane comes
+            // back unpinned, so the empty pane yields to History again.
+            window.closeInspector()
+            window.toggleInspector()
+            #expect(window.inspectorPane == .fileChanges)
+            #expect(window.inspectorPanePinned == false)
+            #expect(window.effectiveInspectorPane == .history)
+
+            // Intel: no File Changes deep links until file history is ported.
+        }
+    }
+
+    @Test("the toolbar badge counts changed files only while the rail is closed, for local chats")
+    func badgeCount() {
+        #expect(ChatWindowState.inspectorBadgeCount(fileChangesCount: 0, isInspectorOpen: false, isRemoteAgentChat: false) == nil)
+        #expect(ChatWindowState.inspectorBadgeCount(fileChangesCount: 3, isInspectorOpen: false, isRemoteAgentChat: false) == 3)
+        #expect(
+            ChatWindowState.inspectorBadgeCount(fileChangesCount: 3, isInspectorOpen: true, isRemoteAgentChat: false) == nil,
+            "open, the lens bar carries the count")
+        #expect(ChatWindowState.inspectorBadgeCount(fileChangesCount: 3, isInspectorOpen: false, isRemoteAgentChat: true) == nil)
+    }
+
+    @Test("the rail hides on the project page and keeps its pane for the chat's return")
+    func visiblePane() {
+        #expect(ChatContentView.visibleInspectorPane(requested: nil, isProjectPageOpen: false) == nil)
+        #expect(ChatContentView.visibleInspectorPane(requested: .history, isProjectPageOpen: true) == nil)
+        #expect(ChatContentView.visibleInspectorPane(requested: .fileChanges, isProjectPageOpen: false) == .fileChanges)
+    }
+
+    @Test("the sidebar steps aside only when both rails plus a readable chat column do not fit")
+    func sidebarStepsAside() {
+        // 260 sidebar + 440 chat + 300 inspector floor = 1000.
+        #expect(ChatContentView.sidebarStepsAside(windowWidth: 800, sidebarWidth: 260, inspectorOpen: true) == true)
+        #expect(ChatContentView.sidebarStepsAside(windowWidth: 800, sidebarWidth: 260, inspectorOpen: false) == false)
+        #expect(ChatContentView.sidebarStepsAside(windowWidth: 1000, sidebarWidth: 260, inspectorOpen: true) == false)
+        // A wider sidebar needs a wider window before both stay up.
+        #expect(ChatContentView.sidebarStepsAside(windowWidth: 1100, sidebarWidth: 400, inspectorOpen: true) == true)
+        #expect(ChatContentView.sidebarStepsAside(windowWidth: 1140, sidebarWidth: 400, inspectorOpen: true) == false)
+    }
+
+    @Test("the chrome reports the sidebar actually on screen, and asking for it back closes the inspector")
+    func sidebarVisibilityFollowsAutoHide() async throws {
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+
+            #expect(window.showSidebar)
+            #expect(window.isSidebarVisible)
+
+            // Narrow window, inspector open: ChatView reports the step-aside.
+            window.toggleInspector()
+            window.isSidebarAutoHidden = true
+            #expect(window.isSidebarVisible == false)
+            #expect(window.showSidebar, "the user's choice is untouched")
+
+            // The toolbar button now reads "Show sidebar"; pressing it must
+            // produce a visible sidebar, which means the inspector goes.
+            window.toggleSidebar()
+            #expect(window.inspectorPane == nil)
+            #expect(window.showSidebar)
+            window.isSidebarAutoHidden = false  // ChatView follows the closed inspector
+            #expect(window.isSidebarVisible)
+
+            // With nothing pushing it aside the toggle is a plain flip.
+            window.toggleSidebar()
+            #expect(window.showSidebar == false)
+            #expect(window.isSidebarVisible == false)
+            window.toggleSidebar()
+            #expect(window.isSidebarVisible)
+        }
+    }
+
+    @Test("the inspector keeps the user's width until the chat column would drop below its floor")
+    func inspectorWidth() {
+        #expect(ChatContentView.changesPanelWidth(totalWidth: 1400, sidebarWidth: 260, preferredWidth: 380) == 380)
+        #expect(ChatContentView.changesPanelWidth(totalWidth: 1400, sidebarWidth: 260, preferredWidth: 480) == 480)
+        // 800pt window, sidebar stepped aside: 800 - 0 - 440 = 360 available.
+        #expect(ChatContentView.changesPanelWidth(totalWidth: 800, sidebarWidth: 0, preferredWidth: 380) == 360)
+        // Never narrower than the floor even when the chat column has to give.
+        #expect(ChatContentView.changesPanelWidth(totalWidth: 700, sidebarWidth: 0, preferredWidth: 380) == 300)
+        // A stale out-of-range stored width is clamped, like the sidebar's.
+        #expect(ChatContentView.clampInspectorWidth(100) == 300)
+        #expect(ChatContentView.clampInspectorWidth(900) == 520)
+        #expect(ChatContentView.changesPanelWidth(totalWidth: 1400, sidebarWidth: 260, preferredWidth: 900) == 520)
+    }
+
+    @Test("the tab strip stops at the chat column: inset by each rail less the chrome already beside it")
+    func tabStripInsetsFollowTheRails() async throws {
+        // Sidebar 260 with the 76pt sidebar-button chrome ahead of the strip.
+        #expect(ChatTabStripView.leadingInset(sidebarWidth: 260, chromeWidth: 76) == 184)
+        // Never negative: a rail narrower than its chrome needs no inset.
+        #expect(ChatTabStripView.leadingInset(sidebarWidth: 60, chromeWidth: 76) == 0)
+
+        // Inspector closed: nothing to clear.
+        #expect(ChatTabStripView.trailingInset(inspectorWidth: 0, chromeWidth: 80) == 0)
+        // Inspector at its 380 default with the pin / toggle chrome after the strip.
+        #expect(ChatTabStripView.trailingInset(inspectorWidth: 380, chromeWidth: 80) == 300)
+        // Squeezed to its 300 floor at a narrow window.
+        #expect(ChatTabStripView.trailingInset(inspectorWidth: 300, chromeWidth: 80) == 220)
+        #expect(ChatTabStripView.trailingInset(inspectorWidth: 50, chromeWidth: 80) == 0)
+
+        // A fresh window has no rail on screen until ChatView lays one out.
+        try await ChatHistoryTestStorage.run {
+            let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
+            defer { window.cleanup() }
+            #expect(window.inspectorColumnWidth == 0)
+        }
+    }
+}

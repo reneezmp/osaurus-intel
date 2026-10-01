@@ -151,9 +151,54 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
                 }
             }
         }
-        custom.sort { $0.createdAt < $1.createdAt }
+        custom = Self.sortedForDisplay(custom)
         resetLegacyDatabaseFlagsIfNeeded(&custom)
         agents = [Agent.default] + custom
+    }
+
+    /// Upstream `AgentStore.sortedForDisplay` for custom agents: agents the
+    /// user ordered (drag in the chat navigator) first, by `order`; the rest
+    /// alphabetically. Intel used creation date before the navigator landed
+    /// (2026-10-01); upstream's rule replaces it.
+    nonisolated static func sortedForDisplay(_ custom: [Agent]) -> [Agent] {
+        custom.sorted { a, b in
+            switch (a.order, b.order) {
+            case let (lhs?, rhs?) where lhs != rhs:
+                return lhs < rhs
+            case (_?, nil):
+                return true
+            case (nil, _?):
+                return false
+            default:
+                return a.name.localizedCaseInsensitiveCompare(b.name) == .orderedAscending
+            }
+        }
+    }
+
+    /// Assign sequential `order` values (0...N-1) to custom agents in the
+    /// given sequence and refresh once. Built-ins and duplicate IDs are
+    /// ignored; omitted custom agents keep their relative position after the
+    /// requested IDs. Upstream `AgentManager.reorder(orderedIds:)`.
+    func reorder(orderedIds: [UUID]) {
+        let customAgents = agents.filter { !$0.isBuiltIn && $0.id != Agent.defaultId }
+        var customById: [UUID: Agent] = [:]
+        for agent in customAgents where customById[agent.id] == nil {
+            customById[agent.id] = agent
+        }
+        var seen = Set<UUID>()
+        var normalized: [Agent] = []
+        for id in orderedIds {
+            guard let agent = customById[id], seen.insert(id).inserted else { continue }
+            normalized.append(agent)
+        }
+        for agent in customAgents where seen.insert(agent.id).inserted {
+            normalized.append(agent)
+        }
+        for (index, var agent) in normalized.enumerated() where agent.order != index {
+            agent.order = index
+            persist(agent)
+        }
+        reload()
     }
 
     /// Marker (in the agents folder, so it is scoped to the storage root and

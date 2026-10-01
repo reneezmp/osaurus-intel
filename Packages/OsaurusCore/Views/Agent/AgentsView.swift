@@ -12,7 +12,7 @@ import UniformTypeIdentifiers
 // preserving identical behavior. Upstream ships it internal, but the
 // clash is Intel-specific (the Intel build compiles a different file
 // set into one module).
-fileprivate func agentColorFor(_ name: String) -> Color {
+func agentColorFor(_ name: String) -> Color {
     let hue = Double(abs(name.hashValue % 360)) / 360.0
     return Color(hue: hue, saturation: 0.6, brightness: 0.8)
 }
@@ -139,6 +139,16 @@ struct AgentsView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
         .environment(\.theme, themeManager.currentTheme)
+        .onReceive(ManagementStateManager.shared.$pendingCreateAgent) { pending in
+            // Deep-link from the chat navigator's New Agent button: land
+            // straight in the Create Agent sheet. One-shot. Upstream.
+            guard pending else { return }
+            ManagementStateManager.shared.pendingCreateAgent = false
+            withAnimation(Self.navTransition) {
+                selectedAgent = nil
+            }
+            isCreating = true
+        }
         .sheet(isPresented: $isCreating) {
             AgentEditorSheet(
                 onSave: { agent in

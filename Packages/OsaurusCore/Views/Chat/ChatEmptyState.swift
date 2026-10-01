@@ -14,10 +14,6 @@ import SwiftUI
 // on Intel, so we re-expose this 3-line utility here to keep HeroAgentAvatar's
 // `AgentAvatarView(tint:)` call working without un-body-swapping that whole
 // 6000-line file. Remove this block once AgentsView is restored.
-fileprivate func agentColorFor(_ name: String) -> Color {
-    let hue = Double(abs(name.hashValue % 360)) / 360.0
-    return Color(hue: hue, saturation: 0.6, brightness: 0.8)
-}
 #endif
 
 // MARK: - Hero Avatar Metrics

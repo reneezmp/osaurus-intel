@@ -521,8 +521,8 @@ struct IntelChatTabsTests {
         #expect(ChatTabShortcut(keyCode: 48, characters: "\t", flags: [.control, .shift]) == .previousTab)
         #expect(ChatTabShortcut(keyCode: 30, characters: "}", flags: [.command, .shift]) == .nextTab)
         #expect(ChatTabShortcut(keyCode: 33, characters: "{", flags: [.command, .shift]) == .previousTab)
-        // ⌘N stays with the File menu (Settings ▸ Conversation decides).
-        #expect(ChatTabShortcut(keyCode: 45, characters: "n", flags: .command) == nil)
+        // ⌘N: a new tab in the current project, as upstream.
+        #expect(ChatTabShortcut(keyCode: 45, characters: "n", flags: .command) == .newTabInCurrentProject)
         #expect(ChatTabShortcut(keyCode: 17, characters: "t", flags: []) == nil)
     }
 

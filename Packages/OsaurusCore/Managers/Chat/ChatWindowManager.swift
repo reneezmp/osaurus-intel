@@ -1108,6 +1108,22 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         return id
     }
 
+    /// The live `ChatSession` currently showing the given persisted session
+    /// id in any open window, else one still running after its tab closed.
+    /// Used by `SessionActivityMonitor.stop` to route a navigator Stop.
+    func session(forSessionId sessionId: UUID) -> ChatSession? {
+        // Prefer the visible (active-tab) instance, then any inactive tab.
+        if let active = windowStates.values.first(where: { $0.session.sessionId == sessionId }) {
+            return active.session
+        }
+        for state in windowStates.values {
+            if let match = state.liveTabSessions.first(where: { $0.sessionId == sessionId }) {
+                return match
+            }
+        }
+        return DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionId)
+    }
+
     /// The window whose tabs include `sessionId`, if any.
     func findWindow(bySessionId sessionId: UUID) -> UUID? {
         windowStates.first { $0.value.tabSessions.contains { $0.sessionId == sessionId } }?.key
@@ -1308,7 +1324,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// ⌘B mirrors the toolbar sidebar button for the focused visible window.
     public func toggleSidebarInFocusedWindow() {
         guard let state = shortcutTargetState else { return }
-        withAnimation(state.theme.animationQuick()) { state.showSidebar.toggle() }
+        withAnimation(state.theme.animationQuick()) { state.toggleSidebar() }
     }
 
     /// ⇧⌘. selects the next local agent, but leaves a project route alone.
@@ -1440,7 +1456,10 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             || DetachedChatRunRegistry.shared.sessions.contains { $0.isStreaming }
     }
 
-    public func setWindowPinned(id: UUID, pinned: Bool) {}
+    /// Pin Window: float above other apps' windows (upstream).
+    public func setWindowPinned(id: UUID, pinned: Bool) {
+        nsWindows[id]?.level = pinned ? .floating : .normal
+    }
 
     public func stopAllSessions() {
         // Quit teardown: record every window's tabs BEFORE cleanup drops the
@@ -1496,12 +1515,14 @@ final class IntelChatWindow: NSWindow {
     }
 }
 
-/// The tab shortcuts a chat window handles itself: ⌘T new tab, ⇧⌘T reopen
-/// the last closed tab, ⌃Tab / ⌃⇧Tab and ⇧⌘] / ⇧⌘[ cycle tabs. ⌘N stays
-/// with the File menu, where Settings ▸ Conversation decides whether it
-/// starts a new chat (a new tab) or opens a new window; upstream's window
-/// always takes ⌘N for a new tab.
+/// The tab shortcuts a chat window handles itself (upstream `ChatPanel`):
+/// ⌘N new tab in the current project (overrides File ▸ New Window while the
+/// chat surface is showing; on the project page the menu keeps ⌘N), ⌘T new
+/// tab, ⇧⌘T reopen the last closed tab, ⌃Tab / ⌃⇧Tab and ⇧⌘] / ⇧⌘[ cycle
+/// tabs. AppKit asks the key window before the menu bar, so handling them
+/// here is what keeps New Window from firing.
 enum ChatTabShortcut: Equatable {
+    case newTabInCurrentProject
     case newTab
     case reopenClosedTab
     case nextTab
@@ -1515,6 +1536,7 @@ enum ChatTabShortcut: Equatable {
             return
         }
         switch (flags, characters.lowercased()) {
+        case (.command, "n"): self = .newTabInCurrentProject
         case (.command, "t"): self = .newTab
         case ([.command, .shift], "t"): self = .reopenClosedTab
         case ([.command, .shift], "]"), ([.command, .shift], "}"): self = .nextTab
@@ -1536,6 +1558,7 @@ enum ChatTabShortcut: Equatable {
     func perform(on state: ChatWindowState) -> Bool {
         guard !state.isProjectPageVisible else { return false }
         switch self {
+        case .newTabInCurrentProject: state.newTabInCurrentProject()
         case .newTab: state.newTab()
         case .reopenClosedTab: state.reopenLastClosedTab()
         case .nextTab: state.selectAdjacentTab(offset: 1)
@@ -1547,21 +1570,23 @@ enum ChatTabShortcut: Equatable {
 
 // MARK: - Intel Chat Toolbar
 
-/// Hosts the chat window's unified toolbar: sidebar toggle leading, the
-/// agent pill and tab strip in one flexible middle item, the settings gear
-/// trailing. Upstream (#2630) moved the agent pill into its agents
-/// sidebar; Intel keeps its chats sidebar, so the pill leads the strip and
-/// picks whose tabs it shows. The back-to-project chip that sat beside the
-/// pill is now the folder glyph on each project chat's tab.
+/// Places each control in its own `NSToolbarItem` so macOS applies native
+/// per-item styling. Upstream `ChatToolbarDelegate` layout: sidebar toggle
+/// leading, the tab strip filling the middle, the inspector toggle and Pin
+/// Window trailing. The agent pill lives in the navigator (sidebar) now, as
+/// upstream; Settings is the navigator's footer row.
 @MainActor
 final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
     static let sidebarItem = NSToolbarItem.Identifier("IntelChatToolbar.sidebar")
     static let tabsItem = NSToolbarItem.Identifier("IntelChatToolbar.tabs")
-    static let actionItem = NSToolbarItem.Identifier("IntelChatToolbar.action")
+    /// The single trailing item: inspector toggle and Pin Window as one row
+    /// of identically sized buttons (a hidden item of its own would still
+    /// reserve AppKit's inter-item spacing).
+    static let trailingItem = NSToolbarItem.Identifier("IntelChatToolbar.trailing")
 
     /// The tab item is flexible, so it doubles as the space that pushes the
     /// trailing item to the right edge.
-    private static let ids: [NSToolbarItem.Identifier] = [sidebarItem, tabsItem, actionItem]
+    private static let ids: [NSToolbarItem.Identifier] = [sidebarItem, tabsItem, trailingItem]
 
     private weak var windowState: ChatWindowState?
 
@@ -1588,9 +1613,9 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
         case Self.sidebarItem:
             return host(itemIdentifier, IntelToolbarSidebarView(windowState: windowState))
         case Self.tabsItem:
-            return makeTabStripItem(itemIdentifier, IntelToolbarTabsView(windowState: windowState))
-        case Self.actionItem:
-            return host(itemIdentifier, IntelToolbarActionView(windowState: windowState))
+            return makeTabStripItem(itemIdentifier, ChatTabStripView(windowState: windowState))
+        case Self.trailingItem:
+            return host(itemIdentifier, IntelToolbarTrailingView(windowState: windowState))
         default:
             return nil
         }
@@ -1636,7 +1661,7 @@ final class IntelChatToolbarDelegate: NSObject, NSToolbarDelegate {
         hosting.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
         item.view = hosting
         item.isBordered = false
-        // Fold the trailing gear into the overflow menu before the tabs.
+        // Fold the trailing buttons into the overflow menu before the tabs.
         item.visibilityPriority = .high
         return item
     }
@@ -1650,10 +1675,10 @@ private struct IntelToolbarSidebarView: View {
     var body: some View {
         HeaderActionButton(
             icon: "sidebar.left",
-            help: windowState.showSidebar ? "Hide sidebar" : "Show sidebar",
+            help: windowState.isSidebarVisible ? "Hide sidebar" : "Show sidebar",
             action: {
-                withAnimation(.easeOut(duration: 0.2)) {
-                    windowState.showSidebar.toggle()
+                withAnimation(windowState.theme.animationQuick()) {
+                    windowState.toggleSidebar()
                 }
             }
         )
@@ -1661,61 +1686,41 @@ private struct IntelToolbarSidebarView: View {
     }
 }
 
-/// The toolbar's middle item: the agent pill, then that agent's tabs.
-/// Reuses the upstream `AgentPill` (un-body-swapped for Intel in M12).
-/// Hidden on the project page, which draws its own header.
-private struct IntelToolbarTabsView: View {
+/// The trailing toolbar item: the inspector toggle and Pin Window. Upstream
+/// `ChatToolbarTrailingView`, minus the Project Settings rail (Intel's
+/// project page keeps its own layout) and the file-count badge (no file
+/// history on Intel yet). Hidden on the project page, which has no chat to
+/// inspect or pin.
+private struct IntelToolbarTrailingView: View {
     @ObservedObject var windowState: ChatWindowState
-    @State private var openPickerTrigger: Int = 0
 
     var body: some View {
-        ChatTabStripView(
-            windowState: windowState,
-            leadingChromeWidth: 110,
-            leadingAccessory: AnyView(agentPill)
-        )
-        .environment(\.theme, windowState.theme)
-    }
-
-    private var agentPill: some View {
-        AgentPill(
-            agents: windowState.agents,
-            activeAgentId: windowState.agentId,
-            onSelectAgent: { windowState.switchAgent(to: $0) },
-            onOpenActiveAgentSettings: {
-                let active = windowState.agents.first { $0.id == windowState.agentId }
-                let deeplinkId = (active?.isBuiltIn == false) ? active?.id : nil
-                AppDelegate.shared?.showManagementWindow(
-                    initialTab: .agents,
-                    deeplinkAgentId: deeplinkId
+        HStack(spacing: 8) {
+            if !windowState.isProjectPageVisible {
+                let isOpen = windowState.isRightRailOpen
+                HeaderActionButton(
+                    icon: "sidebar.right",
+                    help: isOpen ? "Hide inspector" : "Show inspector",
+                    isActive: isOpen,
+                    badge: windowState.inspectorBadgeCount,
+                    action: {
+                        withAnimation(windowState.theme.animationQuick()) {
+                            windowState.toggleInspector()
+                        }
+                    }
                 )
-            },
-            openPickerTrigger: openPickerTrigger
-        )
-        // Bridge the `/agent` slash command into the toolbar's agent picker
-        // (mirrors the non-Intel branch's listener). (Renée, 2026-06-14.)
-        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarOpenAgentPicker)) { notification in
-            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
-                targetWindowId == windowState.windowId
-            else { return }
-            openPickerTrigger &+= 1
-        }
-    }
-}
+                .accessibilityLabel(
+                    Text(LocalizedStringKey(isOpen ? "Hide inspector" : "Show inspector"), bundle: .module))
 
-/// Trailing settings gear. Upstream retired the toolbar's "+ New chat"
-/// button in favour of the strip's "+" (#2630); Intel follows, so the gear
-/// no longer swaps out once a chat has turns. Hidden on the project page,
-/// whose own header has the controls.
-private struct IntelToolbarActionView: View {
-    @ObservedObject var windowState: ChatWindowState
-
-    var body: some View {
-        Group {
-            if windowState.openProjectId == nil {
-                SettingsButton(action: {
-                    AppDelegate.shared?.showManagementWindow(initialTab: nil)
-                })
+                HeaderActionButton(
+                    icon: windowState.isWindowPinned ? "pin.fill" : "pin",
+                    help: windowState.isWindowPinned ? "Unpin Window" : "Pin Window",
+                    action: {
+                        windowState.isWindowPinned.toggle()
+                        ChatWindowManager.shared.setWindowPinned(
+                            id: windowState.windowId, pinned: windowState.isWindowPinned)
+                    }
+                )
             }
         }
         .environment(\.theme, windowState.theme)

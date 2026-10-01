@@ -2383,3 +2383,20 @@ calling a sync complete.
   Renée's decision.
 - Upstream moved on during this work (`b023f2c1e` #2952, `b3b9091c7`
   #2926 and others after `64b0d6a4b`); they belong to the next audit.
+
+### Chat window layout, steps 1–3 (`W-chat-tabs` stage 2, #2907 part C) — 2026-10-01
+
+- Renée's rule from here on: **when in doubt, follow upstream**; adapt only
+  what Intel or Ventura forces.
+- Upstream's navigator (Agents | Projects), History inspector, toolbar
+  (inspector toggle, Pin Window) and #2910 ported; stage-1 divergences
+  (⌘N, `startNewChat(with:)`, tab activity) reverted to upstream. Details
+  and Intel adaptations: [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md).
+- **Re-sync notes:** `ChatSessionSidebar.swift`, `ChatHistoryPane.swift`
+  and `ChatInspectorPanel.swift` are upstream files with workspace, shared,
+  network and File Changes parts removed (each removal says "Intel:").
+  `SessionActivityMonitor.swift` and `Localization.swift` are verbatim.
+  `ChatContentView.swift` stays Intel's file (Ventura thread-height fix);
+  its layout statics mirror upstream `ChatView`'s.
+- Intel `AgentManager` now orders agents as upstream (`order`, then name);
+  it used creation date before.

@@ -991,3 +991,54 @@ few saved chats under two agents.
 - [ ] Ventura: the tab chips, × buttons, the "+" and the overflow menu all
       render (no blank squares); right-clicking a tab shows the chat menu,
       not the toolbar's "Icon and Text" menu.
+
+## Chat window layout (navigator + inspector)
+
+Manual: [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md). This
+changes the chat window's look; the "Chat tabs" section above still applies,
+except that agents are now picked in the sidebar, not a toolbar pill.
+
+- [ ] Toolbar: sidebar button, tabs, then a right-panel button and a pin.
+      No agent pill, no Settings gear in the toolbar.
+- [ ] Left sidebar has **Agents | Projects** at the top, a count with a "+"
+      (New Agent / New Project), a search field, and **Settings** at the
+      bottom (opens Settings).
+- [ ] Agents: one row per agent, the current one highlighted. Clicking an
+      agent shows its tabs (same rules as the tabs checklist). Hover a row:
+      a "+" starts a new chat with that agent in a new tab. Right-click: New
+      Chat, Open Settings.
+- [ ] **(paid)** While an agent replies (in any tab, or a schedule/watcher
+      run), its row shows the spinning ring and "Working…"; hover shows a
+      Stop button that stops it.
+- [ ] Drag a custom agent row up or down: the order sticks after relaunch.
+      The Orchestrator/Default stays first. On first launch of this build,
+      agents you never reordered appear alphabetically.
+- [ ] "+" on Agents opens Settings › Agents with the Create Agent sheet
+      already open. Create an agent: its row shows a "New" pill until you
+      click it.
+- [ ] Projects: project rows; "+" creates a project and opens its page;
+      clicking a row opens the project page; right-click: Rename, Edit
+      Instructions, Delete (asks first, keeps the chats).
+- [ ] Right-panel button opens **History** on the right: the current agent's
+      chats, with "N chats", search, a filter button (origin, projects,
+      plugins, others, archived), New Chat and Import. Clicking a chat opens
+      it in the current tab; the panel stays open. Right-click a chat: Open
+      in New Tab / New Window, Rename, Pin, Move to Project, Export,
+      Archive, Delete. ⌘/⇧-click selects several.
+- [ ] Search finds chats by words inside their messages, not just titles.
+- [ ] For the Default agent, History lists every chat (as the old sidebar
+      did), including old ones saved without an agent.
+- [ ] Switching agents changes History to that agent's chats and clears
+      its filters.
+- [ ] Drag the inner edges of both side panels: they resize, the cursor
+      shows left-right arrows, and the widths are kept after relaunch.
+- [ ] Narrow the window with both panels open: the left sidebar steps
+      aside; the sidebar button then brings it back by closing History.
+      The tabs never run under either panel.
+- [ ] Pin Window: the chat window stays above other apps' windows; click
+      again to unpin.
+- [ ] ⌘N in the chat window opens a new tab (staying in the current
+      project); on the project page ⌘N keeps its menu meaning.
+- [ ] ⌘B still toggles the left sidebar.
+- [ ] Ventura: the lens bars, rows, search fields, filter popover and resize
+      seams render and respond; no blank squares or clipped corners.

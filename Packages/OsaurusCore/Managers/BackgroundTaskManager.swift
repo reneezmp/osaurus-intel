@@ -82,6 +82,23 @@ public final class BackgroundTaskManager: ObservableObject {
         backgroundTasks[id]
     }
 
+    /// The live (active) registry task currently driving the given persisted
+    /// session id, if any (upstream). On Intel these are dispatched runs:
+    /// schedules, watchers and the Orchestrator's delegations.
+    public func liveTask(forSessionId sessionId: UUID) -> BackgroundTaskState? {
+        backgroundTasks.values.first { state in
+            state.status.isActive && state.chatSession?.sessionId == sessionId
+        }
+    }
+
+    /// Sessions of all still-active registry tasks.
+    func activeTaskSessions() -> [ChatSession] {
+        backgroundTasks.values.compactMap { state in
+            guard state.status.isActive else { return nil }
+            return state.chatSession
+        }
+    }
+
     /// Background-task id (if any) the given window is bound to. Returns
     /// nil for plain chat windows that were never detached.
     public func taskId(forWindowId windowId: UUID) -> UUID? {

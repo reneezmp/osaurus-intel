@@ -115,6 +115,11 @@ public final class ManagementStateManager: ObservableObject {
     /// `ModelDownloadView` observes this and resets it to nil after applying.
     @Published public var pendingModelDetailId: String?
 
+    /// One-shot request to open the Create Agent sheet on the Agents tab,
+    /// from the chat navigator's New Agent button. `AgentsView` observes
+    /// this and resets it after applying. Upstream.
+    @Published public var pendingCreateAgent: Bool = false
+
     /// One-shot request to pop the "Add Collection" sheet on the Knowledge
     /// tab — e.g. from the project page's Add Collection shortcut, so the
     /// user isn't dropped on the tab just to click the same button again.

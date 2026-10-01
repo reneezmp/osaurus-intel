@@ -1199,10 +1199,6 @@ struct AddOverrideSheet: View {
 // `ChatEmptyState.swift`, `SharedHeaderComponents.swift`) to avoid a
 // module-scope redeclaration clash now that every Views/ file compiles into
 // one Intel target. Same reasoning, same body.
-fileprivate func agentColorFor(_ name: String) -> Color {
-    let hue = Double(abs(name.hashValue % 360)) / 360.0
-    return Color(hue: hue, saturation: 0.6, brightness: 0.8)
-}
 
 // MARK: - Agent Row (Agents tab)
 

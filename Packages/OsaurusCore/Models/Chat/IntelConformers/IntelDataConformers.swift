@@ -2606,6 +2606,9 @@ extension NSNotification.Name {
     /// Posted by the `/agent` slash command to pop open the toolbar's agent
     /// picker for the window identified in `userInfo["windowId"]`.
     static let chatToolbarOpenAgentPicker = NSNotification.Name("chatToolbarOpenAgentPicker")
+    /// Posted by a tab's folder glyph to reopen the current chat's project
+    /// page in the window identified by `userInfo["windowId"]`.
+    static let chatToolbarBackToProject = NSNotification.Name("chatToolbarBackToProject")
     static let toolsListChanged = NSNotification.Name("toolsListChanged")
 }
 #endif

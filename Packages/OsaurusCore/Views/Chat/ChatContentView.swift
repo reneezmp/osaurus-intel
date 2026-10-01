@@ -62,11 +62,6 @@ struct ChatContentView: View {
     /// every frame; the final value is committed to `storedSidebarWidth` on
     /// drag end. `nil` means no drag is active.
     @State private var liveSidebarWidth: Double?
-    /// Width captured at the start of a drag. `translation` is cumulative from
-    /// the gesture start, so the live width is always `anchor + translation`
-    /// (adding to the running live value would double-count the delta).
-    @State private var sidebarDragAnchor: Double?
-
     /// Allowed range for the resizable sidebar. The floor keeps the header
     /// controls usable; the ceiling stops the sidebar from crowding out the
     /// chat on narrow windows.
@@ -83,134 +78,181 @@ struct ChatContentView: View {
         CGFloat(clampSidebarWidth(liveSidebarWidth ?? storedSidebarWidth))
     }
 
-    /// Draggable divider on the sidebar's trailing edge. A thin visible seam
-    /// with a wider invisible hit area; dragging resizes the sidebar. Uses
-    /// `NSCursor.resizeLeftRight` push/pop (this fork's established cursor
-    /// pattern — see `PromptCard.swift` — rather than upstream's
-    /// `.pointerStyle(.columnResize)`, which is macOS 14+).
+    /// Draggable divider on the sidebar's trailing edge (shared control with
+    /// the inspector's leading edge). Upstream `ColumnResizeHandle`.
     private var sidebarResizeHandle: some View {
-        // An 11pt-wide interactive strip straddling the trailing edge (offset
-        // pushes half of it past the border) so the seam is grabbable right at
-        // the boundary. The visible seam is a 1pt line at the strip's center;
-        // the cursor area fills the strip.
-        Color.clear
-            .frame(width: 11)
-            .frame(maxHeight: .infinity)
-            .overlay {
-                Rectangle()
-                    .fill(theme.secondaryText.opacity(liveSidebarWidth != nil ? 0.55 : 0.12))
-                    .frame(width: 1)
-            }
-            .contentShape(Rectangle())
-            .onHover { hovering in
-                if hovering {
-                    NSCursor.resizeLeftRight.push()
-                } else {
-                    NSCursor.pop()
+        ColumnResizeHandle(
+            edge: .trailing,
+            range: Self.sidebarWidthRange,
+            storedWidth: $storedSidebarWidth,
+            liveWidth: $liveSidebarWidth
+        )
+    }
+
+    // MARK: Inspector (upstream #2907 part C)
+
+    /// User-adjustable width of the right-hand inspector, persisted like the
+    /// sidebar's and clamped to `inspectorWidthRange` on read.
+    @AppStorage("chatInspectorWidth") private var storedInspectorWidth: Double = ChatContentView.defaultInspectorWidth
+    /// Transient inspector width while its edge drag is in flight.
+    @State private var liveInspectorWidth: Double?
+
+    /// Allowed range for the resizable inspector. Same floor as the
+    /// inspector's squeeze limit; the ceiling keeps the chat column readable.
+    static let inspectorWidthRange: ClosedRange<Double> = 300...520
+    /// Design width the inspector opens at before the user resizes it.
+    static let defaultInspectorWidth: Double = 380
+    /// Chat column kept readable beside the inspector.
+    private static let chatColumnMinWidthWithPanel: CGFloat = 440
+
+    static func clampInspectorWidth(_ raw: Double) -> Double {
+        min(max(raw, inspectorWidthRange.lowerBound), inspectorWidthRange.upperBound)
+    }
+
+    private var clampedInspectorWidth: CGFloat {
+        CGFloat(Self.clampInspectorWidth(liveInspectorWidth ?? storedInspectorWidth))
+    }
+
+    private var inspectorResizeHandle: some View {
+        ColumnResizeHandle(
+            edge: .leading,
+            range: Self.inspectorWidthRange,
+            storedWidth: $storedInspectorWidth,
+            liveWidth: $liveInspectorWidth
+        )
+    }
+
+    /// The inspector pane on screen, if any. Hidden on the project page,
+    /// which has no chat to inspect; the requested pane stays remembered.
+    nonisolated static func visibleInspectorPane(
+        requested: ChatInspectorPane?,
+        isProjectPageOpen: Bool
+    ) -> ChatInspectorPane? {
+        guard let requested, !isProjectPageOpen else { return nil }
+        return requested
+    }
+
+    /// Whether the sidebar steps aside (not persisted) for the inspector:
+    /// both only stay up once the window can hold the sidebar at its
+    /// current width, a readable chat column and the inspector at its floor.
+    nonisolated static func sidebarStepsAside(
+        windowWidth: CGFloat, sidebarWidth: CGFloat, inspectorOpen: Bool
+    ) -> Bool {
+        inspectorOpen
+            && windowWidth < sidebarWidth + chatColumnMinWidthWithPanel + CGFloat(inspectorWidthRange.lowerBound)
+    }
+
+    /// Inspector width for a window of `totalWidth`: the user's chosen width
+    /// when it fits, otherwise squeezed down to its floor before the chat
+    /// column gives.
+    nonisolated static func changesPanelWidth(
+        totalWidth: CGFloat, sidebarWidth: CGFloat, preferredWidth: CGFloat
+    ) -> CGFloat {
+        let available = totalWidth - sidebarWidth - chatColumnMinWidthWithPanel
+        let preferred = CGFloat(clampInspectorWidth(Double(preferredWidth)))
+        return min(preferred, max(CGFloat(inspectorWidthRange.lowerBound), available))
+    }
+
+    /// The left rail (Agents | Projects), with every window-level handoff
+    /// it needs. Upstream `navigatorRail(width:)`, minus workspace and
+    /// network agents (docs/CHAT_WINDOW_LAYOUT_INTEL.md).
+    private func navigatorRail(width sidebarWidth: CGFloat) -> some View {
+        ChatSessionSidebar(
+            sessions: windowState.filteredSessions,
+            agentId: windowState.agentId,
+            keepsProjectsLens: windowState.enteredChatFromProjectPage,
+            width: sidebarWidth,
+            onSelect: { [weak windowState] data in
+                windowState?.openProjectId = nil
+                windowState?.enteredChatFromProjectPage = false
+                windowState?.loadSession(data)
+                isPinnedToBottom = true
+            },
+            onDeleteProject: { [weak windowState] id in
+                ChatSessionsManager.shared.deleteProject(id: id)
+                // The open chat may have been a member; its next
+                // auto-save must not resurrect the id.
+                windowState?.syncTabSessions(withProjectId: id) { $0.projectId = nil }
+                if windowState?.openProjectId == id {
+                    windowState?.openProjectId = nil
                 }
+                windowState?.refreshSessions()
+            },
+            onOpenProject: { [weak windowState] project in
+                windowState?.openProjectId = project.id
+            },
+            openProjectId: windowState.openProjectId,
+            onStop: { [weak windowState] id in
+                // This window's own run stops directly; anything else
+                // routes through the monitor.
+                if windowState?.session.sessionId == id {
+                    windowState?.session.stop()
+                } else {
+                    SessionActivityMonitor.shared.stop(sessionId: id)
+                }
+            },
+            onOpenInNewTab: { [weak windowState] data in
+                windowState?.openProjectId = nil
+                windowState?.enteredChatFromProjectPage = false
+                windowState?.openSessionInNewTab(data)
+            },
+            onSelectAgent: { [weak windowState] newAgentId in
+                windowState?.switchAgent(to: newAgentId)
+            },
+            onNewChatWithAgent: { [weak windowState] newAgentId in
+                windowState?.startNewChat(with: newAgentId)
+                isPinnedToBottom = true
             }
-            .offset(x: 5)
-            .gesture(
-                DragGesture(minimumDistance: 0, coordinateSpace: .global)
-                    .onChanged { value in
-                        // Anchor to the width at gesture start so the rail
-                        // tracks the cursor 1:1 without accumulating drift.
-                        let anchor = sidebarDragAnchor ?? Double(clampedSidebarWidth)
-                        if sidebarDragAnchor == nil {
-                            sidebarDragAnchor = anchor
-                        }
-                        liveSidebarWidth = clampSidebarWidth(anchor + Double(value.translation.width))
-                    }
-                    .onEnded { _ in
-                        if let final = liveSidebarWidth {
-                            storedSidebarWidth = clampSidebarWidth(final)
-                        }
-                        liveSidebarWidth = nil
-                        sidebarDragAnchor = nil
-                    }
-            )
+        )
+    }
+
+    private func publishRailGeometry(sidebarAutoHidden: Bool, inspectorWidth: CGFloat) {
+        if windowState.isSidebarAutoHidden != sidebarAutoHidden {
+            windowState.isSidebarAutoHidden = sidebarAutoHidden
+        }
+        if windowState.inspectorColumnWidth != inspectorWidth {
+            windowState.inspectorColumnWidth = inspectorWidth
+        }
     }
 
     var body: some View {
         GeometryReader { proxy in
             let windowWidth: CGFloat = proxy.size.width
-            let showSidebar: Bool = windowState.showSidebar
-            let sidebarWidth: CGFloat = showSidebar ? clampedSidebarWidth : 0
-            let chatWidth = windowWidth - sidebarWidth
+            let inspectorPane = Self.visibleInspectorPane(
+                requested: windowState.effectiveInspectorPane,
+                isProjectPageOpen: windowState.openProjectId != nil)
+            let inspectorVisible = inspectorPane != nil
+            let sidebarAutoHidden =
+                windowState.showSidebar
+                && Self.sidebarStepsAside(
+                    windowWidth: windowWidth,
+                    sidebarWidth: clampedSidebarWidth,
+                    inspectorOpen: inspectorVisible)
+            let sidebarVisible = windowState.showSidebar && !sidebarAutoHidden
+            let sidebarWidth: CGFloat = sidebarVisible ? clampedSidebarWidth : 0
+            let inspectorWidth: CGFloat =
+                inspectorVisible
+                ? Self.changesPanelWidth(
+                    totalWidth: windowWidth,
+                    sidebarWidth: sidebarWidth,
+                    preferredWidth: clampedInspectorWidth) : 0
+            let chatWidth = windowWidth - sidebarWidth - inspectorWidth
             let effectiveContentWidth = min(chatWidth, 1100)
             let chromeHeight = measuredHeaderHeight + measuredComposerHeight
             let threadHeight = max(80, proxy.size.height - chromeHeight)
 
             HStack(alignment: .top, spacing: 0) {
-                // Sidebar
-                let fSessions: [ChatSessionData] = windowState.filteredSessions
-                let aId: UUID = windowState.agentId
-                let sessId: UUID? = session.sessionId
+                // Sidebar (navigator: Agents | Projects)
                 VStack(alignment: .leading, spacing: 0) {
-                    if windowState.showSidebar {
-                        ChatSessionSidebar(
-                            sessions: fSessions,
-                            agentId: aId,
-                            currentSessionId: sessId,
-                            width: sidebarWidth,
-                            onSelect: { [weak windowState] data in
-                                windowState?.openProjectId = nil
-                                windowState?.loadSession(data)
-                            },
-                            onNewChat: { [weak windowState] in windowState?.startNewChat() },
-                            onDelete: { [weak windowState] id in
-                                guard let windowState else { return }
-                                // Move every tab off the doomed row FIRST: a
-                                // live session still holding that id and its
-                                // turns would re-persist itself on the next
-                                // send() or via the save() inside stop() —
-                                // resurrecting the row. Those saves can land
-                                // here, so delete AFTER to guarantee it's gone.
-                                windowState.prepareForSessionDeletion(id: id)
-                                ChatSessionsManager.shared.delete(id: id)
-                                windowState.refreshSessions()
-                            },
-                            onRename: { [weak windowState] id, title in
-                                ChatSessionsManager.shared.rename(id: id, title: title)
-                                // Keep every open tab of it in sync so the next
-                                // auto-save doesn't clobber the rename. (upstream #1482)
-                                windowState?.syncTabSessions(withId: id) { $0.title = title }
-                                windowState?.refreshSessions()
-                            },
-                            onSetArchived: { [weak windowState] id, archived in
-                                ChatSessionsManager.shared.setArchived(id: id, archived: archived)
-                                windowState?.syncTabSessions(withId: id) { $0.archived = archived }
-                                windowState?.refreshSessions()
-                            },
-                            onSetPinned: { [weak windowState] id, pinned in
-                                ChatSessionsManager.shared.setPinned(id: id, pinned: pinned)
-                                // Keep every open tab of it in sync so the next
-                                // auto-save doesn't clobber the flag.
-                                windowState?.syncTabSessions(withId: id) { $0.pinned = pinned }
-                                windowState?.refreshSessions()
-                            },
-                            onExport: { _, _ in
-                                // Rows run export themselves (menu → chooser →
-                                // `ChatSessionExportCoordinator`), as upstream.
-                            },
-                            onOpenInNewWindow: { data in
-                                ChatWindowManager.shared.createWindow(
-                                    agentId: data.agentId, sessionData: data)
-                            },
-                            onOpenInNewTab: { [weak windowState] data in
-                                windowState?.openSessionInNewTab(data)
-                            },
-                            onOpenProject: { [weak windowState] projectId in
-                                windowState?.openProjectId = projectId
-                            }
-                        )
+                    if sidebarVisible {
+                        navigatorRail(width: sidebarWidth)
                     }
                 }
                 .frame(width: sidebarWidth, alignment: .top)
                 .frame(maxHeight: .infinity, alignment: .top)
                 .clipped()
                 .overlay(alignment: .trailing) {
-                    if windowState.showSidebar {
+                    if sidebarVisible {
                         sidebarResizeHandle
                     }
                 }
@@ -325,7 +367,9 @@ struct ChatContentView: View {
                             focusTrigger: focusTrigger,
                             agentId: windowState.agentId,
                             windowId: windowState.windowId,
-                            isCompact: windowState.showSidebar,
+                            // Compact when a side column (sidebar or
+                            // inspector) narrows the chat.
+                            isCompact: sidebarVisible || inspectorVisible,
                             // Never wired up: FloatingInputCard's built-in /clear
                             // handler falls back to a "pass a handler" toast
                             // without this. Mirrors the Cmd+N "New Chat" action
@@ -373,6 +417,57 @@ struct ChatContentView: View {
                 .clipped()
                 .onPreferenceChange(ChatHeaderHeightKey.self) { measuredHeaderHeight = $0 }
                 .onPreferenceChange(ChatComposerHeightKey.self) { measuredComposerHeight = $0 }
+
+                // Right-hand rail: this chat's inspector (History; File
+                // Changes once file history is ported). Mirrors the sidebar
+                // column: same container, clipped to its width.
+                VStack(alignment: .leading, spacing: 0) {
+                    if let inspectorPane {
+                        ChatInspectorPanel(
+                            windowState: windowState,
+                            pane: inspectorPane,
+                            width: inspectorWidth,
+                            sessionId: session.sessionId,
+                            focusSetId: $windowState.changesPanelFocusSetId,
+                            // Same route as a sidebar row: the chat opens in
+                            // the current tab and the rail stays up.
+                            onSelectSession: { [weak windowState] data in
+                                windowState?.openProjectId = nil
+                                windowState?.enteredChatFromProjectPage = false
+                                windowState?.loadSession(data)
+                                isPinnedToBottom = true
+                            }
+                        )
+                    }
+                }
+                .frame(width: inspectorWidth, alignment: .top)
+                .frame(maxHeight: .infinity, alignment: .top)
+                .clipped()
+                .overlay(alignment: .leading) {
+                    if inspectorVisible {
+                        inspectorResizeHandle
+                    }
+                }
+                .zIndex(1)
+            }
+            .animation(theme.animationQuick(), value: inspectorVisible)
+            // Publish the geometry-driven step-aside so the toolbar toggle
+            // and tab strip describe the sidebar actually on screen.
+            // Intel: single-value `onChange` plus `onAppear` (macOS 13).
+            .onAppear {
+                publishRailGeometry(sidebarAutoHidden: sidebarAutoHidden, inspectorWidth: inspectorWidth)
+            }
+            .onChange(of: sidebarAutoHidden) { hidden in
+                publishRailGeometry(sidebarAutoHidden: hidden, inspectorWidth: inspectorWidth)
+            }
+            // Same for the right rail's width: the strip insets its trailing
+            // edge by it so the tabs end where the chat column ends (#2910).
+            .onChange(of: inspectorWidth) { width in
+                publishRailGeometry(sidebarAutoHidden: sidebarAutoHidden, inspectorWidth: width)
+            }
+            .onDisappear {
+                windowState.isSidebarAutoHidden = false
+                windowState.inspectorColumnWidth = 0
             }
         }
         .frame(
@@ -403,6 +498,12 @@ struct ChatContentView: View {
         )
         #endif
         .ignoresSafeArea()
+        .onReceive(NotificationCenter.default.publisher(for: .chatToolbarBackToProject)) { notification in
+            guard let targetWindowId = notification.userInfo?["windowId"] as? UUID,
+                targetWindowId == windowState.windowId
+            else { return }
+            windowState.openProjectId = session.projectId
+        }
         .onReceive(NotificationCenter.default.publisher(for: .chatOverlayActivated)) { _ in
             focusTrigger &+= 1; isPinnedToBottom = true
         }

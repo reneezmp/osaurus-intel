@@ -238,6 +238,13 @@ final class ChatSession: ObservableObject {
     /// forward the prompt overlay wouldn't appear/disappear when the
     /// inner queue mutates `current`.
     nonisolated(unsafe) private var promptQueueCancellable: AnyCancellable?
+    /// Mirrors live activity into `SessionActivityMonitor` (navigator rows,
+    /// tab rings). Upstream #2263 / #2630.
+    nonisolated(unsafe) private var activityMonitorCancellable: AnyCancellable?
+    /// Session id whose activity was last pushed to `SessionActivityMonitor`,
+    /// so a session switch/reset clears the stale entry. `nonisolated(unsafe)`
+    /// so `deinit` can read it for the final cleanup hop.
+    nonisolated(unsafe) private var lastReportedActivitySessionId: UUID?
 
     /// Callback when session needs to be saved (called after streaming completes)
     var onSessionChanged: (() -> Void)?
@@ -320,6 +327,24 @@ final class ChatSession: ObservableObject {
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
+
+        // Mirror live activity into the shared sidebar monitor. `@Published`
+        // publishers emit the NEW value on willSet, so the closure computes
+        // from the emitted values (the properties themselves are still stale
+        // at this point). Intel has no pre-send warm-up handshake.
+        activityMonitorCancellable = Publishers.CombineLatest4(
+            $isStreaming,
+            $sessionId,
+            $awaitingClarify,
+            promptQueue.$current
+        )
+        .sink { [weak self] isStreaming, sessionId, clarify, promptItem in
+            self?.publishActivityState(
+                sessionId: sessionId,
+                working: isStreaming,
+                waiting: promptItem != nil || clarify != nil
+            )
+        }
 
         folderStateCancellable = folderState.objectWillChange
             .sink { [weak self] _ in self?.objectWillChange.send() }
@@ -457,6 +482,31 @@ final class ChatSession: ObservableObject {
         modelSelectionCancellable = nil
         agentAutoSpeakCancellable = nil
         promptQueueCancellable = nil
+        activityMonitorCancellable = nil
+        // Belt-and-suspenders: a session shouldn't dealloc while marked
+        // active, but a stale sidebar indicator with no live session to
+        // clear it would be permanent, so drop the entry on the way out.
+        if let staleId = lastReportedActivitySessionId {
+            Task { @MainActor in
+                SessionActivityMonitor.shared.reportSession(staleId, status: nil)
+            }
+        }
+    }
+
+    /// Push this session's live activity into the shared monitor keyed by
+    /// persisted session id. Waiting (a mounted clarify/secret card or a
+    /// pending clarify answer) outranks working; neither means the entry is
+    /// removed. Upstream `publishActivityState`.
+    private func publishActivityState(sessionId: UUID?, working: Bool, waiting: Bool) {
+        let status: SessionActivityMonitor.Status? =
+            waiting ? .waitingForInput : (working ? .working : nil)
+        if let previous = lastReportedActivitySessionId, previous != sessionId {
+            SessionActivityMonitor.shared.reportSession(previous, status: nil)
+        }
+        if let sessionId {
+            SessionActivityMonitor.shared.reportSession(sessionId, status: status)
+        }
+        lastReportedActivitySessionId = sessionId
     }
 
     private func loadActiveModelOptions(for model: String?) {

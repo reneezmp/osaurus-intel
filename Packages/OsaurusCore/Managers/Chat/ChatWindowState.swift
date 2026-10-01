@@ -574,6 +574,17 @@ enum ChatTabScope: Hashable {
     }
 }
 
+/// The panes of the chat window's right-hand inspector. One rail, two
+/// contents, both about the tab on screen. Intel has no file change
+/// history yet (`W-file-history`), so only History is ever shown; the case
+/// stays so the rail's code matches upstream.
+enum ChatInspectorPane: Hashable {
+    /// This chat's file history: timeline, per-file net state, revert.
+    case fileChanges
+    /// The past chats of this chat's agent (search, filters, import).
+    case history
+}
+
 @MainActor
 final class ChatWindowState: ObservableObject {
     let windowId: UUID
@@ -633,7 +644,132 @@ final class ChatWindowState: ObservableObject {
 
     // MARK: View state
 
+    /// Session sidebar starts open so a fresh window surfaces its agents
+    /// immediately; the toolbar toggle still collapses it per window.
     @Published var showSidebar: Bool = true
+
+    /// True while the sidebar is stepping aside for the open inspector
+    /// because the window is too narrow for both (`ChatContentView` sets it
+    /// from its geometry). Separate from `showSidebar` so the user's choice
+    /// survives and the sidebar returns when the inspector closes.
+    @Published var isSidebarAutoHidden: Bool = false
+
+    /// Width of the right rail actually on screen, 0 while closed.
+    /// `ChatContentView` sets it from its geometry; the tab strip reads it to
+    /// stop the tabs at the chat column's trailing edge (#2910).
+    @Published var inspectorColumnWidth: CGFloat = 0
+
+    /// Whether the sidebar is on screen. The toolbar toggle and the tab
+    /// strip inset read this, not `showSidebar`.
+    var isSidebarVisible: Bool { showSidebar && !isSidebarAutoHidden }
+
+    /// Toolbar button / ⌘B. When the sidebar is stepping aside for the
+    /// inspector, the user asking for it wins: the inspector closes and the
+    /// sidebar (still "shown") comes back — a plain flip would hide nothing
+    /// visible and leave the button looking broken.
+    func toggleSidebar() {
+        if showSidebar && isSidebarAutoHidden {
+            inspectorPane = nil
+            return
+        }
+        showSidebar.toggle()
+    }
+
+    /// True while the active chat was entered from its project's page (or
+    /// started there via ⌘N); keeps the navigator on its Projects lens.
+    @Published var enteredChatFromProjectPage: Bool = false
+
+    /// Floating window (Pin Window in the toolbar).
+    @Published var isWindowPinned: Bool = false
+
+    // MARK: Inspector (upstream #2907 part C)
+
+    /// Which pane the right-hand inspector shows, or nil while it is closed.
+    @Published var inspectorPane: ChatInspectorPane? {
+        didSet { if let inspectorPane { lastInspectorPane = inspectorPane } }
+    }
+
+    /// The pane the inspector reopens on. History by default.
+    @Published private(set) var lastInspectorPane: ChatInspectorPane = .history
+
+    /// True once the user picked the pane on purpose (lens bar tap). A
+    /// pinned pane is shown as asked; an unpinned request may fall back.
+    @Published private(set) var inspectorPanePinned = false
+
+    var isInspectorOpen: Bool { inspectorPane != nil }
+
+    /// The rail is open: the chat inspector (Intel has no Project Settings
+    /// rail yet).
+    var isRightRailOpen: Bool { isInspectorOpen }
+
+    /// File change history is not ported (`W-file-history`): always zero.
+    let fileChangesCount: Int = 0
+    let fileChangeSetCount: Int = 0
+
+    /// The pane the rail actually draws. An unpinned File Changes request
+    /// for a chat with no change sets shows History instead. Upstream.
+    nonisolated static func effectiveInspectorPane(
+        requested: ChatInspectorPane?,
+        fileChangeSetCount: Int,
+        isPinned: Bool
+    ) -> ChatInspectorPane? {
+        guard requested == .fileChanges, fileChangeSetCount == 0, !isPinned else { return requested }
+        return .history
+    }
+
+    var effectiveInspectorPane: ChatInspectorPane? {
+        Self.effectiveInspectorPane(
+            requested: inspectorPane,
+            fileChangeSetCount: fileChangeSetCount,
+            isPinned: inspectorPanePinned
+        )
+    }
+
+    /// Toolbar button: closes the inspector when it is open, otherwise
+    /// reopens it on the pane it last showed.
+    func toggleInspector() {
+        if inspectorPane == nil {
+            inspectorPanePinned = false
+            inspectorPane = lastInspectorPane
+        } else {
+            inspectorPane = nil
+        }
+    }
+
+    /// Show `pane` (opening the inspector or switching in place) and pin it.
+    func showInspector(_ pane: ChatInspectorPane) {
+        inspectorPanePinned = true
+        inspectorPane = pane
+    }
+
+    func closeInspector() {
+        inspectorPane = nil
+    }
+
+    /// Change set the inspector should reveal (File Changes; unused until
+    /// file history is ported).
+    @Published var changesPanelFocusSetId: UUID?
+
+    /// Count shown on the toolbar's inspector toggle: the files this chat
+    /// changed, only while the inspector is closed, only for local chats,
+    /// and never zero. Upstream; always nil on Intel until file history is
+    /// ported (`fileChangesCount` is 0).
+    nonisolated static func inspectorBadgeCount(
+        fileChangesCount: Int,
+        isInspectorOpen: Bool,
+        isRemoteAgentChat: Bool
+    ) -> Int? {
+        guard fileChangesCount > 0, !isInspectorOpen, !isRemoteAgentChat else { return nil }
+        return fileChangesCount
+    }
+
+    var inspectorBadgeCount: Int? {
+        Self.inspectorBadgeCount(
+            fileChangesCount: fileChangesCount,
+            isInspectorOpen: isInspectorOpen,
+            isRemoteAgentChat: selectedDiscoveredAgentProviderId != nil
+        )
+    }
     @Published var showCloseConfirmation: Bool = false
     /// Drives the in-conversation find bar (Cmd+F). Set by the window-level
     /// key monitor (which cannot touch `ChatView`'s `@State`) and cleared by
@@ -824,6 +960,7 @@ final class ChatWindowState: ObservableObject {
         // project page even when the agent is already active, otherwise the
         // early return leaves the page covering the chat (upstream ee9adf6ae).
         openProjectId = nil
+        enteredChatFromProjectPage = false
         let scope = ChatTabScope.local(newAgentId)
         guard scope != activeScope else { return }
         TTSService.shared.stop()
@@ -837,24 +974,19 @@ final class ChatWindowState: ObservableObject {
         newTab(agentId: newAgentId)
     }
 
-    /// Start a fresh chat with `newAgentId` (a project's default agent, or
-    /// a launch for a specific agent). Unlike `switchAgent`, this never
-    /// lands on one of the agent's existing tabs. Upstream
-    /// `startNewChat(with:)`, except that a blank active tab is repurposed
-    /// instead of left behind.
+    /// Start a fresh chat with `newAgentId` from its navigator row (hover
+    /// "+"), a project's default agent, or a launch for a specific agent.
+    /// Unlike `switchAgent`, this never lands on one of the agent's existing
+    /// tabs: on the active agent it acts like New Chat, otherwise a new tab
+    /// opens. Upstream `startNewChat(with:)`.
     func startNewChat(with newAgentId: UUID) {
         openProjectId = nil
+        enteredChatFromProjectPage = false
         if ChatTabScope.local(newAgentId) == activeScope {
             startNewChat()
             return
         }
         TTSService.shared.stop()
-        if isBlank(session) {
-            adoptAgent(newAgentId)
-            session.reset(for: newAgentId)
-            refreshSessions()
-            return
-        }
         newTab(agentId: newAgentId)
     }
 
@@ -911,6 +1043,7 @@ final class ChatWindowState: ObservableObject {
         let projectID = openProjectId ?? session.projectId
         guard let project = ProjectManager.shared.project(for: projectID) else {
             openProjectId = nil
+            enteredChatFromProjectPage = false
             startNewChat()
             return
         }
@@ -919,6 +1052,7 @@ final class ChatWindowState: ObservableObject {
 
     func startNewChat(in project: Project) {
         openProjectId = nil
+        enteredChatFromProjectPage = true
         if let defaultAgentID = project.defaultAgentId,
             defaultAgentID != agentId,
             agents.contains(where: { $0.id == defaultAgentID })
@@ -938,6 +1072,7 @@ final class ChatWindowState: ObservableObject {
     func newTabInCurrentProject() {
         let project = ProjectManager.shared.project(for: openProjectId ?? session.projectId)
         openProjectId = nil
+        enteredChatFromProjectPage = project != nil
         newTab()
         guard let project else { return }
         stampProject(project)
@@ -1070,6 +1205,13 @@ final class ChatWindowState: ObservableObject {
     /// live tab session of that chat so its next auto-save keeps it.
     func syncTabSessions(withId id: UUID, _ update: (ChatSession) -> Void) {
         for tab in tabs where tab.session.sessionId == id {
+            update(tab.session)
+        }
+    }
+
+    /// Same, for every tab whose chat belongs to project `projectId`.
+    func syncTabSessions(withProjectId projectId: UUID, _ update: (ChatSession) -> Void) {
+        for tab in tabs where tab.session.projectId == projectId {
             update(tab.session)
         }
     }
