@@ -6,6 +6,26 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.58</title>
+      <pubDate>Fri, 02 Oct 2026 00:12:40 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>59</sparkle:version>
+      <sparkle:shortVersionString>1.0.58</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.58/Osaurus-Intel-1.0.58.zip" length="72290042" type="application/octet-stream" sparkle:edSignature="9FheAUa8zhvn17DNcguOVcR/qJNzd/Ij8CHwR0ymqZbDdxtLHHlIaeJ8/+Ype+UQLST7cGZx/oTzSwGQ9xSQAQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.58
+
+**Insights is now a persistent activity log.** It keeps history across relaunches (30 days by default), with a new layout, integrity check and export (JSONL, CSV, Markdown), and records web searches, page fetches, MCP calls, Router calls, voice, titles, memory, compaction and local API requests. "Inspect response" opens that reply's own log. Settings › Data & Storage › Activity Log controls retention and content.
+
+**Chat:** the context budget is a ring next to Send with upstream's breakdown popover; per-chat file history with inline diff cards and revert; selecting text across messages; ↑ recalls earlier messages; type @ to insert files from the work folder; follow-up question suggestions under replies (Settings › Conversation to turn off).
+
+Also: NUL-safe tool launches, Notes folder fix, code-block copy fixes, response stats in the reply's ··· menu, and stronger credential scrubbing in logs.
+
+_Intel fork · synced to upstream Osaurus 0.24.7 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.55</title>
       <pubDate>Fri, 25 Sep 2026 16:50:45 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
