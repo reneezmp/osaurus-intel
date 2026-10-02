@@ -75,3 +75,34 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests in `IntelChatUXTests`: parsing, the setting default and copy, the
   generation path through a fixture engine (with its Insights row), and no
   request without an answer.
+
+## Not applicable on Intel
+
+- `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
+  upstream's SQLite chat writer (`ChatSessionStore.retryUnsaved`). Intel
+  stores chats as JSON and never compiled that writer.
+- `Views/Chat/RecentFoldersPanel.swift` has no callers on upstream/main
+  (dead code there). Intel's folder menu already lists recent folders from
+  `RecentFoldersStore`.
+
+## Still to port (paused 2026-10-01 for Renée's weekly usage budget)
+
+Renée asked to release after this batch. The remaining items are large, so
+they wait for the next session, in this suggested order:
+
+1. Compaction marker in the transcript (`NativeCompactionMarkerView`,
+   `CompactionDialogView`) and the compaction-model picker (the four
+   Conversation switches from the #2950 port).
+2. Group thinking and tool activity roll-up (`NativeActivityGroupView`,
+   `ShimmerLabel`), plus expanding thinking while it streams.
+3. Smooth streaming.
+4. Screenshot attach (`ScreenshotCaptureService`, a shared-artifact turn).
+5. Chat import guide (`ImportGuideSheet`, `ImportHistoryPromptGate`).
+6. Markdown document view (`MarkdownBlockParsing`, `MarkdownDocumentView`).
+7. Activity / dispatch rows (`DispatchEnvelope`, `AgentDispatchTarget`,
+   `NativeDispatchBadgeRow`).
+8. Context attribution (`ContextAttribution`).
+9. `AgentDetailChrome` and `BuiltInAgentGuard`.
+10. Slash-command registry parity.
+
+After that comes the model picker (`W-model-picker-2947`).

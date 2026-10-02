@@ -2522,3 +2522,14 @@ calling a sync complete.
   [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md).
 - Audit `fec69aa53..4064a6fde`: #2969 and #2971 MLX pins (incompatible),
   #2964 port. The next review starts after `4064a6fde`.
+
+### Chat UX batch, part 1 (`W-chat-ux`) — 2026-10-01
+
+- Shipped: composer input history (↑/↓), the "@" file menu,
+  `IMEAwareTextField` (now in `SearchField`), and follow-up suggestions (on
+  by default, Core Model via `ChatEngine.completeChat`, Insights
+  `/internal/follow_up_suggestions`).
+- Not applicable: `ChatPersistenceNotice` (upstream SQLite writer) and
+  `RecentFoldersPanel` (no callers upstream).
+- Paused for Renée's weekly usage budget, with the remaining order in
+  [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md). Next release: `1.0.58` (59).
