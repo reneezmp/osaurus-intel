@@ -2533,3 +2533,22 @@ calling a sync complete.
   `RecentFoldersPanel` (no callers upstream).
 - Paused for Renée's weekly usage budget, with the remaining order in
   [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md). Next release: `1.0.58` (59).
+
+### Public release 1.0.58 (build 59) — 2026-10-01
+
+Cut with `BUILD_NUMBER=59 scripts/release/cut_intel_release.sh 1.0.58` from
+`7518d09a2`. Contents:
+
+- Insights activity log.
+- Context budget ring.
+- Per-chat file history.
+- Cross-block selection.
+- The 2026-10-01 upstream batch.
+- Composer history and the "@" file menu.
+- Follow-up suggestions.
+
+Signed with the `bYYJJqFx…` Sparkle key. The appcast commit is `2053ce24b`
+and the asset is `Osaurus-Intel-1.0.58.zip` (72,290,042 bytes). Rosy
+validation is still pending: the checklist sections from "Per-chat file
+history" through "Chat UX batch". The next release needs a build number
+above 59.
