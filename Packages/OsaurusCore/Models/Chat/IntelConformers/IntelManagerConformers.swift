@@ -1497,6 +1497,10 @@ final class ChatConfiguration: @unchecked Sendable {
     // already ran unconditionally; this flag makes it an opt-out,
     // default-on to preserve existing behavior on upgrade.
     var autoGenerateChatTitles: Bool = true
+    /// Upstream follow-up suggestions after each reply (`W-chat-ux`). On by
+    /// default like upstream (decision 3f); runs on the core model, else
+    /// the chat's model.
+    var generateFollowUpSuggestions: Bool = true
     /// Upstream #2892 background description backfill. **Opt-in, off by
     /// default on Intel** (Renée, 2026-09-29): every call is a paid cloud
     /// request with the agent's own model.
@@ -1562,6 +1566,7 @@ final class ChatConfiguration: @unchecked Sendable {
         defaultManualSkillNames: [String]? = nil,
         enableClipboardMonitoring: Bool = true,
         autoGenerateChatTitles: Bool = true,
+        generateFollowUpSuggestions: Bool = true,
         backfillAgentDescriptions: Bool = false,
         generativeGreetingsEnabled: Bool = false,
         greetingPersona: String = ""
@@ -1588,6 +1593,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualSkillNames = defaultManualSkillNames
         self.enableClipboardMonitoring = enableClipboardMonitoring
         self.autoGenerateChatTitles = autoGenerateChatTitles
+        self.generateFollowUpSuggestions = generateFollowUpSuggestions
         self.backfillAgentDescriptions = backfillAgentDescriptions
         self.generativeGreetingsEnabled = generativeGreetingsEnabled
         self.greetingPersona = greetingPersona
@@ -1618,6 +1624,7 @@ final class ChatConfiguration: @unchecked Sendable {
         self.defaultManualSkillNames = other.defaultManualSkillNames
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
         self.autoGenerateChatTitles = other.autoGenerateChatTitles
+        self.generateFollowUpSuggestions = other.generateFollowUpSuggestions
         self.backfillAgentDescriptions = other.backfillAgentDescriptions
         self.fileHistoryRetention = other.fileHistoryRetention
         self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
@@ -1653,6 +1660,7 @@ final class ChatConfiguration: @unchecked Sendable {
         var greetingPersona: String? = nil
         var enableClipboardMonitoring: Bool? = nil
         var autoGenerateChatTitles: Bool? = nil
+        var generateFollowUpSuggestions: Bool? = nil
         var backfillAgentDescriptions: Bool? = nil
         var fileHistoryRetention: FileHistoryRetention? = nil
         var defaultManualToolNames: [String]? = nil
@@ -1690,6 +1698,7 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.greetingPersona { greetingPersona = v }
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
         if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
+        if let v = s.generateFollowUpSuggestions { generateFollowUpSuggestions = v }
         if let v = s.backfillAgentDescriptions { backfillAgentDescriptions = v }
         if let v = s.fileHistoryRetention { fileHistoryRetention = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
@@ -1719,6 +1728,7 @@ final class ChatConfiguration: @unchecked Sendable {
         s.greetingPersona = greetingPersona
         s.enableClipboardMonitoring = enableClipboardMonitoring
         s.autoGenerateChatTitles = autoGenerateChatTitles
+        s.generateFollowUpSuggestions = generateFollowUpSuggestions
         s.backfillAgentDescriptions = backfillAgentDescriptions
         s.fileHistoryRetention = fileHistoryRetention
         s.defaultManualToolNames = defaultManualToolNames

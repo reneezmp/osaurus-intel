@@ -231,6 +231,10 @@ public enum SettingsSearchIndex {
             id: "settings.chat.titles", tab: .chat, section: "Behavior",
             title: "Automatically Name Chats", keywords: ["chat titles", "rename", "auto title"]),
         .init(
+            id: "settings.chat.generateFollowUps", tab: .chat, section: "Behavior",
+            title: "Suggest Follow-Up Questions",
+            keywords: ["follow up", "followup", "suggestions", "next question", "prompts", "suggested"]),
+        .init(
             id: "settings.chat.agentDescriptions", tab: .chat, section: "Behavior",
             title: "Fill In Missing Agent Descriptions",
             keywords: ["agent description", "purpose", "backfill", "orchestrator"]),

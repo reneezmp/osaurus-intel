@@ -39,3 +39,39 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests: upstream `Tests/Chat/ChatInputHistoryTests.swift`. Intel
   `Tests/Chat/IntelChatUXTests.swift` covers the "@" resolver and lister;
   upstream ships no test for them.
+
+## Follow-up suggestions
+
+- After a clean reply, up to four next questions appear as tappable rows
+  under it. Tapping one sends it. The rows clear on the next send, on stop
+  or error, and on a chat switch or new chat. They aren't persisted.
+- **On by default** (upstream, backlog decision 3f): Settings › Conversation
+  › Behavior › **Suggest Follow-Up Questions**.
+  `ChatConfiguration.generateFollowUpSuggestions` is stored in `chat.json`.
+- Files, from upstream: `Views/Chat/FollowUpSuggestionsBar.swift`
+  (verbatim) and `Services/Chat/FollowUpSuggestionService.swift` (prompt,
+  parsing and limits verbatim).
+- **Intel differences:**
+  - Generation runs as one `ChatEngine.completeChat` on the Core Model,
+    else the chat's model: the chat-title resolution. Upstream uses
+    `CoreModelService`, which Intel doesn't compile.
+  - The 30 s timeout is a task-group race.
+  - Insights logs the request as `/internal/follow_up_suggestions`
+    (source System).
+  - No per-agent follow-up model (upstream `AgentFollowUpConfig`), so the
+    Settings description leaves out upstream's "each agent can tailor…"
+    sentence. `generateSuggestions(modelOverride:)` is kept for when the
+    agent setting lands.
+- Wiring (upstream shape):
+  - `ChatSession.followUpSuggestions` / `followUpTurnId`,
+    `maybeGenerateFollowUps()` (from `completeRunCleanup`),
+    `clearFollowUpSuggestions()`, `sendFollowUp(_:)`.
+  - A display-time `ContentBlockKind.followUpSuggestions` is inserted by
+    `insertFollowUpSuggestionsIfNeeded`. The memoizer never caches it, and
+    its id is `followups-<turn>`.
+  - `NativeMessageCellView.configureAsFollowUpSuggestions` hosts the bar,
+    with the height estimate and the entrance animation played once per
+    chat (`shownFollowUpBlockIds`).
+- Tests in `IntelChatUXTests`: parsing, the setting default and copy, the
+  generation path through a fixture engine (with its Insights row), and no
+  request without an answer.

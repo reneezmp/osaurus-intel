@@ -70583,6 +70583,22 @@
         }
       }
     },
+    "Suggest Follow-Up Questions" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Folgefragen vorschlagen"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "建议后续问题"
+          }
+        }
+      }
+    },
     "Summarize text" : {
       "localizations" : {
         "de" : {

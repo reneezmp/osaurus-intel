@@ -7,6 +7,7 @@
 //
 
 import AppKit
+import SwiftUI
 import QuartzCore
 
 // MARK: - Cell Rendering Context
@@ -42,6 +43,13 @@ struct CellRenderingContext {
     /// to also delete the prompting user message. Distinct from `onDelete`,
     /// which truncates a user turn and everything after it.
     var onDeleteMessage: ((UUID) -> Void)? = nil
+    /// Sends a tapped follow-up suggestion as the next message (upstream).
+    var onFollowUpTap: ((String) -> Void)? = nil
+    /// Has this follow-up row already played its entrance animation in the
+    /// current chat? Lets `configureAsFollowUpSuggestions` suppress the
+    /// reveal when a recycled cell re-mounts it after scrolling (upstream).
+    var hasFollowUpsShown: ((String) -> Bool)? = nil
+    var markFollowUpsShown: ((String) -> Void)? = nil
     /// Read at menu-open time so late generation statistics do not leave a
     /// recycled action row showing a stale response's metrics (#2959).
     var responseStatsForTurn: ((UUID) -> String?)? = nil
@@ -1363,6 +1371,11 @@ final class NativeMessageCellView: NSTableCellView {
     private var nativeArtifactView: NativeArtifactCardView?
     private var nativeChartView: NativeChartView?
     private var nativeFileDiffView: NativeFileDiffView?
+    /// Follow-up suggestions are low-frequency (one per completed turn), so
+    /// unlike the streaming-hot cells this one hosts the SwiftUI
+    /// `FollowUpSuggestionsBar` directly — its intrinsic size drives the row
+    /// height via `fittingSize`. (Upstream.)
+    private var nativeFollowUpsView: NSHostingView<AnyView>?
     private var nativePreflightView: NativePreflightCapabilitiesView?
     private var nativeStatsView: NativeStatsView?
     private var nativeAssistantActionsView: NativeAssistantActionsView?
@@ -1519,6 +1532,14 @@ final class NativeMessageCellView: NSTableCellView {
 
         case let .fileDiff(diff):
             configureAsFileDiff(block: block, diff: diff, context: context, sameKind: sameKind)
+
+        case let .followUpSuggestions(_, suggestions):
+            configureAsFollowUpSuggestions(
+                block: block,
+                suggestions: suggestions,
+                context: context,
+                sameKind: sameKind
+            )
 
         case let .preflightCapabilities(items):
             configureAsPreflight(block: block, items: items, context: context, sameKind: sameKind)
@@ -2360,6 +2381,53 @@ final class NativeMessageCellView: NSTableCellView {
 
     // MARK: - Helpers
 
+    // MARK: - FollowUpSuggestions (upstream)
+
+    private func configureAsFollowUpSuggestions(
+        block: ContentBlock,
+        suggestions: [String],
+        context: CellRenderingContext,
+        sameKind: Bool
+    ) {
+        let onTap = context.onFollowUpTap
+        // Animate only the first time this row is shown; recycled re-mounts
+        // after scrolling render in their final state (mirrors the chart cell).
+        let animate = !(context.hasFollowUpsShown?(block.id) ?? false)
+        context.markFollowUpsShown?(block.id)
+        let rootView = AnyView(
+            FollowUpSuggestionsBar(
+                suggestions: suggestions,
+                animate: animate,
+                onSelect: { onTap?($0) }
+            )
+            .environment(\.theme, context.theme)
+        )
+        if !sameKind || nativeFollowUpsView == nil {
+            removeAllContentViews()
+            let hv = NSHostingView(rootView: rootView)
+            hv.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(hv)
+            NSLayoutConstraint.activate([
+                hv.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                hv.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                hv.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+                // Pin the bottom so the cell's `fittingSize` reflects the
+                // hosted content and the row sizes to it.
+                hv.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -8),
+            ])
+            nativeFollowUpsView = hv
+        } else {
+            nativeFollowUpsView?.rootView = rootView
+        }
+        // Correct the row height once SwiftUI has laid out, mirroring the
+        // artifact/user cells' measured-height report.
+        let id = block.id
+        DispatchQueue.main.async { [weak self] in
+            guard let self else { return }
+            context.onHeightMeasured?(self.measureFittedRowHeight(), id)
+        }
+    }
+
     private func removeAllContentViews() {
         self.layer?.backgroundColor = nil
         self.layer?.cornerRadius = 0
@@ -2389,6 +2457,7 @@ final class NativeMessageCellView: NSTableCellView {
         // the user starts scrolling and recycling kicks in.
         nativeChartView?.removeFromSuperview(); nativeChartView = nil
         nativeFileDiffView?.removeFromSuperview(); nativeFileDiffView = nil
+        nativeFollowUpsView?.removeFromSuperview(); nativeFollowUpsView = nil
         nativePreflightView?.removeFromSuperview(); nativePreflightView = nil
         nativeStatsView?.removeFromSuperview(); nativeStatsView = nil
         nativeAssistantActionsView?.removeFromSuperview(); nativeAssistantActionsView = nil
@@ -2576,7 +2645,7 @@ private func cgColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
 enum ContentBlockKindTag: Equatable {
     case header, paragraph, toolCallGroup, thinking, userMessage, pendingToolCall
     case generationStats, typingIndicator, groupSpacer, sharedArtifact, preflightCapabilities, chart
-    case assistantActions, fileDiff, other
+    case assistantActions, fileDiff, followUpSuggestions, other
 }
 
 extension ContentBlockKind {
@@ -2596,6 +2665,7 @@ extension ContentBlockKind {
         case .chart: return .chart
         case .assistantActions: return .assistantActions
         case .fileDiff: return .fileDiff
+        case .followUpSuggestions: return .followUpSuggestions
         }
     }
 }
@@ -2759,6 +2829,19 @@ enum NativeCellHeightEstimator {
             }
             let fontLineHeight: CGFloat = max(10, CGFloat(theme.codeSize) - 1) * 1.35
             return header + 6 + CGFloat(lineRows) * fontLineHeight + 6 + 12
+
+        case let .followUpSuggestions(_, suggestions):
+            // Mirrors `FollowUpSuggestionsBar` (upstream estimate); corrected
+            // by the measured-height report either way.
+            let innerW = max(width - 80, 100)
+            let chars = max(Int(innerW / 7), 20)
+            var rows: CGFloat = 0
+            for s in suggestions {
+                let lines = max(1, (s.count + chars - 1) / chars)
+                rows += CGFloat(lines) * 18 + 20
+            }
+            let dividers = CGFloat(max(0, suggestions.count - 1))
+            return 23 + rows + dividers + 16 + 12
         }
     }
 }

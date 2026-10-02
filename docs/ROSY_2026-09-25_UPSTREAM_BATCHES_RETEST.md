@@ -1275,3 +1275,7 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       home. Escape with the menu open doesn't close the window.
 - [ ] A Chinese/Japanese input method in a search field (e.g. Insights
       search): the placeholder disappears as soon as composition starts.
+- [ ] **(paid)** After a reply finishes, a "Follow up" list with up to four
+      questions appears under it (a few seconds later). Clicking one sends
+      it; the list disappears while the new reply streams. Turning off
+      Settings › Conversation › Suggest Follow-Up Questions stops them.

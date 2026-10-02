@@ -273,6 +273,9 @@ enum ContentBlockKind: Equatable {
     /// (upstream #1683 + #2907 part A), or its live preview while the call
     /// streams.
     case fileDiff(diff: FileDiff)
+    /// Upstream follow-up suggestions row, inserted at display time after
+    /// the turn it belongs to (never cached by the memoizer).
+    case followUpSuggestions(turnId: UUID, suggestions: [String])
 
     static func == (lhs: ContentBlockKind, rhs: ContentBlockKind) -> Bool {
         switch (lhs, rhs) {
@@ -302,6 +305,8 @@ enum ContentBlockKind: Equatable {
         case let (.chart(lSpec), .chart(rSpec)): return lSpec == rSpec
         case let (.assistantActions(lId), .assistantActions(rId)): return lId == rId
         case let (.fileDiff(lDiff), .fileDiff(rDiff)): return lDiff == rDiff
+        case let (.followUpSuggestions(lId, lSugg), .followUpSuggestions(rId, rSugg)):
+            return lId == rId && lSugg == rSugg
         default: return false
         }
     }
@@ -318,7 +323,8 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
         case let .header(role, _, _): return role
         case let .paragraph(_, _, _, role): return role
         case .toolCallGroup, .thinking, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
-             .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff:
+             .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff,
+             .followUpSuggestions:
             return .assistant
         case .userMessage: return .user
         }

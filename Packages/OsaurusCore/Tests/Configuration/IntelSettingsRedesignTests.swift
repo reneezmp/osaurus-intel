@@ -64,6 +64,7 @@ struct IntelSettingsRedesignTests {
             disableTools: false,
             clipboard: false,
             autoTitles: false,
+            followUps: true,
             backfillDescriptions: true,
             greetingsEnabled: true,
             greetingPersona: GenerativeGreetingService.defaultPersonaInstruction,

@@ -42,6 +42,8 @@ struct ChatSettingsView: View {
     @State private var tempDisableTools: Bool = true
     @State private var tempEnableClipboardMonitoring: Bool = false
     @State private var tempAutoGenerateChatTitles: Bool = true
+    /// Upstream follow-up suggestions switch, default on.
+    @State private var tempGenerateFollowUpSuggestions: Bool = true
     @State private var tempBackfillAgentDescriptions: Bool = false
     @State private var tempGenerativeGreetingsEnabled: Bool = false
     @State private var tempGreetingPersona: String = ""
@@ -108,9 +110,18 @@ struct ChatSettingsView: View {
                 isOn: $tempAutoGenerateChatTitles
             )
 
+            // Intel: no per-agent follow-up config yet, so upstream's "each
+            // agent can tailor…" sentence is left out.
+            SettingsToggle(
+                title: L("Suggest Follow-Up Questions"),
+                description: "Offer a few next questions after each reply as tappable rows.",
+                anchorId: "settings.chat.generateFollowUps",
+                isOn: $tempGenerateFollowUpSuggestions
+            )
+
             SettingsLinkRow(
                 title: "Core Model",
-                description: "Chat titles are written by the Core Model set under General.",
+                description: "Chat titles and follow-up questions are written by the Core Model set under General.",
                 icon: "arrow.right",
                 actionTitle: "Change"
             ) {
@@ -312,6 +323,7 @@ struct ChatSettingsView: View {
         var disableTools: Bool
         var clipboard: Bool
         var autoTitles: Bool
+        var followUps: Bool
         var backfillDescriptions: Bool
         var greetingsEnabled: Bool
         var greetingPersona: String
@@ -329,6 +341,7 @@ struct ChatSettingsView: View {
             disableTools: tempDisableTools,
             clipboard: tempEnableClipboardMonitoring,
             autoTitles: tempAutoGenerateChatTitles,
+            followUps: tempGenerateFollowUpSuggestions,
             backfillDescriptions: tempBackfillAgentDescriptions,
             greetingsEnabled: tempGenerativeGreetingsEnabled,
             greetingPersona: tempGreetingPersona,
@@ -347,6 +360,7 @@ struct ChatSettingsView: View {
         tempDisableTools = chat.disableTools
         tempEnableClipboardMonitoring = chat.enableClipboardMonitoring
         tempAutoGenerateChatTitles = chat.autoGenerateChatTitles
+        tempGenerateFollowUpSuggestions = chat.generateFollowUpSuggestions
         tempBackfillAgentDescriptions = chat.backfillAgentDescriptions
         tempGenerativeGreetingsEnabled = chat.generativeGreetingsEnabled
         tempGreetingPersona =
@@ -402,6 +416,7 @@ struct ChatSettingsView: View {
         chat.disableTools = form.disableTools
         chat.enableClipboardMonitoring = form.clipboard
         chat.autoGenerateChatTitles = form.autoTitles
+        chat.generateFollowUpSuggestions = form.followUps
         chat.backfillAgentDescriptions = form.backfillDescriptions
         chat.generativeGreetingsEnabled = form.greetingsEnabled
         let persona = trimmed(form.greetingPersona)

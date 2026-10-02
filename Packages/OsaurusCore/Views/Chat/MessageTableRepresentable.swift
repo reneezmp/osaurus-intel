@@ -182,6 +182,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
     let onDelete: ((UUID) -> Void)?
     let onSpeak: ((UUID) -> Void)?
     let onDeleteMessage: ((UUID) -> Void)?
+    var onFollowUpTap: ((String) -> Void)? = nil
 
     // Inline editing state
     let editingTurnId: UUID?
@@ -356,6 +357,13 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onDelete: onDelete,
             onSpeak: onSpeak,
             onDeleteMessage: onDeleteMessage,
+            onFollowUpTap: onFollowUpTap,
+            hasFollowUpsShown: { [weak coordinator] id in
+                coordinator?.shownFollowUpBlockIds.contains(id) ?? false
+            },
+            markFollowUpsShown: { [weak coordinator] id in
+                coordinator?.shownFollowUpBlockIds.insert(id)
+            },
             onUserImagePreview: onUserImagePreview,
             searchHighlightQuery: searchHighlightQuery
         )
@@ -577,6 +585,9 @@ extension MessageTableRepresentable {
         /// Synced from the session store on each updateNSView and updated
         /// immediately when a cell proxy fires onToggle.
         var expandedIds: Set<String> = []
+        /// Follow-up rows that already played their entrance animation in
+        /// this chat (upstream), so recycled cells don't replay it.
+        var shownFollowUpBlockIds: Set<String> = []
 
         /// Weak reference to the session-level store for forwarding toggles.
         weak var sessionExpandedStore: ExpandedBlocksStore?

@@ -258,6 +258,17 @@ final class ChatSession: ObservableObject {
     /// `ChatView` observes this to drive auto-speak. Not set on stop/error.
     @Published var lastCompletedAssistantTurnId: UUID?
 
+    /// AI-suggested follow-up questions for the most recent completed turn,
+    /// rendered as clickable rows beneath the assistant response when the
+    /// `generateFollowUpSuggestions` setting is on. Transient (not persisted):
+    /// cleared as soon as the user sends again or the run is cancelled/errors.
+    /// `followUpTurnId` pins them to the turn they belong to. (Upstream.)
+    @Published var followUpSuggestions: [String] = []
+    @Published var followUpTurnId: UUID?
+    /// Latches per completed turn so a re-entrant cleanup can't fire a second
+    /// generation for the same turn. A failed attempt clears it.
+    private var followUpGenerationStarted = false
+
     /// Lifecycle of the generative greeting for the current empty state.
     /// Drives skeleton vs static vs AI-produced rendering — see
     /// `GenerativeGreetingState`. Populated by
@@ -735,11 +746,15 @@ final class ChatSession: ObservableObject {
             return
         }
 
-        let newBlocks = blockMemoizer.blocks(
-            from: turns,
-            streamingTurnId: streamingTurnId,
-            agentName: displayName,
-            thinkingEnabled: thinkingEnabledForCurrentModel
+        // Display-time only: the follow-up row never enters the memoizer
+        // cache (upstream `insertFollowUpSuggestionsIfNeeded`).
+        let newBlocks = insertFollowUpSuggestionsIfNeeded(
+            into: blockMemoizer.blocks(
+                from: turns,
+                streamingTurnId: streamingTurnId,
+                agentName: displayName,
+                thinkingEnabled: thinkingEnabledForCurrentModel
+            )
         )
         let newHeaderMap = blockMemoizer.groupHeaderMap
 
@@ -749,6 +764,88 @@ final class ChatSession: ObservableObject {
             visibleBlocksStore.blocks = newBlocks
             visibleBlocksStore.groupHeaderMap = newHeaderMap
         }
+    }
+
+    /// Inject the follow-up suggestions row right after the last block of the
+    /// turn the suggestions belong to (its `assistantActions` footer), so they
+    /// read as the tail of that assistant message and scroll with it. (Upstream.)
+    private func insertFollowUpSuggestionsIfNeeded(into blocks: [ContentBlock]) -> [ContentBlock] {
+        guard !followUpSuggestions.isEmpty, let turnId = followUpTurnId,
+            let lastIndex = blocks.lastIndex(where: { $0.turnId == turnId })
+        else { return blocks }
+        var result = blocks
+        result.insert(
+            ContentBlock(
+                id: "followups-\(turnId.uuidString)",
+                turnId: turnId,
+                kind: .followUpSuggestions(turnId: turnId, suggestions: followUpSuggestions)
+            ),
+            at: lastIndex + 1
+        )
+        return result
+    }
+
+    // MARK: - Follow-Up Suggestions (upstream)
+
+    /// Clear any rendered follow-up suggestions and reset the per-turn latch.
+    private func clearFollowUpSuggestions() {
+        followUpGenerationStarted = false
+        followUpTurnId = nil
+        let hadSuggestions = !followUpSuggestions.isEmpty
+        if hadSuggestions { followUpSuggestions = [] }
+        if hadSuggestions { rebuildVisibleBlocks() }
+    }
+
+    /// Kick off a background follow-up suggestion generation after a clean run
+    /// completion, when the setting is on. Fire-and-forget; any failure leaves
+    /// no suggestions rendered. Latches per turn; a failed attempt re-arms.
+    private func maybeGenerateFollowUps() {
+        guard
+            !followUpGenerationStarted,
+            ChatConfiguration.shared.generateFollowUpSuggestions,
+            source == .chat,
+            // A cancelled or errored run isn't a representative exchange.
+            !stopRequested,
+            lastStreamError == nil,
+            let sid = sessionId
+        else { return }
+
+        func isAnswered(_ turn: ChatTurn) -> Bool {
+            turn.role == .assistant && !turn.content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        }
+        guard let assistantTurn = turns.last(where: isAnswered),
+            let userTurn = turns.last(where: { $0.role == .user })
+        else { return }
+
+        followUpGenerationStarted = true
+        let userText = userTurn.content
+        let assistantText = assistantTurn.content
+        let liveAssistantId = assistantTurn.id
+        let fallbackModel = selectedModel
+        Task { [weak self] in
+            let suggestions = await FollowUpSuggestionService.shared.generateSuggestions(
+                userMessage: userText,
+                assistantResponse: assistantText,
+                fallbackModel: fallbackModel
+            )
+            guard let self, self.sessionId == sid else { return }
+            guard !suggestions.isEmpty else {
+                self.followUpGenerationStarted = false
+                return
+            }
+            // Drop the result if the conversation moved on meanwhile.
+            guard self.turns.last(where: isAnswered)?.id == liveAssistantId, !self.isStreaming else { return }
+            self.followUpTurnId = liveAssistantId
+            self.followUpSuggestions = suggestions
+            self.rebuildVisibleBlocks()
+        }
+    }
+
+    /// Submit a tapped follow-up suggestion as the next user turn.
+    func sendFollowUp(_ suggestion: String) {
+        let trimmed = suggestion.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty, !isStreaming, activeRunId == nil else { return }
+        send(trimmed)
     }
 
     /// Estimated token count for current session context (~4 chars per token).
@@ -1258,6 +1355,7 @@ final class ChatSession: ObservableObject {
         sessionId = nil
         title = "New Chat"
         llmTitleAttempted = false
+        clearFollowUpSuggestions()
         createdAt = Date()
         updatedAt = Date()
         source = .chat
@@ -1643,6 +1741,8 @@ final class ChatSession: ObservableObject {
         title = data.title
         // Existing session already has a title — don't regenerate one.
         llmTitleAttempted = true
+        // Follow-ups are transient and per-turn; a loaded session starts with none.
+        clearFollowUpSuggestions()
         createdAt = data.createdAt
         updatedAt = data.updatedAt
         agentId = data.agentId
@@ -2090,6 +2190,7 @@ final class ChatSession: ObservableObject {
         consolidateAssistantTurns()
         rebuildVisibleBlocks()
         save()
+        maybeGenerateFollowUps()
         flushQueuedSendIfEligible()
         continueAfterWorkingFolderAttachIfEligible()
     }
@@ -2563,6 +2664,9 @@ final class ChatSession: ObservableObject {
             #endif
             return
         }
+
+        // A new send supersedes the previous turn's follow-up suggestions.
+        clearFollowUpSuggestions()
 
         // Fresh run: a previous stop() may have left the flag true. The
         // auto-flush in completeRunCleanup keys off this, so clear it
@@ -3950,6 +4054,7 @@ struct ChatView: View {
                 onDelete: deleteTurn,
                 onSpeak: speakTurnContent,
                 onDeleteMessage: confirmDeleteAssistantMessage,
+                onFollowUpTap: { [weak session] suggestion in session?.sendFollowUp(suggestion) },
                 editingTurnId: editingTurnId,
                 editText: $editText,
                 onConfirmEdit: confirmEditAndRegenerate,
@@ -4159,6 +4264,7 @@ private struct IsolatedThreadView: View {
     let onDelete: ((UUID) -> Void)?
     let onSpeak: ((UUID) -> Void)?
     let onDeleteMessage: ((UUID) -> Void)?
+    var onFollowUpTap: ((String) -> Void)? = nil
     let editingTurnId: UUID?
     let editText: Binding<String>?
     let onConfirmEdit: (() -> Void)?
@@ -4192,6 +4298,7 @@ private struct IsolatedThreadView: View {
             onDelete: onDelete,
             onSpeak: onSpeak,
             onDeleteMessage: onDeleteMessage,
+            onFollowUpTap: onFollowUpTap,
             editingTurnId: editingTurnId,
             editText: editText,
             onConfirmEdit: onConfirmEdit,

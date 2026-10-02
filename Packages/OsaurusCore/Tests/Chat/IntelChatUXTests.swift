@@ -60,4 +60,78 @@ struct IntelChatUXTests {
         #expect(tilde.dir.path == NSHomeDirectory())
         #expect(tilde.filter.isEmpty)
     }
+
+    // MARK: - Follow-up suggestions
+
+    @Test("Follow-up parsing keeps up to four clean questions")
+    func followUpParse() {
+        let json = #"Sure: ["What next?", "what next?", "How about {json}?", "Why?", "Where?", "When?"]"#
+        #expect(FollowUpSuggestionService.parse(json) == ["What next?", "Why?", "Where?", "When?"])
+        let list = "1. First one?\n- Second one?\n"
+        #expect(FollowUpSuggestionService.parse(list) == ["First one?", "Second one?"])
+        #expect(FollowUpSuggestionService.parse("").isEmpty)
+    }
+
+    @Test("Follow-ups are on by default and survive a chat.json round trip")
+    @MainActor
+    func followUpSettingDefault() {
+        #expect(ChatConfiguration(hotkey: nil, systemPrompt: "").generateFollowUpSuggestions)
+        let off = ChatConfiguration(hotkey: nil, systemPrompt: "", generateFollowUpSuggestions: false)
+        let copy = ChatConfiguration(hotkey: nil, systemPrompt: "")
+        copy.adopt(off)
+        #expect(copy.generateFollowUpSuggestions == false)
+    }
+
+    @Test("Follow-ups go through the chat engine as an /internal one-shot")
+    func followUpGeneration() async throws {
+        FollowUpFixtureProtocol.body = #"""
+            {"id":"f1","object":"chat.completion","created":1,"model":"m",
+             "choices":[{"index":0,"message":{"role":"assistant","content":"[\"Can you expand?\", \"Any examples?\"]"},"finish_reason":"stop"}]}
+            """#
+        let configuration = URLSessionConfiguration.ephemeral
+        configuration.protocolClasses = [FollowUpFixtureProtocol.self]
+        let provider = RemoteProvider(
+            name: "FU", host: "followup-fixture.invalid", providerProtocol: .https,
+            port: nil, basePath: "/v1", customHeaders: [:], authType: .none,
+            providerType: .openaiLegacy, enabled: true, autoConnect: false, timeout: 5)
+        let previous = FollowUpSuggestionService.engineFactory
+        FollowUpSuggestionService.engineFactory = {
+            ChatEngine(source: .chatUI, provider: provider, session: URLSession(configuration: configuration))
+        }
+        defer { FollowUpSuggestionService.engineFactory = previous }
+        let model = "fu-probe-\(UUID().uuidString.prefix(6))"
+        let result = await FollowUpSuggestionService.shared.generateSuggestions(
+            userMessage: "Tell me about tides", assistantResponse: "Tides are caused by the moon.",
+            fallbackModel: model, modelOverride: model)
+        #expect(result == ["Can you expand?", "Any examples?"])
+        var row: RequestLog?
+        for _ in 0 ..< 100 where row == nil {
+            row = await MainActor.run { InsightsService.shared.logs.first { $0.model == model } }
+            if row == nil { try await Task.sleep(nanoseconds: 20_000_000) }
+        }
+        #expect(row?.path == "/internal/follow_up_suggestions")
+        #expect(row?.source == .system)
+    }
+
+    @Test("No answer, no suggestions (and no request)")
+    func followUpNeedsAnswer() async {
+        let result = await FollowUpSuggestionService.shared.generateSuggestions(
+            userMessage: "hi", assistantResponse: "   ", fallbackModel: nil)
+        #expect(result.isEmpty)
+    }
+}
+
+private final class FollowUpFixtureProtocol: URLProtocol, @unchecked Sendable {
+    nonisolated(unsafe) static var body = ""
+    override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "followup-fixture.invalid" }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+    override func startLoading() {
+        let response = HTTPURLResponse(
+            url: request.url!, statusCode: 200, httpVersion: "HTTP/1.1",
+            headerFields: ["Content-Type": "application/json"])!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: Data(Self.body.utf8))
+        client?.urlProtocolDidFinishLoading(self)
+    }
+    override func stopLoading() {}
 }
