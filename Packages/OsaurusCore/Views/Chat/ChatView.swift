@@ -85,7 +85,15 @@ final class ChatSession: ObservableObject {
     @Published var turns: [ChatTurn] = []
     /// Compaction summary for this chat (upstream #136) and its run state.
     @Published var conversationSummary: ConversationSummary?
-    @Published var isCompacting = false
+    /// Live compaction progress (upstream), shown by the context popover,
+    /// the composer notice and `CompactionDialogView`.
+    @Published var compactionState: ContextCompactionUIState = .idle
+    /// Presents `CompactionDialogView` (upstream). On Intel only when no
+    /// model is known, to pick one: compaction is never automatic here.
+    @Published var showCompactionDialog = false
+    var isCompacting: Bool { compactionState.isRunning }
+    /// In-flight run, cancelled by `reset()` / `load(from:)` (upstream).
+    private var compactionTask: Task<Void, Never>?
     @Published var isStreaming: Bool = false {
         didSet {
             guard isStreaming != oldValue else { return }
@@ -749,11 +757,13 @@ final class ChatSession: ObservableObject {
         // Display-time only: the follow-up row never enters the memoizer
         // cache (upstream `insertFollowUpSuggestionsIfNeeded`).
         let newBlocks = insertFollowUpSuggestionsIfNeeded(
-            into: blockMemoizer.blocks(
-                from: turns,
-                streamingTurnId: streamingTurnId,
-                agentName: displayName,
-                thinkingEnabled: thinkingEnabledForCurrentModel
+            into: insertCompactionMarkerIfNeeded(
+                into: blockMemoizer.blocks(
+                    from: turns,
+                    streamingTurnId: streamingTurnId,
+                    agentName: displayName,
+                    thinkingEnabled: thinkingEnabledForCurrentModel
+                )
             )
         )
         let newHeaderMap = blockMemoizer.groupHeaderMap
@@ -764,6 +774,23 @@ final class ChatSession: ObservableObject {
             visibleBlocksStore.blocks = newBlocks
             visibleBlocksStore.groupHeaderMap = newHeaderMap
         }
+    }
+
+    /// Inject the compaction-boundary divider right after the last block of
+    /// the last summary-covered turn (upstream). No-op without a valid
+    /// summary or when the covered span isn't in the block list.
+    private func insertCompactionMarkerIfNeeded(into blocks: [ContentBlock]) -> [ContentBlock] {
+        guard let summary = conversationSummary,
+            IntelContextCompaction.summaryIsValid(summary, for: turns),
+            let lastCoveredId = summary.coveredTurnIds.last
+        else { return blocks }
+        let covered = Set(summary.coveredTurnIds)
+        guard let lastIndex = blocks.lastIndex(where: { covered.contains($0.turnId) }) else {
+            return blocks
+        }
+        var result = blocks
+        result.insert(.compactionMarker(summary: summary, afterTurnId: lastCoveredId), at: lastIndex + 1)
+        return result
     }
 
     /// Inject the follow-up suggestions row right after the last block of the
@@ -1366,6 +1393,7 @@ final class ChatSession: ObservableObject {
         pinned = false
         projectId = nil
         conversationSummary = nil
+        resetCompactionState()
         folderState.clearFolder()
         applyAgentDefaultFolder()
         isDirty = false
@@ -1427,20 +1455,69 @@ final class ChatSession: ObservableObject {
 
     /// Summarize the oldest turns so later requests send the summary instead.
     /// Only on request (a paid cloud call); the visible chat never changes.
+    /// Upstream `requestManualCompaction`: runs inline (progress in the
+    /// popover and composer) unless no model is known, which opens the
+    /// model-picking dialog.
     func compactConversation() {
-        guard !isCompacting, !isStreaming else { return }
-        isCompacting = true
+        guard !isStreaming, !compactionState.isRunning else { return }
+        guard IntelContextCompaction.effectiveModelIdentifier(fallback: selectedModel) != nil else {
+            compactionState = .needsModelSelection
+            showCompactionDialog = true
+            return
+        }
+        runCompaction()
+    }
+
+    /// Dialog: persist the chosen model, then run (upstream).
+    func chooseCompactionModelAndRun(_ identifier: String) {
+        IntelContextCompaction.saveConfiguredModel(identifier: identifier)
+        runCompaction()
+    }
+
+    /// Dialog Retry after a failure (upstream).
+    func retryCompaction() {
+        guard !compactionState.isRunning else { return }
+        runCompaction()
+    }
+
+    /// Dialog dismissed. A run in flight keeps going (upstream).
+    func cancelCompactionDialog() {
+        showCompactionDialog = false
+        guard !compactionState.isRunning else { return }
+        switch compactionState {
+        case .needsModelSelection, .failed: compactionState = .idle
+        default: break
+        }
+    }
+
+    /// Upstream stashes an auto-triggered send behind compaction; Intel
+    /// never compacts automatically, so nothing is ever waiting.
+    var hasPendingSendAfterCompaction: Bool { false }
+
+    private func resetCompactionState() {
+        compactionTask?.cancel()
+        compactionTask = nil
+        compactionState = .idle
+        showCompactionDialog = false
+    }
+
+    private func runCompaction() {
+        guard !compactionState.isRunning else { return }
+        compactionTask?.cancel()
         let snapshot = turns
         let existing = conversationSummary
-        let model = selectedModel
-        Task { @MainActor [weak self] in
-            defer { self?.isCompacting = false }
+        let model = IntelContextCompaction.effectiveModelIdentifier(fallback: selectedModel)
+        compactionState = .running(.preparing)
+        compactionTask = Task { @MainActor [weak self] in
             do {
                 let summary = try await IntelContextCompaction.summarize(
-                    turns: snapshot, existingSummary: existing, model: model)
+                    turns: snapshot, existingSummary: existing, model: model,
+                    onPhase: { [weak self] phase in self?.compactionState = .running(phase) })
                 guard let self else { return }
+                guard !Task.isCancelled else { return }
                 // The chat may have changed while the model worked.
                 guard IntelContextCompaction.summaryIsValid(summary, for: self.turns) else {
+                    self.compactionState = .idle
                     _ = ToastManager.shared.info(
                         L("Compaction skipped"), message: L("The conversation changed while it was being summarized."))
                     return
@@ -1448,13 +1525,38 @@ final class ChatSession: ObservableObject {
                 self.conversationSummary = summary
                 self.isDirty = true
                 self.save()
-                _ = ToastManager.shared.success(
-                    L("Compacted \(summary.coveredTurnIds.count) earlier messages"),
-                    message: L("About \(summary.savedTokensEstimate) tokens freed. The full chat stays visible."))
+                self.rebuildVisibleBlocks()
+                self.compactionState = .completed(savedTokens: summary.savedTokensEstimate)
+                // The dialog, when open, reports the outcome itself.
+                if !self.showCompactionDialog {
+                    _ = ToastManager.shared.success(
+                        L("Compacted \(summary.coveredTurnIds.count) earlier messages"),
+                        message: L("About \(summary.savedTokensEstimate) tokens freed. The full chat stays visible."))
+                }
                 await self.refreshContextEstimates()
+                self.settleCompactionState()
             } catch {
-                _ = ToastManager.shared.error(
-                    L("Couldn't compact this chat"), message: error.localizedDescription)
+                guard let self, !Task.isCancelled else { return }
+                self.compactionState = .failed(message: error.localizedDescription)
+                if !self.showCompactionDialog {
+                    _ = ToastManager.shared.error(
+                        L("Couldn't compact this chat"), message: error.localizedDescription)
+                }
+                self.settleCompactionState()
+            }
+        }
+    }
+
+    /// Let transient completed/failed states settle back to idle (upstream),
+    /// leaving a failure the dialog is still showing alone.
+    private func settleCompactionState() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 6_000_000_000)
+            guard let self else { return }
+            switch self.compactionState {
+            case .completed: self.compactionState = .idle
+            case .failed where !self.showCompactionDialog: self.compactionState = .idle
+            default: break
             }
         }
     }
@@ -1754,6 +1856,7 @@ final class ChatSession: ObservableObject {
         pinned = data.pinned
         projectId = data.projectId
         conversationSummary = data.conversationSummary
+        resetCompactionState()
         folderState.restore(bookmark: data.folderBookmark, path: data.folderPath)
 
         // Restore the persisted model when it's still valid; otherwise
@@ -4167,6 +4270,22 @@ struct ChatView: View {
                     .imageFullScreenSheetPresentation()
             }
         }
+        // Compaction dialog (upstream). On Intel it opens only to pick a
+        // model when none is known; dismissal routes through the session.
+        .sheet(
+            isPresented: Binding(
+                get: { observedSession.showCompactionDialog },
+                set: { isShown in
+                    if !isShown, observedSession.showCompactionDialog {
+                        observedSession.cancelCompactionDialog()
+                    }
+                }
+            )
+        ) {
+            CompactionDialogView(session: observedSession)
+                .environment(\.theme, theme)
+                .intelControlRendering(theme: theme)
+        }
         // re-pin to bottom when any in-chat prompt overlay opens. previously
         // wired on the MessageThreadView itself. hoisted here after the store
         // isolation so only ChatView's @State pin toggles, not the thread's
@@ -4435,10 +4554,8 @@ extension ChatView {
     ///
     /// This fork is cloud-only (no resident local model whose KV cache would
     /// need reprocessing), so upstream's local-vs-remote branch on the warning
-    /// copy collapses to the single remote-model line. Upstream also gains a
-    /// line here when the turn is covered by a compaction summary
-    /// (`conversationSummary`); that plumbing doesn't exist on Intel yet, so
-    /// it's omitted — revisit once context compaction (ce414b3f) lands.
+    /// copy collapses to the single remote-model line. A turn covered by the
+    /// compaction summary gets upstream's extra line.
     private func confirmDeleteAssistantMessage(turnId: UUID) {
         guard let turn = session.turns.first(where: { $0.id == turnId }),
             turn.role == .assistant
@@ -4452,6 +4569,11 @@ extension ChatView {
         if hasToolCalls {
             lines.append(
                 L("Any tool calls in this response and their results will be removed together.")
+            )
+        }
+        if session.conversationSummary?.coveredTurnIds.contains(turnId) ?? false {
+            lines.append(
+                L("This response is part of a conversation summary, so deleting it may affect the meaning of later turns.")
             )
         }
 

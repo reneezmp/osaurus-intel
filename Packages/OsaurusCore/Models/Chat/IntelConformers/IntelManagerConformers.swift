@@ -1501,6 +1501,18 @@ final class ChatConfiguration: @unchecked Sendable {
     /// default like upstream (decision 3f); runs on the core model, else
     /// the chat's model.
     var generateFollowUpSuggestions: Bool = true
+    /// Upstream compaction model (Settings › Conversation › Advanced ›
+    /// Compaction Model). Unset means the chat's current model summarizes.
+    var compactionModelProvider: String? = nil
+    var compactionModelName: String? = nil
+    /// `provider/name`, a bare name, or nil when unset (upstream).
+    var compactionModelIdentifier: String? {
+        guard let name = compactionModelName, !name.isEmpty else { return nil }
+        if let provider = compactionModelProvider, !provider.isEmpty {
+            return "\(provider)/\(name)"
+        }
+        return name
+    }
     /// Upstream #2892 background description backfill. **Opt-in, off by
     /// default on Intel** (Renée, 2026-09-29): every call is a paid cloud
     /// request with the agent's own model.
@@ -1625,6 +1637,8 @@ final class ChatConfiguration: @unchecked Sendable {
         self.enableClipboardMonitoring = other.enableClipboardMonitoring
         self.autoGenerateChatTitles = other.autoGenerateChatTitles
         self.generateFollowUpSuggestions = other.generateFollowUpSuggestions
+        self.compactionModelProvider = other.compactionModelProvider
+        self.compactionModelName = other.compactionModelName
         self.backfillAgentDescriptions = other.backfillAgentDescriptions
         self.fileHistoryRetention = other.fileHistoryRetention
         self.generativeGreetingsEnabled = other.generativeGreetingsEnabled
@@ -1661,6 +1675,8 @@ final class ChatConfiguration: @unchecked Sendable {
         var enableClipboardMonitoring: Bool? = nil
         var autoGenerateChatTitles: Bool? = nil
         var generateFollowUpSuggestions: Bool? = nil
+        var compactionModelProvider: String? = nil
+        var compactionModelName: String? = nil
         var backfillAgentDescriptions: Bool? = nil
         var fileHistoryRetention: FileHistoryRetention? = nil
         var defaultManualToolNames: [String]? = nil
@@ -1699,6 +1715,8 @@ final class ChatConfiguration: @unchecked Sendable {
         if let v = s.enableClipboardMonitoring { enableClipboardMonitoring = v }
         if let v = s.autoGenerateChatTitles { autoGenerateChatTitles = v }
         if let v = s.generateFollowUpSuggestions { generateFollowUpSuggestions = v }
+        compactionModelProvider = s.compactionModelProvider
+        compactionModelName = s.compactionModelName
         if let v = s.backfillAgentDescriptions { backfillAgentDescriptions = v }
         if let v = s.fileHistoryRetention { fileHistoryRetention = v }
         if let v = s.defaultManualToolNames { defaultManualToolNames = v }
@@ -1729,6 +1747,8 @@ final class ChatConfiguration: @unchecked Sendable {
         s.enableClipboardMonitoring = enableClipboardMonitoring
         s.autoGenerateChatTitles = autoGenerateChatTitles
         s.generateFollowUpSuggestions = generateFollowUpSuggestions
+        s.compactionModelProvider = compactionModelProvider
+        s.compactionModelName = compactionModelName
         s.backfillAgentDescriptions = backfillAgentDescriptions
         s.fileHistoryRetention = fileHistoryRetention
         s.defaultManualToolNames = defaultManualToolNames

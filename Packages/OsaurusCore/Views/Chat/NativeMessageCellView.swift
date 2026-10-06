@@ -1376,6 +1376,7 @@ final class NativeMessageCellView: NSTableCellView {
     /// `FollowUpSuggestionsBar` directly — its intrinsic size drives the row
     /// height via `fittingSize`. (Upstream.)
     private var nativeFollowUpsView: NSHostingView<AnyView>?
+    private var nativeCompactionMarkerView: NativeCompactionMarkerView?
     private var nativePreflightView: NativePreflightCapabilitiesView?
     private var nativeStatsView: NativeStatsView?
     private var nativeAssistantActionsView: NativeAssistantActionsView?
@@ -1537,6 +1538,16 @@ final class NativeMessageCellView: NSTableCellView {
             configureAsFollowUpSuggestions(
                 block: block,
                 suggestions: suggestions,
+                context: context,
+                sameKind: sameKind
+            )
+
+        case let .compactionMarker(savedTokens, modelName, summaryText):
+            configureAsCompactionMarker(
+                block: block,
+                savedTokens: savedTokens,
+                modelName: modelName,
+                summaryText: summaryText,
                 context: context,
                 sameKind: sameKind
             )
@@ -2428,6 +2439,52 @@ final class NativeMessageCellView: NSTableCellView {
         }
     }
 
+    // MARK: - Compaction Marker (upstream NativeCompactionMarkerView)
+
+    private func configureAsCompactionMarker(
+        block: ContentBlock,
+        savedTokens: Int,
+        modelName: String,
+        summaryText: String,
+        context: CellRenderingContext,
+        sameKind: Bool
+    ) {
+        if !sameKind || nativeCompactionMarkerView == nil {
+            removeAllContentViews()
+            let mv = NativeCompactionMarkerView()
+            mv.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(mv)
+            NSLayoutConstraint.activate([
+                mv.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                mv.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                mv.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            ])
+            nativeCompactionMarkerView = mv
+        }
+        let isExpanded = context.expandedIds.contains(block.id)
+        nativeCompactionMarkerView?.configure(
+            savedTokens: savedTokens,
+            modelName: modelName,
+            summaryText: summaryText,
+            width: context.width - 32,
+            isExpanded: isExpanded,
+            theme: context.theme,
+            blockId: block.id,
+            onToggle: { [weak self] in
+                guard let self else { return }
+                context.onToggleExpand(block.id)
+                self.nativeCompactionMarkerView?.onHeightChanged?()
+            },
+            onHeightChanged: { [weak self] in
+                guard let self, let mv = self.nativeCompactionMarkerView,
+                    let id = self.currentBlockId
+                else { return }
+                let h = mv.measuredHeight() + 8
+                context.onHeightMeasured?(h, id)
+            }
+        )
+    }
+
     private func removeAllContentViews() {
         self.layer?.backgroundColor = nil
         self.layer?.cornerRadius = 0
@@ -2458,6 +2515,7 @@ final class NativeMessageCellView: NSTableCellView {
         nativeChartView?.removeFromSuperview(); nativeChartView = nil
         nativeFileDiffView?.removeFromSuperview(); nativeFileDiffView = nil
         nativeFollowUpsView?.removeFromSuperview(); nativeFollowUpsView = nil
+        nativeCompactionMarkerView?.removeFromSuperview(); nativeCompactionMarkerView = nil
         nativePreflightView?.removeFromSuperview(); nativePreflightView = nil
         nativeStatsView?.removeFromSuperview(); nativeStatsView = nil
         nativeAssistantActionsView?.removeFromSuperview(); nativeAssistantActionsView = nil
@@ -2645,7 +2703,7 @@ private func cgColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
 enum ContentBlockKindTag: Equatable {
     case header, paragraph, toolCallGroup, thinking, userMessage, pendingToolCall
     case generationStats, typingIndicator, groupSpacer, sharedArtifact, preflightCapabilities, chart
-    case assistantActions, fileDiff, followUpSuggestions, other
+    case assistantActions, fileDiff, followUpSuggestions, compactionMarker, other
 }
 
 extension ContentBlockKind {
@@ -2666,6 +2724,7 @@ extension ContentBlockKind {
         case .assistantActions: return .assistantActions
         case .fileDiff: return .fileDiff
         case .followUpSuggestions: return .followUpSuggestions
+        case .compactionMarker: return .compactionMarker
         }
     }
 }
@@ -2842,6 +2901,16 @@ enum NativeCellHeightEstimator {
             }
             let dividers = CGFloat(max(0, suggestions.count - 1))
             return 23 + rows + dividers + 16 + 12
+
+        case let .compactionMarker(_, _, summaryText):
+            // Collapsed: 4 top inset + 32 header + 8 cell gap. Expanded adds
+            // the summary text, estimated like thinking; the cell corrects
+            // via the measured-height report. (Upstream.)
+            if !isExpanded { return 44 }
+            let innerW = max(width - 60, 100)
+            let charsPerLine = max(Int(innerW / 7), 20)
+            let lines = max(1, (summaryText.count + charsPerLine - 1) / charsPerLine)
+            return 44 + 8 + CGFloat(lines) * 22 + 10
         }
     }
 }

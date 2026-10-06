@@ -182,6 +182,12 @@ inference (`IntelPluginExecution`) logs as an ordinary
 - The missing-key count rises from 126 to **149**: upstream's 26 sentences
   built with interpolation inside `L("…\(x)…")`, which no catalog entry can
   match (the same gap exists upstream), minus 3 keys now covered.
+- **2026-10-06:** the merge is now a committed script,
+  `scripts/i18n/merge-upstream-keys.py <path substrings>`. It copies
+  upstream entries for keys used in the named files (including SwiftUI
+  `Text("…", bundle: .module)` literals, which the checker doesn't scan) and
+  prints the keys upstream lacks. The compaction port brought the count to
+  **146**.
 
 ## Upstream audit `fec69aa53..4064a6fde`
 

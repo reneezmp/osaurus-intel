@@ -1279,3 +1279,17 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       questions appears under it (a few seconds later). Clicking one sends
       it; the list disappears while the new reply streams. Turning off
       Settings › Conversation › Suggest Follow-Up Questions stops them.
+- [ ] **(paid)** In a long chat, compact it (context ring popover ›
+      Compact conversation, or `/compact`). A divider "Older messages
+      summarized — ~… tokens reclaimed" appears below the last summarized
+      message. Clicking it opens the summary text; clicking again closes
+      it. Hovering shows which model summarized. Light and dark themes.
+- [ ] Settings › Conversation › Advanced › **Compaction Model**: pick a
+      model, then the popover's helper names it; the ✕ button returns to
+      "Use the current chat model (default)". Search "compaction" in
+      Settings and land on it. Relaunch keeps the choice.
+- [ ] **(paid)** With a Compaction Model set, compact: the run uses that
+      model (Insights row `/internal/compaction` shows it).
+- [ ] Delete a response that is above the divider: the confirmation adds
+      "This response is part of a conversation summary…". After deleting,
+      the divider disappears (the summary no longer applies).

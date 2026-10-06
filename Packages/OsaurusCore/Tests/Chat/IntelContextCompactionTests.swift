@@ -154,4 +154,99 @@ struct IntelContextCompactionTests {
         let old = try JSONSerialization.data(withJSONObject: object)
         #expect(try decoder.decode(ChatSessionData.self, from: old).conversationSummary == nil)
     }
+
+    // MARK: Compaction model, progress and transcript marker (W-chat-ux)
+
+    @Test("The compaction model wins; blank or unset falls back to the chat's model")
+    func effectiveModel() {
+        #expect(IntelContextCompaction.effectiveModelIdentifier(configured: "p/m", fallback: "chat") == "p/m")
+        #expect(IntelContextCompaction.effectiveModelIdentifier(configured: "  ", fallback: "chat") == "chat")
+        #expect(IntelContextCompaction.effectiveModelIdentifier(configured: nil, fallback: nil) == nil)
+        #expect(IntelContextCompaction.usesChatModelFallback(configured: nil))
+        #expect(IntelContextCompaction.usesChatModelFallback(configured: " "))
+        #expect(!IntelContextCompaction.usesChatModelFallback(configured: "p/m"))
+    }
+
+    @Test("The compaction model is stored as provider and name and copied by adopt")
+    func compactionModelSetting() {
+        let cfg = ChatConfiguration(hotkey: nil, systemPrompt: "")
+        #expect(cfg.compactionModelIdentifier == nil)
+        cfg.compactionModelProvider = "deepseek"
+        cfg.compactionModelName = "deepseek-chat"
+        #expect(cfg.compactionModelIdentifier == "deepseek/deepseek-chat")
+        cfg.compactionModelProvider = nil
+        #expect(cfg.compactionModelIdentifier == "deepseek-chat")
+        let copy = ChatConfiguration(hotkey: nil, systemPrompt: "")
+        copy.adopt(cfg)
+        #expect(copy.compactionModelName == "deepseek-chat")
+    }
+
+    @Test("A run reports preparing, summarizing and applying in order")
+    func phases() async throws {
+        var seen: [ContextCompactionPhase] = []
+        _ = try await IntelContextCompaction.summarize(
+            turns: conversation(exchanges: 4, size: 3_000), existingSummary: nil, model: "m",
+            engine: SummaryEngine(reply: "summary"), onPhase: { seen.append($0) })
+        #expect(seen == [.preparing, .summarizing, .applying])
+    }
+
+    @Test("The transcript shows a marker right after the covered turns, only while the summary is valid")
+    func transcriptMarker() async throws {
+        try await ChatHistoryTestStorage.run {
+            let session = ChatSession()
+            let turns = conversation(exchanges: 3)
+            session.turns = turns
+            let summary = ConversationSummary(
+                summaryText: "Earlier: q.", coveredTurnIds: turns.prefix(2).map(\.id),
+                modelIdentifier: "p/m", savedTokensEstimate: 1_234)
+            session.conversationSummary = summary
+            session.rebuildVisibleBlocks()
+            let blocks = session.visibleBlocks
+            guard let index = blocks.firstIndex(where: { $0.id == "compaction-\(summary.id.uuidString)" }) else {
+                Issue.record("no compaction marker")
+                return
+            }
+            #expect(blocks[index].turnId == turns[1].id)
+            #expect(blocks[..<index].allSatisfy { Set(turns.prefix(2).map(\.id)).contains($0.turnId) })
+            #expect(blocks[(index + 1)...].allSatisfy { $0.turnId != turns[0].id && $0.turnId != turns[1].id })
+            if case let .compactionMarker(saved, model, text) = blocks[index].kind {
+                #expect(saved == 1_234 && model == "p/m" && text == "Earlier: q.")
+            } else {
+                Issue.record("wrong kind")
+            }
+
+            // Editing a covered turn retires the summary, and the marker goes.
+            session.turns[0] = ChatTurn(role: .user, content: "edited")
+            session.rebuildVisibleBlocks()
+            #expect(!session.visibleBlocks.contains { $0.id.hasPrefix("compaction-") })
+        }
+    }
+
+    @Test("With no compaction model and no chat model, Compact opens the model dialog")
+    func dialogWhenNoModel() async throws {
+        try await ChatHistoryTestStorage.run {
+            let cfg = ChatConfigurationStore.load()
+            let saved = (cfg.compactionModelProvider, cfg.compactionModelName)
+            cfg.compactionModelProvider = nil
+            cfg.compactionModelName = nil
+            defer { (cfg.compactionModelProvider, cfg.compactionModelName) = saved }
+            let session = ChatSession()
+            session.turns = conversation(exchanges: 4, size: 3_000)
+            session.selectedModel = nil
+            session.compactConversation()
+            #expect(session.compactionState == .needsModelSelection)
+            #expect(session.showCompactionDialog)
+            session.cancelCompactionDialog()
+            #expect(session.compactionState == .idle)
+            #expect(!session.showCompactionDialog)
+            #expect(!session.hasPendingSendAfterCompaction)
+        }
+    }
+
+    @Test("The marker shortens token counts like upstream")
+    func markerCopy() {
+        #expect(NativeCompactionMarkerView.formatTokens(950) == "950")
+        #expect(NativeCompactionMarkerView.formatTokens(1_500) == "1.5k")
+        #expect(NativeCompactionMarkerView.formatTokens(24_000) == "24k")
+    }
 }

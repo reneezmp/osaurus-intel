@@ -92,8 +92,9 @@ touched file diverges, so the port is by hand, in five steps:
   inherited values, `AgentManager.effective*`), notification position /
   timeout / stack size (upstream hid them).
 - **Not on Intel yet** (upstream Conversation switches): smooth streaming,
-  group thinking & tool activity, expand thinking while streaming,
-  compaction model, suggest follow-ups (`W-chat-ux`); keep Mac awake while
+  group thinking & tool activity, expand thinking while streaming
+  (`W-chat-ux`; suggest follow-ups shipped 2026-10-01, Compaction Model
+  2026-10-06 under Advanced); keep Mac awake while
   agents run (`W-ui-misc`). No Legal links: upstream's terms cover upstream's
   service.
 - ⌘N default stays **off** on Intel (upstream's `@AppStorage` default is on);

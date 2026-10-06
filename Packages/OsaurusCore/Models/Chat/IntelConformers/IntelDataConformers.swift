@@ -276,6 +276,11 @@ enum ContentBlockKind: Equatable {
     /// Upstream follow-up suggestions row, inserted at display time after
     /// the turn it belongs to (never cached by the memoizer).
     case followUpSuggestions(turnId: UUID, suggestions: [String])
+    /// Upstream divider at the context-compaction boundary: everything above
+    /// it is covered by the session's `ConversationSummary` in the outbound
+    /// context (the visible turns are untouched). Expands to show the summary
+    /// text. Inserted at display time, never cached by the memoizer.
+    case compactionMarker(savedTokens: Int, modelName: String, summaryText: String)
 
     static func == (lhs: ContentBlockKind, rhs: ContentBlockKind) -> Bool {
         switch (lhs, rhs) {
@@ -307,6 +312,8 @@ enum ContentBlockKind: Equatable {
         case let (.fileDiff(lDiff), .fileDiff(rDiff)): return lDiff == rDiff
         case let (.followUpSuggestions(lId, lSugg), .followUpSuggestions(rId, rSugg)):
             return lId == rId && lSugg == rSugg
+        case let (.compactionMarker(lSaved, lModel, lText), .compactionMarker(rSaved, rModel, rText)):
+            return lSaved == rSaved && lModel == rModel && lText == rText
         default: return false
         }
     }
@@ -324,10 +331,26 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
         case let .paragraph(_, _, _, role): return role
         case .toolCallGroup, .thinking, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
              .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff,
-             .followUpSuggestions:
+             .followUpSuggestions, .compactionMarker:
             return .assistant
         case .userMessage: return .user
         }
+    }
+
+    /// Compaction-boundary divider (upstream). Keyed on the summary id so a
+    /// re-compaction moves and re-renders it; `turnId` is the last covered
+    /// turn, anchoring the marker right below the covered span.
+    static func compactionMarker(summary: ConversationSummary, afterTurnId: UUID) -> ContentBlock {
+        ContentBlock(
+            id: "compaction-\(summary.id.uuidString)",
+            turnId: afterTurnId,
+            kind: .compactionMarker(
+                savedTokens: summary.savedTokensEstimate,
+                modelName: summary.modelIdentifier,
+                summaryText: summary.summaryText
+            ),
+            position: .only
+        )
     }
 }
 

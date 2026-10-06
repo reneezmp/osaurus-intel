@@ -2552,3 +2552,16 @@ and the asset is `Osaurus-Intel-1.0.58.zip` (72,290,042 bytes). Rosy
 validation is still pending: the checklist sections from "Per-chat file
 history" through "Chat UX batch". The next release needs a build number
 above 59.
+
+### Chat UX batch, part 2: compaction marker and model (`W-chat-ux`) — 2026-10-06
+
+- Ported upstream's `NativeCompactionMarkerView`, `CompactionDialogView`,
+  the compaction-model setting and the `ContextCompactionPhase` /
+  `ContextCompactionUIState` session state. Details and Intel differences:
+  [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
+- Compaction stays **on request only** (#136 decision); the dialog appears
+  only when no model is known.
+- `scripts/i18n/merge-upstream-keys.py` replaces the session-only merge
+  script used for the Insights and Chat UX ports. **The catalog isn't
+  strictly sorted**: re-sorting it rewrites thousands of lines, so the
+  script inserts new keys beside their neighbours.

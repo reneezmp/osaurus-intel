@@ -11,13 +11,56 @@
 //   - Runs only when the user asks (Compact button / `/compact` / the
 //     near-limit notice). Every Intel model is a paid cloud model, so there
 //     is no silent automatic compaction.
-//   - Summarizes with the chat's current model (it already holds the whole
-//     conversation's context), through the Intel cloud engine.
+//   - Summarizes with the configured compaction model (Settings ›
+//     Conversation › Advanced › Compaction Model), else the chat's current
+//     model, through the Intel cloud engine (upstream's model resolution).
+//   - Progress shows in the context popover and the composer; results are
+//     toasts. The upstream dialog (`CompactionDialogView`) opens only when
+//     neither model is known, to pick one.
 //   - Boundary selection, summary validity and transcript rendering follow
 //     upstream exactly, so a summary written by either build means the same.
 //
 
 import Foundation
+
+/// Live progress phases surfaced in the compaction dialog / popover (upstream).
+enum ContextCompactionPhase: Equatable, Sendable {
+    case preparing
+    case summarizing
+    case applying
+
+    var label: String {
+        switch self {
+        case .preparing: return L("Analyzing conversation…")
+        case .summarizing: return L("Summarizing older messages…")
+        case .applying: return L("Applying summary…")
+        }
+    }
+
+    /// Coarse progress fraction for the dialog's progress bar.
+    var progressFraction: Double {
+        switch self {
+        case .preparing: return 0.15
+        case .summarizing: return 0.55
+        case .applying: return 0.9
+        }
+    }
+}
+
+/// Session-scoped compaction UI state (upstream), published by `ChatSession`.
+enum ContextCompactionUIState: Equatable {
+    case idle
+    /// No model known: the dialog is asking the user to pick one.
+    case needsModelSelection
+    case running(ContextCompactionPhase)
+    case completed(savedTokens: Int)
+    case failed(message: String)
+
+    var isRunning: Bool {
+        if case .running = self { return true }
+        return false
+    }
+}
 
 enum IntelContextCompaction {
     enum Failure: LocalizedError, Equatable {
@@ -51,6 +94,47 @@ enum IntelContextCompaction {
     /// Context window assumed when neither the model catalog nor the chat's
     /// Context Length setting knows one (common for cloud models on Intel).
     static let fallbackContextWindow = 128_000
+
+    // MARK: Configuration (upstream ContextCompactionService)
+
+    static func configuredModelIdentifier() -> String? {
+        ChatConfigurationStore.load().compactionModelIdentifier
+    }
+
+    /// The model a run will use: the configured compaction model, else
+    /// `fallback` (the chat's model). Nil only when neither is known.
+    static func effectiveModelIdentifier(
+        configured: String? = configuredModelIdentifier(),
+        fallback: String?
+    ) -> String? {
+        if let configured, !configured.trimmingCharacters(in: .whitespaces).isEmpty {
+            return configured
+        }
+        if let fallback, !fallback.trimmingCharacters(in: .whitespaces).isEmpty {
+            return fallback
+        }
+        return nil
+    }
+
+    /// True when a run would use the chat's model rather than a set one.
+    static func usesChatModelFallback(configured: String? = configuredModelIdentifier()) -> Bool {
+        guard let configured else { return true }
+        return configured.trimmingCharacters(in: .whitespaces).isEmpty
+    }
+
+    /// Persist the dialog's model choice (load-modify-write, like Settings).
+    static func saveConfiguredModel(identifier: String) {
+        let cfg = ChatConfigurationStore.load()
+        let parts = identifier.split(separator: "/", maxSplits: 1)
+        if parts.count == 2 {
+            cfg.compactionModelProvider = String(parts[0])
+            cfg.compactionModelName = String(parts[1])
+        } else {
+            cfg.compactionModelProvider = nil
+            cfg.compactionModelName = identifier
+        }
+        ChatConfigurationStore.save(cfg)
+    }
 
     // MARK: Boundary and validity (upstream)
 
@@ -122,8 +206,10 @@ enum IntelContextCompaction {
         turns: [ChatTurn],
         existingSummary: ConversationSummary?,
         model: String?,
-        engine: (any ChatEngineProtocol)? = nil
+        engine: (any ChatEngineProtocol)? = nil,
+        onPhase: ((ContextCompactionPhase) -> Void)? = nil
     ) async throws -> ConversationSummary {
+        onPhase?(.preparing)
         let existing = activeSummary(existingSummary, for: turns)
         guard let model, !model.trimmingCharacters(in: .whitespaces).isEmpty else { throw Failure.noModel }
         guard let cut = compactionCutIndex(turns: turns, existingSummary: existing) else {
@@ -141,6 +227,7 @@ enum IntelContextCompaction {
             max_tokens: summaryMaxTokens
         )
         let chatEngine = engine ?? ChatEngine(model: model)
+        onPhase?(.summarizing)
         let response = try await withThrowingTaskGroup(of: ChatCompletionResponse.self) { group in
             // Insights: a compaction row in the chat's name (upstream logs
             // `/internal/compaction` with the conversation's source).
@@ -161,6 +248,7 @@ enum IntelContextCompaction {
         }
         let text = (response.choices.first?.message?.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw Failure.emptySummary }
+        onPhase?(.applying)
 
         let draft = ConversationSummary(
             summaryText: text, coveredTurnIds: covered.map(\.id), modelIdentifier: model, savedTokensEstimate: 0)

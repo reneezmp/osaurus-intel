@@ -8,9 +8,10 @@
 //
 //  Intel version, not upstream's file. It hosts the chat settings that used
 //  to crowd Intel's General page:
-//  - Upstream's smooth streaming, activity roll-up, expand-thinking,
-//    keep-awake, follow-up and compaction-model switches are not here: Intel
-//    lacks those features (backlog `W-chat-ux`, `W-ui-misc`).
+//  - Upstream's smooth streaming, activity roll-up, expand-thinking and
+//    keep-awake switches are not here yet: Intel lacks those features
+//    (backlog `W-chat-ux`, `W-ui-misc`). Follow-ups and the compaction model
+//    are upstream's.
 //  - Intel keeps switches upstream moved elsewhere because Intel has no
 //    other home for them yet: Disable Tools and Enable Memory (upstream:
 //    Agents / Memory), Folder Tool Permissions (upstream: Tools & MCP,
@@ -49,6 +50,11 @@ struct ChatSettingsView: View {
     @State private var tempGreetingPersona: String = ""
     /// `MemoryConfiguration.enabled` (same debounced save).
     @State private var tempMemoryEnabled: Bool = false
+    /// Upstream compaction model ("" = the chat's current model).
+    @State private var tempCompactionModelProvider: String = ""
+    @State private var tempCompactionModelName: String = ""
+    @State private var showCompactionModelPicker = false
+    @State private var compactionModelPickerItems: [ModelPickerItem] = []
 
     // `UserDefaults`-backed switches, applied immediately.
     @AppStorage(NewChatShortcutSetting.defaultsKey)
@@ -64,6 +70,7 @@ struct ChatSettingsView: View {
     /// Landing anchors rendered inside the Advanced disclosure, so a search
     /// result for one of them opens it before scrolling.
     nonisolated static let advancedAnchorIds: Set<String> = [
+        "settings.chat.compactionModel",
         "settings.chat.systemPrompt", "settings.chat.temperature", "settings.chat.maxTokens",
         "settings.chat.contextLength", "settings.chat.topP", "settings.chat.maxToolAttempts",
     ]
@@ -82,6 +89,7 @@ struct ChatSettingsView: View {
             advancedSection
         }
         .onAppear { loadConfiguration() }
+        .onReceive(ModelPickerItemCache.shared.$items) { compactionModelPickerItems = $0 }
         .onChange(of: currentFormState) { _ in scheduleAutoSave() }
         .onDisappear { flushPendingSave() }
     }
@@ -196,6 +204,22 @@ struct ChatSettingsView: View {
 
     private var advancedSection: some View {
         SettingsAdvancedDisclosure(anchorIds: Self.advancedAnchorIds) {
+            SettingsSubsection(label: "Compaction Model", anchorId: "settings.chat.compactionModel") {
+                VStack(alignment: .leading, spacing: 8) {
+                    compactionModelPicker
+                    // Upstream copy minus "Runs automatically near the
+                    // limit" and the Privacy Filter: on Intel compaction
+                    // runs only when you ask, and every model is remote.
+                    Text(
+                        "Model used to summarize older messages when a chat outgrows its context window. Runs when you choose Compact from the context budget popover, the near-limit notice or /compact. If unset, the chat's current model summarizes.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
+
             StyledSettingsTextArea(
                 label: "System Prompt",
                 text: $tempSystemPrompt,
@@ -252,6 +276,113 @@ struct ChatSettingsView: View {
                 anchorId: "settings.chat.maxToolAttempts"
             )
         }
+    }
+
+    // MARK: - Compaction Model Picker (upstream)
+
+    private var compactionModelIdentifierBinding: Binding<String> {
+        Binding(
+            get: {
+                if tempCompactionModelName.isEmpty { return "" }
+                return tempCompactionModelProvider.isEmpty
+                    ? tempCompactionModelName
+                    : "\(tempCompactionModelProvider)/\(tempCompactionModelName)"
+            },
+            set: { newValue in
+                if newValue.isEmpty {
+                    tempCompactionModelProvider = ""
+                    tempCompactionModelName = ""
+                    return
+                }
+                let parts = newValue.split(separator: "/", maxSplits: 1)
+                if parts.count == 2 {
+                    tempCompactionModelProvider = String(parts[0])
+                    tempCompactionModelName = String(parts[1])
+                } else {
+                    tempCompactionModelProvider = ""
+                    tempCompactionModelName = newValue
+                }
+            }
+        )
+    }
+
+    private var compactionModelSelectionBinding: Binding<String?> {
+        Binding(
+            get: {
+                let id = compactionModelIdentifierBinding.wrappedValue
+                return id.isEmpty ? nil : id
+            },
+            set: { compactionModelIdentifierBinding.wrappedValue = $0 ?? "" }
+        )
+    }
+
+    /// "Unset" means "summarize with the chat's current model"
+    /// (`IntelContextCompaction.effectiveModelIdentifier`).
+    private var compactionModelPicker: some View {
+        let currentId = compactionModelIdentifierBinding.wrappedValue
+        let currentItem = compactionModelPickerItems.first { $0.id == currentId }
+        return HStack(spacing: 8) {
+            Button {
+                showCompactionModelPicker.toggle()
+            } label: {
+                HStack(spacing: 8) {
+                    Image(systemName: "arrow.down.right.and.arrow.up.left")
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(currentId.isEmpty ? theme.tertiaryText : theme.accentColor)
+                    if currentId.isEmpty {
+                        Text("Use the current chat model (default)", bundle: .module)
+                            .font(.system(size: 13))
+                            .foregroundColor(theme.placeholderText)
+                    } else if let currentItem {
+                        Text(currentItem.displayName)
+                            .font(.system(size: 13, weight: .medium))
+                            .foregroundColor(theme.primaryText)
+                            .lineLimit(1)
+                    } else {
+                        Text("\(currentId) (unavailable)", bundle: .module)
+                            .font(.system(size: 13))
+                            .foregroundColor(theme.secondaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                    Image(systemName: "chevron.up.chevron.down")
+                        .font(.system(size: 10, weight: .medium))
+                        .foregroundColor(theme.tertiaryText)
+                }
+                .padding(.horizontal, 12)
+                .padding(.vertical, 10)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(theme.inputBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10).stroke(theme.inputBorder, lineWidth: 1)
+                        )
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+            .popover(isPresented: $showCompactionModelPicker, arrowEdge: .bottom) {
+                ModelPickerView(
+                    options: compactionModelPickerItems,
+                    selectedModel: compactionModelSelectionBinding,
+                    agentId: nil,
+                    onDismiss: { showCompactionModelPicker = false }
+                )
+                .environment(\.theme, theme)
+            }
+
+            if !currentId.isEmpty {
+                Button {
+                    compactionModelIdentifierBinding.wrappedValue = ""
+                } label: {
+                    Image(systemName: "xmark.circle.fill")
+                        .font(.system(size: 13))
+                        .foregroundColor(theme.tertiaryText)
+                }
+                .buttonStyle(.plain)
+                .localizedHelp("Use the current chat model (default)")
+            }
+        }
+        .frame(maxWidth: 320)
     }
 
     // MARK: - Greeting personality
@@ -328,6 +459,8 @@ struct ChatSettingsView: View {
         var greetingsEnabled: Bool
         var greetingPersona: String
         var memoryEnabled: Bool
+        var compactionModelProvider: String = ""
+        var compactionModelName: String = ""
     }
 
     private var currentFormState: SaveableFormState {
@@ -345,7 +478,9 @@ struct ChatSettingsView: View {
             backfillDescriptions: tempBackfillAgentDescriptions,
             greetingsEnabled: tempGenerativeGreetingsEnabled,
             greetingPersona: tempGreetingPersona,
-            memoryEnabled: tempMemoryEnabled
+            memoryEnabled: tempMemoryEnabled,
+            compactionModelProvider: tempCompactionModelProvider,
+            compactionModelName: tempCompactionModelName
         )
     }
 
@@ -368,6 +503,8 @@ struct ChatSettingsView: View {
             ? GenerativeGreetingService.defaultPersonaInstruction
             : chat.greetingPersona
         tempMemoryEnabled = MemoryConfigurationStore.load().enabled
+        tempCompactionModelProvider = chat.compactionModelProvider ?? ""
+        tempCompactionModelName = chat.compactionModelName ?? ""
         savedFormState = currentFormState
     }
 
@@ -417,6 +554,8 @@ struct ChatSettingsView: View {
         chat.enableClipboardMonitoring = form.clipboard
         chat.autoGenerateChatTitles = form.autoTitles
         chat.generateFollowUpSuggestions = form.followUps
+        chat.compactionModelProvider = form.compactionModelProvider.isEmpty ? nil : form.compactionModelProvider
+        chat.compactionModelName = form.compactionModelName.isEmpty ? nil : form.compactionModelName
         chat.backfillAgentDescriptions = form.backfillDescriptions
         chat.generativeGreetingsEnabled = form.greetingsEnabled
         let persona = trimmed(form.greetingPersona)

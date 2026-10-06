@@ -76,6 +76,55 @@ what Intel adapted; everything else is upstream verbatim.
   generation path through a fixture engine (with its Insights row), and no
   request without an answer.
 
+## Compaction marker, dialog and model picker
+
+- **Marker:** after a compaction, a thin divider ("Older messages
+  summarized — ~Nk tokens reclaimed") sits below the last summarized
+  message. Click it to read the summary the model now sees in place of
+  the messages above; the tooltip names the model. It disappears on its own
+  when an edit, regeneration or deletion retires the summary.
+  - Files: `Views/Chat/NativeCompactionMarkerView.swift` (upstream; Intel
+    builds its sized symbols itself and fades with a plain alpha animation,
+    since Intel's `SymbolImageCache` has no sized variants and no
+    `ExpandFade`).
+  - `ContentBlockKind.compactionMarker` + `ContentBlock.compactionMarker`
+    (id `compaction-<summary id>`), inserted at display time by
+    `ChatSession.insertCompactionMarkerIfNeeded`, never cached.
+  - The cell, kind tag and height estimate are upstream's.
+- **Compaction model:** Settings › Conversation › Advanced › **Compaction
+  Model** (search id `settings.chat.compactionModel`). Unset means the
+  chat's current model, as upstream.
+  - Stored in `chat.json` as `compactionModelProvider` /
+    `compactionModelName`, the upstream keys.
+  - `IntelContextCompaction.configuredModelIdentifier`,
+    `effectiveModelIdentifier`, `usesChatModelFallback` and
+    `saveConfiguredModel` are upstream's `ContextCompactionService` helpers.
+  - The context popover's helper names the model the next run uses
+    (upstream copy).
+- **Progress state:** `ChatSession.compactionState`
+  (`ContextCompactionUIState` with phases preparing → summarizing →
+  applying, upstream types) replaces Intel's old `isCompacting` flag, which
+  is now derived from it. `reset()` and loading another chat cancel a run
+  in flight (upstream).
+- **Dialog:** `Views/Chat/CompactionDialogView.swift` (upstream) opens only
+  when no model is known: no compaction model and no chat model. Choosing
+  one saves it as the compaction model and runs, with progress, the result
+  and Retry in the dialog.
+- **Intel differences:**
+  - Never automatic (decision recorded in `UPSTREAM_SYNC.md`, #136): no
+    pre-send trigger, so the dialog never shows for an auto run and
+    `hasPendingSendAfterCompaction` is always false.
+  - Outcomes outside the dialog stay toasts; upstream shows them as popover
+    rows.
+  - Copy drops the Privacy Filter (Intel has none) and "runs automatically
+    near the limit". The Settings description names Intel's three triggers.
+- Deleting a summarized response now adds upstream's warning line ("part of
+  a conversation summary…"), which Intel had left out until compaction
+  existed.
+- Tests: `IntelContextCompactionTests` (model resolution, setting
+  round-trip, phase order, the marker's place and its retirement, the
+  no-model dialog, token formatting).
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -85,14 +134,13 @@ what Intel adapted; everything else is upstream verbatim.
   (dead code there). Intel's folder menu already lists recent folders from
   `RecentFoldersStore`.
 
-## Still to port (paused 2026-10-01 for Renée's weekly usage budget)
+## Still to port (resumed 2026-10-06)
 
 Renée asked to release after this batch. The remaining items are large, so
 they wait for the next session, in this suggested order:
 
-1. Compaction marker in the transcript (`NativeCompactionMarkerView`,
-   `CompactionDialogView`) and the compaction-model picker (the four
-   Conversation switches from the #2950 port).
+1. ~~Compaction marker, dialog and compaction-model picker~~ **done
+   2026-10-06** (section above).
 2. Group thinking and tool activity roll-up (`NativeActivityGroupView`,
    `ShimmerLabel`), plus expanding thinking while it streams.
 3. Smooth streaming.

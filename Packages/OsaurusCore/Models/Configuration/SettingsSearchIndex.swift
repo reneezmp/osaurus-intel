@@ -262,6 +262,14 @@ public enum SettingsSearchIndex {
             keywords: ["file", "shell", "git", "write", "delete", "approve", "folder tools", "permissions"],
             disambiguation: "Approvals for folder file, shell and git tools, not macOS permissions."),
         .init(
+            id: "settings.chat.compactionModel", tab: .chat, section: "Advanced",
+            title: "Compaction Model",
+            keywords: [
+                "compaction", "compact", "summarize", "context", "summary model",
+                "compact conversation", "fallback", "context full",
+            ],
+            disambiguation: "Which model writes the summary. Unset means the chat's current model."),
+        .init(
             id: "settings.chat.systemPrompt", tab: .chat, section: "Advanced",
             title: "System Prompt", keywords: ["instructions", "persona", "orchestrator prompt"],
             disambiguation: "Used by the Orchestrator when it has no prompt of its own."),

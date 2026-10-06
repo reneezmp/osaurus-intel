@@ -4133,10 +4133,22 @@ private struct ContextBreakdownPopover: View {
     /// alert report those).
     private var showsCompactionSection: Bool { canCompact || isCompacting }
 
-    /// Intel compaction always uses the chat's current model (one cloud
-    /// request); there is no compaction-model setting on Intel.
+    /// Names the model the next run uses: the configured compaction model,
+    /// else the chat's current model (upstream copy).
     private var compactionHelperText: String {
-        L("Summarizes older messages with the current chat model to free up context (one cloud request). The visible chat is unchanged.")
+        let configured = IntelContextCompaction.configuredModelIdentifier()
+        if IntelContextCompaction.usesChatModelFallback(configured: configured) {
+            return L(
+                "Summarizes older messages with the current chat model to free up context. The visible chat is unchanged. Pick a dedicated model in Settings → Conversation → Advanced → Compaction Model."
+            )
+        }
+        let name = configured.map(Self.shortModelName) ?? ""
+        return L("Summarizes older messages with \(name) to free up context. The visible chat is unchanged.")
+    }
+
+    /// `provider/model` → `model`; a bare id stays as is.
+    private static func shortModelName(_ identifier: String) -> String {
+        identifier.split(separator: "/", maxSplits: 1).last.map(String.init) ?? identifier
     }
 
     @ViewBuilder
