@@ -128,6 +128,17 @@ log finished 21:15:06), with the app running since 3 October. To rule a hit
 in or out, re-check the same paths a minute after the run, or quit the app
 before testing.
 
+When that app works in a folder it also writes upstream's file history:
+`~/.osaurus/file-history/{objects,pending,tmp,shadows}` plus
+`~/.osaurus/chat-history/history.sqlite-wal` (upstream keeps file-history
+rows in its SQLite chat history, which Intel doesn't have). Telling it apart
+from an Intel leak: Intel's journal would also create
+`file-history/history.sqlite` (Intel's own database, absent from upstream's
+layout), and in tests the journal's root comes from `OsaurusPaths.root()`,
+which `OSAURUS_TEST_ROOT` overrides for the whole process. Seen 2026-10-06:
+an `.xlsx` object at 21:55:57 during a test run, with `shadows/` already
+touched at 21:43 and no `history.sqlite`.
+
 ## 2026-09-14 automation-test residue
 
 The first `ExecutionContextFolderActivationTests` implementation constructed a
