@@ -6,6 +6,52 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.59</title>
+      <pubDate>Wed, 07 Oct 2026 21:35:03 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>60</sparkle:version>
+      <sparkle:shortVersionString>1.0.59</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.59/Osaurus-Intel-1.0.59.zip" length="74216981" type="application/octet-stream" sparkle:edSignature="9LYH2AxA7Huhh6dHU0Yxj5xvBzIUliiL24sLgZt6aC3MRMhVTng5OGrItkaE2WOHbWIiFqZX+Anu8ii9A6WcAw=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.59
+
+### New model picker
+- Click the model pill for the new three-column picker: Provider, Model, and Model options (Thinking and reasoning effort now live here).
+- Star your favourite Osaurus Cloud models; "More models" opens the full Cloud browser with search and filters.
+- The slash, "@" and voice menus, and the context budget card, use the new card style.
+
+### Chat
+- Chat tabs are restyled as one rounded track; a single tab reads as the window title.
+- Compaction: a marker in the transcript, a dialog that explains `/compact`, and a Compaction Model setting.
+- Smoother streaming, activity roll-ups, and an option to expand thinking while it streams.
+- `/screenshot` attaches a screen capture; a guide before importing chats; upstream's Markdown renderer.
+- Long chats scroll and update without stutters; finished replies hide leaked tool-call text.
+- Agent avatars render crisply; caches are freed when memory runs low.
+
+### Connectors (MCP)
+- Many new connectors in Settings › Services, grouped by category (Dropbox, QuickBooks, Microsoft 365, Harvey and more).
+- HubSpot now signs in with your own Client ID and Client Secret, with setup steps.
+- Read-only tools run without asking; tools that can delete data ask every time.
+- Plain-language connector errors (with a Details toggle), progress on long tool calls, and connectors can ask you to fill in a form or open a page.
+- Sign-in hardened: OAuth traffic never follows redirects to unexpected places.
+
+### Files
+- Filled-in PDF forms read with each label and its value on one line, split by page markers; agents can read just some pages.
+
+### Router and announcements
+- Fewer background requests to the Router (the balance refreshes only while a top-up is pending).
+- Announcements from the upstream Osaurus project may appear while the Router is on. They are clearly marked as upstream's, may mention features that need an Apple Silicon Mac, and can be turned off for good from the dialog.
+
+### Reliability
+- Fixes for several main-thread hangs; the local API retries a busy port at launch.
+- Background tasks started by plugins run as the calling chat's agent, never the Default agent.
+- Saving an agent created by upstream Osaurus keeps all of its settings.
+
+_Intel fork · synced to upstream Osaurus 0.24.7 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.58</title>
       <pubDate>Fri, 02 Oct 2026 00:12:40 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
