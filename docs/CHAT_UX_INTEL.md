@@ -125,6 +125,53 @@ what Intel adapted; everything else is upstream verbatim.
   round-trip, phase order, the marker's place and its retirement, the
   no-model dialog, token formatting).
 
+## Activity roll-up and expanding thinking while it streams
+
+- **Roll-up:** a run of two or more thinking / tool steps (an agent loop
+  across several assistant turns included) collapses into one **Worked**
+  row with up to three step circles (green done, red failed, accent
+  running, "+N" beyond that). While a step is live the title shimmers
+  "Working". Expanded, it shows the steps, each still expandable, plus
+  **Expand All / Collapse All**.
+  - Settings › Conversation › Appearance › **Group Thinking & Tool
+    Activity**, on by default (upstream). `UserDefaults`
+    `chatActivityRollupEnabled`, memoized in
+    `ContentBlock.ActivityRollupSetting`; flipping it posts
+    `activityRollupSettingChanged` and open chats regroup at once.
+  - Files: `Views/Chat/NativeActivityGroupView.swift` and
+    `Views/Chat/ShimmerLabel.swift` (verbatim).
+  - `ContentBlockKind.activityGroup`, `rollupActivityBlocks`,
+    `activityStepCount`, `enclosingActivityGroupId` and `rendersToggleId`
+    are upstream's, in `IntelDataConformers.swift`. The table finds the row
+    to re-measure with `rendersToggleId`, and treats a roll-up holding
+    streaming thinking as the streaming row.
+  - `BlockMemoizer.blocks(from:)` applies the roll-up on top of
+    `unrolledBlocks(from:)` (upstream's `generateBlocks`); tests that check
+    raw grouping use `unrolledBlocks`.
+- **Stats only under the reply's last turn** (upstream): Intel used to give
+  every intermediate tool-calling turn its own speed/TTFT row, which also
+  split loops into separate runs.
+- **Expand Thinking While Streaming:** Settings › Conversation › Advanced,
+  off by default (upstream key `chatExpandThinkingWhileStreamingEnabled`).
+  While the reply is still only reasoning, its thinking block (and the
+  roll-up around it) stays open, then folds once the answer or a tool call
+  starts. A manual collapse mid-stream sticks.
+  - A finished reply that is only reasoning opens its thinking once
+    (upstream `seedAutoExpandedReasoningBlocks`).
+- **Intel differences:**
+  - The finished title is "Worked", never "Worked for 12s": Intel records
+    no per-step durations (upstream's thinking `duration` and
+    `ToolCallItem.duration`). The reply's own "Worked for" stats chip still
+    shows the total.
+  - Step glyphs come from `ToolCategory` (no subagent registry).
+  - Intel's thinking id is `thinking-<turn>` (upstream `think-<turn>-<n>`),
+    via `ContentBlock.thinkingBlockId(turnId:)`.
+  - Sized symbols and a plain alpha fade replace upstream's
+    `SymbolImageCache` sizes and `ExpandFade`.
+- Tests: `IntelActivityRollupTests` in `IntelChatUXTests.swift` (grouping
+  rules, loops with one stats row, the switch and its default, streaming
+  expansion, reasoning-only seeding).
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -141,8 +188,8 @@ they wait for the next session, in this suggested order:
 
 1. ~~Compaction marker, dialog and compaction-model picker~~ **done
    2026-10-06** (section above).
-2. Group thinking and tool activity roll-up (`NativeActivityGroupView`,
-   `ShimmerLabel`), plus expanding thinking while it streams.
+2. ~~Activity roll-up and expanding thinking while it streams~~ **done
+   2026-10-06**.
 3. Smooth streaming.
 4. Screenshot attach (`ScreenshotCaptureService`, a shared-artifact turn).
 5. Chat import guide (`ImportGuideSheet`, `ImportHistoryPromptGate`).

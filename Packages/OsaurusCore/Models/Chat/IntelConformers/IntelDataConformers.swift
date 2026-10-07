@@ -255,6 +255,12 @@ enum ContentBlockKind: Equatable {
     case paragraph(index: Int, text: String, isStreaming: Bool, role: MessageRole)
     case toolCallGroup(calls: [ToolCallItem])
     case thinking(index: Int, text: String, isStreaming: Bool)
+    /// Upstream display-time roll-up of a run of consecutive `.thinking` /
+    /// `.toolCallGroup` blocks (possibly across the assistant turns of an
+    /// agent loop). Collapsed it is one summary row; expanded it renders its
+    /// children, whose own ids keep per-item expansion working. Built only by
+    /// `ContentBlock.rollupActivityBlocks`, never cached.
+    case activityGroup(children: [ContentBlock])
     case userMessage(text: String, attachments: [Attachment])
     case sharedArtifact(artifact: SharedArtifact)
     case pendingToolCall(toolName: String, argPreview: String?, argSize: Int)
@@ -292,6 +298,8 @@ enum ContentBlockKind: Equatable {
             return lCalls == rCalls
         case let (.thinking(lIdx, lText, lStream), .thinking(rIdx, rText, rStream)):
             return lIdx == rIdx && lText == rText && lStream == rStream
+        case let (.activityGroup(lChildren), .activityGroup(rChildren)):
+            return lChildren == rChildren
         case let (.userMessage(lText, lAttach), .userMessage(rText, rAttach)):
             return lText == rText && lAttach.count == rAttach.count
         case let (.sharedArtifact(lArt), .sharedArtifact(rArt)):
@@ -329,13 +337,146 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
         switch kind {
         case let .header(role, _, _): return role
         case let .paragraph(_, _, _, role): return role
-        case .toolCallGroup, .thinking, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
+        case .toolCallGroup, .thinking, .activityGroup, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
              .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff,
              .followUpSuggestions, .compactionMarker:
             return .assistant
         case .userMessage: return .user
         }
     }
+
+    /// Whether toggling `toggleId` changes this row: the block itself, a tool
+    /// call inside its group, or either nested in an activity roll-up
+    /// (upstream). The table uses it to find the row to re-measure.
+    func rendersToggleId(_ toggleId: String) -> Bool {
+        if id == toggleId { return true }
+        switch kind {
+        case let .toolCallGroup(calls):
+            return calls.contains { $0.call.id == toggleId }
+        case let .activityGroup(children):
+            return children.contains { $0.rendersToggleId(toggleId) }
+        default:
+            return false
+        }
+    }
+
+    /// Intel's thinking block id (upstream's is `think-<turn>-<index>`).
+    static func thinkingBlockId(turnId: UUID) -> String {
+        "thinking-\(turnId.uuidString)"
+    }
+
+    // MARK: Activity roll-up (upstream)
+
+    /// Stable roll-up id, from its first child so it survives streaming
+    /// appends to the end of the run.
+    static func activityGroupId(firstChildId: String) -> String {
+        "activity-\(firstChildId)"
+    }
+
+    /// Wraps a non-empty run of consecutive thinking / tool-call blocks.
+    static func activityGroup(children: [ContentBlock]) -> ContentBlock {
+        ContentBlock(
+            id: activityGroupId(firstChildId: children[0].id),
+            turnId: children[0].turnId,
+            kind: .activityGroup(children: children),
+            position: children[0].position
+        )
+    }
+
+    /// Thinking segments count one step each, tool calls one each.
+    static func activityStepCount(of children: [ContentBlock]) -> Int {
+        children.reduce(0) { acc, child in
+            switch child.kind {
+            case .thinking: return acc + 1
+            case let .toolCallGroup(calls): return acc + calls.count
+            default: return acc
+            }
+        }
+    }
+
+    /// Rolls every run of consecutive `.thinking` / `.toolCallGroup` blocks
+    /// totalling ≥2 steps into one `.activityGroup` (upstream). Anything
+    /// else (a paragraph, diff card, pending chip, the answer) breaks the
+    /// run; a single step stays bare.
+    static func rollupActivityBlocks(_ blocks: [ContentBlock]) -> [ContentBlock] {
+        var result: [ContentBlock] = []
+        result.reserveCapacity(blocks.count)
+        var run: [ContentBlock] = []
+
+        func flushRun() {
+            if activityStepCount(of: run) >= 2 {
+                result.append(.activityGroup(children: run))
+            } else {
+                result.append(contentsOf: run)
+            }
+            run = []
+        }
+
+        for block in blocks {
+            switch block.kind {
+            case .thinking, .toolCallGroup:
+                run.append(block)
+            default:
+                flushRun()
+                result.append(block)
+            }
+        }
+        flushRun()
+        return result
+    }
+
+    /// The roll-up holding `childId` in `blocks`, or nil when it renders bare.
+    static func enclosingActivityGroupId(forChildId childId: String, in blocks: [ContentBlock]) -> String? {
+        for block in blocks {
+            if case let .activityGroup(children) = block.kind,
+                children.contains(where: { $0.id == childId })
+            {
+                return block.id
+            }
+        }
+        return nil
+    }
+
+    /// Settings › Conversation › Group Thinking & Tool Activity (upstream:
+    /// on unless the user turned it off). Memoized because it's read on
+    /// every rebuild while streaming; the toggle's notification and
+    /// `UserDefaults.didChangeNotification` clear the memo.
+    enum ActivityRollupSetting {
+        static let defaultsKey = "chatActivityRollupEnabled"
+
+        private static let lock = NSLock()
+        nonisolated(unsafe) private static var memo: Bool?
+        nonisolated(unsafe) private static var observersInstalled = false
+
+        static var isEnabled: Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            installObserversLocked()
+            if let memo { return memo }
+            let value = UserDefaults.standard.object(forKey: defaultsKey) as? Bool ?? true
+            memo = value
+            return value
+        }
+
+        static func invalidate() {
+            lock.lock()
+            memo = nil
+            lock.unlock()
+        }
+
+        private static func installObserversLocked() {
+            guard !observersInstalled else { return }
+            observersInstalled = true
+            for name in [ContentBlock.activityRollupSettingChanged, UserDefaults.didChangeNotification] {
+                NotificationCenter.default.addObserver(forName: name, object: nil, queue: nil) { _ in
+                    invalidate()
+                }
+            }
+        }
+    }
+
+    /// Posted when the roll-up toggle flips, so open chats rebuild.
+    static let activityRollupSettingChanged = Notification.Name("activityRollupSettingChanged")
 
     /// Compaction-boundary divider (upstream). Keyed on the summary id so a
     /// re-compaction moves and re-renders it; `turnId` is the last covered
@@ -1644,6 +1785,15 @@ final class BlockMemoizer: @unchecked Sendable {
     init() {}
     static let shared = BlockMemoizer()
     func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false) -> [ContentBlock] {
+        let blocks = unrolledBlocks(from: turns, streamingTurnId: streamingTurnId, agentName: agentName)
+        // Display-time roll-up, gated by the Conversation toggle (upstream
+        // applies it at the same display chokepoint, `limited`).
+        return ContentBlock.ActivityRollupSetting.isEnabled ? ContentBlock.rollupActivityBlocks(blocks) : blocks
+    }
+
+    /// Per-turn blocks before the activity roll-up (upstream
+    /// `ContentBlock.generateBlocks`).
+    func unrolledBlocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "") -> [ContentBlock] {
         var blocks: [ContentBlock] = []
         // Track which "side" (user vs assistant) the previous rendered turn
         // belonged to, so a header is emitted only when the side flips.
@@ -1804,7 +1954,9 @@ final class BlockMemoizer: @unchecked Sendable {
             let totalDuration = Self.workedFor(
                 isUser: isUser, isLastInGroup: isLastInGroup, isStreaming: isStreaming,
                 startedAt: replyStartedAt, completedAt: turn.completedAt)
-            if !isUser, !isStreaming,
+            // Stats only on the reply's last turn (upstream): intermediate
+            // tool-calling turns of a loop don't get their own row.
+            if !isUser, !isStreaming, isLastInGroup,
                 turn.timeToFirstToken != nil || turn.generationTokensPerSecond != nil
                     || turn.generationTokenCount != nil || turn.unclosedReasoning || totalDuration != nil
             {

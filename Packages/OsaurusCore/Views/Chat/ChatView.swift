@@ -327,6 +327,17 @@ final class ChatSession: ObservableObject {
     /// otherwise the next send would keep injecting a stale project's
     /// instructions. Removed in deinit.
     nonisolated(unsafe) private var projectMembershipObserver: NSObjectProtocol?
+    /// Rebuilds the transcript when the activity roll-up toggle flips
+    /// (upstream). Removed in deinit.
+    nonisolated(unsafe) private var activityRollupObserver: NSObjectProtocol?
+
+    /// Thinking ids already auto-expanded once for a completed
+    /// reasoning-only turn, so a later collapse sticks (upstream).
+    private var autoExpandedReasoningBlockIds: Set<String> = []
+    /// Ids auto-expanded while their turn streamed reasoning ("Expand
+    /// Thinking While Streaming"): expanded at most once, collapsed once
+    /// when the thinking phase ends (upstream).
+    private var streamingAutoExpandedThinkingBlockIds: Set<String> = []
 
     init() {
         let cache = ModelPickerItemCache.shared
@@ -387,6 +398,16 @@ final class ChatSession: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.refreshPickerItems() }
+        }
+
+        // Regroup open transcripts live when the roll-up toggle flips; the
+        // memoizer re-reads the flag on each rebuild (upstream).
+        activityRollupObserver = NotificationCenter.default.addObserver(
+            forName: ContentBlock.activityRollupSettingChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in self?.rebuildVisibleBlocks() }
         }
 
         // Mirror AgentTodoStore -> currentTodo so the inline UI block
@@ -496,6 +517,9 @@ final class ChatSession: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = projectMembershipObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = activityRollupObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         modelSelectionCancellable = nil
@@ -754,6 +778,8 @@ final class ChatSession: ObservableObject {
             return
         }
 
+        seedAutoExpandedReasoningBlocks(streamingTurnId: streamingTurnId)
+
         // Display-time only: the follow-up row never enters the memoizer
         // cache (upstream `insertFollowUpSuggestionsIfNeeded`).
         let newBlocks = insertFollowUpSuggestionsIfNeeded(
@@ -768,6 +794,10 @@ final class ChatSession: ObservableObject {
         )
         let newHeaderMap = blockMemoizer.groupHeaderMap
 
+        // After block generation, so the roll-up holding the live thinking
+        // block is in the fresh array (upstream).
+        updateStreamingThinkingExpansion(streamingTurnId: streamingTurnId, in: newBlocks)
+
         // use withAnimation(.none) to suppress the warning about publishing during view updates
         // this wraps the changes in a proper SwiftUI transaction
         withAnimation(.none) {
@@ -775,6 +805,66 @@ final class ChatSession: ObservableObject {
             visibleBlocksStore.groupHeaderMap = newHeaderMap
         }
     }
+
+    /// Expand the thinking block of a completed reasoning-only turn once, so
+    /// reasoning the user paid for isn't hidden behind a click; the user can
+    /// collapse it afterwards (upstream).
+    private func seedAutoExpandedReasoningBlocks(streamingTurnId: UUID?) {
+        for turn in turns where turn.role == .assistant {
+            guard turn.id != streamingTurnId,
+                turn.hasRenderableThinking,
+                turn.contentIsBlank,
+                (turn.toolCalls ?? []).isEmpty
+            else { continue }
+            let blockId = ContentBlock.thinkingBlockId(turnId: turn.id)
+            guard !autoExpandedReasoningBlockIds.contains(blockId) else { continue }
+            autoExpandedReasoningBlockIds.insert(blockId)
+            expandedBlocksStore.expand(blockId)
+        }
+    }
+
+    /// While the streaming turn is still only reasoning, keep its thinking
+    /// block (and the roll-up around it) open, then fold both when the
+    /// phase ends. Opt-in: Settings › Conversation › Advanced › Expand
+    /// Thinking While Streaming (upstream, default off).
+    private func updateStreamingThinkingExpansion(streamingTurnId: UUID?, in blocks: [ContentBlock]) {
+        let activeThinkingBlockId: String? = {
+            guard
+                UserDefaults.standard.bool(forKey: Self.expandThinkingWhileStreamingKey),
+                let streamingTurnId,
+                let turn = turns.last, turn.id == streamingTurnId,
+                turn.role == .assistant,
+                turn.hasRenderableThinking,
+                turn.contentIsBlank,
+                (turn.toolCalls ?? []).isEmpty
+            else { return nil }
+            return ContentBlock.thinkingBlockId(turnId: streamingTurnId)
+        }()
+
+        var activeIds: Set<String> = []
+        if let activeThinkingBlockId {
+            activeIds.insert(activeThinkingBlockId)
+            if let groupId = ContentBlock.enclosingActivityGroupId(forChildId: activeThinkingBlockId, in: blocks) {
+                activeIds.insert(groupId)
+            }
+        }
+
+        for blockId in streamingAutoExpandedThinkingBlockIds where !activeIds.contains(blockId) {
+            streamingAutoExpandedThinkingBlockIds.remove(blockId)
+            if !autoExpandedReasoningBlockIds.contains(blockId) {
+                expandedBlocksStore.collapse(blockId)
+            }
+        }
+        // Expand at most once per block so a manual collapse mid-stream
+        // isn't fought on the next delta.
+        for blockId in activeIds where !streamingAutoExpandedThinkingBlockIds.contains(blockId) {
+            streamingAutoExpandedThinkingBlockIds.insert(blockId)
+            expandedBlocksStore.expand(blockId)
+        }
+    }
+
+    /// Upstream's `@AppStorage` key for Expand Thinking While Streaming.
+    nonisolated static let expandThinkingWhileStreamingKey = "chatExpandThinkingWhileStreamingEnabled"
 
     /// Inject the compaction-boundary divider right after the last block of
     /// the last summary-covered turn (upstream). No-op without a valid

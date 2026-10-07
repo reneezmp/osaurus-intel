@@ -2565,3 +2565,14 @@ above 59.
   script used for the Insights and Chat UX ports. **The catalog isn't
   strictly sorted**: re-sorting it rewrites thousands of lines, so the
   script inserts new keys beside their neighbours.
+
+### Chat UX batch, part 3: activity roll-up, expand thinking (`W-chat-ux`) — 2026-10-06
+
+- Upstream `NativeActivityGroupView`, `ShimmerLabel`, the roll-up pass and
+  setting, and Expand Thinking While Streaming. Details:
+  [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
+- **Behaviour change:** speed/TTFT stats now appear only under a reply's
+  last turn, as upstream. Intel had shown one per intermediate
+  tool-calling turn.
+- Intel keeps no per-step durations, so roll-ups say "Worked" without a
+  time.

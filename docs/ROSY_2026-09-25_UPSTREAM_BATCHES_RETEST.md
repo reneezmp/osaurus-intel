@@ -1290,6 +1290,19 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       Settings and land on it. Relaunch keeps the choice.
 - [ ] **(paid)** With a Compaction Model set, compact: the run uses that
       model (Insights row `/internal/compaction` shows it).
+- [ ] **(paid)** Ask an agent something that needs several tool calls (e.g.
+      "read three files in this folder and compare them"). While it works,
+      a "Working" row shimmers; afterwards it reads "Worked" with step
+      circles and "+N steps". Click it: the thinking and tool rows appear,
+      each still expandable; Expand All / Collapse All work. Speed/TTFT
+      stats show once, under the final answer.
+- [ ] Settings › Conversation › Appearance › Group Thinking & Tool
+      Activity off: the same chat shows every step separately, without
+      reopening it. Back on: grouped again.
+- [ ] **(paid)** Settings › Conversation › Advanced › Expand Thinking While
+      Streaming on, with a reasoning model (DeepSeek Reasoner): the thinking
+      opens while it streams and closes when the answer starts. Collapsing
+      it by hand mid-stream keeps it closed.
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).

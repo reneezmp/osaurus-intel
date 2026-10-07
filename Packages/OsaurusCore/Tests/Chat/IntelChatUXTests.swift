@@ -121,6 +121,138 @@ struct IntelChatUXTests {
     }
 }
 
+// MARK: - Activity roll-up and expand-thinking (W-chat-ux part 2)
+
+@MainActor
+@Suite("Intel activity roll-up", .serialized)
+struct IntelActivityRollupTests {
+    private func call(_ id: String, _ name: String = "file_read") -> ToolCall {
+        ToolCall(id: id, type: "function", function: ToolCallFunction(name: name, arguments: "{}"))
+    }
+
+    /// user → (thinking + call) → tool result → (thinking + call) → answer.
+    private func loopTurns() -> [ChatTurn] {
+        let user = ChatTurn(role: .user, content: "Look into it")
+        let step1 = ChatTurn(role: .assistant, content: "")
+        step1.thinking = "Plan the first read."
+        step1.toolCalls = [call("c1")]
+        step1.toolResults = ["c1": #"{"ok":true}"#]
+        step1.timeToFirstToken = 0.5
+        let tool1 = ChatTurn(role: .tool, content: "result 1")
+        let step2 = ChatTurn(role: .assistant, content: "")
+        step2.thinking = "Now the second."
+        step2.toolCalls = [call("c2", "shell_run")]
+        step2.toolResults = ["c2": #"{"ok":true}"#]
+        step2.timeToFirstToken = 0.4
+        let tool2 = ChatTurn(role: .tool, content: "result 2")
+        let answer = ChatTurn(role: .assistant, content: "Here is what I found.")
+        answer.timeToFirstToken = 0.3
+        return [user, step1, tool1, step2, tool2, answer]
+    }
+
+    private func withRollup<T>(_ enabled: Bool, _ body: () throws -> T) rethrows -> T {
+        let key = ContentBlock.ActivityRollupSetting.defaultsKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.set(enabled, forKey: key)
+        ContentBlock.ActivityRollupSetting.invalidate()
+        defer {
+            UserDefaults.standard.set(previous, forKey: key)
+            ContentBlock.ActivityRollupSetting.invalidate()
+        }
+        return try body()
+    }
+
+    @Test("Runs of two or more steps roll up; a paragraph breaks the run; one step stays bare")
+    func rollupRules() {
+        let turn = UUID()
+        let think = ContentBlock(id: "t1", turnId: turn, kind: .thinking(index: 0, text: "x", isStreaming: false))
+        let tools = ContentBlock(id: "g1", turnId: turn, kind: .toolCallGroup(calls: [ToolCallItem(call: call("a"), result: nil)]))
+        let para = ContentBlock(
+            id: "p1", turnId: turn, kind: .paragraph(index: 0, text: "hi", isStreaming: false, role: .assistant))
+        let rolled = ContentBlock.rollupActivityBlocks([think, tools, para, think])
+        #expect(rolled.map(\.id) == ["activity-t1", "p1", "t1"])
+        #expect(ContentBlock.activityStepCount(of: [think, tools]) == 2)
+        #expect(ContentBlock.enclosingActivityGroupId(forChildId: "g1", in: rolled) == "activity-t1")
+        #expect(rolled[0].rendersToggleId("a"))  // a tool call nested in the roll-up
+        #expect(!rolled[1].rendersToggleId("a"))
+    }
+
+    @Test("An agent loop becomes one Worked row with stats only under the answer")
+    func memoizerRollsUpLoops() {
+        withRollup(true) {
+            let blocks = BlockMemoizer().blocks(from: loopTurns(), agentName: "A")
+            let groups = blocks.filter { if case .activityGroup = $0.kind { return true } else { return false } }
+            #expect(groups.count == 1)
+            if case let .activityGroup(children) = groups.first?.kind {
+                #expect(ContentBlock.activityStepCount(of: children) == 4)
+            }
+            let stats = blocks.filter { if case .generationStats = $0.kind { return true } else { return false } }
+            #expect(stats.count == 1)
+        }
+    }
+
+    @Test("Turning the switch off shows every step bare")
+    func rollupSwitchOff() {
+        withRollup(false) {
+            let blocks = BlockMemoizer().blocks(from: loopTurns(), agentName: "A")
+            #expect(!blocks.contains { if case .activityGroup = $0.kind { return true } else { return false } })
+            #expect(blocks.contains { $0.id.hasPrefix("toolgroup-") })
+        }
+    }
+
+    @Test("The switch is on by default (upstream)")
+    func rollupDefault() {
+        let key = ContentBlock.ActivityRollupSetting.defaultsKey
+        let previous = UserDefaults.standard.object(forKey: key)
+        UserDefaults.standard.removeObject(forKey: key)
+        ContentBlock.ActivityRollupSetting.invalidate()
+        #expect(ContentBlock.ActivityRollupSetting.isEnabled)
+        UserDefaults.standard.set(previous, forKey: key)
+        ContentBlock.ActivityRollupSetting.invalidate()
+    }
+
+    @Test("Expand Thinking While Streaming opens the live thinking block and folds it when the answer starts")
+    func expandThinkingWhileStreaming() async throws {
+        try await ChatHistoryTestStorage.run {
+            let key = ChatSession.expandThinkingWhileStreamingKey
+            let previous = UserDefaults.standard.object(forKey: key)
+            UserDefaults.standard.set(true, forKey: key)
+            defer { UserDefaults.standard.set(previous, forKey: key) }
+
+            let session = ChatSession()
+            let user = ChatTurn(role: .user, content: "Think hard")
+            let reply = ChatTurn(role: .assistant, content: "")
+            reply.thinking = "Reasoning…"
+            session.turns = [user, reply]
+            session.isStreaming = true
+            session.rebuildVisibleBlocks()
+            let thinkingId = ContentBlock.thinkingBlockId(turnId: reply.id)
+            #expect(session.expandedBlocksStore.isExpanded(thinkingId))
+
+            reply.content = "The answer"
+            session.rebuildVisibleBlocks()
+            #expect(!session.expandedBlocksStore.isExpanded(thinkingId))
+            session.isStreaming = false
+        }
+    }
+
+    @Test("A finished reasoning-only reply opens its thinking once")
+    func reasoningOnlySeed() async throws {
+        try await ChatHistoryTestStorage.run {
+            let session = ChatSession()
+            let reply = ChatTurn(role: .assistant, content: "")
+            reply.thinking = "Only reasoning came back."
+            session.turns = [ChatTurn(role: .user, content: "q"), reply]
+            session.rebuildVisibleBlocks()
+            let id = ContentBlock.thinkingBlockId(turnId: reply.id)
+            #expect(session.expandedBlocksStore.isExpanded(id))
+            session.expandedBlocksStore.collapse(id)
+            session.rebuildVisibleBlocks()
+            #expect(!session.expandedBlocksStore.isExpanded(id))  // a collapse sticks
+        }
+    }
+}
+
 private final class FollowUpFixtureProtocol: URLProtocol, @unchecked Sendable {
     nonisolated(unsafe) static var body = ""
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "followup-fixture.invalid" }

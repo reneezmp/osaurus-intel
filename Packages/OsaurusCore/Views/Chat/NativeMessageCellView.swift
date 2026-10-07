@@ -1377,6 +1377,7 @@ final class NativeMessageCellView: NSTableCellView {
     /// height via `fittingSize`. (Upstream.)
     private var nativeFollowUpsView: NSHostingView<AnyView>?
     private var nativeCompactionMarkerView: NativeCompactionMarkerView?
+    private var nativeActivityGroupView: NativeActivityGroupView?
     private var nativePreflightView: NativePreflightCapabilitiesView?
     private var nativeStatsView: NativeStatsView?
     private var nativeAssistantActionsView: NativeAssistantActionsView?
@@ -1502,6 +1503,9 @@ final class NativeMessageCellView: NSTableCellView {
 
         case let .toolCallGroup(calls):
             configureAsToolCallGroup(block: block, calls: calls, context: context, sameKind: sameKind)
+
+        case let .activityGroup(children):
+            configureAsActivityGroup(block: block, children: children, context: context, sameKind: sameKind)
 
         case let .userMessage(text, attachments):
             configureAsUserMessage(
@@ -2439,6 +2443,47 @@ final class NativeMessageCellView: NSTableCellView {
         }
     }
 
+    // MARK: - Activity Group (upstream NativeActivityGroupView)
+
+    private func configureAsActivityGroup(
+        block: ContentBlock,
+        children: [ContentBlock],
+        context: CellRenderingContext,
+        sameKind: Bool
+    ) {
+        if !sameKind || nativeActivityGroupView == nil {
+            removeAllContentViews()
+            let av = NativeActivityGroupView()
+            av.translatesAutoresizingMaskIntoConstraints = false
+            addSubview(av)
+            NSLayoutConstraint.activate([
+                av.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                av.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                av.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            ])
+            nativeActivityGroupView = av
+        }
+        nativeActivityGroupView?.configure(
+            children: children,
+            expandedIds: context.expandedIds,
+            width: context.width - 32,
+            theme: context.theme,
+            isStreaming: context.isStreaming,
+            blockId: block.id,
+            onToggleChild: { id in context.onToggleExpand(id) },
+            onToggle: { [weak self] in
+                guard let self else { return }
+                context.onToggleExpand(block.id)
+                self.nativeActivityGroupView?.onHeightChanged?()
+            },
+            onHeightChanged: { [weak self] in
+                guard let self, let av = self.nativeActivityGroupView, let id = self.currentBlockId else { return }
+                let h = av.measuredHeight() + 8
+                context.onHeightMeasured?(h, id)
+            }
+        )
+    }
+
     // MARK: - Compaction Marker (upstream NativeCompactionMarkerView)
 
     private func configureAsCompactionMarker(
@@ -2516,6 +2561,7 @@ final class NativeMessageCellView: NSTableCellView {
         nativeFileDiffView?.removeFromSuperview(); nativeFileDiffView = nil
         nativeFollowUpsView?.removeFromSuperview(); nativeFollowUpsView = nil
         nativeCompactionMarkerView?.removeFromSuperview(); nativeCompactionMarkerView = nil
+        nativeActivityGroupView?.removeFromSuperview(); nativeActivityGroupView = nil
         nativePreflightView?.removeFromSuperview(); nativePreflightView = nil
         nativeStatsView?.removeFromSuperview(); nativeStatsView = nil
         nativeAssistantActionsView?.removeFromSuperview(); nativeAssistantActionsView = nil
@@ -2701,7 +2747,7 @@ private func cgColorsEqual(_ lhs: CGColor?, _ rhs: CGColor?) -> Bool {
 
 /// Lightweight discriminator used to detect kind changes without comparing full associated values.
 enum ContentBlockKindTag: Equatable {
-    case header, paragraph, toolCallGroup, thinking, userMessage, pendingToolCall
+    case header, paragraph, toolCallGroup, thinking, activityGroup, userMessage, pendingToolCall
     case generationStats, typingIndicator, groupSpacer, sharedArtifact, preflightCapabilities, chart
     case assistantActions, fileDiff, followUpSuggestions, compactionMarker, other
 }
@@ -2713,6 +2759,7 @@ extension ContentBlockKind {
         case .paragraph: return .paragraph
         case .toolCallGroup: return .toolCallGroup
         case .thinking: return .thinking
+        case .activityGroup: return .activityGroup
         case .userMessage: return .userMessage
         case .pendingToolCall: return .pendingToolCall
         case .generationStats: return .generationStats
@@ -2826,6 +2873,17 @@ enum NativeCellHeightEstimator {
         case let .toolCallGroup(calls):
             // each row self-sizes at ~41pt (40pt header + 1pt separator)
             return CGFloat(calls.count) * 41 + 8
+
+        case let .activityGroup(children):
+            // collapsed: 44pt header + 4pt inset + 8pt cell gap (upstream)
+            if !isExpanded { return 56 }
+            // expanded: header + separator/gaps + children estimated
+            // collapsed; per-child expansion is corrected by the measured
+            // height report
+            let childrenH = children.reduce(CGFloat(0)) { acc, child in
+                acc + estimatedHeight(for: child, width: width - 28, theme: theme, isExpanded: false)
+            }
+            return 44 + 1 + 8 + childrenH + 10 + 8
 
         case let .preflightCapabilities(items):
             return 8 + PreflightCapabilitiesRowHeight.estimated(items: items, tableWidth: width)

@@ -224,6 +224,13 @@ public enum SettingsSearchIndex {
 
         // MARK: Conversation
         .init(
+            id: "settings.chat.activityRollup", tab: .chat, section: "Appearance",
+            title: "Group Thinking & Tool Activity",
+            keywords: [
+                "group thinking", "tool activity", "rollup", "worked for",
+                "collapse tools", "activity row",
+            ]),
+        .init(
             id: "settings.chat.spellCheck", tab: .chat, section: "Appearance",
             title: "Check Spelling While Typing",
             keywords: ["spelling", "spell check", "spellcheck", "typos", "underline", "typing"]),
@@ -261,6 +268,13 @@ public enum SettingsSearchIndex {
             title: "Folder Tool Permissions",
             keywords: ["file", "shell", "git", "write", "delete", "approve", "folder tools", "permissions"],
             disambiguation: "Approvals for folder file, shell and git tools, not macOS permissions."),
+        .init(
+            id: "settings.chat.thinkingDisplay", tab: .chat, section: "Advanced",
+            title: "Expand Thinking While Streaming",
+            keywords: [
+                "thinking", "reasoning", "expand thinking", "show thinking",
+                "chain of thought",
+            ]),
         .init(
             id: "settings.chat.compactionModel", tab: .chat, section: "Advanced",
             title: "Compaction Model",

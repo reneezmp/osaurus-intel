@@ -8,10 +8,10 @@
 //
 //  Intel version, not upstream's file. It hosts the chat settings that used
 //  to crowd Intel's General page:
-//  - Upstream's smooth streaming, activity roll-up, expand-thinking and
-//    keep-awake switches are not here yet: Intel lacks those features
-//    (backlog `W-chat-ux`, `W-ui-misc`). Follow-ups and the compaction model
-//    are upstream's.
+//  - Upstream's smooth streaming and keep-awake switches are not here yet:
+//    Intel lacks those features (backlog `W-chat-ux`, `W-ui-misc`).
+//    Follow-ups, the activity roll-up, expand-thinking and the compaction
+//    model are upstream's.
 //  - Intel keeps switches upstream moved elsewhere because Intel has no
 //    other home for them yet: Disable Tools and Enable Memory (upstream:
 //    Agents / Memory), Folder Tool Permissions (upstream: Tools & MCP,
@@ -61,6 +61,14 @@ struct ChatSettingsView: View {
     private var cmdNStartsNewChatInCurrentWindow: Bool = false
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var composerSpellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
+    /// Upstream: keep reasoning open while the model thinks. Read by
+    /// `ChatSession.updateStreamingThinkingExpansion`.
+    @AppStorage(ChatSession.expandThinkingWhileStreamingKey)
+    private var expandThinkingWhileStreamingEnabled: Bool = false
+    /// Upstream: roll thinking / tool runs into one "Worked" row. Read by
+    /// `BlockMemoizer` through `ContentBlock.ActivityRollupSetting`.
+    @AppStorage(ContentBlock.ActivityRollupSetting.defaultsKey)
+    private var activityRollupEnabled: Bool = true
 
     /// Baseline of the save-relevant fields as last loaded or saved; a
     /// pristine page never writes to disk.
@@ -70,7 +78,7 @@ struct ChatSettingsView: View {
     /// Landing anchors rendered inside the Advanced disclosure, so a search
     /// result for one of them opens it before scrolling.
     nonisolated static let advancedAnchorIds: Set<String> = [
-        "settings.chat.compactionModel",
+        "settings.chat.thinkingDisplay", "settings.chat.compactionModel",
         "settings.chat.systemPrompt", "settings.chat.temperature", "settings.chat.maxTokens",
         "settings.chat.contextLength", "settings.chat.topP", "settings.chat.maxToolAttempts",
     ]
@@ -98,6 +106,17 @@ struct ChatSettingsView: View {
 
     private var appearanceSection: some View {
         SettingsSection(title: "Appearance", icon: "text.bubble") {
+            SettingsToggle(
+                title: L("Group Thinking & Tool Activity"),
+                description:
+                    "Collapse runs of thinking and tool steps into one expandable summary row so long agent runs don't push the conversation out of view.",
+                anchorId: "settings.chat.activityRollup",
+                isOn: $activityRollupEnabled
+            )
+            .onChange(of: activityRollupEnabled) { _ in
+                NotificationCenter.default.post(name: ContentBlock.activityRollupSettingChanged, object: nil)
+            }
+
             SettingsToggle(
                 title: L("Check Spelling While Typing"),
                 description:
@@ -204,6 +223,14 @@ struct ChatSettingsView: View {
 
     private var advancedSection: some View {
         SettingsAdvancedDisclosure(anchorIds: Self.advancedAnchorIds) {
+            SettingsToggle(
+                title: L("Expand Thinking While Streaming"),
+                description:
+                    "Keep the model's reasoning open while it is thinking, then collapse it once the answer begins. Useful for watching long agent tasks.",
+                anchorId: "settings.chat.thinkingDisplay",
+                isOn: $expandThinkingWhileStreamingEnabled
+            )
+
             SettingsSubsection(label: "Compaction Model", anchorId: "settings.chat.compactionModel") {
                 VStack(alignment: .leading, spacing: 8) {
                     compactionModelPicker

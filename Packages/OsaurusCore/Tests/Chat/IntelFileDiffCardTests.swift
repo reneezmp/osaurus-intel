@@ -104,7 +104,7 @@ struct IntelFileDiffCardTests {
                 result: ["path": "a.txt", "diff": "--- a/a.txt\n+++ b/a.txt\n-a\n+x"] as [String: Any]),
             "c3": ToolEnvelope.success(tool: "shell_run", text: "ok"),
         ]
-        let blocks = BlockMemoizer().blocks(from: [user, turn])
+        let blocks = BlockMemoizer().unrolledBlocks(from: [user, turn])
         #expect(kinds(blocks) == ["group:c1,c2", "diff:a.txt", "group:c3"])
         let ids = blocks.filter { if case .toolCallGroup = $0.kind { return true } else { return false } }.map(\.id)
         #expect(ids == ["toolgroup-\(turn.id.uuidString)", "toolgroup-\(turn.id.uuidString)-1"])
