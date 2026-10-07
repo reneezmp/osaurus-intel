@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -2632,3 +2632,34 @@ above 59.
 - `scrollBounceBehavior` is macOS 13.3+: use `intelScrollBounceBasedOnSize()`.
 - The separate Thinking and model-options chips are gone (upstream #2958):
   every option lives in the picker's third column.
+
+### Upstream batch `4064a6fde..66ea7ebc4` — 2026-10-07
+
+Audit and port of 40 commits:
+[`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md). The next
+review starts after `66ea7ebc4`.
+
+- Shipped (Rosy section "Upstream audit 2026-10-07"):
+  - #2977, #3003, #3007, #2999 (part), #3018 (part), #2922 (part):
+    hang fixes, busy-port retry, incremental chat table, cleaned replies.
+  - #2998 avatars plus a `MemoryPressureResponder`; #2995 + #3017
+    Safari-style tab track.
+  - #2976 / #2983 PDF reading order, page markers, `file_read` `pages`.
+  - #2982 (part) Router polling cuts.
+  - #2990 MCP robustness, elicitation and the connector catalog. This also
+    brings two older upstream MCP OAuth commits Intel never had (#1276
+    redirect hardening, #1284 HubSpot confidential client).
+  - Found while porting: #2239 server hardening (shared event loop group,
+    connection registry and cap).
+- Needs work, on the backlog: #2979 (`W-privacy-filter`), #2980 / #2982
+  workspaces / #3018 pairing (`W-workspaces-identity-mobile`), #3008 / #3010
+  (`W-channels`), the #2922 Seatbelt check (`W-tools-misc`). Also new:
+  `W-router-billing`, file tool parity from #2791, the external-caller tool
+  policy (`W-server-api`) and the `existsCached()` identity memo.
+- Decision needed: whether Intel shows upstream's Router announcements feed
+  (#2982), which may advertise Apple-Silicon-only features.
+- **Incident:** nine test runs used a one-line `export` gate that left
+  `OSAURUS_TEST_ROOT` empty and wrote the live `~/.osaurus`. Three real agents
+  were rewritten without their upstream-only settings; Renée restored them
+  from the running upstream app. Record, gate fix and code guards:
+  [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md#2026-10-07-live-data-incident-unsafe-export-gate).
