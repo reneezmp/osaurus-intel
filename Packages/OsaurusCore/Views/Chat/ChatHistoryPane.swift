@@ -315,12 +315,36 @@ struct ChatHistoryPaneView: View {
         let scope = self.scope
         let agentId = windowState.agentId
         let onOpen = onSelect
-        // Intel: no first-time import guide yet (`W-chat-ux`); straight to
-        // the picker, as Intel's sidebar always did.
-        ChatSessionImportCoordinator.run(
-            agentId: agentId == Agent.defaultId ? nil : agentId,
-            scope: scope,
-            onOpen: { onOpen($0) }
+        let startImport = {
+            ChatSessionImportCoordinator.run(
+                agentId: agentId == Agent.defaultId ? nil : agentId,
+                scope: scope,
+                onOpen: { onOpen($0) }
+            )
+        }
+        if ImportGuidePreference.shared.skip {
+            startImport()
+            return
+        }
+        let requestId = UUID()
+        let sheet = ImportGuideSheet {
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+            startImport()
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: "Import Conversations",
+                message: nil,
+                buttons: [.cancel(L("Cancel"))],
+                showsCloseButton: true,
+                customContent: AnyView(sheet),
+                width: 470,
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
         )
     }
 }

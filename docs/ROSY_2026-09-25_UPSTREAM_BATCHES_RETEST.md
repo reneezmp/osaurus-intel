@@ -1314,6 +1314,11 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       clicking it opens the image. Quit and reopen the chat: the card is
       still there. Delete the chat: `~/.osaurus-intel/artifacts/<chat id>`
       is gone.
+- [ ] History pane › Import: a guide lists ChatGPT, Claude, Grok, Gemini
+      and Open WebUI; each row opens to its export steps, and the ↗ button
+      opens the provider's export page in the browser. Choose File… opens
+      the picker. Tick "Don't show this again", import again: the picker
+      opens directly. Checkbox looks themed (not the grey system box).
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).

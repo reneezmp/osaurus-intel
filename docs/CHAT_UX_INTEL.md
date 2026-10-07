@@ -223,6 +223,23 @@ what Intel adapted; everything else is upstream verbatim.
   via `unrolledBlocks`) plus `IntelScreenshotArtifactTests` (JSON keys, no
   key on plain turns, delete cleanup).
 
+## Chat import guide
+
+- The history pane's **Import** button first shows upstream's guide: how to
+  export from ChatGPT, Claude, Grok, Gemini and Open WebUI (all five are
+  formats Intel's importer reads), each with a link to its export page,
+  then **Choose File…** opens the picker. "Don't show this again" skips
+  straight to the picker from then on (`UserDefaults` `ImportGuideSkip`).
+- Files: `Views/Chat/ImportGuideSheet.swift` (upstream; the checkbox uses
+  `ThemedCheckboxToggleStyle` for Ventura) and the upstream
+  `requestImport()` in `ChatHistoryPane`.
+- **Not wired yet:** upstream's one-time "Import your chat history" prompt
+  after onboarding. `Services/ImportHistoryPromptGate.swift` and its tests
+  are ported, but Intel doesn't run upstream's onboarding flow, which is
+  the prompt's only trigger. Wire `presentImportHistoryPromptIfEligible`
+  when onboarding lands (`W-ui-misc`).
+- No telemetry on Intel, so the coordinator keeps no `source:` entry point.
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -243,7 +260,8 @@ they wait for the next session, in this suggested order:
    2026-10-06**.
 3. ~~Smooth streaming~~ **done 2026-10-06**.
 4. ~~Screenshot attach~~ **done 2026-10-06**.
-5. Chat import guide (`ImportGuideSheet`, `ImportHistoryPromptGate`).
+5. ~~Chat import guide~~ **done 2026-10-06** (post-onboarding prompt waits
+   for onboarding).
 6. Markdown document view (`MarkdownBlockParsing`, `MarkdownDocumentView`).
 7. Activity / dispatch rows (`DispatchEnvelope`, `AgentDispatchTarget`,
    `NativeDispatchBadgeRow`).
