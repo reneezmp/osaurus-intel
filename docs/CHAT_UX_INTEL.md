@@ -288,6 +288,40 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests: `Tests/Chat/DispatchEnvelopeTests.swift` (upstream's plain-text and
   self-scheduled cases, Intel watcher framing, block wiring, fresh session).
 
+## Built-in agent guard
+
+- Upstream `Models/Agent/BuiltInAgentGuard.swift`
+  (`Agent.rejectBuiltInForExternalSurface`): the Default agent is reachable
+  only from the chat window. Applied where Intel has the surface:
+  - `BackgroundTaskManager.dispatchChat` (every background run);
+  - `ScheduleManager.executeSchedule` (skips, logs);
+  - `WatcherManager.processCurrentState` (the guard was already there,
+    compiled out for lack of the helper);
+  - `NextRunScheduler.dispatch` (skips and records a cancelled run).
+  The schedule and watcher editors already offer only custom agents, so
+  this stops records made another way (or `nil` agents).
+- **Pending decision — plugins:** Intel's plugin bridge
+  (`IntelPluginExecution`) has no per-call active agent and runs every
+  plugin dispatch as the Default agent, so plugin-sourced dispatch is
+  exempt. Upstream refuses it (`PluginHostAPI` uses the active agent).
+  Options: keep the exemption, or refuse plugin dispatch until a plugin
+  can name a custom agent.
+- Intel's local API has no agent-run endpoints, so upstream's HTTP guard
+  sites have no Intel counterpart yet.
+- Tests: upstream `Tests/Agent/BuiltInAgentGuardTests.swift` plus an Intel
+  dispatch case.
+
+## Moved out of this batch
+
+- **Context attribution** (`Services/Context/ContextAttribution.swift`) is
+  upstream's eval-harness cost breakdown, consumed only by
+  `AgentLoopEvaluator` / `PromptSurfaceEvaluator`. It belongs to
+  `N-dev-tooling`, not chat UX.
+- **`AgentDetailChrome`** is upstream's agent-page redesign (#1656, #2052,
+  #2072: header bar, agent switcher, grouped tab strip, shared section
+  cards). Intel's agent page predates it, and those commits were never
+  audited. Now its own workstream, `W-agent-detail-redesign`.
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -313,8 +347,9 @@ they wait for the next session, in this suggested order:
 6. ~~Markdown document view~~ **done 2026-10-06**.
 7. ~~Dispatch rows~~ **done 2026-10-06** for self-scheduled and watcher
    runs; the other kinds wait for their producers.
-8. Context attribution (`ContextAttribution`).
-9. `AgentDetailChrome` and `BuiltInAgentGuard`.
+8. ~~Context attribution~~ moved to `N-dev-tooling` (see "Moved out").
+9. ~~`BuiltInAgentGuard`~~ **done 2026-10-06** (plugin exemption pending a
+   decision); `AgentDetailChrome` moved to `W-agent-detail-redesign`.
 10. Slash-command registry parity.
 
 After that comes the model picker (`W-model-picker-2947`).

@@ -199,6 +199,17 @@ public final class NextRunScheduler {
     }
 
     private func dispatch(entry: NextRunEntry) async {
+        // Self-scheduled wakes MUST target a real custom agent (upstream
+        // `BuiltInAgentGuard`). The slot is already cleared; leave a
+        // cancelled row so the Activity tab shows why nothing ran.
+        if let rejection = Agent.rejectBuiltInForExternalSurface(
+            entry.agentId,
+            source: "scheduler/NextRun"
+        ) {
+            print("[NextRunScheduler] dispatch skipped: \(rejection.message)")
+            await recordSkippedRun(entry: entry, reason: "builtin-agent-rejected")
+            return
+        }
         let request = await Self.makeDispatchRequest(for: entry)
         guard let handle = await TaskDispatcher.shared.dispatch(request) else {
             print(

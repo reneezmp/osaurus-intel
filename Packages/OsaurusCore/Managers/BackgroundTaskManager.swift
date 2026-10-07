@@ -340,6 +340,18 @@ public final class BackgroundTaskManager: ObservableObject {
 
     /// Dispatch a chat task for background execution.
     public func dispatchChat(_ request: DispatchRequest) async -> DispatchHandle? {
+        // Background dispatch is an external surface (schedules, watchers,
+        // self-scheduled wakes): built-in agents (the Default agent) are only
+        // reachable from the in-app Chat (upstream `BuiltInAgentGuard`).
+        // Intel: plugin dispatch is exempt for now — Intel's plugin bridge
+        // has no per-call active agent and always runs as the Default agent
+        // (`IntelPluginExecution`), so the guard would stop every plugin
+        // task. Pending Renée's decision (docs/CHAT_UX_INTEL.md).
+        if request.source != .plugin,
+            Agent.rejectBuiltInForExternalSurface(request.agentId, source: "background/dispatchChat") != nil
+        {
+            return nil
+        }
         guard canDispatchNewTask(source: request.source, agentId: request.agentId) else { return nil }
 
         // The reattach lookup below opens the chat-history DB, which needs the

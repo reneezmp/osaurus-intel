@@ -359,6 +359,18 @@ public final class ScheduleManager: ObservableObject {
     private func executeSchedule(_ schedule: Schedule, scheduledFireTime: Date? = nil) -> Bool {
         if isInFlight(schedule.id) { return false }
 
+        // Schedules MUST target an explicit custom agent (upstream
+        // `BuiltInAgentGuard`). nil or built-in agentIds were previously
+        // coerced to `Agent.defaultId`; the Schedules editor already offers
+        // only custom agents, so this only stops records made another way.
+        if let rejection = Agent.rejectBuiltInForExternalSurface(
+            schedule.agentId,
+            source: "schedule/executeSchedule"
+        ) {
+            print("[Osaurus] Skipping schedule '\(schedule.name)': \(rejection.message)")
+            return false
+        }
+
         var triggeredSchedule = schedule
         triggeredSchedule.lastTriggeredAt = scheduledFireTime ?? Date()
         ScheduleStore.save(triggeredSchedule)

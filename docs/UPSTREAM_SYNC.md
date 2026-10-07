@@ -2610,3 +2610,12 @@ above 59.
 - `SymbolImageCache` replaced with upstream's (adds `pointSize`/`weight`
   and `rotatedDownChevron`); ported AppKit views no longer need symbol
   workarounds.
+
+### Chat UX batch, part 7: built-in agent guard (`W-chat-ux`) — 2026-10-06
+
+- Upstream `BuiltInAgentGuard` on background dispatch, schedules, watchers
+  and self-scheduled wakes. **Plugin dispatch is exempt** on Intel (the
+  bridge has no active agent and always uses the Default agent): open
+  decision recorded in [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
+- Context attribution reclassified to `N-dev-tooling`; `AgentDetailChrome`
+  split into the new `W-agent-detail-redesign` (unaudited #1656/#2052/#2072).
