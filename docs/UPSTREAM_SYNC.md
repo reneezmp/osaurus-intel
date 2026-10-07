@@ -2665,3 +2665,25 @@ review starts after `66ea7ebc4`.
   were rewritten without their upstream-only settings; Renée restored them
   from the running upstream app. Record, gate fix and code guards:
   [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md#2026-10-07-live-data-incident-unsafe-export-gate).
+
+### Public release 1.0.59 (build 60) — 2026-10-07
+
+Cut with `scripts/release/cut_intel_release.sh 1.0.59` from `9cc7dffc1`
+(build 60, the appcast's 59 + 1; no Rosy candidates in between). Contents:
+
+- The model picker (stages A–E).
+- The rest of the Chat UX batch.
+- The 2026-10-07 upstream audit: hang fixes, tab track, avatars, PDF
+  reading, Router polling cuts, MCP robustness and connector catalog.
+- Upstream announcements, labelled as upstream's.
+- The plugin dispatch guard.
+
+Verified after publishing: x86_64, `codesign --verify --deep --strict`
+passes with the `Osaurus Intel Code Signing` identity, version 1.0.59 / 60,
+`SUPublicEDKey` `bYYJJqFx…`, minimum macOS 13.0. The asset is
+`Osaurus-Intel-1.0.59.zip` (74,216,981 bytes), matching the appcast
+`length`, and the live feed (raw `intel-fork/docs/appcast.xml`) serves it.
+The appcast commit is `1c313d959`. Rosy validation is pending: every
+checklist section from "Per-chat file history" through "Upstream audit
+2026-10-07" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`. The next release
+needs a build number above 60.
