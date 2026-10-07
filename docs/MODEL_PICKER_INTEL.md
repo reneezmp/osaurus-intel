@@ -134,3 +134,22 @@ ports upstream/main's current files, not the commits one by one. Plan:
   - The wallet card restyle waits for the composer credits chip (stage C).
 - Render-checked offscreen: slash and "@" menus.
 
+## Stage E — theme editor, search, docs (2026-10-06)
+
+- #2947's theme editor changes (3-way merged): the **Small body** size under
+  Text & Fonts and landing anchors for Border Color / Width / Opacity;
+  Settings search finds all four (`themes.typography.smallBody`,
+  `themes.borders.*`). Intel adaptations: single-value `onChange`, and the
+  landing picks the built-in theme by `isBuiltIn` + light/dark (Intel has no
+  appearance-mode built-in ids).
+- Not ported: upstream's `guide-chat.md` / `guide-settings.md` text (Intel
+  has no in-app guide yet, `W-ui-misc`) and the `SettingsSearchSelfFindProbe`
+  test helper.
+
+## Status
+
+Stages A–E shipped 2026-10-06. Staged: the composer credits chip and its
+wallet card (Intel never had the chip), the Safari-style tab track with the
+quiet lone tab (#2995 + #3017, `W-chat-tabs`), media-model categories and
+prices (`W-media-generation`), live reasoning catalog capabilities.
+

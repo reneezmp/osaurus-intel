@@ -2619,3 +2619,16 @@ above 59.
   decision recorded in [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
 - Context attribution reclassified to `N-dev-tooling`; `AgentDetailChrome`
   split into the new `W-agent-detail-redesign` (unaudited #1656/#2052/#2072).
+
+### Model picker (`W-model-picker-2947`: #2947, #2958, #3017) — 2026-10-06
+
+- Ported upstream/main's current files rather than the three commits.
+  Details, Intel differences and staging: [`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md).
+- **Ventura keyboard rule for picker cards:** no SwiftUI focus
+  (`.focusable()`, `focusEffectDisabled`, `onKeyPress`, `onMoveCommand`,
+  `FocusState` navigation). `PickerCardKeyMonitor` (in
+  `ChatModelPickerCard.swift`) drives arrows and Return inside the card's
+  panel; Escape belongs to `AnchoredCardPresenter`.
+- `scrollBounceBehavior` is macOS 13.3+: use `intelScrollBounceBasedOnSize()`.
+- The separate Thinking and model-options chips are gone (upstream #2958):
+  every option lives in the picker's third column.

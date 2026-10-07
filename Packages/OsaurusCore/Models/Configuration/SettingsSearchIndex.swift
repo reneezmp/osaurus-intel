@@ -318,6 +318,25 @@ public enum SettingsSearchIndex {
             id: "themes.overview", tab: .themes, title: "Themes",
             keywords: ["appearance", "colors", "dark mode", "light mode", "fonts", "accent"]),
         .init(
+            id: "themes.borders.color", tab: .themes, section: "Borders & Effects", title: "Border Color",
+            keywords: ["default border color", "popover border", "model picker border", "credits border"]),
+        .init(
+            id: "themes.borders.width", tab: .themes, section: "Borders & Effects", title: "Border Width",
+            keywords: [
+                "default border width", "menu border width", "popover border width", "model picker border width",
+                "credits border width",
+            ]),
+        .init(
+            id: "themes.borders.opacity", tab: .themes, section: "Borders & Effects", title: "Border Opacity",
+            keywords: [
+                "default border opacity", "dropdown border opacity", "popover opacity", "popover border opacity",
+                "model picker border opacity", "credits border opacity",
+            ]),
+        .init(
+            id: "themes.typography.smallBody", tab: .themes, section: "Text & Fonts", title: "Small body",
+            keywords: ["small body size", "small text", "font size", "compact controls", "model list", "model picker"],
+            disambiguation: "Compact controls and model lists"),
+        .init(
             id: "themes.create", tab: .themes, title: "Create Theme",
             keywords: ["custom theme", "theme editor", "new theme"]),
         .init(
