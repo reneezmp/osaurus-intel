@@ -101,6 +101,36 @@ enum ModelProfileRegistry {
         profile(for: modelId)?.defaults ?? [:]
     }
 
+    /// The chat pill's "· effort" suffix (upstream): the explicit
+    /// `reasoningEffort` choice, else the profile default. Intel has no live
+    /// reasoning catalog, so only the profile branch exists.
+    static func inlineReasoningSuffixLabel(
+        for modelId: String,
+        values: [String: ModelOptionValue]
+    ) -> String? {
+        guard
+            let option = profile(for: modelId)?.options
+                .first(where: { $0.id == "reasoningEffort" }),
+            case .segmented(let segments) = option.kind
+        else { return nil }
+        let effective =
+            values["reasoningEffort"]?.stringValue
+            ?? defaults(for: modelId)["reasoningEffort"]?.stringValue
+        guard let effective else { return nil }
+        return segments.first(where: { $0.id == effective })?.label
+    }
+
+    /// The stored option for a semantic Thinking choice (upstream
+    /// `thinkingStoredOption`): inverted options such as `disableThinking`
+    /// store the opposite boolean.
+    static func thinkingStoredOption(
+        for modelId: String,
+        enabled: Bool
+    ) -> (id: String, value: ModelOptionValue)? {
+        guard let option = profile(for: modelId)?.thinkingOption else { return nil }
+        return (option.id, .bool(option.inverted ? !enabled : enabled))
+    }
+
     static func options(for modelId: String) -> [ModelOptionDefinition] {
         profile(for: modelId)?.options ?? []
     }

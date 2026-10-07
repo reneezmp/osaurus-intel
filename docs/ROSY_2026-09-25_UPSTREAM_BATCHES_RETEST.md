@@ -1333,3 +1333,28 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).
+
+## Model picker (`W-model-picker-2947`)
+
+Manual: [`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md).
+
+- [ ] Click the model pill: a card opens above it with Provider, Model and
+      (for models with options) Model options columns. Click another
+      provider: its models show, the current model stays selected until you
+      pick one. Picking a model updates the pill. Escape closes the card.
+- [ ] Keyboard: open with `/model` or click, then ↑↓ move, ←→ switch columns,
+      Return picks; the focused row shows a thin underline.
+- [ ] A reasoning model (DeepSeek Reasoner / GPT-6 Astra): the pill reads
+      "name · Medium"; Model options has Thinking and Reasoning Effort.
+      Changing effort updates the pill; "Reset to default" appears after a
+      change. The old Thinking and Options chips are gone.
+- [ ] Osaurus Cloud provider: rows have stars; starring keeps a model in
+      the list after switching away. First connection to Osaurus Cloud
+      stars DeepSeek V4.1 Flash, Claude Opus 5.5 and GPT-6 Astra (only if
+      you had no favourites).
+- [ ] "More models" under Osaurus Cloud opens the Cloud browser: search,
+      Category (All / Text-to-text / Image-to-text) and Context filters,
+      stars, Manage Credits. Choosing a model selects it and closes it.
+      ↑↓ highlight and Return pick when not typing in search.
+- [ ] Light and dark themes; narrow window (the card shrinks its columns).
+

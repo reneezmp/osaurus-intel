@@ -283,7 +283,10 @@ struct FloatingInputCard: View {
     @Environment(\.colorScheme) private var colorScheme
     @State private var isDragOver = false
     @State private var showModelPicker = false
-    @State private var showModelOptionsPicker = false
+    /// Column picker card size (upstream #2947), reported by the card.
+    @State private var modelPickerCardSize: CGSize = .zero
+    @State private var showCloudModelBrowser = false
+    @ObservedObject private var chatModelFavorites = FavoriteModelsStore.shared
     @State private var isSandboxHovered = false
     @State private var sandboxPulseAmount: CGFloat = 1.0
     @State private var sandboxPulseTask: Task<Void, Never>? = nil
@@ -1600,7 +1603,7 @@ extension FloatingInputCard {
                 ToastManager.shared.infoLocalized("Clear Chat", message: "Pass an onClearChat handler to enable /clear")
             }
         case "model":
-            showModelPicker = true
+            openModelPicker()
         case "agent":
             NotificationCenter.default.post(
                 name: .chatToolbarOpenAgentPicker,
@@ -1856,25 +1859,17 @@ extension FloatingInputCard {
         return ModelProfileRegistry.options(for: model)
     }
 
-    private var hasNonThinkingOptions: Bool {
-        let thinkingId = selectedModel.flatMap { ModelProfileRegistry.profile(for: $0)?.thinkingOption?.id }
-        return activeProfileOptions.contains { $0.id != thinkingId }
-    }
-
     private var selectorRow: some View {
         HStack(spacing: 6) {
             if !pickerItems.isEmpty {
                 modelSelectorChip
             }
 
-            thinkingToggleChip
+            // Thinking and every other model option live in the picker's
+            // third column now (upstream #2958); no separate chips.
 
             if autoSpeakAssistant {
                 autoSpeakToggleChip
-            }
-
-            if hasNonThinkingOptions {
-                modelOptionsSelectorChip
             }
 
             // Sandbox toggle: visible whenever the sandbox is available on
@@ -1953,9 +1948,47 @@ extension FloatingInputCard {
         return ModelManager.replacementForDeprecatedModel(id) != nil
     }
 
+    private func openModelPicker() {
+        guard !showModelPicker else { return }
+        cachedPickerItems = pickerItems
+        modelPickerCardSize = ChatModelPickerCard.initialSize(
+            providers: chatPickerProviders,
+            selectedModel: selectedModel,
+            optionsControl: modelPickerOptionsControl
+        )
+        showModelPicker = true
+    }
+
+    /// The pill stays visually simple (upstream removed its trailing icons);
+    /// thinking and vision details move to the tooltip and VoiceOver value.
+    private var modelSelectorDetails: String {
+        var details: [String] = []
+        if let model = selectedModel, inlineReasoningSuffix == nil,
+            ModelProfileRegistry.profile(for: model)?.thinkingOption != nil
+        {
+            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: activeModelOptions)
+            if let explicit {
+                details.append(explicit ? L("Thinking on") : L("Thinking off"))
+            } else {
+                details.append([L("Thinking"), L("Default")].joined(separator: ": "))
+            }
+        }
+        if selectedPickerItem?.isVLM == true {
+            details.append(L("Vision"))
+        }
+        return details.joined(separator: "\n")
+    }
+
+    /// "· Medium": the explicit `reasoningEffort` choice, else the profile
+    /// default (upstream's "model · effort").
+    private var inlineReasoningSuffix: String? {
+        guard let model = selectedModel else { return nil }
+        return ModelProfileRegistry.inlineReasoningSuffixLabel(for: model, values: activeModelOptions)
+    }
+
     private var modelSelectorChip: some View {
         SelectorChip(isActive: showModelPicker) {
-            showModelPicker.toggle()
+            if showModelPicker { dismissModelPicker() } else { openModelPicker() }
         } content: {
             HStack(spacing: 6) {
                 if isSelectedModelDeprecated {
@@ -1967,10 +2000,9 @@ extension FloatingInputCard {
                     Circle()
                         .fill(Color.green)
                         .frame(width: 6, height: 6)
-                        .localizedHelp("Model ready")
                 }
 
-                // Model name with metadata badges
+                // Model name and reasoning text, without suffix icons.
                 if let option = selectedPickerItem {
                     HStack(spacing: 4) {
                         Text(option.displayName)
@@ -1978,11 +2010,11 @@ extension FloatingInputCard {
                             .foregroundColor(isSelectedModelDeprecated ? .orange : theme.secondaryText)
                             .lineLimit(1)
 
-                        // Show VLM indicator
-                        if option.isVLM {
-                            Image(systemName: "eye")
-                                .font(theme.font(size: CGFloat(theme.captionSize) - 3))
-                                .foregroundColor(theme.accentColor)
+                        if let suffix = inlineReasoningSuffix {
+                            Text(verbatim: "· \(suffix)")
+                                .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .regular))
+                                .foregroundColor(theme.tertiaryText)
+                                .lineLimit(1)
                         }
 
                         if !isCompact, let params = option.parameterCount {
@@ -2002,24 +2034,48 @@ extension FloatingInputCard {
                         .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
                         .foregroundColor(theme.secondaryText)
                 }
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(theme.font(size: CGFloat(theme.captionSize) - 3, weight: .semibold))
-                    .foregroundColor(theme.tertiaryText)
             }
         }
-        .popover(isPresented: $showModelPicker, arrowEdge: .top) {
-            ModelPickerView(
-                options: cachedPickerItems,
+        .accessibilityValue(Text(verbatim: modelSelectorDetails))
+        .help(modelSelectorDetails.isEmpty ? L("Model ready") : modelSelectorDetails)
+        .anchoredCard(isPresented: $showModelPicker, size: modelPickerCardSize, accessibilityLabel: L("Model picker")) {
+            ChatModelPickerCard(
+                providers: chatPickerProviders,
                 selectedModel: $selectedModel,
-                agentId: agentId,
-                onDismiss: dismissModelPicker
+                optionsControl: modelPickerOptionsControl,
+                onExploreLocal: {
+                    dismissModelPicker()
+                    AppDelegate.shared?.showManagementWindow(initialTab: .models)
+                },
+                onExploreCloud: {
+                    dismissModelPicker()
+                    DispatchQueue.main.async { showCloudModelBrowser = true }
+                },
+                onSizeChange: { modelPickerCardSize = $0 }
             )
+            .environment(\.theme, theme)
+        }
+        .sheet(isPresented: $showCloudModelBrowser) {
+            CloudModelBrowserDialog(
+                options: cloudPickerItems,
+                selectedModel: $selectedModel,
+                onDismiss: { showCloudModelBrowser = false },
+                onManageCloud: {
+                    showCloudModelBrowser = false
+                    AppDelegate.shared?.showManagementWindow(initialTab: .credits)
+                }
+            )
+            .environment(\.theme, theme)
+            .intelControlRendering(theme: theme)
         }
         .onChange(of: showModelPicker) { isShowing in
             if isShowing {
-                // Snapshot options when popover opens to prevent refresh during streaming
+                // Snapshot options when the card opens to prevent refresh during streaming
                 cachedPickerItems = pickerItems
+                Task {
+                    await RemoteProviderManager.shared.connectOsaurusRouterIfPossible()
+                    await ModelPickerItemCache.shared.buildModelPickerItems()
+                }
             }
         }
         .onChange(of: pickerItems) { newItems in
@@ -2030,33 +2086,81 @@ extension FloatingInputCard {
         }
     }
 
-    // MARK: - Thinking Toggle
+    private var cloudPickerItems: [ModelPickerItem] {
+        pickerItems.filter {
+            if case .remote(_, let providerID) = $0.source {
+                return providerID == RemoteProviderManager.osaurusRouterProviderId
+            }
+            return false
+        }
+    }
 
-    @ViewBuilder
-    private var thinkingToggleChip: some View {
-        if let model = selectedModel,
-            let thinkingOpt = ModelProfileRegistry.profile(for: model)?.thinkingOption
-        {
-            let isEnabled =
-                ModelProfileRegistry.thinkingEnabled(for: model, values: activeModelOptions)
-                ?? false
+    /// Cloud shows the favourites shortlist plus the selected model; other
+    /// providers show everything (upstream).
+    private var chatPickerProviders: [ChatModelPickerProvider] {
+        let shortlist = Set(cachedPickerItems.filter {
+            chatModelFavorites.isFavorite($0.favoriteKey) || $0.id == selectedModel
+        }.map(\.id))
+        return ChatModelPickerProvider.groups(from: cachedPickerItems, cloudModelIDs: shortlist)
+    }
 
-            SelectorChip(isActive: isEnabled) {
-                toggleThinking(id: thinkingOpt.id)
-            } content: {
-                HStack(spacing: 5) {
-                    Image(systemName: isEnabled ? "checkmark.square.fill" : "square")
-                        .font(theme.font(size: CGFloat(theme.captionSize) - 1, weight: .semibold))
-                        .foregroundColor(isEnabled ? theme.accentColor : theme.tertiaryText)
-                        .contentTransition(.opacity)
-
-                    Text("Thinking", bundle: .module)
-                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
-                        .foregroundColor(isEnabled ? theme.secondaryText : theme.tertiaryText)
+    /// The picker's third column: the semantic Thinking row plus every other
+    /// option the selected model's profile exposes. Writes are deferred a
+    /// runloop so the pill (which shows the effort) never resizes during the
+    /// card's own update (upstream).
+    private var modelPickerOptionsControl: ModelPickerOptionsControl? {
+        guard let model = selectedModel else { return nil }
+        let thinkingOption = ModelProfileRegistry.profile(for: model)?.thinkingOption
+        let options = activeProfileOptions.filter { $0.id != thinkingOption?.id }
+        let thinking: ModelPickerThinkingControl? = thinkingOption.map { _ in
+            let explicit = ModelProfileRegistry.thinkingEnabled(for: model, values: activeModelOptions)
+            return ModelPickerThinkingControl(
+                isEnabled: explicit ?? false,
+                isExplicit: explicit != nil,
+                onSetEnabled: { enabled in
+                    DispatchQueue.main.async { persistThinkingOverride(enabled, for: model) }
+                }
+            )
+        }
+        guard !options.isEmpty || thinking != nil else { return nil }
+        return ModelPickerOptionsControl(
+            thinking: thinking,
+            options: options,
+            values: ModelProfileRegistry.normalizedOptions(for: model, persisted: activeModelOptions),
+            defaults: ModelProfileRegistry.defaults(for: model),
+            onChange: { optionId, newValue in
+                DispatchQueue.main.async {
+                    guard selectedModel == model else { return }
+                    var updated = activeModelOptions
+                    if optionId == "reasoningEffort" {
+                        updated.removeValue(forKey: "disableThinking")
+                    }
+                    if let newValue {
+                        updated[optionId] = newValue
+                    } else {
+                        updated.removeValue(forKey: optionId)
+                    }
+                    activeModelOptions = updated
+                    ModelOptionsStore.shared.saveOptions(updated, for: model)
                 }
             }
-            .localizedHelp("Toggle model reasoning mode")
+        )
+    }
+
+    /// Semantic-to-stored Thinking write (upstream): inverted options such as
+    /// `disableThinking` never flip their raw boolean directly; nil resets.
+    private func persistThinkingOverride(_ enabled: Bool?, for model: String) {
+        guard selectedModel == model,
+            let thinkingOpt = ModelProfileRegistry.profile(for: model)?.thinkingOption
+        else { return }
+        var updated = activeModelOptions
+        if let enabled, let stored = ModelProfileRegistry.thinkingStoredOption(for: model, enabled: enabled) {
+            updated[stored.id] = stored.value
+        } else {
+            updated.removeValue(forKey: thinkingOpt.id)
         }
+        activeModelOptions = updated
+        ModelOptionsStore.shared.saveOptions(updated, for: model)
     }
 
     // MARK: - Auto-Speak Toggle
@@ -2082,81 +2186,6 @@ extension FloatingInputCard {
         .localizedHelp("Auto-speak every reply in this chat")
     }
 
-    private func toggleThinking(id: String) {
-        let thinkingOpt = selectedModel.flatMap { ModelProfileRegistry.profile(for: $0)?.thinkingOption }
-        let currentEnabled = selectedModel.flatMap {
-            ModelProfileRegistry.thinkingEnabled(for: $0, values: activeModelOptions)
-        } ?? false
-        let newEnabled = !currentEnabled
-        let newVal = thinkingOpt?.inverted == true ? !newEnabled : newEnabled
-
-        withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
-            activeModelOptions[id] = .bool(newVal)
-        }
-
-        if let model = selectedModel {
-            ModelOptionsStore.shared.saveOptions(activeModelOptions, for: model)
-        }
-    }
-
-    // MARK: - Model Options Chip
-
-    private var modelOptionsSummary: String {
-        guard let model = selectedModel,
-            ModelProfileRegistry.profile(for: model) != nil
-        else { return "" }
-        let nonDefault = activeProfileOptions.compactMap { option -> String? in
-            guard let current = activeModelOptions[option.id] else { return nil }
-            if case .segmented(let segments) = option.kind {
-                return segments.first(where: { $0.id == current.stringValue })?.label
-            }
-            if case .bool(let v) = current { return v ? option.label : nil }
-            return nil
-        }
-        if nonDefault.isEmpty { return "Default" }
-        return nonDefault.joined(separator: ", ")
-    }
-
-    private var modelOptionsSelectorChip: some View {
-        SelectorChip(isActive: showModelOptionsPicker) {
-            showModelOptionsPicker.toggle()
-        } content: {
-            HStack(spacing: 5) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(theme.font(size: CGFloat(theme.captionSize) - 2, weight: .medium))
-                    .foregroundColor(theme.tertiaryText)
-
-                Text(modelOptionsSummary)
-                    .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
-                    .foregroundColor(theme.secondaryText)
-                    .lineLimit(1)
-
-                Image(systemName: "chevron.up.chevron.down")
-                    .font(theme.font(size: CGFloat(theme.captionSize) - 3, weight: .semibold))
-                    .foregroundColor(theme.tertiaryText)
-            }
-        }
-        .popover(isPresented: $showModelOptionsPicker, arrowEdge: .top) {
-            ModelOptionsSelectorView(
-                options: activeProfileOptions,
-                values: modelOptionsBinding,
-                profileName: selectedModel.flatMap { ModelProfileRegistry.profile(for: $0)?.displayName } ?? "",
-                thinkingOptionId: selectedModel.flatMap { ModelProfileRegistry.profile(for: $0)?.thinkingOption?.id }
-            )
-        }
-    }
-
-    private var modelOptionsBinding: Binding<[String: ModelOptionValue]> {
-        Binding(
-            get: { activeModelOptions },
-            set: { newValues in
-                activeModelOptions = newValues
-                if let model = selectedModel {
-                    ModelOptionsStore.shared.saveOptions(newValues, for: model)
-                }
-            }
-        )
-    }
 
     // MARK: - Sandbox Toggle Chip
 
@@ -4877,224 +4906,6 @@ private struct SelectorChip<Content: View>: View {
     }
 }
 
-// MARK: - Model Options Selector View
-
-/// Popover that groups all model-specific options into a single panel.
-private struct ModelOptionsSelectorView: View {
-    let options: [ModelOptionDefinition]
-    @Binding var values: [String: ModelOptionValue]
-    let profileName: String
-    let thinkingOptionId: String?
-
-    @Environment(\.theme) private var theme
-
-    private var hasExplicitOptions: Bool { !values.isEmpty }
-
-    var body: some View {
-        VStack(spacing: 0) {
-            header
-            Divider().background(theme.primaryBorder.opacity(0.3))
-            optionRows
-        }
-        .frame(width: 300)
-        .background(popoverBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        .overlay(popoverBorder)
-        .shadow(color: theme.shadowColor.opacity(0.25), radius: 20, x: 0, y: 10)
-    }
-
-    // MARK: - Header
-
-    private var header: some View {
-        HStack {
-            Image(systemName: "slider.horizontal.3")
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(theme.secondaryText)
-
-            Text(profileName)
-                .font(.system(size: 13, weight: .semibold))
-                .foregroundColor(theme.primaryText)
-
-            Spacer()
-
-            if hasExplicitOptions {
-                Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        values = [:]
-                    }
-                } label: {
-                    HStack(spacing: 3) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 9))
-                        Text("Reset", bundle: .module)
-                            .font(.system(size: 11, weight: .medium))
-                    }
-                    .foregroundColor(theme.secondaryText)
-                    .padding(.horizontal, 8)
-                    .padding(.vertical, 4)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .fill(theme.secondaryBackground.opacity(0.8))
-                    )
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 6, style: .continuous)
-                            .strokeBorder(theme.primaryBorder.opacity(0.12), lineWidth: 1)
-                    )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 12)
-    }
-
-    // MARK: - Option Rows
-
-    private var optionRows: some View {
-        let filteredOptions = options.filter { $0.id != thinkingOptionId }
-
-        return VStack(spacing: 0) {
-            ForEach(Array(filteredOptions.enumerated()), id: \.element.id) { index, option in
-                if index > 0 {
-                    Divider().background(theme.primaryBorder.opacity(0.15)).padding(.horizontal, 14)
-                }
-                switch option.kind {
-                case .segmented(let segments):
-                    segmentedRow(option: option, segments: segments)
-                case .toggle(let defaultValue):
-                    toggleRow(option: option, defaultValue: defaultValue)
-                }
-            }
-        }
-        .padding(.vertical, 4)
-    }
-
-    private func segmentedRow(option: ModelOptionDefinition, segments: [ModelOptionSegment]) -> some View {
-        let currentId = values[option.id]?.stringValue ?? segments.first?.id ?? ""
-        let isExplicit = values[option.id] != nil
-
-        return VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                if let icon = option.icon {
-                    Image(systemName: icon)
-                        .font(.system(size: 11, weight: .medium))
-                        .foregroundColor(isExplicit ? theme.accentColor : theme.tertiaryText)
-                }
-                Text(option.label)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-            }
-
-            wrappedSegments(segments: segments, currentId: currentId, optionId: option.id)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private func wrappedSegments(segments: [ModelOptionSegment], currentId: String, optionId: String) -> some View {
-        FlowLayout(spacing: 6) {
-            ForEach(segments) { segment in
-                let isSelected = segment.id == currentId
-                Button {
-                    withAnimation(.easeOut(duration: 0.15)) {
-                        values[optionId] = .string(segment.id)
-                    }
-                } label: {
-                    Text(segment.label)
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                        .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .fill(
-                                    isSelected
-                                        ? theme.accentColor.opacity(theme.isDark ? 0.15 : 0.1)
-                                        : theme.secondaryBackground.opacity(0.6)
-                                )
-                        )
-                        .overlay(
-                            RoundedRectangle(cornerRadius: 6, style: .continuous)
-                                .strokeBorder(
-                                    isSelected
-                                        ? theme.accentColor.opacity(0.3)
-                                        : theme.primaryBorder.opacity(0.12),
-                                    lineWidth: 1
-                                )
-                        )
-                }
-                .buttonStyle(.plain)
-            }
-        }
-    }
-
-    private func toggleRow(option: ModelOptionDefinition, defaultValue: Bool) -> some View {
-        let isOn = values[option.id]?.boolValue ?? defaultValue
-        let isExplicit = values[option.id] != nil
-
-        return HStack(spacing: 6) {
-            if let icon = option.icon {
-                Image(systemName: icon)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(isExplicit ? theme.accentColor : theme.tertiaryText)
-            }
-            Text(option.label)
-                .font(.system(size: 12, weight: .semibold))
-                .foregroundColor(theme.primaryText)
-
-            Spacer()
-
-            Toggle(
-                "",
-                isOn: Binding(
-                    get: { isOn },
-                    set: { values[option.id] = .bool($0) }
-                )
-            )
-            .toggleStyle(.switch)
-            .controlSize(.mini)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    // MARK: - Background & Border
-
-    private var popoverBackground: some View {
-        ZStack {
-            if theme.glassEnabled {
-                RoundedRectangle(cornerRadius: 12, style: .continuous)
-                    .fill(.ultraThinMaterial)
-            }
-            RoundedRectangle(cornerRadius: 12, style: .continuous)
-                .fill(theme.primaryBackground.opacity(theme.isDark ? 0.85 : 0.92))
-            LinearGradient(
-                colors: [
-                    theme.accentColor.opacity(theme.isDark ? 0.06 : 0.04),
-                    Color.clear,
-                ],
-                startPoint: .top,
-                endPoint: .center
-            )
-            .clipShape(RoundedRectangle(cornerRadius: 12, style: .continuous))
-        }
-    }
-
-    private var popoverBorder: some View {
-        RoundedRectangle(cornerRadius: 12, style: .continuous)
-            .strokeBorder(
-                LinearGradient(
-                    colors: [
-                        theme.glassEdgeLight.opacity(0.2),
-                        theme.primaryBorder.opacity(0.15),
-                    ],
-                    startPoint: .topLeading,
-                    endPoint: .bottomTrailing
-                ),
-                lineWidth: 1
-            )
-    }
-}
 
 // MARK: - Input Action Button
 

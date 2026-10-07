@@ -80,7 +80,10 @@ def main() -> int:
         rel = str(path)
         if ".build" in path.parts or not any(f in rel for f in filters):
             continue
-        for raw in literal.findall(path.read_text(encoding="utf-8", errors="ignore")):
+        # Per line: a stray quote in a comment must not shift the pairing for
+        # the rest of the file.
+        lines = path.read_text(encoding="utf-8", errors="ignore").splitlines()
+        for raw in (r for line in lines if not line.lstrip().startswith("//") for r in literal.findall(line)):
             if "\\(" in raw:
                 continue
             key = checker.unescape_swift_string(raw)

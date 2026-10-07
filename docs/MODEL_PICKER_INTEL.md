@@ -42,3 +42,66 @@ ports upstream/main's current files, not the commits one by one. Plan:
   `ThemeTypographyTests` (minus the two `ThemeLibraryManagementService`
   cases, `W-ui-misc`), plus Intel rewrites of `ChatModelPickerProviderTests`
   and `CloudModelCategoryTests` without upstream-only sources.
+
+## Stage B — the column picker in the chat (2026-10-06)
+
+- Clicking the model pill (or `/model`) opens upstream's
+  `ChatModelPickerCard` in an anchored card: **Provider | Model | Model
+  options**. Browsing another provider never changes the model; picking a
+  model does. Osaurus Cloud lists the favourites shortlist plus the selected
+  model, with a star per row; "More models" opens the Cloud browser (Cloud)
+  or Models management (Local). Inactive Local / Cloud rows say "Explore".
+- **Options moved into the third column** (upstream #2958): Thinking
+  (On / Off, with "Reset to default" once set) and every profile option
+  (e.g. Reasoning Effort). Intel's separate **Thinking** and **Options**
+  chips and `ModelOptionsSelectorView` are gone, as upstream.
+- The pill lost its trailing icons (eye, chevron) and shows upstream's
+  "model · effort" suffix (`ModelProfileRegistry.inlineReasoningSuffixLabel`,
+  profile branch only). Thinking and vision state moved to the tooltip and
+  VoiceOver value.
+- Writes go through upstream's semantic path (`persistThinkingOverride`,
+  `ModelProfileRegistry.thinkingStoredOption`, so inverted
+  `disableThinking` never flips the wrong way) and are deferred a runloop
+  so the pill never resizes during the card's own update.
+- Files: `Views/Model/ChatModelPickerCard.swift` (upstream, adapted),
+  `Views/Model/ModelPickerOptionsControl.swift` (upstream's types, which
+  upstream keeps in `ModelPickerView.swift`; Intel's picker view is its own
+  rewrite).
+- **Intel differences:**
+  - Keyboard (Ventura rule from stage A): `PickerCardKeyMonitor` drives
+    ↑↓←→ and Return inside the card's panel (`activateFocused()` maps the
+    focus key to its action); Escape is the presenter's.
+  - No live reasoning catalog (`ModelReasoningCapabilities`): options come
+    from Intel's profiles, effort rows use the segment label as help, and
+    Intel's option definitions carry no footnote text.
+  - Opening the card refreshes the Router catalog through
+    `connectOsaurusRouterIfPossible()` (upstream refreshes every connected
+    provider and prunes external models).
+  - No MTP depth row (local MLX only).
+  - The legacy `ModelPickerView` stays for the agent editor, Orchestrator
+    and compaction settings, as upstream keeps it there.
+
+## Stage C — Cloud model browser (2026-10-06)
+
+- `Views/Model/CloudModelBrowserDialog.swift` (+ `CloudCategoryTag`,
+  `CloudSecondaryButtonStyle` with `ModelFavoriteButtonStyle`, verbatim):
+  the whole Osaurus Cloud catalog with search, Category and Context
+  filters, stars, and Manage Credits. Choosing a model selects it and
+  closes the sheet.
+- **Intel differences:** keyboard through `PickerCardKeyMonitor` (↑↓
+  highlight, Return selects; inactive while searching); no offline monitor;
+  refresh via `connectOsaurusRouterIfPossible()`; identity checked once on
+  appear; no media models, so no "From …" price and no image/video
+  categories; themed bordered buttons.
+- **Staged — Credits card:** #2947 turned the composer's credits chip
+  wallet into an anchored card. Intel's composer never had upstream's
+  credits chip (`FloatingCreditsChip`, router balance with low-balance
+  tiers), so the card waits for that chip (`W-model-picker-2947`
+  follow-up).
+
+- Tests: `Tests/Model/IntelChatModelPickerTests.swift` (effort suffix,
+  inverted Thinking writes, option defaults, key mapping). Render-checked
+  offscreen on Intel (dark theme) for both the card and the browser.
+- i18n: `merge-upstream-keys.py` now scans literals line by line (a stray
+  quote in a comment used to shift the pairing for the rest of the file and
+  silently skip strings).
