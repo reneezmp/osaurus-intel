@@ -74,8 +74,12 @@ Incompatible 20 · already ported 1.
 
 ## Found while porting
 
-- Upstream's server shares one process-wide event loop group (from #2239,
-  marked "port next" in `DEFER_FEASIBILITY_AUDIT_2026-09-08.md`, never
-  done). Intel still makes and shuts down a group per start; restarts while
-  requests are in flight can hit "EventLoopGroup is shut down". Added to
-  `W-ui-misc`-adjacent hang fixes below.
+- **Shipped:** upstream's server hardening from #2239 (marked "port next"
+  in `DEFER_FEASIBILITY_AUDIT_2026-09-08.md` but never done): one
+  process-wide event loop group (`Networking/SharedEventLoopGroups.swift`,
+  verbatim) instead of a group per start, a `ChildChannelRegistry` so
+  `stop` drains and force-closes connections (8 s, or 1 s at quit), and
+  `ConnectionLimitHandler` capping concurrent connections at 512. Intel's
+  server restarts on Settings changes and retries a busy port at launch, so
+  per-start groups were a real thread/descriptor leak (APPLE-MACOS-19T). The
+  quit path now passes `gracefully: false` like upstream.

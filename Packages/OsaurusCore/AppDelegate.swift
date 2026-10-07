@@ -467,7 +467,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             KnowledgeFolderWatcher.shared.stop()
             await ClaudeCodeProcessRegistry.shared.terminateAll()
             await MCPBridge.shared.stop()
-            await server.stop()
+            // Quit: bounded 1 s drain, as upstream (the default waits 8 s).
+            await server.stop(gracefully: false)
             SharedConfigurationService.shared.remove()
             sender.reply(toApplicationShouldTerminate: true)
         }

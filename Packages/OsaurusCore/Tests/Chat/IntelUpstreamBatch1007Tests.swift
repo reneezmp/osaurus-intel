@@ -60,4 +60,18 @@ struct IntelUpstreamBatch1007Tests {
         #expect(!AppDelegate.isAddressInUse(E(description: "Permission denied")))
         #expect(AppDelegate.serverBindAttempts == 6)
     }
+
+    // MARK: #2239 (found) — shared event loop group
+
+    @Test("The server restarts on the shared event loop group and stops in bounded time")
+    func serverRestartsOnSharedGroup() async throws {
+        let server = OsaurusServer()
+        try await server.start(.init(host: "127.0.0.1", port: 0, trustLoopback: true))
+        let started = Date()
+        #expect(await server.stop(gracefully: false))
+        #expect(Date().timeIntervalSince(started) < 3)
+        try await server.start(.init(host: "127.0.0.1", port: 0, trustLoopback: true))
+        _ = await server.stop(gracefully: false)
+        #expect(ConnectionLimitHandler.maxConcurrentConnections == 512)
+    }
 }
