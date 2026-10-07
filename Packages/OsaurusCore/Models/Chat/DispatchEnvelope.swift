@@ -211,7 +211,7 @@ extension DispatchEnvelope {
         case "slack": return "number"
         case "discord": return "bubble.left.and.bubble.right"
         case "telegram": return "paperplane"
-        case "whatsapp": return "phone.bubble"
+        case "whatsapp": return "phone"  // Intel: `phone.bubble` is macOS 14
         case "imessage": return "message"
         default: return "antenna.radiowaves.left.and.right"
         }
@@ -262,7 +262,7 @@ extension DispatchEnvelope {
                 if overflowCount > 0 { lines.append(L("…and \(overflowCount) more")) }
                 out.append(
                     Badge(
-                        symbol: "doc.badge.clock",
+                        symbol: "doc.text.magnifyingglass",  // Intel: `doc.badge.clock` is macOS 14
                         label: total == 1 ? L("1 changed") : L("\(total) changed"),
                         tooltip: lines.joined(separator: "\n")
                     )

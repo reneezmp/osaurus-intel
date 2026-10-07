@@ -220,3 +220,23 @@ struct IntelScreenshotArtifactTests {
         }
     }
 }
+
+@MainActor
+@Suite("Intel slash command registry parity")
+struct IntelSlashCommandRegistryTests {
+    @Test("Filtering ranks exact, then prefix, then substring matches (upstream)")
+    func ranking() {
+        let names = SlashCommandRegistry.shared.filtered(query: "title").map(\.name)
+        #expect(names.first == "title")
+        let sub = SlashCommandRegistry.shared.filtered(query: "shot").map(\.name)
+        #expect(sub.contains("screenshot"))  // substring, not just prefix
+        #expect(SlashCommandRegistry.shared.filtered(query: "zzzz-none").isEmpty)
+    }
+
+    @Test("Built-ins keep upstream's ids, icons and order")
+    func builtIns() {
+        let builtIns = SlashCommand.builtIns.map(\.name)
+        #expect(builtIns == ["clear", "model", "agent", "screenshot", "title", "compact", "help"])
+        #expect(SlashCommand.builtIns.first { $0.name == "title" }?.icon == "character.cursor.ibeam")
+    }
+}

@@ -89,7 +89,7 @@ extension SlashCommand {
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000101")!,
             name: "clear",
-            description: "Clear the current conversation",
+            description: L("Clear the current conversation"),
             icon: "trash",
             kind: .action,
             isBuiltIn: true
@@ -97,7 +97,7 @@ extension SlashCommand {
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000102")!,
             name: "model",
-            description: "Switch the AI model",
+            description: L("Switch the AI model"),
             icon: "cpu",
             kind: .action,
             isBuiltIn: true
@@ -105,7 +105,7 @@ extension SlashCommand {
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000104")!,
             name: "agent",
-            description: "Switch the active agent",
+            description: L("Switch the active agent"),
             icon: "person.crop.circle",
             kind: .action,
             isBuiltIn: true
@@ -121,15 +121,15 @@ extension SlashCommand {
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000106")!,
             name: "title",
-            description: "Generate a title for this chat",
-            icon: "textformat",
+            description: L("Generate a title for this chat"),
+            icon: "character.cursor.ibeam",
             kind: .action,
             isBuiltIn: true
         ),
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000107")!,
             name: "compact",
-            description: "Summarize older messages to free up context",
+            description: L("Summarize older messages to free up context"),
             icon: "arrow.down.right.and.arrow.up.left",
             kind: .action,
             isBuiltIn: true
@@ -137,7 +137,7 @@ extension SlashCommand {
         SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000103")!,
             name: "help",
-            description: "Show available commands and shortcuts",
+            description: L("Show available commands and shortcuts"),
             icon: "questionmark.circle",
             kind: .action,
             isBuiltIn: true

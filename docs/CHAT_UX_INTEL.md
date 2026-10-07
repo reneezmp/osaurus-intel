@@ -285,6 +285,9 @@ what Intel adapted; everything else is upstream verbatim.
 - `SymbolImageCache` is upstream's now (sized symbols, rotated chevron), so
   the badge row, the roll-up and the compaction marker use it as upstream
   does.
+- Two badge symbols are macOS 14-only and render blank on Ventura (caught
+  by `IntelVenturaControlGuardTests`): WhatsApp's `phone.bubble` → `phone`,
+  changed files' `doc.badge.clock` → `doc.text.magnifyingglass`.
 - Tests: `Tests/Chat/DispatchEnvelopeTests.swift` (upstream's plain-text and
   self-scheduled cases, Intel watcher framing, block wiring, fresh session).
 
@@ -311,6 +314,26 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests: upstream `Tests/Agent/BuiltInAgentGuardTests.swift` plus an Intel
   dispatch case.
 
+## Slash-command registry parity
+
+- `SlashCommandRegistry` now runs upstream's logic: matches rank exact, then
+  prefix, then **substring** (`/shot` finds `/screenshot`), alphabetical
+  within a rank (Intel matched prefixes only, in list order); the first load
+  of custom commands runs off the main thread (upstream's app-hang fix);
+  `commands(forPluginId:)` / `deleteByPluginId` as upstream.
+  - Intel keeps the class in `IntelDataConformers.swift` as an
+    `ObservableObject`: upstream's is `@Observable` (macOS 14). Upstream's
+    `Managers/SlashCommandRegistry.swift` stays excluded but is synced, so a
+    diff shows any drift.
+- `Models/SlashCommand/SlashCommand.swift` is upstream's verbatim:
+  localized descriptions, `/title` uses `character.cursor.ibeam`, and
+  `/screenshot` is in upstream's place in the list.
+- **Not here:** upstream #3017 (2026-10-05) restyles the slash and "@"
+  popups on the model picker's PickerCard components. It lands with the
+  model picker batch (`W-model-picker-2947`).
+- Tests: `IntelSlashCommandRegistryTests` (ranking, built-in order and
+  icons).
+
 ## Moved out of this batch
 
 - **Context attribution** (`Services/Context/ContextAttribution.swift`) is
@@ -331,25 +354,23 @@ what Intel adapted; everything else is upstream verbatim.
   (dead code there). Intel's folder menu already lists recent folders from
   `RecentFoldersStore`.
 
-## Still to port (resumed 2026-10-06)
+## Batch status (finished 2026-10-06)
 
-Renée asked to release after this batch. The remaining items are large, so
-they wait for the next session, in this suggested order:
+All ten remaining items are done, moved or staged:
 
-1. ~~Compaction marker, dialog and compaction-model picker~~ **done
-   2026-10-06** (section above).
-2. ~~Activity roll-up and expanding thinking while it streams~~ **done
-   2026-10-06**.
-3. ~~Smooth streaming~~ **done 2026-10-06**.
-4. ~~Screenshot attach~~ **done 2026-10-06**.
-5. ~~Chat import guide~~ **done 2026-10-06** (post-onboarding prompt waits
-   for onboarding).
-6. ~~Markdown document view~~ **done 2026-10-06**.
-7. ~~Dispatch rows~~ **done 2026-10-06** for self-scheduled and watcher
-   runs; the other kinds wait for their producers.
-8. ~~Context attribution~~ moved to `N-dev-tooling` (see "Moved out").
-9. ~~`BuiltInAgentGuard`~~ **done 2026-10-06** (plugin exemption pending a
-   decision); `AgentDetailChrome` moved to `W-agent-detail-redesign`.
-10. Slash-command registry parity.
+1. Compaction marker, dialog and Compaction Model: done.
+2. Activity roll-up and expand thinking while streaming: done.
+3. Smooth streaming: done.
+4. Screenshot attach: done.
+5. Chat import guide: done (the post-onboarding prompt waits for
+   onboarding, `W-ui-misc`).
+6. Markdown block parser and document view: done.
+7. Dispatch rows: done for self-scheduled and watcher runs; channel and
+   delegated kinds wait for `W-channels` / `W-subagents`.
+8. Context attribution: moved to `N-dev-tooling`.
+9. `BuiltInAgentGuard`: done (plugin exemption pending Renée's decision);
+   `AgentDetailChrome` moved to `W-agent-detail-redesign`.
+10. Slash-command registry parity: done; the popup restyle (#3017) comes
+    with the model picker.
 
-After that comes the model picker (`W-model-picker-2947`).
+Next: the model picker (`W-model-picker-2947`, with #3017's popup style).

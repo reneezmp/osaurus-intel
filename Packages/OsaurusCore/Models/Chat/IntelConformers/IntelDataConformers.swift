@@ -1296,72 +1296,44 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
 // would trigger Swift 6.3's actor-isolated-call diagnostic.
 @MainActor
 final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
+    // Upstream's registry logic (`Managers/SlashCommandRegistry.swift`) in an
+    // `ObservableObject`: upstream's class is `@Observable`, which needs
+    // macOS 14. Upstream's file stays excluded; keep the two in step.
     static let shared = SlashCommandRegistry()
 
-    @Published var isPopupVisible: Bool = false
-
-    /// User-defined custom commands loaded from disk. Mirrors the
-    /// upstream `SlashCommandRegistry.customCommands` published
-    /// surface. Refresh() reads from `SlashCommandStore.loadAll()`.
+    /// User-defined custom commands loaded from disk.
     @Published private(set) var customCommands: [SlashCommand] = []
 
+    /// True while the slash command popup is visible in any chat window.
+    /// Used by the global key monitor in ChatView to suppress window-close on Escape.
+    @Published var isPopupVisible: Bool = false
+
     private init() {
-        refresh()
+        // `SlashCommandStore.loadAll()` reads and JSON-decodes every custom
+        // command file from disk. This type is `@MainActor`, so loading
+        // synchronously in `init` runs that scan on the main thread — and the
+        // first accessor is often `ManagementBadgeStore`'s periodic recompute
+        // (counting commands) rather than a user opening the slash menu, which
+        // tripped the app-hang watchdog. Load off the main actor and publish
+        // back; `customCommands` stays empty for the few ms until it lands.
+        Task { [weak self] in
+            let loaded = await Task.detached(priority: .utility) {
+                SlashCommandStore.loadAll()
+            }.value
+            self?.customCommands = loaded
+        }
     }
 
-    /// Re-read every persisted command from disk into `customCommands`.
-    /// Called from each CRUD method after the write succeeds.
+    // MARK: - Refresh
+
+    /// Reload from disk. Synchronous — callers are user-initiated CRUD on a
+    /// small list, so the main-thread cost is negligible (unlike the cold
+    /// first load, which `init` performs off the main actor).
     func refresh() {
         customCommands = SlashCommandStore.loadAll()
     }
 
-    /// FloatingInputCard reads this every time the user types `/`.
-    /// Upstream does prefix-fuzzy across custom + built-in commands.
-    /// The built-ins (clear/model/agent/title/help) are NOT amputated on
-    /// Intel — `FloatingInputCard.handleBuiltInSlashAction(_:)` already
-    /// implements every one of them locally — so surface them here too,
-    /// built-ins first then custom (matching upstream's `allCommands`
-    /// order in the excluded `Managers/SlashCommandRegistry.swift`),
-    /// deduplicated by name so a custom command can't collide with a
-    /// built-in of the same name.
-    func filtered(query: String) -> [SlashCommand] {
-        var seen = Set<String>()
-        var all: [SlashCommand] = []
-        for cmd in SlashCommand.builtIns + customCommands + skillCommands() {
-            let key = cmd.name.lowercased()
-            guard !seen.contains(key) else { continue }
-            seen.insert(key)
-            all.append(cmd)
-        }
-        let q = query.lowercased()
-        guard !q.isEmpty else { return all }
-        return all.filter { $0.name.lowercased().hasPrefix(q) }
-    }
-
-    /// Upstream `allCommands`' skill entries: every installed skill as a
-    /// `/slug` command (user skills, then built-ins, then plugin skills), so
-    /// a skill can be applied to one message (docs/TOOL_DISCOVERY_INTEL.md).
-    private func skillCommands() -> [SlashCommand] {
-        let precedenceOrdered = SkillManager.shared.skills.sorted { a, b in
-            func tier(_ s: Skill) -> Int {
-                if s.isFromPlugin { return 2 }
-                return s.isBuiltIn ? 1 : 0
-            }
-            if tier(a) != tier(b) { return tier(a) < tier(b) }
-            return a.id.uuidString < b.id.uuidString
-        }
-        return precedenceOrdered.compactMap { skill in
-            let slug = skill.name
-                .lowercased()
-                .replacingOccurrences(of: " ", with: "-")
-                .filter { $0.isLetter || $0.isNumber || $0 == "-" }
-            guard !slug.isEmpty else { return nil }
-            let desc = skill.description.isEmpty ? "Apply \(skill.name) skill" : skill.description
-            return SlashCommand(
-                id: skill.id, name: slug, description: desc, icon: "wand.and.stars", kind: .skill,
-                isBuiltIn: false)
-        }
-    }
+    // MARK: - CRUD
 
     @discardableResult
     func create(
@@ -1397,6 +1369,112 @@ final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
         let result = SlashCommandStore.delete(id: id)
         if result { refresh() }
         return result
+    }
+
+    /// Returns all persisted custom commands associated with a plugin.
+    func commands(forPluginId pluginId: String) -> [SlashCommand] {
+        customCommands.filter { $0.pluginId == pluginId }
+    }
+
+    /// Delete every persisted custom command that belongs to a plugin.
+    /// Returns the number of commands deleted.
+    @discardableResult
+    func deleteByPluginId(_ pluginId: String) -> Int {
+        let matches = commands(forPluginId: pluginId)
+        guard !matches.isEmpty else { return 0 }
+        var count = 0
+        for cmd in matches where SlashCommandStore.delete(id: cmd.id) {
+            count += 1
+        }
+        if count > 0 { refresh() }
+        return count
+    }
+
+    // MARK: - Filtering
+
+    /// Returns commands matching `query`, sorted by relevance then alphabetically.
+    /// An empty query returns all commands in default order.
+    func filtered(query: String) -> [SlashCommand] {
+        let all = allCommands
+        guard !query.isEmpty else { return all }
+        let q = query.lowercased()
+        return
+            all
+            .compactMap { cmd -> (SlashCommand, Int)? in
+                let score = matchScore(query: q, name: cmd.name.lowercased())
+                return score > 0 ? (cmd, score) : nil
+            }
+            .sorted { lhs, rhs in
+                if lhs.1 != rhs.1 { return lhs.1 > rhs.1 }
+                return lhs.0.name.localizedCaseInsensitiveCompare(rhs.0.name) == .orderedAscending
+            }
+            .map(\.0)
+    }
+
+    // MARK: - Private
+
+    /// Full command list: built-ins → custom → skills (deduplicated by name).
+    private var allCommands: [SlashCommand] {
+        var seen = Set<String>()
+        var result: [SlashCommand] = []
+
+        func append(_ cmd: SlashCommand) {
+            let key = cmd.name.lowercased()
+            guard !seen.contains(key) else { return }
+            seen.insert(key)
+            result.append(cmd)
+        }
+
+        SlashCommand.builtIns.forEach(append)
+        customCommands.forEach(append)
+
+        // Surface every installed skill as a template command. Iterate in
+        // the same precedence order as `SkillManager.skill(named:)` (user
+        // skills, then built-ins, then plugin skills) so a slug collision
+        // dedupes to the same skill the loader would resolve — otherwise
+        // `/name` and `capabilities_load skill/<name>` could invoke two
+        // different skills.
+        let precedenceOrdered = SkillManager.shared.skills.sorted { a, b in
+            func tier(_ s: Skill) -> Int {
+                if s.isFromPlugin { return 2 }
+                return s.isBuiltIn ? 1 : 0
+            }
+            if tier(a) != tier(b) { return tier(a) < tier(b) }
+            return a.id.uuidString < b.id.uuidString
+        }
+        for skill in precedenceOrdered {
+            let slug = skill.name
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "-")
+                .filter { $0.isLetter || $0.isNumber || $0 == "-" }
+            guard !slug.isEmpty else { continue }
+
+            let desc =
+                skill.description.isEmpty
+                ? "Apply \(skill.name) skill"
+                : skill.description
+
+            append(
+                SlashCommand(
+                    id: skill.id,
+                    name: slug,
+                    description: desc,
+                    icon: "wand.and.stars",
+                    kind: .skill,
+                    isBuiltIn: false
+                )
+            )
+        }
+
+        return result
+    }
+
+    /// Score: 3 = exact match, 2 = prefix match, 1 = substring match, 0 = no match.
+    private func matchScore(query: String, name: String) -> Int {
+        if name == query { return 3 }
+        if name.hasPrefix(query) { return 2 }
+        if name.contains(query) { return 1 }
+        return 0
     }
 }
 
