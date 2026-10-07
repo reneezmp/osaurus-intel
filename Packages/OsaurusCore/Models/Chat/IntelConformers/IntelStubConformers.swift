@@ -1973,7 +1973,7 @@ final class GenerativeGreetingService: @unchecked Sendable {
 
 // MARK: - SharedArtifact (stub)
 
-enum ArtifactContextType: String, Sendable {
+enum ArtifactContextType: String, Codable, Sendable {
     case work
     case chat
 }
@@ -1982,7 +1982,9 @@ struct ProcessingResult: Sendable {
     let enrichedToolResult: String
 }
 
-struct SharedArtifact: Identifiable, Sendable, Equatable {
+/// Codable with upstream's synthesized keys, so a turn's artifacts persist in
+/// the saved chat exactly as upstream writes them (`ChatTurnData`).
+struct SharedArtifact: Identifiable, Codable, Sendable, Equatable {
     let id: String
     let contextId: String
     let contextType: ArtifactContextType

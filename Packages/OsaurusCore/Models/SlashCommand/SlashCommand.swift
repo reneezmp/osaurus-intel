@@ -111,6 +111,14 @@ extension SlashCommand {
             isBuiltIn: true
         ),
         SlashCommand(
+            id: UUID(uuidString: "00000000-0000-0000-0000-000000000105")!,
+            name: "screenshot",
+            description: L("Capture the current screen as a chat artifact"),
+            icon: "camera.viewfinder",
+            kind: .action,
+            isBuiltIn: true
+        ),
+        SlashCommand(
             id: UUID(uuidString: "00000000-0000-0000-0000-000000000106")!,
             name: "title",
             description: "Generate a title for this chat",

@@ -2587,3 +2587,11 @@ above 59.
   state marked `nonisolated(unsafe)`.
 - `scripts/i18n/add-translations.py` adds hand-written de/zh-Hans entries
   for Intel strings upstream's catalog lacks.
+
+### Chat UX batch, part 5: `/screenshot` (`W-chat-ux`) — 2026-10-06
+
+- First shared-artifact feature on Intel: turns now persist
+  `sharedArtifacts` and render artifact cards. Anything else that produces
+  upstream artifacts (share_artifact, generated media) can build on it.
+- **`SCScreenshotManager` is macOS 14+** and `SCContentFilter.includeMenuBar`
+  is 14.2+: Ventura captures with `CGDisplayCreateImage`.

@@ -44,6 +44,8 @@ struct FloatingInputCard: View {
     /// Compact older messages (upstream #136): `/compact`, the token chip's
     /// context menu, and the near-limit notice.
     var onCompact: (() -> Void)? = nil
+    /// `/screenshot` (upstream): capture the screen into the chat.
+    var onCaptureScreenshot: (() -> Void)? = nil
     var isCompacting: Bool = false
     var suggestCompaction: Bool = false
     /// An older span of the chat can be summarized (upstream
@@ -108,6 +110,7 @@ struct FloatingInputCard: View {
         onClearChat: (() -> Void)? = nil,
         onGenerateTitle: (() -> Void)? = nil,
         onCompact: (() -> Void)? = nil,
+        onCaptureScreenshot: (() -> Void)? = nil,
         isCompacting: Bool = false,
         suggestCompaction: Bool = false,
         canCompactConversation: Bool = false,
@@ -148,6 +151,7 @@ struct FloatingInputCard: View {
         self.onClearChat = onClearChat
         self.onGenerateTitle = onGenerateTitle
         self.onCompact = onCompact
+        self.onCaptureScreenshot = onCaptureScreenshot
         self.isCompacting = isCompacting
         self.suggestCompaction = suggestCompaction
         self.canCompactConversation = canCompactConversation
@@ -1603,6 +1607,15 @@ extension FloatingInputCard {
                 object: nil,
                 userInfo: windowId.map { ["windowId": $0] }
             )
+        case "screenshot":
+            if let capture = onCaptureScreenshot {
+                capture()
+            } else {
+                ToastManager.shared.infoLocalized(
+                    "Screenshot Unavailable",
+                    message: "Pass an onCaptureScreenshot handler to enable /screenshot"
+                )
+            }
         case "title":
             if let generateTitle = onGenerateTitle {
                 generateTitle()

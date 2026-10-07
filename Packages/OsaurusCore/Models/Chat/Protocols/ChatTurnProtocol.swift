@@ -24,6 +24,9 @@ protocol ChatTurnProtocol: Identifiable, Sendable {
     var contentIsEmpty: Bool { get }
     var contentLength: Int { get }
     var attachments: [Attachment] { get }
+    /// Files shown as artifact cards on the turn (upstream; on Intel only
+    /// `/screenshot` creates them so far).
+    var sharedArtifacts: [SharedArtifact] { get }
     var imageData: Data? { get }
     var generationTokenCount: Int? { get set }
     var generationTokensPerSecond: Double? { get set }

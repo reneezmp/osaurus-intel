@@ -193,6 +193,36 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests: upstream `Tests/Chat/StreamingDeltaProcessorTests.swift` plus an
   Intel case for the immediate drain.
 
+## Screenshot attach (`/screenshot`)
+
+- `/screenshot` captures the main display into the chat as an artifact card
+  (image preview, open, reveal in Finder) on its own assistant turn. It is a
+  user action only, not a model tool. Like upstream, the model doesn't see
+  the capture: blank assistant turns are skipped when the request is built.
+- Needs Screen Recording permission; without it a toast says where to
+  grant it. During a reply it asks you to stop first.
+- Files: `Services/ScreenshotCaptureService.swift` (upstream) and upstream's
+  `captureScreenshotFromSlashCommand` on `ChatSession`. The `/screenshot`
+  built-in keeps upstream's id `…0105`.
+- **Shared-artifact groundwork Intel lacked:**
+  - `ChatTurn.sharedArtifacts` / `ChatTurnData.sharedArtifacts` (written
+    to the chat JSON only when non-empty, upstream's key).
+  - The `SharedArtifact` stub is now `Codable` with upstream's synthesized
+    keys.
+  - The block builder emits `.sharedArtifact` cards (id
+    `artifact-<turn>-<artifact>`), rendered by the existing
+    `NativeArtifactCardView`; an artifact counts as footer content.
+  - Deleting a chat removes `artifacts/<chat id>/`, as upstream's
+    `ChatSessionStore.delete` does.
+- **Intel differences:**
+  - Ventura has no `SCScreenshotManager` (macOS 14): the main display is
+    captured with `CGDisplayCreateImage` (never draws the cursor). macOS
+    14+ keeps ScreenCaptureKit; the menu bar flag needs 14.2.
+  - Captures live under Intel's root, `~/.osaurus-intel/artifacts/<chat>/`.
+- Tests: upstream `Tests/Tool/CaptureScreenshotCommandTests.swift` (blocks
+  via `unrolledBlocks`) plus `IntelScreenshotArtifactTests` (JSON keys, no
+  key on plain turns, delete cleanup).
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -212,7 +242,7 @@ they wait for the next session, in this suggested order:
 2. ~~Activity roll-up and expanding thinking while it streams~~ **done
    2026-10-06**.
 3. ~~Smooth streaming~~ **done 2026-10-06**.
-4. Screenshot attach (`ScreenshotCaptureService`, a shared-artifact turn).
+4. ~~Screenshot attach~~ **done 2026-10-06**.
 5. Chat import guide (`ImportGuideSheet`, `ImportHistoryPromptGate`).
 6. Markdown document view (`MarkdownBlockParsing`, `MarkdownDocumentView`).
 7. Activity / dispatch rows (`DispatchEnvelope`, `AgentDispatchTarget`,

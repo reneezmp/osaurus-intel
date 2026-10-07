@@ -1205,8 +1205,12 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         let fileURL = OsaurusPaths.sessionFile(for: id)
         // Serialize removal behind any metadata writes already submitted for
         // this session. Those writes also consult the tombstone before disk.
+        // Its artifacts (e.g. `/screenshot` captures) go with it, as
+        // upstream's `ChatSessionStore.delete` does.
+        let artifactsURL = OsaurusPaths.contextArtifactsDir(contextId: id.uuidString)
         Self.persistQueue.async { [self] in
             removeFromDisk(at: fileURL)
+            removeFromDisk(at: artifactsURL)
         }
         // Drop the session's file history and collect its now-unreferenced
         // snapshot blobs (upstream #2907 part A).

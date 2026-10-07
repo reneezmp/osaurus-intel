@@ -404,6 +404,9 @@ struct ChatContentView: View {
                             onCompact: { [weak observedSession] in
                                 observedSession?.compactConversation()
                             },
+                            onCaptureScreenshot: { [weak observedSession] in
+                                observedSession?.captureScreenshotFromSlashCommand()
+                            },
                             isCompacting: observedSession.isCompacting,
                             suggestCompaction: observedSession.shouldSuggestCompaction,
                             canCompactConversation: observedSession.canCompactConversation,

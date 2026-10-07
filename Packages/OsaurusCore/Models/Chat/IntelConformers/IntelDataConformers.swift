@@ -48,6 +48,8 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     @Published var toolCalls: [ToolCall]? = nil
     var toolCallId: String? = nil
     @Published var toolResults: [String: String] = [:]
+    /// Artifact cards on this turn (upstream), e.g. a `/screenshot` capture.
+    @Published var sharedArtifacts: [SharedArtifact] = []
 
     var pendingToolName: String? = nil
     var pendingToolArgPreview: String? = nil
@@ -84,11 +86,18 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         self.completedAt = role == .user ? Date() : nil
     }
 
+    /// Upstream's artifact-turn initializer (`/screenshot`).
+    convenience init(role: MessageRole, content: String, sharedArtifacts: [SharedArtifact]) {
+        self.init(role: role, content: content)
+        self.sharedArtifacts = sharedArtifacts
+    }
+
     convenience init(from turn: any ChatTurnProtocol) {
         self.init(role: turn.role, content: turn.content, attachments: turn.attachments, id: turn.id, createdAt: turn.createdAt)
         self.completedAt = turn.completedAt
         self.toolCalls = turn.toolCalls
         self.toolResults = turn.toolResults
+        self.sharedArtifacts = turn.sharedArtifacts
         self.thinking = turn.thinking
         self.generationTokenCount = turn.generationTokenCount
         self.timeToFirstToken = turn.timeToFirstToken
@@ -511,6 +520,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var toolCalls: [ToolCall]?
     var toolCallId: String?
     var toolResults: [String: String]
+    var sharedArtifacts: [SharedArtifact] = []
     var thinking: String
     let createdAt: Date
     var completedAt: Date?
@@ -540,6 +550,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         self.toolCalls = turn.toolCalls
         self.toolCallId = turn.toolCallId
         self.toolResults = turn.toolResults
+        self.sharedArtifacts = turn.sharedArtifacts
         self.thinking = turn.thinking
         self.createdAt = turn.createdAt
         self.completedAt = turn.completedAt
@@ -568,6 +579,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         toolCalls: [ToolCall]? = nil,
         toolCallId: String? = nil,
         toolResults: [String: String] = [:],
+        sharedArtifacts: [SharedArtifact] = [],
         thinking: String = "",
         createdAt: Date,
         completedAt: Date? = nil,
@@ -582,6 +594,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         self.toolCalls = toolCalls
         self.toolCallId = toolCallId
         self.toolResults = toolResults
+        self.sharedArtifacts = sharedArtifacts
         self.thinking = thinking
         self.createdAt = createdAt
         self.completedAt = completedAt
@@ -601,6 +614,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
 extension ChatTurnData: Codable {
     private enum CodingKeys: String, CodingKey {
         case id, role, content, attachments, toolCalls, toolCallId, toolResults
+        case sharedArtifacts
         case thinking, createdAt, completedAt, generationTokenCount
         case timeToFirstToken, generationTokensPerSecond
     }
@@ -615,6 +629,7 @@ extension ChatTurnData: Codable {
             toolCalls: try c.decodeIfPresent([ToolCall].self, forKey: .toolCalls),
             toolCallId: try c.decodeIfPresent(String.self, forKey: .toolCallId),
             toolResults: try c.decodeIfPresent([String: String].self, forKey: .toolResults) ?? [:],
+            sharedArtifacts: try c.decodeIfPresent([SharedArtifact].self, forKey: .sharedArtifacts) ?? [],
             thinking: try c.decodeIfPresent(String.self, forKey: .thinking) ?? "",
             createdAt: try c.decodeIfPresent(Date.self, forKey: .createdAt) ?? Date(),
             completedAt: try c.decodeIfPresent(Date.self, forKey: .completedAt),
@@ -634,6 +649,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(toolCalls, forKey: .toolCalls)
         try c.encodeIfPresent(toolCallId, forKey: .toolCallId)
         if !toolResults.isEmpty { try c.encode(toolResults, forKey: .toolResults) }
+        if !sharedArtifacts.isEmpty { try c.encode(sharedArtifacts, forKey: .sharedArtifacts) }
         if !thinking.isEmpty { try c.encode(thinking, forKey: .thinking) }
         try c.encode(createdAt, forKey: .createdAt)
         try c.encodeIfPresent(completedAt, forKey: .completedAt)
@@ -1873,6 +1889,17 @@ final class BlockMemoizer: @unchecked Sendable {
                 ))
             }
 
+            // Artifact cards (upstream), e.g. a `/screenshot` capture.
+            if !isUser {
+                for artifact in turn.sharedArtifacts {
+                    blocks.append(ContentBlock(
+                        id: "artifact-\(turn.id.uuidString)-\(artifact.id)",
+                        turnId: turn.id,
+                        kind: .sharedArtifact(artifact: artifact)
+                    ))
+                }
+            }
+
             // In-flight tool call: render the card the MOMENT the model emits
             // the call (pendingToolName set by the engine's StreamingToolHint),
             // BEFORE/while the tool executes — so the user sees "calling X …"
@@ -1976,6 +2003,7 @@ final class BlockMemoizer: @unchecked Sendable {
             let hasFooterableContent =
                 !turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
                 || turn.hasRenderableThinking || !(turn.toolCalls ?? []).isEmpty
+                || !turn.sharedArtifacts.isEmpty
             if !isUser, !isStreaming, isLastInGroup, hasFooterableContent {
                 blocks.append(ContentBlock(
                     id: "actions-\(turn.id.uuidString)",

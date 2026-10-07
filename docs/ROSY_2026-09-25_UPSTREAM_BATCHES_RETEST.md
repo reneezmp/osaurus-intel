@@ -1308,6 +1308,12 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       Streaming on, with a reasoning model (DeepSeek Reasoner): the thinking
       opens while it streams and closes when the answer starts. Collapsing
       it by hand mid-stream keeps it closed.
+- [ ] Type `/screenshot` in a chat. First time: macOS asks for Screen
+      Recording (or a toast says to grant it in Privacy & Security; grant,
+      relaunch if macOS asks, retry). A card with the screenshot appears;
+      clicking it opens the image. Quit and reopen the chat: the card is
+      still there. Delete the chat: `~/.osaurus-intel/artifacts/<chat id>`
+      is gone.
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).
