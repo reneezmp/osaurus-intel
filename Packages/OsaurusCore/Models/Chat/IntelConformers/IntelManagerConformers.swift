@@ -256,8 +256,60 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
         let dir = OsaurusPaths.agents()
         OsaurusPaths.ensureExistsSilent(dir)
         let url = dir.appendingPathComponent("\(agent.id.uuidString).json")
-        if let data = try? Self.iso.encode(agent) {
-            try? data.write(to: url, options: [.atomic])
+        guard var data = try? Self.iso.encode(agent) else { return }
+        if let existing = try? Data(contentsOf: url) {
+            data = Self.preservingUnknownFields(encoded: data, existing: existing)
+        }
+        try? data.write(to: url, options: [.atomic])
+    }
+
+    /// Keep the fields of an agent file that Intel's `Agent` model does not
+    /// know (an agent created or edited by upstream Osaurus: avatar, greeting,
+    /// theme, subagent settings, …). Intel's encoder would otherwise drop them
+    /// on every save; on 2026-10-07 that stripped about 30 fields from real
+    /// agents (docs/TEST_STORAGE_SAFETY.md).
+    ///
+    /// "Unknown" means present in the file but absent after Intel decodes and
+    /// re-encodes it, so a field Intel knows and deliberately clears stays
+    /// cleared. If the file can't be decoded, `encoded` is returned as is.
+    static func preservingUnknownFields(encoded: Data, existing: Data) -> Data {
+        guard
+            let existingObject = (try? JSONSerialization.jsonObject(with: existing)) as? [String: Any],
+            let decoded = try? isoDecoder.decode(Agent.self, from: existing),
+            let roundTripData = try? iso.encode(decoded),
+            let roundTrip = (try? JSONSerialization.jsonObject(with: roundTripData)) as? [String: Any],
+            var updated = (try? JSONSerialization.jsonObject(with: encoded)) as? [String: Any]
+        else { return encoded }
+        let unknown = unknownFields(in: existingObject, comparedTo: roundTrip)
+        guard !unknown.isEmpty else { return encoded }
+        merge(unknown, into: &updated)
+        return (try? JSONSerialization.data(withJSONObject: updated, options: [.prettyPrinted, .sortedKeys]))
+            ?? encoded
+    }
+
+    private static func unknownFields(in file: [String: Any], comparedTo known: [String: Any]) -> [String: Any] {
+        var unknown: [String: Any] = [:]
+        for (key, value) in file {
+            guard let knownValue = known[key] else {
+                unknown[key] = value
+                continue
+            }
+            if let nested = value as? [String: Any], let knownNested = knownValue as? [String: Any] {
+                let nestedUnknown = unknownFields(in: nested, comparedTo: knownNested)
+                if !nestedUnknown.isEmpty { unknown[key] = nestedUnknown }
+            }
+        }
+        return unknown
+    }
+
+    private static func merge(_ unknown: [String: Any], into object: inout [String: Any]) {
+        for (key, value) in unknown {
+            if var nested = object[key] as? [String: Any], let unknownNested = value as? [String: Any] {
+                merge(unknownNested, into: &nested)
+                object[key] = nested
+            } else if object[key] == nil {
+                object[key] = value
+            }
         }
     }
 

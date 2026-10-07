@@ -184,11 +184,16 @@ using at the time. Found by the postflight `find -newer` check.
   (three of the four upstream agents) were rewritten at 10:02:42 by Intel's
   one-time `.intel-agent-database-flag-reset-v1` migration
   (`IntelManagerConformers.resetLegacyDatabaseFlagsIfNeeded`): `dbEnabled`
-  forced off, and Intel's `Agent` encoder dropped about 30 upstream fields
-  each (`avatar`, `chatGreeting`, `chatQuickActions`, `chatSubtitle`,
-  `themeId`, `toolsEnabled`, `memoryEnabled`, knowledge, follow-up,
-  subagent, Apple Script/browser/computer-use settings, …). The marker file
-  was written too. No backup: Time Machine was not mounted, there are no
+  forced off, and Intel's `Agent` encoder dropped the upstream-only keys it
+  doesn't model: about 20 under `settings` (Apple Script, browser and computer
+  use, knowledge, follow-up, image/video, chart, screen context, memory
+  search, spawn/subagent budgets, permissions and overrides) and
+  `autonomousExec.backgroundProcessEnabled` / `sandboxNetworkEnabled`.
+  (Top-level keys such as `avatar`, `chatGreeting` or `themeId` were absent
+  too, but Intel models those and omits them only when unset, so those
+  agents most likely never had them.) Renée re-saved the three agents from
+  the still-running upstream app, which still held the full records. The
+  marker file was written too. No backup: Time Machine was not mounted, there are no
   local APFS snapshots, and no other copy exists on disk.
 - Test residue: four empty `agents/<uuid>/` folders, a
   `sessions/1C8E9DCD….json` ("Scheduled folder task"), and test content in
@@ -200,8 +205,10 @@ using at the time. Found by the postflight `find -newer` check.
   a test or the upstream app's checkpoint is unknown.
 
 **Rules added:** the gate above (no one-line `export`), and the keychain
-flag. **Follow-up:** `OsaurusPaths.root()` should refuse the default root
-inside a test process, so a missing or empty `OSAURUS_TEST_ROOT` fails
-loudly instead of writing live data, and Intel's agent migration should
-never rewrite agent files it can't round-trip (unknown upstream fields are
-dropped).
+flag. **Code guards (2026-10-07):** `OsaurusPaths.root()` now stops a test
+process (`fatalError`) that has no `overrideRoot` and an empty
+`OSAURUS_TEST_ROOT` instead of returning the live root; and Intel's
+`AgentManager.persist` keeps every key of an existing agent file that
+Intel's model can't round-trip (`preservingUnknownFields`,
+`IntelAgentUnknownFieldsTests`), so any Intel save of an upstream agent,
+test or real, no longer strips upstream settings.

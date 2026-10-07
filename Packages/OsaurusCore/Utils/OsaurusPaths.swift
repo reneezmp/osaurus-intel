@@ -52,7 +52,29 @@ public enum OsaurusPaths {
         {
             return URL(fileURLWithPath: envRoot, isDirectory: true)
         }
+        // A test process must never reach the live `~/.osaurus`. On
+        // 2026-10-07 an empty `OSAURUS_TEST_ROOT` (a one-line `export` gate)
+        // sent nine test runs into the live data and stripped real agents
+        // (docs/TEST_STORAGE_SAFETY.md). Fail loudly instead.
+        if isTestProcess {
+            fatalError(
+                "OsaurusPaths.root() in a test process with no overrideRoot and an empty OSAURUS_TEST_ROOT; "
+                    + "refusing to use the live ~/.osaurus. See docs/TEST_STORAGE_SAFETY.md."
+            )
+        }
         return defaultRoot
+    }
+
+    /// True inside `swift test` / XCTest processes. Deliberately narrower than
+    /// `RuntimeEnvironment.isUnderTests` (no CI variables), so a real app
+    /// launched on a CI machine still opens its data.
+    static var isTestProcess: Bool {
+        let info = ProcessInfo.processInfo
+        return info.environment["XCTestConfigurationFilePath"] != nil
+            || info.environment["XCTestBundlePath"] != nil
+            || info.processName == "xctest"
+            || info.processName == "swiftpm-testing-helper"
+            || Bundle.main.bundlePath.hasSuffix(".xctest")
     }
 
     // MARK: - Directory Paths
