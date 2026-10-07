@@ -237,11 +237,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 port: config.port,
                 trustLoopback: true
             )
-            do {
-                try await server.start(serverConfig, serverConfiguration: config)
-                NSLog("[Osaurus Intel] HTTP server started on port \(config.port)")
-            } catch {
-                NSLog("[Osaurus Intel] Server start failed: \(error)")
+            // Upstream #3018: a port still held, most often by an Osaurus that
+            // is quitting as this one launches, is retried for a few seconds
+            // before giving up; otherwise the survivor runs with no server.
+            var attempt = 1
+            while true {
+                do {
+                    try await server.start(serverConfig, serverConfiguration: config)
+                    NSLog("[Osaurus Intel] HTTP server started on port \(config.port)")
+                    break
+                } catch where AppDelegate.isAddressInUse(error) && attempt < AppDelegate.serverBindAttempts {
+                    NSLog("[Osaurus Intel] Port \(config.port) busy, retrying (\(attempt)/\(AppDelegate.serverBindAttempts))")
+                    attempt += 1
+                    try? await Task.sleep(nanoseconds: 1_000_000_000)
+                } catch {
+                    NSLog("[Osaurus Intel] Server start failed: \(error)")
+                    break
+                }
             }
 
             do {
@@ -1000,5 +1012,17 @@ struct IntelStatusPanelView: View {
         }
         .buttonStyle(.plain)
         .help("Open chat")
+    }
+}
+
+// MARK: - Server bind retry (upstream #3018)
+
+extension AppDelegate {
+    /// Binds tried, a second apart, while the port is in use.
+    static let serverBindAttempts = 6
+
+    static func isAddressInUse(_ error: Error) -> Bool {
+        let desc = "\(error) \(error.localizedDescription)".lowercased()
+        return desc.contains("address already in use") || desc.contains("eaddrinuse") || desc.contains("errno: 48")
     }
 }

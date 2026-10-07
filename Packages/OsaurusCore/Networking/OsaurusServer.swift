@@ -84,7 +84,15 @@ public actor OsaurusServer: Sendable {
             .childChannelOption(ChannelOptions.maxMessagesPerRead, value: 16)
             .childChannelOption(ChannelOptions.recvAllocator, value: AdaptiveRecvByteBufferAllocator())
 
-        let ch = try await bootstrap.bind(host: config.host, port: config.port).get()
+        let ch: Channel
+        do {
+            ch = try await bootstrap.bind(host: config.host, port: config.port).get()
+        } catch {
+            // Intel: release the event loop threads of a failed bind, so the
+            // launch retry on a busy port (upstream #3018) doesn't leak them.
+            try? await group.shutdownGracefully()
+            throw error
+        }
         self.group = group
         self.channel = ch
         print("[Osaurus] OsaurusServer started on http://\(config.host):\(config.port)")

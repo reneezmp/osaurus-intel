@@ -1640,11 +1640,28 @@ extension FloatingInputCard {
                     "Chat Title", message: "Pass an onGenerateTitle handler to enable /title")
             }
         case "compact":
-            if let compact = onCompact {
+            // Upstream #2999: say why nothing happens instead of failing
+            // silently.
+            if compactionState.isRunning {
+                ToastManager.shared.infoLocalized(
+                    "Compact Conversation",
+                    message: "Compaction is already running."
+                )
+            } else if isStreaming {
+                ToastManager.shared.infoLocalized(
+                    "Compact Conversation",
+                    message: "Wait for the current response to finish, then run /compact."
+                )
+            } else if let compact = onCompact, canCompactConversation {
                 compact()
-            } else {
+            } else if onCompact == nil {
                 ToastManager.shared.infoLocalized(
                     "Compact", message: "Compaction isn't available in this window.")
+            } else {
+                ToastManager.shared.infoLocalized(
+                    "Compact Conversation",
+                    message: "Nothing to compact yet. The recent conversation is already as small as it can get."
+                )
             }
         case "help":
             ToastManager.shared.infoLocalized(

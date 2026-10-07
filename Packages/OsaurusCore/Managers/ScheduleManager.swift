@@ -391,7 +391,10 @@ public final class ScheduleManager: ObservableObject {
             folderPath: triggeredSchedule.folderPath,
             folderBookmark: triggeredSchedule.folderBookmark,
             source: .schedule,
-            externalSessionKey: triggeredSchedule.id.uuidString
+            // The key groups runs under this schedule in the sidebar; each
+            // run still gets its own chat (upstream #3007).
+            externalSessionKey: triggeredSchedule.id.uuidString,
+            reattachSession: false
         )
 
         print("[Osaurus] Executing schedule: \(triggeredSchedule.name)")

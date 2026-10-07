@@ -1245,12 +1245,27 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// Write every open window's tabs to `ChatTabLayoutStore`. Records of
     /// windows that are no longer open are left as they are: they are what
     /// the next window restores.
-    func persistTabLayoutNow(store: ChatTabLayoutStore = .shared) {
-        var layout = store.load()
-        for (id, state) in windowStates {
-            layout.windows[id] = state.tabLayoutSnapshot()
+    /// Upstream #3003: collect the snapshots here (main-actor state), then do
+    /// the `UserDefaults` read and write on a background queue so a busy
+    /// cfprefsd can't hang the main thread. Intel: the quit path passes
+    /// `synchronously: true` so the record is written before the process
+    /// exits (a background write could be lost at termination).
+    func persistTabLayoutNow(store: ChatTabLayoutStore = .shared, synchronously: Bool = false) {
+        let snapshots: [UUID: ChatTabLayoutRecord] = windowStates.reduce(into: [:]) { result, pair in
+            result[pair.key] = pair.value.tabLayoutSnapshot()
         }
-        store.save(layout)
+        let write = {
+            var layout = store.load()
+            for (id, record) in snapshots {
+                layout.windows[id] = record
+            }
+            store.save(layout)
+        }
+        if synchronously {
+            write()
+        } else {
+            DispatchQueue.global(qos: .utility).async(execute: write)
+        }
     }
 
     /// Adopt the tabs of every window that is not open any more (the
@@ -1612,7 +1627,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     public func stopAllSessions() {
         // Quit teardown: record every window's tabs BEFORE cleanup drops the
         // inactive ones (cleanup also stops listening for layout changes).
-        persistTabLayoutNow()
+        persistTabLayoutNow(synchronously: true)
         windowStates.values.forEach { $0.cleanup() }
         windows.removeAll()
         nsWindows.removeAll()

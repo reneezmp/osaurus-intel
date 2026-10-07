@@ -32,6 +32,11 @@ public struct DispatchRequest: Sendable {
     /// Lets repeated dispatches from the same conversation accrete into one
     /// persisted session row instead of a fresh one per call.
     public let externalSessionKey: String?
+    /// When false, `externalSessionKey` only tags the new session (so the
+    /// sidebar can group runs by trigger) and never reattaches to an earlier
+    /// row. Schedules use this so every run starts a fresh chat (upstream
+    /// #3007).
+    public let reattachSession: Bool
     /// Tool names the dispatcher wants exposed to the model on top of the
     /// agent's normal selection (auto-mode preflight or manual list).
     /// Plugin-sourced dispatches populate this from the validated `tools`
@@ -54,6 +59,7 @@ public struct DispatchRequest: Sendable {
         sourcePluginId: String? = nil,
         source: SessionSource = .chat,
         externalSessionKey: String? = nil,
+        reattachSession: Bool = true,
         requestedToolNames: [String] = []
     ) {
         self.id = id
@@ -67,6 +73,7 @@ public struct DispatchRequest: Sendable {
         self.sourcePluginId = sourcePluginId
         self.source = source
         self.externalSessionKey = externalSessionKey
+        self.reattachSession = reattachSession
         self.requestedToolNames = requestedToolNames
     }
 }

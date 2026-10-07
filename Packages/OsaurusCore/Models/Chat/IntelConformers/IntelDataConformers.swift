@@ -20,7 +20,10 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     var completedAt: Date?
 
     @Published var content: String {
-        didSet { _contentLength = content.count }
+        didSet {
+            _contentLength = content.count
+            _cachedVisibleContent = nil
+        }
     }
     var contentLength: Int { _contentLength }
     private var _contentLength: Int
@@ -72,7 +75,23 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     var turnId: UUID? { id }
     var imageData: Data? { nil }
     var hasAttachments: Bool { !attachments.isEmpty }
-    var visibleContent: String { content }
+    /// User-visible content (upstream): assistant turns hide a leaked
+    /// Harmony channel label, Gemini round-trip metadata and tool-call JSON a
+    /// model emitted as text. Cached because the cleaners are O(n·braces)
+    /// and the block builder reads it on the main thread (upstream #2922);
+    /// cleared whenever `content` changes.
+    var visibleContent: String {
+        guard role == .assistant else { return content }
+        if let cached = _cachedVisibleContent { return cached }
+        let cleaned = StringCleaning.stripLeakedActionJSON(
+            StringCleaning.stripGeminiDisplayMetadata(
+                StringCleaning.stripLeakedChannelLabel(content)
+            )
+        )
+        _cachedVisibleContent = cleaned
+        return cleaned
+    }
+    private var _cachedVisibleContent: String?
 
     init(role: MessageRole, content: String, attachments: [Attachment] = [], id: UUID = UUID(), createdAt: Date = Date()) {
         self.id = id
@@ -1968,9 +1987,11 @@ final class BlockMemoizer: @unchecked Sendable {
                 blocks.append(ContentBlock(
                     id: "assistant-\(turn.id.uuidString)",
                     turnId: turn.id,
+                    // Cleaned text once the reply has finished (upstream: the
+                    // raw stream while it is still arriving).
                     kind: .paragraph(
                         index: blocks.count,
-                        text: turn.content,
+                        text: turn.id == streamingTurnId ? turn.content : turn.visibleContent,
                         isStreaming: turn.id == streamingTurnId,
                         role: .assistant
                     )

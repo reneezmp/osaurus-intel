@@ -511,7 +511,8 @@ final class NativeAssistantActionsView: NSView {
     /// the File Changes panel. Hidden until the journal reports this turn
     /// recorded something; refreshed when history changes (e.g. a revert).
     /// Upstream #2907 part A.
-    private let fileChangesButton = NSButton(title: "", target: nil, action: nil)
+    // `NSButton(title:target:action:)` hung the main thread (upstream #2977).
+    private let fileChangesButton = NSButton(frame: .zero)
     private var fileChangesSummary: FileChangeTurnSummary?
     private var fileChangesLookupTurnId: UUID?
     nonisolated(unsafe) private var fileChangesObservation: NSObjectProtocol?
@@ -610,6 +611,7 @@ final class NativeAssistantActionsView: NSView {
         overflowTrailing.isActive = true
         overflowTrailingConstraint = overflowTrailing
 
+        fileChangesButton.title = ""
         fileChangesButton.translatesAutoresizingMaskIntoConstraints = false
         fileChangesButton.isBordered = false
         fileChangesButton.bezelStyle = .inline
