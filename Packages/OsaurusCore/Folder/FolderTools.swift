@@ -449,7 +449,9 @@ struct FileReadTool: OsaurusTool {
         + ". Documents come back as extracted text; images and scanned PDFs as text recognized "
         + "on this Mac (OCR). **Use this instead of `cat` / `head` / `tail` or pandoc/pdftotext in "
         + "`shell_run`.** Optionally specify start_line and end_line for partial reads. Line numbers "
-        + "are 1-indexed. Pass `mode: \"structure\"` on a .docx/.xlsx/.pptx/.pdf to get the numbered "
+        + "are 1-indexed. PDF text is split by `--- Page N of M ---` markers (labels and values on one "
+        + "visual row share a line) and `pages: \"3-5\"` reads a page range. Pass `mode: \"structure\"` "
+        + "on a .docx/.xlsx/.pptx/.pdf to get the numbered "
         + "paragraphs, cells, slides/shapes, or pages (and form fields) that `file_edit` `operations` address."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
@@ -466,6 +468,12 @@ struct FileReadTool: OsaurusTool {
             "end_line": .object([
                 "type": .string("integer"),
                 "description": .string("Optional end line number (1-indexed, inclusive)"),
+            ]),
+            "pages": .object([
+                "type": .string("string"),
+                "description": .string(
+                    "Optional PDF page selector: one page (\"3\") or a contiguous range (\"3-5\"). Overrides start_line/end_line."
+                ),
             ]),
             "mode": .object([
                 "type": .string("string"),
@@ -564,15 +572,77 @@ struct FileReadTool: OsaurusTool {
                 retryable: false
             )
         }
+
+        // `pages` is a PDF-only selector; reject it up front for other
+        // files so the model gets a field-level correction instead of a
+        // silently ignored argument.
+        let pagesSpec: String? = {
+            if let string = args["pages"] as? String { return string }
+            if let number = coerceInt(args["pages"]) { return String(number) }
+            return nil
+        }()
+        if pagesSpec != nil, ext != "pdf" {
+            return ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message: "`pages` selects pages of a PDF; '\(relativePath)' is a .\(ext) file.",
+                field: "pages",
+                expected: "omit `pages`, or use start_line/end_line",
+                tool: name
+            )
+        }
+
         let content = try await loadFileContent(
             url: fileURL,
             relativePath: relativePath,
             ext: ext
         )
-        let lines = FolderToolHelpers.contentLines(content)
+        let lines = FolderToolHelpers.contentLines(content.text)
 
-        let startLine = coerceInt(args["start_line"]) ?? 1
-        let endLine = coerceInt(args["end_line"]) ?? lines.count
+        // `pages` (PDF only) maps a page range onto the global gutter via
+        // the `--- Page N of M ---` headers, so page reads keep the same
+        // line numbering and continuation contract as any other read.
+        var pageRange: ClosedRange<Int>?
+        if let pagesSpec {
+            guard content.format == "pdf", content.source == .extractedText else {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: content.source == .ocrText
+                        ? "`pages` is unavailable for this PDF: it has no text layer, so the lines are OCR output without page markers."
+                        : "`pages` selects pages of a PDF text layer; '\(relativePath)' is not a PDF.",
+                    field: "pages",
+                    expected: "omit `pages`, or use start_line/end_line",
+                    tool: name
+                )
+            }
+            do {
+                guard let range = try Self.lineRange(forPages: pagesSpec, in: lines) else {
+                    let pageCount = content.counts["pages"] ?? 0
+                    return ToolEnvelope.success(
+                        tool: name,
+                        result: [
+                            "path": relativePath,
+                            "format": content.format,
+                            "source": content.source.rawValue,
+                            "pages": pageCount,
+                            "pages_requested": pagesSpec,
+                            "text": "Page(s) \(pagesSpec) of this \(pageCount)-page PDF have no extractable text layer.",
+                        ]
+                    )
+                }
+                pageRange = range
+            } catch let error as PagesArgumentError {
+                return ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "Invalid `pages` value \"\(pagesSpec)\".",
+                    field: "pages",
+                    expected: error.expected,
+                    tool: name
+                )
+            }
+        }
+
+        let startLine = pageRange?.lowerBound ?? coerceInt(args["start_line"]) ?? 1
+        let endLine = pageRange?.upperBound ?? coerceInt(args["end_line"]) ?? lines.count
         let validStart = max(1, min(startLine, lines.count))
         let validEnd = max(validStart, min(endLine, lines.count))
 
@@ -610,18 +680,42 @@ struct FileReadTool: OsaurusTool {
         } else {
             rawContent = ""
         }
-        return ToolEnvelope.success(
-            tool: name,
-            result: [
-                "text": text,
-                "content": rawContent,
-                "path": relativePath,
-                "start_line": validStart,
-                "end_line": lastLineIncluded,
-                "total_lines": lines.count,
-                "truncated": lastLineIncluded < validEnd,
-            ]
-        )
+        var result: [String: Any] = [
+            "text": text,
+            "content": rawContent,
+            "path": relativePath,
+            "start_line": validStart,
+            "end_line": lastLineIncluded,
+            "total_lines": lines.count,
+            "truncated": lastLineIncluded < validEnd,
+        ]
+        if let format = content.format {
+            result["format"] = format
+            result["source"] = content.source.rawValue
+        }
+        for (key, value) in content.counts {
+            result[key] = value
+        }
+        if pageRange != nil, let pagesSpec {
+            result["pages_requested"] = pagesSpec
+        }
+        if let note = content.note {
+            result["note"] = note
+        }
+        return ToolEnvelope.success(tool: name, result: result)
+    }
+
+    /// What a read produced, with the PDF counts and provenance note
+    /// upstream's `LoadedFileContent` carries (#2983). Intel's file_read is
+    /// older than upstream's (no `format`/`source` on every read), so only
+    /// PDFs fill the extra fields.
+    struct LoadedFileContent {
+        enum Source: String { case extractedText = "extracted_text", ocrText = "ocr_text", other }
+        var text: String
+        var format: String? = nil
+        var source: Source = .other
+        var counts: [String: Int] = [:]
+        var note: String? = nil
     }
 
     /// Pull text out of the file at `url`, throwing `binaryContent` when
@@ -635,21 +729,30 @@ struct FileReadTool: OsaurusTool {
         url: URL,
         relativePath: String,
         ext: String
-    ) async throws -> String {
+    ) async throws -> LoadedFileContent {
+        if ext == "pdf" {
+            return try await extractPDFTextLayer(url: url, relativePath: relativePath, ext: ext)
+        }
         if Self.richDocumentExtensions.contains(ext) {
-            return try await extractRichDocumentText(
-                url: url,
-                relativePath: relativePath,
-                ext: ext
+            return LoadedFileContent(
+                text: try await extractRichDocumentText(
+                    url: url,
+                    relativePath: relativePath,
+                    ext: ext
+                )
             )
         }
         switch WorkspaceFileFormatPolicy.readSupport(for: ext) {
         case .workbook, .extractedText:
             // PowerPoint / Excel (upstream #91) through the registered
             // document adapters.
-            return try await extractWithDocumentAdapter(url: url, relativePath: relativePath, ext: ext)
+            return LoadedFileContent(
+                text: try await extractWithDocumentAdapter(url: url, relativePath: relativePath, ext: ext)
+            )
         case .image:
-            return try await recognizeImageText(url: url, relativePath: relativePath, ext: ext)
+            return LoadedFileContent(
+                text: try await recognizeImageText(url: url, relativePath: relativePath, ext: ext)
+            )
         case .rawText, .unsupportedDocument:
             break
         }
@@ -659,7 +762,7 @@ struct FileReadTool: OsaurusTool {
             throw binaryError(path: relativePath, ext: ext, detail: .nulByte)
         }
         if let text = String(data: data, encoding: .utf8) {
-            return text
+            return LoadedFileContent(text: text)
         }
         throw binaryError(path: relativePath, ext: ext, detail: .decodeFailed)
     }
@@ -702,6 +805,161 @@ struct FileReadTool: OsaurusTool {
             return "(Scanned PDF — text recognized by OCR, \(scope).)\n" + ocr.text
         }
         throw binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
+    }
+
+    /// Extract a PDF text layer through `PDFAdapter` (upstream #2983): page
+    /// markers, layout-ordered flattened forms, and the counts and note
+    /// below. A PDF with no text layer is OCR'd as before.
+    private func extractPDFTextLayer(
+        url: URL,
+        relativePath: String,
+        ext: String
+    ) async throws -> LoadedFileContent {
+        do {
+            let document = try await PDFAdapter().parse(
+                url: url,
+                sizeLimit: Int64(DocumentParser.maxFileSize)
+            )
+            try Task.checkCancellation()
+            return Self.pdfTextLayerContent(document)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DocumentAdapterError {
+            switch error {
+            case .emptyContent:
+                // No text layer: scanned pages. Recognize their text on-device
+                // (upstream #91); only when nothing is legible does the model
+                // get the image-only-PDF error.
+                if let ocr = await FileReadImageSupport.ocrImageOnlyPDF(url: url) {
+                    try Task.checkCancellation()
+                    let scope =
+                        ocr.pagesScanned < ocr.totalPages
+                        ? "pages 1–\(ocr.pagesScanned) of \(ocr.totalPages)" : "\(ocr.totalPages) pages"
+                    return LoadedFileContent(
+                        text: "(Scanned PDF — text recognized by OCR, \(scope).)\n" + ocr.text,
+                        format: "pdf",
+                        source: .ocrText,
+                        counts: ["pages": ocr.totalPages, "pages_scanned": ocr.pagesScanned]
+                    )
+                }
+                throw binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
+            case .cancelled:
+                throw CancellationError()
+            case .unsupportedFormat, .sizeLimitExceeded, .readFailed, .writeFailed:
+                throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            }
+        }
+    }
+
+    /// Payload for a PDF text layer: the page-marked text plus the counts
+    /// and provenance note that keep a small model from reading the `N|`
+    /// gutter as the form's own line numbers (observed live: a 4B model
+    /// tried to reconcile "line 9" of the gutter with "line 9" of a 1040).
+    /// `pages` is the document page count (same meaning as the `file_write`
+    /// payload); pages without a text layer are visible as numbering gaps.
+    private static func pdfTextLayerContent(_ document: StructuredDocument) -> LoadedFileContent {
+        let text = document.textFallback
+        let pageCount =
+            text.split(separator: "\n", maxSplits: 1, omittingEmptySubsequences: false).first
+            .flatMap { PDFAdapter.pageMarker(fromHeaderLine: String($0))?.pageCount } ?? 0
+        let pagesWithText = (document.representation.underlying as? PDFDocumentRepresentation)?.pages.count ?? 0
+        let layoutOrdered = PDFAdapter.layoutOrderedPageIndexes(in: document).count
+        let hidden = document.security.findings.first { $0.kind == .hiddenContent }
+
+        var note = "Text layer of a \(pageCount)-page PDF"
+        if pagesWithText < pageCount {
+            note += " (\(pageCount - pagesWithText) page(s) have no text layer and are absent)"
+        }
+        note +=
+            ". Gutter numbers are line numbers of the extracted text, not the document's own line or field numbers; "
+            + "`--- Page N of \(pageCount) ---` lines mark page boundaries; pass `pages` (e.g. \"3\" or \"3-5\") to read a page range."
+        if layoutOrdered > 0 {
+            note +=
+                " \(layoutOrdered) page(s) were rebuilt from layout geometry so each label and its value share a line "
+                + "(gaps of three spaces separate columns)."
+        }
+        if let hidden {
+            note += " " + hidden.message
+        }
+        return LoadedFileContent(
+            text: text,
+            format: "pdf",
+            source: .extractedText,
+            counts: [
+                "pages": pageCount,
+                "pages_with_text": pagesWithText,
+                "pages_layout_ordered": layoutOrdered,
+            ],
+            note: note
+        )
+    }
+
+    /// Resolves a `pages` request (`"3"`, `"3-5"`) against the page headers
+    /// in the extracted lines. Returns the 1-based inclusive gutter line
+    /// range covering those pages (header line included, trailing blank
+    /// separator excluded), or `nil` when none of the requested pages has
+    /// a text layer. Throws `PagesArgumentError` for malformed or
+    /// out-of-range requests.
+    static func lineRange(forPages spec: String, in lines: [String]) throws -> ClosedRange<Int>? {
+        var headers: [(page: Int, line: Int, pageCount: Int)] = []
+        for (index, line) in lines.enumerated() {
+            if let marker = PDFAdapter.pageMarker(fromHeaderLine: line) {
+                headers.append((marker.page, index + 1, marker.pageCount))
+            }
+        }
+        let pageCount = headers.first?.pageCount ?? 0
+        let requested = try Self.parsePagesArgument(spec, pageCount: pageCount)
+
+        let hits = headers.filter { requested.contains($0.page) }
+        guard let first = hits.first, let last = hits.last else { return nil }
+        let start = first.line
+        var end = lines.count
+        if let following = headers.first(where: { $0.line > last.line }) {
+            end = following.line - 1
+            // Pages are separated by a blank line; leave it to the next page.
+            if end > start, lines[end - 1].isEmpty { end -= 1 }
+        }
+        return start ... max(start, end)
+    }
+
+    enum PagesArgumentError: Error, Equatable {
+        case malformed
+        case notContiguous
+        case outOfRange(pageCount: Int)
+
+        var expected: String {
+            switch self {
+            case .malformed, .notContiguous:
+                return "one page or a contiguous range of PDF pages, e.g. \"3\" or \"3-5\" (make separate calls for non-adjacent pages)"
+            case .outOfRange(let pageCount):
+                return "page numbers between 1 and \(pageCount) (the PDF has \(pageCount) page(s))"
+            }
+        }
+    }
+
+    static func parsePagesArgument(_ spec: String, pageCount: Int) throws -> ClosedRange<Int> {
+        let trimmed = spec.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { throw PagesArgumentError.malformed }
+        if trimmed.contains(",") { throw PagesArgumentError.notContiguous }
+        let parts = trimmed.split(separator: "-", omittingEmptySubsequences: false)
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+        let range: ClosedRange<Int>
+        switch parts.count {
+        case 1:
+            guard let page = Int(parts[0]) else { throw PagesArgumentError.malformed }
+            range = page ... page
+        case 2:
+            guard let lower = Int(parts[0]), let upper = Int(parts[1]), lower <= upper else {
+                throw PagesArgumentError.malformed
+            }
+            range = lower ... upper
+        default:
+            throw PagesArgumentError.malformed
+        }
+        guard range.lowerBound >= 1, pageCount == 0 || range.upperBound <= pageCount else {
+            throw PagesArgumentError.outOfRange(pageCount: pageCount)
+        }
+        return range
     }
 
     /// PowerPoint / Excel text via `DocumentFormatRegistry` (upstream #91).

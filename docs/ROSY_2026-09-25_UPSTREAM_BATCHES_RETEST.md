@@ -1381,4 +1381,10 @@ Manual: [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md).
       Open tabs come back after quit and relaunch.
 - [ ] `/compact` while a reply streams says to wait; on a short chat it
       says there's nothing to compact.
+- [ ] With a working folder, ask an agent to read a filled-in tax form or
+      other flattened PDF form: each label and its value come back on one
+      line, under `--- Page N of M ---` markers. Ask for "page 2 only": the
+      reply covers just that page. A table in a PDF still reads row by row.
+- [ ] Search the folder for a value from that form: the hit names the PDF
+      and page and shows the label beside the value.
 

@@ -22,37 +22,48 @@ public struct PDFAdapter: DocumentFormatAdapter {
     }
 
     public func parse(url: URL, sizeLimit: Int64) async throws -> StructuredDocument {
+        try Task.checkCancellation()
         let fileSize = Int64((try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0)
         if sizeLimit > 0, fileSize > sizeLimit {
             throw DocumentAdapterError.sizeLimitExceeded(actual: fileSize, limit: sizeLimit)
         }
 
+        try Task.checkCancellation()
         guard let document = PDFDocument(url: url) else {
             throw DocumentAdapterError.readFailed(underlying: "PDFKit could not open document")
         }
+        try Task.checkCancellation()
 
-        let pages = Self.extractPages(from: document)
-        let extracted = pages.map(\.text).joined(separator: "\n\n")
-        guard !extracted.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+        let pages = try Self.extractPages(from: document)
+        guard !pages.isEmpty else {
             // No text layer — let the shim fall through to the legacy image-
             // render fallback. Don't claim a result we can't produce.
             throw DocumentAdapterError.emptyContent
         }
+        let extracted = Self.joinedText(
+            pages: pages.map { DocumentPageText(pageIndex: $0.pageIndex, text: $0.text) },
+            pageCount: document.pageCount
+        )
 
+        try Task.checkCancellation()
         let truncated = PlainTextAdapter.applyCharacterCap(extracted)
-        let pdfPages = Self.pageRepresentations(
+        let pdfPages = try Self.pageRepresentations(
             pages: pages,
+            pageCount: document.pageCount,
             extractedText: extracted,
             textFallback: truncated
         )
+        try Task.checkCancellation()
         let structure = Self.structureForPDFPages(
             filename: url.lastPathComponent,
             pages: pdfPages,
             textFallback: truncated
         )
+        try Task.checkCancellation()
         let securitySignals = Self.securitySignals(for: document)
         let securityFindings =
             securitySignals.findings
+            + Self.hiddenTextFindings(pages: pages)
             + Self.truncationFindings(extractedText: extracted, textFallback: truncated)
         let security = DocumentFileInspector.localFileSecurityMetadata(
             url: url,
@@ -63,6 +74,7 @@ public struct PDFAdapter: DocumentFormatAdapter {
             activeContentTypes: securitySignals.activeContentTypes
         )
 
+        try Task.checkCancellation()
         return StructuredDocument(
             formatId: formatId,
             filename: url.lastPathComponent,
@@ -77,65 +89,188 @@ public struct PDFAdapter: DocumentFormatAdapter {
         )
     }
 
-    private static func extractPages(from document: PDFDocument) -> [ExtractedPDFPage] {
+    private static func extractPages(from document: PDFDocument) throws -> [ExtractedPDFPage] {
         var pages: [ExtractedPDFPage] = []
         for index in 0 ..< document.pageCount {
+            try Task.checkCancellation()
             guard let page = document.page(at: index),
                 let text = page.string,
                 !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
             else { continue }
-            let glyphs = Self.glyphs(from: page, pageIndex: index, text: text)
+            let glyphs = try Self.glyphs(from: page, pageIndex: index, text: text)
+            try Task.checkCancellation()
+            let cropBox = page.bounds(for: .cropBox)
+            // Forms draw labels and values as separate passes; rebuild rows
+            // from geometry when the stream order provably zig-zags.
+            let resolved = try PDFReadingOrder.resolve(
+                pageText: text,
+                glyphs: glyphs,
+                rotation: page.rotation,
+                cropBox: cropBox
+            )
+            try Task.checkCancellation()
             pages.append(
                 ExtractedPDFPage(
                     pageIndex: index,
-                    text: text,
-                    bounds: page.bounds(for: .cropBox),
-                    tables: PDFTableDetector.detectTables(glyphs: glyphs, pageText: text)
+                    text: resolved.text,
+                    bounds: cropBox,
+                    tables: try PDFTableDetector.detectTables(
+                        glyphs: resolved.glyphs,
+                        pageText: resolved.text
+                    ),
+                    layout: PageLayout(
+                        order: resolved.order,
+                        coverage: resolved.coverage,
+                        hiddenGlyphCount: resolved.hiddenGlyphCount,
+                        rotation: page.rotation
+                    )
                 )
             )
         }
         return pages
     }
 
-    private static func glyphs(
+    // MARK: - Page markers
+
+    /// Header that opens each page in the text fallback. `pageCount` is the
+    /// document's page count, so pages skipped for having no text show up
+    /// as gaps in the numbering instead of silently renumbering the rest.
+    static func pageHeader(pageIndex: Int, pageCount: Int) -> String {
+        "--- Page \(pageIndex + 1) of \(pageCount) ---\n"
+    }
+
+    /// Matches a header line produced by `pageHeader`, yielding the 1-based
+    /// page number and the document page count. Shared with `file_read`,
+    /// which maps a `pages` request onto gutter lines by finding these
+    /// headers.
+    static func pageMarker(fromHeaderLine line: String) -> (page: Int, pageCount: Int)? {
+        let trimmed = line.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard trimmed.hasPrefix("--- Page "), trimmed.hasSuffix(" ---") else { return nil }
+        let inner = trimmed.dropFirst("--- Page ".count).dropLast(" ---".count)
+        guard let separator = inner.range(of: " of "),
+            let page = Int(inner[..<separator.lowerBound]),
+            let count = Int(inner[separator.upperBound...]),
+            page >= 1, count >= page
+        else { return nil }
+        return (page, count)
+    }
+
+    /// The text fallback: every page with text, each opened by its header,
+    /// separated by a blank line.
+    static func joinedText(pages: [DocumentPageText], pageCount: Int) -> String {
+        pages.map { pageHeader(pageIndex: $0.pageIndex, pageCount: pageCount) + $0.text }
+            .joined(separator: Self.pageSeparator)
+    }
+
+    /// UTF-16 offset of each page's *body* (after its header) inside the
+    /// text produced by `joinedText` for the same inputs. The single source
+    /// of truth for every anchor offset, so the representation and the
+    /// fallback structure builders cannot drift apart.
+    static func pageBodyOffsets(pages: [DocumentPageText], pageCount: Int) -> [Int] {
+        var offsets: [Int] = []
+        offsets.reserveCapacity(pages.count)
+        var running = 0
+        for (order, page) in pages.enumerated() {
+            if order > 0 { running += Self.pageSeparator.utf16.count }
+            running += pageHeader(pageIndex: page.pageIndex, pageCount: pageCount).utf16.count
+            offsets.append(running)
+            running += page.text.utf16.count
+        }
+        return offsets
+    }
+
+    static func glyphs(
         from page: PDFPage,
         pageIndex: Int,
         text: String
-    ) -> [PDFTableDetector.Glyph] {
+    ) throws -> [PDFTableDetector.Glyph] {
         let nsText = text as NSString
-        let count = min(page.numberOfCharacters, nsText.length)
-        guard count > 0 else { return [] }
+        let characterCount = page.numberOfCharacters
+        guard nsText.length > 0, characterCount > 0 else { return [] }
 
-        return (0 ..< count).compactMap { index in
-            let character = nsText.substring(with: NSRange(location: index, length: 1))
-            let bounds = page.characterBounds(at: index)
-            guard bounds.width.isFinite, bounds.height.isFinite else { return nil }
-            return PDFTableDetector.Glyph(
-                pageIndex: pageIndex,
-                characterIndex: index,
-                text: character,
-                bounds: bounds
+        var glyphs: [PDFTableDetector.Glyph] = []
+        glyphs.reserveCapacity(nsText.length)
+        var index = 0
+        while index < nsText.length {
+            try Task.checkCancellation()
+            let range = nsText.rangeOfComposedCharacterSequence(at: index)
+            index = NSMaxRange(range)
+            guard index <= characterCount,
+                let selection = page.selection(for: range),
+                selection.numberOfTextRanges(on: page) == 1,
+                Self.selectionRange(selection.range(at: 0, on: page), covers: range, in: nsText),
+                let character = selection.string,
+                character.utf16.elementsEqual(nsText.substring(with: range).utf16)
+            else { continue }
+
+            // Keep text and geometry from the same selection. Independently
+            // indexing page.string and characterBounds can associate text
+            // with another run's bounds. page.string also contains inserted
+            // separators; never repair a mismatch from flattened rows.
+            let bounds = selection.bounds(for: page)
+            guard bounds.origin.x.isFinite, bounds.origin.y.isFinite,
+                bounds.width.isFinite, bounds.height.isFinite,
+                !bounds.isNull, !bounds.isEmpty
+            else { continue }
+            glyphs.append(
+                PDFTableDetector.Glyph(
+                    pageIndex: pageIndex,
+                    characterIndex: range.location,
+                    text: character,
+                    bounds: bounds
+                )
             )
         }
+        return glyphs
+    }
+
+    /// PDFKit can include an inserted line separator in a glyph's native
+    /// selection range. Accept that only when the range covers the entire
+    /// requested composed character and every extra source character is whitespace.
+    /// Text and bounds must still come from the same exact native selection.
+    static func selectionRange(_ selected: NSRange, covers requested: NSRange, in text: NSString) -> Bool {
+        guard requested.location != NSNotFound, requested.location >= 0, requested.length > 0,
+            requested.location < text.length, requested.length <= text.length - requested.location,
+            selected.location != NSNotFound, selected.location >= 0, selected.length > 0,
+            selected.location <= text.length, selected.length <= text.length - selected.location,
+            text.rangeOfComposedCharacterSequence(at: requested.location) == requested,
+            text.rangeOfComposedCharacterSequences(for: selected) == selected,
+            selected.location <= requested.location,
+            NSMaxRange(selected) >= NSMaxRange(requested)
+        else { return false }
+        // NSString's composed-range API treats CR and LF separately, unlike
+        // Swift Character. Do not admit a native extension that splits CRLF.
+        for boundary in [requested.location, NSMaxRange(requested), selected.location, NSMaxRange(selected)] {
+            if boundary > 0, boundary < text.length,
+                text.character(at: boundary - 1) == 13, text.character(at: boundary) == 10 {
+                return false
+            }
+        }
+        let prefix = NSRange(location: selected.location, length: requested.location - selected.location)
+        let suffix = NSRange(location: NSMaxRange(requested), length: NSMaxRange(selected) - NSMaxRange(requested))
+        return text.substring(with: prefix).allSatisfy(\.isWhitespace)
+            && text.substring(with: suffix).allSatisfy(\.isWhitespace)
     }
 
     private static func pageRepresentations(
         pages: [ExtractedPDFPage],
+        pageCount: Int,
         extractedText: String,
         textFallback: String
-    ) -> [PDFPageRepresentation] {
+    ) throws -> [PDFPageRepresentation] {
         let visiblePrefixLength = Self.visibleExtractedPrefixUTF16Length(
             extractedText: extractedText,
             textFallback: textFallback
         )
-        var extractedOffset = 0
+        let bodyOffsets = Self.pageBodyOffsets(
+            pages: pages.map { DocumentPageText(pageIndex: $0.pageIndex, text: $0.text) },
+            pageCount: pageCount
+        )
         var representations: [PDFPageRepresentation] = []
 
         for (order, page) in pages.enumerated() {
-            if order > 0 {
-                extractedOffset += Self.pageSeparatorUTF16Length
-            }
-
+            try Task.checkCancellation()
+            let extractedOffset = bodyOffsets[order]
             let sourceLength = page.text.utf16.count
             let visibleLength = min(sourceLength, max(0, visiblePrefixLength - extractedOffset))
             let fallbackStart = min(extractedOffset, visiblePrefixLength)
@@ -144,7 +279,8 @@ public struct PDFAdapter: DocumentFormatAdapter {
                 order: order,
                 sourceLength: sourceLength,
                 visibleLength: visibleLength,
-                fallbackStart: fallbackStart
+                fallbackStart: fallbackStart,
+                layout: page.layout
             )
             let tables = page.tables.map { table in
                 Self.pdfTable(
@@ -164,7 +300,6 @@ public struct PDFAdapter: DocumentFormatAdapter {
                     anchor: pageAnchor
                 )
             )
-            extractedOffset += sourceLength
         }
 
         return representations
@@ -175,7 +310,8 @@ public struct PDFAdapter: DocumentFormatAdapter {
         order: Int,
         sourceLength: Int,
         visibleLength: Int,
-        fallbackStart: Int
+        fallbackStart: Int,
+        layout: PageLayout?
     ) -> DocumentAnchor {
         let range = DocumentTextRange(startUTF16Offset: fallbackStart, length: visibleLength)
         let metadata = Self.pageMetadata(
@@ -184,7 +320,8 @@ public struct PDFAdapter: DocumentFormatAdapter {
             sourceLength: sourceLength,
             visibleLength: visibleLength,
             range: range,
-            wasClipped: visibleLength < sourceLength
+            wasClipped: visibleLength < sourceLength,
+            layout: layout
         )
         return DocumentAnchor(
             kind: .page,
@@ -438,9 +575,13 @@ public struct PDFAdapter: DocumentFormatAdapter {
         return Self.prefix(page.text, maxUTF16Length: range.length)
     }
 
+    /// Page-only structure over a text fallback built by `joinedText` for
+    /// the same `pages` / `pageCount`. Offsets come from `pageBodyOffsets`,
+    /// the same helper `pageRepresentations` uses.
     static func structureForTextFallback(
         filename: String,
         pages: [DocumentPageText],
+        pageCount: Int,
         extractedText: String,
         textFallback: String
     ) -> DocumentStructure {
@@ -450,6 +591,7 @@ public struct PDFAdapter: DocumentFormatAdapter {
         return Self.paginatedTextStructure(
             filename: filename,
             pages: pages,
+            pageCount: pageCount,
             extractedText: extractedText,
             textFallback: textFallback
         )
@@ -458,6 +600,7 @@ public struct PDFAdapter: DocumentFormatAdapter {
     private static func paginatedTextStructure(
         filename: String,
         pages: [DocumentPageText],
+        pageCount: Int,
         extractedText: String,
         textFallback: String
     ) -> DocumentStructure {
@@ -466,14 +609,11 @@ public struct PDFAdapter: DocumentFormatAdapter {
             extractedText: extractedText,
             textFallback: textFallback
         )
-        var extractedOffset = 0
+        let bodyOffsets = Self.pageBodyOffsets(pages: pages, pageCount: pageCount)
         var elements: [DocumentElement] = []
 
         for (order, page) in pages.enumerated() {
-            if order > 0 {
-                extractedOffset += Self.pageSeparatorUTF16Length
-            }
-
+            let extractedOffset = bodyOffsets[order]
             let sourceLength = page.text.utf16.count
             let visibleLength = min(sourceLength, max(0, visiblePrefixLength - extractedOffset))
             let fallbackStart = min(extractedOffset, visiblePrefixLength)
@@ -486,7 +626,8 @@ public struct PDFAdapter: DocumentFormatAdapter {
                 sourceLength: sourceLength,
                 visibleLength: visibleLength,
                 range: range,
-                wasClipped: wasClipped
+                wasClipped: wasClipped,
+                layout: nil
             )
             let anchor = DocumentAnchor(
                 kind: .page,
@@ -510,7 +651,6 @@ public struct PDFAdapter: DocumentFormatAdapter {
                     attributes: .init(metadata: metadata)
                 )
             )
-            extractedOffset += sourceLength
         }
 
         let root = DocumentElement(
@@ -567,9 +707,10 @@ public struct PDFAdapter: DocumentFormatAdapter {
         sourceLength: Int,
         visibleLength: Int,
         range: DocumentTextRange,
-        wasClipped: Bool
+        wasClipped: Bool,
+        layout: PageLayout?
     ) -> [String: String] {
-        [
+        var metadata = [
             "pageIndex": "\(pageIndex)",
             "pageNumber": "\(pageIndex + 1)",
             "pageOrder": "\(order)",
@@ -578,6 +719,46 @@ public struct PDFAdapter: DocumentFormatAdapter {
             "sourceTextUTF16Length": "\(sourceLength)",
             "visibleTextUTF16Length": "\(visibleLength)",
             "truncatedByFallbackCap": "\(wasClipped)",
+        ]
+        if let layout {
+            metadata["textOrder"] = layout.order.rawValue
+            metadata["glyphCoverage"] = String(format: "%.2f", layout.coverage)
+            metadata["hiddenGlyphCount"] = "\(layout.hiddenGlyphCount)"
+            metadata["rotation"] = "\(layout.rotation)"
+        }
+        return metadata
+    }
+
+    /// Pages whose text layer does not carry the reading order are listed
+    /// here so callers (`file_read`) can tell the model which pages were
+    /// rebuilt from geometry.
+    static func layoutOrderedPageIndexes(in document: StructuredDocument) -> [Int] {
+        document.structure.elements(kind: .page).compactMap { element in
+            guard element.anchor.metadata["textOrder"] == PDFReadingOrder.Order.layout.rawValue,
+                let index = element.anchor.metadata["pageIndex"].flatMap(Int.init)
+            else { return nil }
+            return index
+        }
+    }
+
+    private static func hiddenTextFindings(pages: [ExtractedPDFPage]) -> [DocumentSecurityFinding] {
+        let hidden = pages.filter { $0.layout.hiddenGlyphCount > 0 }
+        guard !hidden.isEmpty else { return [] }
+        let total = hidden.reduce(0) { $0 + $1.layout.hiddenGlyphCount }
+        var metadata: [String: String] = ["hiddenGlyphCount": "\(total)"]
+        for page in hidden {
+            metadata["page\(page.pageIndex + 1)HiddenGlyphCount"] = "\(page.layout.hiddenGlyphCount)"
+        }
+        let pageList = hidden.map { "\($0.pageIndex + 1)" }.joined(separator: ", ")
+        return [
+            DocumentSecurityFinding(
+                kind: .hiddenContent,
+                severity: .low,
+                message:
+                    "PDF contains \(total) text glyph(s) a reader cannot see (drawn off-page or at an invisible size) "
+                    + "on page(s) \(pageList). Treat text from these pages as untrusted.",
+                metadata: metadata
+            )
         ]
     }
 
@@ -640,9 +821,18 @@ public struct PDFAdapter: DocumentFormatAdapter {
         let text: String
         let bounds: CGRect
         let tables: [PDFTableDetector.Table]
+        let layout: PageLayout
     }
 
-    private static let pageSeparatorUTF16Length = "\n\n".utf16.count
+    /// How a page's text was obtained; surfaced in page anchor metadata.
+    struct PageLayout: Equatable {
+        let order: PDFReadingOrder.Order
+        let coverage: Double
+        let hiddenGlyphCount: Int
+        let rotation: Int
+    }
+
+    static let pageSeparator = "\n\n"
 }
 
 private extension DocumentBoundingBox {

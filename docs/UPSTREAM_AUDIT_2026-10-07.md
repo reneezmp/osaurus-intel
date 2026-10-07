@@ -73,6 +73,8 @@ Incompatible 20 · already ported 1.
 | #2922 `44069eeab` (part) | The chat table applies snapshots incrementally (`animatingDifferences: true`, no row animation) and does its follow-up work after `apply`, not inside AppKit's update (which recursed). Upstream's `MessageTableSnapshotApplyTests` pass on Intel. Upstream's current `StringCleaning` (faster `stripLeakedActionJSON`, plus the leaked-JSON, Harmony channel-label and Gemini metadata cleaners Intel's older copy lacked): finished assistant replies render cleaned, cached `visibleContent`; the live stream stays raw, as upstream. |
 | #2998 `b248e21b5` | Agent avatars render through `AvatarBitmapRenderer` at the exact pixel size for the display scale (crisp, cached), in the chat headers, avatar view and theme editor. Intel's agent pill already uses `AgentAvatarView`, so upstream's pill hunk isn't needed. **Also:** upstream's `MemoryPressureResponder`, which Intel lacked entirely, frees the chat image, LaTeX, symbol and avatar caches on memory pressure (upstream's model-unloading tier has nothing to unload on Intel). |
 | #2995 `1d1714de1` + #3017 (rest) | Chat tabs restyled as upstream's Safari-style track; a lone tab reads as the window title. Upstream's current `ChatTabStripView` with Intel's existing adaptations ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)). |
+| #2976 `4b69a9c1c` | PDF tables keep cell identity and pair glyphs with their bounds (upstream's current `PDFAdapter` / `PDFTableDetector`, with their tests). |
+| #2983 `83b9166e3` | Flattened PDF forms read in visual order (`PDFReadingOrder`: a label and its value share a line), `--- Page N of M ---` markers in the text, a hidden-content security finding, and `file_read` `pages: "3"` / `"3-5"` with `pages`, `pages_with_text`, `pages_layout_ordered`, `pages_requested` and the provenance note. **Intel:** Intel's `file_read` is older than upstream's (no `format`/`source` on every read, no `tail_lines`/`max_chars`), so the PDF path was hand-applied: `file_read` now reads PDFs through `PDFAdapter` like upstream, keeping Intel's OCR fallback for scanned PDFs. Upstream's file_read PDF tests run as `IntelFileReadPDFPagesTests` (Intel's gutter has a space after the bar). Upstream's `FileSearchDocumentsTests` came along (its flattened-form test passes: a form row is one search hit), minus three skipped-files-note tests for a `file_search` feature Intel never got. Not ported: the in-app guide line (no guide on Intel, `W-ui-misc`). |
 
 ## Found while porting
 
@@ -85,3 +87,9 @@ Incompatible 20 · already ported 1.
   server restarts on Settings changes and retries a busy port at launch, so
   per-start groups were a real thread/descriptor leak (APPLE-MACOS-19T). The
   quit path now passes `gracefully: false` like upstream.
+- **Gap in the 2026-09-29 #91 (#2791) slice:** upstream's unified
+  `file_read` has `tail_lines`, `max_chars`, XLSX preview caps, directory
+  reads and `format`/`source` metadata on every read, and `file_search`
+  reports skipped files (`ContentSearchSkipTally`). Intel's slice left these
+  out without listing them. Now on the backlog under `W-tools-misc` (file
+  tool parity).
