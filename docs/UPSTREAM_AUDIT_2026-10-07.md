@@ -111,8 +111,11 @@ Incompatible 20 · already ported 1.
   `ToolRegistry.externallyDeniedToolNames`,
   `ChatExecutionContext.isExternalSurface` / `isUnattendedDispatch` /
   `denyUnapprovedToolPrompts`, none of which Intel has; Intel's approval gate
-  always prompts on this Mac. Needs its own review against Intel's
-  `HTTPHandler` `/mcp/*` routes: `W-server-api`.
+  always prompts on this Mac. Checked 2026-10-07: not a live exposure.
+  Intel's `POST /mcp` (`MCPBridge`) serves only three demo tools (`echo`,
+  `get_time`, `os_info`) and none of the registry's tools, and there is no
+  stdio `osaurus mcp` server. The policy is needed when Intel starts
+  exposing real tools over MCP: `W-server-api`.
 - **Tests could write the real keychain.** The documented test gate never
   set `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`, which is what makes the
   keychain wrappers no-ops under tests. Added to the gate in
