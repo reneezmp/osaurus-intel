@@ -47,6 +47,9 @@ struct FloatingInputCard: View {
     /// `/screenshot` (upstream): capture the screen into the chat.
     var onCaptureScreenshot: (() -> Void)? = nil
     var isCompacting: Bool = false
+    /// Upstream compaction state for the context card's progress / result
+    /// rows (`ChatSession.compactionState`).
+    var compactionState: ContextCompactionUIState = .idle
     var suggestCompaction: Bool = false
     /// An older span of the chat can be summarized (upstream
     /// `canCompactConversation`); shows "Compact conversation" in the
@@ -112,6 +115,7 @@ struct FloatingInputCard: View {
         onCompact: (() -> Void)? = nil,
         onCaptureScreenshot: (() -> Void)? = nil,
         isCompacting: Bool = false,
+        compactionState: ContextCompactionUIState = .idle,
         suggestCompaction: Bool = false,
         canCompactConversation: Bool = false,
         onSkillSelected: ((UUID) -> Void)? = nil,
@@ -153,6 +157,7 @@ struct FloatingInputCard: View {
         self.onCompact = onCompact
         self.onCaptureScreenshot = onCaptureScreenshot
         self.isCompacting = isCompacting
+        self.compactionState = compactionState
         self.suggestCompaction = suggestCompaction
         self.canCompactConversation = canCompactConversation
         self.onSkillSelected = onSkillSelected
@@ -493,32 +498,19 @@ struct FloatingInputCard: View {
                     )
                 )
             } else {
-                VStack(spacing: 4) {
-                    // Slash command popup — appears above the input card
-                    if showSlashPopup {
-                        SlashCommandPopup(
-                            commands: slashFilteredCommands,
-                            selectedIndex: $slashSelectedIndex,
-                            onSelect: applySlashCommand
-                        )
-                        .padding(.horizontal, 20)
-                        .transition(
-                            .asymmetric(
-                                insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)),
-                                removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom))
-                            )
-                        )
-                    }
-
-                    // "@" file completion popup (upstream).
-                    atFileMenuPopupView
-
-                    inputCard
-                        .padding(.horizontal, 20)
-                        .padding(.bottom, 20)
-                        .onDrop(of: dropAcceptedTypes, isTargeted: $isDragOver) { providers in
-                            handleFileDrop(providers)
-                        }
+                inputCard
+                // Float the slash / "@" menus above the card instead of
+                // stacking them in the layout, so opening one never shifts the
+                // selector row or the transcript (upstream #3017). The `.top`
+                // guide lifts the overlay fully above the card's top edge.
+                .overlay(alignment: .top) {
+                    composerPopupOverlay
+                        .alignmentGuide(.top) { dimensions in dimensions.height + 4 }
+                }
+                .padding(.horizontal, 20)
+                .padding(.bottom, 20)
+                .onDrop(of: dropAcceptedTypes, isTargeted: $isDragOver) { providers in
+                    handleFileDrop(providers)
                 }
                 .transition(
                     .asymmetric(
@@ -1534,8 +1526,30 @@ extension FloatingInputCard {
         return false
     }
 
-    /// The "@" file completion popup, extracted from `mainContent` to keep that
-    /// view builder within the Swift type-checker's reach.
+    /// The slash-command and "@" file menus, floated over the input card
+    /// (upstream #3017).
+    private var composerPopupOverlay: some View {
+        VStack(spacing: 4) {
+            if showSlashPopup {
+                SlashCommandPopup(
+                    commands: slashFilteredCommands,
+                    selectedIndex: $slashSelectedIndex,
+                    onSelect: applySlashCommand
+                )
+                .transition(
+                    .asymmetric(
+                        insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)),
+                        removal: .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom))
+                    )
+                )
+            }
+
+            atFileMenuPopupView
+        }
+    }
+
+    /// The "@" file completion popup, extracted from `composerPopupOverlay` to
+    /// keep that view builder within the Swift type-checker's reach.
     @ViewBuilder
     private var atFileMenuPopupView: some View {
         if showAtPopup {
@@ -1548,7 +1562,6 @@ extension FloatingInputCard {
                 onSelect: applyAtItem,
                 onGrantAccess: grantAtMenuAccess
             )
-            .padding(.horizontal, 20)
             .transition(
                 .asymmetric(
                     insertion: .opacity.combined(with: .scale(scale: 0.98, anchor: .bottom)),
@@ -1916,7 +1929,7 @@ extension FloatingInputCard {
                 usageRatio: budget.usageRatio,
                 formatTokenCount: formatTokenCount,
                 breakdown: { budget.breakdown },
-                isCompacting: isCompacting,
+                compactionState: compactionState,
                 canCompact: canCompactConversation && onCompact != nil && !isStreaming && !isCompacting,
                 onCompact: onCompact
             )
@@ -3807,110 +3820,11 @@ extension NSImage {
     }
 }
 
-// MARK: - Popover Card Chrome
-
-/// Shared rounded glass card chrome for the composer's hover/selector popovers
-/// (Context Budget, router balance, model options) so they read as one family.
-/// Defaults match the lightweight hover cards; the model-options panel passes
-/// larger values for its heavier look.
-private struct PopoverCardModifier: ViewModifier {
-    var cornerRadius: CGFloat = 10
-    var backgroundColor: Color? = nil
-    var accentOpacity: (dark: Double, light: Double) = (0.04, 0.03)
-    var borderColor: Color? = nil
-    var borderWidth: CGFloat = 1
-    var borderOpacity: Double = 0.12
-    var shadowOpacity: Double = 0.2
-    var shadowRadius: CGFloat = 16
-    var shadowOffsetY: CGFloat = 8
-
-    @Environment(\.theme) private var theme
-
-    func body(content: Content) -> some View {
-        let shape = RoundedRectangle(cornerRadius: cornerRadius, style: .continuous)
-        content
-            .background {
-                if let backgroundColor {
-                    shape.fill(backgroundColor)
-                } else {
-                    ZStack {
-                        if theme.glassEnabled {
-                            shape.fill(.ultraThinMaterial)
-                        }
-                        shape.fill(theme.primaryBackground.opacity(theme.isDark ? 0.85 : 0.92))
-                        LinearGradient(
-                            colors: [
-                                theme.accentColor.opacity(
-                                    theme.isDark ? accentOpacity.dark : accentOpacity.light
-                                ),
-                                .clear,
-                            ],
-                            startPoint: .top,
-                            endPoint: .center
-                        )
-                        .clipShape(shape)
-                    }
-                }
-            }
-            .clipShape(shape)
-            .overlay {
-                if let borderColor {
-                    shape.strokeBorder(borderColor, lineWidth: borderWidth)
-                } else {
-                    shape.strokeBorder(
-                        LinearGradient(
-                            colors: [
-                                theme.glassEdgeLight.opacity(0.2),
-                                theme.primaryBorder.opacity(borderOpacity),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        ),
-                        lineWidth: 1
-                    )
-                }
-            }
-            .shadow(
-                color: theme.shadowColor.opacity(shadowOpacity),
-                radius: shadowRadius,
-                x: 0,
-                y: shadowOffsetY
-            )
-    }
-}
-
-private extension View {
-    /// Applies the shared composer popover card chrome (glass fill, gradient
-    /// border, soft shadow). Tunable for the heavier model-options panel.
-    func popoverCard(
-        cornerRadius: CGFloat = 10,
-        backgroundColor: Color? = nil,
-        accentOpacity: (dark: Double, light: Double) = (0.04, 0.03),
-        borderColor: Color? = nil,
-        borderWidth: CGFloat = 1,
-        borderOpacity: Double = 0.12,
-        shadowOpacity: Double = 0.2,
-        shadowRadius: CGFloat = 16,
-        shadowOffsetY: CGFloat = 8
-    ) -> some View {
-        modifier(
-            PopoverCardModifier(
-                cornerRadius: cornerRadius,
-                backgroundColor: backgroundColor,
-                accentOpacity: accentOpacity,
-                borderColor: borderColor,
-                borderWidth: borderWidth,
-                borderOpacity: borderOpacity,
-                shadowOpacity: shadowOpacity,
-                shadowRadius: shadowRadius,
-                shadowOffsetY: shadowOffsetY
-            )
-        )
-    }
-}
-
 // MARK: - Context Breakdown Popover
 
+/// A roll-up of one or more breakdown entries shown as a single legend row.
+/// Multi-entry groups collapse behind a disclosure; single-entry groups render
+/// as a plain row.
 private struct BudgetGroup: Identifiable {
     let id: String
     let label: String
@@ -3921,15 +3835,9 @@ private struct BudgetGroup: Identifiable {
     var isExpandable: Bool { entries.count > 1 }
 }
 
-/// Reports the natural height of the context-budget popover content so it
-/// can size its scroll container to fit (see `resolvedHeight`).
-private struct ContextPopoverHeightKey: PreferenceKey {
-    static let defaultValue: CGFloat = 0
-    static func reduce(value: inout CGFloat, nextValue: () -> CGFloat) {
-        value = max(value, nextValue())
-    }
-}
-
+/// The composer's context-budget panel, presented in the same arrowless,
+/// themed card as the wallet and model picker, aligned to the trailing edge
+/// of the context ring.
 private struct ContextBreakdownPopover: View {
     let breakdown: ContextBreakdown
     /// Usable conversation budget (model maximum × safety margin).
@@ -3943,28 +3851,30 @@ private struct ContextBreakdownPopover: View {
     let isNearLimit: Bool
     let isHardOverflow: Bool
     let formatTokenCount: (Int) -> String
-    /// Intel: a compaction is running (upstream carries a richer
-    /// `ContextCompactionUIState`; Intel reports results and errors through
-    /// its own notice and alert).
-    var isCompacting: Bool = false
+    /// Session compaction state — drives the inline progress / result row.
+    var compactionState: ContextCompactionUIState = .idle
     /// True when the manual "Compact conversation" button should show
     /// (an uncovered older span exists and no turn is streaming).
     var canCompact: Bool = false
     var onCompact: (() -> Void)? = nil
+    /// Live disk-cache usage for the footer readout. nil when the disk cache is
+    /// off or no quota is configured, in which case the section is hidden
     // Intel: no disk-cache section (the on-SSD prompt cache is MLX-only).
+    /// Reports the card height to request: the content's natural height,
+    /// capped at `maxPopoverHeight`.
+    var onHeightChange: (CGFloat) -> Void = { _ in }
+
 
     @Environment(\.theme) private var theme
+    @Environment(\.anchoredCardMetrics) private var cardMetrics
 
     /// Which multi-entry groups are drilled open. Starts empty so the popover
     /// opens in its compact, grouped form.
     @State private var expandedGroups: Set<String> = []
 
-    /// Measured natural height of the popover content, fed back via a
-    /// preference to size the scroll container (see `resolvedHeight`).
-    @State private var measuredContentHeight: CGFloat = 0
-
-    /// Cap on the popover height; longer breakdowns scroll past this.
-    private let maxPopoverHeight: CGFloat = 420
+    /// Cap on the popover height (the model picker's cap); longer breakdowns
+    /// scroll past this.
+    private let maxPopoverHeight: CGFloat = 480
 
     private var utilization: ContextBudgetUtilization {
         computeContextBudgetUtilization(
@@ -3979,18 +3889,10 @@ private struct ContextBreakdownPopover: View {
         return theme.accentColor
     }
 
-    private var statusLabel: String {
+    private var limitLabel: String? {
         if isHardOverflow { return L("Over limit") }
         if isNearLimit { return L("Near limit") }
-        if let percent = utilization.percent { return L("\(percent)% used") }
-        return isStreaming ? L("Live") : L("Estimated")
-    }
-
-    /// Scroll-container height: nil until measured (use the content's
-    /// natural size), then clamped to `maxPopoverHeight`.
-    private var resolvedHeight: CGFloat? {
-        guard measuredContentHeight > 0 else { return nil }
-        return min(measuredContentHeight, maxPopoverHeight)
+        return nil
     }
 
     /// Each row's share of the *current* total, not of the model's full
@@ -4081,62 +3983,70 @@ private struct ContextBreakdownPopover: View {
     // MARK: - Body
 
     var body: some View {
-        // A height-capped ScrollView, not a free-growing column: the popover
-        // hugs its content, but a long "System Prompt" drill-down scrolls
-        // instead of resizing the NSPopover window — an animated/oversized
-        // popover resize crashes AppKit (EXC_BAD_ACCESS).
+        // The card hugs its content up to `maxPopoverHeight`; a long
+        // "System Prompt" drill-down scrolls past that.
         ScrollView(.vertical, showsIndicators: false) {
             contentStack
-                .background(
-                    GeometryReader { proxy in
-                        Color.clear.preference(
-                            key: ContextPopoverHeightKey.self,
-                            value: proxy.size.height
-                        )
-                    }
-                )
+                .padding(PickerCardMetrics.padding)
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { geometry in
+                    ceil(geometry.size.height)
+                } action: { height in
+                    onHeightChange(min(height, maxPopoverHeight))
+                }
         }
-        .frame(width: 272, height: resolvedHeight)
-        .onPreferenceChange(ContextPopoverHeightKey.self) { measuredContentHeight = $0 }
-        .popoverCard()
+        .intelScrollBounceBasedOnSize()  // Intel: macOS 13.3+
+        .frame(
+            width: cardMetrics?.visibleSize.width ?? PickerCardMetrics.infoCardWidth,
+            height: cardMetrics?.visibleSize.height
+        )
+        .pickerCardSurface()
     }
 
     /// The popover's content column. Extracted so `body` can wrap it in a
-    /// height-bounded `ScrollView` (see `resolvedHeight`).
+    /// height-bounded `ScrollView`.
     private var contentStack: some View {
-        VStack(alignment: .leading, spacing: 0) {
-            hero
+        VStack(alignment: .leading, spacing: 8) {
+            PickerCardHeading(title: L("Context budget")) { statusAccessory }
 
-            if utilization.maxTokens != nil {
-                divider
-                utilizationSection
+            VStack(alignment: .leading, spacing: PickerCardMetrics.infoSectionSpacing) {
+                hero
+
+                if let notice = autoDisableNotice {
+                    autoDisableRow(notice)
+                }
+
+                if !contextGroups.isEmpty || !breakdown.messages.isEmpty {
+                    breakdownSection
+                }
+
+                VStack(alignment: .leading, spacing: 0) {
+                    if showsCompactionSection {
+                        compactionSection
+                    }
+                    contextWindowCapLink
+                }
             }
+        }
+    }
 
-            divider
-            compositionSection
-
-            if let notice = autoDisableNotice {
-                divider
-                autoDisableRow(notice)
+    /// Status beside the heading. Usage itself lives in the hero, so this
+    /// only speaks up for a limit warning or a live turn.
+    @ViewBuilder
+    private var statusAccessory: some View {
+        if let limitLabel {
+            Text(verbatim: limitLabel)
+                .font(theme.font(size: theme.pickerCardBodySize, weight: .medium))
+                .foregroundStyle(statusColor)
+        } else if isStreaming {
+            HStack(spacing: 5) {
+                Circle()
+                    .fill(theme.successColor)
+                    .frame(width: 6, height: 6)
+                Text("Live", bundle: .module)
+                    .font(theme.font(size: theme.pickerCardBodySize))
+                    .foregroundStyle(theme.secondaryText)
             }
-
-            if !contextGroups.isEmpty {
-                divider
-                sourcesSection
-            }
-
-            if !breakdown.messages.isEmpty {
-                divider
-                messagesSection
-            }
-
-            if showsCompactionSection {
-                divider
-                compactionSection
-            }
-
-            divider
-            contextWindowCapLink
         }
     }
 
@@ -4144,39 +4054,49 @@ private struct ContextBreakdownPopover: View {
     /// window Intel falls back to when the catalog doesn't know the model
     /// (upstream links its Context Window Cap under Server › Cache).
     private var contextWindowCapLink: some View {
-        Button {
+        PickerCardTextLink(title: L("Open Context Length"), icon: "arrow.up.right") {
             AppDelegate.shared?.showManagementWindow(initialTab: .chat)
             DispatchQueue.main.async {
                 SettingsHighlightCoordinator.shared.request("settings.chat.contextLength")
             }
-        } label: {
-            HStack(spacing: 6) {
-                Image(systemName: "slider.horizontal.3")
-                    .font(.system(size: 10, weight: .semibold))
-                Text("Open Context Length", bundle: .module)
-                    .font(.system(size: 11, weight: .medium))
-                Spacer(minLength: 0)
-                Image(systemName: "arrow.up.right")
-                    .font(.system(size: 9, weight: .semibold))
-            }
-            .foregroundColor(theme.accentColor)
         }
-        .buttonStyle(.plain)
-        .pointingHandCursor()
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
         .localizedHelp("Open Settings → Conversation → Advanced → Context Length")
     }
 
+
+    /// Horizontal fill gauge for the hero usage and disk-cache readouts.
+    private func usageBar(fraction: Double, tint: Color, height: CGFloat) -> some View {
+        GeometryReader { proxy in
+            ZStack(alignment: .leading) {
+                Capsule().fill(theme.tertiaryBackground)
+                Capsule()
+                    .fill(tint)
+                    // Keep a sliver visible at ~0% so the bar reads as a gauge.
+                    .frame(width: max(height, min(1, fraction) * proxy.size.width))
+            }
+        }
+        .frame(height: height)
+        .animation(.easeOut(duration: 0.2), value: fraction)
+    }
+
+
     // MARK: - Compaction
 
-    /// The compaction row shows when there's something to act on or a run
-    /// is in flight. Intel: no completed/failed rows (Intel's own notice and
-    /// alert report those).
-    private var showsCompactionSection: Bool { canCompact || isCompacting }
+    /// The compaction row shows whenever there's something to act on or
+    /// report: the manual trigger is available, a run is in flight, or a
+    /// run just completed/failed.
+    private var showsCompactionSection: Bool {
+        if canCompact { return true }
+        switch compactionState {
+        case .idle, .needsModelSelection: return false
+        case .running, .completed, .failed: return true
+        }
+    }
 
-    /// Names the model the next run uses: the configured compaction model,
-    /// else the chat's current model (upstream copy).
+    /// Helper copy naming the model the next compaction run will use:
+    /// the configured compaction model, else the chat's current model
+    /// (`IntelContextCompaction.effectiveModelIdentifier`). Read
+    /// per-render from the in-memory config cache — no file I/O.
     private var compactionHelperText: String {
         let configured = IntelContextCompaction.configuredModelIdentifier()
         if IntelContextCompaction.usesChatModelFallback(configured: configured) {
@@ -4195,141 +4115,125 @@ private struct ContextBreakdownPopover: View {
 
     @ViewBuilder
     private var compactionSection: some View {
-        VStack(alignment: .leading, spacing: 7) {
-            sectionEyebrow("Compaction")
-            if isCompacting {
-                HStack(spacing: 7) {
+        VStack(alignment: .leading, spacing: 0) {
+            switch compactionState {
+            case .running(let phase):
+                statusRow {
                     ProgressView()
                         .controlSize(.small)
                         .scaleEffect(0.6)
-                        .frame(width: 12, height: 12)
-                    Text("Summarizing older messages…", bundle: .module)
-                        .font(.system(size: 10.5, weight: .medium))
-                        .foregroundColor(theme.secondaryText)
-                    Spacer(minLength: 0)
+                        .frame(width: 16, height: 16)
+                } text: {
+                    Text(verbatim: phase.label)
                 }
-            } else if canCompact {
-                VStack(alignment: .leading, spacing: 5) {
-                    compactButton(label: L("Compact conversation"))
-                    Text(verbatim: compactionHelperText)
-                        .font(.system(size: 9.5))
-                        .foregroundColor(theme.tertiaryText)
-                        .fixedSize(horizontal: false, vertical: true)
+            case .completed(let savedTokens):
+                statusRow {
+                    Image(systemName: "checkmark.circle.fill")
+                        .foregroundStyle(theme.successColor)
+                } text: {
+                    Text("Compacted — ~\(formatTokenCount(savedTokens)) tokens reclaimed", bundle: .module)
+                }
+            case .failed(let message):
+                statusRow {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .foregroundStyle(theme.warningColor)
+                } text: {
+                    Text(verbatim: message)
+                }
+                if canCompact { compactLink(label: L("Retry compaction")) }
+            case .idle, .needsModelSelection:
+                if canCompact {
+                    compactLink(label: L("Compact conversation"))
                 }
             }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
     }
 
-    private func compactButton(label: String) -> some View {
-        Button {
+    /// Icon + message row for a compaction state, aligned with legend rows.
+    private func statusRow<Icon: View, Label: View>(
+        @ViewBuilder icon: () -> Icon,
+        @ViewBuilder text: () -> Label
+    ) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: 8) {
+            icon()
+                .font(.system(size: 11))
+                .frame(width: 16)
+            text()
+                .font(theme.font(size: theme.pickerCardBodySize))
+                .foregroundStyle(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer(minLength: 0)
+        }
+        .padding(.vertical, 4)
+        .pickerCardRowChrome(highlighted: false, minHeight: PickerCardMetrics.valueRowHeight)
+    }
+
+    private func compactLink(label: String) -> some View {
+        PickerCardTextLink(title: label, icon: "arrow.down.right.and.arrow.up.left") {
             onCompact?()
-        } label: {
-            HStack(spacing: 5) {
-                Image(systemName: "arrow.down.right.and.arrow.up.left")
-                    .font(.system(size: 9, weight: .semibold))
-                Text(verbatim: label)
-                    .font(.system(size: 10.5, weight: .semibold))
-            }
-            .foregroundColor(theme.accentColor)
-            .padding(.horizontal, 9)
-            .padding(.vertical, 4.5)
-            .background(
-                Capsule()
-                    .fill(theme.accentColor.opacity(0.12))
-                    .overlay(
-                        Capsule().strokeBorder(theme.accentColor.opacity(0.3), lineWidth: 1)
-                    )
-            )
         }
-        .buttonStyle(.plain)
-        .pointingHandCursor()
+        .help(Text(verbatim: compactionHelperText))
     }
 
-    /// Wallet-style hero: the number users are checking first, followed by
-    /// clear headroom rather than a composition chart masquerading as usage.
+    /// The one place usage is stated: tokens against the usable budget, its
+    /// share, a fill bar, and the headroom / model-limit caption.
     private var hero: some View {
         let prefix = isStreaming ? "" : "~"
-        return VStack(alignment: .leading, spacing: 3) {
-            HStack(spacing: 6) {
-                Image(systemName: "chart.bar.fill")
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(statusColor.opacity(0.9))
-                Text("Context Budget", bundle: .module)
-                    .font(.system(size: 10, weight: .semibold))
-                    .foregroundColor(theme.secondaryText)
-                    .textCase(.uppercase)
-                    .kerning(0.8)
-                if isStreaming {
-                    Circle()
-                        .fill(theme.successColor)
-                        .frame(width: 5, height: 5)
-                }
-                Spacer(minLength: 0)
-                Text(verbatim: statusLabel)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(statusColor)
-                    .padding(.horizontal, 7)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(statusColor.opacity(0.12))
-                            .overlay(
-                                Capsule().strokeBorder(
-                                    statusColor.opacity(0.3),
-                                    lineWidth: 1
-                                )
-                            )
-                    )
-            }
-            .padding(.bottom, 5)
-
-            HStack(alignment: .firstTextBaseline, spacing: 6) {
+        let captionFont = theme.font(size: theme.pickerCardCaptionSize)
+        return VStack(alignment: .leading, spacing: 8) {
+            HStack(alignment: .firstTextBaseline, spacing: 4) {
                 Text(verbatim: "\(prefix)\(formatTokenCount(breakdown.total))")
-                    .font(.system(size: 24, weight: .semibold, design: .monospaced))
-                    .foregroundColor(isHardOverflow ? theme.errorColor : theme.primaryText)
+                    .font(theme.font(size: theme.pickerCardHeroSize, weight: .semibold))
+                    .monospacedDigit()
+                    .foregroundStyle(isHardOverflow ? theme.errorColor : theme.primaryText)
                     .contentTransition(.numericText())
-                Text("tokens used", bundle: .module)
-                    .font(.system(size: 10))
-                    .foregroundColor(theme.tertiaryText)
+                Group {
+                    if let maxTokens = utilization.maxTokens {
+                        Text("/ \(formatTokenCount(maxTokens)) tokens", bundle: .module)
+                    } else {
+                        Text("tokens", bundle: .module)
+                    }
+                }
+                .font(theme.font(size: theme.pickerCardBodySize))
+                .foregroundStyle(theme.secondaryText)
+                Spacer(minLength: 4)
+                if let percent = utilization.percent {
+                    Text(verbatim: "\(percent)%")
+                        .font(theme.font(size: theme.pickerCardBodySize, weight: .medium))
+                        .monospacedDigit()
+                        .foregroundStyle(statusColor)
+                        .contentTransition(.numericText())
+                }
             }
 
-            if let remaining = utilization.remainingTokens,
-                let maxTokens = utilization.maxTokens
-            {
-                Text(
-                    "\(formatTokenCount(remaining)) remaining of \(formatTokenCount(maxTokens)) usable",
-                    bundle: .module
-                )
-                .font(.system(size: 10))
-                .foregroundColor(theme.tertiaryText)
-                .contentTransition(.numericText())
-            } else {
-                Text("Model context limit unavailable", bundle: .module)
-                    .font(.system(size: 10))
-                    .foregroundColor(theme.tertiaryText)
+            if let fraction = utilization.fraction {
+                usageBar(fraction: fraction, tint: statusColor, height: 6)
             }
-            if let modelMaxTokens {
-                Text(
-                    "\(modelLimitLabel) \(formatTokenCount(modelMaxTokens)) · usable budget \(Int(IntelContextBudget.safetyMargin * 100))%",
-                    bundle: .module
-                )
-                .font(.system(size: 10))
-                .foregroundColor(theme.tertiaryText)
+
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
+                if let remaining = utilization.remainingTokens {
+                    Text("\(formatTokenCount(remaining)) remaining", bundle: .module)
+                        .contentTransition(.numericText())
+                } else {
+                    Text("Model context limit unavailable", bundle: .module)
+                }
+                Spacer(minLength: 4)
+                if let modelMaxTokens {
+                    Text(verbatim: "\(modelLimitLabel) \(formatTokenCount(modelMaxTokens))")
+                        .lineLimit(1)
+                        .help(
+                            Text(
+                                "The usable budget is \(Int(IntelContextBudget.safetyMargin * 100))% of the model maximum, leaving room for the reply.",
+                                bundle: .module
+                            )
+                        )
+                }
             }
+            .font(captionFont)
+            .foregroundStyle(theme.secondaryText)
         }
         .frame(maxWidth: .infinity, alignment: .leading)
-        .padding(.horizontal, 14)
-        .padding(.top, 12)
-        .padding(.bottom, 11)
-        .background(
-            LinearGradient(
-                colors: [statusColor.opacity(0.10), statusColor.opacity(0.02)],
-                startPoint: .top,
-                endPoint: .bottom
-            )
-        )
+        .padding(.horizontal, PickerCardMetrics.rowInset)
     }
 
     private var modelLimitLabel: String {
@@ -4346,108 +4250,33 @@ private struct ContextBreakdownPopover: View {
         }
     }
 
-    @ViewBuilder
-    private var utilizationSection: some View {
-        if let maxTokens = utilization.maxTokens,
-            let fraction = utilization.fraction,
-            let percent = utilization.percent
-        {
-            VStack(alignment: .leading, spacing: 7) {
-                HStack(spacing: 6) {
-                    Text("Usable budget", bundle: .module)
-                        .font(.system(size: 9, weight: .semibold))
-                        .foregroundColor(theme.tertiaryText)
-                        .textCase(.uppercase)
-                        .kerning(0.8)
-                    Spacer()
-                    Text(
-                        "\(formatTokenCount(utilization.usedTokens)) / \(formatTokenCount(maxTokens))",
-                        bundle: .module
-                    )
-                    .font(.system(size: 10, weight: .medium, design: .monospaced))
-                    .foregroundColor(theme.secondaryText)
-                    .contentTransition(.numericText())
-                    Text(verbatim: "\(percent)%")
-                        .font(.system(size: 10, weight: .semibold, design: .monospaced))
-                        .foregroundColor(statusColor)
-                        .frame(width: 34, alignment: .trailing)
-                        .contentTransition(.numericText())
-                }
-
-                GeometryReader { proxy in
-                    ZStack(alignment: .leading) {
-                        RoundedRectangle(cornerRadius: 3.5)
-                            .fill(theme.tertiaryBackground.opacity(0.65))
-                        RoundedRectangle(cornerRadius: 3.5)
-                            .fill(statusColor.opacity(0.9))
-                            .frame(width: proxy.size.width * fraction)
-                    }
-                }
-                .frame(height: 7)
-                .animation(.easeOut(duration: 0.2), value: fraction)
-            }
-            .padding(.horizontal, 14)
-            .padding(.vertical, 10)
-        }
-    }
-
-    private var compositionSection: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 6) {
-                Text("Composition", bundle: .module)
-                    .font(.system(size: 9, weight: .semibold))
-                    .foregroundColor(theme.tertiaryText)
-                    .textCase(.uppercase)
-                    .kerning(0.8)
-                Spacer()
-                Text("share of used context", bundle: .module)
-                    .font(.system(size: 9))
-                    .foregroundColor(theme.tertiaryText)
-            }
-            compositionBar
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
     private func autoDisableRow(_ notice: String) -> some View {
-        HStack(alignment: .top, spacing: 7) {
+        statusRow {
             Image(systemName: "exclamationmark.triangle.fill")
-                .font(.system(size: 9, weight: .semibold))
-                .foregroundColor(theme.warningColor)
+                .foregroundStyle(theme.warningColor)
+        } text: {
             Text(verbatim: notice)
-                .font(.system(size: 10))
-                .foregroundColor(theme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
     }
 
-    private var sourcesSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            sectionEyebrow("Sources")
-            contextGroupList
+    /// What the used tokens are made of: the stacked bar directly above its
+    /// legend, prompt sources first, then the conversation's messages.
+    private var breakdownSection: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            PickerCardSectionTitle(L("Breakdown"))
+            compositionBar
+                .padding(.horizontal, PickerCardMetrics.rowInset)
+                .padding(.top, 2)
+                .padding(.bottom, 6)
+                .help(Text("Share of the tokens used in this chat", bundle: .module))
+            if !contextGroups.isEmpty {
+                contextGroupList
+            }
+            if !breakdown.messages.isEmpty {
+                PickerCardSectionTitle(L("Messages"))
+                entryGroup(breakdown.messages, highlightOutput: true)
+            }
         }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private var messagesSection: some View {
-        VStack(alignment: .leading, spacing: 9) {
-            sectionEyebrow("Messages")
-            entryGroup(breakdown.messages, highlightOutput: true)
-        }
-        .padding(.horizontal, 14)
-        .padding(.vertical, 10)
-    }
-
-    private func sectionEyebrow(_ title: LocalizedStringKey) -> some View {
-        Text(title, bundle: .module)
-            .font(.system(size: 9, weight: .semibold))
-            .foregroundColor(theme.tertiaryText)
-            .textCase(.uppercase)
-            .kerning(0.8)
     }
 
     // MARK: - Stacked Bar
@@ -4455,7 +4284,7 @@ private struct ContextBreakdownPopover: View {
     private var compositionBar: some View {
         let segments = barSegments
         // Composition deliberately fills its own track. Actual model-window
-        // headroom is represented separately by `utilizationSection`.
+        // headroom is represented separately by the hero's usage bar.
         let scale = max(breakdown.total, 1)
         return GeometryReader { geo in
             let gapTotal = CGFloat(max(segments.count - 1, 0))
@@ -4477,10 +4306,10 @@ private struct ContextBreakdownPopover: View {
                         .frame(width: width)
                 }
             }
-            .clipShape(RoundedRectangle(cornerRadius: 4))
+            .clipShape(RoundedRectangle(cornerRadius: 3))
         }
-        .frame(height: 7)
-        .background(RoundedRectangle(cornerRadius: 4).fill(theme.tertiaryBackground.opacity(0.4)))
+        .frame(height: 6)
+        .background(RoundedRectangle(cornerRadius: 3).fill(theme.tertiaryBackground))
     }
 
     // MARK: - Legend
@@ -4488,34 +4317,35 @@ private struct ContextBreakdownPopover: View {
     /// The context legend at group granularity. Expandable groups render a
     /// tappable header that reveals their per-section rows indented beneath.
     private var contextGroupList: some View {
-        VStack(alignment: .leading, spacing: 9) {
+        VStack(alignment: .leading, spacing: PickerCardMetrics.rowSpacing) {
             ForEach(contextGroups) { group in
                 if group.isExpandable {
                     let expanded = expandedGroups.contains(group.id)
-                    Button {
-                        // No withAnimation: animating the popover resize
-                        // crashes AppKit (see `body`). Snap the size instead.
+                    BudgetDisclosureRow(expanded: expanded) {
+                        // No withAnimation: the anchored card animates its
+                        // own resize from the reported height.
                         if expanded {
                             expandedGroups.remove(group.id)
                         } else {
                             expandedGroups.insert(group.id)
                         }
                     } label: {
-                        groupHeader(group, expanded: expanded)
+                        legendRowContent(
+                            tint: group.tint,
+                            label: group.label,
+                            tokens: group.tokens,
+                            disclosure: expanded
+                        )
                     }
-                    .buttonStyle(.plain)
-                    .pointingHandCursor()
 
                     if expanded {
-                        VStack(alignment: .leading, spacing: 7) {
-                            // Key by position, not `entry.id`: a prompt section's
-                            // id isn't guaranteed unique across the manifest, so
-                            // duplicate ForEach IDs would trap. Positional
-                            // identity is what we want for a static,
-                            // display-only list anyway.
-                            ForEach(Array(group.entries.enumerated()), id: \.offset) { _, entry in
-                                entryRow(entry).padding(.leading, 25)
-                            }
+                        // Key by position, not `entry.id`: a prompt section's
+                        // id isn't guaranteed unique across the manifest, so
+                        // duplicate ForEach IDs would trap. Positional
+                        // identity is what we want for a static,
+                        // display-only list anyway.
+                        ForEach(Array(group.entries.enumerated()), id: \.offset) { _, entry in
+                            entryRow(entry, nested: true)
                         }
                     }
                 } else if let entry = group.entries.first {
@@ -4526,91 +4356,101 @@ private struct ContextBreakdownPopover: View {
     }
 
     private func entryGroup(_ entries: [ContextBreakdown.Entry], highlightOutput: Bool = false) -> some View {
-        VStack(alignment: .leading, spacing: 7) {
+        VStack(alignment: .leading, spacing: PickerCardMetrics.rowSpacing) {
             ForEach(Array(entries.enumerated()), id: \.offset) { _, entry in
                 entryRow(entry, highlighted: highlightOutput && entry.id == "output")
             }
         }
     }
 
-    /// Disclosure header for a multi-entry group: swatch, label, rotating
-    /// chevron, summed tokens, and the group's share of the budget.
-    private func groupHeader(_ group: BudgetGroup, expanded: Bool) -> some View {
-        HStack(spacing: 7) {
-            legendMarker(group.tint)
-
-            Text(group.label)
-                .font(.system(size: 11))
-                .foregroundColor(theme.secondaryText)
-
-            Image(systemName: "chevron.right")
-                .font(.system(size: 7, weight: .semibold))
-                .foregroundColor(theme.tertiaryText)
-                .rotationEffect(.degrees(expanded ? 90 : 0))
-
-            Spacer(minLength: 8)
-
-            Text(formatTokenCount(group.tokens))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(theme.primaryText)
-
-            Text(percent(group.tokens))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(theme.tertiaryText)
-                .frame(width: 32, alignment: .trailing)
-        }
-        .contentShape(Rectangle())
+    private func entryRow(
+        _ entry: ContextBreakdown.Entry,
+        highlighted: Bool = false,
+        nested: Bool = false
+    ) -> some View {
+        legendRowContent(
+            tint: entry.tint,
+            label: entry.label,
+            tokens: entry.tokens,
+            highlighted: highlighted,
+            nested: nested
+        )
+        .pickerCardRowChrome(highlighted: false, minHeight: PickerCardMetrics.valueRowHeight)
     }
 
-    private func entryRow(_ entry: ContextBreakdown.Entry, highlighted: Bool = false) -> some View {
-        HStack(spacing: 7) {
-            legendMarker(entry.tint)
+    /// Swatch, label, token count and share. `disclosure` adds the rotating
+    /// chevron used by expandable groups; `nested` indents a drill-down row
+    /// under its group and quiets its text.
+    private func legendRowContent(
+        tint: ContextBreakdown.Tint,
+        label: String,
+        tokens: Int,
+        disclosure: Bool? = nil,
+        highlighted: Bool = false,
+        nested: Bool = false
+    ) -> some View {
+        let textSize = theme.pickerCardBodySize - (nested ? 1 : 0)
+        return HStack(spacing: 8) {
+            Circle()
+                .fill(color(for: tint))
+                .frame(width: 7, height: 7)
+                .frame(width: 16)
 
-            Text(entry.label)
-                .font(.system(size: 11))
-                .foregroundColor(theme.secondaryText)
+            Text(label)
+                .font(theme.font(size: textSize))
+                .foregroundStyle(nested ? theme.secondaryText : theme.primaryText)
+                .lineLimit(1)
+                .truncationMode(.middle)
 
-            Spacer(minLength: 8)
+            if let disclosure {
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 9, weight: .semibold))
+                    .foregroundStyle(theme.tertiaryText)
+                    .rotationEffect(.degrees(disclosure ? 90 : 0))
+            }
 
-            Text(formatTokenCount(entry.tokens))
-                .font(.system(size: 11, weight: .medium, design: .monospaced))
-                .foregroundColor(highlighted ? color(for: entry.tint) : theme.primaryText)
+            Spacer(minLength: 6)
+
+            Text(formatTokenCount(tokens))
+                .font(theme.font(size: textSize))
+                .monospacedDigit()
+                .foregroundStyle(highlighted ? color(for: tint) : theme.primaryText)
                 .contentTransition(highlighted ? .numericText() : .identity)
 
-            Text(percent(entry.tokens))
-                .font(.system(size: 10, design: .monospaced))
-                .foregroundColor(theme.tertiaryText)
+            Text(percent(tokens))
+                .font(theme.font(size: theme.pickerCardCaptionSize))
+                .monospacedDigit()
+                .foregroundStyle(theme.tertiaryText)
                 .frame(width: 32, alignment: .trailing)
         }
+        .padding(.leading, nested ? 24 : 0)
     }
-
-    private func legendMarker(_ tint: ContextBreakdown.Tint) -> some View {
-        let tintColor = color(for: tint)
-        return ZStack {
-            Circle().fill(tintColor.opacity(0.13))
-            Circle()
-                .fill(tintColor.opacity(0.9))
-                .frame(width: 5, height: 5)
-        }
-        .frame(width: 18, height: 18)
-    }
-
-    // MARK: - Chrome
-
-    private var divider: some View {
-        Divider().overlay(theme.primaryBorder.opacity(0.15))
-    }
-
 }
 
+/// Expandable legend row ("System Prompt"): the picker's hover fill on an
+/// otherwise read-only list, so it reads as the one clickable row.
+private struct BudgetDisclosureRow<Label: View>: View {
+    let expanded: Bool
+    let action: () -> Void
+    @ViewBuilder let label: () -> Label
+    @State private var hovered = false
 
-/// Context budget ring in the composer's button bar (upstream; on Intel since
-/// 2026-10-01, docs/CONTEXT_BUDGET_INTEL.md). Extracted
+    var body: some View {
+        Button(action: action) {
+            label()
+                .pickerCardRowChrome(highlighted: hovered, minHeight: PickerCardMetrics.valueRowHeight)
+        }
+        .buttonStyle(.plain)
+        .onHover { hovered = $0 }
+        .accessibilityValue(expanded ? L("Expanded") : L("Collapsed"))
+    }
+}
+
+/// Context/token indicator on the right edge of the selector row. Extracted
 /// from `FloatingInputCard` so popover hover/pin state re-renders only this
 /// chip. All budget math stays in the parent (it also gates sending); this
 /// view just renders the passed values. `breakdown` is a closure so the
-/// popover's content is computed only when it actually opens, matching the
-/// lazy evaluation the inline `.popover` closure had before extraction.
+/// panel's content is computed only while it is open.
 private struct FloatingContextChip: View {
     let displayTokens: Int
     let usableTokens: Int?
@@ -4625,11 +4465,10 @@ private struct FloatingContextChip: View {
     let usageRatio: Double?
     let formatTokenCount: (Int) -> String
     let breakdown: () -> ContextBreakdown
-    /// Compaction state + manual trigger, rendered inside the popover.
-    var isCompacting: Bool = false
+    /// LLM compaction state + manual trigger, rendered inside the popover.
+    var compactionState: ContextCompactionUIState = .idle
     var canCompact: Bool = false
     var onCompact: (() -> Void)? = nil
-
     @Environment(\.theme) private var theme
 
     @State private var showContextBreakdown = false
@@ -4637,9 +4476,13 @@ private struct FloatingContextChip: View {
     /// automatically; pinned panels remain interactive until an outside click
     /// or a second click on the trigger.
     @State private var contextPanelPinned = false
+    @State private var contextHover = HoverPreviewPresence()
+    /// Measured before the first presentation, then updated as sections
+    /// expand.
+    @State private var contextPanelHeight: CGFloat = 0
     @State private var contextHoverTask: Task<Void, Never>?
-    /// Delayed dismiss for the context popover. Gives the cursor a grace
-    /// period to travel from the trigger into the popover (which lives in its
+    /// Delayed dismiss for the context panel. Gives the cursor a grace
+    /// period to travel from the trigger into the panel (which lives in its
     /// own window, so hovering it doesn't keep the trigger "hovered").
     @State private var contextDismissTask: Task<Void, Never>?
     var body: some View {
@@ -4709,44 +4552,73 @@ private struct FloatingContextChip: View {
             Text("Context budget: \(tokenText) tokens", bundle: .module)
         )
         .onHover { hovering in
+            contextHover.isOverTrigger = hovering
             if hovering {
                 openContextBreakdown()
             } else if !contextPanelPinned {
                 scheduleContextDismiss()
             }
         }
-        .popover(isPresented: $showContextBreakdown, arrowEdge: .top) {
-            ContextBreakdownPopover(
-                breakdown: breakdown(),
-                maxTokens: usableTokens,
-                modelMaxTokens: modelMaxTokens,
-                modelLimitSource: windowSource,
-                isStreaming: isStreaming,
-                isNearLimit: isNearLimit,
-                isHardOverflow: isHardOverflow,
-                formatTokenCount: formatTokenCount,
-                isCompacting: isCompacting,
-                canCompact: canCompact,
-                onCompact: onCompact
-            )
-            // Keep the popover alive while the cursor is over it, so the user
-            // can travel from the trigger and click the disclosure headers.
-            .onPopoverHover { hovering in
-                if hovering {
-                    contextDismissTask?.cancel()
-                } else if !contextPanelPinned {
-                    scheduleContextDismiss()
-                }
+        .anchoredCard(
+            isPresented: $showContextBreakdown,
+            size: CGSize(width: PickerCardMetrics.infoCardWidth, height: contextPanelHeight),
+            alignment: .trailing,
+            constrainToWindow: true,
+            takesFocus: contextPanelPinned,
+            accessibilityLabel: L("Context Budget")
+        ) {
+            // `anchoredCard` builds its content on every render, so gate it
+            // to keep `breakdown()` from running while the panel is closed.
+            if showContextBreakdown {
+                contextPanel
             }
         }
         .onChange(of: showContextBreakdown) { isShown in  // Intel: single-value onChange (macOS 13)
             // Outside-click dismissal flips the binding directly. Clear the
             // pinned state so the next hover behaves as a passive preview.
-            if !isShown { contextPanelPinned = false }
+            if !isShown {
+                contextHover.isOverPanel = false
+                contextPanelPinned = false
+                contextPanelHeight = 0
+                contextHoverTask?.cancel()
+                contextDismissTask?.cancel()
+            }
+        }
+        .onDisappear {
+            contextHoverTask?.cancel()
+            contextDismissTask?.cancel()
         }
     }
 
-    /// Open the context popover after a short hover dwell, cancelling any
+    private var contextPanel: some View {
+        ContextBreakdownPopover(
+            breakdown: breakdown(),
+            maxTokens: usableTokens,
+            modelMaxTokens: modelMaxTokens,
+            modelLimitSource: windowSource,
+            isStreaming: isStreaming,
+            isNearLimit: isNearLimit,
+            isHardOverflow: isHardOverflow,
+            formatTokenCount: formatTokenCount,
+            compactionState: compactionState,
+            canCompact: canCompact,
+            onCompact: onCompact,
+            onHeightChange: { contextPanelHeight = $0 }
+        )
+        // Keep the panel alive while the cursor is over it, so the user
+        // can travel from the trigger and click the disclosure headers.
+        .contentShape(Rectangle())
+        .onHover { hovering in
+            contextHover.isOverPanel = hovering
+            if hovering {
+                contextDismissTask?.cancel()
+            } else if !contextPanelPinned {
+                scheduleContextDismiss()
+            }
+        }
+    }
+
+    /// Open the context panel after a short hover dwell, cancelling any
     /// pending dismiss so a quick re-entry doesn't flicker it closed.
     private func openContextBreakdown() {
         contextDismissTask?.cancel()
@@ -4758,18 +4630,22 @@ private struct FloatingContextChip: View {
         }
     }
 
-    /// Dismiss the context popover after a grace period, giving the cursor
-    /// time to cross the gap into the popover window.
+    /// Dismiss the context panel after a grace period, giving the cursor
+    /// time to cross the gap into the panel window.
     private func scheduleContextDismiss() {
         contextHoverTask?.cancel()
         contextDismissTask?.cancel()
+        guard contextHover.shouldDismiss(isPinned: contextPanelPinned) else { return }
         contextDismissTask = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 250_000_000)
-            guard !Task.isCancelled else { return }
+            guard !Task.isCancelled,
+                contextHover.shouldDismiss(isPinned: contextPanelPinned)
+            else { return }
             showContextBreakdown = false
         }
     }
 }
+
 
 // MARK: - Context Budget Segment Widths
 
@@ -5324,3 +5200,16 @@ private struct SendNowButton: View {
         }
     }
 #endif
+
+extension View {
+    /// Intel: `scrollBounceBehavior` needs macOS 13.3; earlier Ventura keeps
+    /// the default bounce.
+    @ViewBuilder
+    func intelScrollBounceBasedOnSize() -> some View {
+        if #available(macOS 13.3, *) {
+            scrollBounceBehavior(.basedOnSize)
+        } else {
+            self
+        }
+    }
+}

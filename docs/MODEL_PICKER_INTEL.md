@@ -105,3 +105,32 @@ ports upstream/main's current files, not the commits one by one. Plan:
 - i18n: `merge-upstream-keys.py` now scans literals line by line (a stray
   quote in a comment used to shift the pairing for the rest of the file and
   silently skip strings).
+
+## Stage D — #3017 popup restyle (2026-10-06)
+
+- Upstream verbatim (patch applied cleanly): `SlashCommandPopup`,
+  `AtFileMenuPopup`, `VoiceInputOverlay` (PickerCard surface, single-line
+  rows, heading with key hints, quiet New Command / Edit links; only custom
+  commands are tagged) and `FollowUpSuggestionsBar` (one-pixel dividers,
+  hidden beside the hovered row).
+- The slash and "@" menus float in an overlay above the input card
+  (`composerPopupOverlay`), so opening one no longer shifts the composer or
+  the transcript.
+- **Context budget card:** upstream's current `ContextBreakdownPopover` /
+  `FloatingContextChip` in an anchored card (PickerCard chrome, hero usage,
+  hover preview with pin-on-click), replacing Intel's popover. Intel keeps
+  its documented differences ([`CONTEXT_BUDGET_INTEL.md`](CONTEXT_BUDGET_INTEL.md)):
+  window source from the catalog or Context Length, no disk-cache section,
+  the "Open Context Length" link, no pink tint. The compaction rows are now
+  upstream's (running phase, "Compacted — ~N tokens reclaimed", failure with
+  Retry), fed by `ChatSession.compactionState`.
+  - `scrollBounceBehavior` needs macOS 13.3: `intelScrollBounceBasedOnSize()`
+    applies it only there.
+  - The old `PopoverCardModifier` / `popoverCard()` chrome is gone (no users).
+- **Staged:**
+  - #3017's lone-tab styling targets upstream's Safari-style tab track
+    (#2995), which Intel's Chrome-style strip doesn't have yet; both go with
+    a chat-tabs follow-up (`W-chat-tabs`).
+  - The wallet card restyle waits for the composer credits chip (stage C).
+- Render-checked offscreen: slash and "@" menus.
+

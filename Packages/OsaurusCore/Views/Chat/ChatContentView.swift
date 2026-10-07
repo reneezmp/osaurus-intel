@@ -408,6 +408,7 @@ struct ChatContentView: View {
                                 observedSession?.captureScreenshotFromSlashCommand()
                             },
                             isCompacting: observedSession.isCompacting,
+                            compactionState: observedSession.compactionState,
                             suggestCompaction: observedSession.shouldSuggestCompaction,
                             canCompactConversation: observedSession.canCompactConversation,
                             autoSpeakAssistant: $observedSession.autoSpeakAssistant,

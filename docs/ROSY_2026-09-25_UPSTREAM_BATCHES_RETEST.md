@@ -1357,4 +1357,11 @@ Manual: [`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md).
       stars, Manage Credits. Choosing a model selects it and closes it.
       ↑↓ highlight and Return pick when not typing in search.
 - [ ] Light and dark themes; narrow window (the card shrinks its columns).
+- [ ] Type `/` and `@`: the menus float above the composer (the chat and
+      the selector row don't jump), with a "Commands" / "Files" heading and
+      key hints. Voice input card uses the same card style.
+- [ ] Context ring: hovering shows the budget card (after a short pause);
+      clicking pins it; moving into it keeps it open. "Open Context Length"
+      opens Settings at Context Length. Compact from the card: progress,
+      then "Compacted — ~… tokens reclaimed".
 

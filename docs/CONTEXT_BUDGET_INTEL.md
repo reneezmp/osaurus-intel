@@ -39,6 +39,11 @@ the ring chip + "wallet-style" popover (reworked through #1512 and #2947).
 - `ChatSession.canCompactConversation` (an older span exists,
   `IntelContextCompaction.compactionCutIndex`) drives the popover's button.
 
+**2026-10-06:** the card is upstream's #3017 version (anchored card,
+PickerCard style, hover preview with pin-on-click, upstream's compaction
+rows from `ChatSession.compactionState`). See
+[`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md) stage D.
+
 ## Intel differences
 
 | Upstream | Intel | Why |
@@ -46,7 +51,7 @@ the ring chip + "wallet-style" popover (reworked through #1512 and #2947).
 | Window from `AgentLoopBudget.resolveContextWindowResolutionSync` (bundle / provider metadata / user cap) | Model catalog (`ModelInfo`), else Settings › Conversation › Context Length (`.userSetting`, labelled "Your context limit"), the same resolution Intel's compaction suggestion uses | `AgentLoopBudget` isn't compiled; most cloud models aren't in Intel's catalog |
 | Over limit blocks Send (except under a user cap) | Never blocks; the red ring is advisory | Intel's window is usually the Settings value, which upstream also never lets block a send |
 | Disk Cache section (on-SSD prompt cache) | Not shown | MLX-only |
-| Compaction rows for completed / failed runs | Running and "Compact conversation" only | Intel reports results as toasts (or in the dialog when it is open). The helper text is upstream's since 2026-10-06: it names the Compaction Model, else the current chat model ([`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md)) |
+| Compaction rows for completed / failed runs (until 2026-10-06) | Since #3017's port: upstream's rows | Intel reports results as toasts (or in the dialog when it is open). The helper text is upstream's since 2026-10-06: it names the Compaction Model, else the current chat model ([`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md)) |
 | "Open Context Window Cap" (Server › Cache) | "Open Context Length" (Settings › Conversation › Advanced) | Intel's equivalent setting |
 | Right-click "Compact Conversation" on the old Intel chip | Removed (upstream has none); compaction is in the popover, the slash command and the "getting long" notice | Follow upstream |
 | `onChange(old, new)` | Single-value `onChange` | macOS 13 |
