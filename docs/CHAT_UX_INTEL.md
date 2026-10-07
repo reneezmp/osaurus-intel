@@ -240,6 +240,22 @@ what Intel adapted; everything else is upstream verbatim.
   when onboarding lands (`W-ui-misc`).
 - No telemetry on Intel, so the coordinator keeps no `source:` entry point.
 
+## Markdown block parser and document view
+
+- `Utils/MarkdownBlockParsing.swift` is now upstream's file: the block model
+  (`MessageBlock`, `ListItem`) and `parseBlocks` moved out of
+  `MarkdownMessageView`, where Intel kept an older inline copy. Two upstream
+  fixes come with it:
+  - `$$O(n)$$` on one line is display math even without LaTeX syntax
+    (multi-line `$$` still needs a LaTeX signal, so stray `$$` can't
+    swallow prose).
+  - The standalone-image regex compiles once (#2817 main-thread hang fix).
+- `Views/Common/MarkdownDocumentView.swift` (`MarkdownDocument`): upstream's
+  self-sizing static Markdown view. No caller on upstream/main either (it
+  was written for model cards); ported verbatim for the next user.
+- Tests: upstream `Tests/Views/InlineMathScannerTests.swift` replaces
+  Intel's older copy at `Tests/Utils/`.
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -262,7 +278,7 @@ they wait for the next session, in this suggested order:
 4. ~~Screenshot attach~~ **done 2026-10-06**.
 5. ~~Chat import guide~~ **done 2026-10-06** (post-onboarding prompt waits
    for onboarding).
-6. Markdown document view (`MarkdownBlockParsing`, `MarkdownDocumentView`).
+6. ~~Markdown document view~~ **done 2026-10-06**.
 7. Activity / dispatch rows (`DispatchEnvelope`, `AgentDispatchTarget`,
    `NativeDispatchBadgeRow`).
 8. Context attribution (`ContextAttribution`).

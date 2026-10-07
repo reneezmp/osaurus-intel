@@ -1319,6 +1319,9 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       opens the provider's export page in the browser. Choose File… opens
       the picker. Tick "Don't show this again", import again: the picker
       opens directly. Checkbox looks themed (not the grey system box).
+- [ ] **(paid)** Ask for "the complexity as $$O(n \log n)$$ and then just
+      $$O(n)$$": both render as math, not with `$$` showing. Prose that
+      mentions prices ($5 and $10) stays plain text.
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).
