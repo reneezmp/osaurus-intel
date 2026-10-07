@@ -8,10 +8,9 @@
 //
 //  Intel version, not upstream's file. It hosts the chat settings that used
 //  to crowd Intel's General page:
-//  - Upstream's smooth streaming and keep-awake switches are not here yet:
-//    Intel lacks those features (backlog `W-chat-ux`, `W-ui-misc`).
-//    Follow-ups, the activity roll-up, expand-thinking and the compaction
-//    model are upstream's.
+//  - Upstream's keep-awake switch is not here yet (backlog `W-ui-misc`).
+//    Smooth streaming, follow-ups, the activity roll-up, expand-thinking
+//    and the compaction model are upstream's.
 //  - Intel keeps switches upstream moved elsewhere because Intel has no
 //    other home for them yet: Disable Tools and Enable Memory (upstream:
 //    Agents / Memory), Folder Tool Permissions (upstream: Tools & MCP,
@@ -61,6 +60,10 @@ struct ChatSettingsView: View {
     private var cmdNStartsNewChatInCurrentWindow: Bool = false
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var composerSpellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
+    /// Upstream smooth streaming: pace the visible reveal at ~180 tok/s
+    /// however bursty the network is. Read per delta by
+    /// `StreamingDeltaProcessor`.
+    @AppStorage("chatSmoothStreamingEnabled") private var smoothStreamingEnabled: Bool = true
     /// Upstream: keep reasoning open while the model thinks. Read by
     /// `ChatSession.updateStreamingThinkingExpansion`.
     @AppStorage(ChatSession.expandThinkingWhileStreamingKey)
@@ -106,6 +109,14 @@ struct ChatSettingsView: View {
 
     private var appearanceSection: some View {
         SettingsSection(title: "Appearance", icon: "text.bubble") {
+            SettingsToggle(
+                title: L("Smooth Streaming"),
+                description:
+                    "Reveal replies at a steady, readable pace like a typewriter. Turn off to show text the instant it arrives.",
+                anchorId: "settings.chat.smoothStreaming",
+                isOn: $smoothStreamingEnabled
+            )
+
             SettingsToggle(
                 title: L("Group Thinking & Tool Activity"),
                 description:

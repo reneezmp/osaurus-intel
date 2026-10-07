@@ -224,6 +224,10 @@ public enum SettingsSearchIndex {
 
         // MARK: Conversation
         .init(
+            id: "settings.chat.smoothStreaming", tab: .chat, section: "Appearance",
+            title: "Smooth Streaming",
+            keywords: ["typewriter", "streaming pace", "token reveal", "smooth tokens"]),
+        .init(
             id: "settings.chat.activityRollup", tab: .chat, section: "Appearance",
             title: "Group Thinking & Tool Activity",
             keywords: [

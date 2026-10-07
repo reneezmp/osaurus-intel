@@ -2576,3 +2576,14 @@ above 59.
   tool-calling turn.
 - Intel keeps no per-step durations, so roll-ups say "Worked" without a
   time.
+
+### Chat UX batch, part 4: smooth streaming (`W-chat-ux`) — 2026-10-06
+
+- `Utils/StreamingDeltaProcessor.swift` un-excluded and used as upstream's
+  (Intel's pass-through removed). **`finalize()` is now async**: every
+  caller awaits it. A stopped run passes `immediately: true`.
+- **`isolated deinit` isn't usable on Intel**: it needs a newer Swift
+  runtime than macOS 13 provides. Use a plain `deinit` with the touched
+  state marked `nonisolated(unsafe)`.
+- `scripts/i18n/add-translations.py` adds hand-written de/zh-Hans entries
+  for Intel strings upstream's catalog lacks.

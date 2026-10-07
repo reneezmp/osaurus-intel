@@ -172,6 +172,27 @@ what Intel adapted; everything else is upstream verbatim.
   rules, loops with one stats row, the switch and its default, streaming
   expansion, reasoning-only seeding).
 
+## Smooth streaming
+
+- Replies type out at a steady ~180 tok/s however bursty the provider's
+  SSE delivery is; a burst that arrived at once still finishes within about
+  a second. Settings › Conversation › Appearance › **Smooth Streaming**, on
+  by default (upstream key `chatSmoothStreamingEnabled`).
+- `Utils/StreamingDeltaProcessor.swift` is now upstream's file (it was
+  excluded; Intel had a pass-through that appended each delta and rebuilt
+  the transcript per delta). UI syncs are throttled by reply length
+  (16 → 100 ms), which also bounds main-thread work on long replies.
+- `finalize()` is async and waits for the paced tail, so a tool card or
+  the end of the run only lands after the text before it has typed out.
+- **Intel differences:**
+  - Plain `deinit` instead of upstream's `isolated deinit` (needs a newer
+    runtime than macOS 13); the timers and waiters it releases are
+    `nonisolated(unsafe)`.
+  - `finalize(immediately: true)` when the run was stopped, so Stop
+    doesn't keep typing the buffered tail.
+- Tests: upstream `Tests/Chat/StreamingDeltaProcessorTests.swift` plus an
+  Intel case for the immediate drain.
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -190,7 +211,7 @@ they wait for the next session, in this suggested order:
    2026-10-06** (section above).
 2. ~~Activity roll-up and expanding thinking while it streams~~ **done
    2026-10-06**.
-3. Smooth streaming.
+3. ~~Smooth streaming~~ **done 2026-10-06**.
 4. Screenshot attach (`ScreenshotCaptureService`, a shared-artifact turn).
 5. Chat import guide (`ImportGuideSheet`, `ImportHistoryPromptGate`).
 6. Markdown document view (`MarkdownBlockParsing`, `MarkdownDocumentView`).

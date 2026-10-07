@@ -1296,6 +1296,11 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
       circles and "+N steps". Click it: the thinking and tool rows appear,
       each still expandable; Expand All / Collapse All work. Speed/TTFT
       stats show once, under the final answer.
+- [ ] **(paid)** A long reply types out at an even pace instead of in
+      jumps; Stop during it stops right away (no extra typing). Settings ›
+      Conversation › Appearance › Smooth Streaming off: text appears in
+      the provider's chunks again. A reply with a tool call shows the text
+      before the tool card first.
 - [ ] Settings › Conversation › Appearance › Group Thinking & Tool
       Activity off: the same chat shows every step separately, without
       reopening it. Back on: grouped again.

@@ -2137,38 +2137,9 @@ struct ToolCallDone: Sendable, Equatable {
     let result: String
 }
 
-@MainActor
-final class StreamingDeltaProcessor: @unchecked Sendable {
-    private let turn: ChatTurn
-    private let onChange: @MainActor @Sendable () -> Void
+// `StreamingDeltaProcessor` is upstream's (Utils/StreamingDeltaProcessor.swift,
+// smooth streaming); the Intel pass-through that lived here is gone.
 
-    init(turn: ChatTurn, onChange: @escaping @MainActor @Sendable () -> Void = {}) {
-        self.turn = turn
-        self.onChange = onChange
-    }
-
-    func finalize() {
-        onChange()
-    }
-
-    func receiveReasoning(_ text: String) {
-        guard !text.isEmpty else { return }
-        turn.appendThinking(text)
-        // Refresh the UI per chunk so the Think panel streams LIVE, exactly
-        // like content (receiveDelta). Without this the thinking accumulated
-        // silently and only appeared when finalize() fired at end-of-stream —
-        // so a long (8k+ char) thought looked like a multi-second blank stall.
-        // Painting cadence is paced by the ~12/sec runloop yield in
-        // processStreamDeltas, same as content deltas.
-        onChange()
-    }
-
-    func receiveDelta(_ delta: Any) {
-        guard let text = delta as? String, !text.isEmpty else { return }
-        turn.appendContent(text)
-        onChange()
-    }
-}
 /// Intel mirror of the upstream `StreamingReasoningHint` (lives in the
 /// excluded `Services/Inference/ModelService.swift` alongside MLX). The
 /// previous Intel stub returned `nil` from `decode(_:)`, which meant

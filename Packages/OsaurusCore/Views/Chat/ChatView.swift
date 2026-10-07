@@ -2686,12 +2686,12 @@ final class ChatSession: ObservableObject {
         do {
             for try await delta in stream {
                 if !isRunActive(runId) {
-                    processor.finalize()
+                    await processor.finalize(immediately: true)
                     return ([], currentTurn)
                 }
                 // Server-side tool call complete: add the call card + result turn to the chat log
                 if let done = StreamingToolHint.decodeDone(delta) {
-                    processor.finalize()
+                    await processor.finalize()
                     let call = ToolCall(
                         id: done.callId,
                         type: "function",
@@ -2808,8 +2808,9 @@ final class ChatSession: ObservableObject {
             capturedInvocations = [inv]
         }
 
-        // Flush any remaining buffered content (including partial tags)
-        processor.finalize()
+        // Flush any remaining buffered content; with smooth streaming this
+        // waits for the paced tail to finish typing (upstream).
+        await processor.finalize(immediately: !isRunActive(runId))
 
         if let first = firstDeltaTime {
             currentTurn.timeToFirstToken = first.timeIntervalSince(streamStartTime)
@@ -3679,7 +3680,7 @@ final class ChatSession: ObservableObject {
                             if !isRunActive(runId) { break }
                             if !delta.isEmpty { processor.receiveDelta(delta) }
                         }
-                        processor.finalize()
+                        await processor.finalize(immediately: !isRunActive(runId))
                     } catch {
                         debugLog("send: final wrap-up call failed: \(error.localizedDescription)")
                     }

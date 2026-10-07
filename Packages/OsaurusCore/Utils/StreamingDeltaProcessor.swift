@@ -16,6 +16,13 @@
 //  ChatView decodes the sentinel and forwards the text to
 //  `receiveReasoning(_:)`, which appends to the Think panel.
 //
+//  Intel (smooth streaming, `W-chat-ux`): upstream's file, with
+//  - a plain `deinit` instead of `isolated deinit`, which needs a newer
+//    runtime than macOS 13; the timers and waiters it releases are
+//    `nonisolated(unsafe)` so the deinit may touch them;
+//  - `finalize(immediately:)`: a stopped run drains at once instead of
+//    typing out the tail.
+//
 
 import Foundation
 
@@ -29,11 +36,19 @@ final class StreamingDeltaProcessor {
     private var turn: ChatTurn
     private let onSync: (() -> Void)?
 
-    private var deltaBuffer = ""
+    /// Pending (unrevealed) deltas held as a character array with a head
+    /// cursor. Draining advances `bufferHead` instead of rebuilding the
+    /// string, so paced reveal of a large burst is O(total) — the previous
+    /// `String(deltaBuffer.dropFirst(take))` rebuilt the whole remainder on
+    /// every 16ms tick (O(n²)), and `deltaBuffer.count` walked the grapheme
+    /// boundaries on every delta and tick. Both showed up as main-thread
+    /// hangs while streaming long responses.
+    private var deltaBuffer: [Character] = []
+    private var bufferHead = 0
 
     /// Fallback timer — safety net for push-based consumers where no more
     /// deltas may arrive to trigger an inline flush.
-    private var flushTimer: Timer?
+    nonisolated(unsafe) private var flushTimer: Timer?
     private static let fallbackFlushInterval: TimeInterval = 0.1
 
     /// Adaptive flush tuning — tracked lengths avoid calling String.count on large buffers
@@ -50,6 +65,46 @@ final class StreamingDeltaProcessor {
     private var lastFlushTime = Date()
     private var syncCount = 0
 
+    /// Both the engine-completion relay and the stream consumer can finalize
+    /// the same tail. MainActor methods are reentrant across the await, so
+    /// retain every waiter: replacing a single continuation strands the
+    /// earlier caller and leaves Chat's Stop control active after generation.
+    nonisolated(unsafe) private var pacingDoneContinuations: [CheckedContinuation<Void, Never>] = []
+
+    /// Paced-reveal state. When `smoothStreamingEnabled` is on, incoming
+    /// deltas accumulate in `deltaBuffer` but are revealed to the UI at a
+    /// fixed rate via `pacingTimer` instead of flushing immediately. This
+    /// hides server-side SSE micro-batching from remote providers and the
+    /// peak burst behavior of ultra-fast providers (Cerebras-class), so
+    /// streaming looks like a typewriter regardless of network delivery
+    /// pattern. Local MLX at typical token rates is unaffected — its
+    /// natural pace is below the reveal rate.
+    ///
+    /// Internal (not `private`) so tests can assert that a processor
+    /// destroyed mid-stream leaves no live run-loop timer behind.
+    nonisolated(unsafe) var pacingTimer: Timer?
+
+    /// User-facing reveal rate floor. ~12 chars per 16ms ≈ 750 chars/s ≈
+    /// ~180 tok/s display rate. Fast enough not to drag, slow enough that
+    /// the fade-in is perceptible. Per-tick chunk size scales up
+    /// adaptively when the pending buffer is large (see `pacingTick`).
+    private static let pacingTickInterval: TimeInterval = 0.016
+    private static let pacingCharsPerTick: Int = 12
+
+    /// Number of pacing ticks (~16ms each) we aim to drain a fully-arrived
+    /// burst over. 60 ticks ≈ 1 second. Smaller bursts paced at the
+    /// natural floor rate finish sooner; larger ones accelerate to stay
+    /// within this window. Tuned so that even a 4000-char response after
+    /// finalize() drains in roughly 1s without feeling rushed.
+    private static let pacingDrainTicks: Int = 60
+
+    /// Reads `chatSmoothStreamingEnabled` from `UserDefaults` (default
+    /// true). Cheap to re-read per delta — `UserDefaults.bool(forKey:)`
+    /// is an in-memory dictionary lookup.
+    private var smoothStreamingEnabled: Bool {
+        UserDefaults.standard.object(forKey: "chatSmoothStreamingEnabled") as? Bool ?? true
+    }
+
     // MARK: - Init
 
     init(
@@ -60,6 +115,27 @@ final class StreamingDeltaProcessor {
         self.onSync = onSync
     }
 
+    deinit {
+        // The pacing/flush timers retain their closures, but those closures
+        // hold `self` only weakly — so once this processor is gone, nothing
+        // can ever invalidate them. A processor destroyed mid-stream (chat
+        // window closed while smooth-streaming was revealing a buffer)
+        // therefore left a 16ms repeating run-loop timer ticking forever,
+        // spawning a no-op task every tick for the rest of the process
+        // lifetime. Invalidate both here on the main actor, where the
+        // timers were also scheduled.
+        // Intel: timers must be invalidated on the run loop that scheduled
+        // them (main); the last release almost always happens there.
+        let timers = [pacingTimer, flushTimer].compactMap { $0 }
+        if Thread.isMainThread {
+            timers.forEach { $0.invalidate() }
+        } else {
+            nonisolated(unsafe) let pending = timers
+            DispatchQueue.main.async { pending.forEach { $0.invalidate() } }
+        }
+        for continuation in pacingDoneContinuations { continuation.resume() }
+    }
+
     // MARK: - Public API
 
     /// Receive a streaming content delta. Buffers it, checks flush conditions
@@ -68,18 +144,23 @@ final class StreamingDeltaProcessor {
         guard !delta.isEmpty else { return }
         ChatPerfTrace.shared.count("stream.delta")
         ChatPerfTrace.shared.count("stream.deltaBytes", delta.utf8.count)
-        deltaBuffer += delta
+        deltaBuffer.append(contentsOf: delta)
+
+        if smoothStreamingEnabled {
+            startPacingTimerIfNeeded()
+            return
+        }
 
         let now = Date()
         let timeSinceFlush = now.timeIntervalSince(lastFlushTime) * 1000
 
-        if deltaBuffer.count >= maxBufferSize || timeSinceFlush >= flushIntervalMs {
+        if pendingCount >= maxBufferSize || timeSinceFlush >= flushIntervalMs {
             flush()
             syncIfNeeded(now: now)
         }
 
         // Fallback timer in case no more deltas arrive
-        if flushTimer == nil, !deltaBuffer.isEmpty {
+        if flushTimer == nil, pendingCount > 0 {
             flushTimer = Timer.scheduledTimer(
                 withTimeInterval: Self.fallbackFlushInterval,
                 repeats: false
@@ -107,11 +188,10 @@ final class StreamingDeltaProcessor {
     /// Force-flush all buffered deltas to the turn's content channel.
     func flush() {
         invalidateTimer()
-        guard !deltaBuffer.isEmpty else { return }
+        guard pendingCount > 0 else { return }
 
         let flushStart = Date()
-        let textToProcess = deltaBuffer
-        deltaBuffer = ""
+        let textToProcess = consume(pendingCount)
 
         appendContent(textToProcess)
 
@@ -121,23 +201,46 @@ final class StreamingDeltaProcessor {
     }
 
     /// Finalize streaming: drain any remaining buffer and sync to UI.
-    func finalize() {
+    ///
+    /// In smooth-streaming mode the residual `deltaBuffer` continues to
+    /// type out via the pacing timer. We `await` here until that buffer
+    /// is fully drained — without the await, this processor instance
+    /// deallocates the moment `send()` returns, the pacing timer's
+    /// `[weak self]` closure goes nil on the next tick, and the rest of
+    /// the response is silently dropped (the visible text ends
+    /// mid-sentence even though the model produced the full content).
+    func finalize(immediately: Bool = false) async {
         invalidateTimer()
 
-        if !deltaBuffer.isEmpty {
-            let remaining = deltaBuffer
-            deltaBuffer = ""
-            appendContent(remaining)
+        if smoothStreamingEnabled && pendingCount > 0 && !immediately {
+            startPacingTimerIfNeeded()
+            // Drain one tick synchronously. Short final tails should not
+            // depend on any future run-loop timer delivery before ChatView can
+            // leave its streaming state.
+            pacingTick()
+            if pendingCount > 0 {
+                // Block here until `pacingTick` empties the buffer and
+                // resumes us. The processor stays alive for the duration
+                // because the surrounding `send(...)` is awaiting.
+                await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+                    self.pacingDoneContinuations.append(continuation)
+                }
+            }
+        } else if pendingCount > 0 {
+            // Non-smooth path: drain immediately.
+            stopPacingTimer()
+            appendContent(consume(pendingCount))
         }
-
         syncToTurn()
     }
 
     /// Reset for a new streaming session with a new turn.
     func reset(turn: ChatTurn) {
         invalidateTimer()
+        stopPacingTimer()
+        resumePacingDoneIfNeeded()
         self.turn = turn
-        deltaBuffer = ""
+        clearBuffer()
         contentLength = 0
         thinkingLength = 0
         flushIntervalMs = 16
@@ -154,6 +257,83 @@ final class StreamingDeltaProcessor {
     private func invalidateTimer() {
         flushTimer?.invalidate()
         flushTimer = nil
+    }
+
+    private func startPacingTimerIfNeeded() {
+        guard pacingTimer == nil else { return }
+        pacingTimer = Timer.scheduledTimer(
+            withTimeInterval: Self.pacingTickInterval,
+            repeats: true
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.pacingTick()
+            }
+        }
+    }
+
+    private func stopPacingTimer() {
+        pacingTimer?.invalidate()
+        pacingTimer = nil
+    }
+
+    private func resumePacingDoneIfNeeded() {
+        let continuations = pacingDoneContinuations
+        pacingDoneContinuations.removeAll()
+        for continuation in continuations { continuation.resume() }
+    }
+
+    /// Drain a chunk from the head of `deltaBuffer` into the turn + push
+    /// one sync. Chunk size adapts to the pending buffer so a giant
+    /// response that arrived in one shot still finishes typing out within
+    /// ~2 seconds, while normal bursts stay at the perceptible floor rate.
+    /// Stops the timer once the buffer is drained so it doesn't idle-tick
+    /// between bursts.
+    private func pacingTick() {
+        let pending = pendingCount
+        if pending == 0 {
+            stopPacingTimer()
+            // Wake up `finalize()` if it's waiting for the tail to drain.
+            resumePacingDoneIfNeeded()
+            return
+        }
+        let scaled = pending / Self.pacingDrainTicks
+        let take = min(pending, max(Self.pacingCharsPerTick, scaled))
+        appendContent(consume(take))
+        lastFlushTime = Date()
+        // Throttled: appends still land every 16ms tick, but the (expensive)
+        // UI re-apply follows the adaptive `syncIntervalMs` cadence. Any
+        // residual pending content is synced by `finalize()`.
+        syncIfNeeded(now: Date())
+        if pendingCount == 0 {
+            // The last visible chunk was just consumed. Do not require one
+            // more run-loop timer tick to finish the chat run: if that tick is
+            // coalesced or never delivered, ChatView keeps `isStreaming=true`
+            // after the answer is fully visible and the red Stop button never
+            // clears.
+            stopPacingTimer()
+            resumePacingDoneIfNeeded()
+        }
+    }
+
+    /// Pending (unrevealed) character count. O(1) — replaces the O(n)
+    /// `String.count` that ran on every delta and pacing tick.
+    private var pendingCount: Int { deltaBuffer.count - bufferHead }
+
+    /// Take up to `n` characters from the head of the pending region,
+    /// advancing the cursor rather than rebuilding the buffer. Once fully
+    /// drained the backing storage is released so a long stream doesn't
+    /// retain every consumed character.
+    private func consume(_ n: Int) -> String {
+        let end = min(bufferHead + n, deltaBuffer.count)
+        let chunk = String(deltaBuffer[bufferHead ..< end])
+        bufferHead = end
+        if bufferHead == deltaBuffer.count { clearBuffer() }
+        return chunk
+    }
+
+    private func clearBuffer() {
+        deltaBuffer.removeAll(keepingCapacity: true)
+        bufferHead = 0
     }
 
     private func appendContent(_ s: String) {
@@ -180,9 +360,25 @@ final class StreamingDeltaProcessor {
         onSync?()
     }
 
-    private func syncIfNeeded(now: Date) {
-        let syncIntervalMs: Double = 16
+    /// UI sync cadence, scaled down as the turn grows. Every sync re-applies
+    /// the streaming cell — markdown segment dispatch, table relayout, height
+    /// update — and that work is O(content length), so a fixed 16ms cadence
+    /// makes the whole stream O(n²): ChatPerfTrace measured ~21s of
+    /// main-thread work over a 259s markdown stream at ~25 syncs/s, with
+    /// 100ms single-sync peaks (the fleet-hardware app-hang cluster). Short
+    /// responses — the common case — keep the full-rate typewriter; long
+    /// ones trade imperceptible reveal granularity for a bounded per-second
+    /// cost.
+    private var syncIntervalMs: Double {
+        switch contentLength + thinkingLength {
+        case ..<2_000: return 16
+        case ..<8_000: return 33
+        case ..<32_000: return 66
+        default: return 100
+        }
+    }
 
+    private func syncIfNeeded(now: Date) {
         let timeSinceSync = now.timeIntervalSince(lastSyncTime) * 1000
         if (syncCount == 0 && hasPendingContent)
             || (timeSinceSync >= syncIntervalMs && hasPendingContent)
