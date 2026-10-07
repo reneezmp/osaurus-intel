@@ -104,6 +104,12 @@ struct ModelPickerItem: Identifiable, Hashable {
         self.contextLength = contextLength
     }
 
+    /// Cross-provider favourite key (upstream #1811): source unique key +
+    /// model id, so the same id from two providers stays distinct.
+    var favoriteKey: String {
+        FavoriteModelsStore.key(sourceKey: source.uniqueKey, modelId: id)
+    }
+
     /// Check if model matches search query using fuzzy matching.
     func matches(searchQuery: String) -> Bool {
         guard !searchQuery.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return true }

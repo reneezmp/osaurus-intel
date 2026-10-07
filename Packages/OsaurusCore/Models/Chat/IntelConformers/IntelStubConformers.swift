@@ -350,6 +350,9 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
     /// Stable identity for the managed Osaurus Router provider (mirrors upstream).
     static let osaurusRouterProviderId = UUID(uuidString: "2CFBD528-62FD-4EF0-A143-3FE532F03840")!
+    /// Upstream's first-run Osaurus Cloud model (DeepSeek V4.1 Flash),
+    /// matched by final path component; also the first starter favourite.
+    static let firstRunOsaurusModelSlug = "deepseek-v4-1-flash"
 
     /// The managed provider pointing the engine at `router.osaurus.ai`. `authType`
     /// is `.none` — the EIP-191 wallet signature is applied per-request by
@@ -389,7 +392,26 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             routerModelMetadata = Dictionary(models.map { ($0.id, $0) }, uniquingKeysWith: { _, new in new })
         }
         providerStates[Self.osaurusRouterProviderId] = state
+        seedStarterFavoritesFromOsaurusRouterCatalog()
         notifyModelsChanged()
+    }
+
+    /// Upstream #2958: seed the Osaurus Cloud starter favourites once the
+    /// Router catalog is known. Picker ids follow `ModelPickerItemCache`:
+    /// `<provider name, lowercased and dashed>/<router model id>`.
+    private func seedStarterFavoritesFromOsaurusRouterCatalog() {
+        guard let provider = configuration.providers.first(where: { $0.id == Self.osaurusRouterProviderId }),
+            let models = providerStates[Self.osaurusRouterProviderId]?.discoveredModels, !models.isEmpty
+        else { return }
+        let prefix = provider.name.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+        FavoriteModelsStore.shared.seedStarterFavoritesIfNeeded(
+            routerModelIds: models.map { "\(prefix)/\($0)" },
+            routerSourceKey: ModelPickerItem.Source.remote(
+                providerName: provider.name, providerId: Self.osaurusRouterProviderId
+            ).uniqueKey
+        )
     }
 
     func setOsaurusRouterEnabled(_ enabled: Bool) {
