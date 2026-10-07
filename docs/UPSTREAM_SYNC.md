@@ -1694,8 +1694,9 @@ Durable facts from this batch:
   single panel/key-monitor slots previously let one Enter approve two
   concurrent prompts.
 - **Watcher framing strings are shared constants** on `WatcherManager`;
-  changing that text requires `IntelDispatchEnvelope` (display strip) to
-  keep matching, which the tests enforce.
+  changing that text requires `DispatchEnvelope`'s watcher parser (display
+  strip, formerly `IntelDispatchEnvelope`) to keep matching, which the tests
+  enforce.
 - **Do not memoize `ModelProfileRegistry.profile(for:)`** while
   `AutoThinkingProfile` depends on runtime capability data.
 - New per-user settings live in `UserDefaults`: `RecentWorkingFolders`,
@@ -2133,6 +2134,11 @@ calling a sync complete.
   `notify`. It becomes the delegate at launch but **asks for notification
   permission only when self-scheduling is switched on or an agent notifies**
   (upstream asks at launch). Clicking opens the agent in Agents.
+- **2026-10-06:** wakes now use upstream's `makeDispatchRequest`: a fresh
+  chat per wake with a timestamped title and upstream's preamble (scheduled
+  by / previous run / instructions), also for Next Run › Run now. The
+  preamble feeds the "Self-scheduled" badge row
+  ([`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md)).
 
 ### Agent description backfill, opt-in (`W-description-backfill`) — 2026-09-29
 
@@ -2595,3 +2601,12 @@ above 59.
   upstream artifacts (share_artifact, generated media) can build on it.
 - **`SCScreenshotManager` is macOS 14+** and `SCContentFilter.includeMenuBar`
   is 14.2+: Ventura captures with `CGDisplayCreateImage`.
+
+### Chat UX batch, part 6: dispatch rows (`W-chat-ux`) — 2026-10-06
+
+- Upstream `DispatchEnvelope` / `NativeDispatchBadgeRow` for self-scheduled
+  and watcher runs; self-scheduled wakes adopt upstream's preamble and fresh
+  sessions. Details and staging: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
+- `SymbolImageCache` replaced with upstream's (adds `pointSize`/`weight`
+  and `rotatedDownChevron`); ported AppKit views no longer need symbol
+  workarounds.

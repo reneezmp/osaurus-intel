@@ -788,7 +788,8 @@ final class ChatSession: ObservableObject {
                     from: turns,
                     streamingTurnId: streamingTurnId,
                     agentName: displayName,
-                    thinkingEnabled: thinkingEnabledForCurrentModel
+                    thinkingEnabled: thinkingEnabledForCurrentModel,
+                    sessionSource: source
                 )
             )
         )
@@ -4661,8 +4662,8 @@ extension ChatView {
         var markers: [ChatMinimap.Marker] = []
         markers.reserveCapacity(8)
         for block in blocks {
-            if case let .userMessage(text, _) = block.kind {
-                markers.append(ChatMinimap.Marker(id: block.turnId, preview: text))
+            if case let .userMessage(text, _, envelope) = block.kind {
+                markers.append(ChatMinimap.Marker(id: block.turnId, preview: envelope?.displayText ?? text))
             }
         }
         return markers

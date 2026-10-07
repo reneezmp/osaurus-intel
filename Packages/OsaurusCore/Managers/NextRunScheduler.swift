@@ -199,13 +199,7 @@ public final class NextRunScheduler {
     }
 
     private func dispatch(entry: NextRunEntry) async {
-        let request = DispatchRequest(
-            prompt: entry.instructions,
-            agentId: entry.agentId,
-            title: "Self-scheduled run",
-            source: .selfSchedule,
-            externalSessionKey: entry.agentId.uuidString
-        )
+        let request = await Self.makeDispatchRequest(for: entry)
         guard let handle = await TaskDispatcher.shared.dispatch(request) else {
             print(
                 "[NextRunScheduler] dispatch failed for agent \(entry.agentId.uuidString.prefix(8))"
@@ -218,6 +212,106 @@ public final class NextRunScheduler {
         // existing run-hook in Phase 1.
         Task.detached {
             _ = await TaskDispatcher.shared.awaitCompletion(handle)
+        }
+    }
+
+    // MARK: - Dispatch request composition (upstream)
+    //
+    // Every self-scheduled wake runs in a FRESH chat session
+    // (`externalSessionKey: nil`, so `BackgroundTaskManager` never
+    // reattaches to a prior `.selfSchedule` session). Continuity across
+    // wakes is the agent's job via `schedule_next_run` instructions and its
+    // agent DB — accreting every run into one shared chat grew the context
+    // window without bound. Because the fresh chat has no prior turns, the
+    // prompt carries a preamble explaining why the run exists. Shared with
+    // `NextRunPanelView.runNow` so manual and automatic wakes match.
+    // (Intel: no `loadIntent`, which only matters for local models.)
+
+    /// Build the dispatch request for a wake, including the previous-run
+    /// pointer looked up from `agent_runs`.
+    public static func makeDispatchRequest(for entry: NextRunEntry) async -> DispatchRequest {
+        let previousRun = await latestCompletedRun(for: entry.agentId)
+        return DispatchRequest(
+            prompt: composeDispatchPrompt(entry: entry, previousRun: previousRun),
+            agentId: entry.agentId,
+            title: sessionTitle(for: entry),
+            source: .selfSchedule,
+            externalSessionKey: nil
+        )
+    }
+
+    /// Most recent `agent_runs` row that reached a terminal state, used as
+    /// the previous-run pointer in the fresh-chat preamble.
+    public static func latestCompletedRun(for agentId: UUID) async -> AgentRunRecord? {
+        await Task.detached(priority: .utility) { () -> AgentRunRecord? in
+            do {
+                try SchedulerDatabase.shared.open()
+                let recent = try SchedulerDatabase.shared.runs(agentId: agentId, limit: 8)
+                return recent.first { $0.endedAt != nil }
+            } catch {
+                return nil
+            }
+        }.value
+    }
+
+    /// Fixed fragments of the self-scheduled dispatch prompt. Shared with
+    /// `DispatchEnvelope`, which strips them for display, so the producer
+    /// and the parser can never drift apart.
+    nonisolated public static let selfScheduledRunPrefix = "[Self-scheduled run] "
+    nonisolated public static let selfScheduledRunIntro =
+        selfScheduledRunPrefix
+        + "This chat was started automatically for a "
+        + "scheduled wake. It is a fresh session with no prior "
+        + "conversation context."
+    nonisolated public static let scheduledByLinePrefix = "Scheduled by: "
+    nonisolated public static let previousRunLinePrefix = "Your previous run "
+    nonisolated public static let instructionsHeader = "Instructions for this run:"
+
+    /// Prompt preamble + verbatim instructions for a self-scheduled wake.
+    public static func composeDispatchPrompt(
+        entry: NextRunEntry,
+        previousRun: AgentRunRecord?
+    ) -> String {
+        var lines: [String] = [
+            selfScheduledRunIntro,
+            scheduledByLinePrefix + "\(entry.scheduledBy.rawValue), "
+                + "for \(promptTimestamp(entry.scheduledAt)).",
+        ]
+        if let previousRun, let ended = previousRun.endedAt {
+            lines.append(
+                previousRunLinePrefix + "\(statusPhrase(previousRun.status)) at "
+                    + "\(promptTimestamp(ended)). Consult your agent database "
+                    + "or notes for any state you saved."
+            )
+        }
+        lines.append("")
+        lines.append(instructionsHeader)
+        lines.append(entry.instructions)
+        return lines.joined(separator: "\n")
+    }
+
+    /// Session title for a self-scheduled wake, e.g.
+    /// "Self-scheduled run — Jul 4, 2:42 PM".
+    public static func sessionTitle(for entry: NextRunEntry) -> String {
+        let formatter = DateFormatter()
+        formatter.dateFormat = "MMM d, h:mm a"
+        return "Self-scheduled run — \(formatter.string(from: entry.scheduledAt))"
+    }
+
+    private static func promptTimestamp(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private static func statusPhrase(_ status: AgentRunStatus) -> String {
+        switch status {
+        case .success: return "completed"
+        case .error: return "failed"
+        case .cancelled: return "was cancelled"
+        case .clamped: return "was clamped"
+        case .running: return "was still running"
         }
     }
 

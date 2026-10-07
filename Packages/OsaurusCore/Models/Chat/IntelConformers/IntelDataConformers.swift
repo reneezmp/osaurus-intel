@@ -270,7 +270,10 @@ enum ContentBlockKind: Equatable {
     /// children, whose own ids keep per-item expansion working. Built only by
     /// `ContentBlock.rollupActivityBlocks`, never cached.
     case activityGroup(children: [ContentBlock])
-    case userMessage(text: String, attachments: [Attachment])
+    /// `envelope` is set when the stored text is a machine-generated
+    /// dispatch envelope (self-scheduled or watcher run): the cell renders
+    /// its human-authored text under a badge row (upstream).
+    case userMessage(text: String, attachments: [Attachment], envelope: DispatchEnvelope? = nil)
     case sharedArtifact(artifact: SharedArtifact)
     case pendingToolCall(toolName: String, argPreview: String?, argSize: Int)
     case preflightCapabilities(items: [PreflightCapabilityItem])
@@ -309,8 +312,8 @@ enum ContentBlockKind: Equatable {
             return lIdx == rIdx && lText == rText && lStream == rStream
         case let (.activityGroup(lChildren), .activityGroup(rChildren)):
             return lChildren == rChildren
-        case let (.userMessage(lText, lAttach), .userMessage(rText, rAttach)):
-            return lText == rText && lAttach.count == rAttach.count
+        case let (.userMessage(lText, lAttach, lEnv), .userMessage(rText, rAttach, rEnv)):
+            return lText == rText && lAttach.count == rAttach.count && lEnv == rEnv
         case let (.sharedArtifact(lArt), .sharedArtifact(rArt)):
             return lArt == rArt
         case let (.pendingToolCall(lName, _, lSize), .pendingToolCall(rName, _, rSize)):
@@ -1800,8 +1803,9 @@ struct ServiceToolInvocations: Error, Sendable {
 final class BlockMemoizer: @unchecked Sendable {
     init() {}
     static let shared = BlockMemoizer()
-    func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false) -> [ContentBlock] {
-        let blocks = unrolledBlocks(from: turns, streamingTurnId: streamingTurnId, agentName: agentName)
+    func blocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "", version: Int = 0, thinkingEnabled: Bool = false, sessionSource: SessionSource = .chat) -> [ContentBlock] {
+        let blocks = unrolledBlocks(
+            from: turns, streamingTurnId: streamingTurnId, agentName: agentName, sessionSource: sessionSource)
         // Display-time roll-up, gated by the Conversation toggle (upstream
         // applies it at the same display chokepoint, `limited`).
         return ContentBlock.ActivityRollupSetting.isEnabled ? ContentBlock.rollupActivityBlocks(blocks) : blocks
@@ -1809,7 +1813,10 @@ final class BlockMemoizer: @unchecked Sendable {
 
     /// Per-turn blocks before the activity roll-up (upstream
     /// `ContentBlock.generateBlocks`).
-    func unrolledBlocks(from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "") -> [ContentBlock] {
+    func unrolledBlocks(
+        from turns: [ChatTurn], streamingTurnId: UUID? = nil, agentName: String = "",
+        sessionSource: SessionSource = .chat
+    ) -> [ContentBlock] {
         var blocks: [ContentBlock] = []
         // Track which "side" (user vs assistant) the previous rendered turn
         // belonged to, so a header is emitted only when the side flips.
@@ -1864,11 +1871,14 @@ final class BlockMemoizer: @unchecked Sendable {
                 blocks.append(ContentBlock(
                     id: "user-\(turn.id.uuidString)",
                     turnId: turn.id,
-                    // Watcher runs render their instructions, not the framing
-                    // (upstream 13cc78ae3); the stored turn is unchanged.
+                    // Self-scheduled and watcher runs render their
+                    // instructions under a badge row, not the framing
+                    // (upstream DispatchEnvelope); the stored turn is
+                    // unchanged.
                     kind: .userMessage(
-                        text: IntelDispatchEnvelope.displayText(for: turn.content),
-                        attachments: turn.attachments
+                        text: turn.content,
+                        attachments: turn.attachments,
+                        envelope: DispatchEnvelope.parse(turn.content, sessionSource: sessionSource)
                     )
                 ))
             }

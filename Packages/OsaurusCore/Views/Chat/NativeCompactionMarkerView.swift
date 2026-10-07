@@ -11,9 +11,8 @@
 //  model sees, using the same expandedIds/onToggle contract as
 //  NativeThinkingView so height changes stay local to the coordinator.
 //
-//  Intel: Intel's `SymbolImageCache` has no sized variants and there is no
-//  `ExpandFade`, so sized symbols come from `symbol(_:)` below and the
-//  expand fade is a plain alpha animation.
+//  Intel: no `ExpandFade` yet, so the expand fade is a plain alpha
+//  animation; the rest is upstream's.
 //
 
 import AppKit
@@ -179,7 +178,9 @@ final class NativeCompactionMarkerView: NSView {
         addSubview(pillContainer)
 
         iconView.translatesAutoresizingMaskIntoConstraints = false
-        iconView.image = Self.symbol("arrow.down.right.and.arrow.up.left")
+        iconView.image = SymbolImageCache.image(
+            "arrow.down.right.and.arrow.up.left", accessibilityDescription: nil,
+            pointSize: 8, weight: .semibold)
         iconView.imageScaling = .scaleProportionallyDown
         pillContainer.addSubview(iconView)
 
@@ -191,7 +192,8 @@ final class NativeCompactionMarkerView: NSView {
         pillContainer.addSubview(titleLabel)
 
         chevronView.translatesAutoresizingMaskIntoConstraints = false
-        chevronView.image = Self.symbol("chevron.right")
+        chevronView.image = SymbolImageCache.image(
+            "chevron.right", accessibilityDescription: nil, pointSize: 8, weight: .semibold)
         chevronView.imageScaling = .scaleProportionallyDown
         pillContainer.addSubview(chevronView)
 
@@ -264,16 +266,12 @@ final class NativeCompactionMarkerView: NSView {
     private func updateChevron(expanded: Bool) {
         chevronView.image =
             expanded
-            ? Self.symbol("chevron.down")
-            : Self.symbol("chevron.right")
+            ? SymbolImageCache.rotatedDownChevron(pointSize: 8, weight: .semibold)
+            : SymbolImageCache.image(
+                "chevron.right", accessibilityDescription: nil, pointSize: 8, weight: .semibold)
     }
 
     @objc private func headerTapped() { onToggle?() }
-
-    private static func symbol(_ name: String) -> NSImage? {
-        SymbolImageCache.image(name)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 8, weight: .semibold))
-    }
 
     static func formatTokens(_ tokens: Int) -> String {
         if tokens < 1000 { return "\(tokens)" }

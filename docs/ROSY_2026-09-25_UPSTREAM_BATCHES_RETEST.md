@@ -1322,6 +1322,14 @@ Manual: [`CHAT_UX_INTEL.md`](CHAT_UX_INTEL.md).
 - [ ] **(paid)** Ask for "the complexity as $$O(n \log n)$$ and then just
       $$O(n)$$": both render as math, not with `$$` showing. Prose that
       mentions prices ($5 and $10) stays plain text.
+- [ ] **(paid)** Agent with self-scheduling on: Next Run › Run now. A new
+      chat "Self-scheduled run — <date>" opens; the first message shows the
+      instructions only, with "Self-scheduled" and a time chip above it
+      (hover: who scheduled it). Hovering the message offers Copy and Delete
+      but no Edit. A second wake makes another new chat.
+- [ ] **(paid)** A watcher run's chat: the first message shows only the
+      watcher's instructions with a "Watcher run" chip (hover: First pass /
+      Follow-up pass); no Edit button.
 - [ ] Delete a response that is above the divider: the confirmation adds
       "This response is part of a conversation summary…". After deleting,
       the divider disappears (the summary no longer applies).

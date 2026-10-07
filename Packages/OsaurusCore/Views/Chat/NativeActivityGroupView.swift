@@ -19,8 +19,7 @@
 //  - Intel's NativeThinkingView / NativeToolCallGroupView take no duration,
 //    session redactions or streaming flag.
 //  - Step glyphs come from `ToolCategory` only (no subagent registry icons).
-//  - Sized symbols via `symbol(_:pointSize:)`; plain alpha fade instead of
-//    `ExpandFade`.
+//  - Plain alpha fade instead of `ExpandFade`.
 //
 
 import AppKit
@@ -184,11 +183,11 @@ final class NativeActivityGroupView: NSView {
         let allStepsExpanded =
             !toggleIds.isEmpty && toggleIds.allSatisfy { expandedIds.contains($0) }
         expandAllButton.title = allStepsExpanded ? L("Collapse All") : L("Expand All")
-        expandAllButton.image = Self.symbol(
+        expandAllButton.image = SymbolImageCache.image(
             allStepsExpanded
                 ? "arrow.down.right.and.arrow.up.left"
                 : "arrow.up.left.and.arrow.down.right",
-            pointSize: 10)
+            accessibilityDescription: nil, pointSize: 10, weight: .semibold)
         expandAllButton.toolTip =
             allStepsExpanded ? L("Collapse all steps") : L("Expand all steps")
         expandAllButton.setAccessibilityLabel(expandAllButton.toolTip ?? "")
@@ -435,7 +434,9 @@ final class NativeActivityGroupView: NSView {
             circle.widthAnchor.constraint(equalToConstant: Self.chipSize).isActive = true
             let icon = NSImageView()
             icon.translatesAutoresizingMaskIntoConstraints = false
-            icon.image = Self.symbol(glyph, pointSize: 9)
+            icon.image = SymbolImageCache.image(
+            glyph,
+            accessibilityDescription: nil, pointSize: 9, weight: .semibold)
             icon.contentTintColor = color
             icon.imageScaling = .scaleProportionallyDown
             circle.addSubview(icon)
@@ -529,7 +530,9 @@ final class NativeActivityGroupView: NSView {
         stepCountLabel.drawsBackground = false
 
         expandAllButton.translatesAutoresizingMaskIntoConstraints = false
-        expandAllButton.image = Self.symbol("arrow.up.left.and.arrow.down.right", pointSize: 10)
+        expandAllButton.image = SymbolImageCache.image(
+            "arrow.up.left.and.arrow.down.right",
+            accessibilityDescription: nil, pointSize: 10, weight: .semibold)
         expandAllButton.title = L("Expand All")
         expandAllButton.font = NSFont.systemFont(ofSize: 11, weight: .medium)
         expandAllButton.imagePosition = .imageLeading
@@ -545,7 +548,9 @@ final class NativeActivityGroupView: NSView {
 
         chevronView.translatesAutoresizingMaskIntoConstraints = false
         chevronView.wantsLayer = true
-        chevronView.image = Self.symbol("chevron.right", pointSize: 10)
+        chevronView.image = SymbolImageCache.image(
+            "chevron.right",
+            accessibilityDescription: nil, pointSize: 10, weight: .semibold)
         chevronView.contentTintColor = .tertiaryLabelColor
         chevronView.imageScaling = .scaleProportionallyDown
         addSubview(chevronView)
@@ -689,14 +694,11 @@ final class NativeActivityGroupView: NSView {
     private func updateChevron(expanded: Bool, animated: Bool) {
         chevronView.image =
             expanded
-            ? Self.symbol("chevron.down", pointSize: 10)
-            : Self.symbol("chevron.right", pointSize: 10)
+            ? SymbolImageCache.rotatedDownChevron(pointSize: 10, weight: .semibold)
+            : SymbolImageCache.image(
+            "chevron.right",
+            accessibilityDescription: nil, pointSize: 10, weight: .semibold)
     }
 
     @objc private func headerTapped() { onToggle?() }
-
-    private static func symbol(_ name: String, pointSize: CGFloat) -> NSImage? {
-        SymbolImageCache.image(name)?
-            .withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: pointSize, weight: .semibold))
-    }
 }

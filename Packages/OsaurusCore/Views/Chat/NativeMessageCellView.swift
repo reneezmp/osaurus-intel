@@ -185,8 +185,13 @@ final class NativeHeaderView: NSView {
         /// header is emitted only when the conversation side FLIPS, so it
         /// covers just the first turn of a run — it must not draw a second,
         /// partial copy of the same buttons. Label-only there.
-        showsActions: Bool = true
+        showsActions: Bool = true,
+        /// False for enveloped user turns (self-scheduled / watcher runs):
+        /// hand-editing the stored envelope would replace the dispatch
+        /// framing with free text (upstream).
+        allowsEdit: Bool = true
     ) {
+        self.allowsEdit = allowsEdit
         self.turnId = turnId
         self.isEditing = isEditing
         self.onCopy = onCopy
@@ -337,6 +342,8 @@ final class NativeHeaderView: NSView {
         }
     }
 
+    private var allowsEdit = true
+
     private func rebuildActionButtons(
         role: MessageRole, theme: any ThemeProtocol, onCancelEdit: (() -> Void)?,
         showsActions: Bool = true
@@ -356,9 +363,11 @@ final class NativeHeaderView: NSView {
             guard let self else { return }
             self.onCopy?(self.turnId)
         }
-        addBtn(icon: "pencil", help: L("Edit"), theme: theme, tint: nil) { [weak self] in
-            guard let self else { return }
-            self.onEdit?(self.turnId)
+        if allowsEdit {
+            addBtn(icon: "pencil", help: L("Edit"), theme: theme, tint: nil) { [weak self] in
+                guard let self else { return }
+                self.onEdit?(self.turnId)
+            }
         }
         addBtn(icon: "trash", help: L("Delete"), theme: theme, tint: nil) { [weak self] in
             guard let self else { return }
@@ -1398,6 +1407,10 @@ final class NativeMessageCellView: NSTableCellView {
 
     /// tracks inline edit vs read-only markdown so we rebuild when edit mode toggles (same block kind)
     private var userMessageInlineEditActive: Bool = false
+    /// Provenance chips above an enveloped user bubble, and the signature of
+    /// the badges they show (a change rebuilds the row; upstream).
+    private var userBadgeRow: NativeDispatchBadgeRow?
+    private var userEnvelopeSignature: String?
 
     /// last width from CellRenderingContext — used for systemLayoutSizeFitting when reporting row height
     private var lastContextWidth: CGFloat = 400
@@ -1507,11 +1520,12 @@ final class NativeMessageCellView: NSTableCellView {
         case let .activityGroup(children):
             configureAsActivityGroup(block: block, children: children, context: context, sameKind: sameKind)
 
-        case let .userMessage(text, attachments):
+        case let .userMessage(text, attachments, envelope):
             configureAsUserMessage(
                 block: block,
                 text: text,
                 attachments: attachments,
+                envelope: envelope,
                 context: context,
                 sameKind: sameKind
             )
@@ -1809,8 +1823,9 @@ final class NativeMessageCellView: NSTableCellView {
 
     private func configureAsUserMessage(
         block: ContentBlock,
-        text: String,
+        text rawText: String,
         attachments: [Attachment],
+        envelope: DispatchEnvelope?,
         context: CellRenderingContext,
         sameKind: Bool
     ) {
@@ -1818,6 +1833,12 @@ final class NativeMessageCellView: NSTableCellView {
         let documents = attachments.filter(\.isDocument)
         let theme = context.theme
         let innerWidth = max(context.width - 32, 100)
+
+        // An enveloped turn (self-scheduled / watcher run) paints the
+        // human-authored text under a provenance badge row (upstream).
+        let text = envelope?.displayText ?? rawText
+        let badges = envelope?.badges ?? []
+        let badgeSignature = badges.isEmpty ? nil : NativeDispatchBadgeRow.signature(for: badges)
 
         let wantsInlineEdit =
             context.editingTurnId == block.turnId
@@ -1845,21 +1866,43 @@ final class NativeMessageCellView: NSTableCellView {
 
         let needsUserMessageRebuild =
             !sameKind || userMessageContainer == nil || userMessageInlineEditActive != wantsInlineEdit
+            || userEnvelopeSignature != badgeSignature
 
         if needsUserMessageRebuild {
             removeAllContentViews()
 
-            // Compute attachment heights (needed for fittingSize measurement later).
-            let docGap: CGFloat = 6
-            let imgGap: CGFloat = 6
+            // Heights stacked above the bubble (needed for fittingSize
+            // measurement later): badge row, documents, images, and the 6pt
+            // gaps between them. Mirrors the estimator (upstream).
+            let innerGap: CGFloat = 6
             let outerTopGap: CGFloat = 8
             var attachH: CGFloat = 0
-            if !documents.isEmpty { attachH += 26 }
-            if !images.isEmpty { attachH += (documents.isEmpty ? 0 : imgGap) + 96 }
+            if !badges.isEmpty { attachH += NativeDispatchBadgeRow.rowHeight }
+            if !documents.isEmpty { attachH += (attachH > 0 ? innerGap : 0) + 26 }
+            if !images.isEmpty { attachH += (attachH > 0 ? innerGap : 0) + 96 }
             userAttachmentsHeight = attachH
+            userEnvelopeSignature = badgeSignature
 
-            // Attachments sit at cell level (right-aligned), above the bubble.
+            // Provenance row, attachments, then the bubble — all right-aligned
+            // at cell level. `nextGap` is the outer top inset for the first
+            // element and the inner gap for every element after it.
             var cellTopAnchor = topAnchor
+            var nextGap = outerTopGap
+
+            if !badges.isEmpty {
+                let row = NativeDispatchBadgeRow()
+                addSubview(row)
+                NSLayoutConstraint.activate([
+                    row.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
+                    row.topAnchor.constraint(equalTo: cellTopAnchor, constant: nextGap),
+                    row.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
+                ])
+                userBadgeRow = row
+                cellTopAnchor = row.bottomAnchor
+                nextGap = innerGap
+            } else {
+                userBadgeRow = nil
+            }
 
             if !documents.isEmpty {
                 let stack = NSStackView()
@@ -1869,12 +1912,13 @@ final class NativeMessageCellView: NSTableCellView {
                 addSubview(stack)
                 NSLayoutConstraint.activate([
                     stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-                    stack.topAnchor.constraint(equalTo: cellTopAnchor, constant: outerTopGap),
+                    stack.topAnchor.constraint(equalTo: cellTopAnchor, constant: nextGap),
                     stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
                 ])
                 stack.alignment = .centerY
                 userDocumentStack = stack
                 cellTopAnchor = stack.bottomAnchor
+                nextGap = innerGap
             } else {
                 userDocumentStack = nil
             }
@@ -1887,16 +1931,14 @@ final class NativeMessageCellView: NSTableCellView {
                 addSubview(stack)
                 NSLayoutConstraint.activate([
                     stack.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-                    stack.topAnchor.constraint(
-                        equalTo: cellTopAnchor,
-                        constant: documents.isEmpty ? outerTopGap : docGap
-                    ),
+                    stack.topAnchor.constraint(equalTo: cellTopAnchor, constant: nextGap),
                     stack.heightAnchor.constraint(equalToConstant: 96),
                     stack.leadingAnchor.constraint(greaterThanOrEqualTo: leadingAnchor, constant: 16),
                 ])
                 stack.alignment = .top
                 userImageStack = stack
                 cellTopAnchor = stack.bottomAnchor
+                nextGap = innerGap
             } else {
                 userImageStack = nil
             }
@@ -1908,11 +1950,10 @@ final class NativeMessageCellView: NSTableCellView {
                 container.wantsLayer = true
                 container.layer?.masksToBounds = false
                 addSubview(container)
-                let hasAbove = !documents.isEmpty || !images.isEmpty
                 let wc = container.widthAnchor.constraint(equalToConstant: bubbleWidth)
                 NSLayoutConstraint.activate([
                     container.trailingAnchor.constraint(equalTo: trailingAnchor, constant: -16),
-                    container.topAnchor.constraint(equalTo: cellTopAnchor, constant: hasAbove ? imgGap : outerTopGap),
+                    container.topAnchor.constraint(equalTo: cellTopAnchor, constant: nextGap),
                     wc,
                 ])
                 userBubbleWidthConstraint = wc
@@ -1959,7 +2000,7 @@ final class NativeMessageCellView: NSTableCellView {
 
             // Hover action buttons — positioned to the left of the bubble (or attachments).
             // Anchor vertically to the bubble if it exists, otherwise to the first attachment stack.
-            let anchorView = userMessageContainer ?? userImageStack ?? userDocumentStack
+            let anchorView = userMessageContainer ?? userImageStack ?? userDocumentStack ?? userBadgeRow
             if let anchorView {
                 let hv = NativeHeaderView()
                 hv.translatesAutoresizingMaskIntoConstraints = false
@@ -2079,7 +2120,10 @@ final class NativeMessageCellView: NSTableCellView {
             }
         }
 
-        // Configure hover action buttons (no name label for user messages)
+        userBadgeRow?.configure(badges: badges, theme: theme)
+
+        // Configure hover action buttons (no name label for user messages).
+        // An enveloped turn hides Edit (upstream).
         nativeHeaderView?.configure(
             turnId: block.turnId,
             role: .user,
@@ -2093,7 +2137,8 @@ final class NativeMessageCellView: NSTableCellView {
             onRegenerate: context.onRegenerate,
             onEdit: context.onEdit,
             onDelete: context.onDelete,
-            onCancelEdit: context.onCancelEdit
+            onCancelEdit: context.onCancelEdit,
+            allowsEdit: envelope == nil
         )
 
         // push fitted height even when NativeMarkdownView.configure returns early (no onHeightChanged),
@@ -2574,6 +2619,8 @@ final class NativeMessageCellView: NSTableCellView {
         // subviews on the next reuse.
         userImageStack?.removeFromSuperview(); userImageStack = nil
         userDocumentStack?.removeFromSuperview(); userDocumentStack = nil
+        userBadgeRow?.removeFromSuperview(); userBadgeRow = nil
+        userEnvelopeSignature = nil
         userBubbleWidthConstraint = nil
         userAttachmentsHeight = 0
         userMessageInlineEditActive = false
@@ -2840,16 +2887,23 @@ enum NativeCellHeightEstimator {
             let lines = max(1, (text.count + chars - 1) / chars)
             return CGFloat(lines) * 22 + 24
 
-        case let .userMessage(text, attachments):
+        case let .userMessage(rawText, attachments, envelope):
+            // Enveloped turns paint the human-authored text under a badge row.
+            let text = envelope?.displayText ?? rawText
+            let hasBadges = !(envelope?.badges.isEmpty ?? true)
             var h: CGFloat = 8  // outerTopGap
             let innerW = max(width - 32, 100)
 
-            // Attachments above bubble (fixed heights)
+            // Stacked above the bubble (fixed heights, 6pt gaps), mirroring
+            // `configureAsUserMessage`: badge row, documents, images.
             let docCount = attachments.filter(\.isDocument).count
             let imageCount = attachments.filter(\.isImage).count
-            if docCount > 0 { h += 26 }
-            if imageCount > 0 { h += (docCount > 0 ? 6 : 0) + 96 }
-            if (docCount > 0 || imageCount > 0) && !text.isEmpty { h += 6 }  // gap to bubble
+            var above: CGFloat = 0
+            if hasBadges { above += NativeDispatchBadgeRow.rowHeight }
+            if docCount > 0 { above += (above > 0 ? 6 : 0) + 26 }
+            if imageCount > 0 { above += (above > 0 ? 6 : 0) + 96 }
+            h += above
+            if above > 0 && !text.isEmpty { h += 6 }  // gap to bubble
 
             // Text bubble (10pt top + text + 10pt bottom)
             if !text.isEmpty {

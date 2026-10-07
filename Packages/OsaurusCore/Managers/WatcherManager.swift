@@ -688,7 +688,7 @@ public final class WatcherManager: ObservableObject {
         return prompt
     }
 
-    // Fixed framing fragments, shared with `IntelDispatchEnvelope`, which hides
+    // Fixed framing fragments, shared with `DispatchEnvelope`, which hides
     // them for display so the producer and the parser cannot drift apart.
     // Byte-for-byte the historical text.
     nonisolated static let firstRunFraming =

@@ -398,14 +398,11 @@ public struct NextRunPanelView: View {
         // then dispatch with `selfSchedule` so the audit trail still shows
         // the run was triggered by the next-run plumbing.
         try? LocalAgentBridge.shared.cancelNextRun(agentId: agentId)
-        let request = DispatchRequest(
-            prompt: entry.instructions,
-            agentId: agentId,
-            title: "Self-scheduled run",
-            source: .selfSchedule,
-            externalSessionKey: agentId.uuidString
-        )
         Task {
+            // Same builder as the automatic path (upstream): fresh chat per
+            // run, preamble prompt with the previous-run pointer,
+            // timestamped session title.
+            let request = await NextRunScheduler.makeDispatchRequest(for: entry)
             _ = await TaskDispatcher.shared.dispatch(request)
             await reload()
             onRunNow()

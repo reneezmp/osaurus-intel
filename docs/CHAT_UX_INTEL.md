@@ -84,9 +84,7 @@ what Intel adapted; everything else is upstream verbatim.
   the messages above; the tooltip names the model. It disappears on its own
   when an edit, regeneration or deletion retires the summary.
   - Files: `Views/Chat/NativeCompactionMarkerView.swift` (upstream; Intel
-    builds its sized symbols itself and fades with a plain alpha animation,
-    since Intel's `SymbolImageCache` has no sized variants and no
-    `ExpandFade`).
+    fades with a plain alpha animation, as it has no `ExpandFade`).
   - `ContentBlockKind.compactionMarker` + `ContentBlock.compactionMarker`
     (id `compaction-<summary id>`), inserted at display time by
     `ChatSession.insertCompactionMarkerIfNeeded`, never cached.
@@ -166,8 +164,7 @@ what Intel adapted; everything else is upstream verbatim.
   - Step glyphs come from `ToolCategory` (no subagent registry).
   - Intel's thinking id is `thinking-<turn>` (upstream `think-<turn>-<n>`),
     via `ContentBlock.thinkingBlockId(turnId:)`.
-  - Sized symbols and a plain alpha fade replace upstream's
-    `SymbolImageCache` sizes and `ExpandFade`.
+  - A plain alpha fade replaces upstream's `ExpandFade`.
 - Tests: `IntelActivityRollupTests` in `IntelChatUXTests.swift` (grouping
   rules, loops with one stats row, the switch and its default, streaming
   expansion, reasoning-only seeding).
@@ -256,6 +253,41 @@ what Intel adapted; everything else is upstream verbatim.
 - Tests: upstream `Tests/Views/InlineMathScannerTests.swift` replaces
   Intel's older copy at `Tests/Utils/`.
 
+## Dispatch rows (provenance badges on background-run messages)
+
+- A user turn written by a background run now shows the human-authored
+  text, with a right-aligned row of chips above the bubble:
+  - **Self-scheduled** (tooltip: who scheduled it and how the previous run
+    ended) and a clock chip with the scheduled time;
+  - **Watcher run** (tooltip: first or follow-up pass).
+  Edit is hidden on such turns: editing would replace the dispatch framing
+  with free text. The stored turn and the model request are unchanged.
+- Files: `Models/Chat/DispatchEnvelope.swift` (upstream's parser and badge
+  model, trimmed to the kinds Intel produces) and
+  `Views/Chat/NativeDispatchBadgeRow.swift` (verbatim). `IntelDispatchEnvelope`
+  is gone; its watcher strip is now `DispatchEnvelope`'s watcher kind.
+- `ContentBlockKind.userMessage` gained upstream's `envelope`; the block
+  builder takes the session's `sessionSource` (watcher framing is only
+  parsed in `.watcher` chats, as upstream). The cell, height estimate and
+  minimap preview use `envelope.displayText`.
+- **Self-scheduled runs follow upstream now** (`NextRunScheduler`):
+  - each wake starts a fresh chat titled "Self-scheduled run — <date>";
+  - the prompt opens with upstream's preamble (fresh session, who scheduled
+    it and when, how the previous run ended, then the instructions);
+  - Next Run › Run now uses the same builder (`makeDispatchRequest`).
+  Before, Intel sent the bare instructions.
+- **Staged:** channel messages (`W-channels`), delegated tasks (upstream's
+  `AgentDelegationDispatcher` contract; Intel's Orchestrator delegation is a
+  one-shot without a visible delegate chat), the folder-unreadable preamble,
+  and the richer watcher badges (folder and changed files), which need
+  upstream's newer watcher prompt. `AgentDispatchTarget` (shared workspace
+  agents as run targets) belongs to `W-workspaces-identity-mobile`.
+- `SymbolImageCache` is upstream's now (sized symbols, rotated chevron), so
+  the badge row, the roll-up and the compaction marker use it as upstream
+  does.
+- Tests: `Tests/Chat/DispatchEnvelopeTests.swift` (upstream's plain-text and
+  self-scheduled cases, Intel watcher framing, block wiring, fresh session).
+
 ## Not applicable on Intel
 
 - `Views/Chat/ChatPersistenceNotice.swift` watches the unsaved-session set of
@@ -279,8 +311,8 @@ they wait for the next session, in this suggested order:
 5. ~~Chat import guide~~ **done 2026-10-06** (post-onboarding prompt waits
    for onboarding).
 6. ~~Markdown document view~~ **done 2026-10-06**.
-7. Activity / dispatch rows (`DispatchEnvelope`, `AgentDispatchTarget`,
-   `NativeDispatchBadgeRow`).
+7. ~~Dispatch rows~~ **done 2026-10-06** for self-scheduled and watcher
+   runs; the other kinds wait for their producers.
 8. Context attribution (`ContextAttribution`).
 9. `AgentDetailChrome` and `BuiltInAgentGuard`.
 10. Slash-command registry parity.
