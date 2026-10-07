@@ -204,6 +204,18 @@ using at the time. Found by the postflight `find -newer` check.
 - `memory/memory.sqlite` was modified at 10:12:39, during a run; whether by
   a test or the upstream app's checkpoint is unknown.
 
+**Recovery and cleanup (2026-10-07):** Renée re-saved the three agents
+from the running upstream app; all three are back to the full 25 settings
+keys with `dbEnabled` restored. Checked against upstream's code first:
+`config/tool-policies.json` and `knowledge/agent-grants.json` are Intel-only
+(upstream never reads them) and `config/activity-log.json` matched
+upstream's default, so those three were deleted along with the marker, the
+test chat and the four empty test agent folders. `providers/search.json` was
+kept: it is Renée's real upstream search setup (Kagi disabled, premium
+search on), loaded and saved back by a test process without losing a field
+(same stored properties as upstream). `providers/search-definitions/` is
+empty; whether it held custom definitions before is unknown.
+
 **Rules added:** the gate above (no one-line `export`), and the keychain
 flag. **Code guards (2026-10-07):** `OsaurusPaths.root()` now stops a test
 process (`fatalError`) that has no `overrideRoot` and an empty

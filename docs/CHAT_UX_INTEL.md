@@ -303,12 +303,15 @@ what Intel adapted; everything else is upstream verbatim.
   - `NextRunScheduler.dispatch` (skips and records a cancelled run).
   The schedule and watcher editors already offer only custom agents, so
   this stops records made another way (or `nil` agents).
-- **Pending decision — plugins:** Intel's plugin bridge
-  (`IntelPluginExecution`) has no per-call active agent and runs every
-  plugin dispatch as the Default agent, so plugin-sourced dispatch is
-  exempt. Upstream refuses it (`PluginHostAPI` uses the active agent).
-  Options: keep the exemption, or refuse plugin dispatch until a plugin
-  can name a custom agent.
+- **Plugins (decided 2026-10-07, follow upstream):** a plugin's `dispatch`
+  runs as the agent of the chat that called the plugin tool and is refused
+  (`built_in_agent_not_exposable`, or `missing_agent_context` outside a chat
+  call) for the Default agent, as upstream's `PluginHostAPI.planDispatch`.
+  `IntelPluginTool.execute` captures `ChatExecutionContext.currentAgentId`
+  before its GCD hop and `IntelLoadedPlugin.invoke(agentId:)` stores it per
+  thread next to the plugin id. `BackgroundTaskManager.dispatchChat` no
+  longer exempts `.plugin`. A plugin used from a Default-agent chat can't
+  start background tasks; use it from a custom agent.
 - Intel's local API has no agent-run endpoints, so upstream's HTTP guard
   sites have no Intel counterpart yet.
 - Tests: upstream `Tests/Agent/BuiltInAgentGuardTests.swift` plus an Intel

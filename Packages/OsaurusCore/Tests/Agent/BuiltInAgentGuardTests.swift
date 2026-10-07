@@ -78,13 +78,15 @@ struct BuiltInAgentGuardTests {
 }
 
 /// Intel wiring: background dispatch refuses the Default agent (and an
-/// anonymous request) before any task is created.
+/// anonymous request) before any task is created, from every source.
 @MainActor
 struct IntelBuiltInAgentDispatchGuardTests {
     @Test
     func backgroundDispatchRefusesDefaultAndAnonymous() async {
         for agentId in [nil, Agent.defaultId] as [UUID?] {
-            for source in [SessionSource.schedule, .watcher, .selfSchedule] {
+            // `.plugin` too: Intel's former plugin exemption is gone
+            // (plugins dispatch as the calling chat's agent, as upstream).
+            for source in [SessionSource.schedule, .watcher, .selfSchedule, .plugin] {
                 let request = DispatchRequest(prompt: "x", agentId: agentId, source: source)
                 #expect(await BackgroundTaskManager.shared.dispatchChat(request) == nil)
             }

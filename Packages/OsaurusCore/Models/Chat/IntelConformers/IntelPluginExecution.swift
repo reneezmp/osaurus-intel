@@ -183,6 +183,14 @@ func intelCurrentPluginId() -> String {
     (Thread.current.threadDictionary[intelPluginThreadKey] as? String) ?? "_shared"
 }
 
+/// The agent of the chat that called the plugin, stashed the same way
+/// (upstream `PluginHostAPI.activeAgentId()`). Nil outside a chat tool call
+/// (config callbacks, catalog probes).
+let intelPluginAgentThreadKey = "osr.intel.currentAgentId"
+func intelCurrentPluginAgentId() -> UUID? {
+    Thread.current.threadDictionary[intelPluginAgentThreadKey] as? UUID
+}
+
 // --- Per-plugin SQLite (db_exec / db_query). Plaintext file per plugin. ------
 private let intelDbLock = NSLock()
 private nonisolated(unsafe) var intelDbHandles: [String: OpaquePointer] = [:]
@@ -345,14 +353,24 @@ private func intelDispatch(pluginId: String, requestJSON: String) -> String {
     let title = json["title"] as? String
     let folderPath = json["folder_path"] as? String
     let sessionId = json["session_id"] as? String
+    // Agent scope is host-enforced (upstream `PluginHostAPI.planDispatch`):
+    // the plugin runs work as the agent of the chat that called it, never a
+    // caller-supplied id, and never the built-in Default agent, which is
+    // reachable only from the in-app chat.
+    let activeAgent = intelCurrentPluginAgentId()
+    if let rejection = Agent.rejectBuiltInForExternalSurface(activeAgent, source: "plugin/planDispatch") {
+        return jsonStringSafe(["error": rejection.code, "message": rejection.message])
+    }
+    guard let resolvedAgent = activeAgent else {
+        return jsonStringSafe([
+            "error": "missing_agent_context",
+            "message": "Plugin dispatch requires an active chat agent context.",
+        ])
+    }
     return intelBlockingAsync {
-        // The dispatch gate requires plugin dispatches to name an agent
-        // (a nil agentId is refused). With no per-call active-agent context on
-        // Intel, run under the default agent — mirrors the real host's
-        // `activeAgent ?? Agent.defaultId`.
         let request = DispatchRequest(
             prompt: prompt,
-            agentId: Agent.defaultId,
+            agentId: resolvedAgent,
             title: title,
             folderPath: folderPath,
             showToast: true,
@@ -736,7 +754,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     /// Invoke a plugin tool. `type` is the invocation kind ("tool"), `id` is
     /// the tool id, `payload` is the tool's JSON arguments. Returns the
     /// plugin's JSON result string.
-    func invoke(type: String, id: String, payload: String) throws -> String {
+    func invoke(type: String, id: String, payload: String, agentId: UUID? = nil) throws -> String {
         try queue.sync {
             guard !isShutDown else {
                 throw NSError(domain: "IntelLoadedPlugin", code: 1,
@@ -750,7 +768,11 @@ final class IntelLoadedPlugin: @unchecked Sendable {
             // callbacks run synchronously on this thread inside invokeFn, so a
             // thread-local id is the cheapest correct scope.
             Thread.current.threadDictionary[intelPluginThreadKey] = pluginId
-            defer { Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey) }
+            if let agentId { Thread.current.threadDictionary[intelPluginAgentThreadKey] = agentId }
+            defer {
+                Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey)
+                Thread.current.threadDictionary.removeObject(forKey: intelPluginAgentThreadKey)
+            }
             let resPtr: UnsafePointer<CChar>? = type.withCString { t in
                 id.withCString { i in
                     payload.withCString { p in
@@ -994,10 +1016,13 @@ struct IntelPluginTool: OsaurusTool {
             )
         }
         let payload = argumentsJSON.isEmpty ? "{}" : argumentsJSON
+        // Task-locals don't cross the GCD hop: capture the calling chat's
+        // agent here so a plugin `dispatch` runs as it (upstream).
+        let agentId = ChatExecutionContext.currentAgentId
         return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
-                    cont.resume(returning: try handle.invoke(type: "tool", id: tid, payload: payload))
+                    cont.resume(returning: try handle.invoke(type: "tool", id: tid, payload: payload, agentId: agentId))
                 } catch {
                     cont.resume(returning: ToolEnvelope.failure(
                         kind: .executionError,
