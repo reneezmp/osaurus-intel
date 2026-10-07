@@ -1387,4 +1387,21 @@ Manual: [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md).
       reply covers just that page. A table in a PDF still reads row by row.
 - [ ] Search the folder for a value from that form: the hit names the PDF
       and page and shows the label beside the value.
+- [ ] Settings › Services: the directory has category chips and the new
+      connectors (Dropbox, QuickBooks, Microsoft 365, Harvey…). HubSpot
+      asks for a Client ID and Client Secret with numbered setup steps and
+      a redirect URI to copy; signing in works after registering it.
+- [ ] Connect any MCP server (e.g. one from the directory) and use one of
+      its tools: read-only tools run without asking, tools that can delete
+      data ask every time; a failing connector shows a plain-language
+      error with a Details toggle; a long tool call shows its progress
+      after the tool's title.
+- [ ] With the Router on, relaunch Osaurus Intel: if upstream has a live
+      announcement, a dialog appears with the yellow "From the upstream
+      Osaurus project, not Osaurus Intel" banner. Links open in the browser;
+      "Don't show upstream announcements" stops them for good (no dialog on
+      the next relaunch). With the Router off, no dialog ever.
+- [ ] In a custom agent's chat, use a plugin tool that starts a background
+      task: the task runs under that agent. From a Default-agent chat, the
+      same tool reports it can't start background work.
 

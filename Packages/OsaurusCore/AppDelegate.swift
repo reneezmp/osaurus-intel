@@ -231,6 +231,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         #endif
         // Free reconstructible caches under memory pressure (upstream).
         MemoryPressureResponder.shared.start()
+        startUpstreamAnnouncements()
 
         let serverStartupTask = Task { @MainActor in
             let config = ServerConfigurationStore.load() ?? .default
@@ -1027,5 +1028,133 @@ extension AppDelegate {
     static func isAddressInUse(_ error: Error) -> Bool {
         let desc = "\(error) \(error.localizedDescription)".lowercased()
         return desc.contains("address already in use") || desc.contains("eaddrinuse") || desc.contains("errno: 48")
+    }
+}
+
+// MARK: - Router Announcements Dialog (upstream #2982)
+
+extension AppDelegate {
+    /// Upstream's two natural triggers: ~2 s after launch, and foreground
+    /// activation (throttled by `AnnouncementsService` to once per 30 min).
+    /// Intel's AppDelegate has no `applicationDidBecomeActive`, so activation
+    /// is observed here.
+    @MainActor
+    func startUpstreamAnnouncements() {
+        Task { @MainActor [weak self] in
+            try? await Task.sleep(nanoseconds: 2_000_000_000)
+            await AnnouncementsService.shared.refreshIfDue(trigger: .launch)
+            self?.presentAnnouncementIfEligible()
+        }
+        NotificationCenter.default.addObserver(
+            forName: NSApplication.didBecomeActiveNotification, object: nil, queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                await AnnouncementsService.shared.refreshIfDue(trigger: .activation)
+                self?.presentAnnouncementIfEligible()
+            }
+        }
+    }
+
+    /// Present the first unseen router-served announcement when its own gates
+    /// allow it AND nothing critical is in progress (upstream). A blocked
+    /// attempt does not consume eligibility; the next launch or activation
+    /// rechecks. Returns why it deferred, or nil when it presented.
+    ///
+    /// Intel: the dialog says the announcement is upstream's (banner in
+    /// `AnnouncementDialogContent`), offers only `https` links, and adds
+    /// "Don't show upstream announcements". Upstream's deferrals for
+    /// telemetry consent, Computer Use prompts and in-chat blocking prompts
+    /// have no Intel counterpart.
+    @MainActor
+    @discardableResult
+    func presentAnnouncementIfEligible() -> String? {
+        let service = AnnouncementsService.shared
+        guard let announcement = service.eligibleAnnouncement else {
+            return service.isPresenting ? "already presenting" : "no eligible announcement (none live or all seen)"
+        }
+
+        guard !OnboardingService.shared.shouldShowOnboarding else { return "onboarding pending" }
+        guard NSApp.modalWindow == nil else { return "AppKit modal window up" }
+        guard !NSApp.windows.contains(where: { $0.attachedSheet != nil }) else { return "attached sheet up" }
+        guard !ThemedAlertCenter.shared.hasAnyActiveAlert else { return "another themed alert is active" }
+        guard !ChatLayoutTour.shared.isActive else { return "layout tour active" }
+        guard !ChatWindowManager.shared.isAnySessionStreaming else { return "a chat session is streaming" }
+        guard !BackgroundTaskManager.shared.backgroundTasks.values.contains(where: { $0.status.isActive })
+        else { return "background agent task active" }
+
+        // Host in the user's landing window so the dialog behaves like an app
+        // modal; a hidden chat window must not host it (upstream).
+        let scope: ThemedAlertScope
+        if let chatId = ChatWindowManager.shared.lastFocusedWindowId,
+            ChatWindowManager.shared.getNSWindow(id: chatId)?.isVisible == true
+        {
+            scope = .chat(chatId)
+        } else if managementWindow?.isVisible == true {
+            scope = .management
+        } else {
+            scope = .toastOverlay
+        }
+
+        // Seen is persisted at presentation time, so even a force-quit while
+        // the dialog is up can't make it reappear.
+        service.willPresent(announcement)
+        let slug = announcement.slug
+
+        let ctas = AnnouncementsService.intelCTAs(for: announcement)
+        let dismissButton = AlertButtonConfig.cancel(ctas.isEmpty ? L("Got it") : L("Close")) {
+            service.markSeen(slug)
+        }
+
+        // Primary-styled CTA first: the dialog accent-styles (and binds
+        // Return to) the first role-nil button.
+        let ordered = ctas.enumerated().sorted { lhs, rhs in
+            if lhs.element.isPrimary != rhs.element.isPrimary { return lhs.element.isPrimary }
+            return lhs.offset < rhs.offset
+        }
+        var buttons: [AlertButtonConfig] = [dismissButton]
+        var seenLabels: Set<String> = [dismissButton.title]
+        for (_, cta) in ordered {
+            guard let url = cta.resolvedURL else { continue }
+            var label = cta.label
+            while !seenLabels.insert(label).inserted { label += " " }
+            buttons.append(
+                .primary(label) {
+                    service.markSeen(slug)
+                    // `open` can block on LaunchServices while the browser
+                    // cold-launches; NSWorkspace is thread-safe (upstream).
+                    DispatchQueue.global(qos: .userInitiated).async {
+                        NSWorkspace.shared.open(url)
+                    }
+                })
+        }
+        buttons.append(
+            .destructive(L("Don't show upstream announcements")) {
+                service.markSeen(slug)
+                service.optOut()
+            })
+
+        let requestId = UUID()
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: announcement.title,
+                message: nil,
+                accessory: AnyView(
+                    AnnouncementDialogContent(
+                        body: announcement.body,
+                        imageURL: announcement.resolvedImageURL
+                    )
+                ),
+                buttons: buttons,
+                showsCloseButton: !ctas.isEmpty,
+                width: 420,
+                onDismiss: {
+                    service.didDismiss()
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
+        return nil
     }
 }

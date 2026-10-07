@@ -2656,8 +2656,10 @@ review starts after `66ea7ebc4`.
   (`W-channels`), the #2922 Seatbelt check (`W-tools-misc`). Also new:
   `W-router-billing`, file tool parity from #2791, the external-caller tool
   policy (`W-server-api`) and the `existsCached()` identity memo.
-- Decision needed: whether Intel shows upstream's Router announcements feed
-  (#2982), which may advertise Apple-Silicon-only features.
+- Decided and shipped: upstream's Router announcements (#2982), labelled as
+  upstream's with warnings and an opt-out
+  ([`ROUTER_ANNOUNCEMENTS_INTEL.md`](ROUTER_ANNOUNCEMENTS_INTEL.md)); plugin
+  dispatch follows upstream's built-in agent guard (`CHAT_UX_INTEL.md`).
 - **Incident:** nine test runs used a one-line `export` gate that left
   `OSAURUS_TEST_ROOT` empty and wrote the live `~/.osaurus`. Three real agents
   were rewritten without their upstream-only settings; Renée restored them

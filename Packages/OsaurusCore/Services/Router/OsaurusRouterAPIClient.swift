@@ -167,6 +167,27 @@ actor OsaurusRouterAPIClient {
         return try decoder.decode(T.self, from: data)
     }
 
+    /// `GET /announcements?app_version=…` — the live community announcements.
+    /// Unauthenticated (onboarding users have no wallet yet) and IP
+    /// rate-limited; a 429 surfaces as `.rateLimited(retryAfter:)` so the
+    /// caller can back off. `appVersion` lets operators bound an
+    /// announcement to a build range (Intel sends none; see
+    /// `AnnouncementsService`).
+    func announcements(appVersion: String?) async throws -> OsaurusRouterAnnouncementsResponse {
+        var queryItems: [URLQueryItem] = []
+        if let appVersion, !appVersion.isEmpty {
+            queryItems.append(URLQueryItem(name: "app_version", value: appVersion))
+        }
+        let url = try url(path: "/announcements", queryItems: queryItems)
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 10
+        request.setValue("application/json", forHTTPHeaderField: "Accept")
+        let (data, response) = try await perform(request)
+        try ensureOK(data: data, response: response)
+        return try decoder.decode(OsaurusRouterAnnouncementsResponse.self, from: data)
+    }
+
     private func perform(_ request: URLRequest, session overrideSession: URLSession? = nil) async throws -> (Data, URLResponse) {
         // Activity log: every signed control-plane call (account, credits,
         // workspaces, media, pairing) is cloud egress. Hosted search and
