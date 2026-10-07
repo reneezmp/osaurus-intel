@@ -60,6 +60,10 @@ struct RouterAccountUsageCenterView: View {
         .frame(minWidth: 760, minHeight: 580)
         .background(theme.primaryBackground)
         .task { await account.refreshAll() }
+        // A billed turn settled while the center is open (upstream #2982).
+        .onChange(of: account.usageRevision) { _ in
+            Task { await account.refreshUsage(reset: true) }
+        }
     }
 
     private func metric(_ title: String, _ value: String) -> some View {

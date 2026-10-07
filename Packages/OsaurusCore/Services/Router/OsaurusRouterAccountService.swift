@@ -19,25 +19,78 @@ final class OsaurusRouterAccountService: ObservableObject {
     @Published private(set) var isCreatingCheckout = false
     @Published var lastError: String?
 
+    /// Bumped (debounced) whenever a billed Router stream settled, so a usage
+    /// list that is on screen can refetch `/credits/usage` while hidden
+    /// surfaces fetch nothing. Replaces the old per-summary usage fetch,
+    /// which issued one signed request per tool round of an agent loop even
+    /// with no Credits UI open.
+    @Published private(set) var usageRevision = 0
+
     private let client: OsaurusRouterAPIClient
     // Retained for the lifetime of the singleton so balance refreshes when the
-    // user returns from Stripe Checkout or another app.
+    // user returns from Stripe Checkout.
     private var activationObserver: NSObjectProtocol?
     /// Set when a Checkout session is created; cleared once an observed balance
-    /// increase confirms it. Gates `balance_topup_succeeded` so it fires for a
-    /// real top-up rather than any incidental balance refresh.
-    private var awaitingTopUpConfirmation = false
+    /// increase confirms it (or after `maxTopUpConfirmationPolls` fruitless
+    /// activation polls — the tab was abandoned). Gates both the
+    /// activation-driven balance poll and `balance_topup_succeeded`, so the
+    /// Router is only asked on activation while a top-up is actually pending.
+    private(set) var awaitingTopUpConfirmation = false
+    private var topUpConfirmationPolls = 0
+    nonisolated static let maxTopUpConfirmationPolls = 10
 
-    init(client: OsaurusRouterAPIClient = .shared) {
+    /// Last successful `/credits/balance` fetch (monotonic clock, so sleep
+    /// and wall-clock corrections cannot make an old value look fresh) and
+    /// the in-flight refresh every concurrent caller shares.
+    private var balanceFetchedAt: ContinuousClock.Instant?
+    private var balanceRefreshTask: Task<Void, Never>?
+
+    /// Debounce before `usageRevision` moves after a billed stream, so a
+    /// tool-heavy turn's burst of summaries becomes one refetch. Injectable
+    /// for tests.
+    private let usageRevisionDebounce: TimeInterval
+    private var usageRevisionTask: Task<Void, Never>?
+    nonisolated static let defaultUsageRevisionDebounce: TimeInterval = 5
+
+    /// Identity gate for the balance path (see `refreshBalance`). Injectable
+    /// so tests can run the request contract without a keychain. Intel has
+    /// no `existsCached()` memo yet (upstream #1523), so the default is the
+    /// keychain query; with activation no longer refreshing, it runs only
+    /// when a surface asks for the balance.
+    private let identityExists: () -> Bool
+
+    init(
+        client: OsaurusRouterAPIClient = .shared,
+        usageRevisionDebounce: TimeInterval = OsaurusRouterAccountService.defaultUsageRevisionDebounce,
+        observesNotifications: Bool = true,
+        identityExists: @escaping () -> Bool = { OsaurusIdentity.exists() }
+    ) {
         self.client = client
+        self.usageRevisionDebounce = usageRevisionDebounce
+        self.identityExists = identityExists
+        guard observesNotifications else { return }
         activationObserver = NotificationCenter.default.addObserver(
             forName: NSApplication.didBecomeActiveNotification,
             object: nil,
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor [weak self] in
-                await self?.refreshBalance()
+                await self?.handleAppActivation()
             }
+        }
+    }
+
+    /// App regained focus. The only reason to ask the Router here is a
+    /// pending Stripe top-up: the redirect grants nothing, the webhook does,
+    /// so poll the balance until the increase is visible — bounded, because
+    /// an abandoned Checkout tab would otherwise poll on every activation
+    /// forever. Every other surface fetches when it is opened.
+    func handleAppActivation() async {
+        guard OsaurusRouter.isEnabled, awaitingTopUpConfirmation else { return }
+        topUpConfirmationPolls += 1
+        await refreshBalance()
+        if awaitingTopUpConfirmation, topUpConfirmationPolls >= Self.maxTopUpConfirmationPolls {
+            awaitingTopUpConfirmation = false
         }
     }
 
@@ -73,6 +126,8 @@ final class OsaurusRouterAccountService: ObservableObject {
     }
 
     func clearForDisabledRouter() {
+        balanceFetchedAt = nil
+        awaitingTopUpConfirmation = false
         balance = nil
         usage = []
         transactions = []
@@ -84,20 +139,46 @@ final class OsaurusRouterAccountService: ObservableObject {
         lastError = nil
     }
 
-    func refreshBalance() async {
+    /// Fetch `/credits/balance`. With `ifOlderThan`, a balance fetched more
+    /// recently than that is kept (passive chrome uses this; user-opened
+    /// surfaces refresh unconditionally). Concurrent callers share one
+    /// in-flight request, so N surfaces mounting at once is one signed
+    /// request, not N.
+    func refreshBalance(ifOlderThan maxAge: TimeInterval? = nil) async {
+        // Master switch off: never hit `/credits/balance`. This also neutralizes
+        // the activation path, which calls straight in here.
         guard OsaurusRouter.isEnabled else { return }
-        guard OsaurusIdentity.exists() else {
+        guard identityExists() else {
             balance = nil
             lastError = OsaurusRouterAPIError.noIdentity.localizedDescription
             return
         }
+        if let maxAge, balance != nil, let fetchedAt = balanceFetchedAt,
+            fetchedAt.duration(to: .now) < .seconds(maxAge)
+        {
+            return
+        }
+        if let inFlight = balanceRefreshTask {
+            await inFlight.value
+            return
+        }
+        let task = Task<Void, Never> { @MainActor [weak self] in
+            guard let self else { return }
+            await self.performBalanceRefresh()
+        }
+        balanceRefreshTask = task
+        await task.value
+        if balanceRefreshTask == task { balanceRefreshTask = nil }
+    }
 
+    private func performBalanceRefresh() async {
         isLoadingBalance = true
         defer { isLoadingBalance = false }
         do {
             let previousMicro = balanceMicroValue
             let newBalance = try await client.balance()
             balance = newBalance
+            balanceFetchedAt = .now
             lastError = nil
             // Best-effort top-up confirmation: a balance increase after we
             // initiated a Checkout (and returned to the app) means the funds
@@ -221,10 +302,7 @@ final class OsaurusRouterAccountService: ObservableObject {
                 throw OsaurusRouterAPIError.invalidResponse
             }
             lastError = nil
-            // A Checkout session exists and is about to open. Arm the
-            // confirmation watcher so the next balance increase counts as a
-            // completed top-up.
-            awaitingTopUpConfirmation = true
+            armTopUpConfirmation()
             // (Intel) upstream FeatureTelemetry analytics omitted.
             return url
         } catch {
@@ -233,7 +311,19 @@ final class OsaurusRouterAccountService: ObservableObject {
         }
     }
 
+    /// A Checkout session exists and is about to open. Arm the confirmation
+    /// watcher so activation polls the balance until the increase lands (and
+    /// that increase counts as a completed top-up). Internal so tests can
+    /// exercise the bounded poll without a Stripe round-trip.
+    func armTopUpConfirmation() {
+        awaitingTopUpConfirmation = true
+        topUpConfirmationPolls = 0
+    }
+
     func noteRouterSummary(_ summary: OsaurusRouterSummaryEvent.Summary) {
+        // The usage list, when one is on screen, refetches on the (debounced)
+        // revision bump rather than after every summary frame.
+        scheduleUsageRevisionBump()
         guard let current = balance, let currentMicro = Int64(current.balanceMicro),
             let costMicro = Int64(summary.costMicro)
         else {
@@ -242,6 +332,18 @@ final class OsaurusRouterAccountService: ObservableObject {
         }
         let updated = max(0, currentMicro - costMicro)
         balance = OsaurusRouterBalanceResponse(balanceMicro: String(updated), frozen: current.frozen)
-        Task { await refreshUsage(reset: true) }
+    }
+
+    /// Coalesce a burst of billed summaries (one per tool round) into a
+    /// single `usageRevision` increment shortly after the last. Surfaces
+    /// showing usage observe the revision; nothing is fetched here.
+    private func scheduleUsageRevisionBump() {
+        guard usageRevisionTask == nil else { return }
+        usageRevisionTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(self?.usageRevisionDebounce ?? 0))
+            guard let self, !Task.isCancelled else { return }
+            self.usageRevisionTask = nil
+            self.usageRevision &+= 1
+        }
     }
 }

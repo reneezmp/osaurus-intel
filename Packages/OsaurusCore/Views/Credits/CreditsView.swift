@@ -65,6 +65,11 @@ struct CreditsView: View {
         .onChange(of: accountService.usage) { _ in
             Task { await reloadLedger() }
         }
+        // A billed turn settled while Credits is open: refetch the usage
+        // rows (debounced upstream). Fires only while this tab is mounted.
+        .onChange(of: accountService.usageRevision) { _ in
+            Task { await accountService.refreshUsage(reset: true) }
+        }
         .onAppear {
             withAnimation(.easeOut(duration: 0.25).delay(0.05)) {
                 hasAppeared = true

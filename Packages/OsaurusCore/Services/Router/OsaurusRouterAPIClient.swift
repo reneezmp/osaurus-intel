@@ -195,10 +195,14 @@ actor OsaurusRouterAPIClient {
     }
 
     /// Hosted search/contents are logged by the search layer with richer
-    /// facts; everything else on the Router is a control-plane call.
+    /// facts; everything else on the Router is a control-plane call. The
+    /// unauthenticated announcements feed and health probe carry no account
+    /// data (no wallet headers, no body) and are excluded like theme fetches
+    /// and the appcast.
     nonisolated static func shouldLogControlPlaneCall(path: String?) -> Bool {
         guard let path else { return true }
         return path != "/v1/search" && path != "/v1/contents"
+            && path != "/announcements" && path != "/health"
     }
 
     /// Plain-language purpose for a Router path, so the activity row reads

@@ -75,6 +75,7 @@ Incompatible 20 · already ported 1.
 | #2995 `1d1714de1` + #3017 (rest) | Chat tabs restyled as upstream's Safari-style track; a lone tab reads as the window title. Upstream's current `ChatTabStripView` with Intel's existing adaptations ([`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md)). |
 | #2976 `4b69a9c1c` | PDF tables keep cell identity and pair glyphs with their bounds (upstream's current `PDFAdapter` / `PDFTableDetector`, with their tests). |
 | #2983 `83b9166e3` | Flattened PDF forms read in visual order (`PDFReadingOrder`: a label and its value share a line), `--- Page N of M ---` markers in the text, a hidden-content security finding, and `file_read` `pages: "3"` / `"3-5"` with `pages`, `pages_with_text`, `pages_layout_ordered`, `pages_requested` and the provenance note. **Intel:** Intel's `file_read` is older than upstream's (no `format`/`source` on every read, no `tail_lines`/`max_chars`), so the PDF path was hand-applied: `file_read` now reads PDFs through `PDFAdapter` like upstream, keeping Intel's OCR fallback for scanned PDFs. Upstream's file_read PDF tests run as `IntelFileReadPDFPagesTests` (Intel's gutter has a space after the bar). Upstream's `FileSearchDocumentsTests` came along (its flattened-form test passes: a form row is one search hit), minus three skipped-files-note tests for a `file_search` feature Intel never got. Not ported: the in-app guide line (no guide on Intel, `W-ui-misc`). |
+| #2982 `20e297122` (part) | Router polling cuts in the account service: returning to Osaurus no longer fetches the balance (a signed request plus a synchronous keychain query on Intel) unless a Stripe top-up is pending, and then at most 10 times; `refreshBalance(ifOlderThan:)` with one shared in-flight request; billed summaries bump a debounced `usageRevision` that only an open Credits tab or usage center refetches on, instead of fetching `/credits/usage` per summary. Insights no longer logs `/announcements` or `/health`. Upstream's `OsaurusRouterAccountServiceTests` pass. **Intel:** the identity gate is still the keychain query (`existsCached()` memo is upstream #1523, not on Intel); there is no composer credits chip to use `ifOlderThan`; Intel never forwards Router summary frames yet (`W-router-billing`), so `usageRevision` waits on that. Workspaces sync throttling waits for `W-workspaces-identity-mobile`; the announcements feed waits for its decision. |
 
 ## Found while porting
 
@@ -93,3 +94,13 @@ Incompatible 20 · already ported 1.
   reports skipped files (`ContentSearchSkipTally`). Intel's slice left these
   out without listing them. Now on the backlog under `W-tools-misc` (file
   tool parity).
+- **Router billing summaries never reach Intel's account service.** Known
+  since 2026-09-02 ("Router billing ledger is dead code",
+  `SYNC_0.24.3_PLAN.md`) and blocked on observing the frame shape; upstream's
+  `OsaurusRouterSummaryEvent` decoder (already on Intel) defines it, so it is
+  now a plain port: `W-router-billing` on the backlog.
+- **`existsCached()` identity memo (upstream #1523, 2026-06-16) is not on
+  Intel.** `OsaurusRouterAccountService` and other hot paths still call the
+  synchronous keychain `OsaurusIdentity.exists()`. #2982 removed the
+  per-activation call; the memo itself goes with
+  `W-workspaces-identity-mobile`.

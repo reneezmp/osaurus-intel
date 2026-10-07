@@ -87,4 +87,17 @@ struct IntelUpstreamBatch1007Tests {
         let second = renderer.image(mascot: .green, pointSize: 24, scale: 2)
         #expect(second != nil && second !== first)
     }
+
+    // MARK: - #2982 control-plane logging
+
+    /// Insights must not record the public feed or health probe (no account
+    /// data leaves), but every signed control-plane call stays logged.
+    @Test func controlPlaneLogging_excludesUnauthenticatedProbes() {
+        #expect(!OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: "/announcements"))
+        #expect(!OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: "/health"))
+        #expect(!OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: "/v1/search"))
+        #expect(OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: "/credits/balance"))
+        #expect(OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: "/workspaces"))
+        #expect(OsaurusRouterAPIClient.shouldLogControlPlaneCall(path: nil))
+    }
 }
