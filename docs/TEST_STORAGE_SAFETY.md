@@ -119,6 +119,15 @@ $(pgrep -f /Applications/osaurus.app)` and the test log (no PluginSpecs
 mention). Intel code under test writes only to the test root; outside tests
 its live root is `~/.osaurus-intel`. Any other hit is still a failed run.
 
+**Also from that app (2026-10-06):** upstream 0.25.x keeps its activity log
+and memory database open, so `~/.osaurus/activity/{activity.sqlite,
+activity.sqlite-wal,activity.head}` and `~/.osaurus/memory/memory.sqlite-wal`
+change every few seconds while it runs. Verified by watching
+`activity.head` change again after the test run had ended (21:15:50, test
+log finished 21:15:06), with the app running since 3 October. To rule a hit
+in or out, re-check the same paths a minute after the run, or quit the app
+before testing.
+
 ## 2026-09-14 automation-test residue
 
 The first `ExecutionContextFolderActivationTests` implementation constructed a
