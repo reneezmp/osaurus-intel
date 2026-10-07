@@ -46,8 +46,9 @@ struct CodexOAuthHeadersTests {
             expiresAt: expiresAt,
             accountId: accountId
         )
-        await RemoteProviderKeychain.saveOAuthTokensOffMainActor(tokens, for: id)
-        defer { RemoteProviderKeychain.deleteOAuthTokens(for: id) }
+        // Never the real keychain: tokens are served from memory.
+        RemoteProviderKeychain.oauthTokensAccessorOverride = { $0 == id ? tokens : nil }
+        defer { RemoteProviderKeychain.oauthTokensAccessorOverride = nil }
         body(makeProvider(authType: .openAICodexOAuth, id: id))
     }
 
@@ -80,8 +81,8 @@ struct CodexOAuthHeadersTests {
             expiresAt: Date().addingTimeInterval(3600),
             accountId: "acct_test_123"
         )
-        await RemoteProviderKeychain.saveOAuthTokensOffMainActor(tokens, for: id)
-        defer { RemoteProviderKeychain.deleteOAuthTokens(for: id) }
+        RemoteProviderKeychain.oauthTokensAccessorOverride = { $0 == id ? tokens : nil }
+        defer { RemoteProviderKeychain.oauthTokensAccessorOverride = nil }
 
         var provider = makeProvider(authType: .openAICodexOAuth, id: id)
         provider.customHeaders = ["originator": "mine", "Authorization": "Bearer manual"]

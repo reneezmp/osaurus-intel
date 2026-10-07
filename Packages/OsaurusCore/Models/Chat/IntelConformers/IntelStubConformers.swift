@@ -1449,6 +1449,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// Tools catalog (the policy menu hides Auto for these tools).
     func requiresPerCallApproval(_ name: String) -> Bool {
         requiresApprovalEveryCall(name)
+            // Upstream #2990: an MCP tool whose server hints say it may
+            // destroy data asks every call, so the menu hides Auto.
+            || (toolsByName[name] as? MCPProviderTool)?.hints.requiresApprovalEveryCall == true
     }
 
     /// O(1) single-tool lookup as a `ToolEntry` (upstream API; the Tools

@@ -15,6 +15,14 @@ public enum GlobalProxySettings {
         configuration(from: diskBackedServerConfiguration())
     }
 
+    /// Cache key for sessions that are built once and reused (upstream; on
+    /// Intel only `MCPOAuthHTTPTransport.noRedirectSession()` caches, because
+    /// its session carries a delegate and a fresh one per call would leak).
+    static func currentProxyCacheKey() -> String {
+        diskBackedServerConfiguration()?.globalProxyURL?
+            .trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+    }
+
     /// Human-readable state for settings and provider diagnostics. Unlike
     /// `currentConfiguration()`, this distinguishes "not configured" from
     /// "configured but invalid and therefore ignored."

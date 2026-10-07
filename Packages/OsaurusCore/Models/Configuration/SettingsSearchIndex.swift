@@ -432,7 +432,12 @@ public enum SettingsSearchIndex {
             subTab: "Services"),
         .init(
             id: "tools.directory", tab: .tools, section: "Services", title: "Directory",
-            keywords: ["browse services", "mcp directory", "discover mcp", "provider catalog", "custom server"],
+            keywords: [
+                "browse services", "mcp directory", "discover mcp", "provider catalog", "custom server",
+                "connectors", "legal connectors", "accounting connectors", "finance connectors",
+                "healthcare connectors", "quickbooks", "xero", "docusign", "google drive", "gmail", "slack",
+                "dropbox", "gusto", "microsoft 365", "outlook", "harvey",
+            ],
             subTab: "Services"),
         .init(
             id: "tools.allTools", tab: .tools, section: "All Tools", title: "All Tools",

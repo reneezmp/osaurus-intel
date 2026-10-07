@@ -66,6 +66,17 @@ public struct MCPOAuthConfig: Codable, Sendable, Equatable {
     public var registrationEndpoint: String?
     /// When the cached metadata was last refreshed.
     public var serverMetadataCachedAt: Date?
+    /// Optional fixed loopback port for the OAuth callback. When non-nil, `signIn`
+    /// binds the loopback server with `LoopbackPort.fixed(...)` instead of
+    /// `.ephemeral`. Required for vendors that demand an exact-match redirect URI
+    /// registered ahead of time (HubSpot's MCP Auth Apps do this) — RFC 8252 §7.3
+    /// strongly recommends servers accept any loopback port, but in practice
+    /// several confidential-client OAuth providers don't.
+    public var loopbackPort: UInt16?
+    /// Send `client_secret` as HTTP Basic credentials instead of in the form
+    /// body. Set at sign-in when the token endpoint only advertises
+    /// `client_secret_basic` (Zoom); nil means `client_secret_post`.
+    public var clientSecretBasic: Bool?
 
     public init(
         clientId: String? = nil,
@@ -76,7 +87,9 @@ public struct MCPOAuthConfig: Codable, Sendable, Equatable {
         authorizationEndpoint: String? = nil,
         tokenEndpoint: String? = nil,
         registrationEndpoint: String? = nil,
-        serverMetadataCachedAt: Date? = nil
+        serverMetadataCachedAt: Date? = nil,
+        loopbackPort: UInt16? = nil,
+        clientSecretBasic: Bool? = nil
     ) {
         self.clientId = clientId
         self.redirectURI = redirectURI
@@ -87,6 +100,8 @@ public struct MCPOAuthConfig: Codable, Sendable, Equatable {
         self.tokenEndpoint = tokenEndpoint
         self.registrationEndpoint = registrationEndpoint
         self.serverMetadataCachedAt = serverMetadataCachedAt
+        self.loopbackPort = loopbackPort
+        self.clientSecretBasic = clientSecretBasic
     }
 }
 
@@ -297,6 +312,7 @@ public struct MCPProviderState: Sendable {
     public var lastError: String?
     public var discoveredToolCount: Int
     public var discoveredToolNames: [String]
+    public var discoveredToolSummaries: [MCPDiscoveredToolSummary]
     public var lastConnectedAt: Date?
     /// When the manager last auto-reconnected after a stale session during tool execution.
     public var lastAutoReconnectAt: Date?
@@ -310,10 +326,21 @@ public struct MCPProviderState: Sendable {
     /// Optional `resource_metadata` URL parsed out of `WWW-Authenticate`. When present
     /// the OAuth service can skip path-scoped `.well-known` discovery.
     public var resourceMetadataURL: URL?
-    /// Whether the most recent connect failure was classified as transient
-    /// (network loss, timeout, DNS) rather than terminal (auth challenge, bad
-    /// config, protocol mismatch). Drives launch retry and the network/wake/
-    /// activation recovery sweeps in `MCPProviderManager`.
+    /// Scopes to request on the next sign-in after a tool call was refused
+    /// with a valid session (`insufficient_scope` step-up). Passed to
+    /// `MCPOAuthService.signIn` as the challenge `scope=` hint.
+    public var stepUpScopes: [String]?
+    /// True when a provider saved without OAuth (`.none`) had a tool call
+    /// refused with 401 and the server publishes OAuth discovery metadata, so
+    /// the card offers Sign In instead of an API-token field.
+    public var oauthAvailable: Bool = false
+    /// True when the most recent connect attempt failed for a *transient*
+    /// reason (offline, timeout, DNS/TLS, server 5xx) rather than a terminal
+    /// one (auth, bad config). Drives launch/network/wake/activation
+    /// auto-reconnect so a provider that failed while the machine was offline
+    /// comes back on its own, without hammering providers whose tokens or
+    /// endpoints are actually wrong. Mirrors
+    /// `RemoteProviderState.lastFailureWasTransient`.
     public var lastFailureWasTransient: Bool
 
     public init(providerId: UUID) {
@@ -323,12 +350,14 @@ public struct MCPProviderState: Sendable {
         self.lastError = nil
         self.discoveredToolCount = 0
         self.discoveredToolNames = []
+        self.discoveredToolSummaries = []
         self.lastConnectedAt = nil
         self.lastAutoReconnectAt = nil
         self.isAutoReconnecting = false
         self.lastStderrTail = nil
         self.requiresAuth = false
         self.resourceMetadataURL = nil
+        self.stepUpScopes = nil
         self.lastFailureWasTransient = false
     }
 }

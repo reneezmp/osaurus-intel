@@ -13,12 +13,20 @@
 //    let refreshed = try await MCPOAuthService.refresh(provider:, tokens:)
 //      // returns refreshed tokens; saves to Keychain
 //
-//  All steps follow the MCP `2025-06-18` authorization spec:
+//  All steps follow the MCP `2025-11-25` authorization spec:
 //    - PRM (RFC 9728) → ASM (RFC 8414, with OIDC fallback)
-//    - DCR (RFC 7591) for `client_id`
-//    - PKCE S256 + state for the authorize step
-//    - RFC 8707 `resource=` parameter on every authorize / token request
-//    - Loopback `http://127.0.0.1:<ephemeral port>/callback` redirect URI
+//    - `client_id` from an issuer-bound cache, a Client ID Metadata Document,
+//      or DCR (RFC 7591), with a fallback path for confidential-client vendors
+//      (e.g. HubSpot's MCP Auth Apps) that publish neither and instead require
+//      the user to register an OAuth app by hand and supply both `client_id`
+//      and `client_secret`. See `MCPOAuthClientMetadata`.
+//    - PKCE S256 + state for the authorize step, and RFC 9207 `iss` checks
+//      on the authorization response.
+//    - RFC 8707 `resource=` parameter on every authorize / token request.
+//    - Loopback `http://127.0.0.1:<port>/callback` redirect URI. The port is
+//      kernel-assigned by default; vendors that require an exact-match
+//      registered redirect URI can pin it via
+//      `MCPOAuthConfig.loopbackPort`.
 //
 
 import AppKit
@@ -38,12 +46,15 @@ public enum MCPOAuthError: LocalizedError, Sendable {
     case loopback(OAuthLoopbackError)
     case pkce
     case browserOpenFailed
+    case issuerMismatch(expected: String, received: String?)
     case transport(String)
 
     public var errorDescription: String? {
         switch self {
         case .invalidServerURL: return "MCP server URL is not a valid HTTP(S) URL"
-        case .missingClientId: return "OAuth client_id was not registered with the authorization server"
+        case .missingClientId:
+            return
+                "OAuth client_id is missing — register an app with the authorization server or paste a client_id manually"
         case .missingTokenEndpoint: return "Authorization server metadata is missing token_endpoint"
         case .missingAuthorizationEndpoint:
             return "Authorization server metadata is missing authorization_endpoint"
@@ -62,6 +73,11 @@ public enum MCPOAuthError: LocalizedError, Sendable {
         case .loopback(let inner): return inner.errorDescription
         case .pkce: return "Could not create a secure login challenge"
         case .browserOpenFailed: return "Could not open the browser to complete sign-in"
+        case .issuerMismatch(let expected, let received):
+            if let received {
+                return "Sign-in response came from \(received), expected \(expected). Sign-in was stopped for safety."
+            }
+            return "Sign-in response from \(expected) did not identify its issuer. Sign-in was stopped for safety."
         case .transport(let msg): return "OAuth network error: \(msg)"
         }
     }
@@ -78,6 +94,9 @@ public enum MCPOAuthService {
     /// Conservative default scopes when neither PRM nor `WWW-Authenticate scope=`
     /// gives a hint. `offline_access` is requested so the AS issues a refresh token.
     public static let defaultScopes: [String] = ["offline_access"]
+
+    /// Maximum time to wait for the browser OAuth callback on the loopback listener.
+    public static let signInCallbackTimeout: TimeInterval = 300
 
     /// Run the full OAuth sign-in flow for `provider`.
     ///
@@ -122,7 +141,10 @@ public enum MCPOAuthService {
         // 2. Resolve scopes.
         let scopes = resolveScopes(provider: provider, prm: prm, asm: asm, hint: hint)
 
-        // 3. Loopback server on an ephemeral port.
+        // 3. Loopback server on an ephemeral port — or a provider-specified
+        // fixed port when the vendor requires an exact-match redirect URI
+        // (HubSpot's MCP Auth Apps register a single redirect URI with the
+        // exact port baked in).
         let pkce: PKCEPair
         do {
             pkce = try PKCE.makePair()
@@ -131,11 +153,18 @@ public enum MCPOAuthService {
         }
         let state = PKCE.makeState()
 
+        let loopbackPort: LoopbackPort = {
+            if let pinned = provider.oauth?.loopbackPort, pinned != 0 {
+                return .fixed(pinned)
+            }
+            return .ephemeral
+        }()
+
         let server: OAuthLoopbackServer
         do {
             server = try OAuthLoopbackServer(
                 expectedState: state,
-                port: .ephemeral,
+                port: loopbackPort,
                 callbackPath: "/callback"
             )
             try await server.start()
@@ -151,26 +180,52 @@ public enum MCPOAuthService {
         }
         let redirectURI = "http://127.0.0.1:\(port)/callback"
 
-        // 4. Ensure we have a `client_id` — DCR if needed.
+        // 4. Ensure we have a `client_id` (see `MCPOAuthClientMetadata` for the
+        //    order): an issuer-bound cached id (manual entry for vendors without
+        //    DCR — HubSpot's MCP Auth Apps — or a previous registration), then a
+        //    Client ID Metadata Document, then RFC 7591 DCR.
+        let metadataDocumentPublished =
+            asm.clientIdMetadataDocumentSupported == true
+            ? await MCPOAuthClientMetadata.isDocumentPublished()
+            : false
         let clientId: String
-        if let cached = provider.oauth?.clientId, !cached.isEmpty {
+        switch MCPOAuthClientMetadata.strategy(
+            cachedClientId: provider.oauth?.clientId,
+            cachedIssuer: provider.oauth?.issuer,
+            asm: asm,
+            metadataDocumentPublished: metadataDocumentPublished
+        ) {
+        case .cached(let cached):
             clientId = cached
-        } else {
-            guard let registrationEndpoint = asm.registrationEndpoint, !registrationEndpoint.isEmpty else {
-                throw MCPOAuthError.registration(.missingRegistrationEndpoint)
-            }
+        case .metadataDocument(let documentClientId):
+            clientId = documentClientId
+        case .dynamicRegistration(let registrationEndpoint):
             do {
                 let registration = try await MCPOAuthRegistration.register(
                     registrationEndpoint: registrationEndpoint,
                     redirectURI: redirectURI,
-                    clientName: "Osaurus",
+                    clientName: MCPOAuthClientMetadata.clientName,
                     scopes: scopes
                 )
                 clientId = registration.clientId
             } catch let error as MCPOAuthRegistrationError {
                 throw MCPOAuthError.registration(error)
             }
+        case .unavailable:
+            throw MCPOAuthError.registration(
+                asm.clientIdMetadataDocumentSupported == true
+                    ? .metadataDocumentUnavailable : .missingRegistrationEndpoint
+            )
         }
+
+        // Confidential-client `client_secret`, when stored in Keychain. Vendors
+        // whose ASM advertises `client_secret_post` (HubSpot) need this in
+        // every token POST; public-native clients leave it empty and rely on
+        // PKCE alone.
+        let clientSecret = resolveClientSecret(for: provider.id)
+        let clientSecretBasic =
+            clientSecret?.isEmpty == false
+            && usesClientSecretBasic(asm.tokenEndpointAuthMethodsSupported)
 
         // 5. Build the authorization URL and open the browser.
         guard let authorizeURL = URL(string: asm.authorizationEndpoint) else {
@@ -190,12 +245,23 @@ public enum MCPOAuthService {
             throw MCPOAuthError.browserOpenFailed
         }
 
-        // 6. Wait for callback.
+        // 6. Wait for callback (bounded so a closed browser tab can't hang forever).
         let callback: OAuthCallbackResult
         do {
-            callback = try await server.waitForCallback(timeout: OAuthLoopbackServer.defaultSignInTimeout)
+            callback = try await server.waitForCallback(timeout: Self.signInCallbackTimeout)
         } catch let error as OAuthLoopbackError {
             throw MCPOAuthError.loopback(error)
+        }
+
+        // RFC 9207: reject a code minted by a different authorization server
+        // before redeeming it.
+        switch MCPOAuthClientMetadata.validateIssuer(callbackURL: callback.url, asm: asm) {
+        case .valid:
+            break
+        case .missing:
+            throw MCPOAuthError.issuerMismatch(expected: asm.issuer, received: nil)
+        case .mismatch(let received):
+            throw MCPOAuthError.issuerMismatch(expected: asm.issuer, received: received)
         }
 
         // 7. Exchange code for tokens.
@@ -205,13 +271,17 @@ public enum MCPOAuthService {
         let tokens = try await exchangeAuthorizationCode(
             tokenURL: tokenURL,
             clientId: clientId,
+            clientSecret: clientSecret,
+            clientSecretBasic: clientSecretBasic,
             code: callback.code,
             verifier: pkce.verifier,
             redirectURI: redirectURI,
             resource: canonical
         )
 
-        // 8. Build the cached config and persist tokens.
+        // 8. Build the cached config and persist tokens. Preserve the
+        // `loopbackPort` from the input so the next refresh / re-sign-in
+        // keeps using the same port the vendor expects.
         let config = MCPOAuthConfig(
             clientId: clientId,
             redirectURI: redirectURI,
@@ -221,10 +291,16 @@ public enum MCPOAuthService {
             authorizationEndpoint: asm.authorizationEndpoint,
             tokenEndpoint: asm.tokenEndpoint,
             registrationEndpoint: asm.registrationEndpoint,
-            serverMetadataCachedAt: Date()
+            serverMetadataCachedAt: Date(),
+            loopbackPort: provider.oauth?.loopbackPort,
+            clientSecretBasic: clientSecretBasic ? true : nil
         )
-        if persist {
-            MCPProviderKeychain.saveOAuthTokens(tokens, for: provider.id)
+        if persist, !MCPProviderKeychain.saveOAuthTokens(tokens, for: provider.id),
+            !KeychainQueryHelpers.disablesKeychainForProcess {
+            // The in-memory tokens still serve this session; what failed is
+            // relaunch durability. Surface it instead of silently signing the
+            // user out on next launch.
+            NSLog("MCPOAuthService: failed to persist OAuth tokens to Keychain after sign-in")
         }
         return MCPOAuthSignInResult(config: config, tokens: tokens)
     }
@@ -271,6 +347,17 @@ public enum MCPOAuthService {
             "refresh_token": refreshToken,
             "client_id": clientId,
         ]
+        // Confidential-client OAuth (HubSpot) rejects refresh requests
+        // without `client_secret`. Public clients never store one, so this
+        // branch is a no-op for the DCR path.
+        var basicCredentials: (String, String)?
+        if let secret = resolveClientSecret(for: provider.id), !secret.isEmpty {
+            if oauth.clientSecretBasic == true {
+                basicCredentials = (clientId, secret)
+            } else {
+                form["client_secret"] = secret
+            }
+        }
         if let resource = oauth.resource, !resource.isEmpty {
             form["resource"] = resource
         }
@@ -278,7 +365,7 @@ public enum MCPOAuthService {
             form["scope"] = oauth.scopes.joined(separator: " ")
         }
 
-        let raw = try await postTokenRequest(url: tokenURL, form: form)
+        let raw = try await postTokenRequest(url: tokenURL, form: form, basicCredentials: basicCredentials)
         // Refresh-token rotation: some servers (Notion) return a new RT, some don't.
         // Fall back to the existing one when omitted.
         let newRefresh = raw.refreshToken ?? refreshToken
@@ -288,8 +375,11 @@ public enum MCPOAuthService {
             expiresAt: raw.expiresAt,
             scope: raw.scope ?? tokens.scope
         )
-        if persist {
-            MCPProviderKeychain.saveOAuthTokens(refreshed, for: provider.id)
+        if persist, !MCPProviderKeychain.saveOAuthTokens(refreshed, for: provider.id),
+            !KeychainQueryHelpers.disablesKeychainForProcess {
+            // The refreshed tokens still serve this request; what failed is
+            // relaunch durability (and rotated refresh tokens may be lost).
+            NSLog("MCPOAuthService: failed to persist refreshed OAuth tokens to Keychain")
         }
         return refreshed
     }
@@ -395,9 +485,14 @@ public enum MCPOAuthService {
     }
 
     /// Exchange an authorization code for tokens. Always sends `resource=`.
+    /// `clientSecret` is sent when non-nil — required for confidential-client
+    /// OAuth providers (e.g. HubSpot) — in the form body, or as HTTP Basic
+    /// credentials when `clientSecretBasic` is set (Zoom accepts only that).
     public static func exchangeAuthorizationCode(
         tokenURL: URL,
         clientId: String,
+        clientSecret: String? = nil,
+        clientSecretBasic: Bool = false,
         code: String,
         verifier: String,
         redirectURI: String,
@@ -410,10 +505,18 @@ public enum MCPOAuthService {
             "code_verifier": verifier,
             "redirect_uri": redirectURI,
         ]
+        var basicCredentials: (String, String)?
+        if let clientSecret, !clientSecret.isEmpty {
+            if clientSecretBasic {
+                basicCredentials = (clientId, clientSecret)
+            } else {
+                form["client_secret"] = clientSecret
+            }
+        }
         if let resource, !resource.isEmpty {
             form["resource"] = resource
         }
-        let parsed = try await postTokenRequest(url: tokenURL, form: form)
+        let parsed = try await postTokenRequest(url: tokenURL, form: form, basicCredentials: basicCredentials)
         return MCPOAuthTokens(
             accessToken: parsed.accessToken,
             refreshToken: parsed.refreshToken,
@@ -426,6 +529,20 @@ public enum MCPOAuthService {
     nonisolated(unsafe) public static var tokenRequestOverride:
         ((URL, [String: String]) async throws -> ParsedTokenResponse)?
 
+    /// Test seam: replace the Keychain lookup for `client_secret` in unit
+    /// tests. Production code should leave this nil so the real Keychain
+    /// wrapper is used.
+    nonisolated(unsafe) public static var clientSecretAccessorOverride: ((UUID) -> String?)?
+
+    /// Resolve the `client_secret` for `providerId`. Tests stub this via
+    /// `clientSecretAccessorOverride`; production reads from Keychain.
+    static func resolveClientSecret(for providerId: UUID) -> String? {
+        if let override = clientSecretAccessorOverride {
+            return override(providerId)
+        }
+        return MCPProviderKeychain.getOAuthClientSecret(for: providerId)
+    }
+
     public struct ParsedTokenResponse: Sendable, Equatable {
         public let accessToken: String
         public let refreshToken: String?
@@ -433,13 +550,40 @@ public enum MCPOAuthService {
         public let scope: String?
     }
 
-    static func postTokenRequest(url: URL, form: [String: String]) async throws -> ParsedTokenResponse {
+    /// True when the token endpoint only accepts `client_secret_basic`.
+    /// `client_secret_post` is preferred whenever it is allowed (or unstated).
+    static func usesClientSecretBasic(_ methods: [String]?) -> Bool {
+        guard let methods else { return false }
+        return methods.contains("client_secret_basic") && !methods.contains("client_secret_post")
+    }
+
+    /// RFC 6749 §2.3.1: id and secret are form-encoded before Base64.
+    static func basicAuthorizationHeader(clientId: String, clientSecret: String) -> String {
+        let unreserved = CharacterSet.alphanumerics.union(CharacterSet(charactersIn: "-._~"))
+        func encode(_ value: String) -> String {
+            value.addingPercentEncoding(withAllowedCharacters: unreserved) ?? value
+        }
+        let pair = encode(clientId) + ":" + encode(clientSecret)
+        return "Basic " + Data(pair.utf8).base64EncodedString()
+    }
+
+    static func postTokenRequest(
+        url: URL,
+        form: [String: String],
+        basicCredentials: (String, String)? = nil
+    ) async throws -> ParsedTokenResponse {
         if let override = tokenRequestOverride {
             return try await override(url, form)
         }
 
         var request = URLRequest(url: url)
         request.httpMethod = "POST"
+        if let (clientId, clientSecret) = basicCredentials {
+            request.setValue(
+                basicAuthorizationHeader(clientId: clientId, clientSecret: clientSecret),
+                forHTTPHeaderField: "Authorization"
+            )
+        }
         request.setValue("application/x-www-form-urlencoded", forHTTPHeaderField: "Content-Type")
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.httpBody = OAuthFormEncoding.encode(form).data(using: .utf8)
@@ -448,7 +592,7 @@ public enum MCPOAuthService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await URLSession.shared.data(for: request)
+            (data, response) = try await MCPOAuthHTTPTransport.noRedirectSession().data(for: request)
         } catch {
             throw MCPOAuthError.transport(error.localizedDescription)
         }

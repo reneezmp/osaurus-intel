@@ -23,8 +23,9 @@ struct MCPOAuthDiscoveryTests {
     @Test func prmFallsBackToWellKnown() {
         let server = URL(string: "https://mcp.example.com/mcp")!
         let resolved = MCPOAuthDiscovery.prmURL(forServer: server, hint: nil)
-        // RFC 9728 § the resource metadata is at /.well-known/oauth-protected-resource.
-        #expect(resolved?.path == "/.well-known/oauth-protected-resource")
+        // RFC 9728 §3.1: the well-known suffix goes before the resource's
+        // path (upstream #2990 spec alignment).
+        #expect(resolved?.path == "/.well-known/oauth-protected-resource/mcp")
         #expect(resolved?.host == "mcp.example.com")
     }
 

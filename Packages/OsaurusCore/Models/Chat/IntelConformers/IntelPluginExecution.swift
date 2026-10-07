@@ -8,7 +8,7 @@
 //  ---------------
 //  The production execution stack (PluginHostAPI 3,516 lines + the real
 //  PluginManager + repo/resolver/db) was written against the *real*
-//  AgentManager / ChatEngine / MCPServerManager / ToolRegistry / inference
+//  AgentManager / ChatEngine / ToolRegistry / inference
 //  subsystems — all of which are amputated-and-mirrored on Intel. A full
 //  restore drags in ~41 amputated touchpoints, most of which (embed → MLX,
 //  complete → inference, sandbox provisioning) are physically dead on Intel

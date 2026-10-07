@@ -172,7 +172,13 @@ public enum RemoteProviderKeychain {
         }
     }
 
+    /// Test seam: tests answer OAuth token reads from memory instead of
+    /// writing fake tokens into the real keychain (tests run with
+    /// `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`). Production leaves it nil.
+    nonisolated(unsafe) static var oauthTokensAccessorOverride: ((UUID) -> RemoteProviderOAuthTokens?)?
+
     public static func getOAuthTokens(for providerId: UUID) -> RemoteProviderOAuthTokens? {
+        if let override = oauthTokensAccessorOverride { return override(providerId) }
         let account = "\(providerId.uuidString).oauth.tokens"
         if KeychainQueryHelpers.disablesKeychainForProcess { return nil }
 

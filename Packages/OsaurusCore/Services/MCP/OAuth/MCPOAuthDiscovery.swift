@@ -5,7 +5,7 @@
 //  RFC 9728 (OAuth 2.0 Protected Resource Metadata) +
 //  RFC 8414 (Authorization Server Metadata) discovery for MCP servers.
 //
-//  Two-step discovery flow per the MCP `2025-06-18` authorization spec:
+//  Two-step discovery flow per the MCP `2025-11-25` authorization spec:
 //
 //  1. Find PRM:
 //     - Use `resource_metadata=` URL from a `WWW-Authenticate` header if present.
@@ -58,6 +58,11 @@ public struct MCPAuthorizationServerMetadata: Decodable, Sendable, Equatable {
     public let codeChallengeMethodsSupported: [String]?
     public let grantTypesSupported: [String]?
     public let tokenEndpointAuthMethodsSupported: [String]?
+    /// Client ID Metadata Documents (MCP 2025-11-25): the AS accepts an HTTPS
+    /// URL as `client_id` and fetches the client's metadata from it.
+    public let clientIdMetadataDocumentSupported: Bool?
+    /// RFC 9207: the AS always returns `iss` on the authorization response.
+    public let authorizationResponseIssParameterSupported: Bool?
 
     private enum CodingKeys: String, CodingKey {
         case issuer
@@ -68,6 +73,8 @@ public struct MCPAuthorizationServerMetadata: Decodable, Sendable, Equatable {
         case codeChallengeMethodsSupported = "code_challenge_methods_supported"
         case grantTypesSupported = "grant_types_supported"
         case tokenEndpointAuthMethodsSupported = "token_endpoint_auth_methods_supported"
+        case clientIdMetadataDocumentSupported = "client_id_metadata_document_supported"
+        case authorizationResponseIssParameterSupported = "authorization_response_iss_parameter_supported"
     }
 
     public init(
@@ -78,7 +85,9 @@ public struct MCPAuthorizationServerMetadata: Decodable, Sendable, Equatable {
         scopesSupported: [String]?,
         codeChallengeMethodsSupported: [String]?,
         grantTypesSupported: [String]?,
-        tokenEndpointAuthMethodsSupported: [String]?
+        tokenEndpointAuthMethodsSupported: [String]?,
+        clientIdMetadataDocumentSupported: Bool? = nil,
+        authorizationResponseIssParameterSupported: Bool? = nil
     ) {
         self.issuer = issuer
         self.authorizationEndpoint = authorizationEndpoint
@@ -88,6 +97,8 @@ public struct MCPAuthorizationServerMetadata: Decodable, Sendable, Equatable {
         self.codeChallengeMethodsSupported = codeChallengeMethodsSupported
         self.grantTypesSupported = grantTypesSupported
         self.tokenEndpointAuthMethodsSupported = tokenEndpointAuthMethodsSupported
+        self.clientIdMetadataDocumentSupported = clientIdMetadataDocumentSupported
+        self.authorizationResponseIssParameterSupported = authorizationResponseIssParameterSupported
     }
 }
 
@@ -98,6 +109,7 @@ public enum MCPOAuthDiscoveryError: LocalizedError, Sendable {
     case prmDecodeFailed(String)
     case asmDecodeFailed(String)
     case noAuthorizationServers
+    case unsafeDiscoveredURL(String)
     case httpError(Int, String?)
     case transport(String)
 
@@ -116,6 +128,8 @@ public enum MCPOAuthDiscoveryError: LocalizedError, Sendable {
             return "Could not decode authorization-server metadata: \(msg)"
         case .noAuthorizationServers:
             return "Protected-resource metadata listed no authorization servers"
+        case .unsafeDiscoveredURL(let url):
+            return "OAuth metadata pointed at an unsafe URL: \(url)"
         case .httpError(let code, let body):
             if let body, !body.isEmpty {
                 return "OAuth discovery HTTP \(code): \(body)"
@@ -134,14 +148,14 @@ public actor MCPOAuthDiscovery {
     private var prmCache: [URL: MCPProtectedResourceMetadata] = [:]
     private var asmCache: [URL: MCPAuthorizationServerMetadata] = [:]
     /// Test seam for swapping in a fixture-driven fetcher in unit tests.
-    private var fetcher: (URL) async throws -> (Data, HTTPURLResponse) = MCPOAuthDiscovery.defaultFetch
+    private var fetcher: @Sendable (URL) async throws -> (Data, HTTPURLResponse) = MCPOAuthDiscovery.defaultFetch
 
     public init() {}
 
     // MARK: - Test seam
 
     /// Replace the underlying network fetcher (call from tests only).
-    public func _setFetcher(_ fetcher: @escaping (URL) async throws -> (Data, HTTPURLResponse)) {
+    public func _setFetcher(_ fetcher: @escaping @Sendable (URL) async throws -> (Data, HTTPURLResponse)) {
         self.fetcher = fetcher
     }
 
@@ -155,55 +169,121 @@ public actor MCPOAuthDiscovery {
 
     /// Resolve the PRM document URL for a given MCP server, preferring the
     /// `resource_metadata` hint from a `WWW-Authenticate` challenge.
+    ///
+    /// Returns the first candidate from `prmCandidateURLs` — primarily a
+    /// convenience for callers that just need a single URL (and for tests).
+    /// Real fetching uses the full candidate list.
     public static func prmURL(forServer serverURL: URL, hint: URL?) -> URL? {
-        if let hint { return hint }
-        // RFC 9728 §3.1: place at the well-known path for the resource. We use
-        // the server's host (path-scoped probing is allowed but most deployments
-        // serve the doc at the root).
-        var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false)
-        components?.path = "/.well-known/oauth-protected-resource"
-        components?.query = nil
-        components?.fragment = nil
-        return components?.url
+        prmCandidateURLs(forServer: serverURL, hint: hint).first
+    }
+
+    /// Ordered list of PRM URLs to probe for a given MCP server.
+    ///
+    /// - If `hint` (the `resource_metadata=` URL from a `WWW-Authenticate`
+    ///   challenge) is present and passes the discovery URL policy, it is the
+    ///   sole candidate — RFC 9728 §5.1 makes that the canonical pointer.
+    /// - Otherwise we probe both well-known layouts described by RFC 9728 §3.1:
+    ///     1. Path-scoped: `<host>/.well-known/oauth-protected-resource<path>`
+    ///        (the spec-canonical form for resources with a path).
+    ///     2. Root: `<host>/.well-known/oauth-protected-resource`
+    ///        (what most single-tenant deployments serve).
+    ///   For a path-less server URL the two collapse to a single entry after
+    ///   de-dup.
+    public static func prmCandidateURLs(forServer serverURL: URL, hint: URL?) -> [URL] {
+        if let hint {
+            return MCPOAuthURLPolicy.allowsDiscoveredURL(hint, from: serverURL) ? [hint] : []
+        }
+        guard var components = URLComponents(url: serverURL, resolvingAgainstBaseURL: false) else {
+            return []
+        }
+        components.query = nil
+        components.fragment = nil
+
+        let originalPath = components.path
+        let trimmedPath = originalPath == "/" ? "" : originalPath
+
+        var candidates: [URL] = []
+
+        // RFC 9728 §3.1 canonical form: well-known prefixes the resource path.
+        components.path = "/.well-known/oauth-protected-resource" + trimmedPath
+        if let url = components.url { candidates.append(url) }
+
+        // Common deployment shortcut: root-scoped well-known.
+        if !trimmedPath.isEmpty {
+            components.path = "/.well-known/oauth-protected-resource"
+            if let url = components.url { candidates.append(url) }
+        }
+
+        var seen = Set<URL>()
+        let uniqueCandidates = candidates.filter { seen.insert($0).inserted }
+        return uniqueCandidates.filter {
+            MCPOAuthURLPolicy.allowsDiscoveredURL($0, from: serverURL)
+        }
     }
 
     /// Fetch (and cache) the PRM document for an MCP server.
-    public func fetchProtectedResourceMetadata(serverURL: URL, hint: URL?) async throws -> MCPProtectedResourceMetadata
-    {
-        guard let prmURL = Self.prmURL(forServer: serverURL, hint: hint) else {
+    public func fetchProtectedResourceMetadata(
+        serverURL: URL,
+        hint: URL?
+    ) async throws -> MCPProtectedResourceMetadata {
+        let candidates = Self.prmCandidateURLs(forServer: serverURL, hint: hint)
+        guard !candidates.isEmpty else {
             throw MCPOAuthDiscoveryError.invalidServerURL
         }
-        if let cached = prmCache[prmURL] {
-            return cached
+        for candidate in candidates {
+            if let cached = prmCache[candidate] {
+                return cached
+            }
         }
 
-        let (data, response) = try await safeFetch(prmURL)
-        guard response.statusCode == 200 else {
-            if response.statusCode == 404 {
-                throw MCPOAuthDiscoveryError.prmNotFound
+        var lastError: MCPOAuthDiscoveryError?
+        for candidate in candidates {
+            let data: Data
+            let response: HTTPURLResponse
+            do {
+                (data, response) = try await safeFetch(candidate)
+            } catch let error as MCPOAuthDiscoveryError {
+                lastError = error
+                continue
             }
-            throw MCPOAuthDiscoveryError.httpError(response.statusCode, String(data: data, encoding: .utf8))
+
+            guard response.statusCode == 200 else {
+                if response.statusCode == 404 {
+                    lastError = .prmNotFound
+                    continue
+                }
+                lastError = .httpError(response.statusCode, String(data: data, encoding: .utf8))
+                continue
+            }
+
+            do {
+                let metadata = try JSONDecoder().decode(MCPProtectedResourceMetadata.self, from: data)
+                guard !metadata.authorizationServers.isEmpty else {
+                    throw MCPOAuthDiscoveryError.noAuthorizationServers
+                }
+                prmCache[candidate] = metadata
+                return metadata
+            } catch let error as MCPOAuthDiscoveryError {
+                lastError = error
+                continue
+            } catch {
+                lastError = .prmDecodeFailed(error.localizedDescription)
+                continue
+            }
         }
 
-        do {
-            let metadata = try JSONDecoder().decode(MCPProtectedResourceMetadata.self, from: data)
-            guard !metadata.authorizationServers.isEmpty else {
-                throw MCPOAuthDiscoveryError.noAuthorizationServers
-            }
-            prmCache[prmURL] = metadata
-            return metadata
-        } catch let error as MCPOAuthDiscoveryError {
-            throw error
-        } catch {
-            throw MCPOAuthDiscoveryError.prmDecodeFailed(error.localizedDescription)
-        }
+        throw lastError ?? .prmNotFound
     }
 
     /// Fetch (and cache) ASM for a given authorization-server URL.
     /// Tries RFC 8414 first, falls back to OIDC discovery.
-    public func fetchAuthorizationServerMetadata(authServerURL: URL) async throws
-        -> MCPAuthorizationServerMetadata
-    {
+    public func fetchAuthorizationServerMetadata(
+        authServerURL: URL,
+        resourceServerURL: URL? = nil
+    ) async throws -> MCPAuthorizationServerMetadata {
+        guard MCPOAuthURLPolicy.allowsDiscoveredURL(authServerURL, from: resourceServerURL ?? authServerURL) else {
+            throw MCPOAuthDiscoveryError.unsafeDiscoveredURL(authServerURL.absoluteString)
+        }
         if let cached = asmCache[authServerURL] {
             return cached
         }
@@ -227,10 +307,18 @@ public actor MCPOAuthDiscovery {
                 }
                 do {
                     let metadata = try JSONDecoder().decode(MCPAuthorizationServerMetadata.self, from: data)
+                    try Self.validateAuthorizationServerMetadata(
+                        metadata,
+                        origin: resourceServerURL ?? authServerURL
+                    )
                     asmCache[authServerURL] = metadata
                     return metadata
                 } catch {
-                    lastError = MCPOAuthDiscoveryError.asmDecodeFailed(error.localizedDescription)
+                    if let discoveryError = error as? MCPOAuthDiscoveryError {
+                        lastError = discoveryError
+                    } else {
+                        lastError = MCPOAuthDiscoveryError.asmDecodeFailed(error.localizedDescription)
+                    }
                     continue
                 }
             } catch {
@@ -243,14 +331,38 @@ public actor MCPOAuthDiscovery {
     }
 
     /// Convenience: PRM + first usable ASM in one call.
+    ///
+    /// Servers built against MCP `2025-03-26` publish no PRM; their
+    /// authorization server is the MCP server's origin. When no PRM exists
+    /// (and no `resource_metadata` hint pointed elsewhere) discovery falls back
+    /// to ASM at the origin with a synthesized PRM.
     public func discover(serverURL: URL, hint: URL?) async throws -> (
         MCPProtectedResourceMetadata, MCPAuthorizationServerMetadata
     ) {
-        let prm = try await fetchProtectedResourceMetadata(serverURL: serverURL, hint: hint)
+        let prm: MCPProtectedResourceMetadata
+        do {
+            prm = try await fetchProtectedResourceMetadata(serverURL: serverURL, hint: hint)
+        } catch MCPOAuthDiscoveryError.prmNotFound where hint == nil {
+            guard let origin = Self.origin(of: serverURL) else { throw MCPOAuthDiscoveryError.prmNotFound }
+            let asm: MCPAuthorizationServerMetadata
+            do {
+                asm = try await fetchAuthorizationServerMetadata(authServerURL: origin, resourceServerURL: serverURL)
+            } catch {
+                throw MCPOAuthDiscoveryError.prmNotFound
+            }
+            let legacy = MCPProtectedResourceMetadata(
+                resource: nil,
+                authorizationServers: [origin.absoluteString],
+                scopesSupported: nil,
+                bearerMethodsSupported: ["header"]
+            )
+            return (legacy, asm)
+        }
         for raw in prm.authorizationServers {
             guard let url = URL(string: raw) else { continue }
+            guard MCPOAuthURLPolicy.allowsDiscoveredURL(url, from: serverURL) else { continue }
             do {
-                let asm = try await fetchAuthorizationServerMetadata(authServerURL: url)
+                let asm = try await fetchAuthorizationServerMetadata(authServerURL: url, resourceServerURL: serverURL)
                 return (prm, asm)
             } catch {
                 continue
@@ -260,6 +372,14 @@ public actor MCPOAuthDiscovery {
     }
 
     // MARK: - Internal helpers
+
+    static func origin(of url: URL) -> URL? {
+        guard var components = URLComponents(url: url, resolvingAgainstBaseURL: false) else { return nil }
+        components.path = ""
+        components.query = nil
+        components.fragment = nil
+        return components.url
+    }
 
     /// Build the ordered list of ASM URLs to try for a given authorization-server URL.
     /// Per RFC 8414 the well-known path is inserted between the host and the issuer's
@@ -299,6 +419,29 @@ public actor MCPOAuthDiscovery {
         return candidates.filter { seen.insert($0).inserted }
     }
 
+    static func validateAuthorizationServerMetadata(
+        _ metadata: MCPAuthorizationServerMetadata,
+        origin: URL
+    ) throws {
+        let required = [metadata.issuer, metadata.authorizationEndpoint, metadata.tokenEndpoint]
+        for raw in required {
+            guard
+                let url = URL(string: raw),
+                MCPOAuthURLPolicy.allowsDiscoveredURL(url, from: origin)
+            else {
+                throw MCPOAuthDiscoveryError.unsafeDiscoveredURL(raw)
+            }
+        }
+        if let raw = metadata.registrationEndpoint {
+            guard
+                let url = URL(string: raw),
+                MCPOAuthURLPolicy.allowsDiscoveredURL(url, from: origin)
+            else {
+                throw MCPOAuthDiscoveryError.unsafeDiscoveredURL(raw)
+            }
+        }
+    }
+
     private func safeFetch(_ url: URL) async throws -> (Data, HTTPURLResponse) {
         do {
             return try await fetcher(url)
@@ -314,7 +457,7 @@ public actor MCPOAuthDiscovery {
         request.httpMethod = "GET"
         request.setValue("application/json", forHTTPHeaderField: "Accept")
         request.timeoutInterval = 15
-        let (data, response) = try await URLSession.shared.data(for: request)
+        let (data, response) = try await MCPOAuthHTTPTransport.noRedirectSession().data(for: request)
         guard let http = response as? HTTPURLResponse else {
             throw MCPOAuthDiscoveryError.transport("non-HTTP response")
         }

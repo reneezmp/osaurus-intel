@@ -514,6 +514,7 @@ final class NativeToolCallRowView: NSView {
     /// `nonisolated(unsafe)` so deinit can read it; only ever set in
     /// init on the main actor.
     nonisolated(unsafe) private var ttsObservation: NSObjectProtocol?
+    nonisolated(unsafe) private var mcpProgressObservation: NSObjectProtocol?
     /// "N files changed" link on a collapsed completed row whose call
     /// changed files (shell commands, copies…); opens the File Changes
     /// inspector on that change set. Write/edit calls get the diff card
@@ -545,6 +546,17 @@ final class NativeToolCallRowView: NSView {
                 self?.refreshStatusIndicator()
             }
         }
+        mcpProgressObservation = NotificationCenter.default.addObserver(
+            forName: .mcpToolProgressChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            let callId = note.object as? String
+            MainActor.assumeIsolated {
+                guard let self, callId == self.currentItem?.call.id else { return }
+                self.applyNameLabel(expanded: self.isExpanded)
+            }
+        }
         fileChangeObservation = NotificationCenter.default.addObserver(
             forName: .fileChangesDidChange,
             object: nil,
@@ -564,6 +576,9 @@ final class NativeToolCallRowView: NSView {
             NotificationCenter.default.removeObserver(observation)
         }
         if let observation = fileChangeObservation {
+            NotificationCenter.default.removeObserver(observation)
+        }
+        if let observation = mcpProgressObservation {
             NotificationCenter.default.removeObserver(observation)
         }
     }
@@ -617,22 +632,7 @@ final class NativeToolCallRowView: NSView {
         categoryIcon.contentTintColor = tintColor
         categoryBg.layer?.backgroundColor = tintColor.withAlphaComponent(0.15).cgColor
 
-        // Upstream `W-tool-catalog-ui`: collapsed rows say what happened in
-        // plain words ("Read a file"); the expanded detail keeps the raw,
-        // monospaced tool name.
-        if isExpanded {
-            nameLabel.stringValue = item.call.function.name
-            nameLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
-        } else {
-            let failed = item.result.map { isErrorResult($0, callId: item.call.id) } ?? false
-            nameLabel.stringValue = ToolDisplayName.friendly(
-                for: item.call.function.name,
-                running: item.result == nil,
-                arguments: item.call.function.arguments,
-                failed: failed
-            )
-            nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
-        }
+        applyNameLabel(expanded: isExpanded)
         nameLabel.textColor = NSColor(theme.primaryText)
 
         if let preview = PreviewGenerator.jsonPreview(item.call.function.arguments, maxLength: 80) {
@@ -1263,6 +1263,30 @@ final class NativeToolCallRowView: NSView {
             return ("xmark.circle.fill", NSColor(theme.errorColor))
         }
         return ("checkmark.circle.fill", NSColor(theme.successColor))
+    }
+
+    /// Upstream `W-tool-catalog-ui`: collapsed rows say what happened in
+    /// plain words ("Read a file"); the expanded detail keeps the raw,
+    /// monospaced tool name. A running MCP call that reports progress shows
+    /// it after the title (upstream #2990; upstream draws it in its shimmer
+    /// label, which Intel's row doesn't have).
+    private func applyNameLabel(expanded: Bool) {
+        guard let item = currentItem else { return }
+        if expanded {
+            nameLabel.stringValue = item.call.function.name
+            nameLabel.font = NSFont.monospacedSystemFont(ofSize: 12, weight: .semibold)
+        } else {
+            let failed = item.result.map { isErrorResult($0, callId: item.call.id) } ?? false
+            let title = ToolDisplayName.friendly(
+                for: item.call.function.name,
+                running: item.result == nil,
+                arguments: item.call.function.arguments,
+                failed: failed
+            )
+            let progress = item.result == nil ? MCPToolProgressRegistry.shared.message(for: item.call.id) : nil
+            nameLabel.stringValue = progress.map { "\(title) · \($0)" } ?? title
+            nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+        }
     }
 
     /// Spinner if this is a `speak` call still playing; otherwise the

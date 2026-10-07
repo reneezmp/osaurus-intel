@@ -607,7 +607,7 @@ do not exist here). Both belong to the backlog, not to a future retry-as-is.
 > **Proxy-API note:** Intel's `GlobalProxySettings` exposes only `makeSession()` (fresh per
 > call), not upstream's cached `sharedSession()`/`currentProxyCacheKey()`. Every upstream
 > `sharedSession()` consumer maps to `makeSession()` — functionally equivalent (always honors the
-> current proxy), just uncached. Do NOT port `currentProxyCacheKey()`; it only serves the caching design we don't use.
+> current proxy), just uncached. Do NOT port `currentProxyCacheKey()` for those consumers. **Update 2026-10-07:** `GlobalProxySettings.currentProxyCacheKey()` now exists on Intel for one caller, `MCPOAuthHTTPTransport.noRedirectSession()` (upstream #1276/#2990): that session carries a delegate, so building one per call would leak; it is cached per proxy key like upstream.
 
 **SKIP (excluded/absent/divergent):** `07ba93e1` (MCP OAuth → proxy — our MCP OAuth is divergent;
 `MCPOAuthHTTPTransport`/`noRedirectSession` absent, no valid target), `6e47dfe9` (`SandboxManager`
