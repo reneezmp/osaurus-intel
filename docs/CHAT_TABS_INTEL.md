@@ -135,3 +135,16 @@ Remove the overlay in a throwaway copy to look at the chips.
 Tracked in [`CHAT_WINDOW_LAYOUT_INTEL.md`](CHAT_WINDOW_LAYOUT_INTEL.md).
 
 Manual QA: [`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`](ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md#chat-tabs-w-chat-tabs).
+
+## Safari-style track (upstream #2995 + #3017) — 2026-10-07
+
+- The strip is upstream's current design: one recessed rounded track of
+  equal-width tabs with centred avatar and title, an accent pill for the
+  active tab, a close button revealed on hover, and the new-tab button as
+  the toolbar's circle button. A lone tab draws no track, pill or accent, so
+  it reads as the window title (#3017).
+- Intel keeps the same adaptations as before: single-value `onChange` for
+  the strip width, and no workspace / paired-iPhone identity or origin on
+  tabs (`WorkspaceRosterStore`, `RemoteAgentManager` and
+  `RemoteSessionContinuation` aren't on Intel).
+

@@ -149,7 +149,6 @@ ports upstream/main's current files, not the commits one by one. Plan:
 ## Status
 
 Stages A–E shipped 2026-10-06. Staged: the composer credits chip and its
-wallet card (Intel never had the chip), the Safari-style tab track with the
-quiet lone tab (#2995 + #3017, `W-chat-tabs`), media-model categories and
+wallet card (Intel never had the chip), media-model categories and
 prices (`W-media-generation`), live reasoning catalog capabilities.
 

@@ -1365,3 +1365,20 @@ Manual: [`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md).
       opens Settings at Context Length. Compact from the card: progress,
       then "Compacted — ~… tokens reclaimed".
 
+## Upstream audit 2026-10-07
+
+Manual: [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md).
+
+- [ ] Chat tabs: one rounded track with equal-width tabs, the active one in
+      an accent pill; hovering a tab shows its close button on the left.
+      With a single tab, no track or pill: it reads like a window title.
+- [ ] A long chat (50+ messages) scrolls and streams without stutters;
+      a new reply keeps the view pinned to the bottom; editing or deleting
+      an earlier message doesn't jump the scroll position.
+- [ ] Agent avatars look sharp in the chat headers, tabs and theme editor.
+- [ ] Quit and relaunch Osaurus Intel quickly: Settings › Server (or any
+      local API client) still works after relaunch (the port is retried).
+      Open tabs come back after quit and relaunch.
+- [ ] `/compact` while a reply streams says to wait; on a short chat it
+      says there's nothing to compact.
+
