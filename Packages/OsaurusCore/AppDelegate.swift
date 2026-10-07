@@ -229,6 +229,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         #if DEBUG
             MainThreadWatchdog.shared.start()
         #endif
+        // Free reconstructible caches under memory pressure (upstream).
+        MemoryPressureResponder.shared.start()
 
         let serverStartupTask = Task { @MainActor in
             let config = ServerConfigurationStore.load() ?? .default

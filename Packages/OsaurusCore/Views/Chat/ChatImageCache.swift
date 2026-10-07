@@ -26,6 +26,11 @@ final class ChatImageCache: @unchecked Sendable {
 
     // MARK: - Synchronous Lookup
 
+    /// Drop every decoded image (memory pressure; upstream).
+    func removeAll() {
+        cache.removeAllObjects()
+    }
+
     func cachedImage(for id: String) -> NSImage? {
         cache.object(forKey: id as NSString)
     }

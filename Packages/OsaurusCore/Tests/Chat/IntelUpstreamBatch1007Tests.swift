@@ -74,4 +74,17 @@ struct IntelUpstreamBatch1007Tests {
         _ = await server.stop(gracefully: false)
         #expect(ConnectionLimitHandler.maxConcurrentConnections == 512)
     }
+
+    // MARK: #2998 — memory pressure frees the avatar bitmaps (and friends)
+
+    @Test("Memory pressure empties the avatar bitmap cache")
+    func memoryPressureFreesAvatars() {
+        let renderer = AvatarBitmapRenderer.shared
+        let first = renderer.image(mascot: .green, pointSize: 24, scale: 2)
+        #expect(first != nil)
+        MemoryPressureResponder.shared.freeCaches()
+        // Re-rendered after the purge: a fresh object, same pixel size.
+        let second = renderer.image(mascot: .green, pointSize: 24, scale: 2)
+        #expect(second != nil && second !== first)
+    }
 }
