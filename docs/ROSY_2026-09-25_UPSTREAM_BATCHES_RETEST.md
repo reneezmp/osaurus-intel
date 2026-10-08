@@ -1405,3 +1405,15 @@ Manual: [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md).
       task: the task runs under that agent. From a Default-agent chat, the
       same tool reports it can't start background work.
 
+## Router billing (2026-10-08)
+
+- [ ] With an Osaurus Cloud model, send a message and note the balance in
+      Credits before and after: it drops by the turn's cost without
+      reopening Credits.
+- [ ] Credits › usage center: the turn appears in the charges list within a
+      few seconds while it is open.
+- [ ] Stop a Router reply mid-stream: within a few seconds the balance
+      refreshes from the server.
+- [ ] Reopen an old chat and a new one: nothing odd appears in replies, chat
+      titles or summaries (no stray symbols or `billing:` text).
+

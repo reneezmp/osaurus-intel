@@ -2435,9 +2435,64 @@ final class ChatSession: ObservableObject {
             lastTurn.toolCalls == nil,
             !lastTurn.hasRenderableThinking,
             lastTurn.generationTokenCount == nil,
-            lastTurn.generationTokensPerSecond == nil
+            lastTurn.generationTokensPerSecond == nil,
+            // Never drop a turn the router billed — even a zero-output charge
+            // must stay so the user sees the "you were charged" notice instead
+            // of a silent gap (upstream).
+            lastTurn.routerBilling == nil
         {
             turns.removeLast()
+        }
+    }
+
+    /// Stamp an Osaurus Router billing event onto an assistant turn. Adopts the
+    /// server-authoritative output-token count so the turn carries accurate
+    /// stats and is preserved through run cleanup, and writes a durable,
+    /// metadata-only ledger row the instant the charge lands (outcome is
+    /// finalized at `completeRunCleanup`). Two-phase write = correct on crash.
+    /// (Upstream.)
+    private func recordRouterBilling(_ billing: RouterBillingSummary, on turn: ChatTurn) {
+        turn.routerBilling = billing
+        if billing.outputTokens > 0 {
+            turn.generationTokenCount = billing.outputTokens
+        }
+        if let entryId = RouterBillingLedger.shared.record(
+            summary: billing,
+            sessionId: sessionId,
+            turnId: turn.id,
+            model: selectedModel,
+            outcome: .pending
+        ) {
+            turn.billingEntryIds.insert(entryId)
+        }
+    }
+
+    /// Classify how a completed assistant turn ultimately rendered. The same
+    /// classification drives both the chat UI (keep + notice vs. trim) and the
+    /// ledger's finalized outcome, so support sees exactly what the user saw.
+    private func classifyBillingOutcome(for turn: ChatTurn) -> RouterBillingOutcome {
+        RouterBillingOutcome.classify(
+            hasVisibleText: !turn.visibleContent
+                .trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+            hasToolCalls: !(turn.toolCalls?.isEmpty ?? true),
+            hasReasoning: turn.hasRenderableThinking,
+            wasCancelled: stopRequested,
+            hadError: lastStreamError != nil
+        )
+    }
+
+    /// Backfill the rendered outcome onto each billed turn's ledger rows. Called
+    /// once per run at cleanup. Idempotent; reloaded turns have no transient
+    /// entry ids and are skipped since their rows were finalized live.
+    private func finalizeRouterBillingOutcomes() {
+        for turn in turns where turn.role == .assistant {
+            for entryId in turn.billingEntryIds {
+                RouterBillingLedger.shared.finalizeOutcome(
+                    entryId: entryId,
+                    outcome: classifyBillingOutcome(for: turn)
+                )
+            }
+            turn.billingEntryIds.removeAll()
         }
     }
 
@@ -2480,6 +2535,9 @@ final class ChatSession: ObservableObject {
         isStreaming = false
         budgetTracker.clear()
         ServerController.signalGenerationEnd()
+        // Finalize ledger outcomes before trimming so the classification sees
+        // the run's turns intact (the trim guard already preserves billed ones).
+        finalizeRouterBillingOutcomes()
         trimTrailingEmptyAssistantTurn()
         consolidateAssistantTurns()
         rebuildVisibleBlocks()
@@ -2847,6 +2905,11 @@ final class ChatSession: ObservableObject {
                     // renderer can surface a one-line banner suggesting
                     // the user toggle Disable Thinking for this prompt class.
                     currentTurn.unclosedReasoning = stats.unclosedReasoning
+                } else if let billing = StreamingBillingHint.decode(delta) {
+                    // Osaurus Router billed this turn (upstream). Stamp it so
+                    // the run can't silently drop a billed-but-empty turn and
+                    // so the bubble can explain the charge; never shown as text.
+                    recordRouterBilling(billing, on: currentTurn)
                 } else if let reasoning = StreamingReasoningHint.decode(delta) {
                     let now = Date()
                     if firstDeltaTime == nil {
@@ -3779,7 +3842,19 @@ final class ChatSession: ObservableObject {
                             }
                         for try await delta in stream {
                             if !isRunActive(runId) { break }
-                            if !delta.isEmpty { processor.receiveDelta(delta) }
+                            // Hints are not text: feeding them to the processor
+                            // leaked `\u{FFFE}` envelopes into the reply
+                            // (upstream fixed the same leak by routing this
+                            // stream through its typed decoder).
+                            if let billing = StreamingBillingHint.decode(delta) {
+                                recordRouterBilling(billing, on: assistantTurn)
+                            } else if let reasoning = StreamingReasoningHint.decode(delta) {
+                                processor.receiveReasoning(reasoning)
+                            } else if StreamingToolHint.isSentinel(delta) {
+                                continue
+                            } else if !delta.isEmpty {
+                                processor.receiveDelta(delta)
+                            }
                         }
                         await processor.finalize(immediately: !isRunActive(runId))
                     } catch {

@@ -865,6 +865,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         var partials: [Int: PartialToolCall] = [:]
                         var announcedNames: Set<Int> = []
 
+                        // Router billing (upstream `RemoteProviderService`):
+                        // however this round's stream ends, a connected Router
+                        // stream that never delivered its summary frame may
+                        // still have been charged, and the local balance
+                        // decrement never ran. Ask for a debounced
+                        // server-truth refresh.
+                        var routerSummarySeen = false
+                        defer {
+                            if endpoint.isOsaurusRouter, !routerSummarySeen {
+                                Task { @MainActor in
+                                    OsaurusRouterAccountService.shared.reconcileAfterStreamWithoutSummary()
+                                }
+                            }
+                        }
+
                         if endpoint.isCodex {
                             let allowedTools = Set(activeTools?.map { $0.function.name } ?? [])
                             var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: allowedTools)
@@ -1047,6 +1062,20 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 NSLog(
                                     "[CloudChatEngine] CACHE prompt=\(promptTok) hit=\(hit) miss=\(miss) round=\(round)"
                                 )
+                            }
+
+                            // Router billing summary (`{"osaurus": {…}}`): update
+                            // the balance and hand the charge to the chat as a
+                            // hidden hint (upstream). Router endpoints only.
+                            if endpoint.isOsaurusRouter,
+                                let summary = Self.routerSummary(fromFrame: json, data: chunkData)
+                            {
+                                routerSummarySeen = true
+                                Task { @MainActor in
+                                    OsaurusRouterAccountService.shared.noteRouterSummary(summary)
+                                }
+                                continuation.yield(StreamingBillingHint.encode(RouterBillingSummary(summary)))
+                                continue
                             }
 
                             guard let choices = json["choices"] as? [[String: Any]],
@@ -1578,6 +1607,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// third-party OpenAI-compatible gateways can reject unknown fields.
     /// The Router forwards the key to keyed upstream caches; genuine OpenAI
     /// hosts, Azure, and OpenRouter accept it directly.
+    /// The Osaurus Router's billing summary frame (`{"osaurus": {…}}`), or
+    /// nil for any other SSE frame. The cheap key check keeps ordinary
+    /// chunks from paying for a failed decode (upstream).
+    nonisolated static func routerSummary(
+        fromFrame json: [String: Any], data: Data
+    ) -> OsaurusRouterSummaryEvent.Summary? {
+        guard json["osaurus"] != nil,
+            let event = try? JSONDecoder().decode(OsaurusRouterSummaryEvent.self, from: data)
+        else { return nil }
+        return event.osaurus
+    }
+
     nonisolated static func supportsPromptCacheKey(providerType: RemoteProviderType, host: String) -> Bool {
         switch providerType {
         case .osaurusRouter, .azureOpenAI:

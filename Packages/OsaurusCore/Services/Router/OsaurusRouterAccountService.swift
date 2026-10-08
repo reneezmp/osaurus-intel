@@ -346,4 +346,27 @@ final class OsaurusRouterAccountService: ObservableObject {
             self.usageRevision &+= 1
         }
     }
+
+    private var missingSummaryReconcileTask: Task<Void, Never>?
+    /// Debounce before reconciling after a Router stream that ended without
+    /// its summary frame (a burst of aborted rounds becomes one refresh).
+    nonisolated static let missingSummaryReconcileDelay: TimeInterval = 3
+
+    /// A Router stream ended (mid-stream error, user cancel, truncation)
+    /// without its summary frame. The server may still have charged for the
+    /// partial generation, and the optimistic local decrement
+    /// (`noteRouterSummary`) never ran, so the cached balance can drift from
+    /// server truth. Schedule a debounced balance refresh as reconciliation
+    /// (the server is authoritative) and bump the usage revision so an open
+    /// usage list catches up too. (Upstream.)
+    func reconcileAfterStreamWithoutSummary() {
+        guard OsaurusRouter.isEnabled else { return }
+        scheduleUsageRevisionBump()
+        missingSummaryReconcileTask?.cancel()
+        missingSummaryReconcileTask = Task { [weak self] in
+            try? await Task.sleep(for: .seconds(Self.missingSummaryReconcileDelay))
+            guard !Task.isCancelled else { return }
+            await self?.refreshBalance()
+        }
+    }
 }

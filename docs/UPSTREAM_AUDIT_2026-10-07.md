@@ -100,7 +100,8 @@ Incompatible 20 · already ported 1.
   since 2026-09-02 ("Router billing ledger is dead code",
   `SYNC_0.24.3_PLAN.md`) and blocked on observing the frame shape; upstream's
   `OsaurusRouterSummaryEvent` decoder (already on Intel) defines it, so it is
-  now a plain port: `W-router-billing` on the backlog.
+  now a plain port: `W-router-billing` on the backlog. **Shipped
+  2026-10-08**, see below.
 - **`existsCached()` identity memo (upstream #1523, 2026-06-16) is not on
   Intel.** `OsaurusRouterAccountService` and other hot paths still call the
   synchronous keychain `OsaurusIdentity.exists()`. #2982 removed the
@@ -123,3 +124,38 @@ Incompatible 20 · already ported 1.
 - **i18n baseline 154** (was 146): the 8 new entries are literals inside
   upstream's new test files (URLs and fixture labels the checker scans), not
   UI strings.
+
+## `W-router-billing` (shipped 2026-10-08)
+
+Upstream's Router billing chain, which Intel had never wired (its ledger
+and Credits table existed but nothing wrote to them):
+
+- `CloudChatEngine` decodes the Router's `{"osaurus": {…}}` summary frame
+  (`ChatEngine.routerSummary(fromFrame:data:)`, Router endpoints only),
+  calls `OsaurusRouterAccountService.noteRouterSummary` (balance decrement,
+  debounced `usageRevision`) and yields a `StreamingBillingHint`. A round
+  whose connected stream ends without a summary calls
+  `reconcileAfterStreamWithoutSummary` (3 s debounce, then a balance
+  refresh), as upstream.
+- `ChatView` decodes the hint before the text branch, stamps
+  `ChatTurn.routerBilling` (saved in `ChatTurnData`; old chats load
+  unchanged), adopts the server's output-token count, writes a pending
+  ledger row and finalizes it at run cleanup with the rendered outcome.
+  `trimTrailingEmptyAssistantTurn` keeps billed turns.
+- Upstream's `emptyResponseNotice` block and `NativeEmptyResponseNoticeView`
+  ("The model returned no visible text — You were charged … [Retry]") for a
+  finished billed turn with no visible text, reasoning, artifacts or tools.
+- **Found and fixed while porting:**
+  - Intel's `StreamingToolHint.isSentinel` only knew its own tool-hint
+    prefixes, while upstream's rule is "starts with `\u{FFFE}`". Generic
+    filters (e.g. `completeChat` one-shots: titles, compaction summaries)
+    would have taken reasoning or billing hints as text. Now upstream's rule.
+  - `ChatView`'s capped-run wrap-up stream fed raw deltas into the reply,
+    so hints leaked into the text (upstream fixed the same leak by routing
+    it through its typed decoder). It now decodes billing and reasoning and
+    drops other hints.
+- Not ported: `billed_to` workspace routing (no workspaces on Intel) and
+  the composer's per-chat spend chip (Intel has no credits chip yet).
+- Tests: upstream `StreamingBillingHintTests`; Intel
+  `IntelRouterBillingTests` (frame decode, hint round trip, persistence,
+  notice).

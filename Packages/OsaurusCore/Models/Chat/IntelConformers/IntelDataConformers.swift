@@ -71,6 +71,12 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     var generationTokensPerSecond: Double?
     var generationTokenCount: Int?
     var unclosedReasoning: Bool = false
+    /// Osaurus Router charge for this turn (upstream): stamped from the
+    /// stream's billing hint, persisted with the chat.
+    var routerBilling: RouterBillingSummary?
+    /// Ledger rows written for this turn during the live run, finalized with
+    /// the rendered outcome at run cleanup. Transient (upstream).
+    var billingEntryIds: Set<String> = []
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -121,6 +127,7 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         self.generationTokenCount = turn.generationTokenCount
         self.timeToFirstToken = turn.timeToFirstToken
         self.generationTokensPerSecond = turn.generationTokensPerSecond
+        self.routerBilling = (turn as? ChatTurnData)?.routerBilling ?? (turn as? ChatTurn)?.routerBilling
     }
 
     func appendContent(_ s: String) {
@@ -318,6 +325,9 @@ enum ContentBlockKind: Equatable {
     /// context (the visible turns are untouched). Expands to show the summary
     /// text. Inserted at display time, never cached by the memoizer.
     case compactionMarker(savedTokens: Int, modelName: String, summaryText: String)
+    /// Upstream: the Osaurus Router billed a turn that produced no visible
+    /// text, reasoning or tools. Shows the charge with a Retry.
+    case emptyResponseNotice(turnId: UUID, outputTokens: Int, costMicro: String, status: String)
 
     static func == (lhs: ContentBlockKind, rhs: ContentBlockKind) -> Bool {
         switch (lhs, rhs) {
@@ -353,6 +363,11 @@ enum ContentBlockKind: Equatable {
             return lId == rId && lSugg == rSugg
         case let (.compactionMarker(lSaved, lModel, lText), .compactionMarker(rSaved, rModel, rText)):
             return lSaved == rSaved && lModel == rModel && lText == rText
+        case let (
+            .emptyResponseNotice(lId, lTokens, lCost, lStatus),
+            .emptyResponseNotice(rId, rTokens, rCost, rStatus)
+        ):
+            return lId == rId && lTokens == rTokens && lCost == rCost && lStatus == rStatus
         default: return false
         }
     }
@@ -370,7 +385,7 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
         case let .paragraph(_, _, _, role): return role
         case .toolCallGroup, .thinking, .activityGroup, .sharedArtifact, .pendingToolCall, .preflightCapabilities,
              .generationStats, .typingIndicator, .groupSpacer, .chart, .assistantActions, .fileDiff,
-             .followUpSuggestions, .compactionMarker:
+             .followUpSuggestions, .compactionMarker, .emptyResponseNotice:
             return .assistant
         case .userMessage: return .user
         }
@@ -553,6 +568,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var pendingToolArgFragmentCount: Int = 0
     var unclosedReasoning: Bool = false
     var preflightCapabilities: Any? = nil
+    var routerBilling: RouterBillingSummary?
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -580,6 +596,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         self.timeToFirstToken = turn.timeToFirstToken
         self.generationTokensPerSecond = turn.generationTokensPerSecond
         self.preflightCapabilities = turn.preflightCapabilities
+        self.routerBilling = (turn as? ChatTurn)?.routerBilling ?? (turn as? ChatTurnData)?.routerBilling
     }
 
     static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
@@ -639,6 +656,7 @@ extension ChatTurnData: Codable {
         case sharedArtifacts
         case thinking, createdAt, completedAt, generationTokenCount
         case timeToFirstToken, generationTokensPerSecond
+        case routerBilling
     }
 
     init(from decoder: Decoder) throws {
@@ -660,6 +678,7 @@ extension ChatTurnData: Codable {
             generationTokensPerSecond: try c.decodeIfPresent(
                 Double.self, forKey: .generationTokensPerSecond)
         )
+        self.routerBilling = try? c.decodeIfPresent(RouterBillingSummary.self, forKey: .routerBilling)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -678,6 +697,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(generationTokenCount, forKey: .generationTokenCount)
         try c.encodeIfPresent(timeToFirstToken, forKey: .timeToFirstToken)
         try c.encodeIfPresent(generationTokensPerSecond, forKey: .generationTokensPerSecond)
+        try c.encodeIfPresent(routerBilling, forKey: .routerBilling)
     }
 }
 
@@ -2087,6 +2107,26 @@ final class BlockMemoizer: @unchecked Sendable {
                 visibleIndex + 1 < visibleTurns.count ? visibleTurns[visibleIndex + 1].role : nil
             let isLastInGroup = nextRole != turn.role
 
+            // The router billed this turn but it produced no visible text,
+            // reasoning, artifacts or tools: surface the charge with a Retry
+            // instead of an empty row (upstream). Only once the turn is done.
+            if !isUser, !isStreaming, let billing = turn.routerBilling,
+                turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                !turn.hasRenderableThinking, turn.sharedArtifacts.isEmpty,
+                (turn.toolCalls ?? []).isEmpty, turn.pendingToolName == nil
+            {
+                blocks.append(ContentBlock(
+                    id: "empty-notice-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .emptyResponseNotice(
+                        turnId: turn.id,
+                        outputTokens: billing.outputTokens,
+                        costMicro: billing.costMicro,
+                        status: billing.status
+                    )
+                ))
+            }
+
             let totalDuration = Self.workedFor(
                 isUser: isUser, isLastInGroup: isLastInGroup, isStreaming: isStreaming,
                 startedAt: replyStartedAt, completedAt: turn.completedAt)
@@ -2256,8 +2296,12 @@ struct StreamingToolHint: Sendable {
             result: d["result"] ?? ""
         )
     }
+    /// Any in-band hint, not just the tool ones: upstream's rule is "starts
+    /// with `\u{FFFE}`" (reasoning, stats, billing), so generic filters such
+    /// as `completeChat`'s one-shot text never pick up a hint as content.
     static func isSentinel(_ delta: String) -> Bool {
-        delta.hasPrefix(donePrefix) || delta.hasPrefix(namePrefix) || delta.hasPrefix(argsPrefix)
+        delta.first == "\u{FFFE}"
+            || delta.hasPrefix(donePrefix) || delta.hasPrefix(namePrefix) || delta.hasPrefix(argsPrefix)
     }
     static func decode(_ delta: String) -> String? {
         delta.hasPrefix(namePrefix) ? String(delta.dropFirst(namePrefix.count)) : nil
@@ -2288,6 +2332,31 @@ struct ToolCallDone: Sendable, Equatable {
 /// Same `\u{FFFE}reasoning:` sentinel prefix as upstream so the
 /// `ChatView` decode site (`StreamingReasoningHint.decode(delta)` at
 /// L1721) works without an architecture-specific branch.
+/// In-band signaling for an Osaurus Router billing event (cost, token counts,
+/// status). Shares the `\u{FFFE}` sentinel so the generic filters in HTTP
+/// handlers and `ChatEngine` drop it from visible output and skip it for token
+/// counting; `ChatView` decodes it to keep + surface the billed turn and to
+/// write the on-device billing ledger row. Payload is JSON so fields can be
+/// added later without changing the sentinel prefix. (Upstream; upstream
+/// keeps it in `ModelService.swift`, which Intel doesn't compile.)
+enum StreamingBillingHint: Sendable {
+    private static let billingPrefix = "\u{FFFE}billing:"
+
+    static func encode(_ summary: RouterBillingSummary) -> String {
+        guard let data = try? JSONEncoder().encode(summary),
+            let json = String(data: data, encoding: .utf8)
+        else { return billingPrefix + "{}" }
+        return billingPrefix + json
+    }
+
+    static func decode(_ delta: String) -> RouterBillingSummary? {
+        guard delta.hasPrefix(billingPrefix) else { return nil }
+        let json = String(delta.dropFirst(billingPrefix.count))
+        guard let data = json.data(using: .utf8) else { return nil }
+        return try? JSONDecoder().decode(RouterBillingSummary.self, from: data)
+    }
+}
+
 enum StreamingReasoningHint: Sendable {
     private static let reasoningPrefix = "\u{FFFE}reasoning:"
     static func encode(_ text: String) -> String { reasoningPrefix + text }
