@@ -3459,6 +3459,18 @@ extension FloatingInputCard {
                     withAnimation(theme.springAnimation()) {
                         pendingAttachments.append(.image(imageData))
                     }
+                },
+                pasteTarget: { textViewFocusController.textView },
+                onUnsupportedImagePaste: {
+                    // Same message the file picker / drop path shows; the
+                    // paste used to vanish without a word (upstream #3040).
+                    let cap = mediaCapabilities
+                    ToastManager.shared.error(
+                        L("Cannot attach image"),
+                        message: cap.anyMedia
+                            ? L("The current model supports \(cap.summary) only.")
+                            : L("The current model is text-only.")
+                    )
                 }
             )
         )
@@ -3713,11 +3725,15 @@ struct CachedImageThumbnail: View {
 struct PasteboardImageMonitor: NSViewRepresentable {
     let supportsImages: Bool
     let onImagePaste: (Data) -> Void
+    let pasteTarget: () -> NSView?
+    var onUnsupportedImagePaste: (() -> Void)? = nil
 
     func makeNSView(context: Context) -> NSView {
         let view = PasteMonitorView()
         view.supportsImages = supportsImages
         view.onImagePaste = onImagePaste
+        view.pasteTarget = pasteTarget
+        view.onUnsupportedImagePaste = onUnsupportedImagePaste
         return view
     }
 
@@ -3725,6 +3741,8 @@ struct PasteboardImageMonitor: NSViewRepresentable {
         if let view = nsView as? PasteMonitorView {
             view.supportsImages = supportsImages
             view.onImagePaste = onImagePaste
+            view.pasteTarget = pasteTarget
+            view.onUnsupportedImagePaste = onUnsupportedImagePaste
         }
     }
 }
@@ -3734,11 +3752,41 @@ class PasteMonitorView: NSView {
     var onImagePaste: ((Data) -> Void)?
     private var monitor: Any?
 
+    /// Image bytes or an image file URL on the pasteboard. Uses the same
+    /// direct accessors as the paste path (no type enumeration — Sentry
+    /// APPLE-MACOS-43). (Upstream #3040.)
+    static func pasteboardHasImage(_ pasteboard: NSPasteboard) -> Bool {
+        if pasteboard.data(forType: .png) != nil || pasteboard.data(forType: .tiff) != nil {
+            return true
+        }
+        for type in [NSPasteboard.PasteboardType.fileURL, NSPasteboard.PasteboardType("public.file-url")] {
+            guard let raw = pasteboard.string(forType: type), let url = URL(string: raw), url.isFileURL,
+                let uti = try? url.resourceValues(forKeys: [.typeIdentifierKey]).typeIdentifier
+            else { continue }
+            if UTType(uti)?.conforms(to: .image) == true { return true }
+        }
+        return false
+    }
+
+    var pasteTarget: (() -> NSView?)?
+
+    /// Local event monitors see every app window. Only the exact composer
+    /// text view that owns keyboard focus may attach an image or reject it
+    /// (upstream #3040; before, every open composer reacted to any Cmd+V).
+    func ownsPaste(in eventWindow: NSWindow?) -> Bool {
+        guard let window, eventWindow === window, let target = pasteTarget?(),
+            target.window === window, window.firstResponder === target
+        else { return false }
+        return true
+    }
+
+    var onUnsupportedImagePaste: (() -> Void)?
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         if window != nil && monitor == nil {
             monitor = NSEvent.addLocalMonitorForEvents(matching: .keyDown) { [weak self] event in
-                guard let self = self else { return event }
+                guard let self = self, self.ownsPaste(in: event.window) else { return event }
                 // Check for Cmd+V
                 if event.modifierFlags.contains(.command) && event.charactersIgnoringModifiers == "v" {
                     if self.handlePasteIfImage() {
@@ -3759,7 +3807,12 @@ class PasteMonitorView: NSView {
     }
 
     private func handlePasteIfImage() -> Bool {
-        guard supportsImages else { return false }
+        guard supportsImages else {
+            // Not consumed: any text on the pasteboard still pastes normally.
+            // An image-only payload used to disappear with no explanation.
+            if Self.pasteboardHasImage(NSPasteboard.general) { onUnsupportedImagePaste?() }
+            return false
+        }
 
         let pasteboard = NSPasteboard.general
 

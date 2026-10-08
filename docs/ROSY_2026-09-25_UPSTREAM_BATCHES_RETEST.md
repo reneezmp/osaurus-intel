@@ -1417,3 +1417,20 @@ Manual: [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md).
 - [ ] Reopen an old chat and a new one: nothing odd appears in replies, chat
       titles or summaries (no stray symbols or `billing:` text).
 
+## Upstream audit 2026-10-08
+
+Manual: [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md).
+
+- [ ] Ask an agent with tools on for "what is 17.5% of 2,340, and 2^40?":
+      it uses Calculate (row "Calculated") and the answers are exact.
+- [ ] A reply with a code block fenced by four backticks (with a three-
+      backtick block inside) renders as one code block.
+- [ ] With a text-only model selected, copy an image and press Cmd+V in
+      the composer: a "Cannot attach image" toast explains why. With two
+      chat windows open, Cmd+V of an image lands only in the focused one.
+- [ ] Add a stdio MCP server whose command is `npx …` (Node from nvm,
+      mise or asdf, not Homebrew): it starts without "command not found".
+- [ ] Run /compact in a long chat on a DeepSeek model and, if you use one,
+      an LM Studio / llama.cpp model: the summary appears; nothing errors
+      about an unknown `thinking` field.
+

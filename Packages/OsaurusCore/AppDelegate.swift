@@ -231,6 +231,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         #endif
         // Free reconstructible caches under memory pressure (upstream).
         MemoryPressureResponder.shared.start()
+        // Resolve the user's login-shell PATH off-main now so host MCP servers
+        // see version-manager toolchains (mise / nvm / asdf) without waiting on
+        // the probe later (upstream #3024).
+        LoginShellPath.prewarm()
         startUpstreamAnnouncements()
 
         let serverStartupTask = Task { @MainActor in

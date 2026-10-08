@@ -424,18 +424,78 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
-    private func applyReasoningMode(_ request: ChatCompletionRequest, into body: inout [String: Any]) {
+    private func applyReasoningMode(
+        _ request: ChatCompletionRequest, endpoint: ResolvedEndpoint, into body: inout [String: Any]
+    ) {
         // DSV4 reasoning-mode translation (see RemoteProviderService.dsv4RemoteEffort).
         let effort = request.modelOptions?["reasoningEffort"]?.stringValue?
             .trimmingCharacters(in: .whitespacesAndNewlines)
             .lowercased()
+        let offForm = Self.reasoningOffForm(
+            providerType: endpoint.provider?.providerType,
+            host: URL(string: endpoint.url)?.host ?? "",
+            isOsaurusRouter: endpoint.isOsaurusRouter)
+        if request.modelOptions?["disableThinking"]?.boolValue == true {
+            Self.applyReasoningOff(offForm, into: &body)
+            return
+        }
         switch effort {
         case "instruct", "chat", "none", "no_think", "nothink", "off", "disabled", "false":
-            body["thinking"] = ["type": "disabled"]
+            Self.applyReasoningOff(offForm, into: &body)
         case .some(let nonEmpty) where !nonEmpty.isEmpty:
             body["reasoning_effort"] = nonEmpty
         case .some, .none:
-            body["thinking"] = ["type": "disabled"]
+            Self.applyReasoningOff(offForm, into: &body)
+        }
+    }
+
+    /// How "reasoning off" reaches the wire for a host (upstream #3042,
+    /// `RemoteReasoningPolicy.reasoningOffControls`).
+    enum ReasoningOffForm: Equatable {
+        /// DeepSeek's `thinking: {"type": "disabled"}`.
+        case deepSeekThinking
+        /// Self-hosted servers (vLLM, SGLang, llama.cpp, LM Studio) read
+        /// `chat_template_kwargs.enable_thinking` and ignore a DeepSeek flag.
+        case templateKwargs
+        /// Strict hosted schemas reject unknown fields: send nothing.
+        case none
+    }
+
+    /// Hosted OpenAI-compatible APIs with strict request schemas (unknown
+    /// fields are rejected) or their own reasoning switch (upstream list).
+    nonisolated static let strictSchemaHosts = [
+        "openai.com", "mistral.ai", "groq.com", "x.ai", "perplexity.ai", "googleapis.com",
+        "anthropic.com", "cohere", "cerebras.ai", "venice.ai", "deepseek.com",
+        "fireworks.ai", "openrouter.ai",
+    ]
+
+    /// Intel differences from upstream: the built-in DeepSeek path (no
+    /// provider) and any `deepseek` host keep `thinking: disabled` for every
+    /// model (Intel always sent it; upstream limits it to DSV4 models), and
+    /// the Osaurus Router keeps it too (upstream sends nothing there; Intel's
+    /// Router turns have always carried it, and dropping it could turn
+    /// reasoning back on for Router models).
+    nonisolated static func reasoningOffForm(
+        providerType: RemoteProviderType?, host: String, isOsaurusRouter: Bool
+    ) -> ReasoningOffForm {
+        guard let providerType else { return .deepSeekThinking }
+        if isOsaurusRouter || providerType == .osaurusRouter { return .deepSeekThinking }
+        switch providerType {
+        case .openaiLegacy:
+            let lowered = host.lowercased()
+            if lowered.contains("deepseek") { return .deepSeekThinking }
+            if strictSchemaHosts.contains(where: { lowered.contains($0) }) { return .none }
+            return .templateKwargs
+        case .azureOpenAI, .anthropic, .openResponses, .openAICodex, .gemini, .osaurus, .osaurusRouter:
+            return .none
+        }
+    }
+
+    private static func applyReasoningOff(_ form: ReasoningOffForm, into body: inout [String: Any]) {
+        switch form {
+        case .deepSeekThinking: body["thinking"] = ["type": "disabled"]
+        case .templateKwargs: body["chat_template_kwargs"] = ["enable_thinking": false]
+        case .none: break
         }
     }
 
@@ -810,7 +870,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 sessionId: request.session_id,
                                 into: &body
                             )
-                            self.applyReasoningMode(request, into: &body)
+                            self.applyReasoningMode(request, endpoint: endpoint, into: &body)
                         }
 
                         var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
@@ -1367,7 +1427,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         if let temperature = request.temperature, !Self.rejectsSamplingTemperature(modelId: endpoint.modelId) {
             body["temperature"] = temperature
         }
-        applyReasoningMode(request, into: &body)
+        applyReasoningMode(request, endpoint: endpoint, into: &body)
         Self.applyPromptCacheRouting(provider: endpoint.provider, sessionId: request.session_id, into: &body)
 
         // CANONICAL (sorted-key) serialization — bare JSONSerialization emits

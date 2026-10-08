@@ -20,7 +20,7 @@ struct IntelAgentLoopToolsTests {
     @Test("todo, complete, clarify and get_current_time are registered built-ins")
     func registration() {
         let names = Set(ToolRegistry.shared.listTools().map(\.name))
-        #expect(ToolRegistry.agentLoopToolNames == ["todo", "complete", "clarify", "get_current_time"])
+        #expect(ToolRegistry.agentLoopToolNames == ["todo", "complete", "clarify", "get_current_time", "calculate"])
         #expect(ToolRegistry.agentLoopToolNames.isSubset(of: names))
         // `speak` is registered but gated on the agent's Speak Tool switch.
         #expect(names.contains(ToolRegistry.speakToolName))

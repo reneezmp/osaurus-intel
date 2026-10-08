@@ -1098,12 +1098,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// and again at dispatch.
     static let appleAppToolNames: Set<String> = AppleApp.toolNames(for: Set(AppleApp.availableOnIntel))
 
-    /// Agent-loop tools (upstream `AgentLoopTools` + `get_current_time`).
+    /// Agent-loop tools (upstream `AgentLoopTools` + `get_current_time` +
+    /// `calculate`, upstream #3039).
     /// Chat affordances rather than agent capabilities: offered whenever the
     /// agent's tools are on, bypassing the Tools-tab allowlist like upstream's
     /// baseline. `complete`, `clarify` and `prompt_working_folder` end the run
     /// (see `AgentLoopRunEnd`).
-    static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time"]
+    static let agentLoopToolNames: Set<String> = ["todo", "complete", "clarify", "get_current_time", "calculate"]
 
     /// Upstream's Agent Channel tool names (verbatim). Intel doesn't ship the
     /// channel tools yet (`W-channels`); the set is here for upstream's
@@ -1219,7 +1220,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     private func registerAgentLoopTools() {
-        let tools: [OsaurusTool] = [TodoTool(), CompleteTool(), ClarifyTool(), CurrentTimeTool()]
+        let tools: [OsaurusTool] = [TodoTool(), CompleteTool(), ClarifyTool(), CurrentTimeTool(), CalculatorTool()]
         assert(Set(tools.map(\.name)) == Self.agentLoopToolNames)
         for tool in tools {
             toolsByName[tool.name] = tool

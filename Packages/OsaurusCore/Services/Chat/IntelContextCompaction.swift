@@ -68,6 +68,9 @@ enum IntelContextCompaction {
         case noModel
         case emptySummary
         case timedOut
+        /// The summary hit the output limit before it finished; a partial
+        /// summary is never applied over the conversation (upstream #3036).
+        case truncatedSummary(model: String)
 
         var errorDescription: String? {
             switch self {
@@ -79,8 +82,17 @@ enum IntelContextCompaction {
                 return L("The model returned an empty summary. Nothing was changed.")
             case .timedOut:
                 return L("Compaction timed out. Nothing was changed.")
+            case .truncatedSummary(let model):
+                return L("'\(model)' hit its output limit before finishing the summary, so nothing was replaced. If it is a reasoning model served remotely, its server may be ignoring the request to turn reasoning off")
             }
         }
+    }
+
+    /// `finish_reason` values meaning the reply was cut at the output budget
+    /// (upstream `RemoteProviderService.isIncompleteFinishReason`).
+    static func isTruncated(finishReason: String?) -> Bool {
+        guard let finishReason else { return false }
+        return ["length", "max_tokens", "incomplete"].contains(finishReason.lowercased())
     }
 
     /// Recent user turns kept verbatim (current + one prior exchange).
@@ -217,7 +229,7 @@ enum IntelContextCompaction {
         }
         let covered = Array(turns[0 ..< cut])
         let transcript = renderTranscript(covered: covered, existingSummary: existing, charBudget: 240_000)
-        let request = ChatCompletionRequest(
+        var draftRequest = ChatCompletionRequest(
             model: model,
             messages: [
                 ChatMessage(role: "system", content: systemPrompt),
@@ -226,6 +238,10 @@ enum IntelContextCompaction {
             temperature: 0.2,
             max_tokens: summaryMaxTokens
         )
+        // Reasoning off, explicitly: a remote thinking model otherwise spends
+        // the whole budget reasoning and returns no summary (upstream #3036).
+        draftRequest.modelOptions = ["disableThinking": .bool(true)]
+        let request = draftRequest
         let chatEngine = engine ?? ChatEngine(model: model)
         onPhase?(.summarizing)
         let response = try await withThrowingTaskGroup(of: ChatCompletionResponse.self) { group in
@@ -245,6 +261,9 @@ enum IntelContextCompaction {
             defer { group.cancelAll() }
             guard let first = try await group.next() else { throw CancellationError() }
             return first
+        }
+        if Self.isTruncated(finishReason: response.choices.first?.finish_reason) {
+            throw Failure.truncatedSummary(model: model)
         }
         let text = (response.choices.first?.message?.content ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { throw Failure.emptySummary }

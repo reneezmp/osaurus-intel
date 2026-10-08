@@ -49,7 +49,14 @@
         /// lifetime.
         public let transport: StdioTransport
 
-        public init(provider: MCPProvider) throws {
+        /// Preferred entry point: resolves the user's login-shell PATH off the main thread first (cached after
+        /// the first call) so version-manager toolchains are visible to the child (#3024).
+        public static func make(provider: MCPProvider) async throws -> MCPStdioHostRunner {
+            let loginShellEntries = await LoginShellPath.shared.entries()
+            return try MCPStdioHostRunner(provider: provider, loginShellEntries: loginShellEntries)
+        }
+
+        public init(provider: MCPProvider, loginShellEntries: [String]? = LoginShellPath.cachedEntries) throws {
             guard !provider.command.isEmpty else {
                 throw MCPStdioTransportError.missingCommand
             }
@@ -57,11 +64,20 @@
             self.command = provider.command
             self.args = provider.args
 
-            let mergedEnv = Self.buildEnv(provider: provider)
+            var mergedEnv = Self.buildEnv(provider: provider, loginShellEntries: loginShellEntries)
             let executablePath = try Self.resolveExecutablePath(
-                command: provider.command,
+                command: Self.expandUserPath(provider.command),
                 env: mergedEnv
             )
+            // `#!/usr/bin/env node` needs `node` on the CHILD's PATH; a full path to a version-manager `npx`
+            // alone is not enough. Put the script's own directory first when its interpreter sits beside it,
+            // unless the user set PATH explicitly for this provider.
+            if provider.resolvedEnv()["PATH"] == nil,
+                let sibling = ExecutableLocator.envShebangSiblingDirectory(executable: executablePath)
+            {
+                let rest = (mergedEnv["PATH"] ?? "").split(separator: ":").map(String.init).filter { $0 != sibling }
+                mergedEnv["PATH"] = ([sibling] + rest).joined(separator: ":")
+            }
 
             let stdinPipe = Pipe()
             let stdoutPipe = Pipe()
@@ -74,7 +90,10 @@
             process.standardOutput = stdoutPipe
             process.standardError = stderrPipe
             if let cwd = provider.workingDirectory, !cwd.isEmpty {
-                process.currentDirectoryURL = URL(fileURLWithPath: cwd)
+                process.currentDirectoryURL = URL(
+                    fileURLWithPath: Self.expandUserPath(cwd),
+                    isDirectory: true
+                )
             }
 
             self.process = process
@@ -93,49 +112,85 @@
         /// Process env = inherited app env merged with the provider's
         /// own env (plain + Keychain-resolved secrets). Provider entries
         /// win on key conflicts.
-        private static func buildEnv(provider: MCPProvider) -> [String: String] {
+        /// The child's PATH is the login shell's PATH plus the inherited one and the fallbacks — the same path
+        /// the command was found on, so its shebang interpreter is found too. An explicit provider PATH wins as is.
+        private static func buildEnv(provider: MCPProvider, loginShellEntries: [String]?) -> [String: String] {
             var env = ProcessInfo.processInfo.environment
+            env["PATH"] = ExecutableLocator.childPath(inherited: env, loginShellEntries: loginShellEntries)
             for (key, value) in provider.resolvedEnv() {
                 env[key] = value
             }
             return env
         }
 
-        /// Resolve `command` to an absolute path the kernel can exec.
-        /// For absolute / relative paths we trust the caller; for bare
-        /// names we walk the provider's `PATH` ourselves and surface a
-        /// typed `commandNotFound` error if nothing matches. Going
-        /// through `/usr/bin/env` would hide ENOENT inside the env exec
-        /// (env itself spawns fine, then exits non-zero), which is why
-        /// we'd previously never see a useful error for nvm / asdf users.
+        static func buildEnvForTesting(provider: MCPProvider, loginShellEntries: [String]?) -> [String: String] {
+            buildEnv(provider: provider, loginShellEntries: loginShellEntries)
+        }
+
+        /// Resolve `command` to an absolute path the kernel can exec, mapping
+        /// a miss onto this transport's typed `commandNotFound` error.
+        ///
+        /// The lookup itself lives in `ExecutableLocator` (shared with the
+        /// Claude Code provider); only the error mapping is transport-specific,
+        /// because the UI pattern-matches `commandNotFoundMarker` in the
+        /// resulting message.
         private static func resolveExecutablePath(
             command: String,
             env: [String: String]
         ) throws -> String {
-            if command.contains("/") {
-                return command
-            }
-            let searchPath = env["PATH"] ?? "/usr/bin:/bin:/usr/local/bin"
-            guard let found = resolveOnPath(command, path: searchPath) else {
+            guard let found = ExecutableLocator.resolve(command: command, env: env) else {
                 throw MCPStdioTransportError.commandNotFound(
                     command: command,
-                    searchedPath: searchPath
+                    searchedPath: ExecutableLocator.searchPath(env: env)
                 )
             }
             return found
         }
 
+        private static func executableSearchPath(env: [String: String]) -> String {
+            ExecutableLocator.searchPath(env: env)
+        }
+
+        private static func expandUserPath(_ path: String) -> String {
+            ExecutableLocator.expandUserPath(path)
+        }
+
+        static func executableSearchPathForTesting(env: [String: String]) -> String {
+            executableSearchPath(env: env)
+        }
+
+        static func expandUserPathForTesting(_ path: String) -> String {
+            expandUserPath(path)
+        }
+
+        static func resolveExecutablePathForTesting(
+            command: String,
+            env: [String: String]
+        ) throws -> String {
+            try resolveExecutablePath(command: expandUserPath(command), env: env)
+        }
+
+        /// Set once a global spawn slot is held so `stop()` releases exactly
+        /// one slot even if called twice.
+        private var spawnSlotHeld = false
+
         /// Start the subprocess. Must be called before connecting `MCP.Client`
-        /// to `transport`.
-        public func start() throws {
-            process.terminationHandler = { [weak self] proc in
-                let code = proc.terminationStatus
-                Task { await self?.handleProcessExit(exitCode: code) }
-            }
-            startStderrPump()
+        /// to `transport`. Reserves a global MCP child-spawn slot first so a
+        /// reconnect/launch storm can't exhaust PIDs/FDs.
+        public func start() async throws {
+            try await MCPChildSpawnLimiter.shared.acquire()
+            spawnSlotHeld = true
             do {
+                process.terminationHandler = { [weak self] proc in
+                    let code = proc.terminationStatus
+                    Task { await self?.handleProcessExit(exitCode: code) }
+                }
+                startStderrPump()
                 try process.run()
             } catch {
+                // Release the slot we just reserved — the child never launched.
+                await MCPChildSpawnLimiter.shared.release()
+                spawnSlotHeld = false
                 stopStderrPump()
                 throw MCPStdioTransportError.processSpawnFailed(error.localizedDescription)
             }
@@ -188,26 +243,16 @@
                     kill(process.processIdentifier, SIGKILL)
                 }
             }
+            if spawnSlotHeld {
+                spawnSlotHeld = false
+                await MCPChildSpawnLimiter.shared.release()
+            }
         }
 
         public func isRunning() -> Bool {
             process.isRunning
         }
 
-        /// Walk the colon-separated `path` looking for an executable named
-        /// `command`. Returns the first hit's absolute path, or nil. Mirrors
-        /// `/usr/bin/env`'s lookup just enough to give us a useful error
-        /// before we hand off to `Process.run()`.
-        private static func resolveOnPath(_ command: String, path: String) -> String? {
-            let fm = FileManager.default
-            for dir in path.split(separator: ":", omittingEmptySubsequences: true) {
-                let candidate = "\(dir)/\(command)"
-                if fm.isExecutableFile(atPath: candidate) {
-                    return candidate
-                }
-            }
-            return nil
-        }
     }
 
     /// Errors specific to the host stdio path. Sandbox-path errors are
