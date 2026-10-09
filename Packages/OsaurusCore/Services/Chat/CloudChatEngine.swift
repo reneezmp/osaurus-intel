@@ -176,19 +176,46 @@ enum IntelRemoteModelEligibility {
 
 /// Pull a human-readable message out of an OpenAI-style error body
 /// (`{"error":{"message":"…"}}`), falling back to the raw text.
-private func extractAPIErrorMessage(_ body: String) -> String {
+func extractAPIErrorMessage(_ body: String) -> String {
     let trimmed = body.trimmingCharacters(in: .whitespacesAndNewlines)
     if let data = trimmed.data(using: .utf8),
         let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
     {
         if let err = json["error"] as? [String: Any],
-            let msg = err["message"] as? String, !msg.isEmpty
+            var msg = err["message"] as? String, !msg.isEmpty
         {
+            // OpenRouter wraps the upstream reason in `metadata.raw`
+            // behind a generic "Provider returned error" (upstream #3051).
+            if let upstream = openRouterUpstreamMessage(err) {
+                msg = "\(msg): \(upstream)"
+            }
+            if let code = err["code"] as? String { return "\(msg) (code: \(code))" }
+            if let code = err["code"] as? Int { return "\(msg) (code: \(code))" }
             return msg
         }
         if let msg = json["message"] as? String, !msg.isEmpty { return msg }
     }
     return trimmed
+}
+
+/// The upstream provider's message from an OpenRouter error's
+/// `metadata.raw`, which is usually a JSON string with its own `message`
+/// (or `error.message`) but can be plain text. Upstream
+/// `RemoteProviderService.openRouterUpstreamMessage` (#3055).
+func openRouterUpstreamMessage(_ error: [String: Any]) -> String? {
+    guard let metadata = error["metadata"] as? [String: Any],
+        let raw = metadata["raw"] as? String,
+        !raw.isEmpty
+    else { return nil }
+    if let inner = try? JSONSerialization.jsonObject(with: Data(raw.utf8)) as? [String: Any] {
+        if let message = inner["message"] as? String { return message }
+        if let nested = inner["error"] as? [String: Any],
+            let message = nested["message"] as? String
+        {
+            return message
+        }
+    }
+    return raw.count > 300 ? String(raw.prefix(300)) + "..." : raw
 }
 
 // MARK: - Cloud Chat Engine

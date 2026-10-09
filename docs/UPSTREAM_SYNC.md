@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Before that: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Before that: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -2763,3 +2763,19 @@ Found while doing it: Intel's `MasterKey` ignored the keychain-disable test
 flag and `MasterKeyExistsGuardTests` rewrote the real identity slot on every
 full run. See the 2026-10-09 keychain incident in
 [`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).
+
+### Upstream batch `02604ca60..ec654e8c5` — 2026-10-09
+
+Audit and port of 5 commits:
+[`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md). Shipped:
+OpenRouter's upstream reason and error codes in cloud error messages (#3055),
+the App struct no longer observes `ThemeManager` (#3052, `ZoomMenuItems`),
+off-main plugin secret checks so the Plugins tab no longer freezes on scroll
+(#3057). Covered: the forced `tool_choice` downgrade (Intel always sends
+`auto`). New backlog items: `W-app-menus` (upstream menus Intel's menu bar
+lacks, home of #3052/#3054's remaining parts) and `W-plugin-reliability`
+(upstream #2061 and later plugin-stack drift in files Intel compiles but never
+refreshed). **Method gap found:** the 2026-09-29 sweep lists only files Intel
+does not compile; a compiled file can still be months behind. When an audit
+touches a compiled file, diff the whole file against upstream before calling
+it current. The next review starts after `ec654e8c5`.

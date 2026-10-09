@@ -1445,3 +1445,16 @@ Manual: [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md).
       results arrive in pages, and a note says if some files were skipped.
 - [ ] Open a TextEdit `.rtfd` document via the agent: its text is read.
 
+## Upstream audit 2026-10-09
+
+Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
+
+- [ ] Settings › Plugins with several plugins installed: scrolling the grid
+      is smooth, and a plugin missing a required key still shows its
+      warning badge after a moment.
+- [ ] View menu: Zoom In / Zoom Out / Actual Size work; Actual Size is
+      greyed out at normal size, and Zoom In greys out at the largest size.
+- [ ] (If you use OpenRouter) a request the provider rejects shows the
+      provider's reason after "Provider returned error:", not just the
+      generic line.
+

@@ -18,12 +18,11 @@ struct osaurusApp: SwiftUI.App {
     /// Upstream e0eeba12.
     @AppStorage(NewChatShortcutSetting.defaultsKey)
     private var cmdNStartsNewChatInCurrentWindow: Bool = false
-    /// Drives the View menu's zoom item enabled state (`canZoomFontIn` /
-    /// `canZoomFontOut` / `isDefaultFontScale`). Upstream e0eeba12 pairs
-    /// these with an existing "Theme" picker menu item that this fork's
-    /// App target doesn't have; the zoom items stand alone in their own
-    /// View menu here. Upstream 1b955c2b.
-    @ObservedObject private var themeManager = ThemeManager.shared
+    // NOTE: Do not add `@ObservedObject` singletons here. Every `@Published`
+    // change on an object observed by the App struct re-evaluates the whole
+    // `Commands` tree and rebuilds the main menu on the main thread (upstream
+    // #3052, a Sentry-reported hang). Observe state from small, dedicated
+    // menu-item views instead (see `ZoomMenuItems`).
 
     var body: some SwiftUI.Scene {
         // The SwiftUI `Settings { EmptyView() }` scene is kept as a
@@ -146,31 +145,7 @@ private extension osaurusApp {
     /// fork has none, so they get their own `CommandMenu`.
     var viewMenuCommands: some Commands {
         CommandMenu(L("View")) {
-            Button {
-                themeManager.zoomFontIn()
-            } label: {
-                Text(verbatim: L("Zoom In"))
-            }
-            // "=" is the unshifted key under "+", matching how ⌘+ zoom is
-            // reached without holding Shift in browsers.
-            .keyboardShortcut("=", modifiers: .command)
-            .disabled(!themeManager.canZoomFontIn)
-
-            Button {
-                themeManager.zoomFontOut()
-            } label: {
-                Text(verbatim: L("Zoom Out"))
-            }
-            .keyboardShortcut("-", modifiers: .command)
-            .disabled(!themeManager.canZoomFontOut)
-
-            Button {
-                themeManager.resetFontScale()
-            } label: {
-                Text(verbatim: L("Actual Size"))
-            }
-            .keyboardShortcut("0", modifiers: .command)
-            .disabled(themeManager.isDefaultFontScale)
+            ZoomMenuItems()
         }
     }
 
@@ -183,5 +158,43 @@ private extension osaurusApp {
             }
             .keyboardShortcut(",", modifiers: .command)
         }
+    }
+}
+
+// MARK: - Zoom Menu Items
+
+/// View-menu font zoom items. Observes `ThemeManager` locally so theme
+/// changes only invalidate these items rather than re-evaluating every
+/// App-level `Commands` builder. Upstream #3052 `ThemeMenuItems`, minus the
+/// Theme submenu this fork's menu bar doesn't have (`W-app-menus`).
+private struct ZoomMenuItems: View {
+    @ObservedObject private var themeManager = ThemeManager.shared
+
+    var body: some View {
+        Button {
+            themeManager.zoomFontIn()
+        } label: {
+            Text(verbatim: L("Zoom In"))
+        }
+        // "=" is the unshifted key under "+", matching how ⌘+ zoom is
+        // reached without holding Shift in browsers.
+        .keyboardShortcut("=", modifiers: .command)
+        .disabled(!themeManager.canZoomFontIn)
+
+        Button {
+            themeManager.zoomFontOut()
+        } label: {
+            Text(verbatim: L("Zoom Out"))
+        }
+        .keyboardShortcut("-", modifiers: .command)
+        .disabled(!themeManager.canZoomFontOut)
+
+        Button {
+            themeManager.resetFontScale()
+        } label: {
+            Text(verbatim: L("Actual Size"))
+        }
+        .keyboardShortcut("0", modifiers: .command)
+        .disabled(themeManager.isDefaultFontScale)
     }
 }
