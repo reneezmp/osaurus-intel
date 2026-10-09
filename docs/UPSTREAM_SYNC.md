@@ -2746,3 +2746,20 @@ upstream's current `FileReadTool`, `FileSearchTool`, `FileTreeTool`,
 the tab suites and two further full runs passed. Likely a teardown race in
 test-created sessions; if it recurs, start from the crash report under
 `~/Library/Logs/DiagnosticReports/swiftpm-testing-helper-*.ips`.
+
+### Identity existence memo (upstream #1523) — 2026-10-09
+
+`MasterKey.existsCached()` / `OsaurusIdentity.existsCached()` (upstream
+verbatim): an eventually-consistent memo of "does an identity exist", seeded
+off the main thread at launch (`warmExistsCacheInBackground`), refreshed in
+the background at most every 10 s, and updated in-process on install and
+delete. Hot UI and Router reads use it: Credits, Search settings, the Cloud
+browser, the search provider manager, the Router account service's balance
+gate, web settings, auto-pay and web usage. Signing, identity setup and
+recovery, storage keys, the server, agent keys and the usage / transactions /
+checkout requests keep the real `exists()`, as upstream.
+
+Found while doing it: Intel's `MasterKey` ignored the keychain-disable test
+flag and `MasterKeyExistsGuardTests` rewrote the real identity slot on every
+full run. See the 2026-10-09 keychain incident in
+[`TEST_STORAGE_SAFETY.md`](TEST_STORAGE_SAFETY.md).

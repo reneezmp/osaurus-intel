@@ -276,13 +276,13 @@ struct SearchView: View {
             .toggleStyle(.switch)
             .controlSize(.small)
             .tint(theme.accentColor)
-            .disabled(!OsaurusRouter.isEnabled || !OsaurusIdentity.exists())
+            .disabled(!OsaurusRouter.isEnabled || !OsaurusIdentity.existsCached())
         }
         .padding(14)
         .background(RoundedRectangle(cornerRadius: 10).fill(theme.cardBackground))
         .overlay(RoundedRectangle(cornerRadius: 10).stroke(theme.cardBorder))
         .task {
-            if OsaurusRouter.isEnabled, OsaurusIdentity.exists() {
+            if OsaurusRouter.isEnabled, OsaurusIdentity.existsCached() {
                 await routerAccount.refreshWebSettings()
             }
         }

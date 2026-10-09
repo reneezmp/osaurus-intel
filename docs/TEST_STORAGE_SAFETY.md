@@ -224,3 +224,42 @@ process (`fatalError`) that has no `overrideRoot` and an empty
 Intel's model can't round-trip (`preservingUnknownFields`,
 `IntelAgentUnknownFieldsTests`), so any Intel save of an upstream agent,
 test or real, no longer strips upstream settings.
+
+## 2026-10-09 keychain incident (identity test suite)
+
+**What happened.** `MasterKeyExistsGuardTests` ("MasterKey overwrite guard")
+deliberately works against the real login-Keychain slot
+`com.osaurus.account` / `master-key`, which is the same identity slot an
+installed upstream Osaurus uses: it snapshots the master key, deletes it,
+generates test keys, then deletes again and re-installs the snapshot. Its
+only gate was a throwaway keychain write probe, so it ran in **every** full
+run, with or without `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`, because Intel's
+`MasterKey` never honoured that flag (upstream's does). Found while porting
+upstream's `existsCached()` memo.
+
+**State found (attributes only, no key material read):** the item exists in
+`login.keychain-db`, created and modified 2026-10-09 12:50:11 UTC (09:50 local,
+during a full run). The test's cleanup re-creates the item only when it had
+read a snapshot first, so an existing item means each run restored the
+previous one; the chain should end at Renée's original key. Not verifiable
+without reading the key. **Possible side effect:** if the identity was an
+iCloud-synced item, each delete also removed the iCloud copy, and the
+restore may have landed as a device-only item. Check the Osaurus ID shown in
+the upstream app (and on other Macs) against the expected one.
+
+**Fixes:**
+
+- `MasterKey` honours `KeychainQueryHelpers.disablesKeychainForProcess` like
+  upstream: `install` throws, `exists` returns false, `getPrivateKey`
+  throws, `delete` is a no-op.
+- `MasterKeyExistsGuardTests` is skipped under the flag (upstream) and, on
+  Intel, runs only with `OSAURUS_RUN_REAL_IDENTITY_KEYCHAIN_TESTS=1`.
+- `WhitelistStore`, `RevocationStore`, `APIKeyManager` writes and
+  `OnboardingService`'s keychain wipe also skip under the flag (Intel
+  addition; upstream has no guard there).
+- `IntelMasterKeyKeychainGuardTests` pins the no-op contract.
+
+**Rule:** the gate's `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1` is mandatory, and
+a postflight check now includes the identity item's `mdat`
+(`security find-generic-password -s com.osaurus.account -a master-key | grep mdat`,
+attributes only) before and after a run; it must not change.

@@ -48,6 +48,13 @@ public struct MasterKey: Sendable {
     /// - Parameter allowReplace: Mirrors `generate(allowReplace:)`. Defaults to false.
     @discardableResult
     public static func install(seed keyData: Data, allowReplace: Bool = false) throws -> OsaurusID {
+        // Hermetic test/proof launches (OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1)
+        // must not persist identity material into the user's login Keychain.
+        // Same no-op-write contract every other Keychain wrapper honors
+        // (upstream).
+        if KeychainQueryHelpers.disablesKeychainForProcess {
+            throw OsaurusIdentityError.keychainWriteFailed
+        }
         if !allowReplace, exists() {
             throw OsaurusIdentityError.masterAlreadyExists
         }
@@ -71,6 +78,7 @@ public struct MasterKey: Sendable {
                 throw OsaurusIdentityError.keychainWriteFailed
             }
         }
+        setCachedExists(true)
 
         return osaurusId
     }
@@ -96,6 +104,9 @@ public struct MasterKey: Sendable {
 
     /// Check if a Master Key exists in Keychain (no biometric prompt).
     public static func exists() -> Bool {
+        // Keychain-disabled processes report "no identity" (upstream), so
+        // identity-gated paths short-circuit before any keychain read.
+        if KeychainQueryHelpers.disablesKeychainForProcess { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -105,6 +116,95 @@ public struct MasterKey: Sendable {
             kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
         ]
         return SecItemCopyMatching(query as CFDictionary, nil) == errSecSuccess
+    }
+
+    // MARK: - Cached Existence (hot UI paths)
+
+    // `exists()` issues a synchronous `SecItemCopyMatching`, which blocks on the
+    // Security daemon's keychain mutex. Calling it on every model-picker
+    // recompute (the managed-router gate in `RemoteProviderManager`) has hung
+    // the UI for seconds. This memo serves those hot, eventually-consistent
+    // callers without a per-call keychain hit: it is updated in-process on
+    // install/delete, seeded once lazily, and refreshed off the main thread to
+    // pick up out-of-process iCloud Keychain syncs.
+    private static let existsCacheLock = NSLock()
+    private nonisolated(unsafe) static var cachedExists: Bool?
+    private nonisolated(unsafe) static var lastExistsRefresh: Date?
+    private static let existsRefreshInterval: TimeInterval = 10.0
+
+    /// Non-blocking, eventually-consistent variant of `exists()` for hot UI
+    /// paths (e.g. the managed-router gate hit on every model-picker recompute).
+    /// Once seeded it never issues a keychain query on the calling thread.
+    /// Correctness-critical callers — identity creation/recovery guards and
+    /// anything about to read or sign with the key — must keep using `exists()`.
+    public static func existsCached() -> Bool {
+        existsCacheLock.lock()
+        let known = cachedExists
+        existsCacheLock.unlock()
+
+        if let known {
+            refreshExistsInBackground()
+            return known
+        }
+        // Cold: never probe on the calling thread. Launch paths seed the memo
+        // deliberately (`warmExistsCacheInBackground` /
+        // `seedExistsCacheOffMainActor`), so reaching here cold means a hot UI
+        // path won the race — and a synchronous `SecItemCopyMatching` there
+        // has hung the main thread when securityd stalls. Report "no identity"
+        // until the seed lands; identity-gated chrome appears one refresh
+        // tick later, and correctness-critical callers use `exists()`.
+        refreshExistsInBackground()
+        return false
+    }
+
+    private static func setCachedExists(_ value: Bool) {
+        existsCacheLock.lock()
+        cachedExists = value
+        lastExistsRefresh = Date()
+        existsCacheLock.unlock()
+    }
+
+    /// Seed `existsCached()` off the main thread (and off the Swift cooperative
+    /// pool, which a synchronous keychain read would otherwise pin) so the first
+    /// hot-path caller — e.g. the managed-router gate reached from the periodic
+    /// badge recompute — never triggers a `SecItemCopyMatching` on a
+    /// latency-sensitive thread. Call once at launch; idempotent.
+    public static func warmExistsCacheInBackground() {
+        DispatchQueue.global(qos: .utility).async {
+            setCachedExists(exists())
+        }
+    }
+
+    /// Awaitable variant of `warmExistsCacheInBackground` for launch paths
+    /// that are about to enter a cold `existsCached()` caller on the main
+    /// actor (e.g. `RemoteProviderManager.shared`'s init). Awaiting the seed
+    /// guarantees that caller finds the memo populated instead of racing the
+    /// fire-and-forget warm and paying the synchronous keychain probe on the
+    /// main thread.
+    public static func seedExistsCacheOffMainActor() async {
+        await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
+            DispatchQueue.global(qos: .utility).async {
+                setCachedExists(exists())
+                continuation.resume()
+            }
+        }
+    }
+
+    private static func refreshExistsInBackground() {
+        let now = Date()
+        existsCacheLock.lock()
+        let recent = lastExistsRefresh.map { now.timeIntervalSince($0) < existsRefreshInterval } ?? false
+        if recent {
+            existsCacheLock.unlock()
+            return
+        }
+        // Stamp now (under the lock) so concurrent callers don't each spawn a probe.
+        lastExistsRefresh = now
+        existsCacheLock.unlock()
+
+        Task.detached(priority: .utility) {
+            setCachedExists(exists())
+        }
     }
 
     // MARK: - Read
@@ -118,6 +218,10 @@ public struct MasterKey: Sendable {
 
     /// Retrieve the raw Master Key bytes from Keychain (triggers biometric auth).
     static func getPrivateKey(context: LAContext) throws -> Data {
+        // No-op read under the keychain-disable gate (upstream).
+        if KeychainQueryHelpers.disablesKeychainForProcess {
+            throw OsaurusIdentityError.keychainReadFailed
+        }
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -153,6 +257,11 @@ public struct MasterKey: Sendable {
     /// Remove the Master Key from Keychain (irreversible).
     @discardableResult
     public static func delete() -> Bool {
+        // No-op delete under the keychain-disable gate (upstream).
+        if KeychainQueryHelpers.disablesKeychainForProcess {
+            setCachedExists(false)
+            return true
+        }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
@@ -160,7 +269,11 @@ public struct MasterKey: Sendable {
             kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
         ]
         let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        let gone = status == errSecSuccess || status == errSecItemNotFound
+        if gone {
+            setCachedExists(false)
+        }
+        return gone
     }
 
     // MARK: - Memory Safety

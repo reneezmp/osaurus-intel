@@ -255,7 +255,7 @@ public final class SearchProviderManager: ObservableObject {
             category: category,
             hostedSearchEnabled: hostedSearchEnabled,
             routerEnabled: OsaurusRouter.isEnabled,
-            identityExists: OsaurusIdentity.exists(),
+            identityExists: OsaurusIdentity.existsCached(),
             hostedAvailable: RouterWebSearchAvailability.shared.isAvailable
         )
     }

@@ -87,6 +87,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // fatally on `kqueue(): Too many open files` (APPLE-MACOS-19T).
         FileDescriptorLimit.raiseToMaximum()
 
+        // Seed the identity-existence memo off the main thread so the first
+        // `existsCached()` caller (Credits, Search, Router chrome) doesn't pay
+        // a synchronous keychain probe on the main thread (upstream #1523).
+        if !KeychainQueryHelpers.disablesKeychainForProcess {
+            MasterKey.warmExistsCacheInBackground()
+        }
+
         #if OSAURUS_INTEL
             // Headless replacement for the Apple Silicon "Securing your
             // data" overlay (`StorageMigrationOverlay`, entirely

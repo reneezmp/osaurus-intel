@@ -106,7 +106,7 @@ Incompatible 20 · already ported 1.
   Intel.** `OsaurusRouterAccountService` and other hot paths still call the
   synchronous keychain `OsaurusIdentity.exists()`. #2982 removed the
   per-activation call; the memo itself goes with
-  `W-workspaces-identity-mobile`.
+  `W-workspaces-identity-mobile`. **Shipped 2026-10-09** (`UPSTREAM_SYNC.md`).
 - **Upstream's external-caller deny model is not on Intel.** Upstream's
   `ExternalMCPToolPolicy` (stdio `osaurus mcp` and `/mcp/*`) relies on
   `ToolRegistry.externallyDeniedToolNames`,

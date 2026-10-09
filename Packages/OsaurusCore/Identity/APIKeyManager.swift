@@ -208,6 +208,9 @@ public final class APIKeyManager: @unchecked Sendable {
     // MARK: - Keychain Persistence
 
     private static func saveToKeychain(_ keys: [AccessKeyInfo]) {
+        // Hermetic test/proof runs never write the user's Keychain
+        // (OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1; Intel addition, 2026-10-09).
+        if KeychainQueryHelpers.disablesKeychainForProcess { return }
         let encoder = JSONEncoder()
         encoder.dateEncodingStrategy = .iso8601
         guard let data = try? encoder.encode(keys) else { return }

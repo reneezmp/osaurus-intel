@@ -144,6 +144,15 @@ struct MasterKeyExistsGuardTests {
 /// The probe runs once per process. Result is cached in this `let`.
 private let keychainAvailable: Bool = {
     if isContinuousIntegrationEnvironment() { return false }
+    // Under OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1, `MasterKey` deliberately
+    // no-ops every read/write/delete (upstream), so skip the suite.
+    if KeychainQueryHelpers.disablesKeychainForProcess { return false }
+    // Intel: this suite deletes and rewrites the real `com.osaurus.account`
+    // identity slot (shared with an installed upstream Osaurus). It ran in
+    // every full run until 2026-10-09. It now runs only on explicit opt-in.
+    guard ProcessInfo.processInfo.environment["OSAURUS_RUN_REAL_IDENTITY_KEYCHAIN_TESTS"] == "1" else {
+        return false
+    }
     return canProbeMasterKeyWritePath()
 }()
 

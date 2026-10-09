@@ -105,6 +105,9 @@ public final class OnboardingService: ObservableObject {
 
     /// Clear all known Osaurus Keychain services
     private func wipeKeychain() {
+        // Hermetic test/proof runs never write the user's Keychain
+        // (OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1; Intel addition, 2026-10-09).
+        if KeychainQueryHelpers.disablesKeychainForProcess { return }
         let services = [
             // MasterKey
             "com.osaurus.account",

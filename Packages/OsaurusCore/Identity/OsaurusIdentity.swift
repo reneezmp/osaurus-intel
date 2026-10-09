@@ -74,6 +74,14 @@ public struct OsaurusIdentity: Sendable {
         MasterKey.exists()
     }
 
+    /// Non-blocking, eventually-consistent variant of `exists()` for hot UI
+    /// paths that re-check identity on every recompute (no synchronous keychain
+    /// query once seeded). See `MasterKey.existsCached()`. Correctness-critical
+    /// callers must keep using `exists()`. (Upstream #1523.)
+    public static func existsCached() -> Bool {
+        MasterKey.existsCached()
+    }
+
     // MARK: - Restore
 
     /// Outcome of `restore(words:)` for the UI: the restored master address

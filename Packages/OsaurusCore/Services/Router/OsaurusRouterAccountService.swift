@@ -52,18 +52,16 @@ final class OsaurusRouterAccountService: ObservableObject {
     private var usageRevisionTask: Task<Void, Never>?
     nonisolated static let defaultUsageRevisionDebounce: TimeInterval = 5
 
-    /// Identity gate for the balance path (see `refreshBalance`). Injectable
-    /// so tests can run the request contract without a keychain. Intel has
-    /// no `existsCached()` memo yet (upstream #1523), so the default is the
-    /// keychain query; with activation no longer refreshing, it runs only
-    /// when a surface asks for the balance.
+    /// Eventually-consistent identity gate for the balance path (see
+    /// `refreshBalance`; upstream `existsCached()` memo, #1523). Injectable so
+    /// tests can run the request contract without a keychain.
     private let identityExists: () -> Bool
 
     init(
         client: OsaurusRouterAPIClient = .shared,
         usageRevisionDebounce: TimeInterval = OsaurusRouterAccountService.defaultUsageRevisionDebounce,
         observesNotifications: Bool = true,
-        identityExists: @escaping () -> Bool = { OsaurusIdentity.exists() }
+        identityExists: @escaping () -> Bool = { OsaurusIdentity.existsCached() }
     ) {
         self.client = client
         self.usageRevisionDebounce = usageRevisionDebounce
@@ -241,19 +239,19 @@ final class OsaurusRouterAccountService: ObservableObject {
     }
 
     func refreshWebSettings() async {
-        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { return }
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.existsCached() else { return }
         do { webSettings = try await client.webSettings() }
         catch { if !Self.isWebFeatureUnavailable(error) { lastError = error.localizedDescription } }
     }
 
     func setWebAutoPay(_ enabled: Bool) async {
-        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { return }
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.existsCached() else { return }
         do { webSettings = try await client.updateWebSettings(autoPayEnabled: enabled) }
         catch { lastError = error.localizedDescription }
     }
 
     func refreshWebUsage() async {
-        guard OsaurusRouter.isEnabled, OsaurusIdentity.exists() else { webUsage = []; return }
+        guard OsaurusRouter.isEnabled, OsaurusIdentity.existsCached() else { webUsage = []; return }
         do { webUsage = try await client.webUsage(limit: 50).data }
         catch { if !Self.isWebFeatureUnavailable(error) { lastError = error.localizedDescription } }
     }

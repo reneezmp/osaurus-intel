@@ -98,6 +98,9 @@ public final class WhitelistStore: @unchecked Sendable {
     }
 
     private func save() {
+        // Hermetic test/proof runs never write the user's Keychain
+        // (OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1; Intel addition, 2026-10-09).
+        if KeychainQueryHelpers.disablesKeychainForProcess { return }
         let model = StorageModel(
             master: Array(masterAddresses),
             agents: agentAddresses.mapValues { Array($0) }

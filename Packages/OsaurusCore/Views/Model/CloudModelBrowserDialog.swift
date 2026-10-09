@@ -11,7 +11,7 @@
 //    (inactive while the search field is editing); Escape closes.
 //  - No offline monitor on Intel (offline reads as a load failure), and
 //    refresh goes through `connectOsaurusRouterIfPossible()`.
-//  - The identity check runs once on appear (`OsaurusIdentity.exists()`).
+//  - The identity check runs once on appear (`OsaurusIdentity.existsCached()`).
 //  - No media models, so rows show no "From …" price (upstream prices media
 //    only) and image/video categories never appear.
 //  - Themed bordered buttons (Ventura guard).
@@ -109,7 +109,7 @@ struct CloudModelBrowserDialog: View {
         )
         .onAppear {
             keyboardNavigation = NSApp.currentEvent?.type == .keyDown
-            hasIdentity = OsaurusIdentity.exists()
+            hasIdentity = OsaurusIdentity.existsCached()
         }
         .task {
             // Opening the compact picker already refreshes connected providers

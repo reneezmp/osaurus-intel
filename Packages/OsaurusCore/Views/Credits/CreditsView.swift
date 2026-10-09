@@ -26,7 +26,7 @@ struct CreditsView: View {
     @State private var showAccountDetails = false
 
     private var routerEnabled: Bool { providerManager.isOsaurusRouterEnabled }
-    private var canAddCredits: Bool { routerEnabled && OsaurusIdentity.exists() }
+    private var canAddCredits: Bool { routerEnabled && OsaurusIdentity.existsCached() }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -38,7 +38,7 @@ struct CreditsView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 20) {
                     if routerEnabled {
-                        if !OsaurusIdentity.exists() {
+                        if !OsaurusIdentity.existsCached() {
                             identityRequiredCard
                         }
                         balanceCard
@@ -356,7 +356,7 @@ struct CreditsView: View {
                     }
                     .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
                     .controlSize(.small)
-                    .disabled(!OsaurusIdentity.exists() || accountService.isCreatingCheckout)
+                    .disabled(!OsaurusIdentity.existsCached() || accountService.isCreatingCheckout)
                 }
 
                 if let error = accountService.lastError, !error.isEmpty {
@@ -825,7 +825,7 @@ struct CreditsView: View {
     /// address is the server's billing account id, so support can line up the
     /// local ledger with server-side usage. Best-effort by design.
     nonisolated private static func bestEffortWalletAddress() -> String? {
-        guard OsaurusIdentity.exists() else { return nil }
+        guard OsaurusIdentity.existsCached() else { return nil }
         let context = OsaurusIdentityContext.biometric()
         guard var masterKeyData = try? MasterKey.getPrivateKey(context: context) else {
             return nil
