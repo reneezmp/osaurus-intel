@@ -118,6 +118,20 @@ public enum ChatExecutionContext {
     /// can swap its check for a spinner while its audio plays
     @TaskLocal public static var currentToolCallId: String?
 
+    /// Whether a `file_read` of an image may hand the picture itself to the
+    /// model (upstream: the chat loop binds it for vision models). Intel's
+    /// chat sends tool results as text, so nothing binds it and images are
+    /// always read through on-device text recognition.
+    @TaskLocal public static var toolResultImagesEnabled: Bool = false
+
+    /// Upstream's combined sandbox + host-read mode scope; non-nil turns on
+    /// the secret-file refusal in `FolderToolHelpers`. Intel has no sandbox
+    /// VM (`INC-containers`), so it stays nil.
+    @TaskLocal public static var hostReadOnlyScope: URL?
+
+    /// Upstream: lets a session read secret files in combined mode.
+    @TaskLocal public static var allowHostSecretReads: Bool = false
+
     /// File history change set recording the executing tool call (bound by
     /// the registry's journal capture). Tools report it as `operation_id`
     /// so `file_undo` can target exactly this call.

@@ -113,6 +113,80 @@ public enum ToolEnvelope {
         return encodeOrFallbackSuccess(dict, tool: tool)
     }
 
+    /// Build a directory-listing success envelope: a structured, actionable
+    /// shape (NOT prose). `entries` is a list of `{name, path, type}` dicts
+    /// where each `path` is a ready-to-use argument for the next `file_read`
+    /// call — the model copies a field instead of parsing a glyph tree. The
+    /// `kind: "listing"` tag lets the harness branch on result type (listing
+    /// vs file content vs not-found) without the model interpreting anything.
+    /// Pretty trees are a presentation concern rendered from `entries` in the
+    /// UI; they are never handed to the model.
+    public static func listing(
+        tool: String? = nil,
+        path: String,
+        entries: [[String: Any]],
+        truncated: Bool,
+        warnings: [String]? = nil
+    ) -> String {
+        let result: [String: Any] = [
+            "kind": "listing",
+            "path": path,
+            "entries": entries,
+            "entry_count": entries.count,
+            "truncated": truncated,
+        ]
+        // A truncated listing is incomplete, so it must NOT be used as a
+        // find-by-name substrate: concluding "absent" from a partial dump is a
+        // silent data-loss bug. Steer find-by-name to `file_search` at the
+        // result level (route-agnostic, visible on the same turn) when the
+        // caller hasn't supplied its own warnings.
+        let effectiveWarnings = (truncated && (warnings?.isEmpty ?? true)) ? [Self.truncatedListingWarning] : warnings
+        return success(tool: tool, result: result, warnings: effectiveWarnings)
+    }
+
+    /// Steer attached to a truncated listing: the entries are incomplete, so a
+    /// specific file must be found via `file_search`, not by scanning the
+    /// partial set.
+    public static let truncatedListingWarning =
+        "Listing truncated; entries are incomplete. To find a specific file by name, call "
+        + "`file_search` with `target:\"files\"` and a token from the name — do not conclude a "
+        + "file is absent from this partial list. To enumerate or count every file, call "
+        + "`file_search` with `target:\"files\"`, `pattern:\"*\"`, `max_results:500` and page with "
+        + "`offset` (the result reports `total` and `next_offset`)."
+
+    /// Build a filename-search success envelope: the same structured,
+    /// actionable `entries[]` shape as `listing` (so the model copies a
+    /// `path`), tagged `kind: "search"` so it is distinguishable from a
+    /// directory listing. `query` echoes what was actually matched (post mode
+    /// correction / broadening). The tool returns ALL candidates and never
+    /// picks among them — which match satisfies the request is the model's
+    /// judgement.
+    public static func search(
+        tool: String? = nil,
+        query: String,
+        entries: [[String: Any]],
+        truncated: Bool,
+        warnings: [String]? = nil,
+        total: Int? = nil,
+        offset: Int? = nil,
+        nextOffset: Int? = nil
+    ) -> String {
+        var result: [String: Any] = [
+            "kind": "search",
+            "query": query,
+            "entries": entries,
+            "match_count": entries.count,
+            "truncated": truncated,
+        ]
+        // Paging contract (files mode): `total` matches under the walk,
+        // this page's `offset`, and `next_offset` when more remain — the
+        // same total/returned/next_offset shape `list_knowledge` reports.
+        if let total { result["total"] = total }
+        if let offset { result["offset"] = offset }
+        if let nextOffset { result["next_offset"] = nextOffset }
+        return success(tool: tool, result: result, warnings: warnings)
+    }
+
     /// Build a success envelope whose primary payload is a single string of
     /// human-readable prose. The chat UI's existing renderers (folder file
     /// trees, capability listings, search-memory hits) keep working because
@@ -182,13 +256,45 @@ public enum ToolEnvelope {
                 )
             case .binaryContent(let path, let ext, let detail):
                 let extLabel = ext.map { " (.\($0))" } ?? ""
-                let pivotTail = detail.pivotHint.map { " \($0)" } ?? ""
+                // Combined mode has no `shell_run` — the fail-forward path
+                // is `file_copy` into the sandbox, then `sandbox_exec`.
+                // Without this the model dead-ends on binaries (observed
+                // live: a PDF-to-PNG request flailed for turns).
+                let combinedMode = ChatExecutionContext.hostReadOnlyScope != nil
+                var message = detail.explanation(path: path, extLabel: extLabel)
+                if detail.suggestsShellPivot {
+                    let pivot =
+                        combinedMode
+                        ? "copy it into the sandbox with `file_copy` (a `/workspace/...` destination) and process it there with `sandbox_exec` (e.g. `unzip`, `pdftotext`, `file`)"
+                        : "process it with shell_run and an appropriate tool (e.g. `unzip`, `pdftotext`, `file`)"
+                    let connector: String
+                    if case .unsupportedFormat = detail {
+                        connector = ", or "
+                    } else {
+                        connector = " Instead of retrying, "
+                    }
+                    message += "\(connector)\(pivot)."
+                } else {
+                    message += "."
+                }
+                if var pivotTail = detail.pivotHint {
+                    if combinedMode {
+                        pivotTail = pivotTail.replacingOccurrences(
+                            of: "shell_run",
+                            with: "`file_copy` + `sandbox_exec`"
+                        )
+                    }
+                    message += " \(pivotTail)"
+                }
+                var metadata: [String: String] = ["readable_formats": WorkspaceFileFormatPolicy.readableFormatsSummary]
+                if let ext { metadata["extension"] = ext }
+                if let family = detail.family { metadata["document_family"] = family.rawValue }
                 return failure(
                     kind: .executionError,
-                    message:
-                        "file_read only supports text. '\(path)' looks like a binary file\(extLabel) — pivot to shell_run with an appropriate tool (e.g. `unzip`, `pdftotext`, `file`) instead of retrying.\(pivotTail)",
+                    message: message,
                     tool: tool,
-                    retryable: false
+                    retryable: false,
+                    metadata: metadata
                 )
             }
         }

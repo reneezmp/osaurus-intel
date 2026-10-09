@@ -87,7 +87,14 @@ struct IntelRichFolderFormatsTests {
         let root = try Self.makeRoot()
         defer { try? FileManager.default.removeItem(at: root) }
         try Data([0x50, 0x4B, 0x03, 0x04]).write(to: root.appendingPathComponent("old.xls"))
-        let xls = try await FileReadTool(rootPath: root).execute(argumentsJSON: Self.json(["path": "old.xls"]))
+        // Upstream's `file_read` throws a typed error; the chat loop maps it
+        // with `ToolEnvelope.fromError` (as upstream's own tests do).
+        let xls: String
+        do {
+            xls = try await FileReadTool(rootPath: root).execute(argumentsJSON: Self.json(["path": "old.xls"]))
+        } catch {
+            xls = ToolEnvelope.fromError(error, tool: "file_read")
+        }
         #expect(Self.isFailure(xls))
         #expect(xls.contains(".xlsx"))
     }

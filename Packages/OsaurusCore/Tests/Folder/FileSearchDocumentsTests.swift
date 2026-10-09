@@ -138,8 +138,51 @@ struct FileSearchDocumentsTests {
         #expect((EnvelopeAssertions.successText(fresh) ?? "").contains("memo.docx [paragraph 1]"))
     }
 
-    // Not on Intel yet: upstream's skipped-files note tests
-    // (`unextractableDocumentIsNamedInSkippedNote`, `legacyFormatsWithoutAdapterStaySkipped`,
-    // `skippedNoteFormatsEveryKind`). Intel's `file_search` predates
-    // `ContentSearchSkipTally` (W-tools-misc, file tool parity).
+    @Test func unextractableDocumentIsNamedInSkippedNote() async throws {
+        DocumentAdaptersBootstrap.registerBuiltIns()
+        let root = tmpRoot()
+        defer { try? FileManager.default.removeItem(at: root) }
+
+        // Garbage bytes with a .pdf name: extraction fails, must be counted
+        // as a skipped DOCUMENT (with the extension and a file_read pointer),
+        // not lumped in with binaries.
+        try Data([0x00, 0x01, 0x02, 0x03]).write(to: root.appendingPathComponent("broken.pdf"))
+        try Data([0x89, 0x50]).write(to: root.appendingPathComponent("photo.png"))
+
+        let result = try await search(root, ["pattern": "anything"])
+        let text = EnvelopeAssertions.successText(result) ?? ""
+        #expect(text.contains("2 file(s) skipped"))
+        #expect(text.contains("1 document(s) (.pdf)"))
+        #expect(text.contains("`file_read`"))
+        #expect(text.contains("1 media/archive/executable file(s)"))
+    }
+
+    @Test func legacyFormatsWithoutAdapterStaySkipped() {
+        // `.xls` / `.key` have no extractor: they must be pre-skipped, not
+        // routed into extraction.
+        #expect(FolderToolHelpers.contentSearchSkippedExtensions.contains("xls"))
+        #expect(FolderToolHelpers.contentSearchSkippedExtensions.contains("key"))
+        #expect(!FolderToolHelpers.contentSearchSkippedExtensions.contains("pdf"))
+        #expect(!FolderToolHelpers.contentSearchSkippedExtensions.contains("docx"))
+        #expect(!FolderToolHelpers.contentSearchSkippedExtensions.contains("xlsx"))
+        #expect(!FolderToolHelpers.contentSearchSkippedExtensions.contains("pptx"))
+        #expect(DocumentTextExtractionCache.isSearchableDocument(extension: "pptx"))
+        #expect(!DocumentTextExtractionCache.isSearchableDocument(extension: "xls"))
+    }
+
+    @Test func skippedNoteFormatsEveryKind() {
+        var tally = FileSearchTool.ContentSearchSkipTally()
+        tally.record(.binaryExtension)
+        tally.record(.tooLarge)
+        tally.record(.undecodable)
+        tally.record(.document(extension: "pptx"))
+        tally.record(.document(extension: "pdf"))
+        let note = FileSearchTool.skippedFilesNote(tally) ?? ""
+        #expect(note.hasPrefix("5 file(s) skipped: "))
+        #expect(note.contains("1 media/archive/executable file(s)"))
+        #expect(note.contains("1 text file(s) over 2MB"))
+        #expect(note.contains("1 non-UTF-8 file(s)"))
+        #expect(note.contains("2 document(s) (.pdf/.pptx)"))
+        #expect(FileSearchTool.skippedFilesNote(FileSearchTool.ContentSearchSkipTally()) == nil)
+    }
 }

@@ -35,24 +35,80 @@ enum FolderToolError: LocalizedError {
         case decodeFailed
         /// `DocumentParser` returned an image-only PDF (no text layer).
         case imageOnlyPdf
+        /// The file is an image (`.png` / `.jpg` / ...); `file_read`
+        /// returns text only and cannot surface pixels.
+        case image
         /// `DocumentParser` threw `.readFailed` / `.unsupportedFormat` /
         /// `.fileTooLarge`.
         case parseFailed
-        /// An image with no legible text (OCR found nothing).
-        case imageWithoutText
+        /// A recognised document family (`.xls`, `.pages`, `.odt`, ...)
+        /// with no built-in adapter. Distinct from `parseFailed` so the
+        /// message can name the supported sibling format instead of
+        /// implying the file is corrupt.
+        case unsupportedFormat(family: WorkspaceFileFormatPolicy.DocumentFamily)
+
+        /// Short, model-facing statement of WHAT went wrong. Never says
+        /// "file_read only supports text" — the tool reads documents and
+        /// images, and a failure message that denies that teaches the model
+        /// the wrong contract for every later turn.
+        func explanation(path: String, extLabel: String) -> String {
+            switch self {
+            case .nulByte, .decodeFailed:
+                return
+                    "'\(path)' is a binary file\(extLabel) that file_read cannot decode as text, "
+                    + "and its extension is not one of the document or image formats file_read opens "
+                    + "(\(WorkspaceFileFormatPolicy.readableFormatsSummary))."
+            case .imageOnlyPdf:
+                return
+                    "'\(path)' is a PDF with no extractable text layer (scanned or image-only pages), "
+                    + "and OCR of its rendered pages recognised no legible text. "
+                    + "file_read extracts PDF text normally; this file simply has none."
+            case .image:
+                return
+                    "'\(path)' is an image\(extLabel). file_read shows images to vision-capable models; "
+                    + "the active model cannot view images and no text could be recognised in it."
+            case .parseFailed:
+                return
+                    "'\(path)'\(extLabel) is a document format file_read normally extracts, but this file "
+                    + "could not be parsed — it may be encrypted, password-protected, truncated, or malformed."
+            case .unsupportedFormat(let family):
+                var text =
+                    "'\(path)' is a \(family.label)\(extLabel) in a variant file_read cannot extract. "
+                    + "file_read opens \(WorkspaceFileFormatPolicy.readableFormatsSummary)."
+                if let alternative = family.supportedAlternative {
+                    text += " Convert it to \(alternative) and read that"
+                }
+                return text
+            }
+        }
+
+        var family: WorkspaceFileFormatPolicy.DocumentFamily? {
+            switch self {
+            case .unsupportedFormat(let family): return family
+            case .imageOnlyPdf: return .pdf
+            default: return nil
+            }
+        }
+
+        /// Whether a shell / sandbox pivot (`pdftotext`, `unzip`, `file`)
+        /// is a sensible next step. For an unsupported document variant the
+        /// conversion hint is the primary pivot; shell tools are secondary.
+        var suggestsShellPivot: Bool {
+            switch self {
+            case .image: return false
+            default: return true
+            }
+        }
 
         var pivotHint: String? {
             switch self {
             case .imageOnlyPdf:
                 return
-                    "The PDF has no text layer and on-device text recognition found no legible text in it."
-            case .imageWithoutText:
+                    "Use an OCR tool (e.g. `ocrmypdf`, `tesseract`) via shell_run to recover the text."
+            case .image:
                 return
-                    "The image has no legible text. This chat's models can't see images, so describe what you need from it or ask the user."
-            case .parseFailed:
-                return
-                    "The document couldn't be parsed — it may be encrypted, password-protected, or malformed."
-            case .nulByte, .decodeFailed:
+                    "Ask the user to attach the image to chat for a vision model, or use an OCR tool via shell_run."
+            case .parseFailed, .unsupportedFormat, .nulByte, .decodeFailed:
                 return nil
             }
         }
@@ -78,11 +134,9 @@ enum FolderToolError: LocalizedError {
 
 /// Shared utilities for folder tools
 enum FolderToolHelpers {
-    /// Lines of file content, not separator-delimited fields (upstream
-    /// #2894). A final line terminator does not introduce another empty
-    /// line, and CRLF is one newline (`components(separatedBy: .newlines)`
-    /// counted it as two, shifting every later line number). An empty file
-    /// stays one empty line.
+    /// Lines of file content, not separator-delimited fields. A final line
+    /// terminator does not introduce another empty line; CRLF is one newline.
+    /// Keep the existing single editable-line representation of an empty file.
     static func contentLines(_ text: String) -> [String] {
         var lines = text.split(omittingEmptySubsequences: false, whereSeparator: { $0.isNewline })
             .map(String.init)
@@ -90,32 +144,6 @@ enum FolderToolHelpers {
             lines.removeLast()
         }
         return lines
-    }
-
-    /// Runtime tools carry no global folder. Directly constructed test tools
-    /// may provide a fixed root; otherwise the executing chat's TaskLocal root
-    /// is authoritative.
-    static func resolveRoot(fixed: URL?) -> URL? {
-        fixed ?? ChatExecutionContext.currentFolderRoot
-    }
-
-    /// `payload` plus the file history `operation_id` of the executing call
-    /// (bound by the registry's journal capture), so `file_undo` can target
-    /// exactly this call (upstream reports it on every mutating result).
-    static func withOperationId(_ payload: [String: Any]) -> [String: Any] {
-        guard let setId = ChatExecutionContext.currentChangeSetId else { return payload }
-        var payload = payload
-        payload["operation_id"] = setId.uuidString
-        return payload
-    }
-
-    static func requireRoot(fixed: URL?) throws -> URL {
-        guard let root = resolveRoot(fixed: fixed) else {
-            throw FolderToolError.operationFailed(
-                "No working folder is selected for this chat."
-            )
-        }
-        return root
     }
 
     /// Resolve a tool's `path` argument under the working folder.
@@ -131,6 +159,12 @@ enum FolderToolHelpers {
     /// can't carry a read or write outside it. An absolute path may also use
     /// another spelling of the root, such as `/private/var/...` for a root
     /// under `/var/...`.
+    ///
+    /// Kept over upstream's resolver when upstream's folder helpers were
+    /// taken (2026-10-09): every path component is checked with `lstat`, so
+    /// a dangling symlink inside the folder that points outside it is caught.
+    /// Upstream's `resolvingSymlinksInPath` check skips components that don't
+    /// exist yet and would let such a link through on write.
     static func resolvePath(_ relativePath: String, rootPath: URL) throws -> URL {
         let rootStandardized = rootPath.standardized.path
         let realRoot = symlinkResolvedPath(rootStandardized)
@@ -164,72 +198,6 @@ enum FolderToolHelpers {
         return resolvedURL
     }
 
-    /// `path` is `root` or lies beneath it (never a sibling such as
-    /// `<root>-other`).
-    static func isPath(_ path: String, within root: String) -> Bool {
-        path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
-    }
-
-    /// Links followed before giving up, matching the kernel's `MAXSYMLINKS`.
-    private static let maxSymlinkHops = 32
-
-    /// Absolute `path` with every symbolic link expanded, one component at a
-    /// time, the way the kernel follows it. Unlike `realpath(3)` it accepts a
-    /// tail that doesn't exist yet, and unlike `URL.resolvingSymlinksInPath()`
-    /// it never strips `/private` and it follows dangling links to their
-    /// target text, so a link to a file that doesn't exist yet can't be used
-    /// to create one elsewhere. `..` inside a link target is applied after the
-    /// link is expanded. Returns nil for a link loop or an unreadable link.
-    static func symlinkResolvedPath(_ path: String) -> String? {
-        var resolved: [String] = []
-        var pending = Array(path.split(separator: "/").map(String.init).reversed())
-        var hops = 0
-        let fm = FileManager.default
-        while let component = pending.popLast() {
-            if component == "." { continue }
-            if component == ".." {
-                _ = resolved.popLast()
-                continue
-            }
-            let candidate = "/" + (resolved + [component]).joined(separator: "/")
-            var info = stat()
-            guard lstat(candidate, &info) == 0, (info.st_mode & S_IFMT) == S_IFLNK else {
-                resolved.append(component)
-                continue
-            }
-            hops += 1
-            guard hops <= maxSymlinkHops,
-                let target = try? fm.destinationOfSymbolicLink(atPath: candidate)
-            else { return nil }
-            if target.hasPrefix("/") { resolved.removeAll() }
-            pending.append(contentsOf: target.split(separator: "/").map(String.init).reversed())
-        }
-        return "/" + resolved.joined(separator: "/")
-    }
-
-    /// Root-relative display path for a URL produced by walking the folder.
-    /// FileManager enumerators hand back physical paths (`/private/var/...`)
-    /// even when the root was given as `/var/...`, so fall back to comparing
-    /// symlink-resolved paths before settling for the bare file name.
-    static func displayPath(for url: URL, under rootPath: URL) -> String {
-        let root = rootPath.standardized.path
-        let path = url.standardized.path
-        if let relative = relativePath(path, under: root) { return relative }
-        if let realRoot = symlinkResolvedPath(root),
-            let realPath = symlinkResolvedPath(path),
-            let relative = relativePath(realPath, under: realRoot)
-        {
-            return relative
-        }
-        return url.lastPathComponent
-    }
-
-    private static func relativePath(_ path: String, under root: String) -> String? {
-        guard isPath(path, within: root) else { return nil }
-        if path == root { return "." }
-        return String(path.dropFirst(root.hasSuffix("/") ? root.count : root.count + 1))
-    }
-
     /// Parse JSON arguments to dictionary
     static func parseArguments(_ json: String) throws -> [String: Any] {
         guard let data = json.data(using: .utf8),
@@ -244,21 +212,116 @@ enum FolderToolHelpers {
     static func detectProjectType(_ url: URL) -> ProjectType {
         let fm = FileManager.default
         for projectType in ProjectType.allCases where projectType != .unknown {
-            for manifestFile in projectType.manifestFiles {
-                if fm.fileExists(atPath: url.appendingPathComponent(manifestFile).path) {
-                    return projectType
-                }
+            for manifestFile in projectType.manifestFiles
+            where fm.fileExists(atPath: url.appendingPathComponent(manifestFile).path) {
+                return projectType
             }
         }
         return .unknown
     }
 
+    /// Convert a filename glob (`*` / `?` wildcards) into an anchored regex
+    /// with every OTHER regex metacharacter escaped. The old conversion only
+    /// escaped `.` and rewrote `*`, so a pattern containing `+ ( [ {` became
+    /// a broken (or wrong) regex that silently matched nothing.
+    static func globToRegex(_ pattern: String) -> String {
+        let body = NSRegularExpression.escapedPattern(for: pattern)
+            .replacingOccurrences(of: "\\*", with: ".*")
+            .replacingOccurrences(of: "\\?", with: ".")
+        return "^\(body)$"
+    }
+
+    /// Root-relative display path for `url`, symlink-safe. FileManager
+    /// enumerators return REAL paths (`/private/var/...`) even when the
+    /// root handle was created through a symlink/firmlink (`/var/...`,
+    /// `/tmp/...`), so a naive `hasPrefix(root.path)` misses and callers
+    /// used to fall back to `lastPathComponent` — silently flattening
+    /// `src/client.py` to `client.py`. The model then feeds that wrong
+    /// path into its next tool call and gets "File not found" for a file
+    /// the search itself just reported. Resolve symlinks on BOTH sides
+    /// before prefix-matching; fall back to the basename only when the
+    /// url genuinely isn't under the root.
+    static func displayPath(for url: URL, under rootPath: URL) -> String {
+        let root = rootPath.standardized.path
+        let path = url.standardized.path
+        if path == root { return "." }
+        if path.hasPrefix(root + "/") {
+            return String(path.dropFirst(root.count + 1))
+        }
+        let realRoot = rootPath.resolvingSymlinksInPath().standardized.path
+        let realPath = url.resolvingSymlinksInPath().standardized.path
+        if realPath == realRoot { return "." }
+        if realPath.hasPrefix(realRoot + "/") {
+            return String(realPath.dropFirst(realRoot.count + 1))
+        }
+        return url.lastPathComponent
+    }
+
+    /// Resolve the working-folder root for a folder tool. Tools registered
+    /// process-wide carry no fixed root and resolve the EXECUTING chat's
+    /// folder from the TaskLocal scope bound by the send/run surfaces;
+    /// fixed-root instances (tests, direct construction) win over it.
+    static func resolveRoot(fixed: URL?) -> URL? {
+        fixed ?? ChatExecutionContext.currentFolderRoot
+    }
+
+    /// Bounded search for files whose basename matches the (missing)
+    /// requested path, so a not-found envelope can quote the real
+    /// relative paths instead of leaving the model to guess-and-search.
+    /// Case-insensitive on the basename; hidden entries skipped; scan
+    /// capped so a huge tree can't stall a failing read.
+    static func basenameCandidates(
+        for relativePath: String,
+        rootPath: URL,
+        maxResults: Int = 5,
+        maxScanned: Int = 5_000
+    ) -> [String] {
+        let wanted = (relativePath as NSString).lastPathComponent.lowercased()
+        guard !wanted.isEmpty else { return [] }
+        guard
+            let enumerator = FileManager.default.enumerator(
+                at: rootPath,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else { return [] }
+        var results: [String] = []
+        var scanned = 0
+        let rootStandardized = rootPath.standardizedFileURL.path
+        for case let url as URL in enumerator {
+            scanned += 1
+            if scanned > maxScanned { break }
+            guard url.lastPathComponent.lowercased() == wanted else { continue }
+            guard (try? url.resourceValues(forKeys: [.isRegularFileKey]))?.isRegularFile == true
+            else { continue }
+            // Never surface denylisted paths through the recovery hint.
+            if shouldRefuseSecret(fileURL: url) { continue }
+            let full = url.standardizedFileURL.path
+            guard full.hasPrefix(rootStandardized + "/") else { continue }
+            results.append(String(full.dropFirst(rootStandardized.count + 1)))
+            if results.count >= maxResults { break }
+        }
+        return results
+    }
+
+    /// Typed failure returned when a folder tool executes with no working
+    /// folder in scope (e.g. the model guessed a tool name outside a folder
+    /// session, or the folder was cleared mid-run).
+    static func noActiveFolderEnvelope(tool: String) -> String {
+        ToolEnvelope.failure(
+            kind: .unavailable,
+            message:
+                "No working folder is selected for this chat — folder tools are "
+                + "unavailable. " + PromptWorkingFolderTool.attachFolderSteer,
+            tool: tool,
+            retryable: false
+        )
+    }
+
     /// Check if pattern matches filename
     static func matchesPattern(_ name: String, pattern: String) -> Bool {
         if pattern.contains("*") {
-            let regex = pattern.replacingOccurrences(of: ".", with: "\\.")
-                .replacingOccurrences(of: "*", with: ".*")
-            return name.range(of: "^\(regex)$", options: .regularExpression) != nil
+            return name.range(of: globToRegex(pattern), options: .regularExpression) != nil
         }
         return name == pattern
     }
@@ -286,14 +349,31 @@ enum FolderToolHelpers {
 
     /// Run a git command and return the output.
     /// A 30-second timeout prevents indefinite hangs (e.g. credential prompts, network issues).
+    ///
+    /// `confineWritesToDirectory: true` (mutating commands like add/commit)
+    /// wraps git in Seatbelt so its writes stay inside `directory` — `.git`
+    /// is in there, so staging/committing works while e.g. `git config
+    /// --global` writes get blocked. Fails closed if `sandbox-exec` is
+    /// unavailable.
     static func runGitCommand(
         arguments: [String],
         in directory: URL,
-        timeout: Int = 30
+        timeout: Int = 30,
+        confineWritesToDirectory: Bool = false
     ) async throws -> (output: String, exitCode: Int32) {
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
-        process.arguments = arguments
+        if confineWritesToDirectory {
+            let invocation = try ShellSandboxProfile.wrappedInvocation(
+                executable: "/usr/bin/git",
+                arguments: arguments,
+                writableRoot: directory
+            )
+            process.executableURL = invocation.executableURL
+            process.arguments = invocation.arguments
+        } else {
+            process.executableURL = URL(fileURLWithPath: "/usr/bin/git")
+            process.arguments = arguments
+        }
         process.currentDirectoryURL = directory
 
         let pipe = Pipe()
@@ -319,18 +399,212 @@ enum FolderToolHelpers {
 
         return (output, process.terminationStatus)
     }
+
+    // MARK: - Combined-mode secret denylist
+
+    /// Extensions whose files are treated as secret material (private
+    /// keys, certs with keys, keystores). Lowercased, no leading dot.
+    private static let secretExtensions: Set<String> = [
+        "pem", "key", "p12", "pfx", "keystore", "jks",
+    ]
+
+    /// Exact basenames that are secret regardless of extension.
+    private static let secretBasenames: Set<String> = [
+        ".npmrc", ".netrc", "credentials", ".pypirc", ".dockercfg",
+    ]
+
+    /// Suffixes on a `.env` family file that are conventionally NON-secret
+    /// (templates / samples) and therefore allowed even under refusal.
+    private static let envAllowedSuffixes: [String] = [
+        ".example", ".sample", ".template", ".dist",
+    ]
+
+    /// True when the current execution is combined sandbox + host-read
+    /// mode (`ChatExecutionContext.hostReadOnlyScope` set) and secret
+    /// reads are not explicitly allowed for the session. Plain folder
+    /// mode (scope `nil`) is always `false`, so its behavior is unchanged.
+    private static var secretRefusalActive: Bool {
+        ChatExecutionContext.hostReadOnlyScope != nil
+            && !ChatExecutionContext.allowHostSecretReads
+    }
+
+    /// Whether `fileURL` points at a file that should be refused in
+    /// combined read-only mode. Checks the basename, extension, and the
+    /// path components so a key under `.ssh/` or `.aws/` is caught even
+    /// when its own name looks innocuous. Single source of truth shared
+    /// by `file_read` (including its directory listing) and `file_search`.
+    static func isSecretPath(fileURL: URL) -> Bool {
+        let lowerName = fileURL.lastPathComponent.lowercased()
+        let ext = fileURL.pathExtension.lowercased()
+
+        // `.git/config` and `.aws/`, `.ssh/`, `.gnupg/` directory contents
+        // routinely carry tokens / private keys.
+        let components = fileURL.pathComponents
+        let secretDirs: Set<String> = [".aws", ".ssh", ".gnupg"]
+        if !secretDirs.isDisjoint(with: Set(components.map { $0.lowercased() })) {
+            return true
+        }
+        if components.count >= 2 {
+            let tail = components.suffix(2).map { $0.lowercased() }
+            if tail == [".git", "config"] { return true }
+        }
+
+        if secretBasenames.contains(lowerName) { return true }
+
+        // SSH/GPG private keys: `id_rsa`, `id_ed25519`, etc. — but allow
+        // the matching `.pub` public keys.
+        if lowerName.hasPrefix("id_"), ext != "pub" { return true }
+
+        // `.env` family: refuse `.env` and `.env.<anything>` except
+        // template/sample suffixes.
+        if lowerName == ".env" { return true }
+        if lowerName.hasPrefix(".env.") {
+            return !envAllowedSuffixes.contains { lowerName.hasSuffix($0) }
+        }
+
+        // Public keys (`*.pub`) are safe; secret extensions otherwise.
+        if ext == "pub" { return false }
+        if secretExtensions.contains(ext) { return true }
+
+        return false
+    }
+
+    /// True when `fileURL` must be refused for the current execution
+    /// because the combined-mode secret denylist is active and the file
+    /// is classified secret. Convenience combiner used by the read tools.
+    static func shouldRefuseSecret(fileURL: URL) -> Bool {
+        secretRefusalActive && isSecretPath(fileURL: fileURL)
+    }
+
+    /// The shared `rejected` envelope returned when a read tool refuses a
+    /// secret file in combined mode. `tool` names the refusing tool so
+    /// the model-facing message is attributed correctly.
+    static func secretRefusalEnvelope(relativePath: String, tool: String) -> String {
+        ToolEnvelope.failure(
+            kind: .rejected,
+            message:
+                "Refused to read '\(relativePath)': secret files (.env, private keys, "
+                + "credentials) are blocked in read-only sandbox mode to prevent leaking "
+                + "secrets into the sandbox. This is not retryable.",
+            tool: tool,
+            retryable: false
+        )
+    }
+
+    /// Write-side sibling of `secretRefusalEnvelope`: in writable combined
+    /// mode a sandbox-driven agent must not create or overwrite secret
+    /// files in the host workspace (same agent-as-bridge rationale as the
+    /// read denylist, tampering instead of exfiltration). Same activation
+    /// gate — inert in plain folder mode.
+    static func secretWriteRefusalEnvelope(relativePath: String, tool: String) -> String {
+        ToolEnvelope.failure(
+            kind: .rejected,
+            message:
+                "Refused to write '\(relativePath)': secret files (.env, private keys, "
+                + "credentials) cannot be created or modified in sandbox mode. This is "
+                + "not retryable.",
+            tool: tool,
+            retryable: false
+        )
+    }
+
+    // MARK: - Filename search matching
+
+    /// True when a filename pattern contains glob metacharacters (`*` / `?`).
+    /// Shared by the host and sandbox `target:"files"` routes so both decide
+    /// substring-vs-glob identically: a bare word is a case-insensitive
+    /// substring, a pattern with wildcards is a case-insensitive glob.
+    static func patternHasGlobMetacharacters(_ pattern: String) -> Bool {
+        pattern.contains("*") || pattern.contains("?")
+    }
+
+    // MARK: - Search traversal guards
+
+    /// Build-artifact directories pruned during a recursive host search.
+    /// Deliberately conservative: only directories that never hold user
+    /// documents, so pruning can't hide real files in a home/Desktop-rooted
+    /// workspace. Hidden dirs (`.git`, `.build`, `.venv`, …) are already
+    /// dropped by `.skipsHiddenFiles`; this catches the non-hidden ones.
+    static let prunedSearchDirectories: Set<String> = ["node_modules", "Pods", "DerivedData"]
+
+    /// Maximum number of filesystem entries a single host search pulls from
+    /// the enumerator before stopping and reporting truncation. A
+    /// deterministic worst-case traversal bound so a low/zero-match query
+    /// over a huge tree can't walk the entire subtree (and blow past the
+    /// registry's 120s wall-clock cap with no results). Filename matching at
+    /// this count is sub-second; content reads stay separately bounded by
+    /// `maxContentSearchFileBytes` + the binary-extension skip.
+    static let maxSearchEntriesVisited = 20_000
+
+    /// Shared prune step for a recursive host search enumerator. When
+    /// `fileURL` is a directory, prunes build-artifact subtrees (via
+    /// `skipDescendants()`) and returns true so the caller skips it; returns
+    /// false for regular files so the caller proceeds to match/read them.
+    static func pruneSearchDirectory(
+        _ fileURL: URL,
+        isDirectory: Bool,
+        enumerator: FileManager.DirectoryEnumerator?
+    ) -> Bool {
+        guard isDirectory else { return false }
+        if prunedSearchDirectories.contains(fileURL.lastPathComponent) {
+            enumerator?.skipDescendants()
+        }
+        return true
+    }
+
+    /// Cancellation + visit-budget gate for one search enumerator step,
+    /// shared by both host search loops. Throws `CancellationError` when the
+    /// surrounding task is cancelled (so a timed-out search stops instead of
+    /// walking on as a background zombie), counts the visited entry, and
+    /// returns false once `limit` is exceeded so the caller can stop and mark
+    /// the result truncated.
+    static func searchStepWithinBudget(visited: inout Int, limit: Int) throws -> Bool {
+        try Task.checkCancellation()
+        visited += 1
+        return visited <= limit
+    }
+
+    /// Per-file size cap for a content search. Files larger than this are
+    /// skipped before being read into memory, so a workspace full of large
+    /// media / data files doesn't load each one only to fail UTF-8 decode.
+    static let maxContentSearchFileBytes = 2 * 1024 * 1024
+
+    /// Extensions skipped by a content search before any read: obvious
+    /// binary/media/archive types that can't yield a useful text substring
+    /// match, plus document families with no extractor (`.xls`, `.key`, …).
+    /// Documents WITH an adapter (PDF/DOCX/PPTX/XLSX) are not here — they
+    /// are searched through `DocumentTextExtractionCache`. The UTF-8 decode
+    /// `nil`-skip remains the backstop.
+    static let contentSearchSkippedExtensions: Set<String> = [
+        "png", "jpg", "jpeg", "gif", "bmp", "tiff", "webp", "heic", "ico", "icns",
+        "mov", "mp4", "m4v", "avi", "mkv", "webm",
+        "mp3", "wav", "aac", "m4a", "flac", "ogg",
+        "zip", "gz", "tar", "tgz", "bz2", "xz", "7z", "rar", "dmg",
+        "xls", "ppt", "key", "numbers", "pages", "odt", "ods", "odp",
+        "bin", "exe", "dll", "so", "dylib", "o", "a", "class", "wasm",
+    ]
 }
 
 // MARK: - Core Tools
+
+enum WorkspaceToolContract {
+    /// Keeps one generated tool call small enough to parse and execute
+    /// promptly on local models. Large files are assembled with append calls.
+    static let maxWriteContentCharacters = 30_000
+    /// Leaves room for JSON escaping and argument framing below the streaming
+    /// envelope while accepting the 20–25K single-file apps local models
+    /// commonly produce.
+    static let recommendedWriteChunkCharacters = 28_000
+}
 
 // MARK: File Tree Tool
 
 struct FileTreeTool: OsaurusTool {
     let name = "file_tree"
     let description =
-        "List the directory structure of the working directory or a subdirectory. **Use this instead "
-        + "of `ls` / `tree` in `shell_run`.** Returns a tree view of files and folders. Skips hidden "
-        + "files and truncates at 300 files."
+        "List the directory structure of the working directory or a subdirectory. Use this (rather "
+        + "than a shell `ls` / `tree`) to inspect the working directory layout. Returns a tree view of "
+        + "files and folders. Skips hidden files and truncates at 300 files."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -355,8 +629,11 @@ struct FileTreeTool: OsaurusTool {
         self.fixedRootPath = rootPath
     }
 
+    /// The executing chat's folder root (TaskLocal scope), or the fixed
+    /// root when this instance was built for a known folder.
+    private var rootPath: URL? { FolderToolHelpers.resolveRoot(fixed: fixedRootPath) }
+
     func execute(argumentsJSON: String) async throws -> String {
-        let rootPath = try FolderToolHelpers.requireRoot(fixed: fixedRootPath)
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
 
@@ -366,6 +643,9 @@ struct FileTreeTool: OsaurusTool {
         let relativePath = (args["path"] as? String) ?? "."
         let maxDepth = coerceInt(args["max_depth"]) ?? 3
 
+        // Intel: no Linux sandbox (`INC-containers`), so `/workspace/...` paths stay on the host workspace (upstream serves them from the sandbox bridge).
+
+        guard let rootPath else { return FolderToolHelpers.noActiveFolderEnvelope(tool: name) }
         let targetURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
 
         var isDirectory: ObjCBool = false
@@ -375,19 +655,111 @@ struct FileTreeTool: OsaurusTool {
             throw FolderToolError.directoryNotFound(relativePath)
         }
 
-        return ToolEnvelope.success(
-            tool: name,
-            text: buildTree(targetURL, maxDepth: maxDepth, rootPath: rootPath))
+        return ToolEnvelope.success(tool: name, text: buildTree(targetURL, maxDepth: maxDepth))
     }
 
-    private func buildTree(_ url: URL, maxDepth: Int, rootPath: URL) -> String {
+    /// Render a directory tree for `targetURL` (already resolved and known
+    /// to be a directory). Shared with `file_read`, which lists directories
+    /// under the unified read tool — the path argument decides file vs
+    /// directory, so this struct is now an internal lister, not a
+    /// separately-registered tool.
+    func treeText(for targetURL: URL, maxDepth: Int) -> String {
+        buildTree(targetURL, maxDepth: maxDepth)
+    }
+
+    /// Structured directory listing for `targetURL` (already resolved and
+    /// known to be a directory). Returns entries whose `path` is relative to
+    /// the working root, so the model can copy a `path` field straight into
+    /// the next `file_read` call instead of parsing a glyph tree. Honors the
+    /// same ignore/secret/cap rules as `buildTree`. `truncated` is true when
+    /// the file cap or a per-directory file cap dropped entries.
+    func entries(for targetURL: URL, maxDepth: Int) -> (entries: [[String: Any]], truncated: Bool) {
+        guard let rootPath else { return ([], false) }
+        var out: [[String: Any]] = []
+        var fileCount = 0
+        var truncated = false
+        let maxFiles = Self.maxFiles
+        let maxFilesPerDir = Self.maxFilesPerDir
+        let ignorePatterns = FolderToolHelpers.detectProjectType(rootPath).ignorePatterns
+
+        func relativePath(_ url: URL) -> String {
+            FolderToolHelpers.displayPath(for: url, under: rootPath)
+        }
+
+        func traverse(_ currentURL: URL, depth: Int) {
+            guard depth <= maxDepth else { return }
+            let fm = FileManager.default
+            guard
+                let contents = try? fm.contentsOfDirectory(
+                    at: currentURL,
+                    includingPropertiesForKeys: [.isDirectoryKey],
+                    options: [.skipsHiddenFiles]
+                )
+            else { return }
+
+            let sorted = contents.sorted { a, b in
+                let aIsDir = (try? a.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                let bIsDir = (try? b.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if aIsDir != bIsDir { return aIsDir }
+                return a.lastPathComponent.lowercased() < b.lastPathComponent.lowercased()
+            }
+
+            var filesShownHere = 0
+            for item in sorted {
+                guard fileCount < maxFiles else {
+                    truncated = true
+                    return
+                }
+                let name = item.lastPathComponent
+                if FolderToolHelpers.shouldIgnore(name, patterns: ignorePatterns) { continue }
+                if FolderToolHelpers.shouldRefuseSecret(fileURL: item) { continue }
+
+                let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
+                if isDir {
+                    out.append(["name": name, "path": relativePath(item), "type": "directory"])
+                    if depth < maxDepth {
+                        traverse(item, depth: depth + 1)
+                    }
+                } else {
+                    if filesShownHere >= maxFilesPerDir {
+                        truncated = true
+                        continue
+                    }
+                    out.append(["name": name, "path": relativePath(item), "type": "file"])
+                    filesShownHere += 1
+                    fileCount += 1
+                }
+            }
+        }
+
+        traverse(targetURL, depth: 1)
+        return (out, truncated)
+    }
+
+    /// File-count ceiling — caps how many leaf files the tree enumerates.
+    private static let maxFiles = 300
+    /// Character ceiling for the rendered tree. A wide/deep layout (many
+    /// directories, which don't count toward `maxFiles`) can still bloat the
+    /// retained context across every later request, so cap the raw output too.
+    private static let maxOutputChars = ToolOutputCaps.tree
+    /// Per-directory file ceiling. A flat media folder (hundreds of
+    /// screenshots) is collapsed past this so the listing — and the retained
+    /// context on every later turn — stays readable. Directories are never
+    /// collapsed; the full folder structure is always shown.
+    private static let maxFilesPerDir = 20
+
+    private func buildTree(_ url: URL, maxDepth: Int) -> String {
+        guard let rootPath else { return "" }
         var result = "./\n"
         var fileCount = 0
-        let maxFiles = 300
+        var truncated = false
+        let maxFiles = Self.maxFiles
+        let maxChars = Self.maxOutputChars
+        let maxFilesPerDir = Self.maxFilesPerDir
         let ignorePatterns = FolderToolHelpers.detectProjectType(rootPath).ignorePatterns
 
         func traverse(_ currentURL: URL, depth: Int, prefix: String) {
-            guard depth <= maxDepth, fileCount < maxFiles else { return }
+            guard depth <= maxDepth else { return }
 
             let fm = FileManager.default
             guard
@@ -405,21 +777,28 @@ struct FileTreeTool: OsaurusTool {
                 return a.lastPathComponent.lowercased() < b.lastPathComponent.lowercased()
             }
 
+            // Directories sort first, so files form a contiguous tail; track
+            // how many files this directory has shown to collapse the rest.
+            var filesShownHere = 0
+            var filesCollapsedHere = 0
             for (index, item) in sorted.enumerated() {
-                guard fileCount < maxFiles else {
-                    result += "\(prefix)... (truncated)\n"
+                guard fileCount < maxFiles, result.count < maxChars else {
+                    truncated = true
                     return
                 }
 
                 let name = item.lastPathComponent
                 if FolderToolHelpers.shouldIgnore(name, patterns: ignorePatterns) { continue }
 
+                // Combined-mode secret denylist: don't even disclose the
+                // names of secret files in the tree. Inert in plain folder
+                // mode. Directories are never classified secret, so this
+                // only prunes individual files.
+                if FolderToolHelpers.shouldRefuseSecret(fileURL: item) { continue }
+
                 let isLast = index == sorted.count - 1
                 let connector = isLast ? "└── " : "├── "
                 let childPrefix = isLast ? "    " : "│   "
-                // Resource values describe a symlink itself (never a
-                // directory), so a linked folder is listed by name and not
-                // descended into, even when it points outside the root.
                 let isDir = (try? item.resourceValues(forKeys: [.isDirectoryKey]).isDirectory) ?? false
 
                 if isDir {
@@ -428,13 +807,28 @@ struct FileTreeTool: OsaurusTool {
                         traverse(item, depth: depth + 1, prefix: prefix + childPrefix)
                     }
                 } else {
+                    if filesShownHere >= maxFilesPerDir {
+                        filesCollapsedHere += 1
+                        continue
+                    }
                     result += "\(prefix)\(connector)\(name)\n"
+                    filesShownHere += 1
                     fileCount += 1
                 }
+            }
+            // Collapsed files are the directory's trailing entries, so the
+            // summary is its last visual child (`└──`).
+            if filesCollapsedHere > 0 {
+                result += "\(prefix)└── ... +\(filesCollapsedHere) more files\n"
             }
         }
 
         traverse(url, depth: 1, prefix: "")
+        if truncated {
+            result +=
+                "... (truncated at \(maxFiles) files / \(maxChars) chars — "
+                + "narrow the view with `path` or a smaller `max_depth`)\n"
+        }
         return result
     }
 }
@@ -444,15 +838,19 @@ struct FileTreeTool: OsaurusTool {
 struct FileReadTool: OsaurusTool {
     let name = "file_read"
     let description =
-        "Read a file from the working folder: "
-        + WorkspaceFileFormatPolicy.readableFormatsSummary
-        + ". Documents come back as extracted text; images and scanned PDFs as text recognized "
-        + "on this Mac (OCR). **Use this instead of `cat` / `head` / `tail` or pandoc/pdftotext in "
-        + "`shell_run`.** Optionally specify start_line and end_line for partial reads. Line numbers "
-        + "are 1-indexed. PDF text is split by `--- Page N of M ---` markers (labels and values on one "
-        + "visual row share a line) and `pages: \"3-5\"` reads a page range. Pass `mode: \"structure\"` "
-        + "on a .docx/.xlsx/.pptx/.pdf to get the numbered "
-        + "paragraphs, cells, slides/shapes, or pages (and form fields) that `file_edit` `operations` address."
+        "Read a file's contents, or list a directory's contents — the path decides. Handles every "
+        + "file type in one call: UTF-8 source/text (including HTML/RTF/SVG) is returned raw; PDF, "
+        + "Word (.docx/.doc/.rtfd), and PowerPoint (.pptx) documents are extracted to text; Excel "
+        + "(.xlsx) returns a bounded cell preview (`sheet_name`, `max_rows`, `max_columns`); images "
+        + "(.png/.jpg/.gif/.webp/.heic/…) are shown to vision models and OCR'd to text otherwise. "
+        + "Call it on the document itself — never unzip, convert, or shell out first. Files return "
+        + "text with `N|` line-number prefixes plus `format`/`source` metadata; bound large reads with "
+        + "start_line/end_line, tail_lines, or max_chars. PDF text is split by `--- Page N of M ---` "
+        + "markers (labels and values on one visual row share a line) and `pages: \"3-5\"` reads a page "
+        + "range. Directories return a listing; bound with "
+        + "max_depth. Pass `mode: \"structure\"` on a .docx/.xlsx/.pptx/.pdf to get the numbered paragraphs, "
+        + "cells, slides/shapes, or pages (and form fields) that `file_edit` `operations` address. "
+        + "Example: {\"path\": \"src/app.py\", \"start_line\": 1, \"end_line\": 120}"
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -461,19 +859,45 @@ struct FileReadTool: OsaurusTool {
                 "type": .string("string"),
                 "description": .string("Relative path to the file from the working directory"),
             ]),
+            "max_depth": .object([
+                "type": .string("integer"),
+                "description": .string("Optional directory listing depth when path is a directory (default: 3)"),
+            ]),
+            "sheet_name": .object([
+                "type": .string("string"),
+                "description": .string("Optional XLSX worksheet name to preview"),
+            ]),
             "start_line": .object([
                 "type": .string("integer"),
-                "description": .string("Optional start line number (1-indexed, inclusive)"),
+                "description": .string("Optional start line number or XLSX row number (1-indexed, inclusive)"),
             ]),
             "end_line": .object([
                 "type": .string("integer"),
-                "description": .string("Optional end line number (1-indexed, inclusive)"),
+                "description": .string("Optional end line number or XLSX row number (1-indexed, inclusive)"),
+            ]),
+            "tail_lines": .object([
+                "type": .string("integer"),
+                "description": .string(
+                    "Optional: read the last N lines instead of a range (useful for logs)"
+                ),
+            ]),
+            "max_chars": .object([
+                "type": .string("integer"),
+                "description": .string("Optional cap on returned characters after line selection"),
             ]),
             "pages": .object([
                 "type": .string("string"),
                 "description": .string(
                     "Optional PDF page selector: one page (\"3\") or a contiguous range (\"3-5\"). Overrides start_line/end_line."
                 ),
+            ]),
+            "max_rows": .object([
+                "type": .string("integer"),
+                "description": .string("Optional XLSX preview row cap per sheet (default 8, max 50)"),
+            ]),
+            "max_columns": .object([
+                "type": .string("integer"),
+                "description": .string("Optional XLSX preview column cap per row (default 8, max 30)"),
             ]),
             "mode": .object([
                 "type": .string("string"),
@@ -487,22 +911,28 @@ struct FileReadTool: OsaurusTool {
     ])
 
     private let fixedRootPath: URL?
+    private let documentRegistry: DocumentFormatRegistry
 
-    init(rootPath: URL? = nil) {
+    init(rootPath: URL? = nil, documentRegistry: DocumentFormatRegistry = .shared) {
         self.fixedRootPath = rootPath
+        self.documentRegistry = documentRegistry
     }
 
-    /// Maximum characters for file_read output to prevent context window exhaustion.
-    /// Consistent with truncation limits on shell_run (10k) and git_diff (20k).
-    private static let maxOutputChars = 15_000
 
-    /// File extensions that `DocumentParser` (PDFKit + `NSAttributedString`)
-    /// already extracts plain text from. For these we route through the
-    /// parser instead of attempting a UTF-8 decode that would fail with
-    /// `NSCocoaError 264` ("isn't in the correct format").
-    private static let richDocumentExtensions: Set<String> = [
-        "pdf", "docx", "doc", "rtf", "rtfd", "html", "htm",
-    ]
+
+    /// Maximum characters for file_read output to prevent context window exhaustion.
+    /// Tiered against shell_run / git_diff via `ToolOutputCaps`.
+    private static let maxOutputChars = ToolOutputCaps.fileRead
+
+    /// Maximum raw bytes read for plain text / source / CSV before
+    /// decoding. Rich documents and XLSX previews have their own adapter
+    /// limits; this cap protects the raw path from loading a huge file
+    /// just to emit a 15K-character preview.
+    private static let rawReadByteLimit = 5 * 1024 * 1024
+
+    /// Chunk size for bounded raw reads. Keeps peak transient allocation
+    /// modest while avoiding tiny syscall loops.
+    private static let rawReadChunkBytes = 64 * 1024
 
     /// First-chunk byte budget for the NUL-byte binary sniff. Catches
     /// off-extension binaries whose UTF-8 decode happens to succeed by
@@ -510,8 +940,45 @@ struct FileReadTool: OsaurusTool {
     /// heuristic.
     private static let binarySniffBytes = 4096
 
+    /// Where the text came from. Carried into the result payload so the
+    /// model can tell raw source from an extracted text layer (a PDF's
+    /// "line 12" is a line of extracted prose, not a line of the file).
+    enum ContentSource: String {
+        case rawText = "raw_text"
+        case extractedText = "extracted_text"
+        case ocrText = "ocr_text"
+    }
+
+    private struct LoadedFileContent {
+        let text: String
+        let rawRead: RawReadMetadata?
+        /// Short format id for the payload (`text`, `pdf`, `docx`, `pptx`, …).
+        let format: String
+        let source: ContentSource
+        /// Cheap structural counts the adapter already computed
+        /// (`pages`, `slides`). Empty for raw reads.
+        var counts: [String: Int] = [:]
+        /// Provenance note surfaced as `note` (e.g. OCR caveats).
+        var note: String? = nil
+    }
+
+    private enum ImageReadOutcome {
+        /// Vision-capable surface: the envelope carries an `image_ref`.
+        case attached(String)
+        /// Text-only surface: OCR lines flow through the normal `N|` path.
+        case recognizedText(LoadedFileContent)
+        /// The bytes are not a decodable image; take the ordinary read path.
+        case notAnImage
+    }
+
+    private struct RawReadMetadata {
+        let bytesRead: Int
+        let byteLimit: Int
+        let fileSize: Int64?
+        let truncatedByByteLimit: Bool
+    }
+
     func execute(argumentsJSON: String) async throws -> String {
-        let rootPath = try FolderToolHelpers.requireRoot(fixed: fixedRootPath)
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
 
@@ -525,17 +992,91 @@ struct FileReadTool: OsaurusTool {
             return pathReq.failureEnvelope ?? ""
         }
 
+        // Intel: no Linux sandbox (`INC-containers`), so `/workspace/...` paths stay on the host workspace (upstream serves them from the sandbox bridge).
+
+        guard let rootPath = FolderToolHelpers.resolveRoot(fixed: fixedRootPath) else {
+            return FolderToolHelpers.noActiveFolderEnvelope(tool: name)
+        }
         let fileURL = try FolderToolHelpers.resolvePath(relativePath, rootPath: rootPath)
 
-        guard FileManager.default.fileExists(atPath: fileURL.path) else {
-            throw FolderToolError.fileNotFound(relativePath)
+        // Combined sandbox + host-read mode: refuse secret files even
+        // though they live inside the scoped workspace. The read channel
+        // is the agent-as-bridge surface, so a poisoned README or a
+        // steered instruction shouldn't be able to pull `.env` / private
+        // keys / credentials into context and exfiltrate them via the
+        // sandbox. Plain folder mode is unaffected (the gate is inert
+        // when no read-only host scope is bound). Shared with
+        // `file_search` so the denylist can't be bypassed by switching
+        // tools.
+        if FolderToolHelpers.shouldRefuseSecret(fileURL: fileURL) {
+            return FolderToolHelpers.secretRefusalEnvelope(relativePath: relativePath, tool: name)
         }
 
+        var isDirectory: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory) else {
+            // Resolve basename candidates before failing: a wrong path
+            // guess otherwise costs a failed turn plus one or two
+            // `file_search` turns (observed live) before the model finds
+            // the file it was told about. Quoting the real relative paths
+            // makes the very next call correct.
+            let candidates = FolderToolHelpers.basenameCandidates(
+                for: relativePath, rootPath: rootPath)
+            if !candidates.isEmpty {
+                return ToolEnvelope.failure(
+                    kind: .notFound,
+                    message:
+                        "File not found: \(relativePath). Files with a matching name exist at: "
+                        + candidates.joined(separator: ", ")
+                        + ". Use one of those exact relative paths.",
+                    field: "path",
+                    expected: "an existing relative path",
+                    tool: name
+                )
+            }
+            throw FolderToolError.fileNotFound(relativePath)
+        }
+        return try await readResolved(
+            fileURL: fileURL,
+            relativePath: relativePath,
+            isDirectory: isDirectory.boolValue,
+            rootPath: rootPath,
+            args: args
+        )
+    }
+
+    /// Everything after path resolution: listing, workbook preview, image
+    /// attach/OCR, document extraction, and the `N|` rendering contract.
+    /// Shared by the host route and the `/workspace` share route.
+    private func readResolved(
+        fileURL: URL,
+        relativePath: String,
+        isDirectory isDirectoryFlag: Bool,
+        rootPath: URL,
+        args: [String: Any]
+    ) async throws -> String {
+        let isDirectory = ObjCBool(isDirectoryFlag)
         let ext = fileURL.pathExtension.lowercased()
-        // Upstream #2907: an outline of what `file_edit` operations address.
+
+        // A directory path lists rather than reads (the path carries the
+        // decision — no separate `file_tree` tool to mis-select). Reuse the
+        // internal tree lister, honoring `max_depth`, but stamp the
+        // envelope as `file_read` since that's the only file tool now.
+        // Document packages such as RTFD are directories on macOS, but remain
+        // files at the workspace contract boundary and must use extraction.
+        if isDirectory.boolValue,
+            !WorkspaceFileFormatPolicy.prefersDocumentExtraction(ext)
+        {
+            let maxDepth = coerceInt(args["max_depth"]) ?? 3
+            let listing = FileTreeTool(rootPath: rootPath).entries(for: fileURL, maxDepth: maxDepth)
+            return ToolEnvelope.listing(
+                tool: name,
+                path: relativePath,
+                entries: listing.entries,
+                truncated: listing.truncated
+            )
+        }
+
         if let mode = (args["mode"] as? String)?.lowercased(), mode == "structure" {
-            var isDirectory: ObjCBool = false
-            FileManager.default.fileExists(atPath: fileURL.path, isDirectory: &isDirectory)
             guard DocumentEditService.isEditable(ext), !isDirectory.boolValue else {
                 return ToolEnvelope.failure(
                     kind: .invalidArgs,
@@ -558,20 +1099,6 @@ struct FileReadTool: OsaurusTool {
                 )
             }
         }
-        // Upstream #91: recognised document formats without a built-in
-        // reader get an honest message naming the sibling format that works.
-        if case .unsupportedDocument(let family) = WorkspaceFileFormatPolicy.readSupport(for: ext) {
-            let alternative = family.supportedAlternative.map { " Save it as \($0) and read that instead." } ?? ""
-            return ToolEnvelope.failure(
-                kind: .invalidArgs,
-                message:
-                    "`\(relativePath)` is a \(family.label) format file_read can't open. It reads "
-                    + WorkspaceFileFormatPolicy.readableFormatsSummary + "." + alternative,
-                field: "path",
-                tool: name,
-                retryable: false
-            )
-        }
 
         // `pages` is a PDF-only selector; reject it up front for other
         // files so the model gets a field-level correction instead of a
@@ -591,11 +1118,72 @@ struct FileReadTool: OsaurusTool {
             )
         }
 
-        let content = try await loadFileContent(
-            url: fileURL,
+        let sheetName: String?
+        if args.keys.contains("sheet_name") {
+            let sheetReq = requireString(
+                args,
+                "sheet_name",
+                expected: "worksheet name in the XLSX workbook",
+                tool: name
+            )
+            guard case .value(let parsedSheetName) = sheetReq else {
+                return sheetReq.failureEnvelope ?? ""
+            }
+            sheetName = parsedSheetName
+        } else {
+            sheetName = nil
+        }
+
+        if let workbookPreview = try await workbookPreviewIfAvailable(
+            fileURL: fileURL,
             relativePath: relativePath,
-            ext: ext
-        )
+            sheetName: sheetName,
+            args: args
+        ) {
+            var result: [String: Any] = [
+                "kind": "workbook",
+                "text": workbookPreview.text,
+                "path": relativePath,
+                "format": "xlsx",
+                "source": "workbook_preview",
+                "sheets": workbookPreview.sheetCount,
+                "sheet_names": workbookPreview.sheetNames,
+                "preview_note":
+                    "Bounded cell preview (`max_rows`/`max_columns`, `start_line`/`end_line` = rows); "
+                    + "pass `sheet_name` to focus one sheet.",
+            ]
+            if let sheetName { result["sheet_name"] = sheetName }
+            return ToolEnvelope.success(tool: name, result: result)
+        }
+
+        // Pixel images: attach for a vision model, OCR for everyone else.
+        // SVG is XML source and keeps the raw text path.
+        let imageByPolicy = WorkspaceFileFormatPolicy.readSupport(for: ext) == .image
+        let content: LoadedFileContent
+        if ext != "svg", !isDirectory.boolValue,
+            imageByPolicy || DocumentParser.isImageFile(url: fileURL)
+        {
+            switch try await readImage(fileURL: fileURL, relativePath: relativePath, ext: ext) {
+            case .attached(let envelope):
+                return envelope
+            case .recognizedText(let loaded):
+                content = loaded
+            case .notAnImage:
+                // Mislabelled bytes (e.g. source text saved as `.png`):
+                // UTF-8 source still wins over the extension.
+                content = try await loadFileContent(
+                    url: fileURL,
+                    relativePath: relativePath,
+                    ext: ext
+                )
+            }
+        } else {
+            content = try await loadFileContent(
+                url: fileURL,
+                relativePath: relativePath,
+                ext: ext
+            )
+        }
         let lines = FolderToolHelpers.contentLines(content.text)
 
         // `pages` (PDF only) maps a page range onto the global gutter via
@@ -620,6 +1208,7 @@ struct FileReadTool: OsaurusTool {
                     return ToolEnvelope.success(
                         tool: name,
                         result: [
+                            "kind": "file",
                             "path": relativePath,
                             "format": content.format,
                             "source": content.source.rawValue,
@@ -641,16 +1230,64 @@ struct FileReadTool: OsaurusTool {
             }
         }
 
-        let startLine = pageRange?.lowerBound ?? coerceInt(args["start_line"]) ?? 1
-        let endLine = pageRange?.upperBound ?? coerceInt(args["end_line"]) ?? lines.count
+        // `tail_lines` (last N lines, for logs) overrides an explicit
+        // start/end range; `max_chars` optionally tightens the per-call
+        // character cap below the hard `maxOutputChars` ceiling.
+        let tailLines = max(coerceInt(args["tail_lines"]) ?? 0, 0)
+        let maxChars = max(coerceInt(args["max_chars"]) ?? 0, 0)
+        let startLine: Int
+        let endLine: Int
+        if let pageRange {
+            startLine = pageRange.lowerBound
+            endLine = pageRange.upperBound
+        } else if tailLines > 0 {
+            endLine = lines.count
+            startLine = max(1, lines.count - tailLines + 1)
+        } else {
+            startLine = coerceInt(args["start_line"]) ?? 1
+            endLine = coerceInt(args["end_line"]) ?? lines.count
+        }
         let validStart = max(1, min(startLine, lines.count))
         let validEnd = max(validStart, min(endLine, lines.count))
+        // Adaptive cap: an explicit `max_chars` may exceed the default tier
+        // up to the absolute ceiling, and when the whole file fits under
+        // that ceiling it serves in one call — forced chunking of a file
+        // the model could hold whole just multiplies agent turns. Files
+        // above the ceiling keep the default tier + continuation chunking.
+        let charCap: Int
+        if maxChars > 0 {
+            charCap = min(maxChars, ToolOutputCaps.fileReadMax)
+        } else if content.text.count <= ToolOutputCaps.fileReadMax {
+            charCap = ToolOutputCaps.fileReadMax
+        } else {
+            charCap = Self.maxOutputChars
+        }
 
         var output = ""
         var lastLineIncluded = validStart - 1
+        var outputTruncated = false
+        // Line cut mid-way by the char cap. Tracked separately so it is
+        // never counted as "included": treating the cut line as complete
+        // made the truncation notice (and `end_line`) overstate what the
+        // model actually saw by one line.
+        var partialLine: Int? = nil
         for i in (validStart - 1) ..< validEnd {
-            let line = String(format: "%6d| %@\n", i + 1, lines[i])
-            if output.count + line.count > Self.maxOutputChars {
+            try Task.checkCancellation()
+            // Gutter format is `N|content` with NO space after the pipe:
+            // everything after the first `|` is byte-exact file content.
+            // The earlier `N| content` form made a leading gutter space
+            // indistinguishable from real leading whitespace — models
+            // (gemma-4-12B live, grok-4.3 historically) copied it into
+            // `file_write` content / `file_edit` old_string and corrupted
+            // whitespace or whiffed the match.
+            let line = String(format: "%6d|%@\n", i + 1, lines[i])
+            if output.count + line.count > charCap {
+                let remaining = charCap - output.count
+                if remaining > 0 {
+                    output += String(line.prefix(remaining))
+                    partialLine = i + 1
+                }
+                outputTruncated = true
                 break
             }
             output += line
@@ -661,37 +1298,91 @@ struct FileReadTool: OsaurusTool {
             return ToolEnvelope.success(tool: name, text: "(empty file)")
         }
 
-        // If truncated, inform the model and suggest using line ranges
-        if lastLineIncluded < validEnd {
+        let renderedTruncated = outputTruncated || lastLineIncluded < validEnd
+        // Exact continuation boundary when the RENDERED character cap cut the
+        // output (issue #2098: a 13.9KB source file whose gutters pushed the
+        // render past the cap read "complete" to the model, which reviewed
+        // 426 of 499 lines as if it had the whole file). Only offered when:
+        //   - the whole file was loaded (a raw byte-capped read cannot reach
+        //     unloaded bytes by line number, so a line continuation would lie);
+        //   - progress past `validStart` was made (a single line longer than
+        //     the cap can never advance — re-reading the same start would loop).
+        // The continuation never extends past the caller's requested range end.
+        let continuationStart: Int? = {
+            guard renderedTruncated, content.rawRead?.truncatedByByteLimit != true else {
+                return nil
+            }
+            let next = partialLine ?? (lastLineIncluded + 1)
+            guard next > validStart, next <= validEnd else { return nil }
+            return next
+        }()
+
+        // If truncated, inform the model and name the exact next range
+        if renderedTruncated {
+            let totalLabel = Self.lineCountLabel(lines.count, rawRead: content.rawRead)
+            let rangeHint: String
+            if let continuationStart {
+                rangeHint = "continue with start_line=\(continuationStart), end_line=\(validEnd)"
+            } else {
+                rangeHint = "use start_line/end_line for specific ranges"
+            }
+            if let partialLine {
+                output +=
+                    "\n... (truncated mid-line: line \(partialLine) is only PARTIALLY shown; complete lines end at \(lastLineIncluded) of \(totalLabel) — \(rangeHint))"
+            } else {
+                output +=
+                    "\n... (truncated at \(lastLineIncluded) of \(totalLabel) lines — \(rangeHint))"
+            }
+        }
+        if let rawRead = content.rawRead, rawRead.truncatedByByteLimit {
             output +=
-                "\n... (truncated at \(lastLineIncluded) of \(lines.count) lines — use start_line/end_line for specific ranges)"
+                "\n... (raw read capped at \(Self.formatByteCount(Int64(rawRead.bytesRead)))"
+                + " of \(Self.formatByteCount(rawRead.fileSize ?? Int64(rawRead.bytesRead)))"
+                + " before full-file load; split the file or use a format-specific reader for later content)"
         }
 
         let text: String
-        if validStart > 1 || validEnd < lines.count {
-            text = "Lines \(validStart)-\(validEnd) of \(lines.count):\n" + output
+        if validStart > 1 || validEnd < lines.count || content.rawRead?.truncatedByByteLimit == true {
+            let totalLines = Self.lineCountLabel(lines.count, rawRead: content.rawRead)
+            // When the char cap cut the FIRST line mid-way there is no
+            // complete line at all — say so instead of an inverted range.
+            let endLabel =
+                lastLineIncluded >= validStart
+                ? "\(lastLineIncluded)" : "\(validStart) (partial)"
+            text = "Lines \(validStart)-\(endLabel) of \(totalLines):\n" + output
         } else {
             text = output
         }
-        let contentEnd = max(validStart - 1, lastLineIncluded)
-        let rawContent: String
-        if contentEnd > validStart - 1 {
-            rawContent = lines[(validStart - 1) ..< contentEnd].joined(separator: "\n")
-        } else {
-            rawContent = ""
-        }
         var result: [String: Any] = [
+            "kind": "file",
             "text": text,
-            "content": rawContent,
+            // Self-describing gutter contract, carried WITH the payload:
+            // models (gemma-4-12B live) have read `     1|41` as "first
+            // number is 1" when the only explanation lived back in the
+            // tool schema. One short field per read is cheaper than one
+            // wrong-answer retry loop.
+            "line_format": "each line is `<line number>|<content>`; content starts after the first `|`",
             "path": relativePath,
+            // Self-describing provenance: `format` is the file type that
+            // was opened, `source` says whether the lines are the file's
+            // own bytes or a text layer extracted from a document. Without
+            // this a PDF read is indistinguishable from a `.txt` read and
+            // the model reasons about "line 12 of the file" literally.
+            "format": content.format,
+            "source": content.source.rawValue,
             "start_line": validStart,
             "end_line": lastLineIncluded,
             "total_lines": lines.count,
-            "truncated": lastLineIncluded < validEnd,
+            "total_lines_exact": content.rawRead?.truncatedByByteLimit != true,
+            "truncated": renderedTruncated || content.rawRead?.truncatedByByteLimit == true,
         ]
-        if let format = content.format {
-            result["format"] = format
-            result["source"] = content.source.rawValue
+        // Machine-readable continuation: the exact `start_line`/`end_line`
+        // pair that resumes this read where the rendered cap cut it. The
+        // harness (`AgentTaskState`) turns these into a next-step notice so
+        // a truncated read becomes a continuation action, not a silent gap.
+        if let continuationStart {
+            result["next_start_line"] = continuationStart
+            result["next_end_line"] = validEnd
         }
         for (key, value) in content.counts {
             result[key] = value
@@ -702,152 +1393,247 @@ struct FileReadTool: OsaurusTool {
         if let note = content.note {
             result["note"] = note
         }
-        return ToolEnvelope.success(tool: name, result: result)
+        // Anti-paging guard: a model on chunk 2+ of a file too large to
+        // ever fit is usually sequentially paging the whole thing through
+        // context (observed live: 9B model read chunk after chunk of a
+        // 15K-line file until stopped — every chunk grows the transcript
+        // and the next prefill). Steer to tools that operate on the file
+        // without loading it. Stateless: fires on any continuation read of
+        // an over-ceiling file, so it needs no per-session tracking.
+        if validStart > 1, renderedTruncated,
+            content.text.count > ToolOutputCaps.fileReadMax
+        {
+            // Suggest only tools actually in THIS request's schema — the
+            // redaction tools are host-folder-only, and steering a
+            // combined/sandbox conversation toward an unoffered tool just
+            // trades paging churn for tool_not_found churn. A nil scope
+            // means the surface publishes no schema (direct registry use);
+            // the full folder surface applies there.
+            // Intel: no per-request tool scope; offer only tools this build
+            // registers (e.g. no `redact_file` yet).
+            func offered(_ tool: String) -> Bool { ToolRegistry.shared.entry(named: tool) != nil }
+            var alternatives: [String] = []
+            if offered("redact_file") {
+                alternatives.append("`redact_file`/`detect_pii` for redaction")
+            }
+            if offered("file_edit") {
+                alternatives.append("`file_edit` with `replace_all`/`edits` for replacements")
+            }
+            if offered("file_search") {
+                alternatives.append("`file_search` to locate specific lines")
+            }
+            if offered("shell_run") {
+                alternatives.append("`shell_run` for anything else")
+            }
+            var warning =
+                "This file is far too large to page through chunk by chunk - each chunk "
+                + "permanently grows the context and slows every later turn. Do NOT keep "
+                + "reading sequentially."
+            if !alternatives.isEmpty {
+                warning +=
+                    " Act with tools that process the file without loading it: "
+                    + alternatives.joined(separator: ", ") + "."
+            }
+            result["paging_warning"] = warning
+        }
+        // The numbered gutter cannot express whether the file's last line is
+        // terminated — a byte-exact reconstruction (backup copies, `equals`
+        // contracts) needs to know if a final `\n` belongs at the end
+        // (observed live: a model rebuilt a config from the gutter text and
+        // dropped the trailing newline, failing a byte-for-byte check by one
+        // byte). Only stated when the read actually reached the end of file.
+        if content.rawRead?.truncatedByByteLimit != true {
+            result["ends_with_newline"] = content.text.last?.isNewline == true
+        }
+        if let partialLine {
+            result["partial_line"] = partialLine
+        }
+        if let rawRead = content.rawRead {
+            result["bytes_read"] = rawRead.bytesRead
+            result["byte_limit"] = rawRead.byteLimit
+            result["raw_bytes_truncated"] = rawRead.truncatedByByteLimit
+            if let fileSize = rawRead.fileSize {
+                result["file_size"] = fileSize
+            }
+        }
+        return ToolEnvelope.success(
+            tool: name,
+            result: result
+        )
     }
 
-    /// What a read produced, with the PDF counts and provenance note
-    /// upstream's `LoadedFileContent` carries (#2983). Intel's file_read is
-    /// older than upstream's (no `format`/`source` on every read), so only
-    /// PDFs fill the extra fields.
-    struct LoadedFileContent {
-        enum Source: String { case extractedText = "extracted_text", ocrText = "ocr_text", other }
-        var text: String
-        var format: String? = nil
-        var source: Source = .other
-        var counts: [String: Int] = [:]
-        var note: String? = nil
+    /// Image branch. When the running surface can carry an image to a
+    /// vision model (`ChatExecutionContext.toolResultImagesEnabled`), the
+    /// bytes are bounded, spilled to `AttachmentBlobStore`, and referenced
+    /// from a `kind: "image"` envelope that `ToolResultMediaBridge` turns
+    /// into a multimodal tool message. Otherwise Vision OCR recognises the
+    /// text so a text-only model still reads the picture; an image with no
+    /// recognisable text throws the `.image` binary envelope.
+    private func readImage(
+        fileURL: URL,
+        relativePath: String,
+        ext: String
+    ) async throws -> ImageReadOutcome {
+        let loaded: FileReadImageSupport.LoadedImage
+        do {
+            loaded = try await Task.detached(priority: .userInitiated) {
+                try FileReadImageSupport.load(url: fileURL)
+            }.value
+        } catch FileReadImageSupport.LoadError.tooLarge(let bytes) {
+            throw FolderToolError.operationFailed(
+                "'\(relativePath)' is a \(bytes / (1024 * 1024)) MB image, above the "
+                    + "\(FileReadImageSupport.maxSourceBytes / (1024 * 1024)) MB limit file_read attaches or OCRs. "
+                    + "Downscale it first (e.g. `sips -Z 2048` via shell_run)."
+            )
+        } catch {
+            // Not decodable as an image after all (mislabelled bytes): let
+            // the ordinary path read UTF-8 source or raise the binary error.
+            return .notAnImage
+        }
+        try Task.checkCancellation()
+
+        let format =
+            loaded.mimeSubtype == "jpeg" && ext != "jpg" && ext != "jpeg" && !loaded.downscaled
+            ? loaded.mimeSubtype : (ext.isEmpty ? loaded.mimeSubtype : ext)
+        let dimensions = "\(loaded.pixelWidth)x\(loaded.pixelHeight)"
+
+        if ChatExecutionContext.toolResultImagesEnabled {
+            let hash: String
+            do {
+                hash = try AttachmentBlobStore.write(loaded.data)
+            } catch {
+                throw FolderToolError.operationFailed(
+                    "Could not stage the image for the model: \(error.localizedDescription)"
+                )
+            }
+            var text =
+                "Image \(relativePath) (\(dimensions), \(format.uppercased()), \(loaded.sourceBytes) bytes) "
+                + "is attached to this tool result and visible to you as an image. Describe or analyse it directly; "
+                + "do not call a shell tool or OCR to inspect it."
+            if loaded.downscaled {
+                text += " It was downscaled to \(loaded.pixelWidth)x\(loaded.pixelHeight) JPEG for transport."
+            }
+            let result: [String: Any] = [
+                "kind": "image",
+                "path": relativePath,
+                "format": format,
+                "source": "image",
+                "width": loaded.pixelWidth,
+                "height": loaded.pixelHeight,
+                "bytes": loaded.sourceBytes,
+                "image_ref": [
+                    "hash": hash,
+                    "byte_count": loaded.data.count,
+                    "mime": "image/\(loaded.mimeSubtype)",
+                ],
+                "text": text,
+            ]
+            return .attached(ToolEnvelope.success(tool: name, result: result))
+        }
+
+        let lines = await FileReadImageSupport.recognizeTextLines(in: loaded.data)
+        try Task.checkCancellation()
+        guard !lines.isEmpty else {
+            throw Self.binaryError(path: relativePath, ext: ext, detail: .image)
+        }
+        return .recognizedText(
+            LoadedFileContent(
+                text: lines.joined(separator: "\n"),
+                rawRead: nil,
+                format: format,
+                source: .ocrText,
+                counts: ["width": loaded.pixelWidth, "height": loaded.pixelHeight],
+                note:
+                    "The active model cannot view images, so these lines are OCR text recognised in the "
+                    + "\(dimensions) image (reading order is approximate; layout, colours, and non-text "
+                    + "content are not represented)."
+            )
+        )
     }
 
     /// Pull text out of the file at `url`, throwing `binaryContent` when
-    /// the file is not decodable as text. Two branches:
-    ///   - rich extensions go through `DocumentParser` (PDFKit /
-    ///     `NSAttributedString`);
-    ///   - other extensions read raw bytes, NUL-sniff the first 4KB,
-    ///     then UTF-8 decode. The byte-first ordering catches binaries
-    ///     whose UTF-8 prefix happens to be valid by coincidence.
+    /// the file is not text or text-extractable:
+    ///   - PDFs use `PDFAdapter` directly so spawned reads remain
+    ///     cancellation-cooperative without crossing the synchronous
+    ///     `DocumentParser` compatibility shim;
+    ///   - other known binary document packages use document extraction;
+    ///   - every other UTF-8 file reads as raw source regardless of extension;
+    ///   - binary images are refused, while parser-supported binary documents
+    ///     fall back to extraction;
+    /// Raw reads NUL-sniff the first 4KB, then UTF-8 decode. This keeps
+    /// line-numbering and `start_line`/`end_line` semantics, and the
+    /// byte-first ordering catches binaries whose UTF-8 prefix happens
+    /// to be valid by coincidence.
     private func loadFileContent(
         url: URL,
         relativePath: String,
         ext: String
     ) async throws -> LoadedFileContent {
         if ext == "pdf" {
-            return try await extractPDFTextLayer(url: url, relativePath: relativePath, ext: ext)
+            return try await extractPDFTextLayer(
+                url: url,
+                relativePath: relativePath,
+                ext: ext
+            )
         }
-        if Self.richDocumentExtensions.contains(ext) {
-            return LoadedFileContent(
-                text: try await extractRichDocumentText(
+
+        if case .unsupportedDocument(let family) = WorkspaceFileFormatPolicy.readSupport(for: ext) {
+            // Recognised family, no adapter: say so precisely instead of
+            // falling through to a "could not be parsed" or binary message.
+            throw Self.binaryError(
+                path: relativePath,
+                ext: ext,
+                detail: .unsupportedFormat(family: family)
+            )
+        }
+
+        if WorkspaceFileFormatPolicy.prefersDocumentExtraction(ext) {
+            DocumentAdaptersBootstrap.registerBuiltIns(registry: documentRegistry)
+            guard let adapter = documentRegistry.adapter(for: url) else {
+                throw Self.binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            }
+            return try await extractRichDocumentText(
+                adapter: adapter,
+                url: url,
+                relativePath: relativePath,
+                ext: ext
+            )
+        }
+
+        do {
+            let worker = Task.detached(priority: .userInitiated) {
+                try Self.loadBoundedRawText(
                     url: url,
                     relativePath: relativePath,
                     ext: ext
                 )
-            )
-        }
-        switch WorkspaceFileFormatPolicy.readSupport(for: ext) {
-        case .workbook, .extractedText:
-            // PowerPoint / Excel (upstream #91) through the registered
-            // document adapters.
-            return LoadedFileContent(
-                text: try await extractWithDocumentAdapter(url: url, relativePath: relativePath, ext: ext)
-            )
-        case .image:
-            return LoadedFileContent(
-                text: try await recognizeImageText(url: url, relativePath: relativePath, ext: ext)
-            )
-        case .rawText, .unsupportedDocument:
-            break
-        }
-
-        let data = try Data(contentsOf: url)
-        if data.prefix(Self.binarySniffBytes).contains(0) {
-            throw binaryError(path: relativePath, ext: ext, detail: .nulByte)
-        }
-        if let text = String(data: data, encoding: .utf8) {
-            return LoadedFileContent(text: text)
-        }
-        throw binaryError(path: relativePath, ext: ext, detail: .decodeFailed)
-    }
-
-    /// Run `DocumentParser.parse(url:)` on a detached task so the
-    /// parser's internal `runBlocking` semaphore can't starve the
-    /// cooperative thread pool. Matches the production pattern in
-    /// `FloatingInputCard`.
-    private func extractRichDocumentText(
-        url: URL,
-        relativePath: String,
-        ext: String
-    ) async throws -> String {
-        let attachment: Attachment
-        do {
-            attachment = try await Task.detached(priority: .userInitiated) {
-                try DocumentParser.parse(url: url)
-            }.value
-        } catch let err as DocumentParser.ParseError {
-            switch err {
-            case .emptyContent:
-                // Empty rich doc — surface as empty string; downstream
-                // slicing produces the same "(empty)" output the plain-
-                // text path would for a zero-byte `.txt`.
-                return ""
-            case .unsupportedFormat, .readFailed, .fileTooLarge:
-                throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
             }
-        }
-        if case .document(_, let text, _) = attachment.kind {
-            return text
-        }
-        // Image-only (scanned) PDF: DocumentParser falls back to page
-        // images. Recognize their text on-device (upstream #91); only when
-        // nothing is legible does the model get the image-only-PDF error.
-        if ext == "pdf", let ocr = await FileReadImageSupport.ocrImageOnlyPDF(url: url) {
-            let scope =
-                ocr.pagesScanned < ocr.totalPages
-                ? "pages 1–\(ocr.pagesScanned) of \(ocr.totalPages)" : "\(ocr.totalPages) pages"
-            return "(Scanned PDF — text recognized by OCR, \(scope).)\n" + ocr.text
-        }
-        throw binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
-    }
-
-    /// Extract a PDF text layer through `PDFAdapter` (upstream #2983): page
-    /// markers, layout-ordered flattened forms, and the counts and note
-    /// below. A PDF with no text layer is OCR'd as before.
-    private func extractPDFTextLayer(
-        url: URL,
-        relativePath: String,
-        ext: String
-    ) async throws -> LoadedFileContent {
-        do {
-            let document = try await PDFAdapter().parse(
-                url: url,
-                sizeLimit: Int64(DocumentParser.maxFileSize)
-            )
-            try Task.checkCancellation()
-            return Self.pdfTextLayerContent(document)
-        } catch is CancellationError {
-            throw CancellationError()
-        } catch let error as DocumentAdapterError {
-            switch error {
-            case .emptyContent:
-                // No text layer: scanned pages. Recognize their text on-device
-                // (upstream #91); only when nothing is legible does the model
-                // get the image-only-PDF error.
-                if let ocr = await FileReadImageSupport.ocrImageOnlyPDF(url: url) {
-                    try Task.checkCancellation()
-                    let scope =
-                        ocr.pagesScanned < ocr.totalPages
-                        ? "pages 1–\(ocr.pagesScanned) of \(ocr.totalPages)" : "\(ocr.totalPages) pages"
-                    return LoadedFileContent(
-                        text: "(Scanned PDF — text recognized by OCR, \(scope).)\n" + ocr.text,
-                        format: "pdf",
-                        source: .ocrText,
-                        counts: ["pages": ocr.totalPages, "pages_scanned": ocr.pagesScanned]
-                    )
-                }
-                throw binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
-            case .cancelled:
-                throw CancellationError()
-            case .unsupportedFormat, .sizeLimitExceeded, .readFailed, .writeFailed:
-                throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            return try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: {
+                worker.cancel()
             }
+        } catch let error as FolderToolError {
+            guard case .binaryContent = error else { throw error }
+
+            // Raw UTF-8 always wins. Only after strict decoding fails do we
+            // reinterpret the bytes as an image or rich binary document.
+            if DocumentParser.isImageFile(url: url) {
+                throw Self.binaryError(path: relativePath, ext: ext, detail: .image)
+            }
+            DocumentAdaptersBootstrap.registerBuiltIns(registry: documentRegistry)
+            if let adapter = documentRegistry.adapter(for: url),
+                adapter.formatId != PlainTextAdapter().formatId,
+                !adapter.formatId.hasPrefix("csv")
+            {
+                return try await extractRichDocumentText(
+                    adapter: adapter,
+                    url: url,
+                    relativePath: relativePath,
+                    ext: ext
+                )
+            }
+            throw error
         }
     }
 
@@ -883,6 +1669,7 @@ struct FileReadTool: OsaurusTool {
         }
         return LoadedFileContent(
             text: text,
+            rawRead: nil,
             format: "pdf",
             source: .extractedText,
             counts: [
@@ -962,42 +1749,215 @@ struct FileReadTool: OsaurusTool {
         return range
     }
 
-    /// PowerPoint / Excel text via `DocumentFormatRegistry` (upstream #91).
-    private func extractWithDocumentAdapter(url: URL, relativePath: String, ext: String) async throws -> String {
-        DocumentAdaptersBootstrap.registerBuiltIns()
-        guard let adapter = DocumentFormatRegistry.shared.adapter(for: url) else {
-            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
-        }
+    /// Extract a PDF text layer without the synchronous `DocumentParser`
+    /// bridge. `PDFAdapter` checks cancellation between pages, glyphs, table
+    /// phases, and representation construction, so an owning spawned
+    /// operation can cancel and drain this work before it returns.
+    private func extractPDFTextLayer(
+        url: URL,
+        relativePath: String,
+        ext: String
+    ) async throws -> LoadedFileContent {
         do {
-            let document = try await adapter.parse(url: url, sizeLimit: Int64(FileReadImageSupport.maxSourceBytes))
-            return document.textFallback
-        } catch DocumentAdapterError.emptyContent {
-            return ""
-        } catch {
-            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            let document = try await PDFAdapter().parse(
+                url: url,
+                sizeLimit: Int64(DocumentParser.maxFileSize)
+            )
+            try Task.checkCancellation()
+            return Self.pdfTextLayerContent(document)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DocumentAdapterError {
+            switch error {
+            case .emptyContent:
+                // No text layer: scanned pages. OCR a bounded number of
+                // rendered pages so the document is still readable here
+                // instead of bouncing the model to a shell tool.
+                if let ocr = await FileReadImageSupport.ocrImageOnlyPDF(url: url) {
+                    try Task.checkCancellation()
+                    var note =
+                        "This PDF has no text layer; the lines are OCR text recognised from "
+                        + "\(ocr.pagesScanned) rendered page(s) (reading order approximate)."
+                    if ocr.pagesScanned < ocr.totalPages {
+                        note += " Only the first \(ocr.pagesScanned) of \(ocr.totalPages) pages were scanned."
+                    }
+                    return LoadedFileContent(
+                        text: ocr.text,
+                        rawRead: nil,
+                        format: "pdf",
+                        source: .ocrText,
+                        counts: ["pages": ocr.totalPages, "pages_scanned": ocr.pagesScanned],
+                        note: note
+                    )
+                }
+                throw Self.binaryError(path: relativePath, ext: ext, detail: .imageOnlyPdf)
+            case .cancelled:
+                throw CancellationError()
+            case .unsupportedFormat, .sizeLimitExceeded, .readFailed, .writeFailed:
+                throw Self.binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            }
         }
     }
 
-    /// Images: Intel chat is text-only, so recognize the image's text with
-    /// the Vision framework (upstream #91's text-only-model path). A blank
-    /// image is refused honestly rather than returned as empty.
-    private func recognizeImageText(url: URL, relativePath: String, ext: String) async throws -> String {
-        let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize ?? 0
-        guard size <= FileReadImageSupport.maxSourceBytes, let data = try? Data(contentsOf: url) else {
-            throw binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+    /// Run a registered non-PDF document adapter directly (async, so the
+    /// adapter's own cancellation checks reach the owning task) and fold
+    /// the structural counts it already computed into the payload.
+    private func extractRichDocumentText(
+        adapter: any DocumentFormatAdapter,
+        url: URL,
+        relativePath: String,
+        ext: String
+    ) async throws -> LoadedFileContent {
+        let document: StructuredDocument
+        do {
+            document = try await adapter.parse(
+                url: url,
+                sizeLimit: DocumentLimits.limit(forFormatId: adapter.formatId)
+            )
+            try Task.checkCancellation()
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch let error as DocumentAdapterError {
+            switch error {
+            case .emptyContent:
+                // Empty rich doc — surface as empty string; downstream
+                // slicing produces the same "(empty)" output the plain-
+                // text path would for a zero-byte `.txt`.
+                return LoadedFileContent(
+                    text: "",
+                    rawRead: nil,
+                    format: Self.formatLabel(ext: ext, adapter: adapter),
+                    source: .extractedText
+                )
+            case .cancelled:
+                throw CancellationError()
+            case .unsupportedFormat, .sizeLimitExceeded, .readFailed, .writeFailed:
+                throw Self.binaryError(path: relativePath, ext: ext, detail: .parseFailed)
+            }
+        } catch {
+            throw Self.binaryError(path: relativePath, ext: ext, detail: .parseFailed)
         }
-        let lines = await FileReadImageSupport.recognizeTextLines(in: data)
-            .filter { $0.contains(where: { !$0.isWhitespace }) }
-        guard !lines.isEmpty else {
-            throw binaryError(path: relativePath, ext: ext, detail: .imageWithoutText)
+        var counts: [String: Int] = [:]
+        if let presentation = document.representation.underlying as? PresentationDocument {
+            counts["slides"] = presentation.slides.count
         }
-        return "(Image — text recognized by OCR; layout and graphics are not described.)\n"
-            + lines.joined(separator: "\n")
+        return LoadedFileContent(
+            text: document.textFallback,
+            rawRead: nil,
+            format: Self.formatLabel(ext: ext, adapter: adapter),
+            source: .extractedText,
+            counts: counts
+        )
+    }
+
+    /// Payload `format` id: the file extension when it is a known document
+    /// extension (`docx`, `pptx`), else the adapter's id (`richdoc`).
+    private static func formatLabel(ext: String, adapter: any DocumentFormatAdapter) -> String {
+        if !ext.isEmpty, WorkspaceFileFormatPolicy.readSupport(for: ext).isDocument {
+            return ext
+        }
+        return adapter.formatId
+    }
+
+    private static func loadBoundedRawText(
+        url: URL,
+        relativePath: String,
+        ext: String
+    ) throws -> LoadedFileContent {
+        let fileSize: Int64? = {
+            guard let size = (try? url.resourceValues(forKeys: [.fileSizeKey]))?.fileSize else {
+                return nil
+            }
+            return Int64(size)
+        }()
+        let handle: FileHandle
+        do {
+            handle = try FileHandle(forReadingFrom: url)
+        } catch {
+            throw FolderToolError.operationFailed(
+                "Could not read '\(relativePath)': \(error.localizedDescription)"
+            )
+        }
+        defer { try? handle.close() }
+
+        var data = Data()
+        let reserve = min(Self.rawReadByteLimit, Int(fileSize ?? Int64(Self.rawReadByteLimit)))
+        data.reserveCapacity(max(0, reserve))
+
+        var bytesRead = 0
+        do {
+            while bytesRead < Self.rawReadByteLimit {
+                try Task.checkCancellation()
+                let remaining = Self.rawReadByteLimit - bytesRead
+                let count = min(Self.rawReadChunkBytes, remaining)
+                guard let chunk = try handle.read(upToCount: count), !chunk.isEmpty else { break }
+                data.append(chunk)
+                bytesRead += chunk.count
+                if data.prefix(Self.binarySniffBytes).contains(0) {
+                    throw binaryError(path: relativePath, ext: ext, detail: .nulByte)
+                }
+                if chunk.count < count { break }
+            }
+        } catch let error as CancellationError {
+            throw error
+        } catch let error as FolderToolError {
+            throw error
+        } catch {
+            throw FolderToolError.operationFailed(
+                "Could not read '\(relativePath)': \(error.localizedDescription)"
+            )
+        }
+
+        let truncatedByByteLimit: Bool
+        if let fileSize {
+            truncatedByByteLimit = Int64(data.count) < fileSize
+        } else {
+            truncatedByByteLimit = data.count >= Self.rawReadByteLimit
+        }
+        let decoded = try decodeUTF8(
+            data,
+            allowTrailingScalarTrim: truncatedByByteLimit,
+            relativePath: relativePath,
+            ext: ext
+        )
+
+        return LoadedFileContent(
+            text: decoded.text,
+            rawRead: RawReadMetadata(
+                bytesRead: decoded.bytesUsed,
+                byteLimit: Self.rawReadByteLimit,
+                fileSize: fileSize,
+                truncatedByByteLimit: truncatedByByteLimit
+            ),
+            format: ext.isEmpty ? "text" : ext,
+            source: .rawText
+        )
+    }
+
+    private static func decodeUTF8(
+        _ data: Data,
+        allowTrailingScalarTrim: Bool,
+        relativePath: String,
+        ext: String
+    ) throws -> (text: String, bytesUsed: Int) {
+        let maxTrim = allowTrailingScalarTrim ? min(3, data.count) : 0
+        for trim in 0 ... maxTrim {
+            let candidate: Data
+            if trim == 0 {
+                candidate = data
+            } else {
+                candidate = Data(data.dropLast(trim))
+            }
+            if let text = String(data: candidate, encoding: .utf8) {
+                return (text, candidate.count)
+            }
+        }
+        throw binaryError(path: relativePath, ext: ext, detail: .decodeFailed)
     }
 
     /// Construct a `binaryContent` error, normalising an empty extension
     /// to `nil` so the envelope mapper doesn't emit a bare `(.)` label.
-    private func binaryError(
+    private static func binaryError(
         path: String,
         ext: String,
         detail: FolderToolError.BinaryDetail
@@ -1007,6 +1967,233 @@ struct FileReadTool: OsaurusTool {
             ext: ext.isEmpty ? nil : ext,
             detail: detail
         )
+    }
+
+    private static func lineCountLabel(_ count: Int, rawRead: RawReadMetadata?) -> String {
+        guard rawRead?.truncatedByByteLimit == true else { return "\(count)" }
+        return "at least \(count) scanned"
+    }
+
+    private static func formatByteCount(_ bytes: Int64) -> String {
+        let mib = 1024 * 1024
+        if bytes >= Int64(mib), bytes % Int64(mib) == 0 {
+            return "\(bytes / Int64(mib)) MiB (\(bytes) bytes)"
+        }
+        return "\(bytes) bytes"
+    }
+
+    struct WorkbookPreview {
+        let text: String
+        let sheetCount: Int
+        let sheetNames: [String]
+    }
+
+    private func workbookPreviewIfAvailable(
+        fileURL: URL,
+        relativePath: String,
+        sheetName: String?,
+        args: [String: Any]
+    ) async throws -> WorkbookPreview? {
+        guard let adapter = workbookAdapter(for: fileURL) else { return nil }
+        let document = try await adapter.parse(
+            url: fileURL,
+            sizeLimit: DocumentLimits.limit(forFormatId: adapter.formatId)
+        )
+        guard let workbook = document.representation.underlying as? Workbook else {
+            throw FolderToolError.operationFailed(
+                "Registered adapter '\(adapter.formatId)' did not produce a workbook representation."
+            )
+        }
+        if let sheetName, !workbook.sheets.contains(where: { $0.name == sheetName }) {
+            throw FolderToolError.operationFailed("Workbook has no sheet named '\(sheetName)'.")
+        }
+
+        let maxRows = Self.clamped(coerceInt(args["max_rows"]), fallback: 8, lower: 1, upper: 50)
+        let maxColumns = Self.clamped(coerceInt(args["max_columns"]), fallback: 8, lower: 1, upper: 30)
+        let startRow = max(1, coerceInt(args["start_line"]) ?? 1)
+        let endRow = max(startRow, coerceInt(args["end_line"]) ?? Int.max)
+
+        let text = Self.renderWorkbookPreview(
+            document: document,
+            workbook: workbook,
+            relativePath: relativePath,
+            sheetName: sheetName,
+            startRow: startRow,
+            endRow: endRow,
+            maxRows: maxRows,
+            maxColumns: maxColumns
+        )
+        return WorkbookPreview(
+            text: text,
+            sheetCount: workbook.sheets.count,
+            sheetNames: Array(workbook.sheets.map(\.name).prefix(50))
+        )
+    }
+
+    private func workbookAdapter(for fileURL: URL) -> (any DocumentFormatAdapter)? {
+        var adapter = documentRegistry.adapter(for: fileURL)
+        if adapter == nil, documentRegistry === DocumentFormatRegistry.shared {
+            DocumentAdaptersBootstrap.registerBuiltIns(registry: documentRegistry)
+            adapter = documentRegistry.adapter(for: fileURL)
+        }
+
+        guard adapter?.formatId.lowercased() == "xlsx" else { return nil }
+        return adapter
+    }
+
+    private static func renderWorkbookPreview(
+        document: StructuredDocument,
+        workbook: Workbook,
+        relativePath: String,
+        sheetName: String?,
+        startRow: Int,
+        endRow: Int,
+        maxRows: Int,
+        maxColumns: Int
+    ) -> String {
+        let sheets = selectedSheets(in: workbook, sheetName: sheetName)
+        let sheetNames = workbook.sheets.map(\.name)
+        let formulaCount = workbook.sheets.reduce(0) { total, sheet in
+            total
+                + sheet.rows.reduce(0) { rowTotal, row in
+                    rowTotal + row.cells.filter { $0.formula != nil }.count
+                }
+        }
+
+        var lines: [String] = [
+            "Workbook: \(relativePath)",
+            "Format: \(document.formatId) (\(document.fileSize) bytes)",
+            "Sheets: \(workbook.sheets.count) — \(boundedList(sheetNames, limit: 20))",
+            "Formula cells: \(formulaCount)",
+            securityLine(for: document.security),
+            "",
+        ]
+
+        let previewSheets = sheetName == nil ? Array(sheets.prefix(3)) : sheets
+        for sheet in previewSheets {
+            appendPreview(
+                for: sheet,
+                startRow: startRow,
+                endRow: endRow,
+                maxRows: maxRows,
+                maxColumns: maxColumns,
+                lines: &lines
+            )
+        }
+
+        if sheetName == nil, sheets.count > previewSheets.count {
+            lines.append("")
+            lines.append(
+                "... \(sheets.count - previewSheets.count) more sheet(s); pass sheet_name to focus the preview."
+            )
+        }
+
+        return truncatePreview(lines.joined(separator: "\n"))
+    }
+
+    private static func appendPreview(
+        for sheet: Workbook.Sheet,
+        startRow: Int,
+        endRow: Int,
+        maxRows: Int,
+        maxColumns: Int,
+        lines: inout [String]
+    ) {
+        let rowsInRange = sheet.rows.filter { $0.number >= startRow && $0.number <= endRow }
+        let visibleRows = Array(rowsInRange.prefix(maxRows))
+        let cellCount = sheet.rows.reduce(0) { $0 + $1.cells.count }
+        let formulaCount = sheet.rows.reduce(0) { rowTotal, row in
+            rowTotal + row.cells.filter { $0.formula != nil }.count
+        }
+        let maxColumn = sheet.rows.flatMap(\.cells).map(\.columnNumber).max() ?? 0
+
+        lines.append("Sheet \(sheet.index + 1): \(sheet.name)")
+        lines.append(
+            "Rows: \(sheet.rows.count), columns: \(maxColumn), cells: \(cellCount), formulas: \(formulaCount)"
+        )
+        if !sheet.mergedRanges.isEmpty {
+            lines.append("Merged ranges: \(boundedList(sheet.mergedRanges.map(\.reference), limit: 12))")
+        }
+
+        guard !visibleRows.isEmpty else {
+            lines.append("Preview: no rows in requested range \(startRow)-\(endRow).")
+            lines.append("")
+            return
+        }
+
+        lines.append("Preview rows \(visibleRows.first?.number ?? startRow)-\(visibleRows.last?.number ?? startRow):")
+        for row in visibleRows {
+            let cells = row.cells.sorted { $0.columnNumber < $1.columnNumber }
+            let visibleCells = cells.prefix(maxColumns).map(formatCell)
+            var line = "  row \(row.number): " + visibleCells.joined(separator: " | ")
+            if cells.count > maxColumns {
+                line += " | ... \(cells.count - maxColumns) more cell(s)"
+            }
+            lines.append(line)
+        }
+        if rowsInRange.count > visibleRows.count {
+            lines.append("... \(rowsInRange.count - visibleRows.count) more row(s) in this range.")
+        }
+        lines.append("")
+    }
+
+    private static func selectedSheets(in workbook: Workbook, sheetName: String?) -> [Workbook.Sheet] {
+        guard let sheetName else { return workbook.sheets }
+        return workbook.sheets.filter { $0.name == sheetName }
+    }
+
+    private static func formatCell(_ cell: Workbook.Cell) -> String {
+        var value = cell.value.fallbackText
+        value = value.replacingOccurrences(of: "\n", with: "\\n")
+        value = value.replacingOccurrences(of: "\t", with: " ")
+        if value.isEmpty { value = "<empty>" }
+        if let formula = cell.formula {
+            return "\(cell.reference)=\(value) [=\(formula)]"
+        }
+        return "\(cell.reference)=\(value)"
+    }
+
+    private static func securityLine(for security: DocumentSecurityMetadata) -> String {
+        var parts = ["inspection=\(security.inspectionStatus.rawValue)"]
+        if !security.activeContentTypes.isEmpty {
+            let active = security.activeContentTypes.map(\.rawValue).sorted().joined(separator: ",")
+            parts.append("active=\(active)")
+        }
+        if let maximumSeverity = security.maximumSeverity {
+            parts.append("max_severity=\(maximumSeverity.rawValue)")
+        }
+
+        let notableFindings = security.findings
+            .filter { $0.kind != .unsupportedFeature || $0.severity > .informational }
+            .prefix(3)
+            .map { finding in
+                if let count = finding.metadata["count"] {
+                    return "\(finding.kind.rawValue)(\(count))"
+                }
+                return finding.kind.rawValue
+            }
+        if !notableFindings.isEmpty {
+            parts.append("findings=\(notableFindings.joined(separator: ","))")
+        }
+        return "Security: " + parts.joined(separator: "; ")
+    }
+
+    private static func boundedList(_ values: [String], limit: Int) -> String {
+        guard !values.isEmpty else { return "(none)" }
+        let prefix = values.prefix(limit).joined(separator: ", ")
+        if values.count > limit {
+            return prefix + ", ... \(values.count - limit) more"
+        }
+        return prefix
+    }
+
+    private static func truncatePreview(_ text: String) -> String {
+        guard text.count > maxOutputChars else { return text }
+        return String(text.prefix(maxOutputChars)) + "\n... (truncated workbook preview)"
+    }
+
+    private static func clamped(_ value: Int?, fallback: Int, lower: Int, upper: Int) -> Int {
+        min(max(value ?? fallback, lower), upper)
     }
 }
 
@@ -1983,19 +3170,36 @@ struct FileUndoTool: OsaurusTool, PermissionedTool {
 // MARK: File Search Tool
 
 struct FileSearchTool: OsaurusTool {
+    typealias ContentReader = @Sendable (URL) async throws -> String?
+
     let name = "file_search"
     let description =
-        "Search for text in files using case-insensitive substring matching, including inside PDF, "
-        + "Word, PowerPoint and Excel files. **Use this instead of `grep` / `rg` / `find` in "
-        + "`shell_run`.** Returns matching lines with file paths and line numbers (documents show "
-        + "a page, slide, sheet or paragraph instead)."
+        "Search files in the working directory. With `target=\"content\"` (default) it finds text by "
+        + "case-insensitive substring match, returning matching lines with file paths and line numbers. "
+        + "Content search also looks inside PDF, Word, PowerPoint, and Excel files (extracted text; matches "
+        + "carry a `[page N]` / `[slide N]` / `[Sheet row N]` locator instead of a line number). "
+        + "With `target=\"files\"` it finds files by name (case-insensitive substring, e.g. `q4` matches "
+        + "`q4_sales_report.xlsx`; use `*`/`?` for a glob like `*.swift`). "
+        + "Example: {\"pattern\": \"TODO\", \"path\": \"src\", \"file_pattern\": \"*.py\"}"
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
         "properties": .object([
             "pattern": .object([
                 "type": .string("string"),
-                "description": .string("Text to search for (case-insensitive substring match)"),
+                "description": .string(
+                    "When `target=\"content\"`: text to find (case-insensitive substring). "
+                        + "When `target=\"files\"`: filename to find (case-insensitive substring, e.g. "
+                        + "`q4`; use `*`/`?` for a glob like `*.swift`, `test_*`)."
+                ),
+            ]),
+            "target": .object([
+                "type": .string("string"),
+                "enum": .array([.string("content"), .string("files")]),
+                "description": .string(
+                    "`content` searches inside file bodies; `files` finds files by name. Default: `content`."
+                ),
+                "default": .string("content"),
             ]),
             "path": .object([
                 "type": .string("string"),
@@ -2005,46 +3209,127 @@ struct FileSearchTool: OsaurusTool {
             ]),
             "file_pattern": .object([
                 "type": .string("string"),
-                "description": .string("Optional file name pattern (e.g., '*.swift', '*.ts')"),
+                "description": .string(
+                    "Optional file name pattern to restrict a content search (e.g., '*.swift'). "
+                        + "Ignored when `target=\"files\"` — use `pattern` directly."
+                ),
             ]),
             "max_results": .object([
                 "type": .string("integer"),
-                "description": .string("Maximum number of results to return (default: 50)"),
+                "description": .string(
+                    "Maximum number of results to return per call (default: 50, max: "
+                        + "\(ToolOutputCaps.searchMaxResults)). With `target:\"files\"` the result "
+                        + "reports `total` and, when more remain, `next_offset`."
+                ),
+            ]),
+            "offset": .object([
+                "type": .string("integer"),
+                "description": .string(
+                    "Skip this many matches (default 0). Pass the previous result's `next_offset` to "
+                        + "page through more results than `max_results`. To enumerate every file in the "
+                        + "folder: `target:\"files\"`, `pattern:\"*\"`, `max_results:500`, then page."
+                ),
             ]),
         ]),
         "required": .array([.string("pattern")]),
     ])
 
     private let fixedRootPath: URL?
+    /// Async seam for cancellation-owned content reads. Production uses a
+    /// close-on-cancel `FileHandle` owner; tests inject a suspended read so
+    /// cancellation can be asserted deterministically at the mid-read boundary.
+    private let contentReader: ContentReader
+    /// Entries pulled from the enumerator before a search stops and reports
+    /// truncation. Defaults to the shared budget; injectable so tests can
+    /// exercise the bound without creating tens of thousands of files.
+    private let maxEntriesVisited: Int
 
-    init(rootPath: URL? = nil) {
+    init(
+        rootPath: URL? = nil,
+        maxEntriesVisited: Int = FolderToolHelpers.maxSearchEntriesVisited,
+        contentReader: ContentReader? = nil
+    ) {
         self.fixedRootPath = rootPath
+        self.maxEntriesVisited = maxEntriesVisited
+        self.contentReader =
+            contentReader
+            ?? { url in
+                try await Self.readContentCancellationAware(url)
+            }
     }
 
+    /// The executing chat's folder root (TaskLocal scope), or the fixed
+    /// root when this instance was built for a known folder. Helpers run
+    /// inside `execute`'s task, so they resolve the same root.
+    private var rootPath: URL? { FolderToolHelpers.resolveRoot(fixed: fixedRootPath) }
+
+
+
     func execute(argumentsJSON: String) async throws -> String {
-        let rootPath = try FolderToolHelpers.requireRoot(fixed: fixedRootPath)
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
 
-        let patternReq = requireString(
-            args,
-            "pattern",
-            expected: "search text (case-insensitive substring, e.g. `TODO`)",
-            tool: name
-        )
+        let target = (args["target"] as? String)?.lowercased() ?? "content"
+        // Files mode with an empty pattern means "every file" — the exact
+        // call Raptor makes at temperature 0 to enumerate a folder
+        // (`{"pattern":"","target":"files"}`, live 2026-09-04). Rejecting it
+        // as invalid_args produced a retry loop that the breaker ended with
+        // no answer; a content search still needs real search text.
+        let patternReq: ArgumentRequirement<String>
+        if target == "files", let raw = args["pattern"] as? String,
+            raw.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            patternReq = .value("*")
+        } else {
+            patternReq = requireString(
+                args,
+                "pattern",
+                expected: "search text (case-insensitive substring, e.g. `TODO`)",
+                tool: name
+            )
+        }
         guard case .value(let pattern) = patternReq else {
             return patternReq.failureEnvelope ?? ""
         }
 
         let searchPath = (args["path"] as? String) ?? "."
         let filePattern = args["file_pattern"] as? String
-        let maxResults = coerceInt(args["max_results"]) ?? 50
+        // Clamp to the shared ceiling — an unclamped `max_results: 100000`
+        // over a big tree is a one-call context bomb.
+        let maxResults = min(max(coerceInt(args["max_results"]) ?? 50, 1), ToolOutputCaps.searchMaxResults)
+        let offset = max(0, coerceInt(args["offset"]) ?? 0)
 
+        // Intel: no Linux sandbox (`INC-containers`), so `/workspace/...` paths stay on the host workspace (upstream serves them from the sandbox bridge).
+
+        guard let rootPath else { return FolderToolHelpers.noActiveFolderEnvelope(tool: name) }
         let searchURL = try FolderToolHelpers.resolvePath(searchPath, rootPath: rootPath)
+
+        // `target="files"`: filename find (no content read). Mirrors
+        // `sandbox_search_files(target:"files")` so the unified family can
+        // locate files by name on either filesystem. The tool does the
+        // deterministic search mechanics (broaden-on-empty) and returns ALL
+        // candidates as structured `entries[]`; which match satisfies the
+        // request is the model's judgement, never auto-picked here.
+        if target == "files" {
+            let found = try searchFilesByName(
+                root: searchURL, query: pattern, maxResults: maxResults, offset: offset)
+            return filesSearchEnvelope(originalQuery: pattern, found: found)
+        }
 
         var results: [String] = []
         var totalMatches = 0
-        var skippedDocuments = 0
+        // Content paging: skip the first `offset` matches, collect up to
+        // `maxResults`, and look for ONE more so the footer can say "more
+        // matches exist — call again with offset: N" without reading every
+        // remaining file (a full total would cost the whole scan).
+        var skipRemaining = offset
+        let collectCap = maxResults + 1
+        // Files the search never looked inside (binary extension, over the
+        // size cap, undecodable, or an unextractable document). Tallied so
+        // "No matches" can't silently mean "the file you care about was
+        // skipped", and so the note names WHICH kinds were left out.
+        var skippedFiles = ContentSearchSkipTally()
+        let documentBudget = DocumentSearchBudget()
 
         // Determine if searching a file or directory
         var isDirectory: ObjCBool = false
@@ -2053,140 +3338,703 @@ struct FileSearchTool: OsaurusTool {
             throw FolderToolError.fileNotFound(searchPath)
         }
 
+        // Combined-mode secret denylist (shared with `file_read`). A
+        // single-file search targeting a secret (`path:".env"`) would
+        // otherwise leak its contents line-by-line and bypass both the
+        // `file_read` refusal and the directory hidden-file filter, so
+        // refuse it outright. Directory searches skip secret files
+        // per-entry below instead of failing the whole call.
+        if !isDirectory.boolValue, FolderToolHelpers.shouldRefuseSecret(fileURL: searchURL) {
+            return FolderToolHelpers.secretRefusalEnvelope(relativePath: searchPath, tool: name)
+        }
+
+        var budgetTruncated = false
+
         if isDirectory.boolValue {
             // Search directory recursively
             let enumerator = FileManager.default.enumerator(
                 at: searchURL,
-                includingPropertiesForKeys: [.isRegularFileKey],
+                includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
                 options: [.skipsHiddenFiles]
             )
 
+            var visited = 0
             while let fileURL = enumerator?.nextObject() as? URL {
-                guard totalMatches < maxResults else { break }
-
-                // Check if regular file. A symlink reports false here and
-                // the enumerator doesn't descend into linked folders, so the
-                // walk never reads outside the root.
+                guard totalMatches < collectCap else { break }
                 guard
-                    let resourceValues = try? fileURL.resourceValues(forKeys: [.isRegularFileKey]),
-                    resourceValues.isRegularFile == true
-                else { continue }
+                    try FolderToolHelpers.searchStepWithinBudget(
+                        visited: &visited,
+                        limit: maxEntriesVisited
+                    )
+                else {
+                    budgetTruncated = true
+                    break
+                }
 
-                // Check file pattern
+                let resourceValues = try? fileURL.resourceValues(forKeys: [
+                    .isRegularFileKey, .isDirectoryKey,
+                ])
+                if FolderToolHelpers.pruneSearchDirectory(
+                    fileURL,
+                    isDirectory: resourceValues?.isDirectory == true,
+                    enumerator: enumerator
+                ) {
+                    continue
+                }
+                guard resourceValues?.isRegularFile == true else { continue }
+
+                // Combined-mode secret denylist: never return contents of
+                // a non-hidden secret (`server.pem`, `id_rsa`, …). `.env`
+                // and other dotfiles are already excluded by
+                // `.skipsHiddenFiles`; this catches the rest.
+                if FolderToolHelpers.shouldRefuseSecret(fileURL: fileURL) {
+                    continue
+                }
+
+                // Check file pattern (proper glob → regex conversion: all
+                // metacharacters escaped, so `*.+(test)*` can't silently
+                // become a regex that matches nothing).
                 if let pattern = filePattern {
-                    let regex = pattern.replacingOccurrences(of: ".", with: "\\.")
-                        .replacingOccurrences(of: "*", with: ".*")
-                    if fileURL.lastPathComponent.range(of: "^\(regex)$", options: .regularExpression)
+                    let regex = FolderToolHelpers.globToRegex(pattern)
+                    if fileURL.lastPathComponent.range(of: regex, options: .regularExpression)
                         == nil
                     {
                         continue
                     }
                 }
 
-                // Search file (documents through extracted text, upstream #91)
-                let matches: [String]?
-                if DocumentTextExtractionCache.isSearchableDocument(extension: fileURL.pathExtension) {
-                    matches = await searchDocument(
-                        fileURL, pattern: pattern, maxResults: maxResults - totalMatches,
-                        rootPath: rootPath, skipped: &skippedDocuments)
-                } else {
-                    matches = searchFile(
-                        fileURL, pattern: pattern,
-                        maxResults: maxResults - totalMatches,
-                        rootPath: rootPath
-                    )
-                }
-                if let matches {
+                // Search file
+                switch try await searchFile(
+                    fileURL,
+                    pattern: pattern,
+                    maxResults: collectCap - totalMatches + skipRemaining,
+                    documentBudget: documentBudget
+                ) {
+                case .matches(var matches):
+                    let drop = min(skipRemaining, matches.count)
+                    skipRemaining -= drop
+                    matches.removeFirst(drop)
                     results.append(contentsOf: matches)
                     totalMatches += matches.count
+                case .skipped(let reason):
+                    skippedFiles.record(reason)
                 }
             }
         } else {
             // Search single file
-            let matches: [String]?
-            if DocumentTextExtractionCache.isSearchableDocument(extension: searchURL.pathExtension) {
-                matches = await searchDocument(
-                    searchURL, pattern: pattern, maxResults: maxResults, rootPath: rootPath,
-                    skipped: &skippedDocuments)
-            } else {
-                matches = searchFile(searchURL, pattern: pattern, maxResults: maxResults, rootPath: rootPath)
-            }
-            if let matches {
+            switch try await searchFile(
+                searchURL,
+                pattern: pattern,
+                maxResults: collectCap + skipRemaining,
+                documentBudget: documentBudget
+            ) {
+            case .matches(var matches):
+                let drop = min(skipRemaining, matches.count)
+                skipRemaining -= drop
+                matches.removeFirst(drop)
                 results.append(contentsOf: matches)
                 totalMatches = matches.count
+            case .skipped(let reason):
+                skippedFiles.record(reason)
             }
         }
+        // The (maxResults + 1)th match is the "more exists" probe, never
+        // returned.
+        let moreMatches = results.count > maxResults
+        if moreMatches {
+            results.removeLast(results.count - maxResults)
+            totalMatches = maxResults
+        }
 
-        let skippedNote =
-            skippedDocuments > 0
-            ? "\n(\(skippedDocuments) document(s) couldn't be searched — too large, encrypted or damaged.)" : ""
         if results.isEmpty {
+            // Mode correction (deterministic, no NL parsing): a content search
+            // that finds nothing is the classic "wanted files, grepped bodies"
+            // mistake. Run the files-mode search AT THE SAME OFFSET; if that
+            // query has matches, answer in files mode so the reasonable-but-
+            // wrong `target` succeeds at the model's actual intent — on every
+            // page, not just the first. Live (build #12): Raptor's page 1 of
+            // `pattern:"*"` fell back to files (total 350, next_offset 50),
+            // it re-issued exactly as told with `offset: 50`, and the old
+            // offset-guard below answered "the earlier pages held every
+            // match" — twenty identical times. Only fires on empty content,
+            // so it never overrides a real content hit.
+            let fallback = try searchFilesByName(
+                root: searchURL, query: pattern, maxResults: maxResults, offset: offset)
+            if !fallback.entries.isEmpty || (offset > 0 && fallback.total > 0) {
+                let corrected = FileSearchOutcome(
+                    entries: fallback.entries,
+                    matchedQuery: fallback.matchedQuery,
+                    truncated: fallback.truncated,
+                    note: fallback.entries.isEmpty
+                        ? fallback.note
+                        : "(no content matches for '\(pattern)'; showing files named like '\(fallback.matchedQuery)')",
+                    total: fallback.total,
+                    offset: fallback.offset
+                )
+                return filesSearchEnvelope(originalQuery: pattern, found: corrected)
+            }
+            // Paging overrun: an `offset` past the last match is not "no
+            // matches".
+            if offset > 0 {
+                return ToolEnvelope.success(
+                    tool: name,
+                    text: "No content matches for '\(pattern)' at offset \(offset) — the earlier "
+                        + "pages held every match. Re-issue with a smaller `offset` (or 0)."
+                )
+            }
+            let skippedNote = Self.skippedFilesNote(skippedFiles)
+            var base = "No matches found for '\(pattern)'"
+            if let skippedNote { base += "\n\n(\(skippedNote))" }
+            if budgetTruncated { base += Self.budgetTruncationNote }
+            var warnings: [String] = []
+            if let skippedNote { warnings.append(skippedNote) }
+            if budgetTruncated { warnings.append(Self.searchBudgetWarning) }
             return ToolEnvelope.success(
                 tool: name,
-                text: "No matches found for '\(pattern)'" + skippedNote
+                text: base,
+                warnings: warnings.isEmpty ? nil : warnings
             )
         }
 
-        var output = "Found \(totalMatches) match(es):\n\n"
-        output += results.joined(separator: "\n")
+        var output =
+            offset > 0
+            ? "Found \(totalMatches) match(es) (offset \(offset)):\n\n"
+            : "Found \(totalMatches) match(es):\n\n"
+        var body = results.joined(separator: "\n")
 
-        if totalMatches >= maxResults {
-            output += "\n\n(results truncated at \(maxResults))"
+        // Character backstop independent of the result-count clamp: a few
+        // hundred very long matched lines can outweigh the count limit.
+        var charTruncated = false
+        if body.count > ToolOutputCaps.fileSearch {
+            body = String(body.prefix(ToolOutputCaps.fileSearch))
+            charTruncated = true
         }
-        output += skippedNote
+        output += body
 
-        return ToolEnvelope.success(tool: name, text: output)
+        // Truncation/skip state is ALSO carried as structured `warnings` on
+        // the envelope (mirroring files-mode `ToolEnvelope.search`), so the
+        // harness and scorers can branch on it without parsing prose.
+        var warnings: [String] = []
+        if charTruncated {
+            let note =
+                "Output truncated at \(ToolOutputCaps.fileSearch) chars; narrow the `path`, "
+                + "tighten the pattern, or add a `file_pattern` filter."
+            output += "\n\n(\(note))"
+            warnings.append(note)
+        } else if moreMatches {
+            let next = offset + totalMatches
+            let note =
+                "[returned=\(totalMatches), offset=\(offset), next_offset=\(next) — more matches exist. "
+                + "Call file_search again with `offset: \(next)` (same pattern/path/max_results) to continue, "
+                + "or narrow with `path` / `file_pattern`.]"
+            output += "\n\n\(note)"
+            warnings.append(note)
+        } else if budgetTruncated {
+            output += Self.budgetTruncationNote
+            warnings.append(Self.searchBudgetWarning)
+        }
+        if let skippedNote = Self.skippedFilesNote(skippedFiles) {
+            output += "\n\n(\(skippedNote))"
+            warnings.append(skippedNote)
+        }
+
+        return ToolEnvelope.success(
+            tool: name,
+            text: output,
+            warnings: warnings.isEmpty ? nil : warnings
+        )
     }
 
-    /// Matches inside a document's extracted text (upstream #91), located by
-    /// page / slide / sheet row / paragraph.
-    private func searchDocument(
-        _ url: URL, pattern: String, maxResults: Int, rootPath: URL, skipped: inout Int
-    ) async -> [String]? {
-        guard maxResults > 0 else { return nil }
-        DocumentAdaptersBootstrap.registerBuiltIns()
-        let extracted: ExtractedDocumentText
-        do {
-            extracted = try await DocumentTextExtractionCache.shared.units(for: url)
-        } catch {
-            skipped += 1
-            return nil
+    /// Human/structured note for files the content search never read.
+    /// Names the kinds skipped so the model knows whether the file it
+    /// cares about was one of them. Returns nil when nothing was skipped.
+    static func skippedFilesNote(_ tally: ContentSearchSkipTally) -> String? {
+        guard tally.total > 0 else { return nil }
+        let mb = FolderToolHelpers.maxContentSearchFileBytes / (1024 * 1024)
+        var parts: [String] = []
+        if tally.binary > 0 {
+            parts.append("\(tally.binary) media/archive/executable file(s)")
         }
-        var matches: [String] = []
-        let displayPath = FolderToolHelpers.displayPath(for: url, under: rootPath)
-        outer: for unit in extracted.units {
-            for line in unit.text.components(separatedBy: .newlines)
-            where line.localizedCaseInsensitiveContains(pattern) {
-                matches.append("\(displayPath) [\(unit.locator)]: \(line.trimmingCharacters(in: .whitespaces))")
-                if matches.count >= maxResults { break outer }
+        if tally.tooLarge > 0 {
+            parts.append("\(tally.tooLarge) text file(s) over \(mb)MB")
+        }
+        if tally.undecodable > 0 {
+            parts.append("\(tally.undecodable) non-UTF-8 file(s)")
+        }
+        if tally.documents > 0 {
+            let exts = tally.documentExtensions.sorted().map { ".\($0)" }.joined(separator: "/")
+            parts.append(
+                "\(tally.documents) document(s) (\(exts)) that could not be extracted here "
+                    + "(over \(DocumentTextExtractionCache.maxDocumentBytes / (1024 * 1024))MB, unparseable, "
+                    + "or past the \(maxDocumentsExtractedPerSearch)-document search budget) — open them with `file_read`"
+            )
+        }
+        return "\(tally.total) file(s) skipped: " + parts.joined(separator: "; ")
+            + ". Their contents were not searched."
+    }
+
+    /// Appended when a search stops at `maxEntriesVisited` rather than from
+    /// running out of matches, so the model knows the result is incomplete
+    /// because the tree was too large — and what to do about it.
+    private static let budgetTruncationNote =
+        "\n\n(search stopped after scanning the entry limit; narrow the `path` "
+        + "or use a more specific pattern)"
+
+    /// One files-mode search pass: collect basename matches under `root`
+    /// (recursive, hidden + secret files skipped, build-artifact dirs pruned)
+    /// as structured `{name, path, type}` entries. A bare pattern is a
+    /// case-insensitive substring of the basename; a pattern with `*`/`?` is a
+    /// case-insensitive glob anchored to the full basename. Mirrors the
+    /// sandbox `find … -iname` behaviour. `truncated` is true when the walk
+    /// stopped at the visit budget rather than from running out of matches.
+    private func collectFileMatches(root: URL, glob: String, maxResults: Int, offset: Int = 0) throws
+        -> (entries: [[String: Any]], truncated: Bool, total: Int)
+    {
+        guard let rootPath else { return ([], false, 0) }
+        let regexBody =
+            NSRegularExpression.escapedPattern(for: glob)
+            .replacingOccurrences(of: "\\*", with: ".*")
+            .replacingOccurrences(of: "\\?", with: ".")
+        let regex =
+            FolderToolHelpers.patternHasGlobMetacharacters(glob) ? "^\(regexBody)$" : regexBody
+
+        var entries: [[String: Any]] = []
+        var budgetTruncated = false
+        // Every match is counted even once the page is full: the walk is the
+        // cost we already pay, so an exact `total` is cheap and lets the
+        // model page (`offset`) instead of guessing from a capped page.
+        var matched = 0
+        let enumerator = FileManager.default.enumerator(
+            at: root,
+            includingPropertiesForKeys: [.isRegularFileKey, .isDirectoryKey],
+            options: [.skipsHiddenFiles]
+        )
+        var visited = 0
+        while let fileURL = enumerator?.nextObject() as? URL {
+            guard
+                try FolderToolHelpers.searchStepWithinBudget(
+                    visited: &visited,
+                    limit: maxEntriesVisited
+                )
+            else {
+                budgetTruncated = true
+                break
+            }
+            let resourceValues = try? fileURL.resourceValues(forKeys: [
+                .isRegularFileKey, .isDirectoryKey,
+            ])
+            if FolderToolHelpers.pruneSearchDirectory(
+                fileURL,
+                isDirectory: resourceValues?.isDirectory == true,
+                enumerator: enumerator
+            ) {
+                continue
+            }
+            guard resourceValues?.isRegularFile == true else { continue }
+            if FolderToolHelpers.shouldRefuseSecret(fileURL: fileURL) { continue }
+            let entryName = fileURL.lastPathComponent
+            let relativePath = FolderToolHelpers.displayPath(for: fileURL, under: rootPath)
+            // A query carrying a path separator ("orders/", "src/main.py")
+            // can never match a basename — match it against the relative
+            // path instead (observed live: a model searched the perfectly
+            // reasonable "orders/", got zero hits for three existing files,
+            // and asked the user instead of finishing the task).
+            let haystack = glob.contains("/") ? relativePath : entryName
+            guard haystack.range(of: regex, options: [.regularExpression, .caseInsensitive]) != nil
+            else { continue }
+            matched += 1
+            guard matched > offset, entries.count < maxResults else { continue }
+            entries.append(["name": entryName, "path": relativePath, "type": "file"])
+        }
+        return (entries, budgetTruncated, matched)
+    }
+
+    /// The result of a files-mode search after any broadening: the candidate
+    /// entries, the query actually matched (post-broaden), whether the walk
+    /// hit the visit budget, and an optional human note describing broadening.
+    private struct FileSearchOutcome {
+        let entries: [[String: Any]]
+        let matchedQuery: String
+        let truncated: Bool
+        let note: String?
+        /// Matches under the walk (exact unless `truncated`), this page's
+        /// start, and the next page's start when more remain.
+        let total: Int
+        let offset: Int
+        var nextOffset: Int? {
+            let next = offset + entries.count
+            return next < total ? next : nil
+        }
+    }
+
+    /// "[total=350, returned=300, next_offset=300 …]" for a files-mode page
+    /// that did not exhaust the matches; nil when it did.
+    private static func filesPagingNote(_ found: FileSearchOutcome) -> String? {
+        guard let next = found.nextOffset else { return nil }
+        return
+            "[total=\(found.total), returned=\(found.entries.count), offset=\(found.offset), "
+            + "next_offset=\(next) — \(found.total - next) more match(es). Call file_search again with "
+            + "`offset: \(next)` (same pattern/path/max_results) to continue.]"
+    }
+
+    /// Files-mode search with bounded broaden-on-empty. Runs the query as
+    /// given; if it finds nothing AND the query has multiple tokens, retries
+    /// with the longest token, then the next-longest — at most 2 retries —
+    /// returning the first non-empty candidate set. The tokenizer is dumb on
+    /// purpose (length-sorted alphanumeric tokens); no natural-language
+    /// cleverness. Never decides which match the user meant.
+    private func searchFilesByName(root: URL, query: String, maxResults: Int, offset: Int = 0) throws
+        -> FileSearchOutcome
+    {
+        let first = try collectFileMatches(root: root, glob: query, maxResults: maxResults, offset: offset)
+        let empty = FileSearchOutcome(
+            entries: [],
+            matchedQuery: query,
+            truncated: first.truncated,
+            note: first.total > 0 && offset >= first.total
+                ? "(offset \(offset) is past the last match; '\(query)' has \(first.total) match(es) — "
+                    + "re-issue with a smaller `offset`)"
+                : nil,
+            total: first.total,
+            offset: offset
+        )
+        if !first.entries.isEmpty {
+            return FileSearchOutcome(
+                entries: first.entries,
+                matchedQuery: query,
+                truncated: first.truncated,
+                note: nil,
+                total: first.total,
+                offset: offset
+            )
+        }
+        // A paging overrun (matches exist, page is past them) is not "no
+        // match" — never broaden it onto a different query.
+        guard first.total == 0 else { return empty }
+
+        let tokens = Self.broadeningTokens(query)
+        guard tokens.count > 1 else { return empty }
+        for token in tokens.prefix(2) where token != query {
+            let broadened = try collectFileMatches(root: root, glob: token, maxResults: maxResults, offset: offset)
+            if !broadened.entries.isEmpty {
+                return FileSearchOutcome(
+                    entries: broadened.entries,
+                    matchedQuery: token,
+                    truncated: broadened.truncated,
+                    note: "(no match for '\(query)'; broadened to '\(token)')",
+                    total: broadened.total,
+                    offset: offset
+                )
             }
         }
-        return matches.isEmpty ? nil : matches
+        return empty
+    }
+
+    /// Split a filename query into distinctive tokens for broaden-on-empty,
+    /// longest first (the distinctive token is usually the longest). Splits on
+    /// whitespace / `_` / `-` / `.` and drops tokens with no alphanumerics
+    /// (so a bare `*` never becomes a broaden target).
+    private static func broadeningTokens(_ query: String) -> [String] {
+        let separators = CharacterSet(charactersIn: " \t\n_-.")
+        return query.components(separatedBy: separators)
+            .filter { token in token.contains(where: { $0.isLetter || $0.isNumber }) }
+            .sorted { $0.count > $1.count }
+    }
+
+    /// Wrap a files-mode search outcome into a `kind:"search"` envelope. On a
+    /// non-empty result the candidates are returned for the model to pick
+    /// among; on empty (after any broadening) it returns no candidates plus a
+    /// steer to list the parent directory or ask the user — the tool never
+    /// guesses which file was meant.
+    private func filesSearchEnvelope(originalQuery: String, found: FileSearchOutcome) -> String {
+        if found.entries.isEmpty {
+            let steer =
+                found.note
+                ?? "No files matched '\(originalQuery)'. List the parent directory with `file_read` "
+                + "to see what's there, or ask the user which file they mean."
+            return ToolEnvelope.search(
+                tool: name,
+                query: originalQuery,
+                entries: [],
+                truncated: found.truncated,
+                warnings: found.truncated ? [steer, Self.searchBudgetWarning] : [steer],
+                total: found.total,
+                offset: found.offset
+            )
+        }
+        var warnings: [String] = []
+        if let note = found.note { warnings.append(note) }
+        if let paging = Self.filesPagingNote(found) { warnings.append(paging) }
+        if found.truncated { warnings.append(Self.searchBudgetWarning) }
+        return ToolEnvelope.search(
+            tool: name,
+            query: found.matchedQuery,
+            entries: found.entries,
+            truncated: found.truncated,
+            warnings: warnings.isEmpty ? nil : warnings,
+            total: found.total,
+            offset: found.offset,
+            nextOffset: found.nextOffset
+        )
+    }
+
+    /// Warning-array form of `budgetTruncationNote` (no leading newlines) for
+    /// the structured `search` envelope.
+    private static let searchBudgetWarning =
+        "Search stopped after scanning the entry limit; results may be incomplete — narrow the "
+        + "`path` or use a more specific token."
+
+    /// Outcome of attempting a content search of one file. `skipped` is
+    /// distinct from "searched and found nothing" so the caller can COUNT
+    /// skips — otherwise "No matches" silently lies about files that were
+    /// never looked at.
+    enum ContentSearchFileOutcome {
+        /// File was searched; the array may be empty (no hits).
+        case matches([String])
+        /// File was never searched: binary extension, over the size cap,
+        /// or not decodable as UTF-8.
+        case skipped(ContentSearchSkipReason)
+    }
+
+    /// Why a file was not searched — tallied so the skipped note can say
+    /// which kinds were left out instead of a bare count.
+    enum ContentSearchSkipReason: Equatable {
+        /// Media/archive/executable extension: never searchable.
+        case binaryExtension
+        /// Text file over `maxContentSearchFileBytes`.
+        case tooLarge
+        /// Not decodable as UTF-8 (or unreadable).
+        case undecodable
+        /// A document (PDF/Word/PowerPoint/Excel) that could not be
+        /// extracted: over the document cap, no adapter, parse failure, or
+        /// the per-search document budget was spent.
+        case document(extension: String)
+    }
+
+    /// Tally of skipped files for the search note.
+    struct ContentSearchSkipTally {
+        var binary = 0
+        var tooLarge = 0
+        var undecodable = 0
+        var documents = 0
+        var documentExtensions: Set<String> = []
+
+        var total: Int { binary + tooLarge + undecodable + documents }
+
+        mutating func record(_ reason: ContentSearchSkipReason) {
+            switch reason {
+            case .binaryExtension: binary += 1
+            case .tooLarge: tooLarge += 1
+            case .undecodable: undecodable += 1
+            case .document(let ext):
+                documents += 1
+                documentExtensions.insert(ext)
+            }
+        }
+    }
+
+    /// Documents extracted per search before further documents are
+    /// reported as skipped — keeps one search from extracting a whole
+    /// archive of PDFs cold (the cache makes the next search cheap).
+    static let maxDocumentsExtractedPerSearch = 200
+
+    /// Per-search counter of document extractions (cold or cached).
+    private final class DocumentSearchBudget: @unchecked Sendable {
+        private let lock = NSLock()
+        private var extracted = 0
+        func take() -> Bool {
+            lock.lock()
+            defer { lock.unlock() }
+            guard extracted < FileSearchTool.maxDocumentsExtractedPerSearch else { return false }
+            extracted += 1
+            return true
+        }
     }
 
     private func searchFile(
-        _ url: URL, pattern: String, maxResults: Int, rootPath: URL
-    ) -> [String]? {
-        guard let content = try? String(contentsOf: url, encoding: .utf8) else { return nil }
+        _ url: URL,
+        pattern: String,
+        maxResults: Int,
+        documentBudget: DocumentSearchBudget
+    ) async throws -> ContentSearchFileOutcome {
+        try Task.checkCancellation()
+        let ext = url.pathExtension.lowercased()
+        // Documents are searched through their extracted text (same
+        // adapters as `file_read`), with page/slide/sheet locators.
+        if DocumentTextExtractionCache.isSearchableDocument(extension: ext) {
+            return try await searchDocument(
+                url,
+                ext: ext,
+                pattern: pattern,
+                maxResults: maxResults,
+                documentBudget: documentBudget
+            )
+        }
+        // Skip obvious binaries by extension and any file over the size cap
+        // before loading it into memory; the UTF-8 decode below is the final
+        // backstop for misnamed or unexpectedly-large text.
+        if FolderToolHelpers.contentSearchSkippedExtensions.contains(ext) {
+            return .skipped(.binaryExtension)
+        }
+        if let size = try? url.resourceValues(forKeys: [.fileSizeKey]).fileSize,
+            size > FolderToolHelpers.maxContentSearchFileBytes
+        {
+            return .skipped(.tooLarge)
+        }
+        let content: String
+        do {
+            guard let loaded = try await contentReader(url) else { return .skipped(.undecodable) }
+            content = loaded
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .skipped(.undecodable)
+        }
+
+        guard let rootPath else { return .skipped(.undecodable) }
+        let relativePath = FolderToolHelpers.displayPath(for: url, under: rootPath)
 
         let lines = FolderToolHelpers.contentLines(content)
         var matches: [String] = []
-        var relativePath: String?
 
         for (index, line) in lines.enumerated() {
+            try Task.checkCancellation()
             guard matches.count < maxResults else { break }
 
             if line.localizedCaseInsensitiveContains(pattern) {
                 let lineNum = index + 1
-                // Resolved on the first hit only; the fallback walks symlinks.
-                let displayPath =
-                    relativePath ?? FolderToolHelpers.displayPath(for: url, under: rootPath)
-                relativePath = displayPath
-                matches.append("\(displayPath):\(lineNum): \(line.trimmingCharacters(in: .whitespaces))")
+                matches.append("\(relativePath):\(lineNum): \(line.trimmingCharacters(in: .whitespaces))")
             }
         }
 
-        return matches.isEmpty ? nil : matches
+        return .matches(matches)
+    }
+
+    /// Content search inside one document. Matches are rendered as
+    /// `path [page 3]: text` — the bracketed locator replaces the line
+    /// number because the text is an extracted layer, not the file's bytes.
+    private func searchDocument(
+        _ url: URL,
+        ext: String,
+        pattern: String,
+        maxResults: Int,
+        documentBudget: DocumentSearchBudget
+    ) async throws -> ContentSearchFileOutcome {
+        guard documentBudget.take() else { return .skipped(.document(extension: ext)) }
+        let extracted: ExtractedDocumentText
+        do {
+            extracted = try await DocumentTextExtractionCache.shared.units(for: url)
+        } catch is CancellationError {
+            throw CancellationError()
+        } catch {
+            return .skipped(.document(extension: ext))
+        }
+        guard let rootPath else { return .skipped(.document(extension: ext)) }
+        let relativePath = FolderToolHelpers.displayPath(for: url, under: rootPath)
+        var matches: [String] = []
+        for unit in extracted.units {
+            try Task.checkCancellation()
+            guard matches.count < maxResults else { break }
+            if unit.text.localizedCaseInsensitiveContains(pattern) {
+                matches.append("\(relativePath) [\(unit.locator)]: \(unit.text)")
+            }
+        }
+        return .matches(matches)
+    }
+
+    /// Read at most the content-search byte limit on a detached worker whose
+    /// file descriptor remains owned by this call. Cancellation closes the
+    /// live handle before draining the worker, so a blocked host/network read
+    /// cannot outlive a stopped spawned run. Invalid UTF-8 and files that grow
+    /// past the cap retain the prior `skipped` behavior.
+    private static func readContentCancellationAware(_ url: URL) async throws -> String? {
+        let owner = ContentReadOwner(url: url)
+        let worker = Task.detached(priority: .userInitiated) {
+            try owner.read(
+                maxBytes: FolderToolHelpers.maxContentSearchFileBytes,
+                chunkBytes: 64 * 1024
+            )
+        }
+
+        do {
+            let data = try await withTaskCancellationHandler {
+                try await worker.value
+            } onCancel: {
+                owner.requestAbort()
+                worker.cancel()
+            }
+            try Task.checkCancellation()
+            guard let data else { return nil }
+            return String(data: data, encoding: .utf8)
+        } catch {
+            if Task.isCancelled {
+                throw CancellationError()
+            }
+            throw error
+        }
+    }
+
+    /// Synchronous `FileHandle.read` itself does not observe Swift task
+    /// cancellation. This owner supplies the missing hard-abort edge by closing
+    /// the handle from the cancellation handler, then the caller awaits the
+    /// worker's termination before returning.
+    private final class ContentReadOwner: @unchecked Sendable {
+        private let url: URL
+        private let lock = NSLock()
+        private var handle: FileHandle?
+        private var abortRequested = false
+
+        init(url: URL) {
+            self.url = url
+        }
+
+        func read(maxBytes: Int, chunkBytes: Int) throws -> Data? {
+            try Task.checkCancellation()
+            let opened = try FileHandle(forReadingFrom: url)
+
+            lock.lock()
+            if abortRequested {
+                lock.unlock()
+                try? opened.close()
+                throw CancellationError()
+            }
+            handle = opened
+            lock.unlock()
+
+            defer { finish(opened) }
+
+            var data = Data()
+            data.reserveCapacity(maxBytes)
+            while data.count <= maxBytes {
+                try Task.checkCancellation()
+                let remaining = (maxBytes + 1) - data.count
+                let count = min(chunkBytes, remaining)
+                guard let chunk = try opened.read(upToCount: count), !chunk.isEmpty else {
+                    break
+                }
+                data.append(chunk)
+            }
+            try Task.checkCancellation()
+            return data.count > maxBytes ? nil : data
+        }
+
+        func requestAbort() {
+            lock.lock()
+            abortRequested = true
+            let opened = handle
+            handle = nil
+            lock.unlock()
+            try? opened?.close()
+        }
+
+        private func finish(_ opened: FileHandle) {
+            lock.lock()
+            if handle === opened {
+                handle = nil
+            }
+            lock.unlock()
+            try? opened.close()
+        }
     }
 }
 
@@ -2810,5 +4658,71 @@ extension String {
             start = range.upperBound
         }
         return ranges
+    }
+}
+
+// MARK: - Intel helpers
+
+/// Intel's own helpers for its write / edit / shell / git tools, which are
+/// older than upstream's. Kept when upstream's `file_read`, `file_search`,
+/// `FolderToolHelpers` and `FileTreeTool` were taken whole (2026-10-09).
+extension FolderToolHelpers {
+    private static let maxSymlinkHops = 32
+    /// Absolute `path` with every symbolic link expanded, one component at a
+    /// time, the way the kernel follows it. Unlike `realpath(3)` it accepts a
+    /// tail that doesn't exist yet, and unlike `URL.resolvingSymlinksInPath()`
+    /// it never strips `/private` and it follows dangling links to their
+    /// target text, so a link to a file that doesn't exist yet can't be used
+    /// to create one elsewhere. `..` inside a link target is applied after the
+    /// link is expanded. Returns nil for a link loop or an unreadable link.
+    static func symlinkResolvedPath(_ path: String) -> String? {
+        var resolved: [String] = []
+        var pending = Array(path.split(separator: "/").map(String.init).reversed())
+        var hops = 0
+        let fm = FileManager.default
+        while let component = pending.popLast() {
+            if component == "." { continue }
+            if component == ".." {
+                _ = resolved.popLast()
+                continue
+            }
+            let candidate = "/" + (resolved + [component]).joined(separator: "/")
+            var info = stat()
+            guard lstat(candidate, &info) == 0, (info.st_mode & S_IFMT) == S_IFLNK else {
+                resolved.append(component)
+                continue
+            }
+            hops += 1
+            guard hops <= maxSymlinkHops,
+                let target = try? fm.destinationOfSymbolicLink(atPath: candidate)
+            else { return nil }
+            if target.hasPrefix("/") { resolved.removeAll() }
+            pending.append(contentsOf: target.split(separator: "/").map(String.init).reversed())
+        }
+        return "/" + resolved.joined(separator: "/")
+    }
+    /// `path` is `root` or lies beneath it (never a sibling such as
+    /// `<root>-other`).
+    static func isPath(_ path: String, within root: String) -> Bool {
+        path == root || path.hasPrefix(root.hasSuffix("/") ? root : root + "/")
+    }
+
+    static func requireRoot(fixed: URL?) throws -> URL {
+        guard let root = resolveRoot(fixed: fixed) else {
+            throw FolderToolError.operationFailed(
+                "No working folder is selected for this chat."
+            )
+        }
+        return root
+    }
+
+    /// `payload` plus the file history `operation_id` of the executing call
+    /// (bound by the registry's journal capture), so `file_undo` can target
+    /// exactly this call (upstream reports it on every mutating result).
+    static func withOperationId(_ payload: [String: Any]) -> [String: Any] {
+        guard let setId = ChatExecutionContext.currentChangeSetId else { return payload }
+        var payload = payload
+        payload["operation_id"] = setId.uuidString
+        return payload
     }
 }

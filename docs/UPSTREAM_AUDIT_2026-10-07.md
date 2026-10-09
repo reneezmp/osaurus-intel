@@ -95,7 +95,7 @@ Incompatible 20 · already ported 1.
   reads and `format`/`source` metadata on every read, and `file_search`
   reports skipped files (`ContentSearchSkipTally`). Intel's slice left these
   out without listing them. Now on the backlog under `W-tools-misc` (file
-  tool parity).
+  tool parity). **Shipped 2026-10-09** (`UPSTREAM_SYNC.md`).
 - **Router billing summaries never reach Intel's account service.** Known
   since 2026-09-02 ("Router billing ledger is dead code",
   `SYNC_0.24.3_PLAN.md`) and blocked on observing the frame shape; upstream's

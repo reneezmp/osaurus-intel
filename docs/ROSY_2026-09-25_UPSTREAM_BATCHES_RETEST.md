@@ -1434,3 +1434,14 @@ Manual: [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md).
       an LM Studio / llama.cpp model: the summary appears; nothing errors
       about an unknown `thinking` field.
 
+## File tools parity (2026-10-09)
+
+- [ ] In a working-folder chat, ask for "the last 20 lines of" a log file:
+      the agent reads just the tail.
+- [ ] Ask about an Excel file with several sheets: the agent reads one
+      sheet's preview and can name the others.
+- [ ] Ask "what's in the src folder?": the agent lists it with `file_read`.
+- [ ] Ask the agent to find every file mentioning a word in a big folder:
+      results arrive in pages, and a note says if some files were skipped.
+- [ ] Open a TextEdit `.rtfd` document via the agent: its text is read.
+

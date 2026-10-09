@@ -48,7 +48,9 @@ struct IntelUpstreamBatch0929Tests {
 
         let read = try await FileReadTool(rootPath: root).execute(
             argumentsJSON: Self.json(["path": "notes.txt", "start_line": 3, "end_line": 3]))
-        #expect(read.contains("3| third"), "\(read)")
+        // Upstream's gutter (`N|text`) since `file_read` was taken whole
+        // (2026-10-09); Intel's older tool printed `     N| text`.
+        #expect(read.contains("3|third"), "\(read)")
         #expect(!read.contains("of 7"))  // CRLF used to double the line count
 
         let search = try await FileSearchTool(rootPath: root).execute(argumentsJSON: Self.json(["pattern": "third"]))

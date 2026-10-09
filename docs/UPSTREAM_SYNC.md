@@ -2699,3 +2699,50 @@ paste monitor (#3040), and the `calculate` tool (#3039). Needs work: #3033
 (`W-agent-loop-tools`), #3044 (`W-workspaces-identity-mobile`), the channel
 half of #3034 (`W-channels`). Also shipped the same day: `W-router-billing`
 (see the 2026-10-07 audit). The next review starts after `02604ca60`.
+
+### File tool parity (#2791 gap) — 2026-10-09
+
+Intel's `file_read` and `file_search` were older hand ports; they are now
+upstream's current `FileReadTool`, `FileSearchTool`, `FileTreeTool`,
+`FolderToolError` and `FolderToolHelpers`, plus `ToolOutputCaps`,
+`ShellSandboxProfile`, upstream's `ToolEnvelope.listing` / `search` and its
+`binaryContent` error mapping, `DocumentParser` (adapter timeout) and
+`RichDocumentAdapter` (`.rtfd` packages). What Intel gains:
+
+- `file_read`: `tail_lines`, `max_chars` (up to 60,000 characters in one
+  call), workbook previews (`sheet_name`, `max_rows`, `max_columns`),
+  directory reads (`max_depth`), `format` / `source` on every read, upstream's
+  gutter (`N|text`, was `     N| text`) and continuation hints.
+- `file_search`: paging (`offset`, `total`, `next_offset`), files mode, the
+  skipped-files note (`ContentSearchSkipTally`), search budgets.
+- Upstream's `FileReadDocumentFormatsTests` and full `FileSearchDocumentsTests`
+  replace Intel's partial copies (`IntelFileReadPDFPagesTests` removed).
+
+**Intel differences:**
+
+- `FolderToolHelpers.resolvePath` stays Intel's: every component is checked
+  with `lstat`, so a dangling in-folder symlink pointing outside is refused.
+  Upstream's `resolvingSymlinksInPath` check skips components that don't
+  exist yet (`FolderToolsSymlinkContainmentTests`).
+- Upstream's `/workspace` sandbox routes (`combinedFileRoute`, the sandbox
+  read/list/search bridges, the VirtioFS share reader) are removed:
+  `INC-containers`. Subagent spawn members removed (`W-subagents`).
+- `ChatExecutionContext.toolResultImagesEnabled` exists but nothing sets it:
+  Intel's chat sends tool results as text, so images are always read by OCR.
+  `hostReadOnlyScope` / `allowHostSecretReads` exist with upstream's
+  defaults, so the secret-file refusal stays inactive (it belongs to the
+  sandbox mode).
+- The continuation hint offers only tools this build registers (no
+  `redact_file` yet) instead of upstream's per-request tool scope.
+- Intel's own write / edit / shell / git tools keep `requireRoot` /
+  `withOperationId` in an Intel extension. Git commits don't use the new
+  Seatbelt confinement yet (`W-tools-misc`).
+- `ToolEnvelope.fromError` maps `binaryContent` like upstream (no more
+  "file_read only supports text").
+
+**Flaky test crash seen once (2026-10-09):** a full run died with SIGSEGV in
+`ChatSession.deinit` (releasing a `@Published` value) during
+`IntelChatTabsTests.adjacentAndMoveStayInsideTheActiveAgent`. Five repeats of
+the tab suites and two further full runs passed. Likely a teardown race in
+test-created sessions; if it recurs, start from the crash report under
+`~/Library/Logs/DiagnosticReports/swiftpm-testing-helper-*.ips`.

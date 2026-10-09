@@ -20,6 +20,7 @@ enum DocumentParser {
     /// latin-1 or rich-document input could still balloon RAM during decode.
     /// Matches the image cap in `FloatingInputCard`.
     static let maxFileSize = 10 * 1024 * 1024
+    private static let registryAdapterTimeout = UnfairLockedBox<TimeInterval>(15)
 
     enum ParseError: LocalizedError {
         case unsupportedFormat(String)
@@ -38,6 +39,16 @@ enum DocumentParser {
     }
 
     // MARK: - Public API
+
+    static func withRegistryAdapterTimeoutForTesting<T>(
+        _ timeout: TimeInterval,
+        _ body: () throws -> T
+    ) rethrows -> T {
+        let previous = registryAdapterTimeout.get()
+        registryAdapterTimeout.set(timeout)
+        defer { registryAdapterTimeout.set(previous) }
+        return try body()
+    }
 
     static func parse(url: URL) throws -> Attachment {
         let results = try parseAll(url: url)
@@ -184,6 +195,16 @@ enum DocumentParser {
 
     private static func isPlainText(ext: String) -> Bool {
         plainTextExtensions.contains(ext)
+    }
+
+    /// Whether `ext` is one of the extensions decoded as raw plain text
+    /// (source code, CSV/TSV, JSON, config, etc.). Exposed so callers
+    /// like `file_read` can keep the raw line-numbered read path for
+    /// these — preserving `start_line`/`end_line` semantics — and only
+    /// route the binary-but-text-extractable formats (pdf/docx/pptx/...)
+    /// through the parser.
+    static func isPlainTextExtension(_ ext: String) -> Bool {
+        isPlainText(ext: ext.lowercased())
     }
 
     private static func parsePlainText(url: URL) throws -> String {
@@ -341,6 +362,8 @@ enum DocumentParser {
             throw ParseError.readFailed(reason)
         } catch DocumentAdapterError.writeFailed, DocumentAdapterError.cancelled {
             throw ParseError.readFailed("Adapter emitted non-read error for ingress")
+        } catch BlockingAwaitError.timedOut(let timeout) {
+            throw ParseError.readFailed("Document adapter timed out after \(formatTimeout(timeout)) seconds")
         } catch {
             throw ParseError.readFailed(error.localizedDescription)
         }
@@ -354,7 +377,7 @@ enum DocumentParser {
         let semaphore = DispatchSemaphore(value: 0)
         let resultBox = UnfairLockedBox<Result<T, Error>?>(nil)
 
-        Task.detached {
+        let task = Task.detached {
             let result: Result<T, Error>
             do {
                 result = .success(try await body())
@@ -365,11 +388,39 @@ enum DocumentParser {
             semaphore.signal()
         }
 
-        semaphore.wait()
-        switch resultBox.get()! {
+        let waitResult = semaphore.wait(timeout: deadline(after: registryAdapterTimeout.get()))
+        guard waitResult == .success else {
+            // Adapter implementations are extension points. A hung adapter
+            // should lose its ingest attempt, not wedge the synchronous UI
+            // bridge that is still in place while parser callers migrate.
+            task.cancel()
+            throw BlockingAwaitError.timedOut(registryAdapterTimeout.get())
+        }
+
+        guard let result = resultBox.get() else {
+            throw BlockingAwaitError.missingResult
+        }
+        switch result {
         case .success(let value): return value
         case .failure(let error): throw error
         }
+    }
+
+    private static func deadline(after timeout: TimeInterval) -> DispatchTime {
+        guard timeout.isFinite, timeout > 0 else { return .now() }
+        let milliseconds = max(1, Int((min(timeout, 86_400) * 1_000).rounded(.up)))
+        return .now() + .milliseconds(milliseconds)
+    }
+
+    private static func formatTimeout(_ timeout: TimeInterval) -> String {
+        timeout.rounded() == timeout
+            ? String(Int(timeout))
+            : String(format: "%.2f", timeout)
+    }
+
+    private enum BlockingAwaitError: Error {
+        case timedOut(TimeInterval)
+        case missingResult
     }
 }
 
