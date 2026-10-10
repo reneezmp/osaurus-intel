@@ -219,6 +219,8 @@ final class RemoteAgentManager: ObservableObject, @unchecked Sendable {
     private init() {}
     func refresh() {}
     func remoteAgent(id: UUID) -> RemoteAgent? { nil }
+    /// Upstream overload used by `AgentTargetResolver` (workspace targets).
+    func remoteAgent(forAddress address: String, workspaceId: String?) -> RemoteAgent? { nil }
     @discardableResult
     func remove(id: UUID) -> Bool { false }
 }

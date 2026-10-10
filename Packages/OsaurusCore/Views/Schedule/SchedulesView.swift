@@ -4,27 +4,32 @@
 //
 //  Management view for creating, editing, and viewing scheduled AI tasks.
 //
-//  M13 Schedules restore (Renée 2026-06-03): un-body-swapped on Intel. The
-//  whole schedule execution chain (ScheduleManager / SchedulerDatabase /
-//  NextRunScheduler / BackgroundTaskManager) is un-excluded — pure
-//  Foundation/Combine/SQLCipher — and scheduled agents fire headless through
-//  the cloud pipeline.
-//
 
+//
+//  Intel (2026-10-10): upstream's file, for the schedule run history port
+//  (#1583 history sheet, run summaries, Markdown export). Intel changes:
+//  `onChange` uses the single-value form (macOS 13); workspace targets come
+//  from an empty stub roster (`IntelWorkspaceRosterStub`,
+//  W-workspaces-identity-mobile), so only local agents are offered.
+//
 import AppKit
 import SwiftUI
+import UniformTypeIdentifiers
 
 // MARK: - Schedules View
 
 struct SchedulesView: View {
     @ObservedObject private var themeManager = ThemeManager.shared
     @ObservedObject private var managementState = ManagementStateManager.shared
-    @ObservedObject private var scheduleManager = ScheduleManager.shared
+    private var scheduleManager = ScheduleManager.shared
 
     private var theme: ThemeProtocol { themeManager.currentTheme }
 
     @State private var isCreating = false
     @State private var editingSchedule: Schedule?
+    @State private var historySchedule: Schedule?
+    @State private var scheduleSummaries: [UUID: ScheduleAutomationSummary] = [:]
+    @State private var summaryLoadTask: Task<Void, Never>?
     @State private var hasAppeared = false
     @State private var successMessage: String?
 
@@ -32,9 +37,7 @@ struct SchedulesView: View {
         VStack(spacing: 0) {
             // Header
             headerView
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : -10)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+                .managerHeaderEntrance(hasAppeared: hasAppeared)
 
             // Content
             ZStack {
@@ -47,20 +50,20 @@ struct SchedulesView: View {
                             .init(
                                 icon: "sun.max",
                                 title: L("Morning Briefing"),
-                                description: "Get a daily summary every morning"
+                                description: L("Get a daily summary every morning")
                             ),
                             .init(
                                 icon: "chart.bar",
                                 title: L("Weekly Report"),
-                                description: "Generate insights on a schedule"
+                                description: L("Generate insights on a schedule")
                             ),
                             .init(
                                 icon: "bell",
                                 title: L("Reminders"),
-                                description: "Automated notifications at set times"
+                                description: L("Automated notifications at set times")
                             ),
                         ],
-                        primaryAction: .init(title: "Create Schedule", icon: "plus", handler: { isCreating = true }),
+                        primaryAction: .init(title: L("Create Schedule"), icon: "plus", handler: { isCreating = true }),
                         hasAppeared: hasAppeared
                     )
                 } else {
@@ -77,16 +80,23 @@ struct SchedulesView: View {
                                 schedule in
                                 ScheduleCard(
                                     schedule: schedule,
+                                    summary: displaySummary(for: schedule),
                                     isRunning: scheduleManager.isRunning(schedule.id),
                                     animationDelay: Double(index) * 0.05,
                                     hasAppeared: hasAppeared,
                                     onToggle: { enabled in
                                         scheduleManager.setEnabled(schedule.id, enabled: enabled)
+                                        scheduleManager.refresh()
+                                        reloadHistorySummaries()
+                                        showSuccess(
+                                            enabled ? "Resumed \"\(schedule.name)\"" : "Paused \"\(schedule.name)\""
+                                        )
                                     },
                                     onRunNow: {
                                         switch scheduleManager.runNow(schedule.id) {
                                         case .started:
                                             scheduleManager.refresh()
+                                            reloadHistorySummaries()
                                             showSuccess("Started \"\(schedule.name)\"")
                                         case .alreadyRunning:
                                             showSuccess("\"\(schedule.name)\" is already running")
@@ -94,11 +104,18 @@ struct SchedulesView: View {
                                             break
                                         }
                                     },
+                                    onShowHistory: {
+                                        historySchedule = schedule
+                                    },
+                                    onExportSummary: {
+                                        exportSummary(for: schedule)
+                                    },
                                     onEdit: {
                                         editingSchedule = schedule
                                     },
                                     onDelete: {
                                         scheduleManager.delete(id: schedule.id)
+                                        reloadHistorySummaries()
                                         showSuccess("Deleted \"\(schedule.name)\"")
                                     }
                                 )
@@ -130,7 +147,7 @@ struct SchedulesView: View {
                     scheduleManager.create(
                         name: schedule.name,
                         instructions: schedule.instructions,
-                        agentId: schedule.agentId,
+                        target: schedule.target,
                         parameters: schedule.parameters,
                         folderPath: schedule.folderPath,
                         folderBookmark: schedule.folderBookmark,
@@ -138,6 +155,7 @@ struct SchedulesView: View {
                         isEnabled: schedule.isEnabled
                     )
                     isCreating = false
+                    reloadHistorySummaries()
                     showSuccess("Created \"\(schedule.name)\"")
                 },
                 onCancel: {
@@ -151,6 +169,7 @@ struct SchedulesView: View {
                 onSave: { updated in
                     scheduleManager.update(updated)
                     editingSchedule = nil
+                    reloadHistorySummaries()
                     showSuccess("Updated \"\(updated.name)\"")
                 },
                 onCancel: {
@@ -158,8 +177,18 @@ struct SchedulesView: View {
                 }
             )
         }
+        .sheet(item: $historySchedule) { schedule in
+            ScheduleHistorySheet(
+                schedule: schedule,
+                summary: displaySummary(for: schedule),
+                onExport: {
+                    exportSummary(for: schedule)
+                }
+            )
+        }
         .onAppear {
             scheduleManager.refresh()
+            reloadHistorySummaries()
             withAnimation(.easeOut(duration: 0.25).delay(0.05)) {
                 hasAppeared = true
             }
@@ -167,6 +196,14 @@ struct SchedulesView: View {
         }
         .onChange(of: managementState.pendingScheduleEditId) { _ in
             consumePendingScheduleEditRequest()
+        }
+        .onReceive(NotificationCenter.default.publisher(for: .scheduleExecutionCompleted)) { _ in
+            scheduleManager.refresh()
+            reloadHistorySummaries()
+        }
+        .onDisappear {
+            summaryLoadTask?.cancel()
+            summaryLoadTask = nil
         }
     }
 
@@ -177,6 +214,7 @@ struct SchedulesView: View {
     private func consumePendingScheduleEditRequest() {
         guard let pending = managementState.pendingScheduleEditId else { return }
         scheduleManager.refresh()
+        reloadHistorySummaries()
         if let match = scheduleManager.schedules.first(where: { $0.id == pending }) {
             editingSchedule = match
         }
@@ -193,6 +231,7 @@ struct SchedulesView: View {
         ) {
             HeaderIconButton("arrow.clockwise", help: "Refresh schedules") {
                 scheduleManager.refresh()
+                reloadHistorySummaries()
             }
             HeaderPrimaryButton("Create Schedule", icon: "plus") {
                 isCreating = true
@@ -212,6 +251,90 @@ struct SchedulesView: View {
             }
         }
     }
+
+    private func reloadHistorySummaries() {
+        let schedules = scheduleManager.schedules
+        let scheduleIds = Set(schedules.map(\.id))
+        let now = Date()
+        var summaries = scheduleSummaries.filter { scheduleIds.contains($0.key) }
+        for schedule in schedules where summaries[schedule.id] == nil {
+            summaries[schedule.id] = placeholderSummary(for: schedule, asOf: now)
+        }
+        scheduleSummaries = summaries
+
+        summaryLoadTask?.cancel()
+        summaryLoadTask = Task { @MainActor in
+            let loadedSummaries = await ScheduleHistoryService.shared.summariesOffMain(
+                for: schedules,
+                runLimit: 8,
+                asOf: now
+            )
+            guard !Task.isCancelled else { return }
+            scheduleSummaries = loadedSummaries
+        }
+    }
+
+    private func displaySummary(for schedule: Schedule) -> ScheduleAutomationSummary {
+        scheduleSummaries[schedule.id] ?? placeholderSummary(for: schedule)
+    }
+
+    private func placeholderSummary(for schedule: Schedule, asOf now: Date = Date()) -> ScheduleAutomationSummary {
+        let runs = Array(schedule.runHistory.prefix(8))
+        return ScheduleAutomationSummary(
+            scheduleId: schedule.id,
+            generatedAt: now,
+            nextRun: schedule.nextRunPreview(asOf: now),
+            runs: runs,
+            lastError: latestLocalError(in: runs)
+        )
+    }
+
+    private func latestLocalError(in runs: [ScheduleRunHistoryEntry]) -> ScheduleLastErrorDiagnostic? {
+        for run in runs {
+            guard run.status == .failed || (run.status != .succeeded && run.errorMessage != nil),
+                let message = run.errorMessage,
+                !message.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+
+            return ScheduleLastErrorDiagnostic(
+                runId: run.id,
+                occurredAt: run.endedAt ?? run.startedAt,
+                message: message,
+                status: run.status
+            )
+        }
+        return nil
+    }
+
+    private func exportSummary(for schedule: Schedule) {
+        let service = ScheduleHistoryService.shared
+        let filenameSummary = displaySummary(for: schedule)
+
+        let panel = NSSavePanel()
+        panel.title = L("Export")
+        panel.prompt = L("Export")
+        panel.nameFieldStringValue = service.suggestedExportFilename(
+            for: schedule,
+            generatedAt: filenameSummary.generatedAt
+        )
+        panel.allowedContentTypes = [UTType(filenameExtension: "md") ?? .plainText]
+        panel.canCreateDirectories = true
+
+        Task { @MainActor in
+            guard await panel.beginModal() == .OK, let url = panel.url else { return }
+            let summary = await service.summaryOffMain(for: schedule, runLimit: Schedule.maxRunHistoryEntries)
+            let markdown = service.markdownSummary(for: schedule, summary: summary)
+            do {
+                try await Task.detached(priority: .utility) {
+                    try markdown.write(to: url, atomically: true, encoding: .utf8)
+                }.value
+                scheduleSummaries[schedule.id] = summary
+                showSuccess("Exported \"\(schedule.name)\"")
+            } catch {
+                showSuccess("Export failed: \(error.localizedDescription)")
+            }
+        }
+    }
 }
 
 // MARK: - Schedule Card
@@ -221,15 +344,19 @@ private struct ScheduleCard: View {
     @ObservedObject private var agentManager = AgentManager.shared
 
     let schedule: Schedule
+    let summary: ScheduleAutomationSummary
     let isRunning: Bool
     let animationDelay: Double
     let hasAppeared: Bool
     let onToggle: (Bool) -> Void
     let onRunNow: () -> Void
+    let onShowHistory: () -> Void
+    let onExportSummary: () -> Void
     let onEdit: () -> Void
     let onDelete: () -> Void
 
     @State private var isHovered = false
+    @State private var showDeleteConfirm = false
 
     private var agent: Agent? {
         guard let agentId = schedule.agentId else { return nil }
@@ -243,7 +370,8 @@ private struct ScheduleCard: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
+        Button(action: onEdit) {
+            VStack(alignment: .leading, spacing: 12) {
                 // Header
                 HStack(alignment: .center, spacing: 12) {
                     ZStack {
@@ -290,6 +418,68 @@ private struct ScheduleCard: View {
 
                     Spacer(minLength: 8)
 
+                    Menu {
+                        Button(action: onEdit) {
+                            Label {
+                                Text("Edit", bundle: .module)
+                            } icon: {
+                                Image(systemName: "pencil")
+                            }
+                        }
+                        Button(action: onRunNow) {
+                            Label {
+                                Text("Run Now", bundle: .module)
+                            } icon: {
+                                Image(systemName: "play.fill")
+                            }
+                        }
+                        .disabled(isRunning)
+                        Button(action: onShowHistory) {
+                            Label {
+                                Text("History", bundle: .module)
+                            } icon: {
+                                Image(systemName: "clock.arrow.circlepath")
+                            }
+                        }
+                        Button(action: onExportSummary) {
+                            Label {
+                                Text("Export…", bundle: .module)
+                            } icon: {
+                                Image(systemName: "square.and.arrow.up")
+                            }
+                        }
+                        Divider()
+                        Button {
+                            onToggle(!schedule.isEnabled)
+                        } label: {
+                            Label(
+                                schedule.isEnabled ? "Pause" : "Resume",
+                                systemImage: schedule.isEnabled ? "pause.circle" : "play.circle"
+                            )
+                        }
+                        Divider()
+                        Button(role: .destructive) {
+                            showDeleteConfirm = true
+                        } label: {
+                            Label {
+                                Text("Delete", bundle: .module)
+                            } icon: {
+                                Image(systemName: "trash")
+                            }
+                        }
+                    } label: {
+                        Image(systemName: "ellipsis")
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(theme.secondaryText)
+                            .frame(width: 24, height: 24)
+                            .background(
+                                Circle()
+                                    .fill(theme.tertiaryBackground)
+                            )
+                    }
+                    .menuStyle(.borderlessButton)
+                    .menuIndicator(.hidden)
+                    .frame(width: 24)
                 }
 
                 // Instructions excerpt
@@ -302,18 +492,15 @@ private struct ScheduleCard: View {
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
 
+                nextRunPreview
+
+                if let lastError = summary.lastError {
+                    lastErrorPreview(lastError)
+                }
+
                 Spacer(minLength: 0)
 
                 compactStats
-
-                AgentScheduleActionMenu(
-                    schedule: schedule,
-                    isRunning: isRunning,
-                    onEdit: onEdit,
-                    onRunNow: onRunNow,
-                    onToggle: onToggle,
-                    onDelete: onDelete
-                )
             }
             .padding(16)
             .frame(maxHeight: .infinity, alignment: .top)
@@ -327,10 +514,9 @@ private struct ScheduleCard: View {
                 x: 0,
                 y: isHovered ? 3 : 2
             )
-        .contentShape(Rectangle())
-        .onTapGesture(perform: onEdit)
-        .accessibilityAddTraits(.isButton)
-        .accessibilityLabel("Edit \(schedule.name)")
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
         .scaleEffect(isHovered ? 1.01 : 1.0)
         .animation(.spring(response: 0.3, dampingFraction: 0.7), value: isHovered)
         .opacity(hasAppeared ? 1 : 0)
@@ -339,6 +525,13 @@ private struct ScheduleCard: View {
         .onHover { hovering in
             withAnimation(.easeOut(duration: 0.15)) { isHovered = hovering }
         }
+        .themedAlert(
+            "Delete Schedule",
+            isPresented: $showDeleteConfirm,
+            message: "Are you sure you want to delete \"\(schedule.name)\"? This action cannot be undone.",
+            primaryButton: .destructive("Delete", action: onDelete),
+            secondaryButton: .cancel("Cancel")
+        )
     }
 
     // MARK: - Card Background
@@ -398,17 +591,101 @@ private struct ScheduleCard: View {
 
     // MARK: - Compact Stats
 
+    private var nextRunPreview: some View {
+        HStack(spacing: 8) {
+            Image(systemName: nextRunIcon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(nextRunColor)
+                .frame(width: 14)
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text("Next run", bundle: .module)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(theme.tertiaryText)
+                Text(summary.nextRun.description)
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(nextRunColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(nextRunColor.opacity(0.18), lineWidth: 1)
+                )
+        )
+    }
+
+    private var nextRunIcon: String {
+        switch summary.nextRun.state {
+        case .scheduled:
+            return "clock"
+        case .due:
+            return "bell.badge.fill"
+        case .paused:
+            return "pause.circle"
+        case .exhausted:
+            return "checkmark.circle"
+        }
+    }
+
+    private var nextRunColor: Color {
+        switch summary.nextRun.state {
+        case .scheduled:
+            return theme.accentColor
+        case .due:
+            return .orange
+        case .paused:
+            return .orange
+        case .exhausted:
+            return theme.tertiaryText
+        }
+    }
+
+    private func lastErrorPreview(_ diagnostic: ScheduleLastErrorDiagnostic) -> some View {
+        HStack(spacing: 8) {
+            Image(systemName: "exclamationmark.triangle.fill")
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(theme.errorColor)
+                .frame(width: 14)
+            Text(diagnostic.message)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(theme.errorColor)
+                .lineLimit(1)
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 10)
+        .padding(.vertical, 7)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.errorColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.errorColor.opacity(0.18), lineWidth: 1)
+                )
+        )
+    }
+
     @ViewBuilder
     private var compactStats: some View {
         HStack(spacing: 0) {
             statItem(icon: schedule.frequency.frequencyType.icon, text: schedule.frequency.shortDescription)
 
-            if let nextRun = schedule.nextRunDescription {
+            if let latest = summary.latestRun {
                 statDot
-                statItem(icon: "clock", text: nextRun)
+                statItem(icon: latest.status.iconName, text: latest.status.displayName)
             }
 
-            if let agentName = agent?.name, agent?.isBuiltIn == false {
+            if let ref = schedule.workspaceTarget {
+                statDot
+                statItem(icon: "person.2.fill", text: AgentTargetResolver.displayName(for: ref))
+            } else if let agentName = agent?.name, agent?.isBuiltIn == false {
                 statDot
                 statItem(icon: "person.fill", text: agentName)
             }
@@ -433,6 +710,396 @@ private struct ScheduleCard: View {
             .fill(theme.tertiaryText.opacity(0.4))
             .frame(width: 3, height: 3)
             .padding(.horizontal, 8)
+    }
+}
+
+// MARK: - Schedule History Sheet
+
+private struct ScheduleHistorySheet: View {
+    @Environment(\.theme) private var theme
+    @Environment(\.dismiss) private var dismiss
+
+    let schedule: Schedule
+    let summary: ScheduleAutomationSummary
+    let onExport: () -> Void
+
+    var body: some View {
+        VStack(spacing: 0) {
+            header
+
+            ScrollView {
+                VStack(alignment: .leading, spacing: 18) {
+                    overview
+
+                    if let diagnostic = summary.lastError {
+                        diagnosticPanel(diagnostic)
+                    }
+
+                    runsSection
+                }
+                .padding(24)
+            }
+
+            footer
+        }
+        .fittedSheetFrame(width: 640, height: 560)
+        .background(theme.primaryBackground)
+    }
+
+    private var header: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "clock.arrow.circlepath")
+                .font(.system(size: 18, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .frame(width: 36, height: 36)
+                .background(Circle().fill(theme.accentColor.opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("History", bundle: .module)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(schedule.name)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer()
+
+            Button {
+                dismiss()
+            } label: {
+                Image(systemName: "xmark")
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+                    .frame(width: 28, height: 28)
+                    .background(Circle().fill(theme.tertiaryBackground))
+            }
+            .buttonStyle(.plain)
+            .keyboardShortcut(.escape, modifiers: [])
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 18)
+        .background(theme.secondaryBackground)
+    }
+
+    private var overview: some View {
+        HStack(spacing: 12) {
+            ScheduleHistoryMetric(
+                icon: schedule.isEnabled ? "checkmark.circle.fill" : "pause.circle.fill",
+                title: "State",
+                value: schedule.isEnabled ? "Enabled" : "Paused",
+                color: schedule.isEnabled ? theme.successColor : .orange
+            )
+            ScheduleHistoryMetric(
+                icon: summary.nextRun.state.iconName,
+                title: "Next run",
+                value: summary.nextRun.description,
+                color: summary.nextRun.state.color(theme: theme)
+            )
+            ScheduleHistoryMetric(
+                icon: "list.bullet.rectangle",
+                title: "Runs",
+                value: "\(summary.runs.count)",
+                color: theme.accentColor
+            )
+        }
+    }
+
+    private func diagnosticPanel(_ diagnostic: ScheduleLastErrorDiagnostic) -> some View {
+        VStack(alignment: .leading, spacing: 8) {
+            HStack(spacing: 8) {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(theme.errorColor)
+                Text("Diagnostics", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Spacer()
+                Text(formatDate(diagnostic.occurredAt))
+                    .font(.system(size: 10))
+                    .foregroundColor(theme.tertiaryText)
+            }
+
+            Text(diagnostic.message)
+                .font(.system(size: 12))
+                .foregroundColor(theme.errorColor)
+                .textSelection(.enabled)
+
+            Text("Run ID: \(diagnostic.runId.uuidString)", bundle: .module)
+                .font(.system(size: 10, design: .monospaced))
+                .foregroundColor(theme.tertiaryText)
+                .textSelection(.enabled)
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(theme.errorColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.errorColor.opacity(0.18), lineWidth: 1)
+                )
+        )
+    }
+
+    private var runsSection: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack {
+                Text("Recent Runs", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Spacer()
+            }
+
+            if summary.runs.isEmpty {
+                VStack(spacing: 8) {
+                    Image(systemName: "clock.badge.questionmark")
+                        .font(.system(size: 22, weight: .medium))
+                        .foregroundColor(theme.tertiaryText)
+                    Text("No runs yet.", bundle: .module)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                }
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 36)
+                .background(
+                    RoundedRectangle(cornerRadius: 10)
+                        .fill(theme.secondaryBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 10)
+                                .stroke(theme.cardBorder, lineWidth: 1)
+                        )
+                )
+            } else {
+                VStack(spacing: 8) {
+                    ForEach(summary.runs) { run in
+                        ScheduleRunHistoryRow(run: run)
+                    }
+                }
+            }
+        }
+    }
+
+    private var footer: some View {
+        HStack(spacing: 12) {
+            Spacer()
+            Button(action: { dismiss() }) {
+                Text("Close", bundle: .module)
+            }
+            .buttonStyle(ScheduleSecondaryButtonStyle())
+
+            Button {
+                onExport()
+            } label: {
+                Label {
+                    Text("Export…", bundle: .module)
+                } icon: {
+                    Image(systemName: "square.and.arrow.up")
+                }
+            }
+            .buttonStyle(SchedulePrimaryButtonStyle())
+        }
+        .padding(.horizontal, 24)
+        .padding(.vertical, 16)
+        .background(
+            theme.secondaryBackground
+                .overlay(Rectangle().fill(theme.primaryBorder).frame(height: 1), alignment: .top)
+        )
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+}
+
+private struct ScheduleHistoryMetric: View {
+    @Environment(\.theme) private var theme
+
+    let icon: String
+    let title: String
+    let value: String
+    let color: Color
+
+    var body: some View {
+        HStack(spacing: 10) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(color)
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(color.opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text(verbatim: title)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(theme.tertiaryText)
+                Text(value)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+        }
+        .padding(12)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(theme.secondaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+}
+
+private struct ScheduleRunHistoryRow: View {
+    @Environment(\.theme) private var theme
+
+    let run: ScheduleRunHistoryEntry
+
+    var body: some View {
+        HStack(spacing: 12) {
+            Image(systemName: run.status.iconName)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(run.status.color(theme: theme))
+                .frame(width: 28, height: 28)
+                .background(Circle().fill(run.status.color(theme: theme).opacity(0.12)))
+
+            VStack(alignment: .leading, spacing: 3) {
+                HStack(spacing: 8) {
+                    Text(run.status.displayName)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                    Text(formatDate(run.startedAt))
+                        .font(.system(size: 10))
+                        .foregroundColor(theme.tertiaryText)
+                    Spacer()
+                    if let duration = run.durationSeconds {
+                        Text(formatDuration(duration))
+                            .font(.system(size: 10, weight: .medium))
+                            .foregroundColor(theme.secondaryText)
+                    }
+                }
+
+                HStack(spacing: 8) {
+                    if let sessionId = run.chatSessionId {
+                        Label(String(sessionId.uuidString.prefix(8)), systemImage: "bubble.left.and.bubble.right")
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.tertiaryText)
+                    }
+                    if let error = run.errorMessage, !error.isEmpty {
+                        Text(error)
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.errorColor)
+                            .lineLimit(1)
+                    } else if let preview = run.instructionsPreview {
+                        Text(preview)
+                            .font(.system(size: 10))
+                            .foregroundColor(theme.tertiaryText)
+                            .lineLimit(1)
+                    }
+                    Spacer()
+                }
+            }
+        }
+        .padding(12)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(theme.secondaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.cardBorder, lineWidth: 1)
+                )
+        )
+    }
+
+    private func formatDate(_ date: Date) -> String {
+        let formatter = DateFormatter()
+        formatter.dateStyle = .medium
+        formatter.timeStyle = .short
+        return formatter.string(from: date)
+    }
+
+    private func formatDuration(_ duration: TimeInterval) -> String {
+        if duration < 1 { return "<1s" }
+        if duration < 60 { return "\(Int(duration.rounded()))s" }
+        let minutes = Int(duration) / 60
+        let seconds = Int(duration) % 60
+        return "\(minutes)m \(seconds)s"
+    }
+}
+
+private extension ScheduleRunStatus {
+    var displayName: String {
+        switch self {
+        case .running:
+            return L("Running")
+        case .succeeded:
+            return L("Completed")
+        case .failed:
+            return L("Failed")
+        case .cancelled:
+            return L("Cancelled")
+        case .skipped:
+            return "Skipped"
+        }
+    }
+
+    var iconName: String {
+        switch self {
+        case .running:
+            return "play.circle.fill"
+        case .succeeded:
+            return "checkmark.circle.fill"
+        case .failed:
+            return "exclamationmark.triangle.fill"
+        case .cancelled:
+            return "xmark.circle.fill"
+        case .skipped:
+            return "forward.end.circle.fill"
+        }
+    }
+
+    func color(theme: ThemeProtocol) -> Color {
+        switch self {
+        case .running:
+            return theme.accentColor
+        case .succeeded:
+            return theme.successColor
+        case .failed:
+            return theme.errorColor
+        case .cancelled, .skipped:
+            return .orange
+        }
+    }
+}
+
+private extension ScheduleNextRunPreviewState {
+    var iconName: String {
+        switch self {
+        case .scheduled:
+            return "clock"
+        case .due:
+            return "bell.badge.fill"
+        case .paused:
+            return "pause.circle.fill"
+        case .exhausted:
+            return "checkmark.circle.fill"
+        }
+    }
+
+    func color(theme: ThemeProtocol) -> Color {
+        switch self {
+        case .scheduled:
+            return theme.accentColor
+        case .due, .paused:
+            return .orange
+        case .exhausted:
+            return theme.tertiaryText
+        }
     }
 }
 
@@ -833,7 +1500,7 @@ private struct WeekdayButton: View {
     @State private var isHovering = false
 
     private var dayLetter: String {
-        String(Calendar.current.shortWeekdaySymbols[day - 1].prefix(1))
+        String(Calendar.current.veryShortWeekdaySymbols[day - 1])
     }
 
     var body: some View {
@@ -1341,11 +2008,16 @@ private struct DayOfMonthPicker: View {
 
 private struct AgentPicker: View {
     @Environment(\.theme) private var theme
-    @Binding var selectedAgentId: UUID?
+    /// Local agent (`.local`) or a teammate's shared agent (`.workspace`).
+    @Binding var selectedTarget: AgentDispatchTarget?
     let agents: [Agent]
+    /// Shared agents from every joined workspace, minus this instance's own.
+    let workspaceAgents: [WorkspaceAgentPickerOption]
 
     @State private var isHovering = false
     @State private var showingPopover = false
+
+    private var selectedAgentId: UUID? { selectedTarget?.localId }
 
     private var selectedAgent: Agent? {
         if let id = selectedAgentId {
@@ -1354,15 +2026,25 @@ private struct AgentPicker: View {
         return nil
     }
 
+    private var selectedWorkspaceOption: WorkspaceAgentPickerOption? {
+        guard let ref = selectedTarget?.workspaceRef else { return nil }
+        return WorkspaceAgentPickerOption.resolve(ref, in: workspaceAgents)
+    }
+
     private var selectedAgentName: String {
-        selectedAgent?.name ?? "Default"
+        if let option = selectedWorkspaceOption { return option.name }
+        return selectedAgent?.name ?? L("Default")
     }
 
     private var selectedAgentDescription: String? {
-        if selectedAgentId == nil {
-            return "Uses the default system behavior"
+        if let option = selectedWorkspaceOption {
+            let purpose = AgentDescriptionPolicy.normalized(option.description ?? "")
+            return purpose.isEmpty ? option.subtitle : "\(option.subtitle) — \(purpose)"
         }
-        let desc = selectedAgent?.description ?? ""
+        if selectedAgentId == nil {
+            return L("Uses the default system behavior")
+        }
+        let desc = selectedAgent?.routingDescription ?? ""
         return desc.isEmpty ? nil : desc
     }
 
@@ -1382,10 +2064,19 @@ private struct AgentPicker: View {
                     .fill(agentColor(for: selectedAgentName).opacity(0.2))
                     .frame(width: 32, height: 32)
                     .overlay(
-                        Image(systemName: "person.fill")
+                        Image(systemName: selectedWorkspaceOption == nil ? "person.fill" : "person.2.fill")
                             .font(.system(size: 14, weight: .medium))
                             .foregroundColor(agentColor(for: selectedAgentName))
                     )
+                    .overlay(alignment: .bottomTrailing) {
+                        if let option = selectedWorkspaceOption {
+                            Circle()
+                                .fill(option.presence.indicatorColor(theme: theme))
+                                .frame(width: 9, height: 9)
+                                .overlay(Circle().stroke(theme.inputBackground, lineWidth: 1.5))
+                                .help(option.presenceLabel)
+                        }
+                    }
 
                 if hasDescription {
                     VStack(alignment: .leading, spacing: 2) {
@@ -1439,9 +2130,9 @@ private struct AgentPicker: View {
                 AgentOptionRow(
                     name: "Default",
                     description: "Uses the default system behavior",
-                    isSelected: selectedAgentId == nil,
+                    isSelected: selectedTarget == nil,
                     action: {
-                        selectedAgentId = nil
+                        selectedTarget = nil
                         showingPopover = false
                     }
                 )
@@ -1453,10 +2144,34 @@ private struct AgentPicker: View {
                     ForEach(agents, id: \.id) { agent in
                         AgentOptionRow(
                             name: agent.name,
-                            description: agent.displayDescription,
+                            description: agent.routingDescription,
                             isSelected: selectedAgentId == agent.id,
                             action: {
-                                selectedAgentId = agent.id
+                                selectedTarget = .local(agent.id)
+                                showingPopover = false
+                            }
+                        )
+                    }
+                }
+
+                if !workspaceAgents.isEmpty {
+                    Divider()
+                        .padding(.vertical, 4)
+
+                    Text("Workspace agents", bundle: .module)
+                        .font(.system(size: 10, weight: .semibold))
+                        .foregroundColor(theme.tertiaryText)
+                        .padding(.horizontal, 10)
+                        .padding(.bottom, 2)
+
+                    ForEach(workspaceAgents) { option in
+                        AgentOptionRow(
+                            name: option.name,
+                            description: option.description.map { "\(option.subtitle) — \($0)" } ?? option.subtitle,
+                            isSelected: selectedTarget?.workspaceRef == option.ref,
+                            presence: option.presence,
+                            action: {
+                                selectedTarget = .workspace(option.ref)
                                 showingPopover = false
                             }
                         )
@@ -1464,7 +2179,7 @@ private struct AgentPicker: View {
                 }
             }
             .padding(8)
-            .frame(minWidth: 280)
+            .frame(width: 360)
             .background(theme.cardBackground)
         }
     }
@@ -1478,6 +2193,8 @@ private struct AgentOptionRow: View {
     let name: String
     let description: String
     let isSelected: Bool
+    /// Cached roster presence for shared workspace agents; nil for local.
+    var presence: WorkspaceRosterStore.Presence? = nil
     let action: () -> Void
 
     @State private var isHovering = false
@@ -1485,6 +2202,11 @@ private struct AgentOptionRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 10) {
+                if let presence {
+                    Circle()
+                        .fill(presence.indicatorColor(theme: theme))
+                        .frame(width: 7, height: 7)
+                }
                 VStack(alignment: .leading, spacing: 2) {
                     Text(name)
                         .font(.system(size: 13, weight: .medium))
@@ -1533,6 +2255,7 @@ struct ScheduleEditorSheet: View {
 
     @Environment(\.theme) private var theme
     @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var roster = WorkspaceRosterStore.shared
 
     let mode: Mode
     let onSave: (Schedule) -> Void
@@ -1541,7 +2264,7 @@ struct ScheduleEditorSheet: View {
 
     @State private var name = ""
     @State private var instructions = ""
-    @State private var selectedAgentId: UUID?
+    @State private var selectedTarget: AgentDispatchTarget?
     @State private var frequencyType: ScheduleFrequencyType = .daily
     @State private var isEnabled = true
     @State private var selectedFolderPath: String?
@@ -1599,6 +2322,32 @@ struct ScheduleEditorSheet: View {
         return nil
     }
 
+    /// The schedule being edited, if any. Used to detect whether the form
+    /// still matches what's stored so "Save Changes" can disable itself.
+    private var editingSchedule: Schedule? {
+        if case .edit(let schedule) = mode { return schedule }
+        return nil
+    }
+
+    /// True when an edited schedule differs from its stored version.
+    /// Create mode is always "changed" so its button keeps the existing
+    /// click-to-reveal-validation behaviour.
+    private var hasChanges: Bool {
+        guard let original = editingSchedule else { return true }
+        return trimmedName != original.name
+            || trimmedInstructions != original.instructions
+            || selectedTarget != original.target
+            || isEnabled != original.isEnabled
+            || selectedFolderPath != original.folderPath
+            || selectedFolderBookmark != original.folderBookmark
+            || buildFrequency() != original.frequency
+    }
+
+    private var existingRunHistory: [ScheduleRunHistoryEntry] {
+        if case .edit(let schedule) = mode { return schedule.runHistory }
+        return []
+    }
+
     var body: some View {
         VStack(spacing: 0) {
             headerView
@@ -1616,7 +2365,7 @@ struct ScheduleEditorSheet: View {
 
             footerView
         }
-        .frame(width: 580, height: 680)
+        .fittedSheetFrame(width: 580, height: 680)
         .background(theme.primaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -1630,12 +2379,14 @@ struct ScheduleEditorSheet: View {
             if case .edit(let schedule) = mode {
                 loadSchedule(schedule)
             } else if let initialAgentId = initialAgentId {
-                selectedAgentId = initialAgentId
+                selectedTarget = .local(initialAgentId)
             }
+            roster.beginObserving()
             withAnimation {
                 hasAppeared = true
             }
         }
+        .onDisappear { roster.endObserving() }
     }
 
     // MARK: - Header
@@ -1670,11 +2421,11 @@ struct ScheduleEditorSheet: View {
             .frame(width: 40, height: 40)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(isEditing ? "Edit Schedule" : "Create Schedule")
+                Text(isEditing ? L("Edit Schedule") : L("Create Schedule"))
                     .font(.system(size: 16, weight: .semibold))
                     .foregroundColor(theme.primaryText)
 
-                Text(isEditing ? "Modify your scheduled task" : "Set up an automated AI task")
+                Text(isEditing ? L("Modify your scheduled task") : L("Set up an automated AI task"))
                     .font(.system(size: 12))
                     .foregroundColor(theme.secondaryText)
             }
@@ -1714,7 +2465,7 @@ struct ScheduleEditorSheet: View {
     // MARK: - Schedule Info Section
 
     private var scheduleInfoSection: some View {
-        ScheduleEditorSection(title: "Schedule Info", icon: "info.circle.fill") {
+        ScheduleEditorSection(title: L("Schedule Info"), icon: "info.circle.fill") {
             VStack(alignment: .leading, spacing: 16) {
                 VStack(alignment: .leading, spacing: 6) {
                     Text("Name", bundle: .module)
@@ -1722,7 +2473,7 @@ struct ScheduleEditorSheet: View {
                         .foregroundColor(theme.secondaryText)
 
                     ScheduleTextField(
-                        placeholder: "e.g., Daily Summary",
+                        placeholder: L("e.g., Daily Summary"),
                         text: $name,
                         icon: "textformat",
                         isInvalid: nameInvalid
@@ -1748,7 +2499,7 @@ struct ScheduleEditorSheet: View {
                             Text("Enabled", bundle: .module)
                                 .font(.system(size: 13, weight: .medium))
                                 .foregroundColor(theme.primaryText)
-                            Text(isEnabled ? "Schedule is active" : "Schedule is paused")
+                            Text(isEnabled ? L("Schedule is active") : L("Schedule is paused"))
                                 .font(.system(size: 11))
                                 .foregroundColor(theme.tertiaryText)
                         }
@@ -1784,7 +2535,7 @@ struct ScheduleEditorSheet: View {
     private var hasFolder: Bool { selectedFolderPath != nil }
 
     private var folderContextSection: some View {
-        ScheduleEditorSection(title: "Working Directory", icon: "folder.fill") {
+        ScheduleEditorSection(title: L("Working Directory"), icon: "folder.fill") {
             VStack(alignment: .leading, spacing: 8) {
                 HStack(spacing: 12) {
                     ZStack {
@@ -1864,45 +2615,34 @@ struct ScheduleEditorSheet: View {
         let panel = NSOpenPanel()
         panel.canChooseFiles = false
         panel.canChooseDirectories = true
-        panel.canCreateDirectories = false
+        panel.canCreateDirectories = true
         panel.allowsMultipleSelection = false
         panel.title = L("Select Working Directory")
         panel.prompt = L("Select")
 
-        guard panel.runModal() == .OK, let url = panel.url else { return }
+        Task { @MainActor in
+            guard await panel.beginModal() == .OK, let url = panel.url else { return }
 
-        #if OSAURUS_INTEL
-        // M13 Schedules restore: the Intel app is not sandboxed, so
-        // `.withSecurityScope` bookmark creation throws (same bug fixed for
-        // the chat folder picker in M12). Without a sandbox there's nothing to
-        // scope — attach the path directly and skip the bookmark. The headless
-        // run reads `folderPath` via `FolderContextService`, which is already
-        // Intel-gated to use the raw path.
-        withAnimation(.easeOut(duration: 0.2)) {
-            selectedFolderPath = url.path
-            selectedFolderBookmark = nil
-        }
-        #else
-        do {
-            let bookmark = try url.bookmarkData(
-                options: .withSecurityScope,
-                includingResourceValuesForKeys: nil,
-                relativeTo: nil
-            )
-            withAnimation(.easeOut(duration: 0.2)) {
-                selectedFolderPath = url.path
-                selectedFolderBookmark = bookmark
+            do {
+                let bookmark = try url.bookmarkData(
+                    options: .withSecurityScope,
+                    includingResourceValuesForKeys: nil,
+                    relativeTo: nil
+                )
+                withAnimation(.easeOut(duration: 0.2)) {
+                    selectedFolderPath = url.path
+                    selectedFolderBookmark = bookmark
+                }
+            } catch {
+                print("[ScheduleEditor] Failed to create bookmark: \(error)")
             }
-        } catch {
-            print("[ScheduleEditor] Failed to create bookmark: \(error)")
         }
-        #endif
     }
 
     // MARK: - Instructions Section
 
     private var instructionsSection: some View {
-        ScheduleEditorSection(title: "Instructions", icon: "text.alignleft") {
+        ScheduleEditorSection(title: L("Instructions"), icon: "text.alignleft") {
             VStack(alignment: .leading, spacing: 8) {
                 ZStack(alignment: .topLeading) {
                     if instructions.isEmpty {
@@ -1949,7 +2689,7 @@ struct ScheduleEditorSheet: View {
     // MARK: - Frequency Section
 
     private var frequencySection: some View {
-        ScheduleEditorSection(title: "Frequency", icon: "clock.fill") {
+        ScheduleEditorSection(title: L("Frequency"), icon: "clock.fill") {
             VStack(spacing: 16) {
                 FrequencySelector(selection: $frequencyType)
                 frequencyOptionsView
@@ -2361,7 +3101,7 @@ struct ScheduleEditorSheet: View {
                 .foregroundColor(isError ? theme.errorColor : theme.accentColor)
 
             VStack(alignment: .leading, spacing: 2) {
-                Text(isError ? "Error" : "Schedule")
+                Text(isError ? L("Error") : L("Schedule"))
                     .font(.system(size: 10, weight: .medium))
                     .foregroundColor(isError ? theme.errorColor : theme.tertiaryText)
                 Text(text)
@@ -2385,17 +3125,28 @@ struct ScheduleEditorSheet: View {
     // MARK: - Agent Section
 
     private var agentSection: some View {
-        ScheduleEditorSection(title: "Agent", icon: "person.circle.fill") {
+        ScheduleEditorSection(title: L("Agent"), icon: "person.circle.fill") {
             VStack(alignment: .leading, spacing: 8) {
                 AgentPicker(
-                    selectedAgentId: $selectedAgentId,
-                    agents: agentManager.agents.filter { !$0.isBuiltIn }
+                    selectedTarget: $selectedTarget,
+                    agents: agentManager.agents.filter { !$0.isBuiltIn },
+                    workspaceAgents: WorkspaceAgentPickerOption.all(roster: roster)
                 )
                 .frame(maxWidth: .infinity)
 
-                Text("The agent determines the AI's behavior and available tools.", bundle: .module)
+                if selectedTarget?.isWorkspace == true {
+                    Text(
+                        "A workspace agent runs on its owner's Mac with their prompt, model and tools. If the host is offline when this fires, the run is skipped until the next scheduled time.",
+                        bundle: .module
+                    )
                     .font(.system(size: 11))
                     .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                } else {
+                    Text("The agent determines the AI's behavior and available tools.", bundle: .module)
+                        .font(.system(size: 11))
+                        .foregroundColor(theme.tertiaryText)
+                }
             }
             .frame(maxWidth: .infinity)
         }
@@ -2410,11 +3161,12 @@ struct ScheduleEditorSheet: View {
             Button(action: onCancel) { Text("Cancel", bundle: .module) }
                 .buttonStyle(ScheduleSecondaryButtonStyle())
 
-            Button(isEditing ? "Save Changes" : "Create Schedule") {
+            Button(isEditing ? L("Save Changes") : L("Create Schedule")) {
                 saveSchedule()
             }
             .buttonStyle(SchedulePrimaryButtonStyle())
             .keyboardShortcut(.return, modifiers: .command)
+            .disabled(isEditing && !hasChanges)
         }
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
@@ -2434,7 +3186,7 @@ struct ScheduleEditorSheet: View {
     private func loadSchedule(_ schedule: Schedule) {
         name = schedule.name
         instructions = schedule.instructions
-        selectedAgentId = schedule.agentId
+        selectedTarget = schedule.target
         isEnabled = schedule.isEnabled
         selectedFolderPath = schedule.folderPath
         selectedFolderBookmark = schedule.folderBookmark
@@ -2502,7 +3254,7 @@ struct ScheduleEditorSheet: View {
             id: existingId ?? UUID(),
             name: trimmedName,
             instructions: trimmedInstructions,
-            agentId: selectedAgentId,
+            target: selectedTarget,
             folderPath: selectedFolderPath,
             folderBookmark: selectedFolderBookmark,
             frequency: buildFrequency(),
@@ -2510,6 +3262,7 @@ struct ScheduleEditorSheet: View {
             lastRunAt: existingLastRunAt,
             lastTriggeredAt: existingLastTriggeredAt,
             lastChatSessionId: existingLastChatSessionId,
+            runHistory: existingRunHistory,
             createdAt: existingCreatedAt ?? Date(),
             updatedAt: Date()
         )
@@ -2622,16 +3375,17 @@ private struct ScheduleTextField: View {
 
 private struct SchedulePrimaryButtonStyle: ButtonStyle {
     @Environment(\.theme) private var theme
+    @Environment(\.isEnabled) private var isEnabled
 
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
-            .foregroundColor(.white)
+            .foregroundColor(isEnabled ? .white : theme.tertiaryText)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
             .background(
                 RoundedRectangle(cornerRadius: 8)
-                    .fill(theme.accentColor)
+                    .fill(isEnabled ? theme.accentColor : theme.tertiaryBackground)
             )
             .opacity(configuration.isPressed ? 0.8 : 1.0)
     }

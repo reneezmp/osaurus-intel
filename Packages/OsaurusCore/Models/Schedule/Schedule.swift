@@ -505,8 +505,18 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
     public var name: String
     /// Instructions to send to the AI when the schedule runs
     public var instructions: String
-    /// The agent to use for the chat (nil = default agent)
-    public var agentId: UUID?
+    /// Who runs the schedule: an agent hosted here or a teammate's shared
+    /// workspace agent. nil = no agent (refused at execution time).
+    /// (Intel: workspace targets cannot be chosen yet, W-workspaces-identity-mobile.)
+    public var target: AgentDispatchTarget?
+    /// The local agent, for readers that only understand local agents.
+    /// nil for workspace targets; setting it replaces `target` with `.local`.
+    public var agentId: UUID? {
+        get { target?.localId }
+        set { target = newValue.map(AgentDispatchTarget.local) }
+    }
+    /// The shared workspace agent this schedule runs, or nil for local.
+    public var workspaceTarget: WorkspaceAgentRef? { target?.workspaceRef }
     /// Extra parameters for future extensibility
     public var parameters: [String: String]
     /// Working directory path (for display)
@@ -523,6 +533,8 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
     public var lastTriggeredAt: Date?
     /// The chat session ID from the last run (for viewing results)
     public var lastChatSessionId: UUID?
+    /// Bounded local execution history inferred from schedule persistence transitions
+    public var runHistory: [ScheduleRunHistoryEntry]
     /// When the schedule was created
     public let createdAt: Date
     /// When the schedule was last modified
@@ -533,6 +545,7 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         name: String,
         instructions: String,
         agentId: UUID? = nil,
+        target: AgentDispatchTarget? = nil,
         parameters: [String: String] = [:],
         folderPath: String? = nil,
         folderBookmark: Data? = nil,
@@ -541,13 +554,14 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         lastRunAt: Date? = nil,
         lastTriggeredAt: Date? = nil,
         lastChatSessionId: UUID? = nil,
+        runHistory: [ScheduleRunHistoryEntry] = [],
         createdAt: Date = Date(),
         updatedAt: Date = Date()
     ) {
         self.id = id
         self.name = name
         self.instructions = instructions
-        self.agentId = agentId
+        self.target = target ?? agentId.map(AgentDispatchTarget.local)
         self.parameters = parameters
         self.folderPath = folderPath
         self.folderBookmark = folderBookmark
@@ -556,6 +570,7 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         self.lastRunAt = lastRunAt
         self.lastTriggeredAt = lastTriggeredAt
         self.lastChatSessionId = lastChatSessionId
+        self.runHistory = runHistory
         self.createdAt = createdAt
         self.updatedAt = updatedAt
     }
@@ -564,10 +579,12 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, instructions, agentId, parameters
+        case target
         case personaId  // legacy key for migration
         case mode  // legacy key (chat / work) — ignored on decode
         case folderPath, folderBookmark
         case frequency, isEnabled, lastRunAt, lastTriggeredAt, lastChatSessionId
+        case runHistory
         case createdAt, updatedAt
     }
 
@@ -576,9 +593,13 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         id = try container.decode(UUID.self, forKey: .id)
         name = try container.decode(String.self, forKey: .name)
         instructions = try container.decode(String.self, forKey: .instructions)
-        agentId =
-            try container.decodeIfPresent(UUID.self, forKey: .agentId)
-            ?? container.decodeIfPresent(UUID.self, forKey: .personaId)
+        // `target` (new) → `agentId` → `personaId` (oldest); every stored
+        // schedule written before workspace targets decodes as `.local`.
+        target = try container.decodeAgentTarget(
+            targetKey: .target,
+            legacyAgentIdKey: .agentId,
+            legacyPersonaIdKey: .personaId
+        )
         // Legacy `mode` field (chat / work) is silently dropped — every
         // scheduled run is now a chat dispatch.
         _ = try container.decodeIfPresent(String.self, forKey: .mode)
@@ -590,6 +611,7 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         lastRunAt = try container.decodeIfPresent(Date.self, forKey: .lastRunAt)
         lastTriggeredAt = try container.decodeIfPresent(Date.self, forKey: .lastTriggeredAt)
         lastChatSessionId = try container.decodeIfPresent(UUID.self, forKey: .lastChatSessionId)
+        runHistory = try container.decodeIfPresent([ScheduleRunHistoryEntry].self, forKey: .runHistory) ?? []
         createdAt = try container.decode(Date.self, forKey: .createdAt)
         updatedAt = try container.decode(Date.self, forKey: .updatedAt)
     }
@@ -599,7 +621,9 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         try container.encode(id, forKey: .id)
         try container.encode(name, forKey: .name)
         try container.encode(instructions, forKey: .instructions)
-        try container.encodeIfPresent(agentId, forKey: .agentId)
+        // Writes `target` AND (for local) the legacy `agentId` so older
+        // builds keep reading the UUID they expect.
+        try container.encodeAgentTarget(target, targetKey: .target, legacyAgentIdKey: .agentId)
         try container.encode(parameters, forKey: .parameters)
         try container.encodeIfPresent(folderPath, forKey: .folderPath)
         try container.encodeIfPresent(folderBookmark, forKey: .folderBookmark)
@@ -608,6 +632,9 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
         try container.encodeIfPresent(lastRunAt, forKey: .lastRunAt)
         try container.encodeIfPresent(lastTriggeredAt, forKey: .lastTriggeredAt)
         try container.encodeIfPresent(lastChatSessionId, forKey: .lastChatSessionId)
+        if !runHistory.isEmpty {
+            try container.encode(runHistory, forKey: .runHistory)
+        }
         try container.encode(createdAt, forKey: .createdAt)
         try container.encode(updatedAt, forKey: .updatedAt)
     }

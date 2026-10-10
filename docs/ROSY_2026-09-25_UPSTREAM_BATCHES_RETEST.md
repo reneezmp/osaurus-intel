@@ -1581,3 +1581,15 @@ Providers). Before this build, these three could list models but not chat.
       it: "read photo.png and tell me what's in it". The agent describes the
       picture (not only its size or name).
 
+## Schedule run history (2026-10-10)
+
+- [ ] Settings › Schedules: each schedule card shows its next run and
+      recent runs. Run one with "Run now", wait for it to finish: the card
+      shows it.
+- [ ] Open a schedule's history: runs are listed with status and time, and
+      Export saves a Markdown file.
+- [ ] Edit an existing schedule (change its time) and save: its history is
+      kept, and it still runs as its agent.
+- [ ] Create a new schedule: the agent picker lists your agents (no
+      "workspace" section).
+

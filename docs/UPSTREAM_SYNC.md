@@ -3143,3 +3143,35 @@ them into turn attachments, so later turns replay them and the tool card
 shows the picture. Intel's turns keep the text envelope only. Upstream's
 `FileReadImageAndFormatContractTests` runs, minus three cases that need
 upstream-only chat machinery.
+
+### Schedule run history (`W-self-scheduling`) — 2026-10-10
+
+Upstream #1583 (June, "Add schedule automation history") never reached
+Intel. Now:
+
+- `ScheduleRunHistory` and `ScheduleHistoryService` are upstream's.
+- `Schedule.runHistory`, recorded by `ScheduleStore.save` from trigger and
+  finish transitions (upstream's store, verbatim).
+- The Schedules screen is upstream's current file: run summaries on each
+  card, a history sheet (recent runs, metrics, errors) and Markdown export.
+
+Upstream's screen is built on dispatch targets, so `Schedule` also gained
+upstream's `target: AgentDispatchTarget?` (`agentId` is now a computed
+local view). It encodes the legacy `agentId` too, so older builds still
+read it. `AgentDispatchTarget.swift`, `WorkspaceAgentPickerOption.swift`
+and `FittedSheetFrame.swift` are upstream's.
+
+**Intel differences:**
+
+- The workspace roster is a stub that is always empty
+  (`IntelWorkspaceRosterStub.swift`: `WorkspaceRosterStore`,
+  `OsaurusRouterWorkspacePerson.shortWallet`, and a
+  `RemoteAgentManager.remoteAgent(forAddress:workspaceId:)` stub). Only
+  local agents can be picked until `W-workspaces-identity-mobile`.
+- The screen's 19 two-argument `onChange` calls use the macOS 13
+  single-value form.
+- Watchers did not get `target` (upstream did).
+
+Tests: upstream's `ScheduleHistoryServiceTests`,
+`ScheduleRunHistoryStoreTests` and `AgentDispatchTargetTests` (minus the
+watcher and channel-route cases).
