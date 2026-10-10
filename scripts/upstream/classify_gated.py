@@ -77,8 +77,6 @@ GATED = {
     "Views/Plugin/ClaudePluginCard.swift": ("W-skills-plugins-import", "W", "Claude plugins"),
     "Views/Plugin/ClaudePluginDetailView.swift": ("W-skills-plugins-import", "W", "Claude plugins"),
     "Views/Skill/GitHubImportSheet.swift": ("W-skills-plugins-import", "W", "GitHub import (upstream moved it to Views/Plugin/)"),
-    "Views/Chat/TerminalDisplayView.swift": ("W-chat-ux", "W", "inline shell_run terminal; LiveExecRegistry already fed"),
-    "Views/Chat/TerminalSnapshot.swift": ("W-chat-ux", "W", "inline shell_run terminal"),
     "Views/Agent/NextRunPanelView.swift": ("W-agent-detail-redesign", "W", "Next Run panel"),
     "Views/Theme/ShareThemeSheet.swift": ("W-ui-misc", "W", "theme sharing (themes.osaurus.ai, identity-signed)"),
     "Views/Theme/ImportThemeByIdSheet.swift": ("W-ui-misc", "W", "theme import by id"),
@@ -100,6 +98,8 @@ GATED = {
     "Views/Agent/AgentReorderSheet.swift": ("W-gated-sweep", "P", "ported (AgentManager.reorder existed)"),
     "Views/Chat/MarkdownImageView.swift": ("W-gated-sweep", "P", "ported; also the full-screen image preview"),
     "Views/Plugin/ToolSecretsSheet.swift": ("W-plugin-reliability", "P", "ported in stage 1"),
+    "Views/Chat/TerminalDisplayView.swift": ("W-chat-ux", "P", "ported 2026-10-10"),
+    "Views/Chat/TerminalSnapshot.swift": ("W-chat-ux", "P", "ported 2026-10-10"),
     # --- App target (App/osaurus/...) ---
 }
 
@@ -160,8 +160,7 @@ print(f"\n{len(entries)} gated / placeholder / app-target entries ({REF})")
 for (fid, v), n in sorted(counts.items()):
     print(f"  {v} {fid:30s} {n}")
 stale = [k for k in GATED if k not in {e[0] for e in entries}
-         and not (k.endswith("ToolSecretsSheet.swift") or k.endswith("AgentReorderSheet.swift")
-                  or k.endswith("MarkdownImageView.swift"))]
+         and GATED[k][1] != "P"]
 if stale:
     print("NO LONGER GATED (drop from GATED once verified):")
     for k in stale:

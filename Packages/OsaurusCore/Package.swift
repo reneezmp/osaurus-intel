@@ -391,7 +391,6 @@ let package = Package(
                 "Chat/SharedArtifactSecurityTests.swift",
                 "Chat/SystemPromptComposerToolResolutionTests.swift",
                 "Chat/SystemPromptDefaultIdentityTests.swift",
-                "Chat/TerminalDisplayViewTests.swift",
                 "Configuration/AppConfigurationMigrationTests.swift",
                 "Configuration/VLMDetectionTests.swift",
                 "Context/PluginCreatorInjectionTests.swift",

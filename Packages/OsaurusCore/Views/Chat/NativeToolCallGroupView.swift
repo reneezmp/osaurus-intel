@@ -480,13 +480,11 @@ final class NativeToolCallRowView: NSView {
     ///      chrome the live pane used.
     /// Mutually exclusive with `resultView` in the layout pin so we
     /// never double-pin contentContainer's bottom.
-#if !OSAURUS_INTEL
     private var terminalView: TerminalDisplayView?
     private var terminalBottomConstraint: NSLayoutConstraint?
     private var terminalHeightConstraint: NSLayoutConstraint?
     private var liveExecSubscription: AnyCancellable?
     private var liveExecBoundCallId: String?
-#endif
     private let separatorView = NSView()
     /// pins contentContainer height for hit-testing; toggled when result section is shown
     private var contentBottomToArgs: NSLayoutConstraint?
@@ -685,9 +683,7 @@ final class NativeToolCallRowView: NSView {
             // (and after we stopped dumping the raw result turn into the chat,
             // the result vanished entirely — Renée 2026-06-03).
             applyResultOrLiveState(width: width, theme: theme)
-#if !OSAURUS_INTEL
             bindLiveOutputIfPresent(toolCallId: item.call.id, theme: theme)
-#endif
         }
 
         // Tear down terminal pane when the row collapses.
@@ -721,15 +717,11 @@ final class NativeToolCallRowView: NSView {
         // Live mode locks at maxBodyHeight; completed mode uses the
         // view's adaptive measured height (60–140pt body + 30pt header).
         let terminalH: CGFloat
-#if !OSAURUS_INTEL
         if let tv = terminalView {
             terminalH = 8 + tv.currentMeasuredHeight
         } else {
             terminalH = 0
         }
-#else
-        terminalH = 0
-#endif
         return rowH + 1 + 8 + sectionTitleH + argsH + terminalH + resultH + 8
     }
 
@@ -754,7 +746,6 @@ final class NativeToolCallRowView: NSView {
     private func applyResultOrLiveState(width: CGFloat, theme: any ThemeProtocol) {
         guard let item = currentItem else { return }
 
-#if !OSAURUS_INTEL
         // 1) Live path takes priority while a tool is actively running.
         if let entry = LiveExecRegistry.shared.currentEntries()[item.call.id],
             entry.currentStatus() == .running
@@ -775,7 +766,6 @@ final class NativeToolCallRowView: NSView {
             mountTerminalView(mode: .completed(snapshot), theme: theme)
             return
         }
-#endif
 
         // 3) Markdown fallback for everything else.
         tearDownTerminalView()
@@ -810,7 +800,6 @@ final class NativeToolCallRowView: NSView {
     /// Idempotent on the same id so layout-only re-configures don't
     /// re-subscribe.
     private func bindLiveOutputIfPresent(toolCallId: String, theme: any ThemeProtocol) {
-#if !OSAURUS_INTEL
         if liveExecBoundCallId == toolCallId, liveExecSubscription != nil {
             return
         }
@@ -826,14 +815,12 @@ final class NativeToolCallRowView: NSView {
                     self.applyResultOrLiveState(width: width, theme: theme)
                 }
             }
-#endif
     }
 
     /// Lazily install (or reuse) a `TerminalDisplayView` and bind it
     /// in the given mode. The view itself decides between the live
     /// streaming path and the static snapshot render based on the
     /// passed `mode`.
-#if !OSAURUS_INTEL
     private func mountTerminalView(
         mode: TerminalDisplayView.Mode,
         theme: any ThemeProtocol
@@ -887,10 +874,8 @@ final class NativeToolCallRowView: NSView {
         terminalHeightConstraint?.constant = view.currentMeasuredHeight
         applyHeight()
     }
-#endif
 
     private func tearDownTerminalView() {
-#if !OSAURUS_INTEL
         liveExecSubscription?.cancel()
         liveExecSubscription = nil
         liveExecBoundCallId = nil
@@ -901,7 +886,6 @@ final class NativeToolCallRowView: NSView {
         terminalHeightConstraint = nil
         view.removeFromSuperview()
         terminalView = nil
-#endif
     }
 
     // MARK: - Private

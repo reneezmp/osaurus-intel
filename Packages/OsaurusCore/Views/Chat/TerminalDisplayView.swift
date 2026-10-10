@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  TerminalDisplayView.swift
 //  osaurus
@@ -131,8 +130,15 @@ final class TerminalDisplayView: NSView {
 
     required init?(coder: NSCoder) { fatalError() }
 
-    // No explicit deinit: each `AnyCancellable` cancels itself when
-    // released, so dropping the `cancellables` set during ARC is enough.
+    deinit {
+        // Drop the bounds-changed observer registered in `buildViews()`.
+        // AppKit auto-deregisters selector observers on dealloc on modern
+        // macOS, but we remove it explicitly so the contract is local and
+        // doesn't silently regress if this view is reused or the registration
+        // pattern changes. `AnyCancellable`s in `cancellables` still cancel
+        // themselves when the set is released during ARC.
+        NotificationCenter.default.removeObserver(self)
+    }
 
     // MARK: Bind / Unbind
 
@@ -601,11 +607,3 @@ extension TerminalDisplayView {
         renderer.reset()
     }
 }
-#else
-import SwiftUI
-struct TerminalDisplayView: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Terminal Display", symbol: "apple.logo")
-    }
-}
-#endif

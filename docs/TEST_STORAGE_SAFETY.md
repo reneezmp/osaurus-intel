@@ -186,6 +186,21 @@ After the run:
   - `~/.osaurus/knowledge/knowledge.sqlite` and its `-wal` at 09:50:44
     (tests ran 09:53:14–09:53:47), the upstream app's Knowledge index.
 
+  **The upstream app's hourly storage maintenance** checkpoints *every*
+  database within a few seconds and then rewrites
+  `~/.osaurus/.storage-maintenance.json`. The hits look alarming:
+  `methods/methods.sqlite`, `tool-index/tool_index.sqlite`,
+  `knowledge/write_log.sqlite`, `knowledge.sqlite`, `memory.sqlite`, their
+  WALs, and `~/.osaurus` itself. Seen 2026-10-10 11:30:21–25, inside a
+  short filtered run's window. To identify it, convert `lastCheckpoint` in
+  that file (seconds since 2001-01-01) with
+  `date -r $(( ${lastCheckpoint%.*} + 978307200 ))`. If it equals the
+  burst's first second, it's the maintenance pass. Supporting signs: the
+  burst includes databases Intel never compiles (methods, tool index,
+  knowledge write log), and `OsaurusPaths.root()` crashes a test process
+  that tries to resolve `~/.osaurus`. Intel's own `StorageMaintenance`
+  starts only from `AppDelegate`, which tests never run.
+
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`
 and, while it runs, re-downloads its plugin catalog into

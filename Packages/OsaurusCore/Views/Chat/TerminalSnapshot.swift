@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  TerminalSnapshot.swift
 //  osaurus
@@ -116,11 +115,3 @@ extension TerminalSnapshot {
         )
     }
 }
-#else
-import SwiftUI
-struct TerminalSnapshot: View {
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Terminal Snapshot", symbol: "apple.logo")
-    }
-}
-#endif

@@ -1521,3 +1521,12 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
       working-folder chat, ask the agent to run `node -v` (or `python -V`).
       It prints the version instead of "command not found".
 
+## Inline terminal (2026-10-10)
+
+- [ ] Ask an agent in a working-folder chat to run something slow, e.g.
+      `for i in 1 2 3 4 5; do echo $i; sleep 1; done`. Expand the tool
+      card: lines appear live in a terminal pane. When it finishes, the
+      pane keeps the command, its output and the exit code.
+- [ ] A failing command (`ls /nope`) shows its error output in the same
+      pane.
+

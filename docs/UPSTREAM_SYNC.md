@@ -2957,3 +2957,14 @@ real run).
 Audit of 2 commits: [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md).
 Shipped #3056: `shell_run` gets the login-shell PATH. #3059 (Qwen-Image-2.1
 Turbo) is MLX-only. The next review starts after `24f4c416a`.
+
+### Inline `shell_run` terminal (`W-chat-ux`) — 2026-10-10
+
+Tool cards for `shell_run` now show upstream's inline terminal: live output
+while the command runs (from `LiveExecRegistry`, which Intel's `shell_run`
+already fed), then the finished stdout / stderr, command and exit code in
+the same terminal chrome. `TerminalDisplayView` and `TerminalSnapshot` are
+upstream's verbatim. The `#if !OSAURUS_INTEL` gates around the terminal in
+`NativeToolCallGroupView` are gone, and upstream's
+`TerminalDisplayViewTests` run again. Upstream's subagent activity feed in
+the same card (`SubagentFeedRegistry`) stays out (`W-subagents`).
