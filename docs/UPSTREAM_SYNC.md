@@ -2829,3 +2829,45 @@ are gone).
 `merge-upstream-keys.py` (it only reads `Packages/OsaurusCore`). All 33 menu
 keys were checked by hand: 30 were already translated, and "Zoom In" / "Zoom
 Out" / "Actual Size" (untranslated upstream too) got de / zh-Hans.
+
+### Plugin secrets and load checks (`W-plugin-reliability` stage 1) — 2026-10-10
+
+Intel's plugin host is M9's slim `IntelPluginExecution` (x86_64 dylibs),
+not upstream's `ExternalPlugin` / `PluginHostAPI`, which are compiled out.
+Its config and key handling now follows upstream:
+
+- **Storage:** plugin config values live in `ToolSecretsKeychain`, per
+  agent. Until now they sat in a plaintext, agent-less JSON file
+  (`Tools/.intel-plugin-config.json`). `IntelPluginConfigMigration` moves
+  them into the Default agent's namespace at plugin load, and deletes the
+  file only after every value reads back.
+- **Resolution (upstream #2061):** `resolvedSecret` / `hasResolvedSecret`
+  (calling agent, then the Default agent's globals). Required-key checks
+  use them, with the #3057 memo.
+- **Host callbacks:** `config_get/set/delete` act on the calling chat's
+  agent. Without one they refuse (no Default-agent fallback), warn once,
+  and cap values at 1 MiB.
+- **Tool calls:** `_secrets` (not for the Default agent or anonymous calls)
+  and `_context.working_directory`, as in upstream's `ExternalTool`.
+- **UI:** upstream's `ToolSecretsSheet`, verbatim, replaces an "Apple
+  Silicon only" stub. Intel's Plugin Settings sheet now writes the same
+  Default-agent Keychain namespace, so both sheets and the "missing keys"
+  badge agree.
+- **Load checks (upstream #2061):** missing ABI functions are refused
+  before `init`. The manifest's `plugin_id` must match the install folder
+  (all five Intel registry plugins do), and tool ids must be non-empty and
+  unique.
+- **Agent delete** sweeps the agent's plugin keys (upstream). Intel serves
+  no plugin routes, so there is no webhook teardown to run first.
+
+Tests: `IntelPluginSecretsTests` (in-memory secret store; never the
+Keychain). Stage 2, `W-keychain-layer` and `W-gated-sweep` are on the
+backlog.
+
+**Found while doing it:**
+
+- **Intel's data root is `~/.osaurus`.** The `~/.osaurus-intel` split was
+  dropped by the 2026-06-08 sync `109d1e3e0`. See the correction in
+  `TEST_STORAGE_SAFETY.md`.
+- **86 wholly `#if !OSAURUS_INTEL` files and 48 `AppleSiliconOnlyTab`
+  placeholders** were never classified (`W-gated-sweep`).

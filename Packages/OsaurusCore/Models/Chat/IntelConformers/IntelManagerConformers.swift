@@ -484,6 +484,12 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // Drop the bridge's cached handle/queue so a later agent with the
         // same id can't re-attach to a stale connection.
         LocalAgentBridge.shared.forget(agentId: id)
+        // Upstream sweeps the agent's plugin secrets (`config_set` values,
+        // per-agent keys) so they don't sit in Keychain Access forever.
+        // Upstream first tears down routed plugins (webhook deregister);
+        // Intel's plugin host serves no routes, so there is nothing to tear
+        // down before the sweep.
+        ToolSecretsKeychain.deleteAllSecrets(forAgent: id)
         let url = OsaurusPaths.agents().appendingPathComponent("\(id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
         knowledgeGrants.removeValue(forKey: id)

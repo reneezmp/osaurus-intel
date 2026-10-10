@@ -1680,10 +1680,11 @@ public final class PluginManager: ObservableObject {
 
     /// Scans the plugin directory, checks capabilities, and loads compatible plugins.
     public func loadAll(forceReload: Bool = false) async {
-        // Intel data isolation: scan `~/.osaurus-intel/Tools` (NOT the
-        // production `~/.osaurus/Tools`). OsaurusPaths.root() resolves the
-        // Intel split automatically.
         let pluginsDir = OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
+
+        // Plugin config moved from a plaintext file to the Keychain
+        // (2026-10-10); move any values left in the old file first.
+        IntelPluginConfigMigration.runIfNeeded()
 
         // Reset bucket state and tear down any live handles before re-scanning,
         // so repeated calls don't duplicate entries or leak dlopen'd dylibs.

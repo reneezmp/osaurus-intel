@@ -3,8 +3,10 @@
 //  OsaurusCore — Intel fork
 //
 //  A minimal settings sheet for natively-loaded x86_64 plugins that declare
-//  config fields (manifest `secrets[]`). Values persist to the scoped plugin
-//  config store; saving calls the plugin's `on_config_changed` callback.
+//  config fields (manifest `secrets[]`). Values are the Plugins tab's global
+//  defaults: the Default agent's `ToolSecretsKeychain` namespace, the same
+//  place upstream's secrets sheet writes (until 2026-10-10 a plaintext file).
+//  Saving calls the plugin's `on_config_changed` callback.
 //
 
 #if OSAURUS_INTEL

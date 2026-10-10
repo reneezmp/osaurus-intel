@@ -100,7 +100,9 @@ public enum ToolSecretsKeychain {
 
     public static func hasSecret(id: String, for pluginId: String, agentId: UUID) -> Bool {
         let account = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
-        if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
+        if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests
+            || KeychainQueryHelpers.disablesKeychainForProcess
+        {
             return getSecret(id: id, for: pluginId, agentId: agentId) != nil
         }
         presenceLock.lock()
@@ -193,6 +195,32 @@ public enum ToolSecretsKeychain {
         resolvedSecretsMerging(pluginId: pluginId, primary: agentId, defaults: Agent.defaultId)
     }
 
+    /// THE single per-key resolution policy: exact agent namespace first,
+    /// then the `Agent.defaultId` namespace as the global-default fallback
+    /// (Plugins-tab writes land there). This is the per-key equivalent of
+    /// `resolvedSecretsWithDefaults` and must be used by every read path
+    /// that feeds plugins — `config_get`, initial config delivery, and
+    /// required-secret checks — so they can't disagree with tool payload
+    /// injection about whether a key is configured. (Upstream #2061.)
+    public static func resolvedSecret(id: String, for pluginId: String, agentId: UUID) -> String? {
+        if let exact = getSecret(id: id, for: pluginId, agentId: agentId) {
+            return exact
+        }
+        guard agentId != Agent.defaultId else { return nil }
+        return getSecret(id: id, for: pluginId, agentId: Agent.defaultId)
+    }
+
+    /// `resolvedSecret` presence check (exact agent, then default-agent
+    /// fallback). Goes through the memoized `hasSecret` rather than reading
+    /// the value: plugin cards call this on appear for every agent, and
+    /// uncached misses (the common case) cost up to three securityd
+    /// round-trips each, which froze scrolling the plugin grid. (#3057.)
+    public static func hasResolvedSecret(id: String, for pluginId: String, agentId: UUID) -> Bool {
+        if hasSecret(id: id, for: pluginId, agentId: agentId) { return true }
+        guard agentId != Agent.defaultId else { return false }
+        return hasSecret(id: id, for: pluginId, agentId: Agent.defaultId)
+    }
+
     /// Two-id merge primitive: `primary` agent's secrets overlaid on `defaults`.
     public static func resolvedSecretsMerging(pluginId: String, primary: UUID, defaults: UUID) -> [String: String] {
         let defaultDict = getAllSecrets(for: pluginId, agentId: defaults)
@@ -203,11 +231,15 @@ public enum ToolSecretsKeychain {
         return merged
     }
 
+    /// Required-secret check under the shared resolution policy: a key
+    /// satisfied by a Plugins-tab (default-agent) write counts as
+    /// configured for every agent, matching what tool payload injection
+    /// actually delivers via `resolvedSecretsWithDefaults`.
     public static func hasAllRequiredSecrets(specs: [PluginManifest.SecretSpec], for pluginId: String, agentId: UUID)
         -> Bool
     {
         for spec in specs where spec.required {
-            if !hasSecret(id: spec.id, for: pluginId, agentId: agentId) {
+            if !hasResolvedSecret(id: spec.id, for: pluginId, agentId: agentId) {
                 return false
             }
         }
@@ -220,7 +252,7 @@ public enum ToolSecretsKeychain {
         agentId: UUID
     ) -> [PluginManifest.SecretSpec] {
         return specs.filter { spec in
-            spec.required && !hasSecret(id: spec.id, for: pluginId, agentId: agentId)
+            spec.required && !hasResolvedSecret(id: spec.id, for: pluginId, agentId: agentId)
         }
     }
 

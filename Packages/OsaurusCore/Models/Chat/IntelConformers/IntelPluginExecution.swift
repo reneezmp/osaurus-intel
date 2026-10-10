@@ -301,32 +301,78 @@ private func intelDbQuery(pluginId: String, sql: String, paramsJSON: String?) ->
     return jsonStringSafe(["ok": true, "rows": rows])
 }
 
-// --- Config: a lock-guarded, file-backed key/value store. -------------------
-private let intelConfigLock = NSLock()
-private nonisolated(unsafe) var intelConfigStore: [String: String] = IntelPluginConfigStore.load()
+// --- Config: the plugin's per-agent Keychain namespace (upstream). ----------
+// Config values are credentials (manifest `secrets`), so they live in
+// `ToolSecretsKeychain` like upstream's `PluginHostAPI`, scoped per agent:
+// plugin calls read the calling chat's agent with the Default agent as the
+// global fallback (`resolvedSecret`, upstream #2061); the Plugins tab writes
+// the Default agent's namespace. Until 2026-10-10 Intel kept them in a
+// plaintext, agent-less JSON file (`Tools/.intel-plugin-config.json`) that
+// upstream's secrets sheet and the plugin cards never read;
+// `IntelPluginConfigMigration` moves that file into the Keychain once.
 
-private enum IntelPluginConfigStore {
-    static func fileURL() -> URL {
+/// Upstream `PluginHostAPI.configValueMaxBytes`: the Keychain is for
+/// credentials and small state, not blobs (plugins use `db_exec`).
+let intelPluginConfigValueMaxBytes = 1 * 1024 * 1024  // 1 MiB
+
+private let intelConfigWarnLock = NSLock()
+private nonisolated(unsafe) var intelConfigWarned: Set<String> = []
+
+/// Warn once per plugin + operation (upstream `warnNoAgentContextOnce` /
+/// `warnConfigValueTooLargeOnce`), so a misbehaving plugin can't flood the log.
+private func intelWarnConfigOnce(pluginId: String, op: String, _ message: String) {
+    intelConfigWarnLock.lock()
+    let first = intelConfigWarned.insert("\(pluginId)|\(op)").inserted
+    intelConfigWarnLock.unlock()
+    if first { intelPluginLog.warning("plugin \(pluginId, privacy: .public): \(message, privacy: .public)") }
+}
+
+enum IntelPluginConfigMigration {
+    static let separator = "\u{1}"
+
+    static func legacyFileURL() -> URL {
         OsaurusPaths.root()
             .appendingPathComponent("Tools", isDirectory: true)
             .appendingPathComponent(".intel-plugin-config.json")
     }
 
-    static func load() -> [String: String] {
-        guard let data = try? Data(contentsOf: fileURL()),
-              let dict = try? JSONDecoder().decode([String: String].self, from: data)
-        else { return [:] }
-        return dict
-    }
-
-    /// Caller must hold `intelConfigLock`.
-    static func persistLocked() {
-        let url = fileURL()
-        try? FileManager.default.createDirectory(
-            at: url.deletingLastPathComponent(), withIntermediateDirectories: true)
-        if let data = try? JSONEncoder().encode(intelConfigStore) {
-            try? data.write(to: url, options: .atomic)
+    /// Move every `pluginId<U+0001>key` value from the legacy plaintext file
+    /// into the Default agent's Keychain namespace (where the Plugins tab
+    /// writes). The file is deleted only after every value reads back from
+    /// the Keychain, so an interrupted or refused write never loses one;
+    /// it stays for the next launch otherwise. Returns how many moved.
+    @discardableResult
+    static func runIfNeeded() -> Int {
+        let url = legacyFileURL()
+        guard let data = try? Data(contentsOf: url) else { return 0 }
+        guard let stored = try? JSONDecoder().decode([String: String].self, from: data) else {
+            intelPluginLog.error("plugin config file unreadable; left in place")
+            return 0
         }
+        var moved = 0
+        var allMoved = true
+        for (scopedKey, value) in stored {
+            let parts = scopedKey.components(separatedBy: separator)
+            // `_shared` held values set outside any plugin call: no owner.
+            guard parts.count == 2, !parts[0].isEmpty, parts[0] != "_shared", !parts[1].isEmpty else { continue }
+            let (pluginId, key) = (parts[0], parts[1])
+            if ToolSecretsKeychain.getSecret(id: key, for: pluginId, agentId: Agent.defaultId) == value {
+                moved += 1
+                continue
+            }
+            ToolSecretsKeychain.saveSecret(value, id: key, for: pluginId, agentId: Agent.defaultId)
+            if ToolSecretsKeychain.getSecret(id: key, for: pluginId, agentId: Agent.defaultId) == value {
+                moved += 1
+            } else {
+                allMoved = false
+            }
+        }
+        if allMoved {
+            try? FileManager.default.removeItem(at: url)
+        } else {
+            intelPluginLog.error("plugin config: some values could not be stored in the Keychain; file kept")
+        }
+        return moved
     }
 }
 
@@ -473,49 +519,72 @@ private let intelHostLogStructured: osr_log_structured_t = { level, msgPtr, fiel
     intelPluginLog.log(level: level >= 3 ? .error : .info, "\(msg, privacy: .public) \(fields, privacy: .public)")
 }
 
-/// Namespace a config key by the calling plugin so one plugin's config never
-/// collides with another's (mirrors the real host's per-plugin scoping).
-private func intelScopedConfigKey(_ key: String) -> String {
-    "\(intelCurrentPluginId())\u{1}\(key)"
-}
-
-// Explicit-plugin config access (for the config UI / PluginManager — not the
-// thread-local trampoline path).
+// Explicit-plugin config access (the settings UI / PluginManager — not the
+// thread-local trampoline path): the Plugins tab's global defaults, i.e. the
+// Default agent's namespace, the same place upstream's secrets sheet writes.
 func intelPluginConfigGet(pluginId: String, key: String) -> String? {
-    intelConfigLock.lock(); defer { intelConfigLock.unlock() }
-    return intelConfigStore["\(pluginId)\u{1}\(key)"]
+    ToolSecretsKeychain.getSecret(id: key, for: pluginId, agentId: Agent.defaultId)
 }
 
 func intelPluginConfigSet(pluginId: String, key: String, value: String) {
-    intelConfigLock.lock()
-    intelConfigStore["\(pluginId)\u{1}\(key)"] = value
-    IntelPluginConfigStore.persistLocked()
-    intelConfigLock.unlock()
+    if value.isEmpty {
+        ToolSecretsKeychain.deleteSecret(id: key, for: pluginId, agentId: Agent.defaultId)
+    } else {
+        ToolSecretsKeychain.saveSecret(value, id: key, for: pluginId, agentId: Agent.defaultId)
+    }
+}
+
+// Upstream `PluginHostAPI.configGet/configSet/configDelete`. Anonymous calls
+// (no chat-bound agent, e.g. inside `on_config_changed`) must not fall back
+// to the Default agent's namespace: reads return nil, writes are dropped,
+// each with a one-time warning.
+func intelHostConfigGetValue(pluginId: String, agentId: UUID?, key: String) -> String? {
+    guard let agentId else {
+        intelWarnConfigOnce(pluginId: pluginId, op: "config_get", "config_get without an agent context")
+        return nil
+    }
+    return ToolSecretsKeychain.resolvedSecret(id: key, for: pluginId, agentId: agentId)
+}
+
+func intelHostConfigSetValue(pluginId: String, agentId: UUID?, key: String, value: String) {
+    if value.utf8.count > intelPluginConfigValueMaxBytes {
+        intelWarnConfigOnce(pluginId: pluginId, op: "config_set_size", "config_set value for '\(key)' over 1 MiB ignored")
+        return
+    }
+    guard let agentId else {
+        intelWarnConfigOnce(pluginId: pluginId, op: "config_set", "config_set without an agent context")
+        return
+    }
+    ToolSecretsKeychain.saveSecret(value, id: key, for: pluginId, agentId: agentId)
+}
+
+func intelHostConfigDeleteValue(pluginId: String, agentId: UUID?, key: String) {
+    guard let agentId else {
+        intelWarnConfigOnce(pluginId: pluginId, op: "config_delete", "config_delete without an agent context")
+        return
+    }
+    ToolSecretsKeychain.deleteSecret(id: key, for: pluginId, agentId: agentId)
 }
 
 private let intelHostConfigGet: osr_config_get_t = { keyPtr in
     guard let keyPtr else { return nil }
-    let key = intelScopedConfigKey(String(cString: keyPtr))
-    intelConfigLock.lock(); defer { intelConfigLock.unlock() }
-    guard let value = intelConfigStore[key] else { return nil }
+    guard let value = intelHostConfigGetValue(
+        pluginId: intelCurrentPluginId(), agentId: intelCurrentPluginAgentId(), key: String(cString: keyPtr))
+    else { return nil }
     return dupCString(value)
 }
 
 private let intelHostConfigSet: osr_config_set_t = { keyPtr, valuePtr in
     guard let keyPtr else { return }
-    let key = intelScopedConfigKey(String(cString: keyPtr))
-    let value = valuePtr.map { String(cString: $0) } ?? ""
-    intelConfigLock.lock(); defer { intelConfigLock.unlock() }
-    intelConfigStore[key] = value
-    IntelPluginConfigStore.persistLocked()
+    intelHostConfigSetValue(
+        pluginId: intelCurrentPluginId(), agentId: intelCurrentPluginAgentId(),
+        key: String(cString: keyPtr), value: valuePtr.map { String(cString: $0) } ?? "")
 }
 
 private let intelHostConfigDelete: osr_config_delete_t = { keyPtr in
     guard let keyPtr else { return }
-    let key = intelScopedConfigKey(String(cString: keyPtr))
-    intelConfigLock.lock(); defer { intelConfigLock.unlock() }
-    intelConfigStore[key] = nil
-    IntelPluginConfigStore.persistLocked()
+    intelHostConfigDeleteValue(
+        pluginId: intelCurrentPluginId(), agentId: intelCurrentPluginAgentId(), key: String(cString: keyPtr))
 }
 
 private let intelHostFileRead: osr_file_read_t = { pathPtr in
@@ -847,6 +916,16 @@ enum IntelPluginLoader {
 
         let api = apiRaw.assumingMemoryBound(to: osr_plugin_api.self).pointee
 
+        // Reject incomplete ABI tables BEFORE calling init (upstream #2061): a
+        // nil `free_string` leaks every returned string, a nil `destroy`
+        // makes teardown impossible, a nil `invoke` yields tools that can
+        // never run.
+        if let abiError = abiTableValidationFailure(api) {
+            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
+            dlclose(handle)
+            return .failure(IntelPluginLoadError(message: abiError))
+        }
+
         guard let initFn = api.`init`, let ctx = initFn() else {
             hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
@@ -861,6 +940,16 @@ enum IntelPluginLoader {
         }
         let manifestJSON = String(cString: jsonPtr)
         api.free_string?(jsonPtr)
+
+        // Upstream #2061: the manifest's `plugin_id` must be the id it is
+        // installed (and its secrets stored) under, and tool ids must be
+        // non-empty and unique (duplicates silently overwrite each other).
+        if let manifestError = manifestValidationFailure(manifestJSON: manifestJSON, directoryId: pluginId) {
+            api.destroy?(ctx)
+            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
+            dlclose(handle)
+            return .failure(IntelPluginLoadError(message: manifestError))
+        }
 
         let toolSpecs = Self.parseToolSpecs(fromManifestJSON: manifestJSON)
         let instructions = Self.parseInstructions(fromManifestJSON: manifestJSON)
@@ -913,6 +1002,39 @@ enum IntelPluginLoader {
 
     /// Decodable shapes for pulling tool specs + instructions + config out of
     /// the manifest.
+    /// Upstream `PluginManager.abiTableValidationFailure`.
+    static func abiTableValidationFailure(_ api: osr_plugin_api) -> String? {
+        var missing: [String] = []
+        if api.free_string == nil { missing.append("free_string") }
+        if api.`init` == nil { missing.append("init") }
+        if api.destroy == nil { missing.append("destroy") }
+        if api.get_manifest == nil { missing.append("get_manifest") }
+        if api.invoke == nil { missing.append("invoke") }
+        guard !missing.isEmpty else { return nil }
+        return "Plugin ABI table is missing required function(s): \(missing.joined(separator: ", "))"
+    }
+
+    /// Upstream `manifestIdentityValidationFailure` +
+    /// `manifestCapabilityValidationFailure` (tools; Intel serves no routes).
+    /// A manifest without `plugin_id` is accepted, as before: the id then
+    /// comes from the install directory.
+    static func manifestValidationFailure(manifestJSON: String, directoryId: String) -> String? {
+        guard let data = manifestJSON.data(using: .utf8),
+              let decoded = try? JSONDecoder().decode(ManifestTools.self, from: data)
+        else { return nil }
+        if let declared = decoded.plugin_id, declared != directoryId {
+            return "Plugin manifest declares plugin_id '\(declared)' but is installed as '\(directoryId)'. "
+                + "Reinstall the plugin under its canonical ID."
+        }
+        var seen = Set<String>()
+        for tool in decoded.capabilities?.tools ?? [] {
+            let id = tool.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            if id.isEmpty { return "Plugin \(directoryId) declares a tool with an empty id" }
+            if !seen.insert(id).inserted { return "Plugin \(directoryId) declares duplicate tool id '\(id)'" }
+        }
+        return nil
+    }
+
     private struct ManifestTools: Decodable {
         struct Caps: Decodable { let tools: [ToolDef]? }
         struct ToolDef: Decodable {
@@ -928,6 +1050,7 @@ enum IntelPluginLoader {
             let url: String?
             let secret: Bool?
         }
+        let plugin_id: String?
         let capabilities: Caps?
         let instructions: String?
         let name: String?
@@ -1015,10 +1138,13 @@ struct IntelPluginTool: OsaurusTool {
                 tool: toolName
             )
         }
-        let payload = argumentsJSON.isEmpty ? "{}" : argumentsJSON
         // Task-locals don't cross the GCD hop: capture the calling chat's
         // agent here so a plugin `dispatch` runs as it (upstream).
         let agentId = ChatExecutionContext.currentAgentId
+        let payload = Self.injectFolderContext(
+            into: Self.injectSecrets(
+                into: argumentsJSON.isEmpty ? "{}" : argumentsJSON, pluginId: pid, agentId: agentId),
+            folderRoot: ChatExecutionContext.currentFolderRoot)
         return try await withCheckedThrowingContinuation { cont in
             DispatchQueue.global(qos: .userInitiated).async {
                 do {
@@ -1032,6 +1158,37 @@ struct IntelPluginTool: OsaurusTool {
                 }
             }
         }
+    }
+
+    /// Upstream `ExternalTool.injectSecrets`: the plugin's secrets (calling
+    /// agent's, over the Default agent's globals) under `_secrets`. No agent,
+    /// or the Default agent itself, means an anonymous call: the payload is
+    /// left unchanged rather than leaking the built-in agent's namespace
+    /// (such plugins read keys through `config_get`).
+    static func injectSecrets(into payload: String, pluginId: String, agentId: UUID?) -> String {
+        guard let agentId, agentId != Agent.defaultId else { return payload }
+        let secrets = ToolSecretsKeychain.resolvedSecretsWithDefaults(pluginId: pluginId, agentId: agentId)
+        guard !secrets.isEmpty else { return payload }
+        return merging(["_secrets": secrets], into: payload)
+    }
+
+    /// Upstream `ExternalTool.injectFolderContext`: the executing chat's
+    /// working folder under `_context.working_directory`.
+    static func injectFolderContext(into payload: String, folderRoot: URL?) -> String {
+        guard let folderRoot else { return payload }
+        return merging(["_context": ["working_directory": folderRoot.path]], into: payload)
+    }
+
+    /// Adds `fields` to a JSON-object payload; any other payload is returned as is.
+    private static func merging(_ fields: [String: Any], into payload: String) -> String {
+        guard let data = payload.data(using: .utf8),
+              var dict = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any]
+        else { return payload }
+        for (key, value) in fields { dict[key] = value }
+        guard let out = try? JSONSerialization.data(withJSONObject: dict),
+              let string = String(data: out, encoding: .utf8)
+        else { return payload }
+        return string
     }
 }
 

@@ -58,3 +58,13 @@ upstream's `ThemeMenuItems`. Upstream moved on meanwhile: #3056 (`shell_run`
 login-shell PATH) and #3059 (Qwen image bundles) are for the next audit,
 which starts after `ec654e8c5`.
 
+## Correction (2026-10-10)
+
+"Plugin stack drift" above was partly wrong. `ExternalPlugin.swift` and the
+first half of `PluginManager.swift` are wholly `#if !OSAURUS_INTEL`; Intel's
+live plugin host is M9's `IntelPluginExecution`. Tool calls did **not** merge
+Default-agent secrets: Intel injected no secrets at all, kept config in a
+plaintext file, and stubbed upstream's secrets sheet. Fixed in
+`W-plugin-reliability` stage 1. The method gap is wider than stated, too:
+86 wholly gated files are invisible to the sweep (`W-gated-sweep`).
+

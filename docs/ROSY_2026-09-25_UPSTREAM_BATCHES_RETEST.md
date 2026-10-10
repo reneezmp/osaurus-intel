@@ -1481,3 +1481,17 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
       "Osaurus (Intel)".
 - [ ] Menus in German and Chinese show translated labels, including the zoom items.
 
+## Plugin keys and load checks (2026-10-10)
+
+- [ ] If Plugin Settings had values before this build: after updating, open
+      Plugin Settings. The values are still there, and the plugin still
+      works.
+- [ ] Settings › Plugins: on a plugin that needs a key, "Configure"
+      opens a real form (not an "Apple Silicon" placeholder). Save a key:
+      the card's warning badge goes away, and Plugin Settings shows the
+      same value.
+- [ ] The Intel registry plugins (time, fetch, memo, hello) still install
+      and run from a chat.
+- [ ] Delete a test agent that used a plugin: nothing breaks, and other
+      agents' plugins still work.
+

@@ -130,8 +130,21 @@ and, while it runs, re-downloads its plugin catalog into
 plus writes `.storage-maintenance.json`. A `find ~/.osaurus -newer <marker>`
 hit on those paths is that app, not a test: confirm with `ps -o lstart= -p
 $(pgrep -f /Applications/osaurus.app)` and the test log (no PluginSpecs
-mention). Intel code under test writes only to the test root; outside tests
-its live root is `~/.osaurus-intel`. Any other hit is still a failed run.
+mention). Intel code under test writes only to the test root. Any other hit
+is still a failed run.
+
+**Correction (2026-10-10): Intel's live root is `~/.osaurus`, not
+`~/.osaurus-intel`.** The `~/.osaurus-intel` split (`62aec8881`, M11) and
+its Info.plist opt-out for Rosy's builds (`02c0871d4`, M7) were dropped from
+`OsaurusPaths` by the 2026-06-08 sync port `109d1e3e0`. Nothing has put
+them back since. So **an Intel build launched on the dev Mac reads and
+writes the same `~/.osaurus` as the upstream app.** Don't launch Intel
+builds here (the Xcode build check only compiles) until Renée decides
+whether to restore the split. Restoring it also needs the Rosy opt-out, or
+Rosy's data would move. Stale `~/.osaurus-intel` comments remain in
+`AppDelegate`, `IntelManagerConformers`, `IntelPluginExecution` and
+`PluginsView`. The `find ~/.osaurus ~/.osaurus-intel` check is still right;
+the second path simply doesn't exist.
 
 **Also from that app (2026-10-06):** upstream 0.25.x keeps its activity log
 and memory database open, so `~/.osaurus/activity/{activity.sqlite,
