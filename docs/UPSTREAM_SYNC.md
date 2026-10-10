@@ -3441,3 +3441,74 @@ back (the file is upstream's verbatim). The i18n missing-key count drops
 from 154 to 125, because upstream's keys for these files were merged.
 `CreditsView` drift is a separate item (`W-credits-ui-sync`).
 
+### Credits at upstream (`W-credits-ui-sync`) — 2026-10-10
+
+Intel's Credits page was upstream's June version plus hand-ported gates
+(C1–C3). It and the Router services are now upstream's, file by file.
+
+**Upstream verbatim:**
+
+- **Services:** `OsaurusRouterAuthSigner`, `RouterBillingLedger`,
+  `RedeemCodeService`, `RouterAccountUsageCenter`, `OsaurusRouterSearchBackend`.
+- **Views:** `CreditsRedeemCodeCard` (themed button), `RedeemRetryCountdownHint`,
+  `Views/Router/RouterAccountUsageCenterView` (single-value `onChange`, themed
+  buttons) and its view model.
+- **New files:** `WelcomeCreditDeviceID`, `RouterCreditAcquisitionCoordinator`,
+  `LocalCreditsBalance`, `WalletActivityProjector`, `OsaurusRouterIDTypes`,
+  `OsaurusRouterWorkspaceTypes`.
+- **Removed:** Intel's own `Views/Credits/RouterAccountUsageCenterView` and
+  `OsaurusRouterRedeemTests`; upstream's view and `RedeemCodeServiceTests`
+  replace them.
+
+**Upstream with Intel edits (keep on re-sync):**
+
+- `OsaurusRouterAPIClient`:
+  - the idempotency key is sent as a header on `/v1/search` and
+    `/v1/contents`;
+  - no Osaurus ID session store yet;
+  - workspace sync, attestation and cloud media sit under
+    `#if !OSAURUS_INTEL`.
+- `OsaurusRouterTypes`: upstream's file plus an Intel extension at the end:
+  - an injectable Router switch for tests;
+  - `parseMicroUSD` with the 2^63 fix;
+  - the `OsaurusRouterModel` picker helpers.
+- `OsaurusRouterAccountService`:
+  - only `paid` web charges lower the balance;
+  - no synthesized settings with auto-pay on.
+- `CreditsTopUpSheet`: `<`, not `<=`. `Double(Int.max)` is 2^63, which traps
+  in `Int(_:)`.
+- `CreditsView`:
+  - single-value `onChange`, themed buttons and the `stethoscope` symbol;
+  - a click-only `CreditsWelcomeClaimCard`;
+  - no `localAPISpendFooter`;
+  - chats open through `ChatSessionsManager` + `openSessionAsTab`.
+- `WelcomeCreditService`: `observesNotifications` defaults to false.
+- `AnnouncementsService` keeps Intel's labelled feed.
+- `StorageKeyManager.isStorageReadyForWrites` is `hasCachedKey` (Intel is
+  always encrypted).
+- Stubs:
+  - `FeatureTelemetry`: no-op (`W-diagnostics-telemetry`);
+  - `WorkspacesService.noteWorkspaceBilled`;
+  - `WorkspacesDeepLinkRouter.normalized`.
+- The Settings search titles "Wallet" and "Web search" follow upstream's
+  cards.
+
+**Found in passing:** upstream's top-up amount guard (`<=
+Double(Int.max)`) admits exactly 2^63 micro-USD and then crashes on
+`Int(_:)`. Intel's own `parseMicroUSD` had the same bug. Both now use `<`,
+and a test pins the 2^63 case.
+
+Tests:
+
+- **Upstream's:** Router, credits, ledger and billing-database tests, the
+  welcome / coordinator / redeem services, and the activity and wallet
+  projectors.
+- **Kept as Intel's:** `AnnouncementsServiceTests` (Intel sends no app
+  version) and `RouterCacheTelemetryDecodingTests` (it uses excluded engine
+  types). Intel's cached-input check now reads upstream's `creditsSummary`.
+- **Cut:** `LocalCreditsBalanceTests` drops its two key-scoping cases
+  (`W-server-api`).
+
+i18n: upstream keys merged, plus hand translations for the welcome card. The
+missing-key count is 115.
+

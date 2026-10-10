@@ -340,13 +340,13 @@ public enum SettingsSearchIndex {
             id: "themes.create", tab: .themes, title: "Create Theme",
             keywords: ["custom theme", "theme editor", "new theme"]),
         .init(
-            id: "credits.balance", tab: .credits, title: "Credit balance",
+            id: "credits.balance", tab: .credits, title: "Wallet",
             keywords: ["credits", "wallet", "top up", "add credits", "billing"]),
         .init(
             id: "credits.router", tab: .credits, title: "Osaurus Router",
             keywords: ["router", "hosted models", "turn off router"]),
         .init(
-            id: "credits.premiumSearch", tab: .credits, title: "Premium web search",
+            id: "credits.premiumSearch", tab: .credits, title: "Web search",
             keywords: ["premium search", "search credits", "wallet"]),
         .init(
             id: "credits.activity", tab: .credits, title: "Recent activity",

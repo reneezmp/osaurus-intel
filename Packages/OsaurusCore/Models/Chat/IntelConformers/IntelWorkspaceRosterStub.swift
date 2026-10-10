@@ -56,10 +56,39 @@ final class WorkspaceRosterStore: ObservableObject {
     func endObserving() {}
 }
 
-enum OsaurusRouterWorkspacePerson {
-    /// Upstream `OsaurusRouterWorkspacePerson.shortWallet`.
-    static func shortWallet(_ address: String) -> String {
-        guard address.count > 12 else { return address }
-        return "\(address.prefix(6))…\(address.suffix(4))"
+// `OsaurusRouterWorkspacePerson` is upstream's (OsaurusRouterWorkspaceTypes.swift,
+// ported 2026-10-10 with W-credits-ui-sync).
+
+/// Intel stub: no workspaces yet (`W-workspaces-identity-mobile`). A Router
+/// summary billed to a workspace pool can't happen without one, so upstream's
+/// "refresh that pool's ledger" hook has nothing to do.
+@MainActor
+final class WorkspacesService {
+    static let shared = WorkspacesService()
+    func noteWorkspaceBilled(workspaceId: String) {}
+}
+
+/// Intel stub: upstream's KPI telemetry is not ported
+/// (`W-diagnostics-telemetry`: upstream sends to its own Aptabase keys).
+enum FeatureTelemetry {
+    static func balanceTopUpInitiated() {}
+    static func balanceTopUpSucceeded() {}
+}
+
+/// Intel stub: only upstream's `normalized(_:)` (verbatim), which the ported
+/// workspace invite type decodes through. The rest of
+/// `WorkspacesDeepLinkRouter` (the `osaurus://workspaces/...` handler) comes
+/// with `W-workspaces-identity-mobile`; drop this stub then.
+enum WorkspacesDeepLinkRouter {
+    nonisolated static let host = "workspaces"
+    nonisolated static let legacyHost = "teams"
+
+    /// Rewrites a legacy `osaurus://teams/...` link to the current host so
+    /// links the router still mints under the old name are displayed and
+    /// copied in the new form. Anything else is returned untouched.
+    nonisolated static func normalized(_ link: String) -> String {
+        let prefix = "osaurus://\(legacyHost)/"
+        guard link.lowercased().hasPrefix(prefix) else { return link }
+        return "osaurus://\(host)/" + link.dropFirst(prefix.count)
     }
 }

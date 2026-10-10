@@ -111,6 +111,29 @@ than following the redirect itself. The Intel client still blocks direct and
 DNS-resolved private targets before disclosure and its local fallback rejects
 unsafe redirects.
 
+## 2026-10-10 — Credits at upstream (`W-credits-ui-sync`)
+
+The Credits page, redeem card, top-up sheet, usage center and the Router
+services are now upstream's current files, with the boundaries above kept as
+small Intel edits (listed in `UPSTREAM_SYNC.md`, "Credits at upstream").
+
+**Welcome credit: click-only (Renée's decision, 2026-10-10).** Upstream claims
+the Router's one-time welcome credit automatically (launch, app activation,
+identity setup), sending a salted SHA-256 of the Mac's hardware UUID. On Intel
+nothing is sent until the user presses Claim on the Credits card
+(`CreditsWelcomeClaimCard`), which says what is sent. `WelcomeCreditService`
+observes no notifications by default, `bootstrapAtLaunch` and
+`selectForFirstLaunch` have no callers, and the first-action coordinator is
+never prepared, so it gates nothing. If onboarding ever gains upstream's
+code-or-welcome choice, revisit this.
+
+**Other boundaries kept:** Premium stays consent-only; wallet auto-pay is the
+server's setting and is never shown as on before the server says so; only
+`paid` web charges lower the displayed balance; the idempotency key rides in
+both the signed body and the header; amounts at 2^63 micro-USD are rejected
+(`<`, where upstream's `<=` traps); the key-less loopback spend opt-in is
+hidden because Intel's local API never routes to the Router.
+
 ## Maintenance rule
 
 Whenever implementation, testing, Rosy, or an upstream audit reveals an

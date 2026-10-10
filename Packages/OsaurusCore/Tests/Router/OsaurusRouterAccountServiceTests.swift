@@ -105,7 +105,7 @@ struct OsaurusRouterAccountServiceTests {
     private func summary(costMicro: String) -> OsaurusRouterSummaryEvent.Summary {
         OsaurusRouterSummaryEvent.Summary(
             requestId: "req-1", costMicro: costMicro, status: "ok", tokenSource: "provider",
-            inputTokens: 10, outputTokens: 5)  // Intel: no `billedTo` (workspaces)
+            inputTokens: 10, outputTokens: 5, billedTo: nil)
     }
 
     // MARK: - Activation

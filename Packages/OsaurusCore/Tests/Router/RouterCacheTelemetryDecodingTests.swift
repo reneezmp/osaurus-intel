@@ -304,8 +304,9 @@ struct IntelPromptCacheRoutingTests {
                 costMicro: "10", status: "completed", tokenSource: "provider",
                 createdAt: "2026-09-25T00:00:00Z"),
         ]
-        let snapshot = RouterAccountUsageCenter.snapshot(usage: rows, transactions: [])
-        #expect(snapshot.inputTokens == 1_500)
-        #expect(snapshot.cachedInputTokens == 800)
+        // Upstream's usage center (W-credits-ui-sync, 2026-10-10).
+        let summary = RouterAccountUsageCenter.creditsSummary(rows)
+        #expect(summary.inputTokens == 1_500)
+        #expect(summary.cachedInputTokens == 800)
     }
 }

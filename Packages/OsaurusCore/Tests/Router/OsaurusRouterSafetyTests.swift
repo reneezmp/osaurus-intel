@@ -26,5 +26,9 @@ struct OsaurusRouterSafetyTests {
         #expect(OsaurusRouter.parseMicroUSD("-1") == nil)
         #expect(OsaurusRouter.parseMicroUSD("nan") == nil)
         #expect(OsaurusRouter.parseMicroUSD("1e100") == nil)
+        // 2^63 micro-USD: `Double(Int.max)` itself. Upstream's `<=` guard let
+        // it through to a trapping `Int(_:)` (Intel fix, 2026-10-10).
+        #expect(OsaurusRouter.parseMicroUSD("9223372036854.775808") == nil)
+        #expect(OsaurusRouter.parseMicroUSD("9223372036854") != nil)  // just below 2^63
     }
 }

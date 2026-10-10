@@ -141,6 +141,11 @@ public final class StorageKeyManager: @unchecked Sendable {
         return cached
     }
 
+    /// Upstream: true when storage can be written without risking a Keychain
+    /// prompt. Intel's storage is always encrypted (no plaintext posture), so
+    /// this is `hasCachedKey`.
+    public var isStorageReadyForWrites: Bool { hasCachedKey }
+
     /// Populate the in-process key cache before storage database queues start
     /// opening. This keeps later `currentKey()` calls off the slow Keychain path.
     public func prewarmCurrentKey() throws {

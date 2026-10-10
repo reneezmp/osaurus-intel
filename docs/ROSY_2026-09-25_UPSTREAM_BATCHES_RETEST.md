@@ -1651,3 +1651,19 @@ Providers). Before this build, these three could list models but not chat.
       says the page could not be read instead of retrying the same URL.
 - [ ] If you use Tavily, Kagi or You.com keys: Try It still works with them.
 
+## Credits at upstream (2026-10-10)
+
+- [ ] Settings › Credits opens; the wallet balance shows in credits, with
+      Recent activity below it.
+- [ ] A "Welcome credit" card is shown. Nothing is claimed until you press
+      Claim. If the Router refuses (not a new account), the card disappears.
+- [ ] Redeem a code if you have one: the countdown hint appears after a
+      rate-limit, and success refreshes the balance.
+- [ ] The Web search card: the Premium search toggle stays off until you turn
+      it on; wallet auto-pay is a separate toggle.
+- [ ] Top up: the sheet opens Checkout; an absurd amount (e.g.
+      9999999999999) is refused, not a crash.
+- [ ] Turn the Router off and on from the footer: the off card appears, then
+      the balance comes back.
+- [ ] Click a chat link on an activity row: the chat opens as a tab.
+

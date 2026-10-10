@@ -157,6 +157,8 @@ struct CreditsTopUpSheet: View {
                 .fixedSize(horizontal: false, vertical: true)
         } else if isValid, let micro = currentMicro {
             Label {
+                // The purchase itself is in dollars (Stripe), so the credits
+                // the user receives are shown next to the $ amount they pay.
                 Text(
                     "You'll add \(OsaurusRouter.formatMicroAsCredits(String(micro))) (\(OsaurusRouter.formatMicroUSD(String(micro))))",
                     bundle: .module
@@ -275,7 +277,15 @@ struct CreditsTopUpSheet: View {
     /// Parse the amount field as a dollar amount into micro-USD. Tolerates a
     /// leading "$". Returns nil when empty or not a positive number.
     private var currentMicro: Int? {
-        OsaurusRouter.parseMicroUSD(amountTrimmed)
+        let trimmed = amountTrimmed
+        guard !trimmed.isEmpty else { return nil }
+        let cleaned = trimmed.hasPrefix("$") ? String(trimmed.dropFirst()) : trimmed
+        guard let dollars = Double(cleaned), dollars.isFinite, dollars > 0 else { return nil }
+        let micro = (dollars * 1_000_000).rounded()
+        // Intel: `<`, not upstream's `<=`. `Double(Int.max)` rounds up to
+        // 2^63, which passes `<=` and then traps in `Int(_:)`.
+        guard micro < Double(Int.max) else { return nil }
+        return Int(micro)
     }
 
     private var isValid: Bool {
@@ -302,7 +312,10 @@ struct CreditsTopUpSheet: View {
             // so the user can see why and retry.
             return
         }
-        NSWorkspace.shared.open(url)
+        // Launching the browser blocks on an XPC round-trip to LaunchServices
+        // that can stall for seconds, so hand the URL off the main actor. The
+        // sheet dismisses immediately; the open completes in the background.
+        Task.detached { NSWorkspace.shared.open(url) }
         dismiss()
     }
 }
