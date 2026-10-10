@@ -4,10 +4,39 @@
 //
 
 import Foundation
+import os
 
 /// Disk-backed resolver for the global proxy endpoint that can be used from
 /// background services without crossing the `@MainActor` settings store.
 public enum GlobalProxySettings {
+    private struct SharedSessionState {
+        let proxyKey: String
+        let session: URLSession
+    }
+
+    /// Cached one-shot session + the proxy key it was built for. Guarded so
+    /// concurrent callers can't race two sessions into the box.
+    private static let sharedSessionBox = OSAllocatedUnfairLock<SharedSessionState?>(initialState: nil)
+
+    /// A process-wide `URLSession` for one-shot request/response calls
+    /// (upstream). Reusing one session avoids leaking a fresh, never
+    /// invalidated `URLSession` per call; it is rebuilt (and the old one
+    /// drained) only when the global proxy endpoint changes. Only for
+    /// delegate-less, transient work. On Intel only `MarkdownImageView` uses
+    /// it so far; other `makeSession().data(…)` callers still build their own.
+    public static func sharedSession() -> URLSession {
+        let key = currentProxyCacheKey()
+        return sharedSessionBox.withLock { state in
+            if let state, state.proxyKey == key {
+                return state.session
+            }
+            state?.session.finishTasksAndInvalidate()
+            let session = makeSession()
+            state = SharedSessionState(proxyKey: key, session: session)
+            return session
+        }
+    }
+
     /// Read the persisted server configuration and return the validated proxy
     /// endpoint. Invalid or missing values fail closed to normal networking so
     /// a stale config file cannot break all outbound traffic.

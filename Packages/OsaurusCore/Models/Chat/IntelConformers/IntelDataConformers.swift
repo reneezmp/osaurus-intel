@@ -761,23 +761,9 @@ final class ChatConfigurationStore: @unchecked Sendable {
 // indexing pieces inside it are gated separately; the picker + tool wiring are
 // pure AppKit/Foundation. The old no-op Intel stub that lived here is removed.
 
-struct ImageFullScreenView: View { var image: Any? = nil; var altText: String = ""; var body: some View { EmptyView() } }
-
-extension View {
-    func imageFullScreenSheetPresentation() -> some View {
-        // NOTE: macOS 15's `.presentationSizing(.fitted)` was dropped for
-        // Ventura/Sonoma compatibility; the ideal frame below sizes the sheet
-        // sensibly on all supported OSes.
-        frame(
-            minWidth: 320,
-            idealWidth: 960,
-            maxWidth: .infinity,
-            minHeight: 240,
-            idealHeight: 720,
-            maxHeight: .infinity
-        )
-    }
-}
+// `ImageFullScreenView` and `imageFullScreenSheetPresentation()` are
+// upstream's, in Views/Chat/MarkdownImageView.swift (W-gated-sweep,
+// 2026-10-10). The empty stub that lived here left image previews blank.
 
 final class MemoryContextAssembler: @unchecked Sendable {
     static let shared = MemoryContextAssembler()

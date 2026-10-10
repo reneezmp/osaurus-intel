@@ -166,6 +166,23 @@ After the run:
   passed.
 - Rebuild only after the storage checks pass, so the delivered app and the test
   evidence refer to the same commit.
+- **Time-box any live hit (2026-10-10).** `swift test` compiles for minutes
+  before any test code runs, and the upstream app keeps writing meanwhile.
+  So record when tests start (the "Test run started" line) and end, and
+  print each hit's mtime. A hit outside that window cannot be a test. Pipe
+  the run through a loop that writes `date +%H:%M:%S` when it sees
+  "Test run started", and print `stat -f %Sm -t %H:%M:%S` for each
+  `find` hit. A hit inside the window is a failed run until proven
+  otherwise.
+
+  Seen on 2026-10-10, both outside the test window (during the 300 s
+  compile) while the upstream app was running:
+  - `~/.osaurus/config/chat.json` at 09:20:38 (tests ran about
+    09:25:24–09:26:04). Its contents were Renée's real settings in
+    upstream's format.
+  - `~/.osaurus/memory/memory.sqlite` at 09:33:45 (tests ran
+    09:36:37–09:37:13), a checkpoint of the database the upstream app holds
+    open.
 
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`

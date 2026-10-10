@@ -1495,3 +1495,12 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
 - [ ] Delete a test agent that used a plugin: nothing breaks, and other
       agents' plugins still work.
 
+## Placeholder fixes (2026-10-10)
+
+- [ ] Settings › Agents › reorder agents: a list you can drag opens (no
+      "Apple Silicon" placeholder). The new order sticks after closing.
+- [ ] In a chat, click an image you attached: it opens large and you can
+      zoom; Esc or the close button dismisses it.
+- [ ] A plugin README with an image shows the image. Hovering shows a
+      download button.
+

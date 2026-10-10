@@ -726,6 +726,9 @@ git fetch upstream
 # Only NEW commits since last sync — never reparse old ones
 git log d132b728..upstream/main --oneline
 # Classify → PORT/SKIP/MIRROR → cherry-pick/ignore → update this ledger
+# Then check nothing new slipped past the gap scripts (both must exit 0):
+python3 scripts/upstream/classify_gap.py
+python3 scripts/upstream/classify_gated.py
 # When done:
 #   1. update the "Last synced upstream commit" hash + "Upstream version era" above
 #   2. update IntelBuildInfo.swift (upstreamBase + upstreamCommit) to match
@@ -2871,3 +2874,51 @@ backlog.
   `TEST_STORAGE_SAFETY.md`.
 - **86 wholly `#if !OSAURUS_INTEL` files and 48 `AppleSiliconOnlyTab`
   placeholders** were never classified (`W-gated-sweep`).
+
+### Gated files sweep (`W-gated-sweep`) — 2026-10-10
+
+The 2026-09-29 sweep (`classify_gap.py`) only lists upstream files Intel
+doesn't compile. It cannot see three things, now covered by
+`scripts/upstream/classify_gated.py` (shared table:
+`scripts/upstream/gap_features.py`):
+
+- compiled files that are wholly `#if !OSAURUS_INTEL`;
+- files that render `AppleSiliconOnlyTab` placeholders;
+- upstream App-target files (`App/osaurus/…`) Intel lacks.
+
+87 entries, all assigned:
+
+| Group | Count |
+|---|---|
+| Intel's own replacement | 13 |
+| Apple Silicon only (MLX, containers) | 25 |
+| Needs work (existing or new backlog items) | 30 |
+| Deleted upstream in redesigns; Intel leftovers | 18 |
+| Dev tooling | 1 |
+
+**Wrong placeholders fixed, with upstream's files:**
+
+- **Agent reorder sheet:** Intel's `AgentManager` already had `reorder`.
+- **`MarkdownImageView`:** images in Markdown, as rendered in plugin
+  READMEs. Its `ImageFullScreenView` replaces an empty Intel stub, so
+  clicking an attached image in chat opened a blank sheet until now.
+  `presentationSizing` is guarded for macOS 13.
+- **`GlobalProxySettings.sharedSession()`:** upstream's leak-free one-shot
+  session. So far only image loading uses it on Intel.
+- **Tests:** upstream's `MarkdownRemoteImageGlobalProxyTests`.
+- **Ventura adaptations** (caught by `IntelVenturaControlGuardTests`): the
+  reorder sheet's Done button uses `ThemedBorderedButtonStyle`, and the image
+  error icon is `exclamationmark.triangle` (`photo.badge.exclamationmark` is
+  macOS 14+).
+
+**New gaps:**
+
+- `W-app-intents`: Shortcuts and Siri, removed in sync row 41 and never
+  tracked.
+- Inline `shell_run` terminal (`W-chat-ux`).
+- Theme sharing and import by id (`W-ui-misc`).
+- Next Run panel (`W-agent-detail-redesign`).
+- Default-agent addendum (`W-declarative-config`).
+
+The gap script also caught three new upstream files: channel activity
+logging, SSD model residency and picker previews.

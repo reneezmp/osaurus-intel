@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  MarkdownImageView.swift
 //  osaurus
@@ -145,6 +144,7 @@ struct MarkdownImageView: View {
 
     private func errorView(_ error: Error) -> some View {
         VStack(spacing: 12) {
+            // Intel: `photo.badge.exclamationmark` is macOS 14+ (blank on 13).
             Image(systemName: "exclamationmark.triangle")
                 .font(.system(size: 32, weight: .light))
                 .foregroundColor(theme.tertiaryText)
@@ -261,7 +261,7 @@ enum ImageLoader {
     }
 
     static func makeRemoteImageSession() -> URLSession {
-        GlobalProxySettings.makeSession()
+        GlobalProxySettings.sharedSession()
     }
 }
 
@@ -347,18 +347,193 @@ enum ImageActions {
 
         panel.begin { response in
             guard response == .OK, let url = panel.url,
-                let tiffData = image.tiffRepresentation,
-                let bitmap = NSBitmapImageRep(data: tiffData),
-                let pngData = bitmap.representation(using: .png, properties: [:])
+                let tiffData = image.tiffRepresentation
             else { return }
-            try? pngData.write(to: url)
+            // Encode + write off the main thread so the disk I/O never blocks
+            // the UI, then surface a "Reveal in Finder" toast on success.
+            Task { @MainActor in
+                let saved = await encodeAndWritePNG(tiff: tiffData, to: url)
+                guard saved else {
+                    NSSound.beep()
+                    return
+                }
+                ToastManager.shared.action(
+                    L("Image saved"),
+                    message: url.lastPathComponent,
+                    action: .revealInFinder(url),
+                    buttonTitle: L("Reveal in Finder")
+                )
+            }
         }
     }
 
     static func copyImageToClipboard(_ image: NSImage) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        pasteboard.writeObjects([image])
+        // Pull the (cheap) Sendable TIFF on the main actor, then hand it to a
+        // detached task so the pasteboard serialization never blocks the UI.
+        let tiff = image.tiffRepresentation
+        Task.detached(priority: .userInitiated) {
+            await writeImageDataToPasteboard(tiff: tiff)
+        }
+    }
+
+    /// Reads an image file off the main thread and copies its bytes to the
+    /// clipboard. Avoids decoding the image into an `NSImage` and re-encoding
+    /// it, so nothing heavy touches the main thread for a file-backed image.
+    static func copyImageFileToClipboard(at url: URL) {
+        Task.detached(priority: .userInitiated) {
+            let data = try? Data(contentsOf: url)
+            let type: NSPasteboard.PasteboardType =
+                url.pathExtension.lowercased() == "png" ? .png : .tiff
+            await MainActor.run {
+                guard let data else {
+                    NSSound.beep()
+                    return
+                }
+                let pasteboard = NSPasteboard.general
+                pasteboard.clearContents()
+                pasteboard.setData(data, forType: type)
+                ToastManager.shared.success(L("Image Copied to Clipboard"))
+            }
+        }
+    }
+
+    private static func writeImageDataToPasteboard(tiff: Data?) async {
+        await MainActor.run {
+            guard let tiff else {
+                NSSound.beep()
+                return
+            }
+            let pasteboard = NSPasteboard.general
+            pasteboard.clearContents()
+            pasteboard.setData(tiff, forType: .tiff)
+            ToastManager.shared.success(L("Image Copied to Clipboard"))
+        }
+    }
+
+    /// Encodes TIFF data to PNG and writes it to `url` on a background queue.
+    private static func encodeAndWritePNG(tiff: Data, to url: URL) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            guard let bitmap = NSBitmapImageRep(data: tiff),
+                let pngData = bitmap.representation(using: .png, properties: [:])
+            else { return false }
+            do {
+                try pngData.write(to: url)
+                return true
+            } catch {
+                return false
+            }
+        }.value
+    }
+}
+
+// MARK: - Native Markdown Image Segment View
+
+/// `NSImageView` used by the AppKit markdown renderer for inline / generated
+/// images. Overlays a download button at the top-right of the *displayed*
+/// image (revealed on hover) so a generated image can be saved without opening
+/// it full screen. The owner positions the button via `setImageRightEdge(_:)`
+/// since the view is full-width while the image is left-aligned and scaled.
+final class MarkdownSegmentImageView: NSImageView {
+    private let downloadButton = NSButton()
+    private var trackingAreaRef: NSTrackingArea?
+    private var rightEdgeConstraint: NSLayoutConstraint?
+
+    /// Clicking the image opens it in the full-screen lightbox. The owner
+    /// forwards the already-decoded `NSImage` up to `ChatView`, which presents
+    /// `ImageFullScreenView` — no reload, so no main-thread file/network read.
+    var onPreview: ((NSImage) -> Void)?
+
+    private static let buttonSize: CGFloat = 26
+    private static let inset: CGFloat = 8
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        configureDownloadButton()
+        let click = NSClickGestureRecognizer(target: self, action: #selector(imageClicked))
+        addGestureRecognizer(click)
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    @objc private func imageClicked() {
+        guard let image else { return }
+        onPreview?(image)
+    }
+
+    private func configureDownloadButton() {
+        downloadButton.translatesAutoresizingMaskIntoConstraints = false
+        downloadButton.isBordered = false
+        downloadButton.bezelStyle = .regularSquare
+        downloadButton.imagePosition = .imageOnly
+        downloadButton.image = NSImage(
+            systemSymbolName: "arrow.down.to.line",
+            accessibilityDescription: "Save Image"
+        )?.withSymbolConfiguration(NSImage.SymbolConfiguration(pointSize: 12, weight: .semibold))
+        downloadButton.contentTintColor = .white
+        downloadButton.wantsLayer = true
+        downloadButton.layer?.backgroundColor = NSColor.black.withAlphaComponent(0.55).cgColor
+        downloadButton.layer?.cornerRadius = 6
+        downloadButton.target = self
+        downloadButton.action = #selector(saveImageTapped)
+        downloadButton.isHidden = true
+        downloadButton.toolTip = L("Save Image")
+        addSubview(downloadButton)
+
+        let trailing = downloadButton.trailingAnchor.constraint(
+            equalTo: leadingAnchor,
+            constant: Self.buttonSize
+        )
+        // Non-required so the required "stay inside the right edge" cap below
+        // can override it when `displayedWidth` overshoots the view bounds.
+        trailing.priority = .defaultHigh
+        rightEdgeConstraint = trailing
+        NSLayoutConstraint.activate([
+            downloadButton.topAnchor.constraint(equalTo: topAnchor, constant: Self.inset),
+            trailing,
+            downloadButton.trailingAnchor.constraint(
+                lessThanOrEqualTo: trailingAnchor, constant: -Self.inset),
+            downloadButton.widthAnchor.constraint(equalToConstant: Self.buttonSize),
+            downloadButton.heightAnchor.constraint(equalToConstant: Self.buttonSize),
+        ])
+    }
+
+    /// Pin the button `inset` points inside the displayed image's right edge,
+    /// `displayedWidth` measured from the view's left (where the image aligns).
+    /// This constraint is non-required; a required `trailing <= self.trailing`
+    /// cap (see `configureDownloadButton`) keeps the button inside the view's
+    /// bounds if `displayedWidth` overshoots, so the rounded-corner mask can't
+    /// shear its right corners.
+    func setImageRightEdge(_ displayedWidth: CGFloat) {
+        let target = max(Self.buttonSize + Self.inset, displayedWidth) - Self.inset
+        if let c = rightEdgeConstraint, abs(c.constant - target) > 0.5 {
+            c.constant = target
+        }
+    }
+
+    @objc private func saveImageTapped() {
+        guard let image else { return }
+        ImageActions.saveImageToFile(image)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let t = trackingAreaRef { removeTrackingArea(t) }
+        let t = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(t)
+        trackingAreaRef = t
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        downloadButton.isHidden = (image == nil)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        downloadButton.isHidden = true
     }
 }
 
@@ -481,8 +656,9 @@ struct ImageFullScreenView: View {
 
 extension View {
     /// macOS 15: default sheet sizing can resize the parent window when the sheet dismisses; `fitted` plus an explicit frame avoids that (see `PresentationSizing`).
+    @ViewBuilder
     func imageFullScreenSheetPresentation() -> some View {
-        frame(
+        let framed = frame(
             minWidth: 320,
             idealWidth: 960,
             maxWidth: .infinity,
@@ -490,7 +666,13 @@ extension View {
             idealHeight: 720,
             maxHeight: .infinity
         )
-        .presentationSizing(.fitted)
+        // Intel (macOS 13): `presentationSizing` is macOS 15+; older systems
+        // size the sheet from the ideal frame alone.
+        if #available(macOS 15.0, *) {
+            framed.presentationSizing(.fitted)
+        } else {
+            framed
+        }
     }
 }
 
@@ -516,22 +698,4 @@ extension View {
             .background(Color(hex: "0f0f10"))
         }
     }
-#endif
-#else
-import SwiftUI
-struct MarkdownImageView: View {
-    let urlString: String
-    let altText: String
-    let baseWidth: CGFloat
-
-    init(urlString: String, altText: String, baseWidth: CGFloat) {
-        self.urlString = urlString
-        self.altText = altText
-        self.baseWidth = baseWidth
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Markdown Image", symbol: "apple.logo")
-    }
-}
 #endif
