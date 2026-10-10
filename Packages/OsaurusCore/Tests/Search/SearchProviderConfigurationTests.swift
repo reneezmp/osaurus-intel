@@ -92,13 +92,15 @@ struct SearchProviderConfigurationTests {
                 SearchProvider(definitionId: "ddg", enabled: false),
             ],
             routing: ["news": ["tavily"]],
-            pluginKeysMigrated: true
+            pluginKeysMigrated: true,
+            hostedSearchEnabled: false
         )
         let data = try JSONEncoder().encode(original)
         let decoded = try JSONDecoder().decode(SearchProviderConfiguration.self, from: data)
         #expect(decoded.providers == original.providers)
         #expect(decoded.routing == original.routing)
         #expect(decoded.pluginKeysMigrated == original.pluginKeysMigrated)
+        #expect(decoded.hostedSearchEnabled == false)
     }
 
     @Test func configurationDecodesSparseJSONWithDefaults() throws {

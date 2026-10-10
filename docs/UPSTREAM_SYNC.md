@@ -3390,3 +3390,54 @@ in the home folder and expects the write to be denied. The file is removed
 in a `defer` either way. That is the only test write outside the temporary
 root, and no file is left behind.
 
+### Web search at upstream (`W-web-search-sync`) — 2026-10-10
+
+Intel's search stack was upstream's #1944 snapshot (2026-07-08) plus Intel's
+Premium gate (`67b518e48`). Each drifted file was three-way merged against
+the upstream revision Intel had imported (`801394afc` or `70346b6f4`; find
+the base by diffing Intel's file against each upstream revision).
+
+**Now upstream's verbatim:**
+
+- `SearchReadability`: HTTP 4xx other than 408/425/429 is `blocked`, not a
+  retryable `fetch_failed`; CSV/TSV/JSON responses are kept raw.
+- `SearchProviderCatalog`: current Tavily, Kagi and You.com APIs (#1978);
+  localized strings.
+- `SearchStructuredDataStore`: new, in memory only.
+- `SearchView`: the Premium strip with a Credits link.
+- Upstream's search tests.
+
+**Upstream with Intel edits:**
+
+- `WebSearchTools`:
+  - immutable `web_search` schema;
+  - `search_and_extract` takes `url` / `urls` (up to 5);
+  - `extractionEnvelope` (all-failed extraction is an honest tool failure);
+  - structured-data URLs stay local;
+  - no-results is `not_found`. Intel's `execution_error` there predated
+    upstream's `ToolEnvelope`, which the harness's not-found steering
+    reads.
+- `SearchProviderManager`: custom definitions classified as `custom`, plus
+  the keychain and hang fixes.
+
+**Intel edits to keep on re-sync:**
+
+- **Premium stays consent-only.** `hostedSearchEnabled ?? false`, and
+  upstream's `resolveHostedSearchDefaultIfNeeded` (which turns Premium on
+  for free-only setups) is left out. `SearchProviderConfiguration` stays
+  Intel's ("absent means off").
+- **Private targets stay local.** Direct URLs that fail
+  `SearchHTML.resolvedUnsafeExtractionURLReason` are never sent to the
+  hosted extractor, and replayed hosted responses are ignored.
+- **Ventura.** `SearchView`'s Credits button uses `ThemedBorderedButtonStyle`.
+- **Intel's tests.** Intel's Premium-gate tests moved to
+  `IntelPremiumSearchGateTests`. In `WebSearchToolTests`, the
+  registry/composer cases stay Intel's: `ToolRegistry.swift`,
+  `SystemPromptComposer.swift` and `toTokenizerToolSpec` are excluded on
+  Intel.
+
+**Also:** the three `webSearchLoop_*` cases in `AgentTaskStateTests` are
+back (the file is upstream's verbatim). The i18n missing-key count drops
+from 154 to 125, because upstream's keys for these files were merged.
+`CreditsView` drift is a separate item (`W-credits-ui-sync`).
+

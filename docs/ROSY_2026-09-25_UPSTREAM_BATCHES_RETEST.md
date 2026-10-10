@@ -1638,3 +1638,16 @@ Providers). Before this build, these three could list models but not chat.
       the agent may say it needs to re-read the file. Set Context Length
       back afterwards.
 
+## Web search at upstream (2026-10-10)
+
+- [ ] Settings › Search: the page opens; Try It still returns results; with
+      the Router on, the Premium search row shows "Off — …" until you turn
+      it on, and its Credits button opens Credits.
+- [ ] Ask an agent to read two pages at once ("compare example.com and
+      example.org"): both are fetched in one call.
+- [ ] Ask it to fetch a raw CSV URL and chart it: the data reaches the chart
+      intact.
+- [ ] Ask it to read a page that blocks bots (e.g. a login-only page): it
+      says the page could not be read instead of retrying the same URL.
+- [ ] If you use Tavily, Kagi or You.com keys: Try It still works with them.
+

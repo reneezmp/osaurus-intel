@@ -3,9 +3,10 @@
 //  OsaurusCoreTests
 //
 //  Tool-surface contracts for native search: `web_search` is an always-loaded
-//  built-in (and part of the Default-agent baseline), `search_and_extract` is
-//  a dynamic native tool, the `category` enum only appears in the schema when
-//  the user's providers serve more than plain web, the per-agent
+//  built-in (and part of the Default-agent baseline) whose schema is immutable
+//  by design — `category` is an open string with no provider-derived enum, so
+//  the advertised schema never depends on which providers are configured.
+//  `search_and_extract` is a dynamic native tool, the per-agent
 //  `webSearchEnabled` gate strips both tools in `resolveTools` (while loaded
 //  tools survive), and the weak-caller argument sanitizers never fail a call
 //  over a malformed value.
@@ -33,22 +34,232 @@ struct WebSearchToolTests {
         #expect(registry.openAISpecs().contains { $0.function.name == "search_and_extract" })
     }
 
-    // MARK: - Dynamic category enum
-
-    private func categoryEnum(of tool: WebSearchTool) -> [String]? {
-        guard case .object(let root)? = tool.parameters,
-            case .object(let properties)? = root["properties"],
-            case .object(let category)? = properties["category"],
-            case .array(let values)? = category["enum"]
-        else { return nil }
-        return values.compactMap {
-            if case .string(let s) = $0 { return s }
-            return nil
-        }
+    @Test func webSearchContractExplainsDiscoveryToRetrievalTransition() {
+        let description = WebSearchTool().description
+        #expect(description.contains("does not fetch page bodies"))
+        #expect(description.contains("search_and_extract"))
+        // The old contract routed through `capabilities_load tool/…` when
+        // retrieval wasn't loaded. `search_and_extract` is now composed into
+        // the schema whenever web search is enabled, so the description must
+        // name the direct transition — a load detour here would send models
+        // to a loader for a tool already in their schema.
+        #expect(!description.contains("capabilities_load"))
+        #expect(description.contains("IS the fetch tool"))
     }
 
+    @Test func searchAndExtractContractProvidesPageContent() {
+        let tool = SearchAndExtractTool()
+        let description = tool.description
+        #expect(description.contains("page text or data"))
+        #expect(description.contains("pass the chosen result's URL"))
+        guard case .object(let root)? = tool.parameters,
+            case .object(let properties)? = root["properties"]
+        else {
+            Issue.record("missing search_and_extract object schema")
+            return
+        }
+        #expect(properties["url"] != nil)
+        #expect(properties["urls"] != nil)
+    }
+
+    @Test func allFailedExtractionsAreAnHonestToolFailure() throws {
+        let envelope = SearchAndExtractTool.extractionEnvelope(
+            payload: [
+                "mode": "direct_url",
+                "provider": "direct_url",
+                "results": [
+                    [
+                        "url": "https://huggingface.co/OsaurusAI/models",
+                        "extracted": false,
+                        "extract_status": "challenge",
+                        "extract_error": "challenge_page",
+                    ],
+                    [
+                        "url": "https://huggingface.co/dealignai/models",
+                        "extracted": false,
+                        "extract_status": "challenge",
+                        "extract_error": "challenge_page",
+                    ],
+                    [
+                        "url": "https://huggingface.co/JANGQ-AI/models",
+                        "extracted": false,
+                        "extract_status": "challenge",
+                        "extract_error": "challenge_page",
+                    ],
+                ],
+            ]
+        )
+
+        #expect(ToolEnvelope.isError(envelope))
+        #expect(envelope.contains("No page content was retrieved"))
+        #expect(envelope.contains("do not claim these pages were read"))
+
+        let data = try #require(envelope.data(using: .utf8))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(object["retryable"] as? Bool == false)
+        #expect(object["extracted_count"] as? Int == 0)
+        #expect(object["extraction_failed_count"] as? Int == 3)
+        #expect((object["results"] as? [[String: Any]])?.count == 3)
+    }
+
+    @Test func partialExtractionSuccessPreservesCountsAndResults() throws {
+        let envelope = SearchAndExtractTool.extractionEnvelope(
+            payload: [
+                "mode": "search_and_extract",
+                "provider": "test",
+                "results": [
+                    [
+                        "url": "https://example.com/one",
+                        "extracted": true,
+                        "extract_status": "ok",
+                        "markdown": "retrieved body",
+                    ],
+                    [
+                        "url": "https://example.com/two",
+                        "extracted": false,
+                        "extract_status": "timeout",
+                    ],
+                    [
+                        "url": "https://example.com/not-attempted",
+                        "extracted": false,
+                    ],
+                ],
+            ]
+        )
+
+        #expect(ToolEnvelope.isSuccess(envelope))
+        let payload = try #require(ToolEnvelope.successPayload(envelope) as? [String: Any])
+        #expect(payload["extraction_attempted_count"] as? Int == 2)
+        #expect(payload["extracted_count"] as? Int == 1)
+        #expect(payload["extraction_failed_count"] as? Int == 1)
+        #expect((payload["results"] as? [[String: Any]])?.count == 3)
+    }
+
+    @Test func allTimeoutExtractionsRemainRetryableAndPreserveMetadata() throws {
+        let envelope = SearchAndExtractTool.extractionEnvelope(
+            payload: [
+                "mode": "search_and_extract",
+                "provider": "local",
+                "query": "models for coding",
+                "category": "web",
+                "search_source": "local",
+                "premium_fallback": true,
+                "next_offset": 5,
+                "results": [
+                    [
+                        "url": "https://example.com/slow",
+                        "extracted": false,
+                        "extract_status": "timeout",
+                    ],
+                ],
+            ],
+            warnings: ["test warning"]
+        )
+
+        let data = try #require(envelope.data(using: .utf8))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(object["ok"] as? Bool == false)
+        #expect(object["kind"] as? String == ToolEnvelope.Kind.timeout.rawValue)
+        #expect(object["retryable"] as? Bool == true)
+        #expect(object["query"] as? String == "models for coding")
+        #expect(object["category"] as? String == "web")
+        #expect(object["search_source"] as? String == "local")
+        #expect(object["premium_fallback"] as? Bool == true)
+        #expect(object["next_offset"] as? Int == 5)
+        #expect(object["warnings"] as? [String] == ["test warning"])
+    }
+
+    @Test func fetchFailureIsRetryableButNotMislabeledAsTimeout() throws {
+        let envelope = SearchAndExtractTool.extractionEnvelope(
+            payload: [
+                "mode": "direct_url",
+                "provider": "direct_url",
+                "results": [
+                    [
+                        "url": "https://example.com/offline",
+                        "extracted": false,
+                        "extract_status": "fetch_failed",
+                    ],
+                ],
+            ]
+        )
+
+        let data = try #require(envelope.data(using: .utf8))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(object["kind"] as? String == ToolEnvelope.Kind.executionError.rawValue)
+        #expect(object["retryable"] as? Bool == true)
+    }
+
+    @Test func cancellationIsNotPresentedAsARequestToRetry() throws {
+        let envelope = SearchAndExtractTool.extractionEnvelope(
+            payload: [
+                "mode": "direct_url",
+                "provider": "direct_url",
+                "results": [
+                    [
+                        "url": "https://example.com/cancelled",
+                        "extracted": false,
+                        "extract_status": "cancelled",
+                    ],
+                ],
+            ]
+        )
+
+        let data = try #require(envelope.data(using: .utf8))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: data) as? [String: Any]
+        )
+        #expect(object["retryable"] as? Bool == false)
+    }
+
+    // MARK: - Immutable schema contract
+
+    private func categoryProperty(of tool: WebSearchTool) -> [String: JSONValue]? {
+        guard case .object(let root)? = tool.parameters,
+            case .object(let properties)? = root["properties"],
+            case .object(let category)? = properties["category"]
+        else { return nil }
+        return category
+    }
+
+    /// `web_search` is an always-loaded baseline tool: its schema sits in the
+    /// static prompt prefix of every compose. `category` must always be
+    /// advertised, as an open string with NO provider-derived enum — an enum
+    /// that tracked configured providers would flip the schema bytes when the
+    /// background Keychain probe lands (or on any settings edit) and
+    /// invalidate the KV-cache prefix for the whole conversation.
+    @Test func categoryIsAlwaysAdvertisedAsAnOpenString() throws {
+        let category = try #require(categoryProperty(of: WebSearchTool()))
+        #expect(category["enum"] == nil)
+        guard case .string(let type)? = category["type"] else {
+            Issue.record("category must be typed as a string")
+            return
+        }
+        #expect(type == "string")
+        // Custom provider categories stay expressible: the description names
+        // the built-ins and the open-ended contract, not a closed list.
+        guard case .string(let description)? = category["description"] else {
+            Issue.record("category must carry a description")
+            return
+        }
+        #expect(description.contains("web"))
+        #expect(description.contains("news"))
+        #expect(description.contains("images"))
+        #expect(description.contains("fall back to web"))
+    }
+
+    // Intel: upstream's `schemaBytesDoNotDependOnProviderAvailability`
+    // reads the registry's tokenizer specs (`ToolRegistry.swift` and
+    // `toTokenizerToolSpec` are excluded on Intel); this is the same contract
+    // on the tool itself.
     @Test func categoryIsOpenAndSchemaIsStable() throws {
-        #expect(categoryEnum(of: WebSearchTool()) == nil)
+        #expect(categoryProperty(of: WebSearchTool())?["enum"] == nil)
         let encoder = JSONEncoder()
         encoder.outputFormatting = [.sortedKeys]
         #expect(
@@ -111,23 +322,27 @@ struct WebSearchToolTests {
         let available = ["web", "news"]
         #expect(
             WebSearchArgs.sanitizeCategory("news", available: available, warnings: &warnings)
-                == "news")
+                == "news"
+        )
         #expect(warnings.isEmpty)
         // Synonyms local models produce map onto available categories.
         #expect(
             WebSearchArgs.sanitizeCategory("articles", available: available, warnings: &warnings)
-                == "news")
+                == "news"
+        )
         #expect(warnings.isEmpty)
         // Unknown category: fall back to web + warning, never an error.
         #expect(
             WebSearchArgs.sanitizeCategory("videos", available: available, warnings: &warnings)
-                == "web")
+                == "web"
+        )
         #expect(warnings.count == 1)
         // Synonym for an UNAVAILABLE category also falls back.
         warnings = []
         #expect(
             WebSearchArgs.sanitizeCategory("photos", available: available, warnings: &warnings)
-                == "web")
+                == "web"
+        )
         #expect(warnings.count == 1)
     }
 
@@ -155,12 +370,16 @@ struct WebSearchToolTests {
         let results = payload["results"] as? [[String: Any]]
         let snippet = results?.first?["snippet"] as? String
         #expect((snippet?.count ?? 0) <= WebSearchResultFormatter.maxSnippetLength + 1)
+        let nextAction = payload["next_action"] as? [String: Any]
+        #expect((nextAction?["tool"] as? String) == "search_and_extract")
+        #expect((nextAction?["instruction"] as? String)?.contains("Do not rephrase") == true)
+        #expect((nextAction?["candidate_urls"] as? [String]) == ["https://x.example"])
     }
 
     @Test func noResultsHintDependsOnProviderConfiguration() {
         let withProvider = WebSearchResultFormatter.noResultsHint(hasConfiguredAPIProvider: true)
         let without = WebSearchResultFormatter.noResultsHint(hasConfiguredAPIProvider: false)
         #expect(withProvider.contains("API keys"))
-        #expect(without.contains("add a free search provider"))
+        #expect(without.contains("add a search provider"))
     }
 }
