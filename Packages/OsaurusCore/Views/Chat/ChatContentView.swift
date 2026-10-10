@@ -233,6 +233,63 @@ struct ChatContentView: View {
         }
     }
 
+    /// Composer chip while a run has gone quiet (upstream). `slow` reassures;
+    /// `stalled` is a silent hang and offers Stop.
+    @ViewBuilder
+    private var runProgressNotice: some View {
+        if observedSession.isStreaming {
+            switch observedSession.runProgress.state {
+            case .active:
+                EmptyView()
+            case .slow:
+                runProgressNoticeRow(tint: theme.accentColor) {
+                    ProgressView()
+                        .controlSize(.small)
+                    Text(L("Still working — waiting on the model or a tool…"))
+                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                }
+            case .stalled:
+                runProgressNoticeRow(tint: theme.warningColor) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: CGFloat(theme.captionSize), weight: .semibold))
+                        .foregroundColor(theme.warningColor)
+                    Text(L("No response for a while — this run may be stuck."))
+                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                    Button(action: { observedSession.stop() }) {
+                        Text(L("Stop"))
+                            .font(theme.font(size: CGFloat(theme.captionSize), weight: .semibold))
+                            .foregroundColor(theme.warningColor)
+                    }
+                    .buttonStyle(.plain)
+                }
+            }
+        }
+    }
+
+    /// Upstream `remoteAgentNoticeRow`.
+    private func runProgressNoticeRow<Content: View>(
+        tint: Color,
+        @ViewBuilder _ content: () -> Content
+    ) -> some View {
+        HStack(spacing: 8) { content() }
+            .padding(.horizontal, 12)
+            .padding(.vertical, 7)
+            .background(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .fill(tint.opacity(theme.isDark ? 0.14 : 0.10))
+            )
+            .overlay(
+                RoundedRectangle(cornerRadius: 12, style: .continuous)
+                    .strokeBorder(tint.opacity(0.22), lineWidth: 1)
+            )
+            .padding(.bottom, 8)
+            .transition(.opacity.combined(with: .scale(scale: 0.96)))
+    }
+
     var body: some View {
         GeometryReader { proxy in
             let windowWidth: CGFloat = proxy.size.width
@@ -343,6 +400,19 @@ struct ChatContentView: View {
                                 // outside that clip). (Renée, 2026-06-13.)
                                 messageThread(effectiveContentWidth, threadHeight)
                                     .frame(maxWidth: .infinity)
+                                    // Run-liveness notice (slow / stalled, upstream).
+                                    // Intel overlays it on the thread's bottom edge:
+                                    // the thread has an explicit Ventura height, so
+                                    // an extra row above the composer would push it.
+                                    .overlay(alignment: .bottom) {
+                                        runProgressNotice
+                                            .frame(maxWidth: 1100)
+                                            .padding(.horizontal, 16)
+                                            .animation(
+                                                theme.springAnimation(),
+                                                value: observedSession.runProgress.state
+                                            )
+                                    }
                             }
                         } else {
                             VStack(spacing: 16) {

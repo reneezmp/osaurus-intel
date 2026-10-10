@@ -99,12 +99,45 @@ final class ChatSession: ObservableObject {
             guard isStreaming != oldValue else { return }
             if isStreaming {
                 ChatPerfTrace.shared.begin("stream-\(Int(Date().timeIntervalSince1970))")
+                beginRunProgressMonitor()
             } else {
                 ChatPerfTrace.shared.end()
+                endRunProgressMonitor()
             }
         }
     }
     @Published var lastStreamError: String?
+
+    // MARK: - Run progress (slow / stalled surfacing, upstream)
+
+    let runProgress = RunProgressMonitor()
+    nonisolated(unsafe) private var runProgressCancellable: AnyCancellable?
+
+    func noteRunProgress(_ kind: RunProgressKind = .stream) {
+        runProgress.note(kind)
+    }
+
+    private func beginRunProgressMonitor() {
+        runProgress.start(
+            toolCallIds: { [weak self] in self?.sessionToolCallIds ?? [] },
+            sessionId: { [weak self] in self?.sessionId?.uuidString },
+            agentId: { [weak self] in self?.agentId }
+        )
+    }
+
+    private func endRunProgressMonitor() {
+        runProgress.stop()
+    }
+
+    /// Tool call ids in this chat, so the monitor follows only its own
+    /// live `shell_run` output.
+    private var sessionToolCallIds: Set<String> {
+        var ids = Set<String>()
+        for turn in turns {
+            for call in turn.toolCalls ?? [] { ids.insert(call.id) }
+        }
+        return ids
+    }
 
     /// Single-slot FIFO queue for in-chat prompt overlays (secrets,
     /// clarify, …). Both prompt types share the same on-screen real
@@ -354,6 +387,10 @@ final class ChatSession: ObservableObject {
         // when the queue mounts or advances. See the property comment
         // for why the explicit bridge is needed.
         promptQueueCancellable = promptQueue.objectWillChange
+            .sink { [weak self] _ in
+                self?.objectWillChange.send()
+            }
+        runProgressCancellable = runProgress.objectWillChange
             .sink { [weak self] _ in
                 self?.objectWillChange.send()
             }
@@ -2844,6 +2881,9 @@ final class ChatSession: ObservableObject {
         debugLog("send: got stream, entering delta loop")
         do {
             for try await delta in stream {
+                // Text deltas are stream progress; tool hints (`\u{FFFE}`
+                // envelopes: a call starting or finishing) are discrete.
+                noteRunProgress(delta.first == "\u{FFFE}" ? .discrete : .stream)
                 if !isRunActive(runId) {
                     await processor.finalize(immediately: true)
                     return ([], currentTurn)
@@ -3841,6 +3881,7 @@ final class ChatSession: ObservableObject {
                                 }
                             }
                         for try await delta in stream {
+                            noteRunProgress(delta.first == "\u{FFFE}" ? .discrete : .stream)
                             if !isRunActive(runId) { break }
                             // Hints are not text: feeding them to the processor
                             // leaked `\u{FFFE}` envelopes into the reply

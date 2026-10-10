@@ -1541,3 +1541,11 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
       never answers): after about 2 minutes the card says it timed out,
       and the agent carries on.
 
+## Run progress chip (2026-10-10)
+
+- [ ] Ask an agent to run `sleep 45` (it streams nothing): after about 30 s a
+      "Still working…" chip appears above the composer, and it goes away when
+      the reply continues.
+- [ ] Ask it to run `sleep 150`: after 2 minutes the chip turns to "No
+      response for a while…" with Stop, and Stop ends the run.
+

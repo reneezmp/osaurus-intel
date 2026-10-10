@@ -3014,3 +3014,22 @@ Tests: upstream's `SchemaCoercionTests`, the three `SchemaValidator*` suites,
 `ToolResultNormalizationTests` (minus three sandbox-error cases),
 `ToolWirePropertyOrderTests` (Intel's `file_edit` order) and
 `ToolEnvelopeTests`.
+
+### Run progress chip (`W-agent-loop-tools`) — 2026-10-10
+
+While a reply runs, upstream's `RunProgressMonitor` watches for progress
+and the composer shows "Still working — waiting on the model or a tool…"
+after 30 s of silence. After 120 s it shows "No response for a while — this
+run may be stuck." with a Stop button. A burst of streamed text clears it.
+`RunProgressEvaluator` (and its upstream tests) and `RunProgressMonitor` are
+upstream's, with Intel differences:
+
+- **Sources:** text deltas count as stream progress, and tool hints (call
+  start / finish) and live `shell_run` output as discrete progress. Subagent
+  feeds, local model load / prefill / warmup and the container sandbox
+  don't exist on Intel, so `RunProgressLoadingPhase.current` is always
+  `.none`.
+- **Log:** a stall goes to the log, not a crash-report breadcrumb.
+- **Placement:** the chip overlays the bottom of the thread instead of
+  sitting in the composer stack, because Intel gives the thread an explicit
+  Ventura height that an extra row would push.
