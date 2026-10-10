@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Before that: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Before that: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -2951,3 +2951,9 @@ plugin `dispatch` use.
 
 Tests: `IntelAppIntentsClientTests` (only the checks before dispatch; no
 real run).
+
+### Upstream batch `ec654e8c5..24f4c416a` — 2026-10-10
+
+Audit of 2 commits: [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md).
+Shipped #3056: `shell_run` gets the login-shell PATH. #3059 (Qwen-Image-2.1
+Turbo) is MLX-only. The next review starts after `24f4c416a`.

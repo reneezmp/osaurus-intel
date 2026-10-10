@@ -1515,3 +1515,9 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
       finishes.
 - [ ] (If you use Siri on that Mac) "Ask Osaurus" starts the shortcut.
 
+## Upstream audit 2026-10-10
+
+- [ ] If you have Node (or Python) from nvm, mise, asdf or fnm: in a
+      working-folder chat, ask the agent to run `node -v` (or `python -V`).
+      It prints the version instead of "command not found".
+
