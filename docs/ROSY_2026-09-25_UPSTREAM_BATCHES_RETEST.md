@@ -1604,3 +1604,11 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] Ask it to create a small Excel file with two sheets: it opens in
       Numbers / Excel.
 
+## Loop harness (2026-10-10)
+
+- [ ] Ask an agent to read the same file twice in one reply ("read
+      notes.txt, then read it again and compare"): the second read
+      returns instantly, and the answer still uses the file.
+- [ ] Ask it to edit a file and then read it back: the read shows the new
+      content (not a stale replay).
+

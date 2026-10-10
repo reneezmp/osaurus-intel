@@ -347,6 +347,60 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// INCLUDING `tool_calls` (assistant) and `tool_call_id` (tool results) —
     /// the original Intel engine dropped both, so multi-turn tool context was
     /// lost. (M12 Gap 3.)
+    // MARK: - Loop harness (upstream AgentToolLoop + AgentTaskState)
+
+    /// Upstream `AgentToolLoop.dedupeNotice`.
+    static let dedupeNotice =
+        "[System Notice] You already retrieved this exact result this turn and it is unchanged. Use the result you already have instead of repeating the call."
+
+    /// A result the harness supplies instead of running the call: a guard
+    /// refusal, or a held replay of an identical earlier read (which also
+    /// stages upstream's dedupe notice, or its escalation).
+    static func harnessResult(
+        _ state: AgentTaskState, name: String, arguments: String, notices: inout [String]
+    ) -> String? {
+        if let guarded = state.guardedResult(name: name, argsJSON: arguments) {
+            return guarded
+        }
+        guard let held = state.heldResult(name: name, argsJSON: arguments) else { return nil }
+        if let escalation = state.lastReplayNotice {
+            notices = ["[System Notice] " + escalation]
+        } else {
+            notices = [dedupeNotice]
+        }
+        return held
+    }
+
+    /// Upstream `stageBiasNotice`: the next-step bias rides first.
+    static func stageBiasNotice(_ bias: String, into notices: inout [String]) {
+        let notice = "[System Notice] " + bias
+        notices.removeAll { $0 == notice }
+        notices.insert(notice, at: 0)
+    }
+
+    /// Upstream `AgentLoopBudget.appendingTransientNotices`, Intel form:
+    /// notices are appended to the trailing tool result's text (or ride as a
+    /// trailing user message) in the outgoing request only. Upstream adds a
+    /// second tool message with the same `tool_call_id`, which strict
+    /// OpenAI-compatible hosts (DeepSeek) can reject.
+    static func appendingTransientNotices(_ notices: [String], to messages: [[String: Any]]) -> [[String: Any]] {
+        guard !notices.isEmpty else { return messages }
+        var out = messages
+        let text = notices.joined(separator: "\n")
+        if let last = out.last, last["role"] as? String == "tool" {
+            var tool = last
+            if let parts = tool["content"] as? [[String: Any]] {
+                tool["content"] = parts + [["type": "text", "text": text]]
+            } else {
+                tool["content"] = ((tool["content"] as? String) ?? "") + "\n\n" + text
+            }
+            out[out.count - 1] = tool
+        } else {
+            out.append(["role": "user", "content": text])
+        }
+        return out
+    }
+
     /// One OpenAI chat-completions content part as a wire dict.
     static func wirePart(_ part: MessageContentPart) -> [String: Any] {
         switch part {
@@ -900,6 +954,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                     }
                     var retriedWithoutImages = false
+                    // Upstream's loop harness (`AgentTaskState`, driven by
+                    // `AgentToolLoop`): replays identical read calls instead of
+                    // re-running them, guards known-bad repeats, and stages the
+                    // next-step bias. Notices are transient: they ride on the
+                    // next request only.
+                    let taskState = AgentTaskState()
+                    var pendingHarnessNotices: [String] = []
                     var codexReplayItems: [[String: Any]] = []
                     let maxToolRounds = 12
                     var round = 0
@@ -911,10 +972,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         var body: [String: Any] = [
                             "model": endpoint.modelId,
-                            "messages": IntelToolImageWire.preparedForSend(
-                                wireMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire),
+                            "messages": Self.appendingTransientNotices(
+                                pendingHarnessNotices,
+                                to: IntelToolImageWire.preparedForSend(
+                                    wireMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire)),
                             "stream": true,
                         ]
+                        let roundNotices = pendingHarnessNotices
+                        pendingHarnessNotices.removeAll()
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
                             body["tool_choice"] = "auto"
@@ -931,6 +996,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             )
                             var input = body["input"] as? [[String: Any]] ?? []
                             input.append(contentsOf: codexReplayItems)
+                            // Harness notices ride on this request only.
+                            if !roundNotices.isEmpty {
+                                input.append([
+                                    "type": "message", "role": "user",
+                                    "content": [["type": "input_text", "text": roundNotices.joined(separator: "\n")]],
+                                ])
+                            }
                             body["input"] = input
                         } else {
                             // Ask for a final usage chunk so the prompt-cache hit/miss
@@ -1099,63 +1171,70 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
-                                // Upstream checks arguments before its permission gate: a call
-                                // that cannot run is never put in front of the user. Treated
-                                // as Auto here; `execute` returns the `invalid_args` envelope.
-                                let preflightRejected = await ToolRegistry.shared.preflightRejection(
-                                    name: call.name, argumentsJSON: call.arguments) != nil
-                                let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
-                                    for: call.name, argumentsJSON: call.arguments)
-                                let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
-                                let approved: Bool
-                                switch policy {
-                                case .deny: approved = false
-                                case .auto: approved = true
-                                case .ask:
-                                    if ownsApproval {
-                                        approved = true
-                                        break
-                                    }
-                                    // Upstream #2241: the global auto-allow switch
-                                    // replaces the card, except for per-call tools.
-                                    if ToolApprovalSettings.skipsApprovalCard(
-                                        perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
-                                            call.name, argumentsJSON: call.arguments))
-                                    {
-                                        approved = true
-                                        break
-                                    }
-                                    let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
-                                    approved = await ToolPermissionPromptService.requestApproval(
-                                        toolName: call.name,
-                                        description: description,
-                                        argumentsJSON: call.arguments,
-                                        knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
-                                            for: call.name, argumentsJSON: call.arguments)
-                                    )
-                                }
                                 let result: String
-                                if !approved {
-                                    let reason = policy == .deny
-                                        ? "blocked by your tool permissions (Deny)"
-                                        : "you declined to run it this time"
-                                    result = "⛔️ “\(call.name)” was not run — \(reason)."
+                                if let harnessResult = Self.harnessResult(
+                                    taskState, name: call.name, arguments: call.arguments,
+                                    notices: &pendingHarnessNotices)
+                                {
+                                    result = harnessResult
                                 } else {
-                                    do {
-                                        // Tools that bind UI to their call (`speak`)
-                                        // read the call id from the task-local.
-                                        result = try await ChatExecutionContext.$currentToolCallId.withValue(
-                                            call.callID
-                                        ) {
-                                            try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                try await ToolRegistry.shared.execute(
-                                                    name: call.name,
-                                                    argumentsJSON: call.arguments
-                                                )
-                                            }
+                                    // Upstream checks arguments before its permission gate: a call
+                                    // that cannot run is never put in front of the user. Treated
+                                    // as Auto here; `execute` returns the `invalid_args` envelope.
+                                    let preflightRejected = await ToolRegistry.shared.preflightRejection(
+                                        name: call.name, argumentsJSON: call.arguments) != nil
+                                    let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
+                                        for: call.name, argumentsJSON: call.arguments)
+                                    let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
+                                    let approved: Bool
+                                    switch policy {
+                                    case .deny: approved = false
+                                    case .auto: approved = true
+                                    case .ask:
+                                        if ownsApproval {
+                                            approved = true
+                                            break
                                         }
-                                    } catch {
-                                        result = ToolEnvelope.fromError(error, tool: call.name)
+                                        // Upstream #2241: the global auto-allow switch
+                                        // replaces the card, except for per-call tools.
+                                        if ToolApprovalSettings.skipsApprovalCard(
+                                            perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
+                                                call.name, argumentsJSON: call.arguments))
+                                        {
+                                            approved = true
+                                            break
+                                        }
+                                        let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
+                                        approved = await ToolPermissionPromptService.requestApproval(
+                                            toolName: call.name,
+                                            description: description,
+                                            argumentsJSON: call.arguments,
+                                            knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
+                                                for: call.name, argumentsJSON: call.arguments)
+                                        )
+                                    }
+                                    if !approved {
+                                        let reason = policy == .deny
+                                            ? "blocked by your tool permissions (Deny)"
+                                            : "you declined to run it this time"
+                                        result = "⛔️ “\(call.name)” was not run — \(reason)."
+                                    } else {
+                                        do {
+                                            // Tools that bind UI to their call (`speak`)
+                                            // read the call id from the task-local.
+                                            result = try await ChatExecutionContext.$currentToolCallId.withValue(
+                                                call.callID
+                                            ) {
+                                                try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                                    try await ToolRegistry.shared.execute(
+                                                        name: call.name,
+                                                        argumentsJSON: call.arguments
+                                                    )
+                                                }
+                                            }
+                                        } catch {
+                                            result = ToolEnvelope.fromError(error, tool: call.name)
+                                        }
                                     }
                                 }
                                 continuation.yield(
@@ -1179,6 +1258,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                 )
                                 results.append(.init(callID: call.callID, output: result))
+                                taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                                 if ChatExecutionContext.toolResultImagesEnabled {
                                     resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
                                         .loadImages()
@@ -1199,6 +1279,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             codexReplayItems.append(
                                 contentsOf: try finalized.completion.replayInputItems(toolResults: results)
                             )
+                            if let bias = taskState.nextStepBias() {
+                                Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
+                            }
                             // Responses tool outputs are text-only: hoist the
                             // round's tool images into one user item (upstream
                             // `hoistingToolImagesToUserMessages`).
@@ -1391,73 +1474,80 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             let result: String
                             let toolStart = Date()
 
-                            // Enforce the user's per-tool permission policy
-                            // (Tools / Permissions tab). Deny blocks the tool;
-                            // Ask shows a confirmation before running; Auto runs.
-                            // Upstream checks arguments before its permission gate (see
-                            // the batch path above).
-                            let preflightRejected = await ToolRegistry.shared.preflightRejection(
-                                name: call.name, argumentsJSON: call.arguments) != nil
-                            let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
-                                for: call.name, argumentsJSON: call.arguments)
-                            let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
-                            let approved: Bool
-                            switch policy {
-                            case .deny:
-                                approved = false
-                            case .auto:
-                                approved = true
-                            case .ask:
-                                if ownsApproval {
-                                    approved = true
-                                    break
-                                }
-                                // Upstream #2241: the global auto-allow switch
-                                // replaces the card, except for per-call tools.
-                                if ToolApprovalSettings.skipsApprovalCard(
-                                    perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
-                                        call.name, argumentsJSON: call.arguments))
-                                {
-                                    approved = true
-                                    break
-                                }
-                                // Real upstream permission card (ToolPermissionView via
-                                // ToolPermissionPromptService) — Allow / Deny / Always Allow.
-                                // "Always Allow" persists the policy internally.
-                                let toolDescription =
-                                    activeTools?
-                                    .first(where: { $0.function.name == call.name })?
-                                    .function.description ?? ""
-                                approved = await ToolPermissionPromptService.requestApproval(
-                                    toolName: call.name,
-                                    description: toolDescription,
-                                    argumentsJSON: call.arguments,
-                                    knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
-                                        for: call.name, argumentsJSON: call.arguments))
-                            }
-
-                            if !approved {
-                                let reason =
-                                    policy == .deny
-                                    ? "blocked by your tool permissions (Deny)"
-                                    : "you declined to run it this time"
-                                NSLog("[CloudChatEngine] tool '\(call.name)' not run — \(reason)")
-                                result = "⛔️ “\(call.name)” was not run — \(reason)."
+                            if let harnessResult = Self.harnessResult(
+                                taskState, name: call.name, arguments: call.arguments,
+                                notices: &pendingHarnessNotices)
+                            {
+                                result = harnessResult
                             } else {
-                                NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
-                                do {
-                                    result = try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
-                                        try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                            try await ToolRegistry.shared.execute(
-                                                name: call.name,
-                                                argumentsJSON: call.arguments
-                                            )
-                                        }
+                                // Enforce the user's per-tool permission policy
+                                // (Tools / Permissions tab). Deny blocks the tool;
+                                // Ask shows a confirmation before running; Auto runs.
+                                // Upstream checks arguments before its permission gate (see
+                                // the batch path above).
+                                let preflightRejected = await ToolRegistry.shared.preflightRejection(
+                                    name: call.name, argumentsJSON: call.arguments) != nil
+                                let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
+                                    for: call.name, argumentsJSON: call.arguments)
+                                let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
+                                let approved: Bool
+                                switch policy {
+                                case .deny:
+                                    approved = false
+                                case .auto:
+                                    approved = true
+                                case .ask:
+                                    if ownsApproval {
+                                        approved = true
+                                        break
                                     }
-                                    NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
-                                } catch {
-                                    NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
-                                    result = ToolEnvelope.fromError(error, tool: call.name)
+                                    // Upstream #2241: the global auto-allow switch
+                                    // replaces the card, except for per-call tools.
+                                    if ToolApprovalSettings.skipsApprovalCard(
+                                        perCallRequired: ToolRegistry.shared.requiresApprovalEveryCall(
+                                            call.name, argumentsJSON: call.arguments))
+                                    {
+                                        approved = true
+                                        break
+                                    }
+                                    // Real upstream permission card (ToolPermissionView via
+                                    // ToolPermissionPromptService) — Allow / Deny / Always Allow.
+                                    // "Always Allow" persists the policy internally.
+                                    let toolDescription =
+                                        activeTools?
+                                        .first(where: { $0.function.name == call.name })?
+                                        .function.description ?? ""
+                                    approved = await ToolPermissionPromptService.requestApproval(
+                                        toolName: call.name,
+                                        description: toolDescription,
+                                        argumentsJSON: call.arguments,
+                                        knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
+                                            for: call.name, argumentsJSON: call.arguments))
+                                }
+
+                                if !approved {
+                                    let reason =
+                                        policy == .deny
+                                        ? "blocked by your tool permissions (Deny)"
+                                        : "you declined to run it this time"
+                                    NSLog("[CloudChatEngine] tool '\(call.name)' not run — \(reason)")
+                                    result = "⛔️ “\(call.name)” was not run — \(reason)."
+                                } else {
+                                    NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
+                                    do {
+                                        result = try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
+                                            try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                                try await ToolRegistry.shared.execute(
+                                                    name: call.name,
+                                                    argumentsJSON: call.arguments
+                                                )
+                                            }
+                                        }
+                                        NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
+                                    } catch {
+                                        NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
+                                        result = ToolEnvelope.fromError(error, tool: call.name)
+                                    }
                                 }
                             }
                             continuation.yield(
@@ -1488,9 +1578,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 IntelToolImageWire.toolMessage(
                                     callId: callId, toolName: call.name, result: result,
                                     imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
+                            taskState.record(name: call.name, argsJSON: call.arguments, result: result)
                             if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
                                 runEndedByTool = true
                             }
+                        }
+                        if let bias = taskState.nextStepBias() {
+                            Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
                         }
                         // `complete` / `clarify` / `prompt_working_folder` end
                         // the run after this round: every call in the round

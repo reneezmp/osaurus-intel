@@ -3244,3 +3244,36 @@ current `DocumentEditTests` and `ToolWirePropertyOrderTests`.
 doesn't keep them across save and reopen, while `PDFEditor` is upstream's
 verbatim and warns when the flag is missing. Rosy checks it on real Intel
 hardware.
+
+### Loop harness (`W-agent-loop-tools`) — 2026-10-10
+
+Intel's engine now drives upstream's `AgentTaskState` (upstream's file,
+verbatim) the way upstream's `AgentToolLoop` does, on both the
+chat-completions and the Responses tool paths:
+
+- **Before a call:** `guardedResult` (refuse a known-bad repeat), then
+  `heldResult` (replay an identical earlier read or search instead of
+  running it). A replay skips approval and execution, and stages upstream's
+  dedupe notice or the state's escalation.
+- **After a call:** `record(name:argsJSON:result:)`. Writes and shell runs
+  invalidate held reads.
+- **After a round:** `nextStepBias()` stages the bias first (invalid
+  arguments, listing nudges, not-found steering).
+
+Notices are transient: they ride on the next request only and are never
+stored in the conversation.
+
+**Intel difference:** notices are appended to the trailing tool result's
+text (Responses: a user input item). Upstream adds a second tool message
+with the same `tool_call_id`, which strict OpenAI-compatible hosts such as
+DeepSeek can reject.
+
+**Correction to the earlier entry:** grounded claim checks are not all
+eval tooling. Upstream's loop runs `GroundedFileSideEffectCheck`,
+`GroundedKnowledgeClaimCheck` and `GroundedConfigClaimCheck` at runtime;
+they are next. Only `CapabilityClaimsEvaluator` (#3033) is eval-only.
+
+Tests: upstream's `AgentTaskStateTests` (80 cases; three web-search cases
+dropped, as Intel lacks `SearchAndExtractTool.extractionEnvelope`) and
+`IntelLoopHarnessTests`. Upstream's `HarnessStabilityFixesTests` waits on
+`shell_run`'s idle timeout.

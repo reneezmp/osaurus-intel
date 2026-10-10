@@ -1,0 +1,1766 @@
+//
+//  AgentTaskStateTests.swift
+//  osaurusTests
+//
+//  Unit + simulation tests for the harness task-state machine. Covers the
+//  result classifier (listing/file/not-found branches), the dedupe +
+//  write-invalidation logic (with shared path canonicalization), verbatim
+//  per-signature replay, the data-driven reactive next-step nudge (fires only
+//  after the model is observed wandering), the bias-disabled validation gate,
+//  and an end-to-end "list -> read" transcript simulation with fixed
+//  turn-count criteria.
+//
+
+import Foundation
+import Testing
+
+@testable import OsaurusCore
+
+@Suite(.serialized)
+// Intel: cases using `SearchAndExtractTool.extractionEnvelope` are dropped
+// (Intel web search lacks it): webSearchLoop_allChallengeExtractionDoesNotResetGuard, webSearchLoop_transientExtractionFailureGetsOneRetryThenStops, webSearchLoop_contentfulExtractionResetsAndMayReplay.
+struct AgentTaskStateTests {
+
+    // MARK: - Helpers
+
+    private func fileContentEnvelope(path: String, text: String = "hello") -> String {
+        ToolEnvelope.success(
+            tool: "file_read",
+            result: ["kind": "file", "text": text, "path": path]
+        )
+    }
+
+    private func partialFileEnvelope(path: String, nextStart: Int, nextEnd: Int) -> String {
+        ToolEnvelope.success(
+            tool: "file_read",
+            result: [
+                "kind": "file",
+                "text": "Lines 1-\(nextStart - 1) of \(nextEnd):\n...",
+                "path": path,
+                "truncated": true,
+                "next_start_line": nextStart,
+                "next_end_line": nextEnd,
+            ]
+        )
+    }
+
+    private func listingEnvelope(
+        path: String,
+        entries: [(name: String, path: String, dir: Bool)],
+        truncated: Bool = false
+    ) -> String {
+        ToolEnvelope.listing(
+            tool: "file_read",
+            path: path,
+            entries: entries.map {
+                ["name": $0.name, "path": $0.path, "type": $0.dir ? "directory" : "file"]
+            },
+            truncated: truncated
+        )
+    }
+
+    private func targetedEditEnvelope(before: String, after: String) -> String {
+        ToolEnvelope.success(
+            tool: "file_edit",
+            result: [
+                "before_content_sha256": WorkspaceWriteSafety.contentSHA256(before),
+                "content_sha256": WorkspaceWriteSafety.contentSHA256(after),
+            ]
+        )
+    }
+
+    // MARK: - Classification
+
+    @Test func classify_populatedListing() {
+        let env = listingEnvelope(
+            path: ".",
+            entries: [("a.txt", "a.txt", false), ("sub", "sub", true)]
+        )
+        #expect(AgentTaskState.classify(env) == .populatedListing)
+    }
+
+    @Test func classify_emptyListing() {
+        let env = listingEnvelope(path: "empty", entries: [])
+        #expect(AgentTaskState.classify(env) == .emptyListing)
+    }
+
+    @Test func classify_partialListing() {
+        let env = listingEnvelope(
+            path: "big",
+            entries: [("a.txt", "big/a.txt", false)],
+            truncated: true
+        )
+        #expect(AgentTaskState.classify(env) == .partialListing)
+    }
+
+    @Test func classify_fileContent() {
+        #expect(AgentTaskState.classify(fileContentEnvelope(path: "a.txt")) == .fileContent)
+    }
+
+    /// Issue #2098: a rendered-cap-truncated read carrying an exact
+    /// continuation range classifies as its own state so the harness can
+    /// stage a continuation notice instead of treating it as complete.
+    @Test func classify_partialFileContent() {
+        let env = partialFileEnvelope(path: "BeatStrip.ino", nextStart: 427, nextEnd: 499)
+        #expect(
+            AgentTaskState.classify(env)
+                == .partialFileContent(path: "BeatStrip.ino", nextStartLine: 427, nextEndLine: 499)
+        )
+    }
+
+    /// A raw byte-capped read reports `truncated: true` but deliberately
+    /// carries NO continuation fields (line numbers can't reach unloaded
+    /// bytes) — it must stay plain `.fileContent`, never a continuation.
+    @Test func classify_byteCappedFileWithoutContinuationStaysFileContent() {
+        let env = ToolEnvelope.success(
+            tool: "file_read",
+            result: [
+                "kind": "file",
+                "text": "Lines 1-90000 of at least 90000 scanned:\n...",
+                "path": "huge.csv",
+                "truncated": true,
+                "raw_bytes_truncated": true,
+            ]
+        )
+        #expect(AgentTaskState.classify(env) == .fileContent)
+    }
+
+    @Test func classify_notFound() {
+        let env = ToolEnvelope.failure(kind: .notFound, message: "File not found: x", tool: "file_read")
+        #expect(AgentTaskState.classify(env) == .notFound)
+    }
+
+    @Test func classify_genericError() {
+        let env = ToolEnvelope.failure(kind: .executionError, message: "boom", tool: "file_read")
+        #expect(AgentTaskState.classify(env) == .error)
+    }
+
+    @Test func classify_otherSuccess() {
+        // A plain text success (no `kind`) is neither listing nor file.
+        let env = ToolEnvelope.success(tool: "file_search", text: "Found 2 matches")
+        #expect(AgentTaskState.classify(env) == .other)
+    }
+
+    /// The `kind:"search"` shape must classify as benign `.other`, NOT be
+    /// misread as a listing. Recording one must leave both the wandering
+    /// counter and the retained `lastListing` snapshot untouched — a future
+    /// edit that makes search results count as listings would corrupt Fix 1's
+    /// truncated-listing steer, so pin the behaviour here.
+    @Test func classify_searchResultIsBenignOther() {
+        let searchEnv = ToolEnvelope.search(
+            tool: "file_search",
+            query: "q4",
+            entries: [["name": "q4.xlsx", "path": "q4.xlsx", "type": "file"]],
+            truncated: false
+        )
+        #expect(AgentTaskState.classify(searchEnv) == .other)
+
+        let state = AgentTaskState()
+        // Seed a truncated listing so we can prove recording a search doesn't
+        // overwrite it (the not_found steer reads this snapshot).
+        let truncatedListing = listingEnvelope(
+            path: "big",
+            entries: [("a.txt", "big/a.txt", false)],
+            truncated: true
+        )
+        state.record(name: "file_read", argsJSON: #"{"path":"big"}"#, result: truncatedListing)
+        let snapshotBefore = state.lastListing
+        #expect(snapshotBefore?.truncated == true)
+
+        state.record(name: "file_search", argsJSON: #"{"pattern":"q4","target":"files"}"#, result: searchEnv)
+
+        // Counter unchanged (search is not a listing), snapshot unchanged.
+        #expect(state.lastListing == snapshotBefore, "a search result must not overwrite lastListing")
+        // The retained truncated listing still drives the not_found steer.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big/missing.txt"}"#,
+            result: ToolEnvelope.failure(kind: .notFound, message: "not found", tool: "file_read")
+        )
+        #expect(state.nextStepBias()?.contains("file_search") == true)
+    }
+
+    // MARK: - Path canonicalization (shared)
+
+    @Test func canonicalPath_normalizesSpellings() {
+        #expect(AgentTaskState.canonicalPath("config.json") == AgentTaskState.canonicalPath("./config.json"))
+        #expect(AgentTaskState.canonicalPath("a/b/") == AgentTaskState.canonicalPath("a/b"))
+        #expect(AgentTaskState.canonicalPath("a//b") == AgentTaskState.canonicalPath("a/b"))
+    }
+
+    // MARK: - Dedupe
+
+    @Test func dedupe_repeatedReadIsHeld() {
+        let state = AgentTaskState()
+        let env = fileContentEnvelope(path: "config.json")
+        state.record(name: "file_read", argsJSON: #"{"path":"config.json"}"#, result: env)
+        // The identical re-issue replays the EXACT prior envelope.
+        #expect(state.heldResult(name: "file_read", argsJSON: #"{"path":"config.json"}"#) == env)
+    }
+
+    @Test func dedupe_argOrderInsensitive() {
+        let state = AgentTaskState()
+        let env = fileContentEnvelope(path: "a.txt")
+        state.record(name: "file_read", argsJSON: #"{"path":"a.txt","start_line":1}"#, result: env)
+        // Same args, different key order — still a duplicate.
+        #expect(state.isDuplicate(name: "file_read", argsJSON: #"{"start_line":1,"path":"a.txt"}"#))
+    }
+
+    @Test func dedupe_differentPathNotHeld() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"a.txt"}"#,
+            result: fileContentEnvelope(path: "a.txt")
+        )
+        #expect(state.heldResult(name: "file_read", argsJSON: #"{"path":"b.txt"}"#) == nil)
+    }
+
+    @Test func dedupe_overwriteWritesAreNeverHeld() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"x"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "ok")
+        )
+        // A repeated write must always run.
+        #expect(state.heldResult(name: "file_write", argsJSON: #"{"path":"a.txt","content":"x"}"#) == nil)
+    }
+
+    @Test func dedupe_exactSuccessfulAppendBecomesTypedNoop() throws {
+        let state = AgentTaskState()
+        let args = #"{"path":"a.txt","content":"SECOND\n","mode":"append"}"#
+        let result = ToolEnvelope.success(
+            tool: "file_write",
+            result: [
+                "action": "update",
+                "applied": true,
+                "path": "a.txt",
+                "mode": "append",
+            ] as [String: Any]
+        )
+        state.record(name: "file_write", argsJSON: args, result: result)
+
+        let replay = try #require(state.heldResult(name: "file_write", argsJSON: args))
+        let payload = try #require(ToolEnvelope.successPayload(replay) as? [String: Any])
+        #expect(payload["action"] as? String == "noop")
+        #expect(payload["applied"] as? Bool == false)
+        #expect(payload["reason"] as? String == "exact_append_already_applied")
+    }
+
+    @Test func dedupe_appendReexecutesAfterInterveningMutationOrMessage() {
+        let state = AgentTaskState()
+        let append = #"{"path":"a.txt","content":"x","mode":"append"}"#
+        let success = ToolEnvelope.success(
+            tool: "file_write",
+            result: ["applied": true, "path": "a.txt"] as [String: Any]
+        )
+        state.record(name: "file_write", argsJSON: append, result: success)
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"reset","mode":"overwrite"}"#,
+            result: success
+        )
+        #expect(state.heldResult(name: "file_write", argsJSON: append) == nil)
+
+        state.record(name: "file_write", argsJSON: append, result: success)
+        state.beginMessage()
+        #expect(state.heldResult(name: "file_write", argsJSON: append) == nil)
+    }
+
+    /// The read -> edit -> read-to-verify pattern: the write to the path
+    /// invalidates the fresh read so the verify-read re-executes instead of
+    /// being short-circuited with stale pre-edit content. Uses TWO spellings
+    /// of the same path to prove the shared canonicalization matches.
+    @Test func dedupe_writeInvalidatesReadAcrossSpellings() {
+        let state = AgentTaskState()
+        // 1) read "config.json" — now fresh and would be deduped.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"config.json"}"#,
+            result: fileContentEnvelope(path: "config.json", text: "before")
+        )
+        #expect(state.isDuplicate(name: "file_read", argsJSON: #"{"path":"config.json"}"#))
+
+        // 2) edit "./config.json" — a DIFFERENT spelling of the same path.
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"./config.json"}"#,
+            result: ToolEnvelope.success(tool: "file_edit", text: "edited")
+        )
+
+        // 3) the verify-read of "config.json" must NOT be held — it must
+        //    re-execute so the model sees post-edit content.
+        #expect(
+            state.heldResult(name: "file_read", argsJSON: #"{"path":"config.json"}"#) == nil,
+            "a write to ./config.json must invalidate the read of config.json (shared canonicalization)"
+        )
+    }
+
+    /// Raptor-0.6-4B puts `path` inside every `edits` entry (or sends
+    /// `edits` as a JSON string). `FileEditTool` hoists it before validation
+    /// and the edit lands; the state machine sees the raw call and must
+    /// invalidate the same file, or the verify-read replays pre-edit content
+    /// (post4 `edit-pptx-in-place`: "repeated reads continue to show the
+    /// original content").
+    @Test func dedupe_perEntryPathEditInvalidatesRead() {
+        for editArgs in [
+            #"{"dry_run":"false","edits":[{"old_string":"a","new_string":"b","path":"deck.pptx"},{"old_string":"c","new_string":"d","path":"./deck.pptx"}]}"#,
+            #"{"edits":"[{\"old_string\": \"a\", \"new_string\": \"b\", \"path\": \"deck.pptx\"}]"}"#,
+            #"{"edits":[{"op":"fill_form","fields":{"Name":"Ada"},"path":"deck.pptx"}]}"#,
+        ] {
+            let state = AgentTaskState()
+            state.record(
+                name: "file_read", argsJSON: #"{"mode":"content","path":"deck.pptx"}"#,
+                result: fileContentEnvelope(path: "deck.pptx", text: "before"))
+            #expect(state.isDuplicate(name: "file_read", argsJSON: #"{"mode":"content","path":"deck.pptx"}"#))
+            state.record(name: "file_edit", argsJSON: editArgs, result: ToolEnvelope.success(tool: "file_edit", text: "edited"))
+            #expect(
+                state.heldResult(name: "file_read", argsJSON: #"{"mode":"content","path":"deck.pptx"}"#) == nil,
+                "the verify-read after \(editArgs) must re-execute")
+        }
+        // Entries naming different files resolve to no single target.
+        #expect(
+            AgentTaskState.sharedEntryPath(["edits": [["path": "a.txt", "old_string": "x", "new_string": "y"], ["path": "b.txt", "old_string": "x", "new_string": "y"]]])
+                == nil)
+        #expect(AgentTaskState.sharedEntryPath(["edits": [["old_string": "x", "new_string": "y"]]]) == nil)
+    }
+
+    @Test func replay_isVerbatimNotCollapsed() {
+        let state = AgentTaskState()
+        // A long listing whose ContextBudget summary would be much shorter.
+        let entries = (0 ..< 40).map { (name: "f\($0).txt", path: "f\($0).txt", dir: false) }
+        let env = listingEnvelope(path: ".", entries: entries)
+        state.record(name: "file_read", argsJSON: #"{"path":"."}"#, result: env)
+        let held = state.heldResult(name: "file_read", argsJSON: #"{"path":"."}"#)
+        #expect(held == env, "the replay must be the exact prior envelope, not a collapsed form")
+    }
+
+    /// `capabilities_load` is a path-less deterministic-error tool: a failing
+    /// `invalid_args` load is held and replayed (with an escalation notice)
+    /// instead of re-executing, so a model can't burn iterations re-issuing
+    /// the same bad capability id.
+    @Test func dedupe_capabilitiesLoadInvalidArgsIsHeld() {
+        let state = AgentTaskState()
+        let args = #"{"ids":["plugin/Scite.AI"]}"#
+        let err = ToolEnvelope.failure(
+            kind: .invalidArgs,
+            message: "Unknown type 'plugin'",
+            tool: "capabilities_load",
+            retryable: false
+        )
+        state.record(name: "capabilities_load", argsJSON: args, result: err)
+        #expect(state.heldResult(name: "capabilities_load", argsJSON: args) == err)
+        #expect(state.lastReplayNotice?.contains("capabilities_load") == true)
+        // A different id set is a different call — not held.
+        #expect(state.heldResult(name: "capabilities_load", argsJSON: #"{"ids":["skill/other"]}"#) == nil)
+    }
+
+    // MARK: - Next-step nudge
+
+    /// Reactive: a single listing does NOT nudge (a capable model that
+    /// descends immediately is never told what it already inferred). A second
+    /// listing without an intervening read DOES nudge.
+    @Test func bias_populatedListingPointsAtEntries() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"."}"#,
+            result: listingEnvelope(path: ".", entries: [("a.txt", "a.txt", false)])
+        )
+        #expect(state.nextStepBias() == nil, "one listing is not wandering — no nudge")
+
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"other"}"#,
+            result: listingEnvelope(path: "other", entries: [("b.txt", "other/b.txt", false)])
+        )
+        let bias = try? #require(state.nextStepBias())
+        #expect(bias?.contains("result.entries") == true)
+    }
+
+    @Test func bias_emptyListingDoesNotTellModelToPick() {
+        let state = AgentTaskState()
+        // Two empty listings without a read to reach the reactive threshold.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"empty"}"#,
+            result: listingEnvelope(path: "empty", entries: [])
+        )
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"empty2"}"#,
+            result: listingEnvelope(path: "empty2", entries: [])
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("empty"))
+        // Must not instruct the model to pick/copy an entry that isn't there.
+        #expect(!bias.contains("result.entries"))
+    }
+
+    @Test func bias_partialListingPointsAtSearch() {
+        let state = AgentTaskState()
+        // Two truncated listings without a read to reach the reactive threshold.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big"}"#,
+            result: listingEnvelope(
+                path: "big",
+                entries: [("a.txt", "big/a.txt", false)],
+                truncated: true
+            )
+        )
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big2"}"#,
+            result: listingEnvelope(
+                path: "big2",
+                entries: [("b.txt", "big2/b.txt", false)],
+                truncated: true
+            )
+        )
+        #expect(state.nextStepBias()?.contains("file_search") == true)
+    }
+
+    // MARK: - Truncated-read continuation budget
+
+    /// Under the limit the continuation steer is unchanged: it names the exact
+    /// resume range so the model can finish the file (issue #2098's fix).
+    @Test func bias_partialReadSteersContinuationUnderLimit() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big.md","start_line":1}"#,
+            result: partialFileEnvelope(path: "big.md", nextStart: 101, nextEnd: 600)
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("call `file_read` again"))
+        #expect(bias.contains(#""start_line": 101"#))
+    }
+
+    /// Each continuation costs an agent iteration, so a file that stays
+    /// truncated cannot keep buying them: past the limit the instruction
+    /// switches. Critically it must NOT go silent — silence is what let a
+    /// truncated render be reviewed as the whole file (#2098) — so the bounded
+    /// notice still requires the model to disclose the partial read.
+    @Test func bias_partialReadSwitchesToBoundedNoticeAtLimit() {
+        let state = AgentTaskState()
+        for step in 0...2 {
+            state.record(
+                name: "file_read",
+                argsJSON: #"{"path":"big.md","start_line":\#(step * 100 + 1)}"#,
+                result: partialFileEnvelope(
+                    path: "big.md",
+                    nextStart: (step + 1) * 100 + 1,
+                    nextEnd: 600
+                )
+            )
+        }
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("Stop re-reading this file"))
+        #expect(bias.contains("state explicitly"))
+        #expect(bias.contains("only read part"))
+        // The whole point of the bound: it stops asking for another read.
+        #expect(!bias.contains("call `file_read` again"))
+    }
+
+    /// The budget is per file. A second file that gets truncated must still
+    /// earn its own continuations rather than inheriting the first file's
+    /// exhausted budget.
+    @Test func bias_partialReadBudgetIsPerPath() {
+        let state = AgentTaskState()
+        for step in 0...2 {
+            state.record(
+                name: "file_read",
+                argsJSON: #"{"path":"big.md","start_line":\#(step * 100 + 1)}"#,
+                result: partialFileEnvelope(
+                    path: "big.md",
+                    nextStart: (step + 1) * 100 + 1,
+                    nextEnd: 600
+                )
+            )
+        }
+        #expect(state.nextStepBias()?.contains("Stop re-reading this file") == true)
+
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"other.md","start_line":1}"#,
+            result: partialFileEnvelope(path: "other.md", nextStart: 101, nextEnd: 400)
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("other.md"))
+        #expect(bias.contains("call `file_read` again"))
+    }
+
+    /// A read that comes back whole means the file was finished, so its
+    /// continuation budget is released — a later truncated read of the same
+    /// path starts over instead of landing straight on the bounded notice.
+    @Test func bias_completeReadReleasesPartialReadBudget() {
+        let state = AgentTaskState()
+        for step in 0...2 {
+            state.record(
+                name: "file_read",
+                argsJSON: #"{"path":"big.md","start_line":\#(step * 100 + 1)}"#,
+                result: partialFileEnvelope(
+                    path: "big.md",
+                    nextStart: (step + 1) * 100 + 1,
+                    nextEnd: 600
+                )
+            )
+        }
+        #expect(state.nextStepBias()?.contains("Stop re-reading this file") == true)
+
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big.md","start_line":400}"#,
+            result: fileContentEnvelope(path: "big.md")
+        )
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big.md","start_line":1,"end_line":50}"#,
+            result: partialFileEnvelope(path: "big.md", nextStart: 51, nextEnd: 600)
+        )
+        #expect(state.nextStepBias()?.contains("call `file_read` again") == true)
+    }
+
+    /// The budget is per user message: a new send starts with a full one.
+    @Test func bias_partialReadBudgetResetsPerMessage() {
+        let state = AgentTaskState()
+        for step in 0...2 {
+            state.record(
+                name: "file_read",
+                argsJSON: #"{"path":"big.md","start_line":\#(step * 100 + 1)}"#,
+                result: partialFileEnvelope(
+                    path: "big.md",
+                    nextStart: (step + 1) * 100 + 1,
+                    nextEnd: 600
+                )
+            )
+        }
+        #expect(state.nextStepBias()?.contains("Stop re-reading this file") == true)
+
+        state.beginMessage()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big.md","start_line":1}"#,
+            result: partialFileEnvelope(path: "big.md", nextStart: 101, nextEnd: 600)
+        )
+        #expect(state.nextStepBias()?.contains("call `file_read` again") == true)
+    }
+
+    @Test func bias_fileContentHasNoNudge() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"a.txt"}"#,
+            result: fileContentEnvelope(path: "a.txt")
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    @Test func bias_oversizedFileWriteRequiresChunkedAppendRecovery() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"index.html","content":"oversized"}"#,
+            result: ToolEnvelope.failure(
+                kind: .invalidArgs,
+                message: "Property 'content' must contain at most 30000 characters (got 32000).",
+                field: "content",
+                expected: "at most 30000 characters",
+                tool: "file_write",
+                retryable: true
+            )
+        )
+
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("did not execute"))
+        #expect(bias.contains("Do not regenerate another complete oversized payload"))
+        #expect(bias.contains("\(WorkspaceToolContract.recommendedWriteChunkCharacters)"))
+        #expect(bias.contains(#"mode: "append""#))
+    }
+
+    @Test func bias_runnableWriteRequiresVerificationAndExplainsTruncatedDiff() {
+        let state = AgentTaskState()
+        let result = ToolEnvelope.success(
+            tool: "file_edit",
+            result: [
+                "kind": "workspace_write_result",
+                "path": "minesweeper.html",
+                "applied": true,
+                "dry_run": false,
+                "diff_truncated": true,
+                "content_write_complete": true,
+                "verification": [
+                    "status": "not_run",
+                    "reason": "Persistence is not runtime correctness.",
+                ],
+            ] as [String: Any]
+        )
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"minesweeper.html","old_string":"x","new_string":"y"}"#,
+            result: result
+        )
+
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("succeeded"))
+        #expect(bias.contains("only the review preview was shortened"))
+        #expect(bias.contains("Do not rewrite the whole file"))
+        #expect(bias.contains("proves persistence, not that runnable code works"))
+        #expect(bias.contains("shell_run"))
+    }
+
+    @Test func bias_plainTextWriteWithoutVerificationMetadataHasNoNudge() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"notes.txt","content":"done"}"#,
+            result: ToolEnvelope.success(
+                tool: "file_write",
+                result: [
+                    "kind": "workspace_write_result",
+                    "path": "notes.txt",
+                    "applied": true,
+                ]
+            )
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// Issue #2098: a rendered-cap-truncated read stages a continuation
+    /// notice naming the exact path and `start_line`/`end_line` to resume
+    /// with, so the model reads the rest instead of reviewing a prefix as
+    /// if it were the whole file.
+    @Test func bias_partialFileReadStagesExactContinuation() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"BeatStrip.ino"}"#,
+            result: partialFileEnvelope(path: "BeatStrip.ino", nextStart: 427, nextEnd: 499)
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("BeatStrip.ino"))
+        #expect(bias.contains(#""start_line": 427"#))
+        #expect(bias.contains(#""end_line": 499"#))
+    }
+
+    /// The disabled-bias validation gate covers the continuation notice too.
+    @Test func bias_partialFileReadSilentWhenBiasDisabled() {
+        let state = AgentTaskState(biasEnabled: false)
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"BeatStrip.ino"}"#,
+            result: partialFileEnvelope(path: "BeatStrip.ino", nextStart: 427, nextEnd: 499)
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// A byte-capped read (`truncated: true` but no continuation fields)
+    /// must not receive a line-continuation steer that could not work.
+    @Test func bias_byteCappedReadGetsNoContinuationSteer() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"huge.csv"}"#,
+            result: ToolEnvelope.success(
+                tool: "file_read",
+                result: [
+                    "kind": "file",
+                    "text": "...",
+                    "path": "huge.csv",
+                    "truncated": true,
+                    "raw_bytes_truncated": true,
+                ]
+            )
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// A partial read is still a successful descent into a file: it resets
+    /// the wandering (listings-without-read) counter like a complete read.
+    @Test func bias_partialFileReadResetsWanderingCounter() {
+        let state = AgentTaskState()
+        let listing = listingEnvelope(path: ".", entries: [("a.txt", "a.txt", false)])
+        state.record(name: "file_read", argsJSON: #"{"path":"."}"#, result: listing)
+        state.record(name: "file_read", argsJSON: #"{"path":"x"}"#, result: listing)
+        #expect(state.nextStepBias()?.contains("result.entries") == true)
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big.ino"}"#,
+            result: partialFileEnvelope(path: "big.ino", nextStart: 400, nextEnd: 499)
+        )
+        // One fresh listing after the reset is below the reactive threshold.
+        state.record(name: "file_read", argsJSON: #"{"path":"y"}"#, result: listing)
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// While the model stays stuck (keeps listing without reading), the nudge
+    /// keeps firing — it does NOT go silent right when a stuck model needs it
+    /// most. Each distinct listing past the threshold still nudges.
+    @Test func bias_listingNudgeKeepsFiringWhileStuck() {
+        let state = AgentTaskState()
+        // First listing: below threshold, no nudge.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"d0"}"#,
+            result: listingEnvelope(path: "d0", entries: [("a.txt", "d0/a.txt", false)])
+        )
+        #expect(state.nextStepBias() == nil)
+        // Listings 2..5 without a read: nudge fires every time.
+        for i in 1 ..< 5 {
+            state.record(
+                name: "file_read",
+                argsJSON: "{\"path\":\"d\(i)\"}",
+                result: listingEnvelope(path: "d\(i)", entries: [("a.txt", "d\(i)/a.txt", false)])
+            )
+            #expect(
+                state.nextStepBias()?.contains("result.entries") == true,
+                "the nudge must keep firing while the model stays stuck (iteration \(i))"
+            )
+        }
+    }
+
+    @Test func bias_resetsAfterAFileRead() {
+        let state = AgentTaskState()
+        let listing = listingEnvelope(path: ".", entries: [("a.txt", "a.txt", false)])
+        // Two listings without a read -> wandering -> nudge.
+        state.record(name: "file_read", argsJSON: #"{"path":"."}"#, result: listing)
+        state.record(name: "file_read", argsJSON: #"{"path":"x"}"#, result: listing)
+        #expect(state.nextStepBias()?.contains("result.entries") == true)
+        // A successful file read is progress and resets the counter.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"a.txt"}"#,
+            result: fileContentEnvelope(path: "a.txt")
+        )
+        // A single fresh listing after the reset is below threshold again.
+        state.record(name: "file_read", argsJSON: #"{"path":"y"}"#, result: listing)
+        #expect(state.nextStepBias() == nil, "counter reset by the read -> one listing is not wandering")
+        // A second listing without a read fires again.
+        state.record(name: "file_read", argsJSON: #"{"path":"z"}"#, result: listing)
+        #expect(state.nextStepBias()?.contains("result.entries") == true)
+    }
+
+    /// Capable-model path (bias ON): list once, then descend into a file. The
+    /// nudge never fires — no backseat-driving for a model that does the right
+    /// thing on its own.
+    @Test func bias_firstListingThenReadNeverNudges() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"Desktop"}"#,
+            result: listingEnvelope(path: "Desktop", entries: [("a.txt", "Desktop/a.txt", false)])
+        )
+        #expect(state.nextStepBias() == nil)
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"Desktop/a.txt"}"#,
+            result: fileContentEnvelope(path: "Desktop/a.txt")
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// The wandering counter and the per-`not_found` nudge compose: a failed
+    /// read is not progress, so it neither resets nor masks wandering. A
+    /// listing -> failed read -> listing sequence still reaches the listing
+    /// nudge, and the not-found in the middle fires its own nudge.
+    @Test func bias_interleavedListingAndNotFoundStillReachesNudge() {
+        let state = AgentTaskState()
+        // list A — below threshold.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"A"}"#,
+            result: listingEnvelope(path: "A", entries: [("a.txt", "A/a.txt", false)])
+        )
+        #expect(state.nextStepBias() == nil)
+        // failed read — fires the not-found nudge, must NOT reset the counter.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"/nope"}"#,
+            result: ToolEnvelope.failure(kind: .notFound, message: "File not found: /nope", tool: "file_read")
+        )
+        #expect(state.nextStepBias()?.contains("not found") == true)
+        // list B — second listing without a successful read -> listing nudge.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"B"}"#,
+            result: listingEnvelope(path: "B", entries: [("b.txt", "B/b.txt", false)])
+        )
+        #expect(
+            state.nextStepBias()?.contains("result.entries") == true,
+            "a not_found must not mask wandering — the second listing still reaches the nudge"
+        )
+    }
+
+    /// A truncated listing followed by a failed read must NOT steer the model
+    /// back into the partial set (that's how a present file gets reported
+    /// absent). The not_found nudge points at `file_search` instead.
+    @Test func bias_notFoundAfterTruncatedListingPointsAtSearch() {
+        let state = AgentTaskState()
+        // A single truncated listing (below the listing reactive threshold, so
+        // no listing nudge fires on its own).
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big"}"#,
+            result: listingEnvelope(
+                path: "big",
+                entries: [("a.txt", "big/a.txt", false)],
+                truncated: true
+            )
+        )
+        // The model guesses a path and misses.
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"big/missing.txt"}"#,
+            result: ToolEnvelope.failure(
+                kind: .notFound,
+                message: "File not found: big/missing.txt",
+                tool: "file_read"
+            )
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("file_search"), "truncated listing -> not_found must steer to file_search")
+        #expect(!bias.contains("most recent listing's entries"))
+    }
+
+    /// The result-level steer fires on the FIRST truncated listing (no
+    /// reactive gating): the warning is attached to the envelope itself.
+    @Test func truncatedListingEnvelopeCarriesSearchWarning() {
+        func warnings(_ envelope: String) -> [String] {
+            guard let data = envelope.data(using: .utf8),
+                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else { return [] }
+            return dict["warnings"] as? [String] ?? []
+        }
+        let truncated = listingEnvelope(
+            path: "big",
+            entries: [("a.txt", "big/a.txt", false)],
+            truncated: true
+        )
+        #expect(warnings(truncated).contains { $0.contains("file_search") && $0.contains("truncated") })
+        // A non-truncated listing carries no auto-warning.
+        let ok = listingEnvelope(path: "small", entries: [("a.txt", "small/a.txt", false)])
+        #expect(warnings(ok).isEmpty)
+    }
+
+    // MARK: - Bias-disabled validation gate
+
+    /// With the nudge disabled the state machine emits NO prose guidance —
+    /// the structured `entries[]` must carry the descent on its own. This is
+    /// the lever the transcript simulation pulls to prove the note is not
+    /// load-bearing.
+    @Test func gate_biasDisabledEmitsNoNudge() {
+        let state = AgentTaskState(biasEnabled: false)
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"."}"#,
+            result: listingEnvelope(path: ".", entries: [("a.txt", "a.txt", false)])
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    // MARK: - Transcript simulation ("what's on my desktop" -> "read the file")
+
+    /// Simulates the failing transcript at the harness level: a model driven
+    /// purely by the structured results (bias OFF) descends from a listing
+    /// into a file read within the fixed turn budget, with no duplicate
+    /// executions and never reporting a listing as file content.
+    ///
+    /// Pass criterion (fixed in advance): the read happens within <= 2 tool
+    /// iterations of the second message and <= 4 total; zero replays; the
+    /// content the model "answers" from is classified as file content, not a
+    /// listing.
+    @Test func transcript_listThenRead_descendsWithoutBias() {
+        let state = AgentTaskState(biasEnabled: false)
+        var replays = 0
+
+        // The "filesystem": Desktop has one file. A directory path lists; a
+        // file path returns content.
+        func execute(_ args: String) -> String {
+            if args.contains("\"Desktop\"") {
+                return listingEnvelope(
+                    path: "Desktop",
+                    entries: [("notes.txt", "Desktop/notes.txt", false)]
+                )
+            }
+            return fileContentEnvelope(path: "Desktop/notes.txt", text: "yahoo news")
+        }
+
+        // A `file_read` turn driven only by copying fields (never prose): it
+        // de-dupes via the harness, executes otherwise, and records.
+        func read(_ args: String) -> String {
+            if let held = state.heldResult(name: "file_read", argsJSON: args) {
+                replays += 1
+                return held
+            }
+            let result = execute(args)
+            state.record(name: "file_read", argsJSON: args, result: result)
+            return result
+        }
+
+        // --- Message 1: "what's on my desktop" -> one list call, then answer.
+        state.beginMessage()
+        let m1 = read(#"{"path":"Desktop"}"#)
+        let msg1Iterations = 1
+        #expect(AgentTaskState.classify(m1) == .populatedListing)
+
+        // The harness retained the listing across the message boundary, so
+        // message 2 can resolve "the file" against it (structure, not prose).
+        let retained = try? #require(state.lastListing)
+        #expect(retained?.entries.first?.path == "Desktop/notes.txt")
+
+        // --- Message 2: "read the file" -> copy the one entry's path back.
+        state.beginMessage()
+        let target = state.lastListing?.entries.first?.path ?? "Desktop/notes.txt"
+        let escaped = target.replacingOccurrences(of: "\"", with: "\\\"")
+        let m2 = read("{\"path\":\"\(escaped)\"}")
+        let msg2Iterations = 1
+
+        // Fixed pass criteria (decided in advance).
+        #expect(AgentTaskState.classify(m2) == .fileContent)
+        #expect(AgentTaskState.classify(m2) != .populatedListing, "no listing-as-content")
+        #expect(msg2Iterations <= 2, "read within 2 iterations of message 2")
+        #expect(msg1Iterations + msg2Iterations <= 4, "<= 4 total tool iterations")
+        #expect(replays == 0, "no duplicate executions")
+    }
+
+    // MARK: - Repeated write/exec call detector
+
+    private func execFailureEnvelope(_ message: String = "command failed") -> String {
+        ToolEnvelope.failure(kind: .executionError, message: message, tool: "sandbox_exec")
+    }
+
+    /// The 3rd identical non-read call arms the repeated-call nudge; the
+    /// first two stay silent (a legitimate retry shouldn't be nagged).
+    @Test func repeatedCall_thirdIdenticalExecArmsNudge() {
+        let state = AgentTaskState()
+        let args = #"{"command":"swift build"}"#
+
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        #expect(state.nextStepBias() == nil, "first call: no nudge")
+
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        #expect(state.nextStepBias() == nil, "second call: no nudge")
+
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("sandbox_exec"), "third call: nudge names the tool")
+        #expect(bias.contains("change your approach"), "nudge asks for a different approach")
+    }
+
+    /// Argument canonicalization applies: key order must not defeat the
+    /// detector.
+    @Test func repeatedCall_keyOrderInsensitive() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"x"}"#,
+            result: execFailureEnvelope()
+        )
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"content":"x","path":"a.txt"}"#,
+            result: execFailureEnvelope()
+        )
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"x"}"#,
+            result: execFailureEnvelope()
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("file_write"))
+    }
+
+    /// Reworded planning loop: `todo` re-issued with a DIFFERENT checklist each
+    /// turn (as the qwen3.5 AgentWorld/Ornith models do) evades the
+    /// identical-args counter — every list is a fresh signature — yet makes no
+    /// progress. The same-NAME run detector must still arm at the 3rd call.
+    @Test func planningLoop_rewordedTodoArmsNudgeAtThird() {
+        let state = AgentTaskState()
+        func todo(_ n: Int) -> String {
+            ToolEnvelope.success(tool: "todo", text: "Todo updated: 0/\(n) complete.")
+        }
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] a"}"#, result: todo(5))
+        #expect(state.nextStepBias() == nil, "first todo: no nudge")
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] a\n- [ ] b"}"#, result: todo(4))
+        #expect(state.nextStepBias() == nil, "second (reworded) todo: no nudge")
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] x\n- [ ] y\n- [ ] z"}"#, result: todo(3))
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("todo"), "third reworded todo: nudge names the tool")
+        #expect(bias.contains("Re-planning is not progress"), "nudge steers toward action")
+    }
+
+    /// False-positive guard: a productive tool (`file_write`) issued 3× to
+    /// DIFFERENT paths is legitimate work, not a planning loop — the same-name
+    /// run detector must NOT fire for it (only the identical-args detector may,
+    /// and only on identical args, which these are not).
+    @Test func planningLoop_productiveMultiTargetNotNudged() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"1"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "ok")
+        )
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"b.txt","content":"2"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "ok")
+        )
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"c.txt","content":"3"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "ok")
+        )
+        #expect(state.nextStepBias() == nil, "multi-file writes are progress, not a loop")
+    }
+
+    /// A productive action between planning calls disarms the run — the model
+    /// that plans, acts, then plans again is progressing, not stuck.
+    @Test func planningLoop_intervalActionDisarms() {
+        let state = AgentTaskState()
+        let todoEnv = ToolEnvelope.success(tool: "todo", text: "Todo updated.")
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] a"}"#, result: todoEnv)
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] b"}"#, result: todoEnv)
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"a.txt","content":"x"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "ok")
+        )
+        state.record(name: "todo", argsJSON: #"{"markdown":"- [ ] c"}"#, result: todoEnv)
+        #expect(state.nextStepBias() == nil, "interleaved action resets the planning run")
+    }
+
+    /// False-positive guard for the allowlist scope: a NON-planning tool
+    /// (e.g. `db_insert`, `image`, `web_search`, `capabilities_load`) issued
+    /// 3× in a row with varied args is legitimate consecutive work, NOT a
+    /// stalled plan — the planning detector is an allowlist (`todo` only), so
+    /// it must never arm for these. This also guarantees the planning nudge
+    /// cannot mask/contradict the `image` gen→edit continuation nudge.
+    @Test func planningLoop_consecutiveNonPlanningToolNotNudged() {
+        for tool in ["db_insert", "image", "web_search", "capabilities_load"] {
+            let state = AgentTaskState()
+            state.record(
+                name: tool,
+                argsJSON: #"{"q":"1"}"#,
+                result: ToolEnvelope.success(tool: tool, text: "ok")
+            )
+            state.record(
+                name: tool,
+                argsJSON: #"{"q":"2"}"#,
+                result: ToolEnvelope.success(tool: tool, text: "ok")
+            )
+            state.record(
+                name: tool,
+                argsJSON: #"{"q":"3"}"#,
+                result: ToolEnvelope.success(tool: tool, text: "ok")
+            )
+            #expect(
+                state.nextStepBias() == nil,
+                "3 consecutive \(tool) calls are work, not a planning loop"
+            )
+        }
+    }
+
+    /// Bonsai can rephrase the same discovery query indefinitely, so exact
+    /// argument matching is insufficient. Allow three research searches, then
+    /// make the required discovery -> retrieval transition explicit.
+    @Test func webSearchLoop_rewordedQueriesArmTransitionAtFourth() {
+        let state = AgentTaskState()
+        for n in 1 ... 3 {
+            state.record(
+                name: "web_search",
+                argsJSON: #"{"query":"S&P 500 CSV variation \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+            )
+            #expect(state.nextStepBias() == nil, "search \(n) remains a legitimate research step")
+        }
+
+        state.record(
+            name: "web_search",
+            argsJSON: #"{"query":"S&P historical close dataset"}"#,
+            result: ToolEnvelope.success(tool: "web_search", text: "more ranked snippets")
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("discovery-only"))
+        #expect(bias.contains("search_and_extract"))
+        #expect(bias.contains("render_chart"))
+        #expect(bias.contains("Stop searching"))
+    }
+
+    /// A retrieval/processing call is real progress and immediately disarms
+    /// the discovery-run advisory.
+    @Test func webSearchLoop_retrievalDisarmsTransition() {
+        let state = AgentTaskState()
+        for n in 1 ... 4 {
+            state.record(
+                name: "web_search",
+                argsJSON: #"{"query":"dataset \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+            )
+        }
+        #expect(state.nextStepBias()?.contains("Stop searching") == true)
+
+        state.record(
+            name: "search_and_extract",
+            argsJSON: #"{"query":"selected source"}"#,
+            result: ToolEnvelope.success(tool: "search_and_extract", text: "page body")
+        )
+        #expect(state.nextStepBias() == nil, "retrieval resets the discovery-only run")
+    }
+
+    @Test func webSearchLoop_failedRetrievalDoesNotResetGuard() throws {
+        let state = AgentTaskState()
+        for n in 1 ... 4 {
+            state.record(
+                name: "web_search",
+                argsJSON: #"{"query":"dataset \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+            )
+        }
+
+        state.record(
+            name: "search_and_extract",
+            argsJSON: #"{"url":"https://example.com/data.csv"}"#,
+            result: ToolEnvelope.failure(
+                kind: .notFound,
+                message: "search_and_extract is not available in this conversation.",
+                tool: "search_and_extract",
+                retryable: false
+            )
+        )
+
+        let guarded = try #require(state.guardedResult(name: "web_search"))
+        #expect(guarded.contains("transition_required"))
+    }
+
+
+
+
+    @Test func webSearchLoop_metaToolDetourDoesNotResetGuard() throws {
+        let state = AgentTaskState()
+        for n in 1 ... 4 {
+            state.record(
+                name: "web_search",
+                argsJSON: #"{"query":"dataset \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+            )
+        }
+
+        state.record(
+            name: "capabilities_load",
+            argsJSON: #"{"ids":["skill/Data Visualizer"]}"#,
+            result: ToolEnvelope.success(tool: "capabilities_load", text: "loaded")
+        )
+        let guarded = try #require(state.guardedResult(name: "web_search"))
+        #expect(guarded.contains("transition_required"))
+    }
+
+    @Test func webSearchLoop_fifthDiscoveryIsGuardedWithoutProviderExecution() throws {
+        let state = AgentTaskState()
+        for n in 1 ... 4 {
+            state.record(
+                name: "web_search",
+                argsJSON: #"{"query":"dataset \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+            )
+        }
+
+        let guarded = try #require(state.guardedResult(name: "web_search"))
+        #expect(ToolEnvelope.isSuccess(guarded))
+        #expect(guarded.contains("transition_required"))
+        #expect(guarded.contains("search_and_extract"))
+        #expect(state.guardedResult(name: "search_and_extract") == nil)
+    }
+
+    /// Identical successful web reads are replayable just like file reads;
+    /// re-executing the same query cannot add information to the current turn.
+    @Test func webSearchLoop_identicalSuccessfulSearchIsHeld() {
+        let state = AgentTaskState()
+        let args = #"{"query":"S&P 500 CSV"}"#
+        let envelope = ToolEnvelope.success(tool: "web_search", text: "ranked snippets")
+        state.record(name: "web_search", argsJSON: args, result: envelope)
+
+        #expect(AgentTaskState.isReplayEligible(name: "web_search"))
+        #expect(state.heldResult(name: "web_search", argsJSON: args) == envelope)
+    }
+
+    /// A different call between repeats disarms the pending nudge — the
+    /// notice describes the MOST RECENT call only.
+    @Test func repeatedCall_differentCallDisarms() {
+        let state = AgentTaskState()
+        let args = #"{"command":"make test"}"#
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        // Now a different command runs — the nudge must not fire for it.
+        state.record(
+            name: "sandbox_exec",
+            argsJSON: #"{"command":"ls"}"#,
+            result: ToolEnvelope.success(tool: "sandbox_exec", text: "ok")
+        )
+        #expect(state.nextStepBias() == nil)
+    }
+
+    /// Read tools never reach the counter — they are covered by the dedupe
+    /// replay (`heldResult`) instead.
+    @Test func repeatedCall_readToolsExcluded() {
+        let state = AgentTaskState()
+        // Failed reads re-execute (no fresh-read entry), so the same read can
+        // genuinely repeat — and must not trip the write/exec detector.
+        let notFound = ToolEnvelope.failure(kind: .notFound, message: "missing", tool: "file_read")
+        let args = #"{"path":"ghost.txt"}"#
+        state.record(name: "file_read", argsJSON: args, result: notFound)
+        state.record(name: "file_read", argsJSON: args, result: notFound)
+        state.record(name: "file_read", argsJSON: args, result: notFound)
+        let bias = state.nextStepBias() ?? ""
+        #expect(!bias.contains("identical arguments"), "read repeats use the not_found nudge, not the repeat detector")
+    }
+
+    /// `beginMessage` resets the counters: repeats across user messages are
+    /// not loops.
+    @Test func repeatedCall_beginMessageResets() {
+        let state = AgentTaskState()
+        let args = #"{"command":"git status"}"#
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        state.beginMessage()
+        state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        #expect(state.nextStepBias() == nil, "count restarts after beginMessage")
+    }
+
+    /// The detector keeps firing while the model stays stuck (4th, 5th, …
+    /// identical calls) — no premature silence.
+    @Test func repeatedCall_keepsFiringWhileStuck() {
+        let state = AgentTaskState()
+        let args = #"{"command":"swift build"}"#
+        for _ in 0 ..< 5 {
+            state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        }
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("sandbox_exec"))
+    }
+
+    /// Advisory only: nothing in the state machine blocks the call — the
+    /// envelope recorded is whatever the execution produced.
+    @Test func repeatedCall_neverHardBlocks() {
+        let state = AgentTaskState()
+        let args = #"{"command":"swift build"}"#
+        for _ in 0 ..< 4 {
+            state.record(name: "sandbox_exec", argsJSON: args, result: execFailureEnvelope())
+        }
+        // The dedupe path still declines to short-circuit non-read tools.
+        #expect(state.heldResult(name: "sandbox_exec", argsJSON: args) == nil)
+    }
+
+    // MARK: - One-shot stale rewrite protection
+
+    @Test func stalePreEditWholeRewriteIsRejectedOnlyOnce() {
+        let state = AgentTaskState()
+        let before = "const cells = board;"
+        let after = "const cells = board.children;"
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"index.html"}"#,
+            result: targetedEditEnvelope(before: before, after: after)
+        )
+
+        let first = state.guardedResult(
+            name: "file_write",
+            argsJSON: #"{"path":"index.html","content":"const cells = board;"}"#
+        )
+        #expect(first.map(ToolEnvelope.isError) == true)
+        #expect(first?.contains("stale_pre_edit_rewrite") == true)
+
+        #expect(
+            state.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"index.html","content":"const cells = board;"}"#
+            ) == nil
+        )
+    }
+
+    @Test func sandboxTargetedEditArmsSameOneShotGuard() {
+        let state = AgentTaskState()
+        state.record(
+            name: "sandbox_write_file",
+            argsJSON:
+                #"{"path":"/workspace/app.js","old_string":"old","new_string":"new"}"#,
+            result: ToolEnvelope.success(
+                tool: "sandbox_write_file",
+                result: [
+                    "before_content_sha256": WorkspaceWriteSafety.contentSHA256("old"),
+                    "content_sha256": WorkspaceWriteSafety.contentSHA256("new"),
+                ]
+            )
+        )
+
+        #expect(
+            state.guardedResult(
+                name: "sandbox_write_file",
+                argsJSON: #"{"path":"/workspace/app.js","content":"old"}"#
+            ).map(ToolEnvelope.isError) == true
+        )
+    }
+
+    @Test func laterSamePathMutationDisarmsStaleRewriteGuard() {
+        let state = AgentTaskState()
+        let before = "old"
+        let after = "edited"
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"app.js"}"#,
+            result: targetedEditEnvelope(before: before, after: after)
+        )
+        state.record(
+            name: "file_write",
+            argsJSON: #"{"path":"app.js","content":"appended","mode":"append"}"#,
+            result: ToolEnvelope.success(tool: "file_write", text: "appended")
+        )
+
+        #expect(
+            state.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"app.js","content":"old"}"#
+            ) == nil
+        )
+    }
+
+    @Test func dryRunDoesNotArmOrDisarmStaleRewriteGuard() {
+        let previewOnly = AgentTaskState()
+        previewOnly.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"preview.js","dry_run":true}"#,
+            result: ToolEnvelope.success(
+                tool: "file_edit",
+                result: [
+                    "before_content_sha256": WorkspaceWriteSafety.contentSHA256("old"),
+                    "content_sha256": WorkspaceWriteSafety.contentSHA256("new"),
+                    "dry_run": true,
+                ] as [String: Any]
+            )
+        )
+        #expect(
+            previewOnly.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"preview.js","content":"old"}"#
+            ) == nil
+        )
+
+        let armed = AgentTaskState()
+        armed.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"app.js"}"#,
+            result: targetedEditEnvelope(before: "old", after: "new")
+        )
+        armed.record(
+            name: "file_write",
+            argsJSON: #"{"path":"app.js","content":"preview","dry_run":true}"#,
+            result: ToolEnvelope.success(
+                tool: "file_write",
+                result: ["dry_run": true] as [String: Any]
+            )
+        )
+        #expect(
+            armed.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"app.js","content":"old"}"#
+            ).map(ToolEnvelope.isError) == true
+        )
+    }
+
+    @Test func fileUndoClearsOnlyAffectedEditSnapshot() {
+        let state = AgentTaskState()
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"a.js"}"#,
+            result: targetedEditEnvelope(before: "a-old", after: "a-new")
+        )
+        state.record(
+            name: "file_edit",
+            argsJSON: #"{"path":"b.js"}"#,
+            result: targetedEditEnvelope(before: "b-old", after: "b-new")
+        )
+        state.record(
+            name: "file_undo",
+            argsJSON: #"{"path":"a.js"}"#,
+            result: ToolEnvelope.success(
+                tool: "file_undo",
+                result: [
+                    "kind": "file_undo",
+                    "undone_count": 1,
+                    "undone": [["path": "a.js"]],
+                ] as [String: Any]
+            )
+        )
+
+        #expect(
+            state.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"a.js","content":"a-old"}"#
+            ) == nil
+        )
+        #expect(
+            state.guardedResult(
+                name: "file_write",
+                argsJSON: #"{"path":"b.js","content":"b-old"}"#
+            ).map(ToolEnvelope.isError) == true
+        )
+    }
+
+    // MARK: - Native image generation → follow-up edit bias (#88)
+
+    @Test func nativeImageResultBiasesFollowUpEditToSavedPath() throws {
+        let state = AgentTaskState()
+        let envelope = ToolEnvelope.success(
+            tool: "image",
+            result: [
+                "kind": "native_image_generation_job",
+                "mode": "generate",
+                "status": "completed",
+                "images": [
+                    [
+                        "path": "/tmp/osaurus-images/generated-cube.png",
+                        "url": "file:///tmp/osaurus-images/generated-cube.png",
+                        "seed": 123,
+                    ]
+                ],
+            ] as [String: Any]
+        )
+
+        state.record(name: "image", argsJSON: #"{"prompt":"make a red cube"}"#, result: envelope)
+
+        let bias = try #require(state.nextStepBias())
+        #expect(bias.contains("`image`"))
+        #expect(bias.contains("/tmp/osaurus-images/generated-cube.png"))
+        #expect(bias.contains("source_paths"))
+    }
+
+    @Test func nativeImageEditResultDoesNotBiasAnotherEdit() {
+        let state = AgentTaskState()
+        let envelope = ToolEnvelope.success(
+            tool: "image",
+            result: [
+                "kind": "native_image_generation_job",
+                "mode": "edit",
+                "status": "completed",
+                "images": [
+                    [
+                        "path": "/tmp/osaurus-images/edited-cube.png",
+                        "url": "file:///tmp/osaurus-images/edited-cube.png",
+                        "seed": 456,
+                    ]
+                ],
+            ] as [String: Any]
+        )
+
+        state.record(
+            name: "image",
+            argsJSON: #"{"source_paths":["/tmp/osaurus-images/generated-cube.png"],"prompt":"make it green"}"#,
+            result: envelope
+        )
+
+        #expect(state.nextStepBias() == nil)
+    }
+
+    @Test func nativeImageResultWithoutEditModelDoesNotBiasEdit() {
+        // A fresh generation, but the payload reports no ready edit model
+        // (`edit_available: false`). The post-generation edit nudge must stay
+        // silent — steering toward `source_paths` would point the model at an
+        // edit the runtime can't perform.
+        let state = AgentTaskState()
+        let envelope = ToolEnvelope.success(
+            tool: "image",
+            result: [
+                "kind": "native_image_generation_job",
+                "mode": "generate",
+                "status": "completed",
+                "edit_available": false,
+                "images": [
+                    [
+                        "path": "/tmp/osaurus-images/generated-cube.png",
+                        "url": "file:///tmp/osaurus-images/generated-cube.png",
+                        "seed": 123,
+                    ]
+                ],
+            ] as [String: Any]
+        )
+
+        state.record(name: "image", argsJSON: #"{"prompt":"make a red cube"}"#, result: envelope)
+
+        #expect(state.nextStepBias() == nil)
+    }
+
+    // MARK: - Knowledge tools
+
+    /// The knowledge trio participates in dedupe replay like the workspace
+    /// tools: an identical re-issue replays the exact prior envelope instead
+    /// of re-executing (observed live: identical knowledge steps re-executed
+    /// at ~14s each on an 8B with zero dedupe).
+    @Test func knowledge_identicalSearchReadAndListAreHeld() {
+        let state = AgentTaskState()
+
+        let searchArgs = #"{"query":"deployment runbook"}"#
+        let searchEnv = ToolEnvelope.success(
+            tool: "search_knowledge", text: "Found 2 knowledge excerpt(s)")
+        state.record(name: "search_knowledge", argsJSON: searchArgs, result: searchEnv)
+        #expect(AgentTaskState.isReplayEligible(name: "search_knowledge"))
+        #expect(state.heldResult(name: "search_knowledge", argsJSON: searchArgs) == searchEnv)
+
+        let readArgs = #"{"path":"usage/how-to-deploy.md"}"#
+        let readEnv = ToolEnvelope.success(
+            tool: "read_knowledge", text: "# How to deploy\n...")
+        state.record(name: "read_knowledge", argsJSON: readArgs, result: readEnv)
+        #expect(state.heldResult(name: "read_knowledge", argsJSON: readArgs) == readEnv)
+
+        let listArgs = #"{"collection":"ops"}"#
+        let listEnv = ToolEnvelope.success(
+            tool: "list_knowledge", text: "Found 3 knowledge document(s)")
+        state.record(name: "list_knowledge", argsJSON: listArgs, result: listEnv)
+        #expect(state.heldResult(name: "list_knowledge", argsJSON: listArgs) == listEnv)
+
+        // A different query is a different call — never held.
+        #expect(
+            state.heldResult(
+                name: "search_knowledge", argsJSON: #"{"query":"alerts"}"#) == nil)
+    }
+
+    /// `read_knowledge` not_found is deterministic on an unchanged store: the
+    /// held error replays (with the escalation notice) instead of re-reading.
+    @Test func knowledge_readNotFoundHeldErrorReplays() {
+        let state = AgentTaskState()
+        let args = #"{"path":"usage/missing.md"}"#
+        let err = ToolEnvelope.failure(
+            kind: .notFound,
+            message: "No knowledge document at `usage/missing.md`.",
+            tool: "read_knowledge"
+        )
+        state.record(name: "read_knowledge", argsJSON: args, result: err)
+        #expect(state.heldResult(name: "read_knowledge", argsJSON: args) == err)
+        #expect(state.lastReplayNotice?.contains("read_knowledge") == true)
+        // A different document path is a different call — not held.
+        #expect(state.heldResult(name: "read_knowledge", argsJSON: #"{"path":"other.md"}"#) == nil)
+    }
+
+    /// A knowledge write invalidates knowledge SEARCH/LIST wholesale (their
+    /// results span many documents) and the held read/error of each written
+    /// path — while a fresh read of an untouched document stays held.
+    @Test func knowledge_writeInvalidatesSearchListAndWrittenReads() {
+        let state = AgentTaskState()
+        let searchArgs = #"{"query":"deploy"}"#
+        let listArgs = #"{"collection":"ops"}"#
+        let readArgs = #"{"path":"usage/how-to-deploy.md"}"#
+        let otherReadArgs = #"{"path":"reference/alerts.md"}"#
+        state.record(
+            name: "search_knowledge", argsJSON: searchArgs,
+            result: ToolEnvelope.success(tool: "search_knowledge", text: "excerpts"))
+        state.record(
+            name: "list_knowledge", argsJSON: listArgs,
+            result: ToolEnvelope.success(tool: "list_knowledge", text: "documents"))
+        state.record(
+            name: "read_knowledge", argsJSON: readArgs,
+            result: ToolEnvelope.success(tool: "read_knowledge", text: "old content"))
+        state.record(
+            name: "read_knowledge", argsJSON: otherReadArgs,
+            result: ToolEnvelope.success(tool: "read_knowledge", text: "alerts"))
+
+        // Batch write shape: `documents[].path`, no top-level `path`.
+        state.record(
+            name: "write_knowledge",
+            argsJSON:
+                #"{"documents":[{"path":"usage/how-to-deploy.md","content":"new content"}]}"#,
+            result: ToolEnvelope.success(tool: "write_knowledge", text: "written")
+        )
+
+        #expect(
+            state.heldResult(name: "search_knowledge", argsJSON: searchArgs) == nil,
+            "a knowledge write must stale knowledge search results")
+        #expect(
+            state.heldResult(name: "list_knowledge", argsJSON: listArgs) == nil,
+            "a knowledge write must stale knowledge listings")
+        #expect(
+            state.heldResult(name: "read_knowledge", argsJSON: readArgs) == nil,
+            "the verify-read of a written document must re-execute")
+        #expect(
+            state.heldResult(name: "read_knowledge", argsJSON: otherReadArgs) != nil,
+            "a read of an untouched document stays fresh — invalidation is per path")
+    }
+
+    /// Regression check for the 0.24.7 "listing truncated at 50" report:
+    /// the #2632 dedupe keys on the FULL canonical argument set, so paging
+    /// `list_knowledge` with a different `offset` (or a different `limit`)
+    /// is a different call and is executed, never replayed as the first
+    /// page. Only a byte-identical re-issue is held.
+    @Test func knowledge_pagedListingIsNotReplayed() {
+        let state = AgentTaskState()
+        let page0 = #"{"collection":"Obsidian Vault","limit":100,"offset":0}"#
+        let env0 = ToolEnvelope.success(
+            tool: "list_knowledge", text: "Found 312 knowledge document(s) in total; showing 1–100")
+        state.record(name: "list_knowledge", argsJSON: page0, result: env0)
+        #expect(state.heldResult(name: "list_knowledge", argsJSON: page0) == env0)
+        // Same page, keys reordered → same call → replayed.
+        #expect(
+            state.heldResult(
+                name: "list_knowledge",
+                argsJSON: #"{"offset":0,"limit":100,"collection":"Obsidian Vault"}"#) == env0)
+        // Next page → not held.
+        #expect(
+            state.heldResult(
+                name: "list_knowledge",
+                argsJSON: #"{"collection":"Obsidian Vault","limit":100,"offset":100}"#) == nil)
+        // Larger limit → not held.
+        #expect(
+            state.heldResult(
+                name: "list_knowledge",
+                argsJSON: #"{"collection":"Obsidian Vault","limit":500,"offset":0}"#) == nil)
+        // A string limit ("20") is a different signature from the integer:
+        // never confused with a held integer call.
+        let intArgs = #"{"limit":20}"#
+        state.record(
+            name: "list_knowledge", argsJSON: intArgs,
+            result: ToolEnvelope.success(tool: "list_knowledge", text: "20 rows"))
+        #expect(state.heldResult(name: "list_knowledge", argsJSON: #"{"limit":"20"}"#) == nil)
+    }
+
+    /// `write_knowledge` creating the missing document clears the held
+    /// not_found so the identical read re-executes (and can now succeed).
+    @Test func knowledge_writeClearsHeldNotFoundForWrittenPath() {
+        let state = AgentTaskState()
+        let args = #"{"path":"usage/new.md"}"#
+        let err = ToolEnvelope.failure(
+            kind: .notFound,
+            message: "No knowledge document at `usage/new.md`.",
+            tool: "read_knowledge"
+        )
+        state.record(name: "read_knowledge", argsJSON: args, result: err)
+        #expect(state.heldResult(name: "read_knowledge", argsJSON: args) == err)
+
+        state.record(
+            name: "write_knowledge",
+            argsJSON: #"{"documents":[{"path":"usage/new.md","content":"doc body"}]}"#,
+            result: ToolEnvelope.success(tool: "write_knowledge", text: "written")
+        )
+        #expect(
+            state.heldResult(name: "read_knowledge", argsJSON: args) == nil,
+            "the write may have created the document — the read must re-execute")
+    }
+
+    // MARK: - Dynamic-tool same-name run
+
+    /// Four consecutive calls to one DYNAMIC (MCP/plugin) tool with varying
+    /// arguments stage the advisory; three do not. Mirrors the observed
+    /// Raptor 8B loop on `underwriting_underwriter_activity`.
+    @Test func dynamicRun_fourVariedCallsAdviseThreeDoNot() {
+        let state = AgentTaskState()
+        state.dynamicToolClassifier = { $0 == "underwriting_underwriter_activity" }
+        for n in 1 ... 3 {
+            state.record(
+                name: "underwriting_underwriter_activity",
+                argsJSON: #"{"query":"variation \#(n)"}"#,
+                result: ToolEnvelope.success(
+                    tool: "underwriting_underwriter_activity", text: "rows")
+            )
+            #expect(state.nextStepBias() == nil, "call \(n) is still legitimate querying")
+        }
+        state.record(
+            name: "underwriting_underwriter_activity",
+            argsJSON: #"{"query":"variation 4"}"#,
+            result: ToolEnvelope.success(
+                tool: "underwriting_underwriter_activity", text: "rows")
+        )
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("underwriting_underwriter_activity"))
+        #expect(bias.contains("varying arguments"))
+    }
+
+    /// Any interleaved different tool resets the run — alternating tools are
+    /// work, consecutive varied calls to ONE dynamic name are the signal.
+    @Test func dynamicRun_interleavedToolResets() {
+        let state = AgentTaskState()
+        state.dynamicToolClassifier = { $0 == "underwriting_underwriter_activity" }
+        for n in 1 ... 3 {
+            state.record(
+                name: "underwriting_underwriter_activity",
+                argsJSON: #"{"query":"variation \#(n)"}"#,
+                result: ToolEnvelope.success(
+                    tool: "underwriting_underwriter_activity", text: "rows")
+            )
+        }
+        state.record(
+            name: "file_read",
+            argsJSON: #"{"path":"notes.md"}"#,
+            result: fileContentEnvelope(path: "notes.md")
+        )
+        state.record(
+            name: "underwriting_underwriter_activity",
+            argsJSON: #"{"query":"variation 4"}"#,
+            result: ToolEnvelope.success(
+                tool: "underwriting_underwriter_activity", text: "rows")
+        )
+        #expect(state.nextStepBias() == nil, "the interleaved read reset the same-name run")
+    }
+
+    /// An identical-args repeat past `repeatedCallThreshold` gets the
+    /// (stronger) identical-args notice, never both nudges for one call —
+    /// the identical-args check returns first in `nextStepBias`.
+    @Test func dynamicRun_identicalArgsDuplicateDoesNotDoubleNudge() {
+        let state = AgentTaskState()
+        state.dynamicToolClassifier = { $0 == "underwriting_underwriter_activity" }
+        let args = #"{"query":"open underwriting items"}"#
+        for _ in 1 ... 4 {
+            state.record(
+                name: "underwriting_underwriter_activity",
+                argsJSON: args,
+                result: ToolEnvelope.success(
+                    tool: "underwriting_underwriter_activity", text: "rows")
+            )
+        }
+        let bias = state.nextStepBias() ?? ""
+        #expect(bias.contains("identical arguments"))
+        #expect(!bias.contains("varying arguments"))
+    }
+
+    /// A NON-dynamic unknown tool never triggers the dynamic run — the
+    /// default classifier treats every name as non-dynamic, so un-wired
+    /// surfaces keep their exact prior behavior.
+    @Test func dynamicRun_nonDynamicUnknownToolNeverTriggers() {
+        let state = AgentTaskState()
+        for n in 1 ... 5 {
+            state.record(
+                name: "some_unclassified_tool",
+                argsJSON: #"{"query":"variation \#(n)"}"#,
+                result: ToolEnvelope.success(tool: "some_unclassified_tool", text: "ok")
+            )
+        }
+        #expect(state.nextStepBias() == nil)
+    }
+
+    // MARK: - Repeat count
+
+    /// Display accessor for the "×N" badge: 1 for the first execution, 2 for
+    /// the identical re-issue (replays count — the transcript shows the call
+    /// either way), and reset by `beginMessage` like the rest of the
+    /// within-message tracking.
+    @Test func repeatCount_countsIdenticalCallsAndResetsPerMessage() {
+        let state = AgentTaskState()
+        let args = #"{"path":"config.json"}"#
+        let env = fileContentEnvelope(path: "config.json")
+
+        #expect(state.repeatCount(name: "file_read", argsJSON: args) == 0)
+        state.record(name: "file_read", argsJSON: args, result: env)
+        #expect(state.repeatCount(name: "file_read", argsJSON: args) == 1)
+        state.record(name: "file_read", argsJSON: args, result: env)
+        #expect(state.repeatCount(name: "file_read", argsJSON: args) == 2)
+        // Key-order-insensitive, like the dedupe signature.
+        #expect(
+            state.repeatCount(
+                name: "file_read", argsJSON: #"{ "path" : "config.json" }"#) == 2)
+        // Different args are a different signature.
+        #expect(state.repeatCount(name: "file_read", argsJSON: #"{"path":"other"}"#) == 0)
+
+        state.beginMessage()
+        #expect(state.repeatCount(name: "file_read", argsJSON: args) == 0)
+        state.record(name: "file_read", argsJSON: args, result: env)
+        #expect(state.repeatCount(name: "file_read", argsJSON: args) == 1)
+    }
+}
