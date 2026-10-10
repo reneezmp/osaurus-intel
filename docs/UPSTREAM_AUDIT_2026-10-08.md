@@ -19,7 +19,7 @@ named on the backlog. The next review begins at `02604ca60` (exclusive).
 | 5 | `88173d750` #3038 | **Port** | Host (stdio) MCP servers see version-manager toolchains (mise, nvm, asdf, fnm, Volta) through the login-shell PATH. |
 | 6 | `da1aa6e2e` #3045 | Covered (net no-op) | Revert of #3041. |
 | 7 | `10e66ca5c` #3042 | **Port** (adapted) | Compaction asks for reasoning off and refuses a summary cut at the output limit; "reasoning off" reaches each host in the form it reads. |
-| 8 | `86ed14d91` #3033 | **Needs work** (`W-agent-loop-tools`) | Judge polarity and ScreenContext rubric for grounded claim checks. Intel's `CapabilityClaimsEvaluator` is an older, unwired copy; it lands with the grounded-claim-checks item. Eval suite files ride along. |
+| 8 | `86ed14d91` #3033 | **Not a user feature** (`N-dev-tooling`; reclassified 2026-10-10 from Needs work: `CapabilityClaimsEvaluator` only drives the OsaurusEvals harness) | Judge polarity and ScreenContext rubric for grounded claim checks. Intel's `CapabilityClaimsEvaluator` is an older, unwired copy; it lands with the grounded-claim-checks item. Eval suite files ride along. |
 | 9 | `145de994c` #3046 | **Incompatible** | `vmlx-swift` pin (tool-stream and K2 runtime fixes). |
 | 10 | `7f24ca02f` #3044 | **Needs work** (`W-workspaces-identity-mobile`) | Phone secure channel and pairing hardening, phone image generation. |
 | 11 | `19271bb14` #3040 | **Split:** Port + **Incompatible** | Port: a pasted image the model can't take now explains why, and the paste monitor acts only in its own focused composer. Incompatible: the local-bundle reason text (MLX vision bundles). |
