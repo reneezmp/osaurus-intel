@@ -56,8 +56,9 @@ struct ChatSettingsView: View {
     @State private var compactionModelPickerItems: [ModelPickerItem] = []
 
     // `UserDefaults`-backed switches, applied immediately.
+    /// Default on, as upstream since #2517 (must match `osaurusApp`).
     @AppStorage(NewChatShortcutSetting.defaultsKey)
-    private var cmdNStartsNewChatInCurrentWindow: Bool = false
+    private var cmdNStartsNewChatInCurrentWindow: Bool = true
     @AppStorage(ComposerSpellCheckSetting.defaultsKey)
     private var composerSpellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
     /// Upstream smooth streaming: pace the visible reveal at ~180 tok/s

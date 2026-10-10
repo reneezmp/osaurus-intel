@@ -13,8 +13,10 @@ import Foundation
 
 // MARK: - AgentManager
 
-final class AgentManager: ObservableObject, @unchecked Sendable {
-    static let shared = AgentManager()
+/// Public like upstream's `AgentManager` so the App target's menus can list
+/// agents (`W-app-menus`).
+public final class AgentManager: ObservableObject, @unchecked Sendable {
+    public static let shared = AgentManager()
 
     private var defaultModel = "deepseek-v4-pro"
     private let capabilityRevisionLock = NSLock()
@@ -64,7 +66,7 @@ final class AgentManager: ObservableObject, @unchecked Sendable {
     // agent didn't surface a card because `add` was a no-op and this
     // array was a single throwaway. Now backed by real on-disk
     // persistence (same pattern as SlashCommandStore / SkillStore).
-    @Published var agents: [Agent] = [Agent.default] {
+    @Published public internal(set) var agents: [Agent] = [Agent.default] {
         didSet { Self.refreshAgentNameCache(agents) }
     }
 

@@ -19,52 +19,12 @@
       "licenseUrl": ""
     },
     {
-      "name": "Containerization",
-      "identity": "containerization",
-      "version": "0.31.0",
-      "repository": "https://github.com/apple/containerization.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
       "name": "EventSource",
       "identity": "eventsource",
       "version": "1.4.1",
-      "repository": "https://github.com/mattt/EventSource.git",
+      "repository": "https://github.com/mattt/eventsource.git",
       "license": "MIT",
       "licenseUrl": "https://github.com/mattt/EventSource/blob/main/LICENSE"
-    },
-    {
-      "name": "FluidAudio",
-      "identity": "fluidaudio",
-      "version": "0.14.1",
-      "repository": "https://github.com/FluidInference/FluidAudio.git",
-      "license": "Apache 2.0",
-      "licenseUrl": "https://github.com/FluidInference/FluidAudio/blob/main/LICENSE"
-    },
-    {
-      "name": "Grpc Swift 2",
-      "identity": "grpc-swift-2",
-      "version": "2.4.1",
-      "repository": "https://github.com/grpc/grpc-swift-2.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Grpc Swift Nio Transport",
-      "identity": "grpc-swift-nio-transport",
-      "version": "2.7.0",
-      "repository": "https://github.com/grpc/grpc-swift-nio-transport.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Grpc Swift Protobuf",
-      "identity": "grpc-swift-protobuf",
-      "version": "2.3.0",
-      "repository": "https://github.com/grpc/grpc-swift-protobuf.git",
-      "license": "Unknown",
-      "licenseUrl": ""
     },
     {
       "name": "Highlightr",
@@ -77,18 +37,10 @@
     {
       "name": "IkigaJSON",
       "identity": "ikigajson",
-      "version": "2.4.4",
+      "version": "2.5.0",
       "repository": "https://github.com/orlandos-nl/IkigaJSON",
       "license": "MIT",
       "licenseUrl": "https://github.com/orlandos-nl/IkigaJSON/blob/master/LICENSE"
-    },
-    {
-      "name": "Jinja",
-      "identity": "jinja",
-      "version": "2.3.5",
-      "repository": "https://github.com/huggingface/swift-jinja",
-      "license": "Unknown",
-      "licenseUrl": ""
     },
     {
       "name": "Sparkle",
@@ -107,14 +59,6 @@
       "licenseUrl": ""
     },
     {
-      "name": "Swift Argument Parser",
-      "identity": "swift-argument-parser",
-      "version": "1.7.1",
-      "repository": "https://github.com/apple/swift-argument-parser.git",
-      "license": "Apache 2.0",
-      "licenseUrl": "https://github.com/apple/swift-argument-parser/blob/main/LICENSE.txt"
-    },
-    {
       "name": "Swift Asn1",
       "identity": "swift-asn1",
       "version": "1.7.0",
@@ -125,7 +69,7 @@
     {
       "name": "Swift Async Algorithms",
       "identity": "swift-async-algorithms",
-      "version": "1.1.3",
+      "version": "1.1.4",
       "repository": "https://github.com/apple/swift-async-algorithms.git",
       "license": "Unknown",
       "licenseUrl": ""
@@ -165,7 +109,7 @@
     {
       "name": "Swift Crypto",
       "identity": "swift-crypto",
-      "version": "3.15.1",
+      "version": "4.5.0",
       "repository": "https://github.com/apple/swift-crypto.git",
       "license": "Unknown",
       "licenseUrl": ""
@@ -175,14 +119,6 @@
       "identity": "swift-distributed-tracing",
       "version": "1.4.1",
       "repository": "https://github.com/apple/swift-distributed-tracing.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Swift Embeddings",
-      "identity": "swift-embeddings",
-      "version": "62b67b6f",
-      "repository": "https://github.com/jkrukowski/swift-embeddings.git",
       "license": "Unknown",
       "licenseUrl": ""
     },
@@ -203,25 +139,9 @@
       "licenseUrl": ""
     },
     {
-      "name": "Swift Huggingface",
-      "identity": "swift-huggingface",
-      "version": "0.9.0",
-      "repository": "https://github.com/huggingface/swift-huggingface.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Swift Jinja",
-      "identity": "swift-jinja",
-      "version": "2.3.6",
-      "repository": "https://github.com/huggingface/swift-jinja.git",
-      "license": "Apache 2.0",
-      "licenseUrl": "https://github.com/huggingface/swift-jinja/blob/main/LICENSE"
-    },
-    {
       "name": "Swift Log",
       "identity": "swift-log",
-      "version": "1.12.0",
+      "version": "1.12.1",
       "repository": "https://github.com/apple/swift-log.git",
       "license": "Apache 2.0",
       "licenseUrl": "https://github.com/apple/swift-log/blob/main/LICENSE.txt"
@@ -229,7 +149,7 @@
     {
       "name": "SwiftNIO",
       "identity": "swift-nio",
-      "version": "2.99.0",
+      "version": "2.100.0",
       "repository": "https://github.com/apple/swift-nio.git",
       "license": "Apache 2.0",
       "licenseUrl": "https://github.com/apple/swift-nio/blob/main/LICENSE.txt"
@@ -237,7 +157,7 @@
     {
       "name": "Swift Nio Extras",
       "identity": "swift-nio-extras",
-      "version": "1.34.0",
+      "version": "1.34.1",
       "repository": "https://github.com/apple/swift-nio-extras.git",
       "license": "Unknown",
       "licenseUrl": ""
@@ -245,7 +165,7 @@
     {
       "name": "Swift Nio Http2",
       "identity": "swift-nio-http2",
-      "version": "1.43.0",
+      "version": "1.44.0",
       "repository": "https://github.com/apple/swift-nio-http2.git",
       "license": "Unknown",
       "licenseUrl": ""
@@ -270,25 +190,9 @@
       "name": "Swift Numerics",
       "identity": "swift-numerics",
       "version": "1.1.1",
-      "repository": "https://github.com/apple/swift-numerics",
+      "repository": "https://github.com/apple/swift-numerics.git",
       "license": "Apache 2.0",
       "licenseUrl": "https://github.com/apple/swift-numerics/blob/main/LICENSE"
-    },
-    {
-      "name": "Swift Protobuf",
-      "identity": "swift-protobuf",
-      "version": "1.38.0",
-      "repository": "https://github.com/apple/swift-protobuf.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Swift Safetensors",
-      "identity": "swift-safetensors",
-      "version": "0.1.1",
-      "repository": "https://github.com/jkrukowski/swift-safetensors.git",
-      "license": "Unknown",
-      "licenseUrl": ""
     },
     {
       "name": "MCP Swift SDK",
@@ -301,16 +205,8 @@
     {
       "name": "Swift Secp256K1",
       "identity": "swift-secp256k1",
-      "version": "0.21.1",
+      "version": "0.23.2",
       "repository": "https://github.com/21-DOT-DEV/swift-secp256k1",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Swift Sentencepiece",
-      "identity": "swift-sentencepiece",
-      "version": "0.0.6",
-      "repository": "https://github.com/jkrukowski/swift-sentencepiece",
       "license": "Unknown",
       "licenseUrl": ""
     },
@@ -326,15 +222,7 @@
       "name": "Swift Service Lifecycle",
       "identity": "swift-service-lifecycle",
       "version": "2.11.0",
-      "repository": "https://github.com/swift-server/swift-service-lifecycle.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Swift Syntax",
-      "identity": "swift-syntax",
-      "version": "600.0.1",
-      "repository": "https://github.com/swiftlang/swift-syntax.git",
+      "repository": "https://github.com/swift-server/swift-service-lifecycle",
       "license": "Unknown",
       "licenseUrl": ""
     },
@@ -347,50 +235,10 @@
       "licenseUrl": "https://github.com/apple/swift-system/blob/main/LICENSE.txt"
     },
     {
-      "name": "Swift Transformers",
-      "identity": "swift-transformers",
-      "version": "1.3.3",
-      "repository": "https://github.com/huggingface/swift-transformers.git",
-      "license": "Apache 2.0",
-      "licenseUrl": "https://github.com/huggingface/swift-transformers/blob/main/LICENSE"
-    },
-    {
       "name": "Swiftmath",
       "identity": "swiftmath",
       "version": "1.7.3",
       "repository": "https://github.com/mgriebling/SwiftMath",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Vecturakit",
-      "identity": "vecturakit",
-      "version": "a1b93774",
-      "repository": "https://github.com/rryam/VecturaKit",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "vMLX Swift",
-      "identity": "vmlx-swift",
-      "version": "0b85cad0",
-      "repository": "https://github.com/osaurus-ai/vmlx-swift",
-      "license": "MIT",
-      "licenseUrl": "https://github.com/osaurus-ai/vmlx-swift/blob/main/LICENSE"
-    },
-    {
-      "name": "Yyjson",
-      "identity": "yyjson",
-      "version": "0.12.0",
-      "repository": "https://github.com/ibireme/yyjson.git",
-      "license": "Unknown",
-      "licenseUrl": ""
-    },
-    {
-      "name": "Zstd",
-      "identity": "zstd",
-      "version": "1.5.7",
-      "repository": "https://github.com/facebook/zstd.git",
       "license": "Unknown",
       "licenseUrl": ""
     }

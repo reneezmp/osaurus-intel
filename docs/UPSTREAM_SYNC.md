@@ -885,6 +885,8 @@ these Intel-owned customizations survived:**
 | `App/osaurus/Info.plist` | `SUFeedURL` → `reneezmp/osaurus-intel`, `SUPublicEDKey` `bYYJJqFx…` (was `7Nh8jSxF…` until 1.0.36) | `osaurus-ai` / missing |
 | `scripts/release/cut_intel_release.sh` | `REPO="reneezmp/osaurus-intel"` | upstream repo |
 | `scripts/build/build_rosy.sh` | bakes `OsaurusCanonicalData` | — |
+| `App/osaurus/osaurusApp.swift` | `About Osaurus (Intel)` + `OsaurusBuildInfo.upstreamShortLabel`; no Discord / "Report an Issue…" in Help (2026-10-10) | `.applicationName: "Osaurus"`, `discord.gg`, `osaurus-ai/osaurus/issues/new` |
+| `App/osaurus/Acknowledgements.json` | generated from Intel's own `Package.resolved` (30 packages on 2026-10-10; no vMLX, Containerization, FluidAudio) — rerun `scripts/release/generate_acknowledgements.py` when dependencies change | upstream's list |
 | `Packages/OsaurusCore/Identity/MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
 
 **Revert-detector** (run after each sync — lists Swift files that lost ALL their
@@ -2779,3 +2781,50 @@ refreshed). **Method gap found:** the 2026-09-29 sweep lists only files Intel
 does not compile; a compiled file can still be months behind. When an audit
 touches a compiled file, diff the whole file against upstream before calling
 it current. The next review starts after `ec654e8c5`.
+
+### App menu bar (`W-app-menus`) — 2026-10-10
+
+`App/osaurus/osaurusApp.swift` is now upstream's (at `24f4c416a`), replacing
+Intel's trimmed entry point. What Intel gains:
+
+- **Entry point:** `OsaurusMain` ignores SIGPIPE, so a write to a closed
+  socket or pipe (an HTTP client disconnecting mid-response, a plugin that
+  exits with stdio open) fails with EPIPE instead of killing the app. Also
+  `OSAURUS_SPAWN_CHECK=1` (prints `OSAURUS_SPAWN_OK` and exits; Intel has no
+  `verify_launch.sh` yet, so nothing calls it).
+- **File:** New Window with Agent; Voice Detection toggle (⇧⌘V,
+  `VADToggleMenuItem`); Schedules, Watchers and Agents submenus.
+- **View:** Toggle Sidebar, Next Agent, the Theme submenu (System / Light /
+  Dark, installed themes, Manage Themes…) and zoom, all in the system View
+  menu (`CommandGroup(after: .sidebar)`). Intel's separate
+  `CommandMenu("View")` is gone. It probably showed up as a second "View"
+  menu next to the system one.
+- **Window:** Models, Tools, Server.
+- **Help:** Osaurus Help (⌘?), Documentation, Keyboard Shortcuts, Chat
+  Layout Tour, Acknowledgements… (new `AppDelegate.showAcknowledgements`).
+- ⌘N defaults to "new chat in the current window" (upstream #2517), in the
+  menu and in Settings › Chat. ⇧⌘N opens a new window.
+
+**Theme model (upstream #1931, July):** built-in Dark and Light are
+appearance modes, not pinned custom themes.
+`ThemeManager.appearanceMode(forBuiltInTheme:)`,
+`setAppearanceMode(_:clearActiveTheme:persist:)` (persists through the new
+`ServerConfigurationStore.updateAppearanceMode`) and `startupSelection`
+(a saved built-in Dark / Light becomes that mode at launch, so existing
+choices carry over). The Themes page applies built-ins as modes, and Reset
+to Default goes back to System. Upstream's `ThemeAppearanceModeTests` and
+`updateAppearanceMode_preservesOtherServerSettings` pass. Not ported here:
+#1776's deferred theme loading and #2115's system-accent following
+(`W-ui-misc`).
+
+**Intel differences (keep on re-sync):** the About panel names the Intel
+build and its upstream base. Help leaves out upstream's Discord and "Report
+an Issue…": they are upstream's support channels, and this fork's repository
+has no issue tracker. `Acknowledgements.json` is regenerated from Intel's
+own dependencies with upstream's script (30 packages; 19 Intel doesn't ship
+are gone).
+
+**i18n:** the App target's `L()` keys aren't scanned by
+`merge-upstream-keys.py` (it only reads `Packages/OsaurusCore`). All 33 menu
+keys were checked by hand: 30 were already translated, and "Zoom In" / "Zoom
+Out" / "Actual Size" (untranslated upstream too) got de / zh-Hans.

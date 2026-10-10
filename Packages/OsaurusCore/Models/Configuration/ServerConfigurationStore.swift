@@ -39,6 +39,12 @@ enum ServerConfigurationStore {
         }
     }
 
+    static func updateAppearanceMode(_ mode: AppearanceMode) {
+        var configuration = load() ?? ServerConfiguration.default
+        configuration.appearanceMode = mode
+        save(configuration)
+    }
+
     static func updateFontSizeMultiplier(_ multiplier: Double) {
         var configuration = load() ?? ServerConfiguration.default
         configuration.fontSizeMultiplier = ServerConfiguration.clampedFontSizeMultiplier(multiplier)

@@ -48,3 +48,13 @@ named on the backlog. The next review begins at `ec654e8c5` (exclusive).
   macOS 11+. Rosy checks that the zoom items still enable and disable.
 - i18n: no new strings (the menu labels already exist; error text comes from
   the provider).
+
+## Follow-up: `W-app-menus` shipped 2026-10-10
+
+The Needs-work parts of #3052 (`VADToggleMenuItem`, `ThemeMenuItems`) and
+#3054 (`LCached` submenu labels) shipped with the full menu bar port (see
+`UPSTREAM_SYNC.md`, "App menu bar"). `ZoomMenuItems` was folded back into
+upstream's `ThemeMenuItems`. Upstream moved on meanwhile: #3056 (`shell_run`
+login-shell PATH) and #3059 (Qwen image bundles) are for the next audit,
+which starts after `ec654e8c5`.
+

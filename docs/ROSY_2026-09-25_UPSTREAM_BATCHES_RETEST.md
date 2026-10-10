@@ -1458,3 +1458,26 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
       provider's reason after "Provider returned error:", not just the
       generic line.
 
+## App menu bar (2026-10-10)
+
+- [ ] There is one View menu (not two). It has Toggle Sidebar, Next Agent,
+      Theme ▸ and Zoom In / Zoom Out / Actual Size.
+- [ ] View ▸ Theme ▸ Dark, then Light, then System: the app switches each
+      time and the tick follows. Pick a custom theme there (e.g. Nord): it
+      applies, and Settings › Themes shows it active. Reset to Default on
+      the Themes page goes back to System.
+- [ ] If you had the built-in Dark or Light theme picked before this build,
+      the app still looks the same after updating.
+- [ ] File ▸ Schedules / Watchers / Agents list yours. Clicking one opens the
+      right Settings page; an agent opens a new chat window for it. File ▸
+      New Window with Agent does the same.
+- [ ] File ▸ Enable Voice Detection (⇧⌘V) turns VAD on, and the item then
+      reads Disable Voice Detection; choosing it turns VAD off again.
+- [ ] ⌘N starts a new chat in the current window; ⇧⌘N opens a new window.
+      The switch in Settings › Chat still flips them.
+- [ ] Window ▸ Models / Tools / Server open those Settings pages.
+- [ ] Help ▸ Acknowledgements… opens a list of open-source packages. Help ▸
+      Osaurus Help (⌘?) opens the upstream docs site. About still says
+      "Osaurus (Intel)".
+- [ ] Menus in German and Chinese show translated labels, including the zoom items.
+

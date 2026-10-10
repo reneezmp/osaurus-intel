@@ -452,7 +452,10 @@ struct ThemesView: View {
                 Spacer()
 
                 Button(action: {
-                    themeManager.clearCustomTheme()
+                    // "Default" is the System theme: follow the OS appearance
+                    // rather than whatever fixed mode was last pinned
+                    // (upstream #1931).
+                    themeManager.setAppearanceMode(.system, clearActiveTheme: true)
                     showToast(L("Reset to default theme"))
                 }) {
                     HStack(spacing: 4) {
@@ -512,13 +515,19 @@ struct ThemesView: View {
                 spacing: 16
             ) {
                 ForEach(themes, id: \.metadata.id) { themeItem in
-                    let isActive = themeManager.activeCustomTheme?.metadata.id == themeItem.metadata.id
+                    let isActive = isThemeActive(themeItem)
 
                     ThemePreviewCard(
                         theme: themeItem,
                         isActive: isActive,
                         onApply: {
-                            themeManager.applyCustomTheme(themeItem)
+                            // Built-in Dark / Light are appearance modes, not
+                            // pinned custom themes (upstream #1931).
+                            if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
+                                themeManager.setAppearanceMode(mode, clearActiveTheme: true)
+                            } else {
+                                themeManager.applyCustomTheme(themeItem)
+                            }
                             showToast(L("Applied \"\(themeItem.metadata.name)\""))
                         },
                         onEdit: { openEditor(for: themeItem) },
@@ -530,6 +539,13 @@ struct ThemesView: View {
                 }
             }
         }
+    }
+
+    private func isThemeActive(_ themeItem: CustomTheme) -> Bool {
+        if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
+            return themeManager.activeCustomTheme == nil && themeManager.appearanceMode == mode
+        }
+        return themeManager.activeCustomTheme?.metadata.id == themeItem.metadata.id
     }
 
     // MARK: - Empty State

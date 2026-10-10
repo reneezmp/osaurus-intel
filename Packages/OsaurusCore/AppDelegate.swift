@@ -546,6 +546,45 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         }
     }
 
+    private static var acknowledgementsWindow: NSWindow?
+
+    /// Help › Acknowledgements… (upstream). Lists the open-source packages
+    /// bundled in `Acknowledgements.json`, which Intel regenerates from its
+    /// own `Package.resolved` (`scripts/release/generate_acknowledgements.py`).
+    @MainActor public func showAcknowledgements() {
+        popover?.performClose(nil)
+        // Reuse existing window if already open
+        if let existingWindow = Self.acknowledgementsWindow, existingWindow.isVisible {
+            existingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+
+        let themeManager = ThemeManager.shared
+        let contentView = AcknowledgementsView()
+            .environment(\.theme, themeManager.currentTheme)
+
+        let hostingController = NSHostingController(rootView: contentView)
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: 600, height: 500),
+            styleMask: [.titled, .closable, .resizable],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = "Acknowledgements"
+        window.contentViewController = hostingController
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.isRestorable = false
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        Self.acknowledgementsWindow = window
+
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
     @MainActor
     public func showManagementWindow(
         initialTab: ManagementTab? = nil,
