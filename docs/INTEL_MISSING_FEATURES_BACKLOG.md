@@ -154,6 +154,16 @@ cloud models if the fork wants its own eval suite; no user-facing effect.
    `W-skills-plugins-import`, `W-subagents`.
 4. **Backend projects:** `W-channels` (B3), `W-workspaces-identity-mobile`
    (B1/B2/B7).
+5. **Last (Renée, 2026-10-10):** `W-report-issue`. An Intel "Report an
+   Issue…" item in the Help menu that opens a new issue on the fork
+   (`reneezmp/osaurus-intel`). Upstream's item points at
+   `osaurus-ai/osaurus/issues/new` and was left out on 2026-10-10
+   (`W-app-menus`). **Before coding:** Renée turns on Issues for the fork on
+   GitHub (it was off on 2026-10-10). Then add the menu item where upstream
+   has it (`App/osaurus/osaurusApp.swift`, after Documentation), with an
+   Intel URL. An issue template that asks for the Intel build number and
+   macOS version would help. Update the Intel-owned files table in
+   `UPSTREAM_SYNC.md`.
 
 Update this doc (and re-run the script) whenever a feature ships or upstream
 adds files; an UNASSIGNED file is an unclassified feature.

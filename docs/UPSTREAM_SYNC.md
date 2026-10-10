@@ -2820,7 +2820,8 @@ to Default goes back to System. Upstream's `ThemeAppearanceModeTests` and
 **Intel differences (keep on re-sync):** the About panel names the Intel
 build and its upstream base. Help leaves out upstream's Discord and "Report
 an Issue…": they are upstream's support channels, and this fork's repository
-has no issue tracker. `Acknowledgements.json` is regenerated from Intel's
+has no issue tracker. An Intel "Report an Issue…" pointing at the fork is
+queued last on the backlog (`W-report-issue`, Renée 2026-10-10). `Acknowledgements.json` is regenerated from Intel's
 own dependencies with upstream's script (30 packages; 19 Intel doesn't ship
 are gone).
 
