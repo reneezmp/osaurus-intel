@@ -42,7 +42,9 @@ public struct PresentationSlide: Codable, Equatable, Sendable {
     public let number: Int
     public let sourcePart: String
     public let label: String
+    public let isHidden: Bool
     public let textRuns: [PresentationTextRun]
+    public let tables: [PresentationTable]
     public let speakerNotes: PresentationSpeakerNotes?
 
     public var text: String {
@@ -54,7 +56,9 @@ public struct PresentationSlide: Codable, Equatable, Sendable {
         number: Int,
         sourcePart: String,
         label: String,
+        isHidden: Bool = false,
         textRuns: [PresentationTextRun],
+        tables: [PresentationTable] = [],
         speakerNotes: PresentationSpeakerNotes? = nil
     ) {
         precondition(index >= 0, "Presentation slide index must be non-negative")
@@ -63,8 +67,35 @@ public struct PresentationSlide: Codable, Equatable, Sendable {
         self.number = number
         self.sourcePart = sourcePart
         self.label = label
+        self.isHidden = isHidden
         self.textRuns = textRuns
+        self.tables = tables
         self.speakerNotes = speakerNotes
+    }
+
+    public init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        try self.init(
+            index: container.decode(Int.self, forKey: .index),
+            number: container.decode(Int.self, forKey: .number),
+            sourcePart: container.decode(String.self, forKey: .sourcePart),
+            label: container.decode(String.self, forKey: .label),
+            isHidden: container.decodeIfPresent(Bool.self, forKey: .isHidden) ?? false,
+            textRuns: container.decode([PresentationTextRun].self, forKey: .textRuns),
+            tables: container.decodeIfPresent([PresentationTable].self, forKey: .tables) ?? [],
+            speakerNotes: container.decodeIfPresent(PresentationSpeakerNotes.self, forKey: .speakerNotes)
+        )
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case index
+        case number
+        case sourcePart
+        case label
+        case isHidden
+        case textRuns
+        case tables
+        case speakerNotes
     }
 }
 
@@ -124,5 +155,79 @@ public struct PresentationSpeakerNotes: Codable, Equatable, Sendable {
         self.sourcePart = sourcePart
         self.anchorId = anchorId
         self.textRuns = textRuns
+    }
+}
+
+/// Table structure recovered from a slide's DrawingML table markup. Cell text
+/// is also present in `textRuns`; this typed view preserves row/column
+/// provenance so downstream callers do not need to infer tables from lines.
+public struct PresentationTable: Codable, Equatable, Sendable {
+    public let index: Int
+    public let sourcePart: String
+    public let anchorId: String
+    public let rows: [PresentationTableRow]
+
+    public var text: String {
+        rows.map(\.text)
+            .filter { !$0.isEmpty }
+            .joined(separator: "\n")
+    }
+
+    public var columnCount: Int {
+        rows.map(\.cells.count).max() ?? 0
+    }
+
+    public init(
+        index: Int,
+        sourcePart: String,
+        anchorId: String,
+        rows: [PresentationTableRow]
+    ) {
+        precondition(index >= 0, "Presentation table index must be non-negative")
+        self.index = index
+        self.sourcePart = sourcePart
+        self.anchorId = anchorId
+        self.rows = rows
+    }
+}
+
+public struct PresentationTableRow: Codable, Equatable, Sendable {
+    public let index: Int
+    public let anchorId: String
+    public let cells: [PresentationTableCell]
+
+    public var text: String {
+        cells.map(\.text).joined(separator: "\t")
+    }
+
+    public init(index: Int, anchorId: String, cells: [PresentationTableCell]) {
+        precondition(index >= 0, "Presentation table row index must be non-negative")
+        self.index = index
+        self.anchorId = anchorId
+        self.cells = cells
+    }
+}
+
+public struct PresentationTableCell: Codable, Equatable, Sendable {
+    public let rowIndex: Int
+    public let columnIndex: Int
+    public let text: String
+    public let paragraphIndexes: [Int]
+    public let anchorId: String
+
+    public init(
+        rowIndex: Int,
+        columnIndex: Int,
+        text: String,
+        paragraphIndexes: [Int],
+        anchorId: String
+    ) {
+        precondition(rowIndex >= 0, "Presentation table cell row index must be non-negative")
+        precondition(columnIndex >= 0, "Presentation table cell column index must be non-negative")
+        self.rowIndex = rowIndex
+        self.columnIndex = columnIndex
+        self.text = text
+        self.paragraphIndexes = paragraphIndexes
+        self.anchorId = anchorId
     }
 }

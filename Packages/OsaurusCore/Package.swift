@@ -315,7 +315,7 @@ let package = Package(
                 "Plugin/PluginCompatibilityEnforcementTests.swift",
                 "Plugin/PluginCompleteCancelTests.swift",
                 "Plugin/PluginCrashLoopGuardTests.swift",
-                "Documents/PDFPPTXWorkflowServiceTests.swift",
+                
                 "Networking/HTTPHandlerChatStreamingTests.swift",
                 "Networking/HTTPStreamingWriterTests.swift",
                 "Networking/HostAPIPluginCreateTests.swift",

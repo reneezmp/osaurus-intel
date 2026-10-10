@@ -7,7 +7,6 @@
 //  the repository.
 //
 
-import Compression
 import Foundation
 import Testing
 
@@ -68,6 +67,54 @@ struct PPTXAdapterTests {
                 == "ppt/notesSlides/notesSlide2.xml"
         )
         #expect(document.security.externalReferences.first?.urlString == "https://example.com/deck-context")
+    }
+
+    @Test func parse_preservesSlideTableCellsAndStructureAnchors() async throws {
+        let fixture = try makePresentationFixture(
+            fileExtension: "pptx",
+            slides: [1: ["Regional forecast"]],
+            slideOrder: [1],
+            tables: [
+                1: [
+                    [
+                        ["Region", "Revenue"],
+                        ["North", "1200"],
+                        ["South", "900"],
+                        ["West", ""],
+                    ]
+                ]
+            ],
+            compression: .stored
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let document = try await PPTXAdapter().parse(url: fixture.url, sizeLimit: 100_000)
+        let presentation = try #require(document.representation.underlying as? PresentationDocument)
+        let table = try #require(presentation.slides.first?.tables.first)
+
+        #expect(table.rows.count == 4)
+        #expect(table.columnCount == 2)
+        #expect(table.rows[0].cells.map(\.text) == ["Region", "Revenue"])
+        #expect(table.rows[2].cells.map(\.text) == ["South", "900"])
+        #expect(table.rows[3].cells.map(\.text) == ["West", ""])
+        #expect(table.rows[1].cells[0].paragraphIndexes.isEmpty == false)
+        #expect(table.rows[3].cells[1].paragraphIndexes.isEmpty)
+        #expect(document.textFallback.contains("Regional forecast"))
+        #expect(document.textFallback.contains("Region"))
+        #expect(document.textFallback.contains("1200"))
+
+        let tableElement = try #require(document.structure.elements(kind: .table).first)
+        let cells = document.structure.elements(kind: .tableCell)
+        #expect(document.structure.elements(kind: .tableRow).count == 4)
+        #expect(cells.count == 8)
+        #expect(tableElement.anchor.metadata["rowCount"] == "4")
+        #expect(tableElement.anchor.metadata["columnCount"] == "2")
+        #expect(cells.map(\.text).contains("Revenue"))
+        let north = try #require(cells.first { $0.text == "North" })
+        #expect(north.anchor.sourceRange?.start.slideIndex == 0)
+        #expect(north.anchor.sourceRange?.start.rowIndex == 1)
+        #expect(north.anchor.sourceRange?.start.columnIndex == 0)
+        #expect(north.anchor.textRange?.endUTF16Offset ?? 0 <= document.textFallback.utf16.count)
     }
 
     @Test func parse_marksPOTXAsTemplate() async throws {
@@ -136,6 +183,90 @@ struct PPTXAdapterTests {
         )
     }
 
+    @Test func parse_reportsMacroEmbeddedObjectExternalAndHiddenSlideSignals() async throws {
+        let fixture = try makePresentationFixture(
+            fileExtension: "pptx",
+            slides: [
+                1: ["Visible plan"],
+                2: ["Hidden acquisition appendix"],
+            ],
+            slideOrder: [1, 2],
+            hiddenSlides: [2],
+            externalRelationships: [
+                RelationshipFixture(
+                    id: "linkedDeck",
+                    type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/hyperlink",
+                    target: "https://example.com/source-deck",
+                    targetMode: "External"
+                )
+            ],
+            extraSlideRelationships: [
+                1: [
+                    RelationshipFixture(
+                        id: "oleObject",
+                        type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/oleObject",
+                        target: "../embeddings/oleObject1.bin"
+                    ),
+                    RelationshipFixture(
+                        id: "embeddedPackage",
+                        type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/package",
+                        target: "../embeddings/package1.bin"
+                    ),
+                    RelationshipFixture(
+                        id: "activeXControl",
+                        type: "http://schemas.openxmlformats.org/officeDocument/2006/relationships/control",
+                        target: "../activeX/activeX1.bin"
+                    ),
+                    RelationshipFixture(
+                        id: "vbaProject",
+                        type: "http://schemas.microsoft.com/office/2006/relationships/vbaProject",
+                        target: "../vbaProject.bin"
+                    ),
+                ]
+            ],
+            extraEntries: [
+                ("ppt/vbaProject.bin", Data([0x56, 0x42, 0x41])),
+                ("ppt/embeddings/oleObject1.bin", Data([0x4F, 0x4C, 0x45])),
+                ("ppt/embeddings/package1.bin", Data([0x50, 0x4B, 0x03, 0x04])),
+                ("ppt/activeX/activeX1.bin", Data([0x41, 0x58])),
+            ],
+            compression: .stored
+        )
+        defer { try? FileManager.default.removeItem(at: fixture.root) }
+
+        let document = try await PPTXAdapter().parse(url: fixture.url, sizeLimit: 100_000)
+        let presentation = try #require(document.representation.underlying as? PresentationDocument)
+        let hiddenSlide = try #require(presentation.slides.first { $0.number == 2 })
+
+        #expect(hiddenSlide.isHidden)
+        #expect(document.structure.elements(kind: .slide)[1].anchor.metadata["isHidden"] == "true")
+        #expect(document.security.activeContentTypes.contains(.macro))
+        #expect(document.security.activeContentTypes.contains(.embeddedFile))
+        #expect(document.security.activeContentTypes.contains(.externalReference))
+        #expect(
+            document.security.externalReferences.contains {
+                $0.relationshipId == "linkedDeck" && $0.kind == .hyperlink
+            }
+        )
+        #expect(
+            document.security.findings.contains {
+                $0.kind == .macro && $0.severity == .high && $0.metadata["partCount"] == "1"
+            }
+        )
+        #expect(
+            document.security.findings.contains {
+                $0.kind == .embeddedFile && $0.severity == .medium && $0.metadata["partCount"] == "3"
+            }
+        )
+        #expect(
+            document.security.findings.contains {
+                $0.metadata["feature"] == "hiddenSlides"
+                    && $0.metadata["count"] == "1"
+                    && $0.metadata["slideNumbers"] == "2"
+            }
+        )
+    }
+
     @Test func parse_refusesFilesAboveSizeLimit() async throws {
         let root = try makeTempDirectory()
         defer { try? FileManager.default.removeItem(at: root) }
@@ -186,9 +317,13 @@ struct PPTXAdapterTests {
         slides: [Int: [String]],
         slideOrder: [Int],
         notes: [Int: [String]] = [:],
+        tables: [Int: [[[String]]]] = [:],
+        hiddenSlides: Set<Int> = [],
         externalTargets: [String] = [],
         externalRelationships: [RelationshipFixture] = [],
-        compression: FixtureCompression
+        extraSlideRelationships: [Int: [RelationshipFixture]] = [:],
+        extraEntries: [(String, Data)] = [],
+        compression: OpenXMLZipFixture.Compression
     ) throws -> (root: URL, url: URL) {
         let root = try makeTempDirectory()
         let url = root.appendingPathComponent("fixture.\(fileExtension)")
@@ -199,12 +334,24 @@ struct PPTXAdapterTests {
         ]
 
         for (number, paragraphs) in slides {
-            entries.append(("ppt/slides/slide\(number).xml", Data(slideXML(paragraphs).utf8)))
+            entries.append(
+                (
+                    "ppt/slides/slide\(number).xml",
+                    Data(
+                        slideXML(
+                            paragraphs,
+                            tables: tables[number] ?? [],
+                            isHidden: hiddenSlides.contains(number)
+                        ).utf8
+                    )
+                )
+            )
             let slideRelationships = slideRelationshipsXML(
                 slideNumber: number,
                 hasNotes: notes[number] != nil,
                 externalTargets: number == slideOrder.first ? externalTargets : [],
-                externalRelationships: number == slideOrder.first ? externalRelationships : []
+                externalRelationships: number == slideOrder.first ? externalRelationships : [],
+                extraRelationships: extraSlideRelationships[number] ?? []
             )
             if !slideRelationships.isEmpty {
                 entries.append(("ppt/slides/_rels/slide\(number).xml.rels", Data(slideRelationships.utf8)))
@@ -215,7 +362,8 @@ struct PPTXAdapterTests {
             entries.append(("ppt/notesSlides/notesSlide\(number).xml", Data(notesXML(paragraphs).utf8)))
         }
 
-        try writeZip(entries: entries, to: url, compression: compression)
+        entries.append(contentsOf: extraEntries)
+        try OpenXMLZipFixture.write(entries: entries, to: url, compression: compression)
         return (root, url)
     }
 
@@ -256,7 +404,8 @@ struct PPTXAdapterTests {
         slideNumber: Int,
         hasNotes: Bool,
         externalTargets: [String],
-        externalRelationships: [RelationshipFixture]
+        externalRelationships: [RelationshipFixture],
+        extraRelationships: [RelationshipFixture]
     ) -> String {
         var relationships: [RelationshipFixture] = []
         if hasNotes {
@@ -279,6 +428,7 @@ struct PPTXAdapterTests {
             }
         )
         relationships.append(contentsOf: externalRelationships)
+        relationships.append(contentsOf: extraRelationships)
         guard !relationships.isEmpty else { return "" }
         return relationshipsXML(relationships)
     }
@@ -292,17 +442,19 @@ struct PPTXAdapterTests {
         """
     }
 
-    private func slideXML(_ paragraphs: [String]) -> String {
-        """
-        <?xml version="1.0" encoding="UTF-8"?>
-        <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main">
-          <p:cSld>
-            <p:spTree>
-              \(paragraphs.map(textShapeXML).joined(separator: "\n"))
-            </p:spTree>
-          </p:cSld>
-        </p:sld>
-        """
+    private func slideXML(_ paragraphs: [String], tables: [[[String]]] = [], isHidden: Bool = false) -> String {
+        let showAttribute = isHidden ? #" show="0""# : ""
+        return """
+            <?xml version="1.0" encoding="UTF-8"?>
+            <p:sld xmlns:a="http://schemas.openxmlformats.org/drawingml/2006/main" xmlns:p="http://schemas.openxmlformats.org/presentationml/2006/main"\(showAttribute)>
+              <p:cSld>
+                <p:spTree>
+                  \(paragraphs.map(textShapeXML).joined(separator: "\n"))
+                  \(tables.map(tableXML).joined(separator: "\n"))
+                </p:spTree>
+              </p:cSld>
+            </p:sld>
+            """
     }
 
     private func notesXML(_ paragraphs: [String]) -> String {
@@ -330,6 +482,44 @@ struct PPTXAdapterTests {
         """
     }
 
+    private func tableXML(_ rows: [[String]]) -> String {
+        """
+        <p:graphicFrame>
+          <a:graphic>
+            <a:graphicData uri="http://schemas.openxmlformats.org/drawingml/2006/table">
+              <a:tbl>
+                <a:tblPr/>
+                <a:tblGrid>
+                  \((0 ..< (rows.map(\.count).max() ?? 0)).map { _ in #"<a:gridCol w="2000000"/>"# }.joined(separator: "\n        "))
+                </a:tblGrid>
+                \(rows.map(tableRowXML).joined(separator: "\n        "))
+              </a:tbl>
+            </a:graphicData>
+          </a:graphic>
+        </p:graphicFrame>
+        """
+    }
+
+    private func tableRowXML(_ cells: [String]) -> String {
+        """
+        <a:tr h="370840">
+          \(cells.map(tableCellXML).joined(separator: "\n  "))
+        </a:tr>
+        """
+    }
+
+    private func tableCellXML(_ text: String) -> String {
+        """
+        <a:tc>
+          <a:txBody>
+            <a:p>
+              <a:r><a:t>\(escapeXML(text))</a:t></a:r>
+            </a:p>
+          </a:txBody>
+        </a:tc>
+        """
+    }
+
     private func escapeXML(_ text: String) -> String {
         text
             .replacingOccurrences(of: "&", with: "&amp;")
@@ -346,91 +536,6 @@ struct PPTXAdapterTests {
         return url
     }
 
-    private func writeZip(
-        entries: [(String, Data)],
-        to destination: URL,
-        compression: FixtureCompression
-    ) throws {
-        var output = Data()
-        var centralDirectory = Data()
-        var centralRecords: [CentralRecord] = []
-
-        for (path, data) in entries {
-            let encoded = compression.encoded(data)
-            let pathData = Data(path.utf8)
-            let localOffset = output.count
-
-            output.appendUInt32(0x0403_4B50)
-            output.appendUInt16(20)
-            output.appendUInt16(0)
-            output.appendUInt16(encoded.method)
-            output.appendUInt16(0)
-            output.appendUInt16(0)
-            output.appendUInt32(crc32(data))
-            output.appendUInt32(UInt32(encoded.data.count))
-            output.appendUInt32(UInt32(data.count))
-            output.appendUInt16(UInt16(pathData.count))
-            output.appendUInt16(0)
-            output.append(pathData)
-            output.append(encoded.data)
-
-            centralRecords.append(
-                CentralRecord(
-                    pathData: pathData,
-                    method: encoded.method,
-                    crc32: crc32(data),
-                    compressedSize: UInt32(encoded.data.count),
-                    uncompressedSize: UInt32(data.count),
-                    localOffset: UInt32(localOffset)
-                )
-            )
-        }
-
-        let centralDirectoryOffset = output.count
-        for record in centralRecords {
-            centralDirectory.appendUInt32(0x0201_4B50)
-            centralDirectory.appendUInt16(20)
-            centralDirectory.appendUInt16(20)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(record.method)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt32(record.crc32)
-            centralDirectory.appendUInt32(record.compressedSize)
-            centralDirectory.appendUInt32(record.uncompressedSize)
-            centralDirectory.appendUInt16(UInt16(record.pathData.count))
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt16(0)
-            centralDirectory.appendUInt32(0)
-            centralDirectory.appendUInt32(record.localOffset)
-            centralDirectory.append(record.pathData)
-        }
-        output.append(centralDirectory)
-
-        output.appendUInt32(0x0605_4B50)
-        output.appendUInt16(0)
-        output.appendUInt16(0)
-        output.appendUInt16(UInt16(centralRecords.count))
-        output.appendUInt16(UInt16(centralRecords.count))
-        output.appendUInt32(UInt32(centralDirectory.count))
-        output.appendUInt32(UInt32(centralDirectoryOffset))
-        output.appendUInt16(0)
-        try output.write(to: destination)
-    }
-
-    private func crc32(_ data: Data) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
-        for byte in data {
-            crc ^= UInt32(byte)
-            for _ in 0 ..< 8 {
-                let mask = UInt32(bitPattern: -Int32(crc & 1))
-                crc = (crc >> 1) ^ (0xEDB8_8320 & mask)
-            }
-        }
-        return crc ^ 0xFFFF_FFFF
-    }
 }
 
 private struct RelationshipFixture {
@@ -442,59 +547,5 @@ private struct RelationshipFixture {
     var xml: String {
         let mode = targetMode.map { #" TargetMode="\#($0)""# } ?? ""
         return #"<Relationship Id="\#(id)" Type="\#(type)" Target="\#(target)"\#(mode)/>"#
-    }
-}
-
-private enum FixtureCompression {
-    case stored
-    case deflated
-
-    func encoded(_ data: Data) -> (method: UInt16, data: Data) {
-        switch self {
-        case .stored:
-            return (0, data)
-        case .deflated:
-            var output = [UInt8](repeating: 0, count: max(64, data.count + 64))
-            let written = data.withUnsafeBytes { sourceBuffer in
-                guard let source = sourceBuffer.bindMemory(to: UInt8.self).baseAddress else {
-                    return 0
-                }
-                return compression_encode_buffer(
-                    &output,
-                    output.count,
-                    source,
-                    data.count,
-                    nil,
-                    COMPRESSION_ZLIB
-                )
-            }
-            guard written > 0, written < data.count else {
-                return (0, data)
-            }
-            return (8, Data(output.prefix(written)))
-        }
-    }
-}
-
-private struct CentralRecord {
-    let pathData: Data
-    let method: UInt16
-    let crc32: UInt32
-    let compressedSize: UInt32
-    let uncompressedSize: UInt32
-    let localOffset: UInt32
-}
-
-private extension Data {
-    mutating func appendUInt16(_ value: UInt16) {
-        append(UInt8(value & 0x00FF))
-        append(UInt8((value >> 8) & 0x00FF))
-    }
-
-    mutating func appendUInt32(_ value: UInt32) {
-        append(UInt8(value & 0x0000_00FF))
-        append(UInt8((value >> 8) & 0x0000_00FF))
-        append(UInt8((value >> 16) & 0x0000_00FF))
-        append(UInt8((value >> 24) & 0x0000_00FF))
     }
 }

@@ -57,9 +57,8 @@ public struct XLSXEmitter: DocumentFormatEmitter {
     }
 
     private static func packageData(for workbook: Workbook) throws -> Data {
-        let sheets = try validatedSheets(workbook.sheets)
-        try rejectFormulaCells(in: sheets)
-        try requireRenderableContent(in: sheets)
+        try validateForExport(workbook)
+        let sheets = workbook.sheets
 
         var sharedStrings = SharedStringTable()
         var worksheetEntries: [(path: String, xml: String)] = []
@@ -95,11 +94,26 @@ public struct XLSXEmitter: DocumentFormatEmitter {
             entries.append((worksheet.path, try utf8Data(worksheet.xml)))
         }
 
-        var archive = XLSXStoredZIPWriter()
-        for entry in entries {
-            try archive.append(path: entry.path, data: entry.data)
+        var archive = ZipArchiveWriter()
+        do {
+            for entry in entries {
+                try archive.add(path: entry.path, data: entry.data)
+            }
+            return try archive.finalize()
+        } catch let error as ZipArchiveError {
+            throw writeFailed(error.localizedDescription)
         }
-        return try archive.finalize()
+    }
+
+    private static func validateForExport(_ workbook: Workbook) throws {
+        let issues = WorkbookWorkflowService.validationIssues(for: workbook, policy: .xlsxExport)
+        guard let firstIssue = issues.first(where: { $0.severity == .error }) else { return }
+        switch firstIssue.code {
+        case .noRenderableCells, .noSheets:
+            throw DocumentAdapterError.emptyContent
+        default:
+            throw DocumentAdapterError.writeFailed(underlying: firstIssue.message)
+        }
     }
 
     private static func contentTypesXML(sheetCount: Int, hasSharedStrings: Bool) throws -> String {
@@ -280,90 +294,6 @@ public struct XLSXEmitter: DocumentFormatEmitter {
 
     private static let maxRows = 1_048_576
     private static let maxColumns = 16_384
-    private static let invalidSheetNameCharacters = CharacterSet(charactersIn: "[]:*?/\\")
-
-    private static func validatedSheets(_ sheets: [Workbook.Sheet]) throws -> [Workbook.Sheet] {
-        guard !sheets.isEmpty else { throw DocumentAdapterError.emptyContent }
-
-        var names: Set<String> = []
-        for (offset, sheet) in sheets.enumerated() {
-            guard sheet.index == offset else {
-                throw writeFailed("Sheet '\(sheet.name)' has index \(sheet.index), expected \(offset)")
-            }
-            try validateSheetName(sheet.name)
-            let normalizedName = sheet.name.lowercased()
-            guard names.insert(normalizedName).inserted else {
-                throw writeFailed("Duplicate sheet name '\(sheet.name)'")
-            }
-            try validateRows(sheet.rows, sheetName: sheet.name)
-            for range in sheet.mergedRanges where !isValidCellRangeReference(range.reference) {
-                throw writeFailed("Invalid merged range '\(range.reference)'")
-            }
-        }
-        return sheets
-    }
-
-    private static func validateSheetName(_ name: String) throws {
-        guard !name.isEmpty else { throw writeFailed("Sheet name cannot be empty") }
-        guard name.utf16.count <= 31 else {
-            throw writeFailed("Sheet name '\(name)' exceeds the XLSX 31-character limit")
-        }
-        guard name.rangeOfCharacter(from: invalidSheetNameCharacters) == nil else {
-            throw writeFailed("Sheet name '\(name)' contains characters XLSX does not allow")
-        }
-        guard name.first != "'", name.last != "'" else {
-            throw writeFailed("Sheet name '\(name)' cannot start or end with apostrophe")
-        }
-    }
-
-    private static func validateRows(_ rows: [Workbook.Row], sheetName: String) throws {
-        var rowNumbers: Set<Int> = []
-        var cellReferences: Set<String> = []
-        for row in rows {
-            guard row.number >= 1, row.number <= maxRows else {
-                throw writeFailed("\(sheetName) row \(row.number) is outside XLSX row bounds")
-            }
-            guard rowNumbers.insert(row.number).inserted else {
-                throw writeFailed("\(sheetName) contains duplicate row \(row.number)")
-            }
-
-            for cell in row.cells {
-                guard cell.columnNumber >= 1, cell.columnNumber <= maxColumns else {
-                    throw writeFailed("\(sheetName)!\(cell.reference) is outside XLSX column bounds")
-                }
-                guard cell.rowNumber >= 1, cell.rowNumber <= maxRows else {
-                    throw writeFailed("\(sheetName)!\(cell.reference) is outside XLSX row bounds")
-                }
-                let normalizedReference = cell.reference.uppercased()
-                guard cellReferences.insert(normalizedReference).inserted else {
-                    throw writeFailed("\(sheetName) contains duplicate cell \(cell.reference)")
-                }
-            }
-        }
-    }
-
-    private static func rejectFormulaCells(in sheets: [Workbook.Sheet]) throws {
-        for sheet in sheets {
-            for row in sheet.rows {
-                for cell in row.cells where cell.formula != nil {
-                    throw writeFailed("XLSX emitter does not write formulas yet (\(sheet.name)!\(cell.reference))")
-                }
-            }
-        }
-    }
-
-    private static func requireRenderableContent(in sheets: [Workbook.Sheet]) throws {
-        let hasRenderableCell = sheets.contains { sheet in
-            sheet.rows.contains { row in
-                row.cells.contains { cell in
-                    !cell.value.fallbackText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-                }
-            }
-        }
-        guard hasRenderableCell else {
-            throw DocumentAdapterError.emptyContent
-        }
-    }
 
     private static func validatedCellReference(for cell: Workbook.Cell, sheetName: String) throws -> String {
         let expected = cellReference(columnNumber: cell.columnNumber, rowNumber: cell.rowNumber)
@@ -430,10 +360,11 @@ public struct XLSXEmitter: DocumentFormatEmitter {
         guard value.isFinite else {
             throw writeFailed("XLSX emitter cannot write non-finite numbers")
         }
-        if value >= Double(Int64.min),
-            value <= Double(Int64.max),
-            value.rounded(.towardZero) == value
-        {
+        let isIntegerInInt64Range =
+            value >= Double(Int64.min)
+            && value <= Double(Int64.max)
+            && value.rounded(.towardZero) == value
+        if isIntegerInInt64Range {
             return String(Int64(value))
         }
         return String(value)
@@ -510,146 +441,5 @@ private struct SharedStringTable {
         indices[value] = index
         values.append(value)
         return index
-    }
-}
-
-private struct XLSXStoredZIPWriter {
-    private struct CentralDirectoryEntry {
-        let path: String
-        let crc32: UInt32
-        let size: UInt32
-        let localHeaderOffset: UInt32
-    }
-
-    private var archive = Data()
-    private var entries: [CentralDirectoryEntry] = []
-
-    mutating func append(path: String, data: Data) throws {
-        guard !path.isEmpty, !path.hasPrefix("/"), !path.contains("..") else {
-            throw DocumentAdapterError.writeFailed(underlying: "Invalid ZIP entry path '\(path)'")
-        }
-        let name = Data(path.utf8)
-        let localHeaderOffset = try uint32(archive.count, label: "ZIP local header offset")
-        let size = try uint32(data.count, label: "\(path) size")
-        let nameLength = try uint16(name.count, label: "\(path) name length")
-        let checksum = crc32(data)
-
-        archive.appendUInt32LE(0x0403_4B50)
-        archive.appendUInt16LE(20)
-        archive.appendUInt16LE(0x0800)
-        archive.appendUInt16LE(0)
-        archive.appendUInt16LE(0)
-        archive.appendUInt16LE(0)
-        archive.appendUInt32LE(checksum)
-        archive.appendUInt32LE(size)
-        archive.appendUInt32LE(size)
-        archive.appendUInt16LE(nameLength)
-        archive.appendUInt16LE(0)
-        archive.append(name)
-        archive.append(data)
-
-        entries.append(
-            CentralDirectoryEntry(
-                path: path,
-                crc32: checksum,
-                size: size,
-                localHeaderOffset: localHeaderOffset
-            )
-        )
-    }
-
-    mutating func finalize() throws -> Data {
-        var centralDirectory = Data()
-        for entry in entries {
-            let name = Data(entry.path.utf8)
-            let nameLength = try uint16(name.count, label: "\(entry.path) name length")
-
-            centralDirectory.appendUInt32LE(0x0201_4B50)
-            centralDirectory.appendUInt16LE(20)
-            centralDirectory.appendUInt16LE(20)
-            centralDirectory.appendUInt16LE(0x0800)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt32LE(entry.crc32)
-            centralDirectory.appendUInt32LE(entry.size)
-            centralDirectory.appendUInt32LE(entry.size)
-            centralDirectory.appendUInt16LE(nameLength)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt16LE(0)
-            centralDirectory.appendUInt32LE(0)
-            centralDirectory.appendUInt32LE(entry.localHeaderOffset)
-            centralDirectory.append(name)
-        }
-
-        let centralDirectoryOffset = try uint32(archive.count, label: "ZIP central directory offset")
-        let centralDirectorySize = try uint32(centralDirectory.count, label: "ZIP central directory size")
-        let entryCount = try uint16(entries.count, label: "ZIP entry count")
-
-        archive.append(centralDirectory)
-        archive.appendUInt32LE(0x0605_4B50)
-        archive.appendUInt16LE(0)
-        archive.appendUInt16LE(0)
-        archive.appendUInt16LE(entryCount)
-        archive.appendUInt16LE(entryCount)
-        archive.appendUInt32LE(centralDirectorySize)
-        archive.appendUInt32LE(centralDirectoryOffset)
-        archive.appendUInt16LE(0)
-        return archive
-    }
-
-    private func uint16(_ value: Int, label: String) throws -> UInt16 {
-        guard value >= 0, value <= Int(UInt16.max) else {
-            throw DocumentAdapterError.writeFailed(underlying: "\(label) exceeds ZIP32 limits")
-        }
-        return UInt16(value)
-    }
-
-    private func uint32(_ value: Int, label: String) throws -> UInt32 {
-        guard value >= 0, value <= Int(UInt32.max) else {
-            throw DocumentAdapterError.writeFailed(underlying: "\(label) exceeds ZIP32 limits")
-        }
-        return UInt32(value)
-    }
-
-    private func crc32(_ data: Data) -> UInt32 {
-        var crc: UInt32 = 0xFFFF_FFFF
-        for byte in data {
-            let index = Int((crc ^ UInt32(byte)) & 0xFF)
-            crc = (crc >> 8) ^ crc32Table[index]
-        }
-        return crc ^ 0xFFFF_FFFF
-    }
-
-    private let crc32Table: [UInt32] = (0 ..< 256).map { value in
-        var crc = UInt32(value)
-        for _ in 0 ..< 8 {
-            if crc & 1 == 1 {
-                crc = 0xEDB8_8320 ^ (crc >> 1)
-            } else {
-                crc >>= 1
-            }
-        }
-        return crc
-    }
-}
-
-private extension Data {
-    mutating func appendUInt16LE(_ value: UInt16) {
-        append(contentsOf: [
-            UInt8(value & 0x00FF),
-            UInt8((value >> 8) & 0x00FF),
-        ])
-    }
-
-    mutating func appendUInt32LE(_ value: UInt32) {
-        append(contentsOf: [
-            UInt8(value & 0x0000_00FF),
-            UInt8((value >> 8) & 0x0000_00FF),
-            UInt8((value >> 16) & 0x0000_00FF),
-            UInt8((value >> 24) & 0x0000_00FF),
-        ])
     }
 }

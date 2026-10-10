@@ -58,6 +58,7 @@ public struct PPTXAdapter: DocumentFormatAdapter {
 
             let security = try Self.securityMetadata(
                 for: url,
+                presentation: presentation,
                 archive: archive,
                 extractedText: built.text,
                 textFallback: textFallback
@@ -103,7 +104,7 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         for (index, slidePart) in slideParts.enumerated() {
             try Task.checkCancellation()
 
-            let slideRuns = try textRuns(
+            let slideExtraction = try textRunExtraction(
                 in: slidePart.path,
                 from: archive,
                 slideIndex: index,
@@ -129,7 +130,9 @@ public struct PPTXAdapter: DocumentFormatAdapter {
                     number: slidePart.number,
                     sourcePart: slidePart.path,
                     label: "Slide \(index + 1)",
-                    textRuns: slideRuns,
+                    isHidden: slideExtraction.isHiddenSlide,
+                    textRuns: slideExtraction.textRuns,
+                    tables: slideExtraction.tables,
                     speakerNotes: speakerNotes?.text.isEmpty == false ? speakerNotes : nil
                 )
             )
@@ -229,6 +232,20 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         slideIndex: Int,
         region: PresentationTextRegion
     ) throws -> [PresentationTextRun] {
+        try textRunExtraction(
+            in: part,
+            from: archive,
+            slideIndex: slideIndex,
+            region: region
+        ).textRuns
+    }
+
+    private static func textRunExtraction(
+        in part: String,
+        from archive: BoundedZipReader,
+        slideIndex: Int,
+        region: PresentationTextRegion
+    ) throws -> PresentationPartTextExtraction {
         let data = try archive.entryData(part, maxUncompressedBytes: Constants.maxXMLPartBytes)
         let collector = OpenXMLTextRunCollector(maxUTF16Length: Constants.maxTextPartUTF16)
         let parser = XMLParser(data: data)
@@ -250,20 +267,54 @@ public struct PPTXAdapter: DocumentFormatAdapter {
             throw DocumentAdapterError.readFailed(underlying: message)
         }
 
-        return collector.runs.map { run in
-            PresentationTextRun(
-                text: run.text,
-                paragraphIndex: run.paragraphIndex,
-                runIndex: run.runIndex,
-                sourcePart: part,
-                anchorId: textRunAnchorId(
-                    slideIndex: slideIndex,
-                    region: region,
+        return PresentationPartTextExtraction(
+            textRuns: collector.runs.map { run in
+                PresentationTextRun(
+                    text: run.text,
                     paragraphIndex: run.paragraphIndex,
-                    runIndex: run.runIndex
+                    runIndex: run.runIndex,
+                    sourcePart: part,
+                    anchorId: textRunAnchorId(
+                        slideIndex: slideIndex,
+                        region: region,
+                        paragraphIndex: run.paragraphIndex,
+                        runIndex: run.runIndex
+                    )
                 )
-            )
-        }
+            },
+            tables: collector.tables.enumerated().map { tableIndex, table in
+                PresentationTable(
+                    index: tableIndex,
+                    sourcePart: part,
+                    anchorId: tableAnchorId(slideIndex: slideIndex, tableIndex: tableIndex),
+                    rows: table.rows.enumerated().map { rowIndex, row in
+                        PresentationTableRow(
+                            index: rowIndex,
+                            anchorId: tableRowAnchorId(
+                                slideIndex: slideIndex,
+                                tableIndex: tableIndex,
+                                rowIndex: rowIndex
+                            ),
+                            cells: row.cells.enumerated().map { columnIndex, cell in
+                                PresentationTableCell(
+                                    rowIndex: rowIndex,
+                                    columnIndex: columnIndex,
+                                    text: cell.text,
+                                    paragraphIndexes: cell.paragraphIndexes,
+                                    anchorId: tableCellAnchorId(
+                                        slideIndex: slideIndex,
+                                        tableIndex: tableIndex,
+                                        rowIndex: rowIndex,
+                                        columnIndex: columnIndex
+                                    )
+                                )
+                            }
+                        )
+                    }
+                )
+            },
+            isHiddenSlide: collector.isHiddenSlide
+        )
     }
 
     private static func slideRelationshipIds(
@@ -317,12 +368,20 @@ public struct PPTXAdapter: DocumentFormatAdapter {
             let slideStart = text.utf16.count
             text.append(slide.label)
 
-            var children = appendParagraphElements(
+            let slideTextAppend = appendParagraphElements(
                 runs: slide.textRuns,
                 slide: slide,
                 region: .slideText,
                 text: &text
-            ).elements
+            )
+            var children = slideTextAppend.elements
+            children.append(
+                contentsOf: tableElements(
+                    tables: slide.tables,
+                    slide: slide,
+                    paragraphRanges: slideTextAppend.paragraphRanges
+                )
+            )
 
             if let notes = slide.speakerNotes, !notes.text.isEmpty {
                 text.append("\nSpeaker notes:")
@@ -364,6 +423,7 @@ public struct PPTXAdapter: DocumentFormatAdapter {
                 )
             }
 
+            let slideMetadata = slideMetadata(slide)
             let slideAnchor = DocumentAnchor(
                 id: slideAnchorId(slideIndex: slide.index),
                 kind: .slide,
@@ -377,17 +437,14 @@ public struct PPTXAdapter: DocumentFormatAdapter {
                 ),
                 sourceRange: .init(start: .slide(slide.index)),
                 label: slide.label,
-                metadata: [
-                    "sourcePart": slide.sourcePart,
-                    "slideNumber": "\(slide.number)",
-                ]
+                metadata: slideMetadata
             )
             slideElements.append(
                 DocumentElement(
                     kind: .slide,
                     anchor: slideAnchor,
                     text: slide.text,
-                    attributes: .init(metadata: ["slideNumber": "\(slide.number)"]),
+                    attributes: .init(metadata: slideMetadata),
                     children: children
                 )
             )
@@ -502,8 +559,130 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         return ParagraphAppendResult(
             elements: elements,
             textStart: firstStart ?? textEnd,
-            textEnd: textEnd
+            textEnd: textEnd,
+            paragraphRanges: Dictionary(
+                uniqueKeysWithValues: elements.compactMap { element in
+                    guard let range = element.anchor.textRange,
+                        let paragraphIndex = element.anchor.sourceRange?.start.paragraphIndex
+                    else {
+                        return nil
+                    }
+                    return (paragraphIndex, range)
+                }
+            )
         )
+    }
+
+    private static func tableElements(
+        tables: [PresentationTable],
+        slide: PresentationSlide,
+        paragraphRanges: [Int: DocumentTextRange]
+    ) -> [DocumentElement] {
+        tables.compactMap { table in
+            let rowElements = table.rows.map { row in
+                let cellElements = row.cells.map { cell in
+                    let range = spanningRange(
+                        cell.paragraphIndexes.compactMap { paragraphRanges[$0] }
+                    )
+                    let anchor = DocumentAnchor(
+                        id: cell.anchorId,
+                        kind: .cell,
+                        path: tableAnchorPath(
+                            slideIndex: slide.index,
+                            tableIndex: table.index,
+                            rowIndex: row.index,
+                            columnIndex: cell.columnIndex
+                        ),
+                        textRange: range,
+                        sourceRange: .init(
+                            start: DocumentSourceLocation(
+                                slideIndex: slide.index,
+                                rowIndex: row.index,
+                                columnIndex: cell.columnIndex,
+                                namedRegion: "table"
+                            )
+                        ),
+                        label:
+                            "\(slide.label) table \(table.index + 1) cell \(row.index + 1).\(cell.columnIndex + 1)",
+                        metadata: [
+                            "sourcePart": table.sourcePart,
+                            "tableIndex": "\(table.index)",
+                            "rowIndex": "\(row.index)",
+                            "columnIndex": "\(cell.columnIndex)",
+                        ]
+                    )
+                    return DocumentElement(
+                        kind: .tableCell,
+                        anchor: anchor,
+                        text: cell.text,
+                        attributes: .init(role: "tableCell")
+                    )
+                }
+                let rowRange = spanningRange(cellElements.compactMap { $0.anchor.textRange })
+                let rowAnchor = DocumentAnchor(
+                    id: row.anchorId,
+                    kind: .row,
+                    path: tableAnchorPath(slideIndex: slide.index, tableIndex: table.index, rowIndex: row.index),
+                    textRange: rowRange,
+                    sourceRange: .init(
+                        start: DocumentSourceLocation(
+                            slideIndex: slide.index,
+                            rowIndex: row.index,
+                            namedRegion: "table"
+                        )
+                    ),
+                    label: "\(slide.label) table \(table.index + 1) row \(row.index + 1)",
+                    metadata: [
+                        "sourcePart": table.sourcePart,
+                        "tableIndex": "\(table.index)",
+                        "rowIndex": "\(row.index)",
+                        "columnCount": "\(row.cells.count)",
+                    ]
+                )
+                return DocumentElement(
+                    kind: .tableRow,
+                    anchor: rowAnchor,
+                    text: row.text,
+                    attributes: .init(role: "tableRow"),
+                    children: cellElements
+                )
+            }
+            guard rowElements.contains(where: { !$0.children.isEmpty }) else { return nil }
+
+            let tableRange = spanningRange(rowElements.compactMap { $0.anchor.textRange })
+            let tableAnchor = DocumentAnchor(
+                id: table.anchorId,
+                kind: .table,
+                path: tableAnchorPath(slideIndex: slide.index, tableIndex: table.index),
+                textRange: tableRange,
+                sourceRange: .init(
+                    start: DocumentSourceLocation(slideIndex: slide.index, namedRegion: "table")
+                ),
+                label: "\(slide.label) table \(table.index + 1)",
+                metadata: [
+                    "sourcePart": table.sourcePart,
+                    "tableIndex": "\(table.index)",
+                    "rowCount": "\(table.rows.count)",
+                    "columnCount": "\(table.columnCount)",
+                ]
+            )
+            return DocumentElement(
+                kind: .table,
+                anchor: tableAnchor,
+                text: table.text,
+                attributes: .init(role: "table"),
+                children: rowElements
+            )
+        }
+    }
+
+    private static func spanningRange(_ ranges: [DocumentTextRange]) -> DocumentTextRange? {
+        guard let start = ranges.map(\.startUTF16Offset).min(),
+            let end = ranges.map(\.endUTF16Offset).max()
+        else {
+            return nil
+        }
+        return DocumentTextRange(startUTF16Offset: start, length: end - start)
     }
 
     private static func groupedParagraphs(
@@ -519,10 +698,22 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         }
     }
 
+    private static func slideMetadata(_ slide: PresentationSlide) -> [String: String] {
+        var metadata = [
+            "sourcePart": slide.sourcePart,
+            "slideNumber": "\(slide.number)",
+        ]
+        if slide.isHidden {
+            metadata["isHidden"] = "true"
+        }
+        return metadata
+    }
+
     // MARK: - Security
 
     private static func securityMetadata(
         for url: URL,
+        presentation: PresentationDocument,
         archive: BoundedZipReader,
         extractedText: String,
         textFallback: String
@@ -538,46 +729,70 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         var activeContentTypes: Set<DocumentActiveContentType> = []
         var externalReferences: [DocumentExternalReference] = []
 
-        if archive.entryNames.contains(where: { $0.lowercased().hasSuffix("vbaproject.bin") }) {
+        let macroParts = archive.entryNames.filter { $0.lowercased().hasSuffix("vbaproject.bin") }
+        let embeddedObjectParts = archive.entryNames.filter { path in
+            let lowercased = path.lowercased()
+            return !lowercased.hasSuffix("/")
+                && (lowercased.hasPrefix("ppt/embeddings/")
+                    || lowercased.hasPrefix("ppt/activex/")
+                    || lowercased.hasPrefix("ppt/ctrlprops/"))
+        }
+        let relationshipParts = archive.entryNames.filter { $0.hasSuffix(".rels") }
+        let inspectedRelationshipParts = Array(relationshipParts.prefix(Constants.maxRelationshipFiles))
+        var macroRelationshipCount = 0
+        var embeddedObjectRelationshipCount = 0
+
+        for relationshipsPart in inspectedRelationshipParts {
+            for relationship in try relationships(in: relationshipsPart, from: archive) {
+                if relationship.isMacroProject {
+                    macroRelationshipCount += 1
+                }
+                if relationship.isEmbeddedObject {
+                    embeddedObjectRelationshipCount += 1
+                }
+                if relationship.targetMode == .external {
+                    activeContentTypes.insert(.externalReference)
+                    externalReferences.append(
+                        DocumentExternalReference(
+                            kind: relationship.referenceKind,
+                            urlString: relationship.target,
+                            relationshipId: relationship.id
+                        )
+                    )
+                }
+            }
+        }
+
+        if !macroParts.isEmpty || macroRelationshipCount > 0 {
             activeContentTypes.insert(.macro)
             findings.append(
                 DocumentSecurityFinding(
                     kind: .macro,
                     severity: .high,
-                    message: "Presentation package contains a VBA project part."
+                    message: "Presentation package contains a VBA project part or relationship.",
+                    metadata: [
+                        "partCount": "\(macroParts.count)",
+                        "relationshipCount": "\(macroRelationshipCount)",
+                    ]
                 )
             )
         }
 
-        let embeddedCount = archive.entryNames.filter {
-            $0.hasPrefix("ppt/embeddings/") || $0.hasPrefix("ppt/activeX/")
-        }.count
+        let embeddedCount = embeddedObjectParts.count + embeddedObjectRelationshipCount
         if embeddedCount > 0 {
             activeContentTypes.insert(.embeddedFile)
             findings.append(
                 DocumentSecurityFinding(
                     kind: .embeddedFile,
                     severity: .medium,
-                    message: "Presentation package contains embedded or ActiveX parts.",
-                    metadata: ["count": "\(embeddedCount)"]
+                    message: "Presentation package contains embedded OLE/object or ActiveX parts/relationships.",
+                    metadata: [
+                        "count": "\(embeddedCount)",
+                        "partCount": "\(embeddedObjectParts.count)",
+                        "relationshipCount": "\(embeddedObjectRelationshipCount)",
+                    ]
                 )
             )
-        }
-
-        for relationshipsPart in archive.entryNames.filter({ $0.hasSuffix(".rels") }).prefix(
-            Constants.maxRelationshipFiles
-        ) {
-            for relationship in try relationships(in: relationshipsPart, from: archive)
-            where relationship.targetMode == .external {
-                activeContentTypes.insert(.externalReference)
-                externalReferences.append(
-                    DocumentExternalReference(
-                        kind: relationship.referenceKind,
-                        urlString: relationship.target,
-                        relationshipId: relationship.id
-                    )
-                )
-            }
         }
 
         if !externalReferences.isEmpty {
@@ -587,6 +802,36 @@ public struct PPTXAdapter: DocumentFormatAdapter {
                     severity: .low,
                     message: "Presentation package contains external relationship targets.",
                     metadata: ["count": "\(externalReferences.count)"]
+                )
+            )
+        }
+
+        if relationshipParts.count > inspectedRelationshipParts.count {
+            findings.append(
+                DocumentSecurityFinding(
+                    kind: .truncatedContent,
+                    severity: .low,
+                    message: "Presentation relationship inspection was capped before all relationship parts were read.",
+                    metadata: [
+                        "inspectedRelationshipFiles": "\(inspectedRelationshipParts.count)",
+                        "relationshipFiles": "\(relationshipParts.count)",
+                    ]
+                )
+            )
+        }
+
+        let hiddenSlides = presentation.slides.filter(\.isHidden)
+        if !hiddenSlides.isEmpty {
+            findings.append(
+                DocumentSecurityFinding(
+                    kind: .unsupportedFeature,
+                    severity: .low,
+                    message: "Presentation contains hidden slides; their text was extracted and marked in metadata.",
+                    metadata: [
+                        "feature": "hiddenSlides",
+                        "count": "\(hiddenSlides.count)",
+                        "slideNumbers": hiddenSlides.map(\.number).sorted().map(String.init).joined(separator: ","),
+                    ]
                 )
             )
         }
@@ -683,6 +928,23 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         "\(paragraphAnchorId(slideIndex: slideIndex, region: region, paragraphIndex: paragraphIndex))/r-\(runIndex + 1)"
     }
 
+    private static func tableAnchorId(slideIndex: Int, tableIndex: Int) -> String {
+        "\(slideAnchorId(slideIndex: slideIndex))/table-\(tableIndex + 1)"
+    }
+
+    private static func tableRowAnchorId(slideIndex: Int, tableIndex: Int, rowIndex: Int) -> String {
+        "\(tableAnchorId(slideIndex: slideIndex, tableIndex: tableIndex))/row-\(rowIndex + 1)"
+    }
+
+    private static func tableCellAnchorId(
+        slideIndex: Int,
+        tableIndex: Int,
+        rowIndex: Int,
+        columnIndex: Int
+    ) -> String {
+        "\(tableRowAnchorId(slideIndex: slideIndex, tableIndex: tableIndex, rowIndex: rowIndex))/cell-\(columnIndex + 1)"
+    }
+
     private static func anchorPath(
         slideIndex: Int,
         region: PresentationTextRegion,
@@ -697,6 +959,26 @@ public struct PPTXAdapter: DocumentFormatAdapter {
         ]
         if let runIndex {
             path.append(.init(kind: .run, index: runIndex))
+        }
+        return path
+    }
+
+    private static func tableAnchorPath(
+        slideIndex: Int,
+        tableIndex: Int,
+        rowIndex: Int? = nil,
+        columnIndex: Int? = nil
+    ) -> [DocumentAnchor.PathComponent] {
+        var path: [DocumentAnchor.PathComponent] = [
+            .init(kind: .document),
+            .init(kind: .slide, index: slideIndex),
+            .init(kind: .table, index: tableIndex),
+        ]
+        if let rowIndex {
+            path.append(.init(kind: .row, index: rowIndex))
+        }
+        if let columnIndex {
+            path.append(.init(kind: .cell, index: columnIndex))
         }
         return path
     }
@@ -724,6 +1006,12 @@ private struct SlidePart: Sendable {
     let path: String
 }
 
+private struct PresentationPartTextExtraction {
+    let textRuns: [PresentationTextRun]
+    let tables: [PresentationTable]
+    let isHiddenSlide: Bool
+}
+
 private struct PresentationParagraphRuns {
     let index: Int
     let runs: [PresentationTextRun]
@@ -733,6 +1021,7 @@ private struct ParagraphAppendResult {
     let elements: [DocumentElement]
     let textStart: Int
     let textEnd: Int
+    let paragraphRanges: [Int: DocumentTextRange]
 }
 
 private enum PresentationTextRegion: String {
@@ -795,6 +1084,18 @@ private struct OpenXMLRelationship: Sendable {
     let target: String
     let targetMode: TargetMode
 
+    var isMacroProject: Bool {
+        relationshipTypeName == "vbaproject" || target.lowercased().hasSuffix("vbaproject.bin")
+    }
+
+    var isEmbeddedObject: Bool {
+        let lowercasedTarget = target.lowercased()
+        return ["oleobject", "package", "control", "activexcontrol"].contains(relationshipTypeName)
+            || lowercasedTarget.contains("/embeddings/")
+            || lowercasedTarget.contains("/activex/")
+            || lowercasedTarget.contains("/ctrlprops/")
+    }
+
     var referenceKind: DocumentExternalReference.Kind {
         let lowercased = type.lowercased()
         if lowercased.contains("hyperlink") {
@@ -817,6 +1118,10 @@ private struct OpenXMLRelationship: Sendable {
         }
         return .packageRelationship
     }
+
+    private var relationshipTypeName: String {
+        type.split(separator: "/").last.map { String($0).lowercased() } ?? ""
+    }
 }
 
 private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
@@ -826,11 +1131,21 @@ private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
     private var inText = false
     private var currentRun = ""
     private var currentParagraphRuns: [String] = []
+    private var nextParagraphIndex = 0
     private var totalUTF16Length = 0
+    private var tableDepth = 0
+    private var inTableRow = false
+    private var inTableCell = false
+    private var currentTableRows: [CollectedTable.Row] = []
+    private var currentRowCells: [CollectedTable.Cell] = []
+    private var currentCellParagraphIndexes: [Int] = []
+    private var currentCellParagraphTexts: [String] = []
 
     private(set) var runs: [CollectedRun] = []
+    private(set) var tables: [CollectedTable] = []
     private(set) var didOverflow = false
     private(set) var didExceedDepth = false
+    private(set) var isHiddenSlide = false
 
     init(maxUTF16Length: Int) {
         self.maxUTF16Length = maxUTF16Length
@@ -850,7 +1165,28 @@ private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
             return
         }
 
-        switch OpenXMLName.localName(elementName, qualifiedName: qName) {
+        let localName = OpenXMLName.localName(elementName, qualifiedName: qName)
+        if depth == 1, localName == "sld" {
+            isHiddenSlide = OpenXMLBoolean.isFalse(OpenXMLName.attribute("show", in: attributeDict))
+        }
+
+        switch localName {
+        case "tbl":
+            tableDepth += 1
+            if tableDepth == 1 {
+                currentTableRows = []
+            }
+        case "tr":
+            if tableDepth > 0, !inTableRow {
+                inTableRow = true
+                currentRowCells = []
+            }
+        case "tc":
+            if tableDepth > 0, inTableRow, !inTableCell {
+                inTableCell = true
+                currentCellParagraphIndexes = []
+                currentCellParagraphTexts = []
+            }
         case "p":
             inParagraph = true
             currentParagraphRuns = []
@@ -875,16 +1211,48 @@ private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
             if !currentRun.isEmpty {
                 if inParagraph {
                     currentParagraphRuns.append(currentRun)
-                } else {
-                    appendParagraphRuns([currentRun], parser: parser)
+                } else if let paragraph = appendParagraphRuns([currentRun], parser: parser),
+                    inTableCell
+                {
+                    currentCellParagraphIndexes.append(paragraph.index)
+                    currentCellParagraphTexts.append(paragraph.text)
                 }
             }
             currentRun = ""
             inText = false
         case "p":
-            appendParagraphRuns(currentParagraphRuns, parser: parser)
+            if let paragraph = appendParagraphRuns(currentParagraphRuns, parser: parser),
+                inTableCell
+            {
+                currentCellParagraphIndexes.append(paragraph.index)
+                currentCellParagraphTexts.append(paragraph.text)
+            }
             currentParagraphRuns = []
             inParagraph = false
+        case "tc":
+            if inTableCell {
+                currentRowCells.append(
+                    CollectedTable.Cell(
+                        text: currentCellParagraphTexts.joined(separator: "\n"),
+                        paragraphIndexes: currentCellParagraphIndexes
+                    )
+                )
+                currentCellParagraphIndexes = []
+                currentCellParagraphTexts = []
+                inTableCell = false
+            }
+        case "tr":
+            if inTableRow {
+                currentTableRows.append(CollectedTable.Row(cells: currentRowCells))
+                currentRowCells = []
+                inTableRow = false
+            }
+        case "tbl":
+            if tableDepth == 1 {
+                tables.append(CollectedTable(rows: currentTableRows))
+                currentTableRows = []
+            }
+            tableDepth = max(0, tableDepth - 1)
         default:
             break
         }
@@ -903,21 +1271,23 @@ private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
         nil
     }
 
-    private func appendParagraphRuns(_ rawRuns: [String], parser: XMLParser) {
+    private func appendParagraphRuns(_ rawRuns: [String], parser: XMLParser) -> CollectedParagraph? {
         let paragraphText = rawRuns.joined().trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !paragraphText.isEmpty else { return }
+        guard !paragraphText.isEmpty else { return nil }
 
-        let paragraphIndex = Set(runs.map(\.paragraphIndex)).count
+        let paragraphIndex = nextParagraphIndex
         var runIndex = 0
+        var collectedRuns: [CollectedRun] = []
         for rawRun in rawRuns {
             guard !rawRun.isEmpty else { continue }
-            totalUTF16Length += rawRun.utf16.count
-            if totalUTF16Length > maxUTF16Length {
+            let nextTotal = totalUTF16Length + rawRun.utf16.count
+            if nextTotal > maxUTF16Length {
                 didOverflow = true
                 parser.abortParsing()
-                return
+                return nil
             }
-            runs.append(
+            totalUTF16Length = nextTotal
+            collectedRuns.append(
                 CollectedRun(
                     text: rawRun,
                     paragraphIndex: paragraphIndex,
@@ -926,12 +1296,34 @@ private final class OpenXMLTextRunCollector: NSObject, XMLParserDelegate {
             )
             runIndex += 1
         }
+        guard !collectedRuns.isEmpty else { return nil }
+        runs.append(contentsOf: collectedRuns)
+        nextParagraphIndex += 1
+        return CollectedParagraph(index: paragraphIndex, text: paragraphText)
+    }
+
+    struct CollectedParagraph {
+        let index: Int
+        let text: String
     }
 
     struct CollectedRun {
         let text: String
         let paragraphIndex: Int
         let runIndex: Int
+    }
+
+    struct CollectedTable {
+        let rows: [Row]
+
+        struct Row {
+            let cells: [Cell]
+        }
+
+        struct Cell {
+            let text: String
+            let paragraphIndexes: [Int]
+        }
     }
 }
 
@@ -1018,6 +1410,18 @@ private enum OpenXMLName {
         return attributes.first { key, _ in
             key.split(separator: ":").last.map { $0.lowercased() } == lowercasedName
         }?.value
+    }
+}
+
+private enum OpenXMLBoolean {
+    static func isFalse(_ value: String?) -> Bool {
+        guard let value else { return false }
+        switch value.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
+        case "0", "false":
+            return true
+        default:
+            return false
+        }
     }
 }
 

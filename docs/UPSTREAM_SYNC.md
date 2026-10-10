@@ -3175,3 +3175,32 @@ and `FittedSheetFrame.swift` are upstream's.
 Tests: upstream's `ScheduleHistoryServiceTests`,
 `ScheduleRunHistoryStoreTests` and `AgentDispatchTargetTests` (minus the
 watcher and channel-route cases).
+
+### Document services and adapters (`W-doc-editing`) — 2026-10-10
+
+Intel's document layer was frozen at upstream's May versions. Now
+upstream's current files:
+
+- **Taken whole (no Intel commits):** `PPTXAdapter` (slide tables #1307,
+  hidden slides, run metadata), `CSVAdapter`, `PresentationDocument`
+  (`PresentationTable`, `isHidden`).
+- **New:** `CSVTableWorkflowService`, `BusinessDocumentStudioService`.
+  Upstream has no caller for these yet; they are its library for attachment
+  and plugin surfaces.
+- **Ungated:** `PDFPPTXWorkflowService`. Its only Intel change was the
+  `#if !OSAURUS_INTEL`.
+- **Three-way merged:** `XLSXEmitter`, from its last common upstream base
+  (`fafb6a84f`). Intel's agent-database `packageBytes(for:)` already exists
+  upstream in identical form, so one copy remains.
+
+`BusinessDocumentSummary` stays Intel's: upstream differs only by a symbol
+that draws blank on Ventura.
+
+**Lesson:** a three-way merge needs a real base. Before taking a drifted
+file, find its last upstream ancestor (`git log HEAD -- <file>`, first
+commit that `git merge-base --is-ancestor`s into upstream). With no base,
+`git merge-file` silently undid the Ventura fix above.
+
+Tests: upstream's `BusinessDocumentStudioServiceTests`,
+`CSVTableWorkflowServiceTests`, current `CSVAdapterTests` and
+`PPTXAdapterTests`; `PDFPPTXWorkflowServiceTests` re-enabled.
