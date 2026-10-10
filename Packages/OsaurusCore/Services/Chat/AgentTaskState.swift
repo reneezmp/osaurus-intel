@@ -1,0 +1,1520 @@
+//
+//  AgentTaskState.swift
+//  osaurus
+//
+//  The per-task state machine the harness holds so the model doesn't have to.
+//
+//  Diagnosis (see docs/AGENT_LOOP.md): a 1B-active model used as both planner
+//  and executor in a free, stateless loop has to reconstruct from raw tool
+//  text — every turn — where it is, what it just received, and what the next
+//  valid move is. That reconstruction is the work it fails at. This type moves
+//  that bookkeeping into the loop: it classifies each tool result, tracks what
+//  the last result implies, dedupes back-to-back identical re-issues, and
+//  emits a (non-load-bearing) next-step nudge. The structured result objects
+//  (`ToolEnvelope.listing`, `kind: "file"`) are what actually carry the win —
+//  this layer is a thin nudge on top, validated to not be load-bearing.
+//
+//  One instance per loop run. `ChatSession` keeps a session-scoped instance so
+//  a listing survives across user messages; the HTTP `/agents/{id}/run` and
+//  plugin loops are stateless across requests by design, so they use a
+//  per-request / per-invocation instance (nothing to survive).
+//
+
+import Foundation
+
+/// Classification of a tool result, derived from the canonical envelope.
+/// The loop branches on this without the model interpreting anything.
+public enum ToolResultClass: Equatable, Sendable {
+    /// A directory listing with no entries.
+    case emptyListing
+    /// A directory listing with at least one entry.
+    case populatedListing
+    /// A directory listing that hit a cap (entries are incomplete).
+    case partialListing
+    /// File content (`kind: "file"`).
+    case fileContent
+    /// File content whose RENDERED output was cut by the character cap
+    /// and which carries an exact continuation range (`next_start_line`
+    /// / `next_end_line`). Distinct from `.fileContent` so the harness
+    /// can stage a continuation notice instead of letting the model
+    /// review a truncated file as if it were complete (issue #2098).
+    case partialFileContent(path: String, nextStartLine: Int, nextEndLine: Int)
+    /// A referenced path does not exist (`kind: "not_found"`).
+    case notFound
+    /// Any other failure envelope.
+    case error
+    /// Native image job completed and returned saved image paths. `isEdit`
+    /// distinguishes a fresh generation from an edit of an existing image, so
+    /// the follow-up nudge only suggests editing AFTER a generation.
+    /// `editAvailable` is whether a ready edit model is installed; when false
+    /// the post-generation edit nudge is suppressed (it would steer toward an
+    /// edit the runtime can't perform).
+    case nativeImageGeneration(paths: [String], isEdit: Bool, editAvailable: Bool)
+    /// Any success that isn't a listing or file read.
+    case other
+}
+
+/// A single listed entry, parsed into a typed (Sendable) form.
+public struct ListingEntry: Equatable, Sendable {
+    public let name: String
+    public let path: String
+    public let isDirectory: Bool
+}
+
+/// A snapshot of the most recent directory listing, retained so a later
+/// reference ("read the file") can be resolved against it. Phase-3 reference
+/// resolution will read this; today it backs the post-listing nudge.
+public struct ListingSnapshot: Equatable, Sendable {
+    public let path: String
+    public let entries: [ListingEntry]
+    /// True when the listing was capped, so its entries are incomplete and it
+    /// must not be treated as an exhaustive set for find-by-name.
+    public let truncated: Bool
+}
+
+/// Identity of a tool call for dedupe: tool name + canonicalised arguments.
+public struct CallSignature: Hashable, Sendable {
+    public let name: String
+    public let canonicalArgs: String
+}
+
+/// Per-task state threaded through a tool-call loop. Not thread-safe by
+/// design: a single loop drives it sequentially. Each loop owns its own
+/// instance.
+public final class AgentTaskState {
+
+    // MARK: Configuration
+
+    /// When false, `nextStepBias()` returns nil. The structured result objects
+    /// must get the model to descend on their own; this flag exists so the
+    /// validation gate can prove the nudge is not load-bearing.
+    public var biasEnabled: Bool
+
+    /// Read-like tools whose results are eligible for replay-on-duplicate and
+    /// whose `path` freshness is invalidated by a write to the same path.
+    /// The knowledge trio is here for the same reason the workspace tools
+    /// are: observed live (Raptor 8B), knowledge steps were re-executed with
+    /// IDENTICAL arguments at ~14s each with zero dedupe, because these names
+    /// were simply absent from the state machine.
+    private static let readLikeTools: Set<String> = [
+        "file_read", "file_search", "sandbox_read_file", "sandbox_search_files",
+        "web_search", "search_and_extract",
+        "search_knowledge", "read_knowledge", "list_knowledge",
+    ]
+
+    /// Search tools have path-less freshness entries. Local search results
+    /// depend on MANY paths, so any write — not just one to the searched path
+    /// — invalidates them. Applying the same conservative invalidation to web
+    /// results permits a deliberate refresh after intervening work while still
+    /// replaying an immediate identical re-issue.
+    /// `search_knowledge` and `list_knowledge` are path-less multi-document
+    /// views over the knowledge store, so they take the same "." sentinel and
+    /// wholesale write-invalidation as `web_search`: any knowledge write may
+    /// change what they would return.
+    private static let searchLikeTools: Set<String> = [
+        "file_search", "sandbox_search_files", "web_search", "search_and_extract",
+        "search_knowledge", "list_knowledge",
+    ]
+
+    /// Tools that mutate a path; recording one invalidates any fresh read
+    /// signature for that path so a verify-read re-executes. The knowledge
+    /// write tools are here so a knowledge mutation invalidates held
+    /// knowledge reads: `edit_knowledge` targets a top-level `path` like the
+    /// file tools, while `write_knowledge`/`delete_knowledge` are BATCH
+    /// mutations (`documents[].path` / `paths[]`) covered by the multi-path
+    /// extraction in `writeTargetPaths`.
+    private static let writeLikeTools: Set<String> = [
+        "file_edit", "file_write", "sandbox_write_file",
+        "write_knowledge", "edit_knowledge", "delete_knowledge",
+    ]
+
+    /// Tools that run arbitrary commands (`rm`/`mv`/redirects can mutate any
+    /// path, including via scripts we cannot parse). Recording one wipes ALL
+    /// fresh reads — blunt but correct; the only cost is a re-read. Applied
+    /// regardless of exit code: a failed command may still have mutated
+    /// before failing.
+    private static let execLikeTools: Set<String> = ["shell_run", "sandbox_exec"]
+
+    /// Planning/meta tools whose whole purpose is (re)stating intent rather
+    /// than acting on the world. Re-issuing one of these repeatedly — even
+    /// with a reworded body each turn — is re-planning without progress, and
+    /// is what the reworded-`todo` stall does. Deliberately an ALLOWLIST, not
+    /// "everything that isn't read/write/exec/search": tools like `image`,
+    /// `db_*`, `capabilities_load`, `spawn`, and `web_*` are legitimately
+    /// called several times in a row (three images, three row inserts, three
+    /// capability loads) and must NOT be treated as a stalled plan.
+    private static let planningLikeTools: Set<String> = ["todo"]
+
+    /// Tools whose `invalid_args` / `not_found` failures are DETERMINISTIC
+    /// given an unchanged filesystem / capability catalog: re-issuing the
+    /// identical call must return the identical error. Their held errors are
+    /// replayed instead of re-executed (observed live: a model repeating the
+    /// same failing `file_edit` 8× until the iteration cap). `capabilities_load`
+    /// qualifies because capability ids are a closed vocabulary — a bad/unknown
+    /// id fails identically on every retry. `shell_run` and `db_*` are
+    /// deliberately excluded — identical re-runs there are legitimate retries
+    /// that may succeed.
+    /// `read_knowledge` qualifies because its `not_found` for the same
+    /// document path is deterministic on an unchanged store; a knowledge
+    /// write to that path clears the held error via the shared write rules.
+    /// `osaurus_inspect` / `osaurus_help` qualify too: an `invalid_args`
+    /// rejection for the same scope/arguments is a pure function of the
+    /// call (observed live: 31 identical `osaurus_inspect` executions in one
+    /// turn, each re-run for nothing). Replaying the held rejection costs no
+    /// execution; it does not, by itself, stop a model that ignores it.
+    /// `osaurus_config` qualifies for its PRE-EXECUTION validation failures
+    /// only: an `invalid_args` / `not_found` rejection (a stdio server given
+    /// `auth: none`, a section that does not exist) is decided by the planner
+    /// before anything is written, so the identical document is rejected the
+    /// same way every time (observed: nine identical validation failures
+    /// executed nine times). Approval waits, cancellations and execution
+    /// errors are other kinds and are never held; a successful write drops
+    /// every held configuration error (see `record`) because later
+    /// validation may depend on the state it changed.
+    private static let deterministicErrorTools: Set<String> = [
+        "file_read", "file_search", "file_edit", "capabilities_load",
+        "read_knowledge", "osaurus_inspect", "osaurus_help", "osaurus_config",
+    ]
+
+    /// The configuration reads whose held rejections a configuration write
+    /// invalidates (see `record`).
+    private static let configurationReadTools: Set<String> = ["osaurus_inspect", "osaurus_help"]
+    /// The configuration writes that can change what those reads return.
+    private static let configurationWriteTools: Set<String> = ["osaurus_config"]
+
+    /// Read-like tools that can explicitly classify a failure as
+    /// non-retryable for the exact same arguments. `search_and_extract` uses
+    /// this for challenge/blocked/empty pages: immediately repeating the same
+    /// URL batch cannot produce page evidence and previously shifted a search
+    /// loop into an extraction loop.
+    private static let deterministicAsIsFailureTools: Set<String> = [
+        "search_and_extract",
+    ]
+
+    /// Error kinds eligible for held-error replay. Both depend only on the
+    /// arguments + current file state, never on transient conditions.
+    private static let deterministicErrorKinds: Set<String> = [
+        ToolEnvelope.Kind.invalidArgs.rawValue,
+        ToolEnvelope.Kind.notFound.rawValue,
+    ]
+
+    /// One execution plus one same-signature retry for a transient extraction
+    /// failure. The third request is replayed as an explicit retry-exhausted
+    /// failure instead of reaching the network again.
+    private static let maxTransientAsIsRetries = 1
+
+    /// The listing nudge is REACTIVE, not proactive: it fires only once the
+    /// model has produced this many listings without an intervening read —
+    /// i.e. it is observed to be wandering rather than descending. A capable
+    /// model that lists once and immediately descends never reaches this, so
+    /// it is never nudged; a stuck model is nudged exactly when it loops, and
+    /// keeps being nudged while it stays stuck (no premature silence).
+    private static let listingReactiveThreshold = 2
+
+    /// How many times the truncated-read CONTINUATION steer may fire for one
+    /// file before it is replaced by the bounded notice. The continuation
+    /// steer costs one agent iteration per firing and a large file needs
+    /// `ceil(characters / cap)` of them, so an unbounded steer can consume the
+    /// whole iteration budget on a single `file_read` and starve the actual
+    /// task. Bounding it does NOT mean going silent — silence is exactly what
+    /// reintroduces issue #2098 (a truncated render reviewed as the whole
+    /// file). Past this many continuations the model is told to proceed and to
+    /// state explicitly that it only saw part of the file.
+    private static let partialReadSteerLimit = 2
+
+    /// Repeated-call detector threshold for NON-read tools (write/exec/...):
+    /// on the Nth identical (tool + canonical args) execution the bias notice
+    /// fires. Reads are covered by the dedupe replay instead — they never
+    /// reach this counter. Never hard-blocks: the call still executes, the
+    /// model just gets told it's looping.
+    private static let repeatedCallThreshold = 3
+
+    /// `web_search` is discovery-only: it returns ranked URLs and snippets,
+    /// not the page body or downloadable dataset. Several searches can be
+    /// legitimate research, but a longer uninterrupted run — especially with
+    /// reworded queries — means the model is failing to transition to
+    /// extraction/download. Keep this separate from the generic planning
+    /// detector so productive consecutive calls to other web tools stay valid.
+    private static let webDiscoveryRunThreshold = 4
+
+    /// Concrete transitions that consume or process discovered data. Meta
+    /// operations such as capability discovery/loading and provider
+    /// configuration deliberately do not reset the search budget: the live
+    /// Bonsai loop used those as a detour and resumed rephrased discovery.
+    private static let webDiscoveryProgressTools: Set<String> = [
+        "search_and_extract", "render_chart", "browser_use", "http_request",
+        "file_read", "sandbox_read_file", "shell_run", "sandbox_exec",
+    ]
+
+    /// Same-NAME run threshold for DYNAMIC (MCP/plugin) tools. These names
+    /// are unknowable at compile time, so every allowlist above misses them —
+    /// the observed Raptor 8B loop re-queried `underwriting_underwriter_activity`
+    /// with slightly reworded arguments turn after turn and only ever met the
+    /// weakest identical-args advisory. Four consecutive calls (matching the
+    /// `webDiscoveryRunThreshold` allowance for legitimate research) is where
+    /// varied re-querying stops looking like work. Advisory only — the call
+    /// always executes.
+    private static let dynamicToolRunThreshold = 4
+
+    /// Consecutive `invalid_args` rejections of ONE tool name (arguments
+    /// ignored) before the argument-rejection notice fires. Every existing
+    /// loop-breaker keys on identical arguments or on a same-name run of a
+    /// planning/dynamic tool, so the observed Ornith 9B loop — `osaurus_config`
+    /// rejected three times in a row with DIFFERENT arguments each time
+    /// (`token_ref: env var ... is not set`, then `Unexpected property
+    /// set_api_key`, then the first shape again), re-narrating the same plan
+    /// verbatim between attempts — met no detector at all. Two rejections is
+    /// the signal: one is an honest schema miss the model may fix on its own;
+    /// a second on the same tool means it is not reading the validator
+    /// message. Advisory only; the call always executes, and the notice is
+    /// staged at most once per tool per message so it can never become a
+    /// standing nag.
+    static let invalidArgsRunThreshold = 2
+
+    /// Consecutive `tool_not_found` results for one tool NAME (punctuation
+    /// variants folded together, see `canonicalToolName`) before the
+    /// not-available notice fires. Mirrors `invalidArgsRunThreshold`: one
+    /// refusal is an honest miss the envelope itself explains; a second on
+    /// the same name means the model is not reading the envelope (observed
+    /// live: `osaurus_help` refused three times, then `osaurus_help!!`,
+    /// `osaurus_help!`, then a bare `!` as the answer). The notice restates
+    /// the refusal and lists the tools that ARE authorized, so the model can
+    /// answer with one of those or without a tool. Advisory only; the call
+    /// still executes (and is still refused) — nothing here blocks.
+    static let toolNotFoundRunThreshold = 2
+
+    // MARK: State
+
+    /// A read result still considered fresh: the canonical path it read and
+    /// the EXACT envelope the model received (replayed verbatim on a dedupe
+    /// short-circuit so the model never gets back less than it had).
+    private struct FreshRead {
+        let canonicalPath: String
+        let envelope: String
+    }
+
+    /// A deterministic error envelope held for replay: the exact error the
+    /// model received and the canonical path the failing call targeted (nil
+    /// for path-less searches). Invalidated by the same rules as fresh
+    /// reads — a write to the path or any exec clears it, because the
+    /// filesystem may have changed and the identical call could now succeed.
+    private struct HeldError {
+        let canonicalPath: String?
+        let envelope: String
+    }
+
+    /// A successful exact append held only for the current user message.
+    /// Replaying it is a typed no-op, preventing an accidental second
+    /// non-idempotent append while preserving ordinary writes and any append
+    /// after an intervening mutation.
+    private struct HeldAppend {
+        let canonicalPath: String
+        let payload: [String: Any]
+    }
+
+    /// One-shot protection against a whole-file overwrite that exactly
+    /// restores the snapshot from before the most recent targeted edit.
+    private struct SuccessfulEditSnapshot {
+        let beforeSHA256: String
+        let afterSHA256: String
+    }
+
+    /// The class of the most recently recorded result.
+    public private(set) var lastResultClass: ToolResultClass?
+    /// The most recent directory listing (survives across messages in
+    /// `ChatSession`; per-request elsewhere).
+    public private(set) var lastListing: ListingSnapshot?
+    /// The exact envelope the model received for the most recent call.
+    public private(set) var lastResultEnvelope: String?
+    /// The most recent tool name, used when the same result kind has different
+    /// follow-up semantics for generate vs edit.
+    private var lastToolName: String?
+    /// Reads still considered fresh, keyed by signature. A write/edit to a
+    /// read's path invalidates its entry so a verify-read re-executes instead
+    /// of replaying stale pre-edit content.
+    private var freshReads: [CallSignature: FreshRead] = [:]
+    /// Deterministic folder-tool errors held for replay, keyed by signature.
+    private var heldErrors: [CallSignature: HeldError] = [:]
+    private var heldAppends: [CallSignature: HeldAppend] = [:]
+    /// How many times each held error has been replayed (drives escalation).
+    private var heldErrorReplays: [CallSignature: Int] = [:]
+    /// Number of retryable failures executed for a selected read-like tool.
+    /// This is per exact canonical argument signature and per user message.
+    private var transientFailureExecutions: [CallSignature: Int] = [:]
+    /// Notice produced by the most recent `heldResult` hit when it replayed
+    /// a held ERROR (nil for fresh-read replays — the driver's standard
+    /// dedupe notice covers those). The driver stages this verbatim.
+    public private(set) var lastReplayNotice: String?
+    /// Listings recorded since the last file read; gates the listing nudge.
+    private var consecutiveListingsWithoutRead = 0
+    /// Truncated reads recorded per canonical path; gates the continuation
+    /// steer against `partialReadSteerLimit`. Keyed per path so a second file
+    /// still gets its own continuations rather than inheriting the first
+    /// file's exhausted budget.
+    private var partialReadSteers: [String: Int] = [:]
+    /// Execution counts per signature for NON-read tools (reads go through
+    /// the dedupe replay instead). Drives the repeated-call nudge.
+    private var nonReadCallCounts: [CallSignature: Int] = [:]
+    /// Set when the most recent recorded call was a non-read tool repeated
+    /// to (or past) `repeatedCallThreshold`; cleared by any other call.
+    private var repeatedCallName: String?
+    /// Set when a planning/meta tool (not read/write/exec/search) has been
+    /// called `repeatedCallThreshold`+ times in a row REGARDLESS of arguments;
+    /// cleared by any productive call or a different tool. Drives the
+    /// reworded-planning-loop nudge (e.g. `todo` re-issued every turn).
+    private var planningRunName: String?
+    private var planningRunCount = 0
+    /// Classifies a tool name as DYNAMIC (MCP/plugin/dynamic-native) for the
+    /// same-name run detector. A settable property rather than a `record(...)`
+    /// parameter because the recording call sites (chat loop, HTTP, plugin
+    /// host, subagent runner, evaluators) all funnel through the shared
+    /// driver — threading a parameter would touch every one of them, while a
+    /// property is wired once where the state is constructed and only by
+    /// surfaces that have registry access. The default treats every name as
+    /// non-dynamic, keeping un-wired surfaces byte-identical in behavior.
+    /// Wired with an immutable name-set snapshot (not a live registry call)
+    /// because `ToolRegistry` is MainActor-bound while HTTP/plugin drive the
+    /// loop nonisolated; the detector is advisory-only, so a tool registered
+    /// mid-run is merely missed until the next snapshot.
+    public var dynamicToolClassifier: (String) -> Bool = { _ in false }
+    /// Same-NAME run tracking for dynamic tools, args-ignored — the dynamic
+    /// mirror of `planningRunName` (reset by any interleaved different tool).
+    private var dynamicRunName: String?
+    private var dynamicRunCount = 0
+    /// Executions per signature this message, reads and replays included —
+    /// unlike `nonReadCallCounts`, which exists to arm the repeated-call
+    /// nudge and deliberately excludes reads. Backs the UI's "×N" repeat
+    /// badge via `repeatCount(name:argsJSON:)`.
+    private var callCounts: [CallSignature: Int] = [:]
+    /// `web_search` executions since the last concrete retrieval/processing
+    /// action, regardless of argument changes or intervening meta tools.
+    private var webDiscoveryRunCount = 0
+    /// Consecutive `invalid_args` rejections per tool NAME, arguments
+    /// ignored. Any non-`invalid_args` result for that tool (a success, or a
+    /// different failure kind) clears its entry; calls to OTHER tools leave
+    /// it alone, so an inspect/help detour between two rejected `osaurus_config`
+    /// applies does not launder the streak.
+    private var invalidArgsRuns: [String: Int] = [:]
+    /// Tools that have already received the argument-rejection notice this
+    /// message. Bounds delivery to one notice per tool per message.
+    private var invalidArgsNoticedTools: Set<String> = []
+    /// Set by `record` when the most recent call brought a tool to
+    /// `invalidArgsRunThreshold` consecutive rejections for the first time;
+    /// cleared by every other recorded call. `nextStepBias` surfaces it.
+    private var pendingInvalidArgsNotice: String?
+    /// Consecutive `tool_not_found` results per canonical tool name (see
+    /// `canonicalToolName`), arguments ignored. Any other result for that
+    /// name clears its entry; calls to OTHER tools leave it alone.
+    private var toolNotFoundRuns: [String: Int] = [:]
+    /// Canonical tool names that have already received the not-available
+    /// notice this message. Bounds delivery to one notice per tool per
+    /// message.
+    private var toolNotFoundNoticedTools: Set<String> = []
+    /// Set by `record` when the most recent call brought a name to
+    /// `toolNotFoundRunThreshold` consecutive refusals for the first time;
+    /// cleared by every other recorded call. `nextStepBias` surfaces it.
+    private var pendingToolNotFoundNotice: String?
+    /// The names this request is authorized to execute, supplied by the
+    /// surface (chat binds it to `ToolExecutionScope.authorizedNames` via
+    /// `AgentLoopHooks.authorizedToolNames`). Read lazily at notice time so
+    /// same-run `capabilities` activations are reflected. Nil when the
+    /// surface publishes no scope — the notice then omits the list.
+    public var authorizedToolNamesProvider: (() -> Set<String>)?
+    /// Armed only until the next same-path mutation attempt. This catches the
+    /// observed stale rewrite without becoming a persistent rollback policy.
+    private var successfulEditSnapshots: [String: SuccessfulEditSnapshot] = [:]
+
+    public init(biasEnabled: Bool = true) {
+        self.biasEnabled = biasEnabled
+    }
+
+    // MARK: Per-message lifecycle
+
+    /// Reset the within-message dedupe tracking (fresh reads). `lastListing`
+    /// deliberately persists so a listing from one user message can be
+    /// referenced by the next. Called by `ChatSession` at the start of each
+    /// send; one-shot loops simply never call it.
+    public func beginMessage() {
+        lastResultEnvelope = nil
+        lastToolName = nil
+        freshReads.removeAll(keepingCapacity: true)
+        heldErrors.removeAll(keepingCapacity: true)
+        heldAppends.removeAll(keepingCapacity: true)
+        heldErrorReplays.removeAll(keepingCapacity: true)
+        transientFailureExecutions.removeAll(keepingCapacity: true)
+        lastReplayNotice = nil
+        consecutiveListingsWithoutRead = 0
+        partialReadSteers.removeAll(keepingCapacity: true)
+        nonReadCallCounts.removeAll(keepingCapacity: true)
+        repeatedCallName = nil
+        planningRunName = nil
+        planningRunCount = 0
+        // The classifier itself survives (it is configuration, like
+        // `biasEnabled`); only the run tracking resets with the message.
+        dynamicRunName = nil
+        dynamicRunCount = 0
+        callCounts.removeAll(keepingCapacity: true)
+        webDiscoveryRunCount = 0
+        invalidArgsRuns.removeAll(keepingCapacity: true)
+        invalidArgsNoticedTools.removeAll(keepingCapacity: true)
+        pendingInvalidArgsNotice = nil
+        toolNotFoundRuns.removeAll(keepingCapacity: true)
+        toolNotFoundNoticedTools.removeAll(keepingCapacity: true)
+        pendingToolNotFoundNotice = nil
+        successfulEditSnapshots.removeAll(keepingCapacity: true)
+    }
+
+    // MARK: Dedupe
+
+    /// True when `name` can participate in dedupe replay. `file_write` is
+    /// included so exact append siblings in one parallel batch are deferred
+    /// until the first result is known; non-append writes still re-execute.
+    /// The loop driver uses this to recognise duplicate read siblings
+    /// inside a single parallel batch — non-read duplicates always
+    /// re-execute by design (they may legitimately differ).
+    public static func isReplayEligible(name: String) -> Bool {
+        readLikeTools.contains(name) || name == "file_write" || name == "sandbox_write_file"
+    }
+
+    /// How many times the held error for this exact call has been replayed
+    /// so far (0 = never). The loop's stop rule reads it after a replay.
+    public func heldErrorReplayCount(name: String, argsJSON: String) -> Int {
+        heldErrorReplays[signature(name: name, argsJSON: argsJSON)] ?? 0
+    }
+
+    /// Retrieval tools whose as-is failure is held and replayed
+    /// (`search_and_extract`): a replayed failure here has no side effect to
+    /// protect, and the escalation notice tells the model to change the
+    /// source, so the loop lets that notice land before ending the run.
+    public static func isRetrievalAsIsFailureTool(_ name: String) -> Bool {
+        deterministicAsIsFailureTools.contains(name)
+    }
+
+    /// If this call re-issues something the loop already holds the exact
+    /// answer for, return that EXACT envelope so the loop replays it instead
+    /// of re-executing. Two sources, checked in order:
+    ///   1. Fresh reads — a still-fresh read (same tool + canonical args,
+    ///      not invalidated by an intervening write to its path).
+    ///   2. Held deterministic errors — an `invalid_args`/`not_found` error
+    ///      from a deterministic folder tool, or an explicitly non-retryable
+    ///      exact-arguments failure from a read-like tool such as
+    ///      `search_and_extract`. Replaying it (with an escalating notice via
+    ///      `lastReplayNotice`) converts an observed N-execution failure
+    ///      spiral into one execution + cached replays.
+    /// Returns nil for novel calls or invalidated entries. The replay is
+    /// verbatim — never a collapsed/summarized form — so it is neutral.
+    public func heldResult(name: String, argsJSON: String) -> String? {
+        lastReplayNotice = nil
+        let sig = signature(name: name, argsJSON: argsJSON)
+        if Self.readLikeTools.contains(name), let fresh = freshReads[sig] {
+            return fresh.envelope
+        }
+        if let held = heldAppends[sig] {
+            var payload = held.payload
+            payload["action"] = "noop"
+            payload["applied"] = false
+            payload["deduped"] = true
+            payload["reason"] = "exact_append_already_applied"
+            payload.removeValue(forKey: "operation_id")
+            payload.removeValue(forKey: "diff")
+            return ToolEnvelope.success(
+                tool: name,
+                result: payload,
+                warnings: [
+                    "An identical append already succeeded in this task with no intervening mutation; the duplicate side effect was suppressed."
+                ]
+            )
+        }
+        if Self.deterministicErrorTools.contains(name)
+            || Self.deterministicAsIsFailureTools.contains(name),
+            let held = heldErrors[sig]
+        {
+            let replays = (heldErrorReplays[sig] ?? 0) + 1
+            heldErrorReplays[sig] = replays
+            let failures = replays + 1  // original execution + replays
+            lastReplayNotice =
+                "This exact `\(name)` call has now failed \(failures) times with the same error (the result above is a replay — it was NOT re-executed, and re-issuing it cannot succeed). You MUST change the arguments, or report what is blocking you."
+            // A replayed retrieval failure must read as what it is — a cached
+            // result, not another network attempt — in the transcript itself,
+            // not only in the notice: the model otherwise reports "I retried"
+            // for a request that never left the machine.
+            if Self.deterministicAsIsFailureTools.contains(name) {
+                return Self.cachedReplayEnvelope(held.envelope, replays: replays) ?? held.envelope
+            }
+            return held.envelope
+        }
+        return nil
+    }
+
+    /// Marks a replayed retrieval failure envelope as a cached replay:
+    /// `cached_replay: true`, the replay count, and a message that says no
+    /// new network request was made.
+    static func cachedReplayEnvelope(_ envelope: String, replays: Int) -> String? {
+        guard let data = envelope.data(using: .utf8),
+            var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        dict["cached_replay"] = true
+        dict["cached_replay_count"] = replays
+        let original = (dict["message"] as? String) ?? ""
+        dict["message"] =
+            "Cached replay of the identical earlier attempt (no new network request was made). " + original
+        return try? String(
+            data: JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+            encoding: .utf8
+        )
+    }
+
+    /// Return a synthetic, structured transition result when the model keeps
+    /// issuing discovery searches after the bounded research window. Unlike
+    /// the bias notice, this is load-bearing: the next `web_search` is not sent
+    /// to a provider, so a small model cannot burn the rest of the run on
+    /// rephrased discovery queries and network latency. It remains a success
+    /// envelope because this is an agent-loop routing decision, not a provider
+    /// failure; the model can continue immediately with retrieval or report a
+    /// truthful blocker when retrieval is unavailable.
+    public func guardedResult(name: String, argsJSON: String = "{}") -> String? {
+        if name == "file_write" || name == "sandbox_write_file",
+            !Self.isAppendWrite(name: name, argsJSON: argsJSON),
+            let target = pathArgument(argsJSON),
+            let content = Self.stringArgument("content", argsJSON: argsJSON)
+        {
+            let canonical = Self.canonicalPath(target)
+            // The guard is deliberately one-shot. A rejected stale attempt
+            // gets an actionable error; any other overwrite proceeds and
+            // supersedes the edit snapshot.
+            if let edit = successfulEditSnapshots.removeValue(forKey: canonical),
+                WorkspaceWriteSafety.contentSHA256(content) == edit.beforeSHA256
+            {
+                return ToolEnvelope.failure(
+                    kind: .rejected,
+                    message:
+                        "Refused stale whole-file rewrite of '\(target)': its content exactly matches the snapshot from before the successful targeted edit and would silently undo that edit. Read the current file and make a targeted correction, or call file_undo for an intentional rollback.",
+                    field: "content",
+                    expected:
+                        "content based on the current post-edit file; use file_undo to intentionally restore the prior snapshot",
+                    tool: name,
+                    retryable: false,
+                    metadata: [
+                        "reason": "stale_pre_edit_rewrite",
+                        "path": target,
+                        "current_content_sha256": edit.afterSHA256,
+                    ]
+                )
+            }
+        }
+
+        guard name == "web_search", webDiscoveryRunCount >= Self.webDiscoveryRunThreshold else {
+            return nil
+        }
+        return ToolEnvelope.success(
+            tool: name,
+            result: [
+                "kind": "transition_required",
+                "executed": false,
+                "reason": "discovery_limit_reached",
+                "message":
+                    "Discovery is complete. Do not issue another web_search. Retrieve a selected result with search_and_extract using its direct url, then process it and call render_chart when requested. If retrieval or chart rendering is unavailable, report that blocker now.",
+                "next_tools": ["search_and_extract", "render_chart"],
+            ]
+        )
+    }
+
+    /// Convenience boolean mirror of `heldResult`.
+    public func isDuplicate(name: String, argsJSON: String) -> Bool {
+        heldResult(name: name, argsJSON: argsJSON) != nil
+    }
+
+    /// How many times this exact call (tool + canonical args) has been
+    /// recorded this message, replays included. Read-only display state for
+    /// the UI's "×N" repeat badge — a loop that re-issues a call should be
+    /// VISIBLE in the transcript, not just counted internally. Never a guard
+    /// input.
+    public func repeatCount(name: String, argsJSON: String) -> Int {
+        callCounts[signature(name: name, argsJSON: argsJSON)] ?? 0
+    }
+
+    // MARK: Recording
+
+    /// Record a tool call and its result, updating the state machine.
+    public func record(name: String, argsJSON: String, result: String) {
+        let sig = signature(name: name, argsJSON: argsJSON)
+        let resultClass = Self.classify(result)
+        let successPayload =
+            ToolEnvelope.isSuccess(result)
+            ? ToolEnvelope.successPayload(result) as? [String: Any] : nil
+
+        let previousToolName = lastToolName
+        lastResultEnvelope = result
+        lastResultClass = resultClass
+        lastToolName = name
+
+        // Every recorded call counts here — reads, writes, and replayed
+        // duplicates alike (the driver records replays too, so the transcript
+        // and the state machine stay in sync). This is display bookkeeping
+        // for `repeatCount`, never a guard input.
+        callCounts[sig] = (callCounts[sig] ?? 0) + 1
+
+        // An exec can mutate ANY path (rm/mv/redirects, scripts) — wipe all
+        // fresh reads so no post-mutation verify-read replays stale content.
+        // Held errors follow the same rule: the exec may have created the
+        // missing path or fixed the file, so the identical call could now
+        // succeed and must re-execute.
+        if Self.execLikeTools.contains(name) {
+            freshReads.removeAll(keepingCapacity: true)
+            heldErrors.removeAll(keepingCapacity: true)
+            heldAppends.removeAll(keepingCapacity: true)
+            heldErrorReplays.removeAll(keepingCapacity: true)
+            transientFailureExecutions.removeAll(keepingCapacity: true)
+            successfulEditSnapshots.removeAll(keepingCapacity: true)
+        }
+
+        // A configuration write (`osaurus_config apply` / any declarative
+        // mutation) can create the agent, MCP server, schedule… that a held
+        // `osaurus_inspect` "no <scope> matched" rejection complained about,
+        // so every held inspect/help error is dropped after one: the
+        // identical read must re-execute against the new state. Reads that
+        // failed for a reason the write cannot change (a junk scope) simply
+        // fail again once, which is cheap.
+        if Self.configurationWriteTools.contains(name), ToolEnvelope.isSuccess(result) {
+            for key in heldErrors.keys
+            where Self.configurationReadTools.contains(key.name)
+                || Self.configurationWriteTools.contains(key.name)
+            {
+                heldErrors[key] = nil
+                heldErrorReplays[key] = nil
+            }
+        }
+
+        // A write/edit invalidates any fresh read of the same path so the
+        // verify-read re-executes instead of replaying stale pre-edit content.
+        // Read and write canonicalize the path through the SAME helper, so
+        // `file_read "config.json"` and `file_edit "./config.json"` match.
+        // Search results span many paths, so ANY write stales them.
+        // Held errors use the same rules: a write to the failing call's path
+        // may make the identical call succeed (e.g. file_write creates the
+        // file a held `not_found` read complained about), and search errors
+        // depend on many paths so any write clears them.
+        // One write can target several paths: the file tools take a single
+        // `path`, but `write_knowledge`/`delete_knowledge` are batch
+        // mutations (`documents[].path` / `paths[]`) — invalidate against
+        // the whole target set so a knowledge write stales every held
+        // knowledge read it touched. Search entries are wiped wholesale
+        // regardless of target (searchLikeTools rule above).
+        if Self.writeLikeTools.contains(name) {
+            let targetCanonicals = Set(writeTargetPaths(argsJSON).map(Self.canonicalPath))
+            if !targetCanonicals.isEmpty {
+                freshReads = freshReads.filter { entry in
+                    if Self.searchLikeTools.contains(entry.key.name) { return false }
+                    return !targetCanonicals.contains(entry.value.canonicalPath)
+                }
+                heldErrors = heldErrors.filter { entry in
+                    if Self.searchLikeTools.contains(entry.key.name) { return false }
+                    guard let held = entry.value.canonicalPath else { return true }
+                    return !targetCanonicals.contains(held)
+                }
+                heldAppends = heldAppends.filter {
+                    !targetCanonicals.contains($0.value.canonicalPath)
+                }
+            }
+        }
+        // Append holds and the stale-rewrite snapshot are single-path file
+        // semantics — they key on the top-level `path` the file tools use, so
+        // batch knowledge writes (no top-level `path`) never reach them.
+        if Self.writeLikeTools.contains(name), let target = pathArgument(argsJSON) {
+            let targetCanonical = Self.canonicalPath(target)
+            if Self.isAppendWrite(name: name, argsJSON: argsJSON),
+                ToolEnvelope.isSuccess(result),
+                let payload = successPayload
+            {
+                heldAppends[sig] = HeldAppend(
+                    canonicalPath: targetCanonical,
+                    payload: payload
+                )
+            }
+            if ToolEnvelope.isSuccess(result),
+                let payload = successPayload,
+                payload["dry_run"] as? Bool != true,
+                payload["applied"] as? Bool != false
+            {
+                let isTargetedEdit =
+                    name == "file_edit"
+                    || (name == "sandbox_write_file"
+                        && Self.stringArgument("old_string", argsJSON: argsJSON) != nil)
+                if isTargetedEdit,
+                    let before = payload["before_content_sha256"] as? String,
+                    let after = payload["content_sha256"] as? String
+                {
+                    successfulEditSnapshots[targetCanonical] = SuccessfulEditSnapshot(
+                        beforeSHA256: before,
+                        afterSHA256: after
+                    )
+                } else {
+                    // Any successful whole-file or append mutation supersedes
+                    // the targeted-edit snapshot for this path.
+                    successfulEditSnapshots[targetCanonical] = nil
+                }
+            }
+        }
+
+        if name == "file_undo", let payload = successPayload {
+            clearEditSnapshotsUndone(by: payload)
+        }
+
+        // Capture (or clear) a held deterministic error for this signature.
+        // Folder/capability tools qualify by deterministic error kind;
+        // selected read-like tools may also qualify by an explicit
+        // `retryable:false` contract. Transient extraction failures therefore
+        // execute again, while an unchanged challenge-page request is replayed
+        // rather than sent to the network indefinitely.
+        if Self.deterministicErrorTools.contains(name)
+            || Self.deterministicAsIsFailureTools.contains(name)
+        {
+            let holdsByKind = Self.errorKind(result).map(Self.deterministicErrorKinds.contains)
+                ?? false
+            let holdsAsIs = Self.deterministicAsIsFailureTools.contains(name)
+                && Self.errorRetryable(result) == false
+            if ToolEnvelope.isError(result), holdsByKind || holdsAsIs {
+                heldErrors[sig] = HeldError(
+                    canonicalPath: pathArgument(argsJSON).map(Self.canonicalPath),
+                    envelope: result
+                )
+                transientFailureExecutions[sig] = nil
+            } else if ToolEnvelope.isError(result),
+                Self.deterministicAsIsFailureTools.contains(name),
+                Self.errorRetryable(result) == true
+            {
+                let executions = (transientFailureExecutions[sig] ?? 0) + 1
+                transientFailureExecutions[sig] = executions
+                if executions > Self.maxTransientAsIsRetries,
+                    let exhausted = Self.retryExhaustedEnvelope(result, tool: name)
+                {
+                    heldErrors[sig] = HeldError(
+                        canonicalPath: pathArgument(argsJSON).map(Self.canonicalPath),
+                        envelope: exhausted
+                    )
+                } else {
+                    heldErrors[sig] = nil
+                    heldErrorReplays[sig] = nil
+                }
+            } else {
+                // A success (or non-deterministic error) supersedes any held
+                // error for this exact call.
+                heldErrors[sig] = nil
+                heldErrorReplays[sig] = nil
+                transientFailureExecutions[sig] = nil
+            }
+        }
+
+        // Consecutive argument rejections of one tool, arguments ignored.
+        // Keyed on the canonical failure envelope (`ok:false` +
+        // `kind:"invalid_args"`, which both the registry's schema preflight
+        // and tool bodies emit for a contract violation); `execution_error`
+        // is a runtime failure, not an argument problem, so it is deliberately
+        // NOT counted. The notice arms exactly when the streak first reaches
+        // the threshold and the tool has not been noticed this message —
+        // a third rejection gets nothing more (bounded), and any
+        // non-rejection result for the tool resets its streak.
+        pendingInvalidArgsNotice = nil
+        if ToolEnvelope.isError(result),
+            Self.errorKind(result) == ToolEnvelope.Kind.invalidArgs.rawValue
+        {
+            let run = (invalidArgsRuns[name] ?? 0) + 1
+            invalidArgsRuns[name] = run
+            if run == Self.invalidArgsRunThreshold, !invalidArgsNoticedTools.contains(name) {
+                invalidArgsNoticedTools.insert(name)
+                pendingInvalidArgsNotice = Self.invalidArgsLoopNotice(
+                    tool: name,
+                    envelope: result,
+                    consecutiveRejections: run
+                )
+                // Visible in the run log so a live proof can show the notice fired
+                // (the notice itself only travels inside the model prompt).
+                print("[Osaurus][Loop] invalid-args notice staged tool=\(name) consecutiveRejections=\(run)")
+            }
+        } else {
+            invalidArgsRuns[name] = nil
+        }
+
+        // Consecutive `tool_not_found` refusals of one tool name, arguments
+        // ignored, keyed on the canonical name so `osaurus_help`,
+        // `osaurus_help!` and `osaurus_help!!` count as one streak. Same
+        // arming rule as the invalid-args notice above: exactly on the
+        // threshold crossing, once per tool per message, and any other
+        // result for the name resets its streak.
+        pendingToolNotFoundNotice = nil
+        let canonicalName = Self.canonicalToolName(name)
+        if ToolEnvelope.isError(result),
+            Self.errorKind(result) == ToolEnvelope.Kind.toolNotFound.rawValue
+        {
+            let run = (toolNotFoundRuns[canonicalName] ?? 0) + 1
+            toolNotFoundRuns[canonicalName] = run
+            if run == Self.toolNotFoundRunThreshold,
+                !toolNotFoundNoticedTools.contains(canonicalName)
+            {
+                toolNotFoundNoticedTools.insert(canonicalName)
+                pendingToolNotFoundNotice = Self.toolNotFoundLoopNotice(
+                    tool: canonicalName,
+                    authorizedToolNames: authorizedToolNamesProvider?()
+                )
+                print(
+                    "[Osaurus][Loop] tool-not-found notice staged tool=\(canonicalName) consecutiveRefusals=\(run)"
+                )
+            }
+        } else {
+            toolNotFoundRuns[canonicalName] = nil
+        }
+
+        // Repeated-call detector for non-read tools: reads are handled by
+        // the dedupe replay, but an identical write/exec re-executes by
+        // design (it may legitimately differ) — so count it, and once the
+        // model has issued the same call `repeatedCallThreshold` times,
+        // arm the bias nudge. Any different call disarms it.
+        if Self.readLikeTools.contains(name) {
+            repeatedCallName = nil
+        } else {
+            let count = (nonReadCallCounts[sig] ?? 0) + 1
+            nonReadCallCounts[sig] = count
+            repeatedCallName = count >= Self.repeatedCallThreshold ? name : nil
+        }
+
+        // Same-NAME run for a planning/meta tool (an explicit allowlist —
+        // `todo` today): re-issuing one repeatedly — even with a reworded body
+        // each turn — is re-planning without progress. This catches the
+        // reworded-`todo` loop the identical-args `nonReadCallCounts` counter
+        // above cannot: every new checklist is a fresh signature, so that
+        // counter never fires while the model burns turns re-planning. Every
+        // non-planning tool DISARMS the run — that keeps legitimate consecutive
+        // work (three `image` generations, three `db_insert`s, three
+        // `capabilities_load`s) from being mislabeled a stalled plan, and
+        // ensures the planning nudge never masks another result-class nudge
+        // (e.g. the `image` gen→edit continuation). Advisory only.
+        if Self.planningLikeTools.contains(name) {
+            planningRunCount = (previousToolName == name) ? planningRunCount + 1 : 1
+            planningRunName = planningRunCount >= Self.repeatedCallThreshold ? name : nil
+        } else {
+            planningRunName = nil
+            planningRunCount = 0
+        }
+
+        // Same-NAME run for DYNAMIC (MCP/plugin) tools, args-ignored — the
+        // dynamic mirror of the planning run above. These names can't appear
+        // in any compile-time allowlist, so the observed loop class (an 8B
+        // re-querying `underwriting_underwriter_activity` with reworded
+        // arguments every turn) was invisible to every detector except the
+        // identical-args counter, which reworded arguments defeat. Any
+        // interleaved different tool resets the run — consecutive varied
+        // calls to ONE dynamic name are the stuck signal, alternating tools
+        // are work. Advisory only; the call always executes.
+        if dynamicToolClassifier(name) {
+            dynamicRunCount = (previousToolName == name) ? dynamicRunCount + 1 : 1
+            dynamicRunName = dynamicRunCount >= Self.dynamicToolRunThreshold ? name : nil
+        } else {
+            dynamicRunName = nil
+            dynamicRunCount = 0
+        }
+
+        // Discovery-to-retrieval transition guard. Different query text and
+        // meta-tool detours must not defeat it: the observed Bonsai failure
+        // repeatedly rephrased the same request, then loaded/discovered more
+        // capabilities, then resumed searching. Only real retrieval or
+        // processing disarms the budget.
+        if name == "web_search" {
+            webDiscoveryRunCount += 1
+        } else if Self.webDiscoveryProgressTools.contains(name), ToolEnvelope.isSuccess(result) {
+            webDiscoveryRunCount = 0
+        }
+
+        // Wandering counter: a listing is a step that hasn't reached a file
+        // yet, so it increments. ONLY a successful file read counts as
+        // progress and resets it. A `not_found` / `error` is a FAILED read —
+        // not progress — so it neither increments nor resets, which lets
+        // wandering accumulate across interleaved failed reads (e.g.
+        // list -> bad read -> list still reaches the reactive threshold)
+        // while the `not_found` fires its own reactive nudge in parallel.
+        switch resultClass {
+        case .emptyListing, .populatedListing, .partialListing:
+            consecutiveListingsWithoutRead += 1
+            lastListing = parseListing(result)
+        case .fileContent:
+            consecutiveListingsWithoutRead = 0
+            // A read that came back whole means this file is done being
+            // continued; drop its continuation budget so a later truncated
+            // read of the same path starts fresh.
+            if let target = pathArgument(argsJSON) {
+                partialReadSteers[Self.canonicalPath(target)] = nil
+            }
+        case .partialFileContent(let path, _, _):
+            // A partial read is still a successful descent into a file —
+            // progress for the wandering counter. Count it per path so
+            // `nextStepBias` can bound how many continuations one file earns.
+            consecutiveListingsWithoutRead = 0
+            let key = Self.canonicalPath(path)
+            partialReadSteers[key] = (partialReadSteers[key] ?? 0) + 1
+        case .notFound, .error, .nativeImageGeneration, .other:
+            break
+        }
+
+        // Mark a successful read-like result as fresh (with its exact
+        // envelope) so a re-issue replays it until a write invalidates it.
+        // Search tools may omit `path` (it defaults to the root); key them
+        // on "." — write invalidation clears search entries wholesale, so
+        // the sentinel never has to match a written path.
+        if Self.readLikeTools.contains(name), ToolEnvelope.isSuccess(result) {
+            if let target = pathArgument(argsJSON) {
+                freshReads[sig] = FreshRead(
+                    canonicalPath: Self.canonicalPath(target),
+                    envelope: result
+                )
+            } else if Self.searchLikeTools.contains(name) {
+                freshReads[sig] = FreshRead(canonicalPath: ".", envelope: result)
+            }
+        }
+    }
+
+    // MARK: Next-step nudge (non-load-bearing)
+
+    /// A short, system-attributed next-step nudge for the most recent result,
+    /// or nil. The listing nudge is REACTIVE: it fires only after two listings
+    /// without an intervening read (the model is observed wandering), so a
+    /// capable model that descends immediately is never nudged — the
+    /// structured `entries[]` carries the descent on its own. It keeps firing
+    /// while the model stays stuck (no upper silence cap). `not_found` is
+    /// reactive by nature (an observed failure) and always fires. Returns nil
+    /// entirely when `biasEnabled` is false.
+    public func nextStepBias() -> String? {
+        guard biasEnabled, let last = lastResultClass else { return nil }
+
+        if lastToolName == "file_write",
+            let envelope = lastResultEnvelope,
+            Self.isFileWriteContentTooLarge(envelope) {
+            return
+                "The previous `file_write` did not execute because `content` exceeded the per-call limit. Do not regenerate another complete oversized payload. Split the content now: send a first chunk under \(WorkspaceToolContract.recommendedWriteChunkCharacters) characters with overwrite mode, then send only each remaining chunk with `mode: \"append\"`."
+        }
+
+        // Consecutive argument rejections of one tool with varying
+        // arguments: the model is retrying without reading the validator.
+        // Outranks the identical-args nudge below (which needs three exact
+        // repeats and so never fires on this shape) and is delivered once
+        // per tool per message — `record` only arms it on the threshold
+        // crossing, so a third rejection falls through to the ordinary
+        // `.error` (nil) branch rather than nagging again.
+        if let notice = pendingInvalidArgsNotice {
+            return notice
+        }
+
+        // Consecutive `tool_not_found` refusals of one name: the model keeps
+        // calling a tool this conversation does not have. Same rank and
+        // delivery rule as the invalid-args notice (once per tool per
+        // message, armed on the threshold crossing only).
+        if let notice = pendingToolNotFoundNotice {
+            return notice
+        }
+
+        if let tool = lastToolName,
+            let envelope = lastResultEnvelope,
+            let notice = Self.runnableMutationNotice(tool: tool, envelope: envelope)
+        {
+            return notice
+        }
+
+        // Repeated identical write/exec call: the strongest stuck signal we
+        // have, so it outranks the result-class nudges. Reactive (3rd
+        // identical call) and advisory only — the call still executed.
+        if let name = repeatedCallName {
+            return
+                "You have now made the exact same `\(name)` call with identical arguments \(Self.repeatedCallThreshold)+ times. Repeating it will not change the outcome — change your approach, or report what is blocking you."
+        }
+
+        // Reworded planning loop: a meta/planning tool (e.g. `todo`) re-issued
+        // repeatedly with DIFFERENT arguments each turn — the identical-args
+        // check above never catches it, yet no external progress is made.
+        // Reactive (3rd consecutive call) and advisory: the call still ran.
+        if let name = planningRunName {
+            return
+                "You have called `\(name)` \(Self.repeatedCallThreshold)+ times in a row without taking any other action. Re-planning is not progress — if you already have what you need, execute the next concrete step or finish the task; otherwise call a different tool. Do not issue another `\(name)` now."
+        }
+
+        // Same-name dynamic-tool run: reworded re-queries of one MCP/plugin
+        // tool. Checked AFTER the identical-args nudge above — when the
+        // current call is also an exact repeat past `repeatedCallThreshold`,
+        // that stronger notice returns first, so a duplicate never collects
+        // both nudges for the same call.
+        if let name = dynamicRunName {
+            return
+                "You have called `\(name)` \(dynamicRunCount) times in a row with varying arguments. If the results did not answer the question, state what is missing instead of re-querying; repeating similar queries will not produce different data."
+        }
+
+        // Reworded discovery loop: the model has URLs/snippets but keeps
+        // searching instead of retrieving or processing a selected source.
+        // Name the real tool boundary directly. `search_and_extract` is
+        // composed into the schema whenever web search is enabled, so the old
+        // `capabilities_load tool/search_and_extract` detour here pointed at a
+        // loader round-trip for a tool already in the schema — and on the
+        // Default agent, at a loader gated to configure writes that would
+        // REJECT the load. Steer to the tool itself.
+        if webDiscoveryRunCount >= Self.webDiscoveryRunThreshold {
+            return
+                "You have called `web_search` \(Self.webDiscoveryRunThreshold)+ times in a row. `web_search` is discovery-only and returns URLs/snippets, not page bodies or downloadable data. Stop searching. Pick the best returned URLs and call `search_and_extract` with them (`{\"urls\": [...]}`) to retrieve page content, then process the retrieved data and call `render_chart` when that tool is available. If retrieval or chart rendering is unavailable, report that blocker clearly instead of rephrasing the search again."
+        }
+
+        // Listing nudges are reactive: suppressed until the model is observed
+        // wandering (this many listings without an intervening read), so a
+        // model that descends after its first listing is never nudged.
+        let isWandering = consecutiveListingsWithoutRead >= Self.listingReactiveThreshold
+
+        switch last {
+        case .populatedListing:
+            guard isWandering else { return nil }
+            return
+                "Entries are in `result.entries`. To read one, call `file_read` with that entry's `path` value. Do not re-list this directory."
+        case .emptyListing:
+            guard isWandering else { return nil }
+            return
+                "This directory is empty (`entry_count` is 0). Do not pick or invent an entry; report it empty or list a different path."
+        case .partialListing:
+            guard isWandering else { return nil }
+            return
+                "This listing was truncated; the entries shown are incomplete. Use `file_search` to find a specific file by name instead of picking blindly from the partial set."
+        case .notFound:
+            // If the last listing was truncated, its entries are incomplete —
+            // steering the model back into that partial set is how a present
+            // file gets wrongly reported absent. Send it to file_search.
+            if lastListing?.truncated == true {
+                return
+                    "Path not found, and the last directory listing was incomplete (truncated). Use `file_search` with `target:\"files\"` and a token from the name instead of picking from the partial listing."
+            }
+            return
+                "Path not found. Pick a `path` from the most recent listing's entries, or list the parent directory."
+        case .nativeImageGeneration(let paths, let isEdit, let editAvailable):
+            // Only nudge toward an edit AFTER a fresh generation, never after an
+            // edit (which would loop), and never when no ready edit model is
+            // installed (the nudge would steer toward a guaranteed failure).
+            guard editAvailable, lastToolName == "image", !isEdit, !paths.isEmpty
+            else { return nil }
+            let joinedPaths = paths.map { "`\($0)`" }.joined(separator: ", ")
+            return
+                "The previous `image` result saved image path(s): \(joinedPaths). "
+                + "If the user asked for ANY follow-up that modifies, edits, changes, adds to, "
+                + "recolors, or transforms THAT generated image, you MUST call `image` now "
+                + "with `source_paths` set to those path value(s) — do NOT call `image` "
+                + "without `source_paths` again (that produces a brand-new unrelated image, not an "
+                + "edit of this one). Only if no such follow-up was requested should you give a brief "
+                + "final confirmation. Do not narrate the edit as the final answer instead of calling the tool."
+        case .partialFileContent(let path, let nextStart, let nextEnd):
+            // Reactive by nature — the read is observed incomplete. Without
+            // this steer, models treated the truncated render as the whole
+            // file and reviewed 426 of 499 lines as complete (issue #2098).
+            //
+            // Bounded, because each continuation costs an agent iteration and
+            // a large file needs `ceil(characters / cap)` of them: left
+            // unbounded the steer alone can exhaust the iteration budget
+            // before the model ever gets to the task it was asked to do. Past
+            // the limit the instruction CHANGES rather than disappearing —
+            // the model proceeds, but is required to say what it did not see.
+            let continuations = partialReadSteers[Self.canonicalPath(path)] ?? 0
+            guard continuations <= Self.partialReadSteerLimit else {
+                return
+                    "The `file_read` of `\(path)` is still truncated after \(Self.partialReadSteerLimit) continuation reads, and each further read costs a step you need for the task. Stop re-reading this file. Continue with what you have, and state explicitly in your answer that you only read part of `\(path)` — do not describe or summarise it as though you had seen all of it."
+            }
+            return
+                "The `file_read` of `\(path)` was truncated by the output cap — you have only seen part of the requested range. Before drawing conclusions about the whole file, call `file_read` again with {\"path\": \"\(path)\", \"start_line\": \(nextStart), \"end_line\": \(nextEnd)} to read the rest."
+        case .fileContent, .error, .other:
+            return nil
+        }
+    }
+
+    // MARK: - Classification
+
+    /// Classify a result envelope into a `ToolResultClass`. Pure function so
+    /// it can be unit-tested independently of any loop.
+    public static func classify(_ envelope: String) -> ToolResultClass {
+        if ToolEnvelope.isError(envelope) {
+            if let data = envelope.data(using: .utf8),
+                let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+                dict["kind"] as? String == ToolEnvelope.Kind.notFound.rawValue
+            {
+                return .notFound
+            }
+            return .error
+        }
+        guard let payload = ToolEnvelope.successPayload(envelope) as? [String: Any] else {
+            return .other
+        }
+        switch payload["kind"] as? String {
+        case "listing":
+            let count = payload["entry_count"] as? Int ?? (payload["entries"] as? [Any])?.count ?? 0
+            if count == 0 { return .emptyListing }
+            if payload["truncated"] as? Bool == true { return .partialListing }
+            return .populatedListing
+        case "file":
+            // A rendered-cap truncation with an exact continuation range is
+            // its own state: the tool read the whole file but the model only
+            // saw a prefix, and `next_start_line`/`next_end_line` say exactly
+            // how to resume. Raw byte-capped reads (`raw_bytes_truncated`)
+            // deliberately carry no continuation fields — a line-ranged
+            // re-read cannot reach bytes that were never loaded — so they
+            // stay plain `.fileContent` and keep the tool's own split-the-
+            // file guidance.
+            if payload["truncated"] as? Bool == true,
+                let nextStart = payload["next_start_line"] as? Int,
+                let nextEnd = payload["next_end_line"] as? Int
+            {
+                return .partialFileContent(
+                    path: payload["path"] as? String ?? "",
+                    nextStartLine: nextStart,
+                    nextEndLine: nextEnd
+                )
+            }
+            return .fileContent
+        case "native_image_generation_job":
+            let paths = nativeImagePaths(from: payload)
+            if !paths.isEmpty {
+                let isEdit = (payload["mode"] as? String) == "edit"
+                // Absent `edit_available` (older payloads / external callers)
+                // defaults to true so the existing gen→edit nudge still fires.
+                let editAvailable = (payload["edit_available"] as? Bool) ?? true
+                return .nativeImageGeneration(
+                    paths: paths,
+                    isEdit: isEdit,
+                    editAvailable: editAvailable
+                )
+            }
+            return .other
+        default:
+            return .other
+        }
+    }
+
+    private static func nativeImagePaths(from payload: [String: Any]) -> [String] {
+        guard let images = payload["images"] as? [[String: Any]] else { return [] }
+        return images.compactMap { image in
+            guard let path = image["path"] as? String,
+                !path.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { return nil }
+            return path
+        }
+    }
+
+    /// Pull the `kind` field from an error envelope, or nil.
+    private static func errorKind(_ envelope: String) -> String? {
+        guard let data = envelope.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return dict["kind"] as? String
+    }
+
+    /// Pull the canonical retryability bit from an error envelope.
+    private static func errorRetryable(_ envelope: String) -> Bool? {
+        guard let data = envelope.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return dict["retryable"] as? Bool
+    }
+
+    private static func isFileWriteContentTooLarge(_ envelope: String) -> Bool {
+        guard ToolEnvelope.isError(envelope),
+            let data = envelope.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            dict["kind"] as? String == ToolEnvelope.Kind.invalidArgs.rawValue,
+            dict["field"] as? String == "content",
+            let message = dict["message"] as? String
+        else { return false }
+        return message.contains("must contain at most")
+    }
+
+    /// Longest slice of the validator message the notice quotes. Validator
+    /// messages are one line; the cap only guards against a tool body that
+    /// stuffs a payload dump into `message`.
+    private static let invalidArgsQuotedMessageCap = 600
+
+    /// The argument-rejection notice for `tool` after `consecutiveRejections`
+    /// `invalid_args` results in a row. Quotes the LAST validator message
+    /// verbatim (bounded), repeats the allowed-property list when the
+    /// registry's `Unexpected property ... Allowed: a, b, c` shape is present,
+    /// surfaces the envelope's `field` / `expected` hints when set, and
+    /// instructs the model to either fix the arguments exactly as stated or
+    /// stop retrying and tell the user what is missing. Advisory only.
+    static func invalidArgsLoopNotice(
+        tool: String,
+        envelope: String,
+        consecutiveRejections: Int
+    ) -> String {
+        var dict: [String: Any] = [:]
+        if let data = envelope.data(using: .utf8),
+            let parsed = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            dict = parsed
+        }
+        let rawMessage = (dict["message"] as? String ?? ToolEnvelope.failureMessage(envelope))
+            .trimmingCharacters(in: .whitespacesAndNewlines)
+        var message = String(rawMessage.prefix(invalidArgsQuotedMessageCap))
+        if message.count < rawMessage.count { message += "…" }
+
+        var lines: [String] = []
+        lines.append(
+            "`\(tool)` has rejected your arguments \(consecutiveRejections) times in a row (`invalid_args`). Repeating the call with another guessed shape will not change the outcome."
+        )
+        lines.append("Last validator message, verbatim: \"\(message)\"")
+        if let allowed = allowedPropertyList(in: rawMessage) {
+            lines.append("Allowed properties for `\(tool)`: \(allowed). Any other property is rejected.")
+        }
+        if let field = dict["field"] as? String, !field.isEmpty {
+            var hint = "The rejected field is `\(field)`"
+            if let expected = dict["expected"] as? String, !expected.isEmpty {
+                hint += " (expected: \(expected))"
+            }
+            lines.append(hint + ".")
+        }
+        lines.append(
+            "Do exactly one of the following now: (1) fix the arguments EXACTLY as that message states and call `\(tool)` once more, or (2) if the message names something you cannot supply from here (for example an environment variable that is not set, or a value only the user has), stop retrying `\(tool)` and tell the user plainly what is missing and how to provide it."
+        )
+        return lines.joined(separator: " ")
+    }
+
+    /// The not-available notice for `tool` after
+    /// `toolNotFoundRunThreshold` consecutive `tool_not_found` results.
+    /// Lists the authorized names (sorted, so the text is byte-stable for a
+    /// given scope) when the surface supplied them; otherwise points the
+    /// model at its own tool schema. Advisory only.
+    static func toolNotFoundLoopNotice(tool: String, authorizedToolNames: Set<String>?) -> String {
+        var lines: [String] = []
+        lines.append(
+            "`\(tool)` is not available in this conversation and calling it again will fail identically."
+        )
+        if let names = authorizedToolNames {
+            if names.isEmpty {
+                lines.append("There are no tools available in this conversation.")
+            } else {
+                lines.append(
+                    "The tools you have are exactly: \(names.sorted().joined(separator: ", "))."
+                )
+            }
+        } else {
+            lines.append("The tools you have are exactly the ones in your tool schema.")
+        }
+        lines.append("Answer the user with those or without a tool.")
+        return lines.joined(separator: " ")
+    }
+
+    /// Characters a model hallucinates around a tool name — emphasis and
+    /// sentence punctuation (`osaurus_help!!`, `"osaurus_help"`,
+    /// `` `osaurus_help` ``). Only leading / trailing runs are stripped;
+    /// interior characters (`server.tool`, `tool/name`, `a-b`) are part of
+    /// legitimate names and untouched.
+    private static let hallucinatedToolNameEdges = CharacterSet(charactersIn: "!?.,;:'\"`()[]{}<>*")
+        .union(.whitespacesAndNewlines)
+
+    /// `rawName` with hallucinated leading / trailing punctuation removed.
+    /// Returns `rawName` unchanged when nothing was stripped or stripping
+    /// would leave an empty name. Pure normalisation: whether the canonical
+    /// name may EXECUTE is the caller's decision (the loop substitutes it
+    /// only when the request scope authorizes the canonical name, so a
+    /// withheld tool cannot be reached by decorating its name).
+    public static func canonicalToolName(_ rawName: String) -> String {
+        let trimmed = rawName.trimmingCharacters(in: hallucinatedToolNameEdges)
+        return trimmed.isEmpty ? rawName : trimmed
+    }
+
+    /// Pull the comma-separated allowed-property list out of the registry's
+    /// `Unexpected property `x`. Allowed: a, b, c` validator message, or nil
+    /// when the message has no such list.
+    static func allowedPropertyList(in message: String) -> String? {
+        guard let range = message.range(of: "Allowed: ") else { return nil }
+        var tail = String(message[range.upperBound...])
+        // The registry appends its own sentence after the list on the
+        // malformed-JSON path; keep only the list itself.
+        if let stop = tail.firstIndex(where: { $0 == "\n" || $0 == "." }) {
+            tail = String(tail[..<stop])
+        }
+        let list = tail.trimmingCharacters(in: .whitespacesAndNewlines)
+        return list.isEmpty ? nil : list
+    }
+
+    private static func runnableMutationNotice(tool: String, envelope: String) -> String? {
+        guard writeLikeTools.contains(tool),
+            ToolEnvelope.isSuccess(envelope),
+            let payload = ToolEnvelope.successPayload(envelope) as? [String: Any],
+            payload["dry_run"] as? Bool != true,
+            payload["applied"] as? Bool != false,
+            let verification = payload["verification"] as? [String: Any],
+            verification["status"] as? String == "not_run"
+        else { return nil }
+
+        let path = payload["path"] as? String ?? "the runnable artifact"
+        let diffNotice: String
+        if payload["diff_truncated"] as? Bool == true {
+            diffNotice =
+                " `diff_truncated:true` means only the review preview was shortened; the full file mutation completed. Do not rewrite the whole file because the diff preview was truncated."
+        } else {
+            diffNotice = ""
+        }
+        return
+            "The previous `\(tool)` succeeded for `\(path)`.\(diffNotice) Saving bytes proves persistence, not that runnable code works. Before claiming completion, use `shell_run` or another available syntax/build/test/behavior check; if no checker exists, inspect the critical initialization path. Fix only an evidenced defect rather than regenerating the whole file."
+    }
+
+    /// Convert a second identical transient extraction failure into the
+    /// stable result replayed on subsequent requests. Preserve every original
+    /// diagnostic field while making the exhausted retry contract explicit.
+    private static func retryExhaustedEnvelope(_ envelope: String, tool: String) -> String? {
+        guard let data = envelope.data(using: .utf8),
+            var dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        dict["retryable"] = false
+        dict["retry_exhausted"] = true
+        dict["message"] =
+            "The identical \(tool) retrieval failed on its initial attempt and one retry. "
+            + "Do not execute the same arguments again; change the source or report the blocker."
+        dict["next_action"] = [
+            "instruction":
+                "Choose a materially different retrievable source or report the blocker. Do not claim the failed page was inspected."
+        ]
+        return try? String(
+            data: JSONSerialization.data(withJSONObject: dict, options: [.sortedKeys]),
+            encoding: .utf8
+        )
+    }
+
+    // MARK: - Path canonicalization (shared)
+
+    /// Normalise a path so two spellings of the same path compare equal.
+    /// Used by BOTH the read-signature key and the write-target invalidation
+    /// check — if these diverged, invalidation would silently miss and a
+    /// verify-read could be short-circuited with stale content.
+    static func canonicalPath(_ raw: String) -> String {
+        var p = raw.trimmingCharacters(in: .whitespaces)
+        if p.hasPrefix("./") { p.removeFirst(2) }
+        // `standardizingPath` resolves `.`/`..`/`~` and collapses `//`.
+        p = (p as NSString).standardizingPath
+        if p.count > 1, p.hasSuffix("/") { p.removeLast() }
+        return p
+    }
+
+    // MARK: - Helpers
+
+    private func signature(name: String, argsJSON: String) -> CallSignature {
+        CallSignature(name: name, canonicalArgs: Self.canonicalArgs(argsJSON))
+    }
+
+    /// Canonicalise an arguments JSON string to a stable, sorted-key form so
+    /// `{"a":1,"b":2}` and `{"b":2,"a":1}` hash equal. Public so eval
+    /// scoring can build duplicate keys with the SAME canonicalisation the
+    /// loop's dedupe uses — a scorer with weaker key rules would flag
+    /// duplicates the loop correctly distinguishes (or miss real ones).
+    public static func canonicalArgs(_ argsJSON: String) -> String {
+        guard let data = argsJSON.data(using: .utf8),
+            let obj = try? JSONSerialization.jsonObject(with: data),
+            let canonical = try? JSONSerialization.data(
+                withJSONObject: obj,
+                options: [.sortedKeys]
+            ),
+            let str = String(data: canonical, encoding: .utf8)
+        else {
+            return argsJSON.trimmingCharacters(in: .whitespacesAndNewlines)
+        }
+        return str
+    }
+
+    /// Pull the path argument a tool acted on (`path`, then `file_path`).
+    private func pathArgument(_ argsJSON: String) -> String? {
+        guard let data = argsJSON.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        if let p = dict["path"] as? String, !p.isEmpty { return p }
+        if let p = dict["file_path"] as? String, !p.isEmpty { return p }
+        // `file_edit` accepts a `path` carried identically by every
+        // `edits` / `operations` entry (hoisted before validation by
+        // `FileEditTool.normalizeArgumentsBeforeValidation`); the state
+        // machine sees the raw call, so it must resolve the same target or
+        // a verify-read after that edit would replay stale content.
+        return Self.sharedEntryPath(dict)
+    }
+
+    /// The one `path` every `edits` / `operations` entry names (entries may
+    /// arrive as a JSON string); nil when absent or when entries disagree.
+    static func sharedEntryPath(_ dict: [String: Any]) -> String? {
+        for key in ["edits", "operations"] {
+            var entries = dict[key] as? [[String: Any]]
+            if entries == nil, let encoded = dict[key] as? String, let bytes = encoded.data(using: .utf8) {
+                entries = try? JSONSerialization.jsonObject(with: bytes) as? [[String: Any]]
+            }
+            guard let entries, !entries.isEmpty else { continue }
+            let paths = entries.compactMap { ($0["path"] as? String)?.trimmingCharacters(in: .whitespaces) }
+            guard paths.count == entries.count, let first = paths.first, !first.isEmpty,
+                Set(paths.map(canonicalPath)).count == 1
+            else { continue }
+            return first
+        }
+        return nil
+    }
+
+    /// ALL paths a write-like call targets. The file tools carry one
+    /// top-level `path`; `write_knowledge` carries `documents[].path` and
+    /// `delete_knowledge` carries `paths[]` — a batch mutation must
+    /// invalidate every document it touched, not silently none because the
+    /// single-path probe came back nil.
+    private func writeTargetPaths(_ argsJSON: String) -> [String] {
+        if let single = pathArgument(argsJSON) { return [single] }
+        guard let data = argsJSON.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        if let documents = dict["documents"] as? [[String: Any]] {
+            return documents.compactMap { doc in
+                guard let p = doc["path"] as? String, !p.isEmpty else { return nil }
+                return p
+            }
+        }
+        if let paths = dict["paths"] as? [String] {
+            return paths.filter { !$0.isEmpty }
+        }
+        return []
+    }
+
+    private static func isAppendWrite(name: String, argsJSON: String) -> Bool {
+        guard name == "file_write" || name == "sandbox_write_file",
+            let data = argsJSON.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return false }
+        return (dict["mode"] as? String)?.lowercased() == "append"
+    }
+
+    private static func stringArgument(_ key: String, argsJSON: String) -> String? {
+        guard let data = argsJSON.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return dict[key] as? String
+    }
+
+    private func clearEditSnapshotsUndone(by payload: [String: Any]) {
+        guard let undone = payload["undone"] as? [[String: Any]] else { return }
+        for entry in undone {
+            if let path = entry["path"] as? String {
+                successfulEditSnapshots[Self.canonicalPath(path)] = nil
+            }
+            if let destination = entry["destination_path"] as? String {
+                successfulEditSnapshots[Self.canonicalPath(destination)] = nil
+            }
+        }
+    }
+
+    private func parseListing(_ envelope: String) -> ListingSnapshot? {
+        guard let payload = ToolEnvelope.successPayload(envelope) as? [String: Any],
+            payload["kind"] as? String == "listing"
+        else { return nil }
+        let path = payload["path"] as? String ?? "."
+        let rawEntries = payload["entries"] as? [[String: Any]] ?? []
+        let entries: [ListingEntry] = rawEntries.compactMap { entry in
+            guard let entryPath = entry["path"] as? String else { return nil }
+            let name = entry["name"] as? String ?? (entryPath as NSString).lastPathComponent
+            return ListingEntry(
+                name: name,
+                path: entryPath,
+                isDirectory: (entry["type"] as? String) == "directory"
+            )
+        }
+        return ListingSnapshot(
+            path: path,
+            entries: entries,
+            truncated: payload["truncated"] as? Bool == true
+        )
+    }
+}

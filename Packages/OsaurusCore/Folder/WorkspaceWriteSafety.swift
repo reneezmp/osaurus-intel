@@ -5,7 +5,9 @@
 //  Shared guardrails for host-folder write tools.
 //
 
+import CryptoKit
 import Foundation
+
 
 /// Shared preview, diff, and output-safety helpers for host workspace writes.
 ///
@@ -33,64 +35,33 @@ enum WorkspaceWriteSafety {
     private static let maxDiffMatrixCells = 200_000
     private static let largeWriteCharacters = 1_000_000
 
-    private static let structuredTargets: [String: StructuredTarget] = [
-        "xlsx": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "xlsm": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "xltx": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "xltm": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "xlsb": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "xls": StructuredTarget(
-            label: "structured workbook package",
-            pivot: "Use a spreadsheet/XLSX tool for workbook output, or write CSV/TSV text instead."
-        ),
-        "pdf": StructuredTarget(
-            label: "PDF document",
-            pivot: "Use a PDF/document creation path that emits a real PDF package."
-        ),
-        "pptx": StructuredTarget(
-            label: "presentation package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "pptm": StructuredTarget(
-            label: "presentation package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "potx": StructuredTarget(
-            label: "presentation template package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "potm": StructuredTarget(
-            label: "presentation template package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "ppsx": StructuredTarget(
-            label: "presentation slideshow package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "ppsm": StructuredTarget(
-            label: "presentation slideshow package",
-            pivot: "Use a presentation/PPTX creation path that emits a real OpenXML presentation."
-        ),
-        "ppt": StructuredTarget(
-            label: "presentation document",
-            pivot: "Use a presentation/PPTX creation path instead of writing plain text to a presentation extension."
-        ),
-    ]
+    /// Document extensions `file_write` cannot generate. `.xlsx`, `.docx`,
+    /// `.pdf`, and `.pptx` are NOT here — they route through
+    /// `FileWriteDocumentRouting`. Every pivot names what the tool does
+    /// produce so the model never learns "file_write is text only".
+    private static let structuredTargets: [String: StructuredTarget] = {
+        let spreadsheetPivot =
+            "Write the same data as `.xlsx` (file_write builds a real workbook from CSV/TSV text or JSON rows) or as CSV/TSV text."
+        let wordPivot =
+            "Write the same content as `.docx` or `.pdf` (file_write renders Markdown/HTML into a real document) or as Markdown text."
+        let presentationPivot =
+            "Write the deck as `.pptx` instead (file_write builds slides from Markdown: each `#`/`##` heading starts a slide), or as Markdown/`.pdf`."
+        var table: [String: StructuredTarget] = [:]
+        for ext in ["xlsm", "xltx", "xltm", "xlsb", "xls", "xlt", "ods", "numbers"] {
+            table[ext] = StructuredTarget(label: "spreadsheet format", pivot: spreadsheetPivot)
+        }
+        for ext in ["docm", "doc", "dot", "dotx", "dotm", "rtfd", "odt", "pages"] {
+            table[ext] = StructuredTarget(label: "word-processing format", pivot: wordPivot)
+        }
+        for ext in ["pptm", "potx", "potm", "ppsx", "ppsm", "ppt", "pot", "pps", "odp", "key"] {
+            table[ext] = StructuredTarget(label: "presentation format", pivot: presentationPivot)
+        }
+        return table
+    }()
+
+    /// Extensions `file_write` refuses (no generator). Exposed for
+    /// descriptions and tests.
+    static var unsupportedDocumentWriteExtensions: Set<String> { Set(structuredTargets.keys) }
 
     static func structuredTextWriteRejection(
         path: String,
@@ -101,10 +72,39 @@ enum WorkspaceWriteSafety {
         return ToolEnvelope.failure(
             kind: .rejected,
             message:
-                "Refused to write '\(path)' with \(toolName): .\(ext) is a \(target.label), "
-                + "but \(toolName) only writes UTF-8 text. \(target.pivot)",
+                "Refused to write '\(path)' with \(toolName): .\(ext) is a \(target.label) that \(toolName) cannot generate. "
+                + "\(toolName) writes \(WorkspaceFileFormatPolicy.writableFormatsSummary). \(target.pivot)",
             field: "path",
-            expected: "path for a UTF-8 text file; for .\(ext), use a structured document writer",
+            expected: "a UTF-8 text path, or `.xlsx` / `.docx` / `.pdf` for a generated document",
+            tool: toolName,
+            retryable: false,
+            metadata: ["extension": ext, "writable_formats": WorkspaceFileFormatPolicy.writableFormatsSummary]
+        )
+    }
+
+    /// Rejection for text-only tools (`file_edit` on a route without
+    /// in-place document support, redaction) hitting a document extension.
+    /// `.docx`/`.xlsx`/`.pptx`/`.pdf` in the working folder never reach this
+    /// — `file_edit` routes them to `DocumentEditService` first — so it
+    /// covers legacy/other document types (`.doc`, `.xls`, `.odt`, …) and
+    /// sandbox `/workspace` paths, which get the read-then-regenerate pivot.
+    static func documentEditRejection(
+        path: String,
+        fileExtension ext: String,
+        toolName: String,
+        regenerateHint: String,
+        verb: String = "edit"
+    ) -> String? {
+        let support = WorkspaceFileFormatPolicy.readSupport(for: ext)
+        guard support.isDocument else { return nil }
+        let label = support.family?.label ?? "document"
+        return ToolEnvelope.failure(
+            kind: .rejected,
+            message:
+                "Refused to \(verb) '\(path)' with \(toolName): .\(ext) is a \(label), and \(toolName) can't \(verb) it in place here. "
+                + "Read it with `file_read` (documents are extracted to text), apply the change to that text, then \(regenerateHint)",
+            field: "path",
+            expected: "a UTF-8 text file; for documents, read with file_read and regenerate with file_write",
             tool: toolName,
             retryable: false,
             metadata: ["extension": ext]
@@ -180,13 +180,74 @@ enum WorkspaceWriteSafety {
             "risk_level": riskLevel,
             "diff": diff.text,
             "diff_truncated": diff.truncated,
+            "content_sha256": contentSHA256(proposedContent),
         ]
+        if let previousContent {
+            payload["before_content_sha256"] = contentSHA256(previousContent)
+        }
+        annotateMutationResult(
+            &payload,
+            path: path,
+            dryRun: dryRun,
+            diffTruncated: diff.truncated
+        )
         let text =
             dryRun
             ? "Dry run for \(operation) \(path): \(action), \(lineCount) lines, \(proposedContent.count) characters.\n\(diff.text)"
             : "\(action == "create" ? "Created" : "Updated") \(path) (\(lineCount) lines, \(proposedContent.count) characters)"
         payload["text"] = text
         return Preview(payload: payload, warnings: warnings, text: text)
+    }
+
+    /// Make the result semantics explicit for small models: a capped review
+    /// diff never means the write was partial, and saving runnable code never
+    /// proves that it executes correctly.
+    static func annotateMutationResult(
+        _ payload: inout [String: Any],
+        path: String,
+        dryRun: Bool,
+        diffTruncated: Bool
+    ) {
+        payload["content_write_complete"] = !dryRun
+        if diffTruncated {
+            payload["diff_truncation_note"] =
+                dryRun
+                ? "Only the review diff preview is truncated; the proposed content is complete."
+                : "Only the review diff preview is truncated; the full content was applied."
+        }
+        if !dryRun, WorkspaceFileFormatPolicy.isRunnableArtifact(path: path) {
+            payload["verification"] = [
+                "status": "not_run",
+                "reason": "A successful file mutation proves persistence, not runtime correctness.",
+                "next_action":
+                    "Run an available syntax, build, test, or behavior check before claiming the artifact works.",
+            ]
+        }
+    }
+
+    static func contentSHA256(_ content: String) -> String {
+        SHA256.hash(data: Data(content.utf8))
+            .map { String(format: "%02x", $0) }
+            .joined()
+    }
+
+    /// Capped unified-diff text for callers that only need the diff (e.g. the
+    /// sandbox write tool, which writes in-container and just wants a reviewable
+    /// diff to surface). Same labels / truncation behavior as `preview` so the
+    /// chat diff-card parser treats both sources identically.
+    static func unifiedDiffText(
+        old: String,
+        new: String,
+        path: String,
+        existed: Bool
+    ) -> (text: String, truncated: Bool) {
+        unifiedDiff(
+            old: old,
+            new: new,
+            path: path,
+            oldLabel: existed ? "before" : "before (new file)",
+            newLabel: "after"
+        )
     }
 
     private static func riskWarnings(
@@ -198,8 +259,6 @@ enum WorkspaceWriteSafety {
         proposedContent: String
     ) -> [String] {
         var warnings: [String] = []
-        // Upstream: an edit changes part of a file, so it gets no
-        // "overwrite" warning.
         if existed, overwritesExistingFile {
             warnings.append(
                 "This will overwrite an existing file; use dry_run first when replacing more than a small edit."
@@ -228,22 +287,6 @@ enum WorkspaceWriteSafety {
         path.split(separator: "/").map(String.init)
     }
 
-    /// Upstream helper used by the knowledge write preview.
-    static func unifiedDiffText(
-        old: String,
-        new: String,
-        path: String,
-        existed: Bool
-    ) -> (text: String, truncated: Bool) {
-        unifiedDiff(
-            old: old,
-            new: new,
-            path: path,
-            oldLabel: existed ? "before" : "before (new file)",
-            newLabel: "after"
-        )
-    }
-
     private static func unifiedDiff(
         old: String,
         new: String,
@@ -251,8 +294,10 @@ enum WorkspaceWriteSafety {
         oldLabel: String,
         newLabel: String
     ) -> (text: String, truncated: Bool) {
-        // An empty side has zero lines, not one empty line (upstream): a new
-        // one-line file must diff as `+1 −0`, not a phantom removal.
+        // An empty side has zero lines, not one empty line. `"".components(
+        // separatedBy:)` returns `[""]`, which would make creating a new file
+        // (empty `old`) diff as a phantom removal of one empty line — the card
+        // then shows `+1 −1` for a brand-new one-line file instead of `+1 −0`.
         let oldLines = old.isEmpty ? [] : old.components(separatedBy: .newlines)
         let newLines = new.isEmpty ? [] : new.components(separatedBy: .newlines)
         var lines: [String] = [

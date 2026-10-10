@@ -49,7 +49,10 @@ struct IntelFileDiffCardTests {
         let diff = try #require(FileDiff.from(toolResult: result))
         #expect(diff.path == "a.txt")
         #expect(diff.addedCount >= 1)
-        #expect(EnvelopeAssertions.successPayload(result)?["text"] as? String == "Updated a.txt (2 lines, 8 characters)")
+        // Upstream's summary (WorkspaceWriteSafety) counts the empty line after
+        // a trailing newline: "one\ntwo\n" reads as 3 lines (2026-10-10, when
+        // file_write became upstream's).
+        #expect(EnvelopeAssertions.successPayload(result)?["text"] as? String == "Updated a.txt (3 lines, 8 characters)")
 
         // A brand-new one-line file diffs as +1 −0 (no phantom removal).
         let created = try await FileWriteTool(rootPath: root).execute(
@@ -79,12 +82,12 @@ struct IntelFileDiffCardTests {
         #expect(edit.contains("PREVIEW ONLY"))
         #expect(try String(contentsOf: file, encoding: .utf8) == "alpha\nbeta\n")
 
-        // Applied edit: diff payload, Intel's summary text, no overwrite warning.
+        // Applied edit: diff payload, upstream's summary text, no overwrite warning.
         let applied = try await FileEditTool(rootPath: root).execute(
             argumentsJSON: #"{"path": "notes.txt", "old_string": "beta", "new_string": "delta"}"#)
         let appliedPayload = try #require(EnvelopeAssertions.successPayload(applied))
         #expect(appliedPayload["kind"] as? String == "workspace_write_result")
-        #expect((appliedPayload["text"] as? String)?.hasPrefix("Edited notes.txt") == true)
+        #expect((appliedPayload["text"] as? String)?.hasPrefix("Updated notes.txt") == true)
         #expect(appliedPayload["match_strategy"] as? String != nil)
         #expect(!applied.contains("This will overwrite an existing file"))
         #expect(try String(contentsOf: file, encoding: .utf8) == "alpha\ndelta\n")

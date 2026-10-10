@@ -157,11 +157,10 @@ struct ToolWirePropertyOrderTests {
         #expect(keyOrder(in: geminiOut, of: "properties") == ["path", "old_string", "new_string"])
     }
 
-    // Intel: no `edits` batch on file_edit yet (W-doc-editing), so the order omits it.
     @Test @MainActor func registryPublishesFileEditOrder() {
         // Registering through ToolRegistry records the tool's authored order.
         ToolRegistry.shared.register(FileEditTool())
-        #expect(ToolWirePropertyOrder.order(for: "file_edit") == ["path", "old_string", "new_string", "replace_all", "operations", "dry_run"])
+        #expect(ToolWirePropertyOrder.order(for: "file_edit") == ["path", "old_string", "new_string", "replace_all", "edits", "operations", "dry_run"])
         #expect(FileWriteTool().parameterOrder?.first == "path")
     }
 }

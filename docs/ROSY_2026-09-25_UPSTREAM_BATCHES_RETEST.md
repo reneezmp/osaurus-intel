@@ -1593,3 +1593,14 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] Create a new schedule: the agent picker lists your agents (no
       "workspace" section).
 
+## File editing (2026-10-10)
+
+- [ ] Ask an agent to make three separate replacements in one text file
+      in a single step: it uses one `file_edit` with several edits, and the
+      file has all three changes (or none if one didn't match).
+- [ ] Ask it to fill a PDF form that has radio buttons (e.g. a plan
+      choice): open the PDF in Preview. The chosen radio is selected and the
+      text fields show their values without clicking into them.
+- [ ] Ask it to create a small Excel file with two sheets: it opens in
+      Numbers / Excel.
+

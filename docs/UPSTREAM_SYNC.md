@@ -3204,3 +3204,43 @@ commit that `git merge-base --is-ancestor`s into upstream). With no base,
 Tests: upstream's `BusinessDocumentStudioServiceTests`,
 `CSVTableWorkflowServiceTests`, current `CSVAdapterTests` and
 `PPTXAdapterTests`; `PDFPPTXWorkflowServiceTests` re-enabled.
+
+### `file_edit` / `file_write` at upstream (`W-doc-editing`) — 2026-10-10
+
+Intel's two write tools were hand ports from late September (465 / 227
+lines). They are now upstream's current structs (917 / 499).
+
+- **`file_edit`:** atomic `edits` batches (all or nothing). Upstream's
+  shape repair (`normalizeArgumentsBeforeValidation`): string-encoded
+  arrays, a shared `path` hoisted from entries, document ops moved from
+  `edits` to `operations`. Its wire order now includes `edits`.
+- **`file_write`:** writes documents through `file_edit` operation
+  payloads. Upstream's mutation results add `content_sha256`,
+  `content_write_complete`, a truncation note and "verification: not_run"
+  for runnable files (`annotateMutationResult`).
+
+Supporting changes:
+
+- **`WorkspaceWriteSafety`:** three-way merged from upstream's original
+  #1366 (`5145c37aa`). Intel's copy was a cherry-pick with a different hash,
+  so no common commit existed. Intel keeps its own
+  `WorkspaceFileFormatPolicy.swift` (upstream defines it inline) and the
+  `overwritesExistingFile = true` default. Two duplicate helpers were
+  removed.
+- **`AgentTaskState.swift`:** upstream's, added for `canonicalPath` /
+  `sharedEntryPath`. The harness itself isn't wired yet (`W-agent-loop-tools`
+  reopened).
+- **Removed (`INC-containers`):** the `/workspace` sandbox routes and
+  share-document helpers.
+
+**Visible differences:** result text is upstream's. `file_edit` says
+"Updated notes.txt (…)" instead of Intel's "Edited …". Upstream counts the
+line after a trailing newline ("one\ntwo\n" = 3 lines).
+
+Tests: upstream's `FileEditBatchTests`, `FileWriteDocumentFormatsTests`,
+current `DocumentEditTests` and `ToolWirePropertyOrderTests`.
+`pdfFillFormResolvesNamesSetsRadiosAndSurvivesReopen` runs its radio /
+`/NeedAppearances` checks as a known issue: PDFKit on the x86_64 test runner
+doesn't keep them across save and reopen, while `PDFEditor` is upstream's
+verbatim and warns when the flag is missing. Rosy checks it on real Intel
+hardware.
