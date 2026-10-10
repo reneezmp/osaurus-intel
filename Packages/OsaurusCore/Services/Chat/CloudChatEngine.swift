@@ -339,6 +339,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         var id: String = ""
         var name: String = ""
         var arguments: String = ""
+        /// Gemini thought signature, replayed on the echoed call.
+        var thoughtSignature: String?
     }
 
     /// Serialize a ChatMessage into the OpenAI-compatible request shape,
@@ -593,6 +595,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         var isOsaurusRouter: Bool = false
         var provider: RemoteProvider? = nil
         var isCodex: Bool { provider?.providerType == .openAICodex || provider?.authType == .openAICodexOAuth }
+        /// OpenAI Responses wire: ChatGPT-login Codex and API-key OpenAI
+        /// (`.openResponses`, the "OpenAI" preset). Both go through
+        /// `IntelCodexResponsesAdapter` and its SSE decoder; only Codex uses
+        /// the ChatGPT headers and Responses-Lite (W-provider-wire-formats).
+        var usesResponsesWire: Bool { isCodex || provider?.providerType == .openResponses }
+        /// Anthropic Messages wire (`IntelAnthropicMessagesAdapter`).
+        var usesAnthropicWire: Bool { provider?.providerType == .anthropic }
+        /// Gemini `streamGenerateContent` wire (`IntelGeminiAdapter`).
+        var usesGeminiWire: Bool { provider?.providerType == .gemini }
     }
 
     /// Resolve the endpoint + headers for `model`. On Intel a request can route
@@ -907,7 +918,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             body["tools"] = liveToolSpecs
                             body["tool_choice"] = "auto"
                         }
-                        if endpoint.isCodex {
+                        if endpoint.usesResponsesWire {
                             if let effort = Self.codexReasoningEffort(
                                 modelId: endpoint.modelId, options: request.modelOptions)
                             {
@@ -930,9 +941,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 into: &body
                             )
                             self.applyReasoningMode(request, endpoint: endpoint, into: &body)
+                            if endpoint.usesAnthropicWire {
+                                body = try IntelAnthropicMessagesAdapter.makeRequest(chatCompletions: body)
+                            } else if endpoint.usesGeminiWire {
+                                body = try IntelGeminiAdapter.makeRequest(chatCompletions: body)
+                            }
                         }
 
-                        var urlRequest = URLRequest(url: URL(string: endpoint.url)!)
+                        let requestURL =
+                            endpoint.usesGeminiWire
+                            ? IntelGeminiAdapter.streamURL(modelsEndpoint: endpoint.url, model: endpoint.modelId)
+                            : endpoint.url
+                        var urlRequest = URLRequest(url: URL(string: requestURL)!)
                         urlRequest.httpMethod = "POST"
                         for (k, v) in try await self.requestHeaders(for: endpoint) { urlRequest.setValue(v, forHTTPHeaderField: k) }
                         if let responsesLiteSessionId {
@@ -1019,7 +1039,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
                         }
 
-                        if endpoint.isCodex {
+                        if endpoint.usesResponsesWire {
                             let allowedTools = Set(activeTools?.map { $0.function.name } ?? [])
                             var decoder = IntelCodexResponsesSSEDecoder(allowedToolNames: allowedTools)
                             var buffer = Data()
@@ -1176,100 +1196,120 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             continue
                         }
 
-                        for try await line in asyncBytes.lines {
+                        // Native wires (Anthropic) arrive as their own events;
+                        // translate each raw line into OpenAI chunk lines so the
+                        // loop below stays the one parser. Insights keeps the raw
+                        // provider bytes.
+                        var anthropicTranslator: IntelAnthropicSSETranslator? =
+                            endpoint.usesAnthropicWire ? IntelAnthropicSSETranslator() : nil
+                        var geminiTranslator: IntelGeminiSSETranslator? =
+                            endpoint.usesGeminiWire ? IntelGeminiSSETranslator() : nil
+                        lineLoop: for try await rawLine in asyncBytes.lines {
                             try Task.checkCancellation()
-                            wireProbe.appendResponseChunk(Data((line + "\n").utf8))
-                            guard line.hasPrefix("data: ") else { continue }
-                            let dataStr = String(line.dropFirst(6))
-                            if dataStr == "[DONE]" { break }
-
-                            guard let chunkData = dataStr.data(using: .utf8),
-                                let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
-                            else {
-                                // Shape only — never log payload bytes; SSE frames carry
-                                // the user's conversation content.
-                                NSLog(
-                                    "[CloudChatEngine] Skipped unparseable SSE frame (\(dataStr.utf8.count) bytes)"
-                                )
-                                continue
+                            wireProbe.appendResponseChunk(Data((rawLine + "\n").utf8))
+                            let translatedLines: [String]
+                            if anthropicTranslator != nil {
+                                translatedLines = try anthropicTranslator!.translate(rawLine)
+                            } else if geminiTranslator != nil {
+                                translatedLines = try geminiTranslator!.translate(rawLine)
+                            } else {
+                                translatedLines = [rawLine]
                             }
+                            for line in translatedLines {                                guard line.hasPrefix("data: ") else { continue }
+                                let dataStr = String(line.dropFirst(6))
+                                if dataStr == "[DONE]" { break lineLoop }
 
-                            // DeepSeek's final usage chunk (from stream_options) carries
-                            // the prompt-cache split. Log it so cache hit/miss is
-                            // measurable per request in Console.app.
-                            if let usage = json["usage"] as? [String: Any] {
-                                promptTokens = usage["prompt_tokens"] as? Int ?? promptTokens
-                                completionTokens = usage["completion_tokens"] as? Int ?? completionTokens
-                                let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
-                                let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
-                                let promptTok = usage["prompt_tokens"] as? Int ?? -1
-                                NSLog(
-                                    "[CloudChatEngine] CACHE prompt=\(promptTok) hit=\(hit) miss=\(miss) round=\(round)"
-                                )
-                            }
-
-                            // Router billing summary (`{"osaurus": {…}}`): update
-                            // the balance and hand the charge to the chat as a
-                            // hidden hint (upstream). Router endpoints only.
-                            if endpoint.isOsaurusRouter,
-                                let summary = Self.routerSummary(fromFrame: json, data: chunkData)
-                            {
-                                routerSummarySeen = true
-                                Task { @MainActor in
-                                    OsaurusRouterAccountService.shared.noteRouterSummary(summary)
+                                guard let chunkData = dataStr.data(using: .utf8),
+                                    let json = try? JSONSerialization.jsonObject(with: chunkData) as? [String: Any]
+                                else {
+                                    // Shape only — never log payload bytes; SSE frames carry
+                                    // the user's conversation content.
+                                    NSLog(
+                                        "[CloudChatEngine] Skipped unparseable SSE frame (\(dataStr.utf8.count) bytes)"
+                                    )
+                                    continue
                                 }
-                                continuation.yield(StreamingBillingHint.encode(RouterBillingSummary(summary)))
-                                continue
-                            }
 
-                            guard let choices = json["choices"] as? [[String: Any]],
-                                let delta = choices.first?["delta"] as? [String: Any]
-                            else {
-                                // Expected for usage-only frames; also the shape the
-                                // Osaurus Router's billing-summary frame arrives in.
-                                // Log top-level keys only — never the payload.
-                                NSLog(
-                                    "[CloudChatEngine] Non-delta SSE frame keys=\(json.keys.sorted().joined(separator: ","))"
-                                )
-                                continue
-                            }
+                                // DeepSeek's final usage chunk (from stream_options) carries
+                                // the prompt-cache split. Log it so cache hit/miss is
+                                // measurable per request in Console.app.
+                                if let usage = json["usage"] as? [String: Any] {
+                                    promptTokens = usage["prompt_tokens"] as? Int ?? promptTokens
+                                    completionTokens = usage["completion_tokens"] as? Int ?? completionTokens
+                                    let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
+                                    let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
+                                    let promptTok = usage["prompt_tokens"] as? Int ?? -1
+                                    NSLog(
+                                        "[CloudChatEngine] CACHE prompt=\(promptTok) hit=\(hit) miss=\(miss) round=\(round)"
+                                    )
+                                }
 
-                            if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
-                                totalChunks += 1
-                                continuation.yield(StreamingReasoningHint.encode(reasoning))
-                            }
-                            if let content = delta["content"] as? String, !content.isEmpty {
-                                totalChunks += 1
-                                assistantContent += content
-                                responseText += content
-                                continuation.yield(content)
-                            }
-                            // Accumulate streamed tool calls (M12 Gap 3).
-                            if let tcs = delta["tool_calls"] as? [[String: Any]] {
-                                for tc in tcs {
-                                    let idx = tc["index"] as? Int ?? 0
-                                    var partial = partials[idx] ?? PartialToolCall()
-                                    if let id = tc["id"] as? String, !id.isEmpty { partial.id = id }
-                                    if let fn = tc["function"] as? [String: Any] {
-                                        if let n = fn["name"] as? String, !n.isEmpty { partial.name += n }
-                                        // Surface the tool name once, BEFORE
-                                        // streaming args, so the call card
-                                        // appears immediately and the query
-                                        // fills into it live (mirrors upstream:
-                                        // card-with-query first, result later).
-                                        if !partial.name.isEmpty, !announcedNames.contains(idx) {
-                                            announcedNames.insert(idx)
-                                            continuation.yield(StreamingToolHint.encode(partial.name))
-                                        }
-                                        if let a = fn["arguments"] as? String, !a.isEmpty {
-                                            partial.arguments += a
-                                            // Stream the args into the pending
-                                            // card so the user sees the query
-                                            // build up — not just a bare name.
-                                            continuation.yield(StreamingToolHint.encodeArgs(a))
-                                        }
+                                // Router billing summary (`{"osaurus": {…}}`): update
+                                // the balance and hand the charge to the chat as a
+                                // hidden hint (upstream). Router endpoints only.
+                                if endpoint.isOsaurusRouter,
+                                    let summary = Self.routerSummary(fromFrame: json, data: chunkData)
+                                {
+                                    routerSummarySeen = true
+                                    Task { @MainActor in
+                                        OsaurusRouterAccountService.shared.noteRouterSummary(summary)
                                     }
-                                    partials[idx] = partial
+                                    continuation.yield(StreamingBillingHint.encode(RouterBillingSummary(summary)))
+                                    continue
+                                }
+
+                                guard let choices = json["choices"] as? [[String: Any]],
+                                    let delta = choices.first?["delta"] as? [String: Any]
+                                else {
+                                    // Expected for usage-only frames; also the shape the
+                                    // Osaurus Router's billing-summary frame arrives in.
+                                    // Log top-level keys only — never the payload.
+                                    NSLog(
+                                        "[CloudChatEngine] Non-delta SSE frame keys=\(json.keys.sorted().joined(separator: ","))"
+                                    )
+                                    continue
+                                }
+
+                                if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
+                                    totalChunks += 1
+                                    continuation.yield(StreamingReasoningHint.encode(reasoning))
+                                }
+                                if let content = delta["content"] as? String, !content.isEmpty {
+                                    totalChunks += 1
+                                    assistantContent += content
+                                    responseText += content
+                                    continuation.yield(content)
+                                }
+                                // Accumulate streamed tool calls (M12 Gap 3).
+                                if let tcs = delta["tool_calls"] as? [[String: Any]] {
+                                    for tc in tcs {
+                                        let idx = tc["index"] as? Int ?? 0
+                                        var partial = partials[idx] ?? PartialToolCall()
+                                        if let id = tc["id"] as? String, !id.isEmpty { partial.id = id }
+                                    if let signature = tc[IntelGeminiAdapter.thoughtSignatureKey] as? String {
+                                        partial.thoughtSignature = signature
+                                    }
+                                        if let fn = tc["function"] as? [String: Any] {
+                                            if let n = fn["name"] as? String, !n.isEmpty { partial.name += n }
+                                            // Surface the tool name once, BEFORE
+                                            // streaming args, so the call card
+                                            // appears immediately and the query
+                                            // fills into it live (mirrors upstream:
+                                            // card-with-query first, result later).
+                                            if !partial.name.isEmpty, !announcedNames.contains(idx) {
+                                                announcedNames.insert(idx)
+                                                continuation.yield(StreamingToolHint.encode(partial.name))
+                                            }
+                                            if let a = fn["arguments"] as? String, !a.isEmpty {
+                                                partial.arguments += a
+                                                // Stream the args into the pending
+                                                // card so the user sees the query
+                                                // build up — not just a bare name.
+                                                continuation.yield(StreamingToolHint.encodeArgs(a))
+                                            }
+                                        }
+                                        partials[idx] = partial
+                                    }
                                 }
                             }
                         }
@@ -1293,12 +1333,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireMessages.append([
                             "role": "assistant",
                             "content": assistantContent,
-                            "tool_calls": orderedCalls.map { call in
-                                [
+                            "tool_calls": orderedCalls.map { call -> [String: Any] in
+                                var echoed: [String: Any] = [
                                     "id": call.id,
                                     "type": "function",
                                     "function": ["name": call.name, "arguments": call.arguments],
                                 ]
+                                if let signature = call.thoughtSignature {
+                                    echoed[IntelGeminiAdapter.thoughtSignatureKey] = signature
+                                }
+                                return echoed
                             },
                         ])
 
@@ -1465,7 +1509,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
             )
         }
 
-        if endpoint.isCodex {
+        // Native wires answer one-shots through the streaming path (their
+        // non-streaming bodies are not chat-completions JSON).
+        if endpoint.usesResponsesWire || endpoint.usesAnthropicWire || endpoint.usesGeminiWire {
             let stream = try await streamChat(request: request)
             var content = ""
             for try await delta in stream where !StreamingToolHint.isSentinel(delta) {

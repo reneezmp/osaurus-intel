@@ -5,14 +5,16 @@ import Testing
 /// Exercises the real engine against an in-process HTTP fixture, never a paid endpoint.
 @Suite(.serialized)
 struct IntelCodexEngineTests {
-    private func engine(response: String, status: Int = 200, codex: Bool = true) -> ChatEngine {
+    private func engine(
+        response: String, status: Int = 200, codex: Bool = true, providerType: RemoteProviderType? = nil
+    ) -> ChatEngine {
         FixtureProtocol.configure(response: response, status: status)
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [FixtureProtocol.self]
         let provider = RemoteProvider(name: "Fixture", host: "codex-fixture.invalid", providerProtocol: .https,
                                       port: nil, basePath: "/backend-api", customHeaders: [:],
-                                      authType: codex ? .openAICodexOAuth : .none,
-                                      providerType: codex ? .openAICodex : .openaiLegacy,
+                                      authType: providerType == nil && codex ? .openAICodexOAuth : .none,
+                                      providerType: providerType ?? (codex ? .openAICodex : .openaiLegacy),
                                       enabled: true, autoConnect: false, timeout: 5)
         let credentials = IntelCodexCredentials(
             load: { _ in
@@ -88,6 +90,94 @@ struct IntelCodexEngineTests {
         await #expect(throws: (any Error).self) {
             for try await _ in try await engine.streamChat(request: request()) {}
         }
+    }
+
+    // MARK: - W-provider-wire-formats (2026-10-10)
+
+    @Test func openAIPresetUsesTheResponsesWireWithoutChatGPTHeaders() async throws {
+        let engine = engine(response: success, providerType: .openResponses)
+        var output = ""
+        for try await text in try await engine.streamChat(request: request()) { output += text }
+        #expect(output == "Hello Rosy")
+        let sent = try #require(FixtureProtocol.lastRequest)
+        #expect(sent.url?.path == "/backend-api/responses")
+        #expect(sent.value(forHTTPHeaderField: "chatgpt-account-id") == nil)
+        let body = try #require(FixtureProtocol.lastBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["input"] is [[String: Any]])
+        #expect(json["messages"] == nil)
+    }
+
+    private var anthropicSuccess: String {
+        """
+        event: message_start
+        data: {"type":"message_start","message":{"usage":{"input_tokens":12,"output_tokens":1}}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello "}}
+
+        event: content_block_delta
+        data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Rosy"}}
+
+        event: message_delta
+        data: {"type":"message_delta","delta":{"stop_reason":"end_turn"},"usage":{"output_tokens":3}}
+
+        event: message_stop
+        data: {"type":"message_stop"}
+
+        """
+    }
+
+    @Test func anthropicStreamsThroughTheMessagesWire() async throws {
+        let engine = engine(response: anthropicSuccess, providerType: .anthropic)
+        var output = ""
+        for try await text in try await engine.streamChat(request: request()) { output += text }
+        #expect(output == "Hello Rosy")
+        let sent = try #require(FixtureProtocol.lastRequest)
+        #expect(sent.url?.path == "/backend-api/messages")
+        let body = try #require(FixtureProtocol.lastBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["system"] as? String == "Be brief")
+        #expect(json["max_tokens"] as? Int == 4096)
+        #expect(json["stream_options"] == nil)
+        let messages = try #require(json["messages"] as? [[String: Any]])
+        #expect(messages.count == 1)
+        #expect(messages[0]["role"] as? String == "user")
+    }
+
+    @Test func anthropicOneShotsCollectTheStream() async throws {
+        let result = try await engine(response: anthropicSuccess, providerType: .anthropic).completeChat(request: request())
+        #expect(result.choices.first?.message?.content == "Hello Rosy")
+    }
+
+    @Test func anthropicStreamErrorEventFails() async throws {
+        let engine = engine(
+            response: "event: error\ndata: {\"type\":\"error\",\"error\":{\"type\":\"overloaded_error\",\"message\":\"Overloaded\"}}\n\n",
+            providerType: .anthropic)
+        await #expect(throws: (any Error).self) {
+            for try await _ in try await engine.streamChat(request: request()) {}
+        }
+    }
+
+    @Test func geminiStreamsThroughGenerateContent() async throws {
+        let response = """
+            data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Hello "}]}}]}
+
+            data: {"candidates":[{"content":{"role":"model","parts":[{"text":"Rosy"}]},"finishReason":"STOP"}],"usageMetadata":{"promptTokenCount":8,"candidatesTokenCount":2}}
+
+            """
+        let engine = engine(response: response, providerType: .gemini)
+        var output = ""
+        for try await text in try await engine.streamChat(request: request()) { output += text }
+        #expect(output == "Hello Rosy")
+        let sent = try #require(FixtureProtocol.lastRequest)
+        #expect(sent.url?.path == "/backend-api/models/fixture-model:streamGenerateContent")
+        #expect(sent.url?.query == "alt=sse")
+        let body = try #require(FixtureProtocol.lastBody)
+        let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
+        #expect(json["contents"] is [[String: Any]])
+        #expect(json["messages"] == nil)
+        #expect(json["systemInstruction"] != nil)
     }
 
     @Test func ordinaryChatCompletionStreamStillWorks() async throws {

@@ -1562,3 +1562,16 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
 - [ ] Open an older DeepSeek chat that has an image in it and continue
       it: it still works.
 
+## OpenAI, Anthropic and Google providers (2026-10-10)
+
+Needs an API key for each provider you want to check (Settings ›
+Providers). Before this build, these three could list models but not chat.
+
+- [ ] **OpenAI** preset: chat with a GPT model, ask something that uses a
+      tool (e.g. "what time is it in Tokyo?"), and attach an image once.
+- [ ] **Anthropic** preset: same three checks with a Claude model. A
+      longer chat keeps working on follow-ups.
+- [ ] **Google** preset: same three checks with a Gemini model, including a
+      second tool call in the same reply (e.g. "time in Tokyo and in Lima").
+- [ ] With each, a chat title appears after the first exchange.
+

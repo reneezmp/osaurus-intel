@@ -3071,3 +3071,50 @@ Upstream's friendlier rejection message is in `extractAPIErrorMessage`.
 
 **Still broken (`W-provider-wire-formats`, new):** the Anthropic, Google
 Gemini and OpenAI presets use native API types the engine cannot speak.
+
+### Native provider formats (`W-provider-wire-formats`) — 2026-10-10
+
+**Found:** Intel's cloud engine sent a chat-completions body to every
+provider. The OpenAI (`.openResponses` → `/v1/responses`), Anthropic
+(`/v1/messages`) and Google (`/v1beta/models`) presets listed their models,
+but every chat with them failed: their native APIs reject that body.
+Upstream builds each format in `RemoteProviderService`, which Intel excludes.
+
+Intel now translates at the edges, so the engine's one tool loop (approvals,
+preflight, timeouts, billing, Insights) serves every provider:
+
+- **OpenAI (API key).** `endpoint.usesResponsesWire` covers Codex and
+  `.openResponses`. Both use `IntelCodexResponsesAdapter` and its SSE
+  decoder. ChatGPT headers and Responses-Lite stay Codex-only.
+- **Anthropic.** `IntelAnthropicMessagesAdapter` (request, following
+  upstream `toAnthropicRequest`) and `IntelAnthropicSSETranslator` (events →
+  OpenAI chunk lines).
+  - Request: `system`; tool results batched into one user message;
+    `tool_use` / `tool_result`, with an empty result as "(no output)";
+    base64 / URL image blocks; `max_tokens` 4096; no sampler knobs for the
+    Claude generations that reject them; top-level `cache_control` (1 h
+    after a human turn, 5 m after a tool result); `eager_input_streaming`.
+  - Stream: thinking → `reasoning_content`; usage counts cached tokens.
+- **Gemini.** `IntelGeminiAdapter` and `IntelGeminiSSETranslator`, at
+  `models/<model>:streamGenerateContent?alt=sse` (a `models/` prefix is
+  stripped).
+  - Request: `systemInstruction`; `inlineData` images; `functionCall`
+    parts carrying the call's `thoughtSignature`; batched
+    `functionResponse` parts; upstream's schema clean-up; `toolConfig`.
+  - Signatures: the engine keeps the signature on the echoed assistant
+    tool call (`gemini_thought_signature` on Intel's wire dicts), so Gemini
+    gets it back within the run.
+  - Stream: thought parts are skipped (as upstream); a `SAFETY` finish
+    fails.
+  - **Intel difference:** `functionResponse.name` is the function's name.
+    Upstream sends the `tool_call_id` (a random `gemini-…` id) there, which
+    looks like an upstream bug.
+- **One-shots** (titles, memory, compaction) on these wires collect the
+  stream, as Codex already did.
+- **Insights** records the raw provider bytes; the engine parses the
+  translated lines.
+
+Tests: `IntelAnthropicMessagesAdapterTests`, `IntelGeminiAdapterTests`, and
+`IntelCodexEngineTests` end to end through `ChatEngine` with an HTTP
+fixture (OpenAI Responses, Anthropic stream / one-shot / error event,
+Gemini). None of it has met the real APIs yet; that's Rosy's checklist.
