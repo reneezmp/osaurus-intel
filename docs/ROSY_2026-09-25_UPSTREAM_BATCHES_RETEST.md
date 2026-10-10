@@ -1612,3 +1612,14 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] Ask it to edit a file and then read it back: the read shows the new
       content (not a stale replay).
 
+## Grounded-claim checks (2026-10-10)
+
+- [ ] In a chat with no folder attached, ask: "write a short report and
+      save it to report.md". If the model claims it saved the file, a second
+      answer follows right below it saying it cannot write files here (and
+      giving the content). Both answers stay visible.
+- [ ] Quit and reopen the app, open that chat and ask a follow-up: the
+      model does not treat the first answer ("saved") as true.
+- [ ] With a folder attached, ask the same: the file is written and there is
+      only one answer.
+

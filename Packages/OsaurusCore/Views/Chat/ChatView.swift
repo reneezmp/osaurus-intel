@@ -2913,6 +2913,21 @@ final class ChatSession: ObservableObject {
                     rebuildVisibleBlocks()
                     continue
                 }
+                // Upstream `prepareGroundedClaimRetry`: the ungrounded answer
+                // stays visible but leaves model history; the corrected one
+                // streams into a fresh assistant turn.
+                if StreamingGroundedRetryHint.isRetry(delta) {
+                    await processor.finalize()
+                    currentTurn.modelContextExcluded = true
+                    let retryTurn = ChatTurn(role: .assistant, content: "")
+                    turns.append(retryTurn)
+                    currentTurn = retryTurn
+                    processor = StreamingDeltaProcessor(
+                        turn: retryTurn
+                    ) { [weak self] in self?.rebuildVisibleBlocks() }
+                    rebuildVisibleBlocks()
+                    continue
+                }
                 if let toolName = StreamingToolHint.decode(delta) {
                     currentTurn.pendingToolName = toolName.isEmpty ? nil : toolName
                     rebuildVisibleBlocks()
@@ -3292,6 +3307,9 @@ final class ChatSession: ObservableObject {
                 func turnToMessage(_ t: ChatTurn, isLastTurn: Bool) -> ChatMessage? {
                     switch t.role {
                     case .assistant:
+                        // Upstream: an answer the model corrected stays
+                        // visible but never re-enters model history.
+                        if t.modelContextExcluded { return nil }
                         // Skip the last assistant turn if it's empty (it's the streaming placeholder)
                         if isLastTurn && t.contentIsBlank && t.thinkingIsBlank && t.toolCalls == nil {
                             return nil
@@ -3475,7 +3493,10 @@ final class ChatSession: ObservableObject {
                                                             // when the model can take it.
                                                             try await ChatExecutionContext.$toolResultImagesEnabled
                                                                 .withValue(self.selectedModelSupportsImages) {
-                                                                    try await engine.streamChat(request: req)
+                                                                    try await ChatExecutionContext.$groundedClaimChecksEnabled
+                                                                        .withValue(true) {
+                                                                            try await engine.streamChat(request: req)
+                                                                        }
                                                                 }
                                                         }
                                                 }
@@ -3879,7 +3900,10 @@ final class ChatSession: ObservableObject {
                                                         .withValue(assistantTurn.id) {
                                                             try await ChatExecutionContext.$toolResultImagesEnabled
                                                                 .withValue(self.selectedModelSupportsImages) {
-                                                                    try await engine.streamChat(request: finalReq)
+                                                                    try await ChatExecutionContext.$groundedClaimChecksEnabled
+                                                                        .withValue(true) {
+                                                                            try await engine.streamChat(request: finalReq)
+                                                                        }
                                                                 }
                                                         }
                                                 }

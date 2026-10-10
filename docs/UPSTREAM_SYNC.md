@@ -3277,3 +3277,43 @@ Tests: upstream's `AgentTaskStateTests` (80 cases; three web-search cases
 dropped, as Intel lacks `SearchAndExtractTool.extractionEnvelope`) and
 `IntelLoopHarnessTests`. Upstream's `HarnessStabilityFixesTests` waits on
 `shell_run`'s idle timeout.
+
+### Grounded-claim checks (`W-agent-loop-tools`) — 2026-10-10
+
+Upstream's three runtime checks, taken verbatim
+(`GroundedFileSideEffectCheck`, `GroundedKnowledgeClaimCheck`,
+`GroundedConfigClaimCheck`), now run in Intel's engine. The run state and
+upstream's bounds live in `Services/Chat/IntelGroundedClaimGuard.swift`.
+
+- **Tool-calling turn:** narration that claims a file write which no
+  successful file-writing tool made gets upstream's advisory notice on the
+  next request. At most 2 per run; the run never stops.
+- **Final answer:** an answer that claims a file write, knowledge-collection
+  contents after only failed knowledge reads, or (when `osaurus_config` is
+  offered) a config change or a fabricated tool envelope is regenerated once
+  with the factual notice. At most 2 per run.
+  - The ungrounded answer stays visible.
+  - The engine yields `StreamingGroundedRetryHint`. `ChatView` marks the
+    turn `modelContextExcluded` and opens a fresh assistant turn, which is
+    upstream's `prepareGroundedClaimRetry`.
+  - `modelContextExcluded` is persisted in the turn JSON (key written only
+    when true). `buildMessages` skips such turns, as upstream's
+    `modelVisibleAssistantMessage` does.
+- **Scope:** only surfaces that bind
+  `ChatExecutionContext.groundedClaimChecksEnabled` run the checks; chat
+  binds it around both `engine.streamChat` calls. Other callers (the HTTP
+  API, schedules) are unaffected, as upstream leaves their hooks nil.
+- **Intel differences:**
+  - Upstream gets the visible text through hooks; Intel reads the round's
+    streamed text inside the engine.
+  - `osaurus_config` is not on Intel yet (`W-declarative-config`), so the
+    config check is dormant.
+- **Fixed in passing:** the image-fallback retry used to drop the round's
+  harness notices. It now restores them.
+
+Tests: upstream's predicate tests (their `AgentToolLoop` driver sections
+are cut, with a note) and `IntelGroundedClaimGuardTests`. The latter covers
+upstream's driver scenarios against the guard, plus engine runs against an
+in-process fixture: an ungrounded final is regenerated with the notice and
+without the answer, and surfaces that don't opt in are unaffected.
+

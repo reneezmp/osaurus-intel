@@ -120,9 +120,14 @@ public enum ChatExecutionContext {
 
     /// Whether a `file_read` of an image may hand the picture itself to the
     /// model (upstream: the chat loop binds it for vision models). Intel's
-    /// chat sends tool results as text, so nothing binds it and images are
-    /// always read through on-device text recognition.
+    /// chat binds it around `engine.streamChat` since 2026-10-10.
     @TaskLocal public static var toolResultImagesEnabled: Bool = false
+
+    /// Intel: the surface can split an ungrounded final answer from its
+    /// corrected retry (upstream's `prepareGroundedClaimRetry` /
+    /// `assistantVisibleText` hooks, which only chat supplies). The cloud
+    /// engine runs the grounded-claim checks only when this is bound.
+    @TaskLocal public static var groundedClaimChecksEnabled: Bool = false
 
     /// Upstream's combined sandbox + host-read mode scope; non-nil turns on
     /// the secret-file refusal in `FolderToolHelpers`. Intel has no sandbox

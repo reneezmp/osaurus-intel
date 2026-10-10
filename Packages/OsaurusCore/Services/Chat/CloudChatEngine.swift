@@ -961,6 +961,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // next request only.
                     let taskState = AgentTaskState()
                     var pendingHarnessNotices: [String] = []
+                    // Upstream's grounded-claim checks, for surfaces that can
+                    // split a corrected answer into its own turn (chat).
+                    let groundedChecksEnabled = ChatExecutionContext.groundedClaimChecksEnabled
+                    var grounded = IntelGroundedClaimGuard()
+                    // Upstream scopes the config check to runs offering
+                    // `osaurus_config`; read live, as `capabilities` loads tools.
+                    func configToolOffered() -> Bool {
+                        activeTools?.contains { $0.function.name == GroundedConfigClaimCheck.configToolName } == true
+                    }
                     var codexReplayItems: [[String: Any]] = []
                     let maxToolRounds = 12
                     var round = 0
@@ -980,6 +989,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         ]
                         let roundNotices = pendingHarnessNotices
                         pendingHarnessNotices.removeAll()
+                        // This round's visible text, for the grounded checks.
+                        let roundTextStart = responseText.utf8.count
+                        func roundVisibleText() -> String {
+                            String(decoding: responseText.utf8.dropFirst(roundTextStart), as: UTF8.self)
+                        }
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
                             body["tool_choice"] = "auto"
@@ -1079,6 +1093,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     provider: endpoint.providerLabel, model: endpoint.modelId)
                                 wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                                 retriedWithoutImages = true
+                                pendingHarnessNotices = roundNotices
                                 round -= 1
                                 continue
                             }
@@ -1144,6 +1159,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.yield(emission)
                             }
                             if finalized.completion.toolCalls.isEmpty {
+                                if groundedChecksEnabled,
+                                    let notice = grounded.finalAnswerNotice(
+                                        visibleText: roundVisibleText(), configToolOffered: configToolOffered())
+                                {
+                                    // Not replayed: the answer stays out of the
+                                    // next request, the notice rides on it.
+                                    pendingHarnessNotices = [notice]
+                                    continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                    round -= 1
+                                    continue
+                                }
                                 NSLog("[CloudChatEngine] Codex stream finished — \(totalChunks) chunks, \(round) round(s)")
                                 logInference()
                                 continuation.finish()
@@ -1259,6 +1285,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 )
                                 results.append(.init(callID: call.callID, output: result))
                                 taskState.record(name: call.name, argsJSON: call.arguments, result: result)
+                                grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
                                 if ChatExecutionContext.toolResultImagesEnabled {
                                     resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
                                         .loadImages()
@@ -1281,6 +1308,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             )
                             if let bias = taskState.nextStepBias() {
                                 Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
+                            }
+                            if groundedChecksEnabled,
+                                let notice = grounded.toolTurnNotice(narration: roundVisibleText()),
+                                !pendingHarnessNotices.contains(notice)
+                            {
+                                pendingHarnessNotices.append(notice)
                             }
                             // Responses tool outputs are text-only: hoist the
                             // round's tool images into one user item (upstream
@@ -1419,6 +1452,20 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // No tools requested this round → the assistant's final
                         // answer has streamed; we're done.
                         if partials.isEmpty {
+                            // Upstream's grounded-claim checks: an answer
+                            // claiming a write / change / read nothing
+                            // grounded stays visible, never enters the next
+                            // request, and is regenerated once with the
+                            // factual notice (bounded per run).
+                            if groundedChecksEnabled,
+                                let notice = grounded.finalAnswerNotice(
+                                    visibleText: assistantContent, configToolOffered: configToolOffered())
+                            {
+                                pendingHarnessNotices = [notice]
+                                continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                round -= 1
+                                continue
+                            }
                             NSLog("[CloudChatEngine] Stream finished — \(totalChunks) chunks, \(round) round(s), no tool calls")
                             logInference()
                             continuation.finish()
@@ -1579,12 +1626,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     callId: callId, toolName: call.name, result: result,
                                     imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
                             taskState.record(name: call.name, argsJSON: call.arguments, result: result)
+                            grounded.record(toolName: call.name, argumentsJSON: call.arguments, result: result)
                             if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
                                 runEndedByTool = true
                             }
                         }
                         if let bias = taskState.nextStepBias() {
                             Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
+                        }
+                        // Upstream's file side-effect advisory: narration
+                        // claiming a write this round's calls never made.
+                        if groundedChecksEnabled,
+                            let notice = grounded.toolTurnNotice(narration: assistantContent),
+                            !pendingHarnessNotices.contains(notice)
+                        {
+                            pendingHarnessNotices.append(notice)
                         }
                         // `complete` / `clarify` / `prompt_working_folder` end
                         // the run after this round: every call in the round

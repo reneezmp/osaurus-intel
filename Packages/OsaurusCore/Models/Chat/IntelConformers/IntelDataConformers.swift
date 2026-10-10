@@ -74,6 +74,9 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// Osaurus Router charge for this turn (upstream): stamped from the
     /// stream's billing hint, persisted with the chat.
     var routerBilling: RouterBillingSummary?
+    /// Upstream: kept visible in the transcript but left out of model
+    /// history (an ungrounded answer the model then corrected). Persisted.
+    var modelContextExcluded: Bool = false
     /// Ledger rows written for this turn during the live run, finalized with
     /// the rendered outcome at run cleanup. Transient (upstream).
     var billingEntryIds: Set<String> = []
@@ -128,6 +131,8 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         self.timeToFirstToken = turn.timeToFirstToken
         self.generationTokensPerSecond = turn.generationTokensPerSecond
         self.routerBilling = (turn as? ChatTurnData)?.routerBilling ?? (turn as? ChatTurn)?.routerBilling
+        self.modelContextExcluded =
+            (turn as? ChatTurnData)?.modelContextExcluded ?? (turn as? ChatTurn)?.modelContextExcluded ?? false
     }
 
     func appendContent(_ s: String) {
@@ -569,6 +574,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var unclosedReasoning: Bool = false
     var preflightCapabilities: Any? = nil
     var routerBilling: RouterBillingSummary?
+    var modelContextExcluded: Bool = false
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -597,6 +603,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         self.generationTokensPerSecond = turn.generationTokensPerSecond
         self.preflightCapabilities = turn.preflightCapabilities
         self.routerBilling = (turn as? ChatTurn)?.routerBilling ?? (turn as? ChatTurnData)?.routerBilling
+        self.modelContextExcluded =
+            (turn as? ChatTurn)?.modelContextExcluded ?? (turn as? ChatTurnData)?.modelContextExcluded ?? false
     }
 
     static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
@@ -657,6 +665,7 @@ extension ChatTurnData: Codable {
         case thinking, createdAt, completedAt, generationTokenCount
         case timeToFirstToken, generationTokensPerSecond
         case routerBilling
+        case modelContextExcluded
     }
 
     init(from decoder: Decoder) throws {
@@ -679,6 +688,7 @@ extension ChatTurnData: Codable {
                 Double.self, forKey: .generationTokensPerSecond)
         )
         self.routerBilling = try? c.decodeIfPresent(RouterBillingSummary.self, forKey: .routerBilling)
+        self.modelContextExcluded = (try? c.decodeIfPresent(Bool.self, forKey: .modelContextExcluded)) ?? false
     }
 
     func encode(to encoder: Encoder) throws {
@@ -698,6 +708,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(timeToFirstToken, forKey: .timeToFirstToken)
         try c.encodeIfPresent(generationTokensPerSecond, forKey: .generationTokensPerSecond)
         try c.encodeIfPresent(routerBilling, forKey: .routerBilling)
+        if modelContextExcluded { try c.encode(true, forKey: .modelContextExcluded) }
     }
 }
 
