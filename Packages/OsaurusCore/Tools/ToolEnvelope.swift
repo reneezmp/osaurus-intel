@@ -37,6 +37,12 @@ public enum ToolEnvelope {
         /// The tool ran and failed for a runtime reason (process exit, file
         /// missing, network error). Default catch-all for thrown errors.
         case executionError = "execution_error"
+        /// A referenced path (file or directory) does not exist. Distinct
+        /// from `executionError` so the harness can classify it as a
+        /// not-found transition and steer the next step (pick from the
+        /// last listing / list the parent) instead of letting the model
+        /// re-derive it. Not retryable as-is — the path must change.
+        case notFound = "not_found"
         /// The model called a tool that does not exist in the registry.
         case toolNotFound = "tool_not_found"
         /// The tool exists but cannot run right now (e.g. sandbox still
@@ -45,11 +51,10 @@ public enum ToolEnvelope {
         /// User clicked "Deny" on an interactive approval prompt.
         /// Distinct from `rejected` (configured policy refusal).
         case userDenied = "user_denied"
-        /// The requested item (event, contact, note…) doesn't exist.
-        /// Upstream kind, added with the Apple app tools.
-        case notFound = "not_found"
-        /// A macOS permission (TCC) is missing for this tool. Upstream kind,
-        /// added with the Apple app tools.
+        /// A macOS privacy permission (Calendar, Contacts, Automation, Full
+        /// Disk Access, …) the tool needs is not granted. Not retryable
+        /// until the user changes it in System Settings; the message names
+        /// the exact permission and pane.
         case permissionDenied = "permission_denied"
     }
 
@@ -111,6 +116,21 @@ public enum ToolEnvelope {
         if let tool { dict["tool"] = tool }
         if let warnings, !warnings.isEmpty { dict["warnings"] = warnings }
         return encodeOrFallbackSuccess(dict, tool: tool)
+    }
+
+    /// Build a success envelope whose primary payload is a single string of
+    /// human-readable prose. The chat UI's existing renderers (folder file
+    /// trees, capability listings, search-memory hits) keep working because
+    /// the prose is preserved verbatim under `result.text`.
+    ///
+    /// Convenience for tools that have no structured payload — equivalent to
+    /// `success(tool:, result: ["text": text], warnings:)`.
+    public static func success(
+        tool: String? = nil,
+        text: String,
+        warnings: [String]? = nil
+    ) -> String {
+        success(tool: tool, result: ["text": text], warnings: warnings)
     }
 
     /// Build a directory-listing success envelope: a structured, actionable
@@ -187,21 +207,6 @@ public enum ToolEnvelope {
         return success(tool: tool, result: result, warnings: warnings)
     }
 
-    /// Build a success envelope whose primary payload is a single string of
-    /// human-readable prose. The chat UI's existing renderers (folder file
-    /// trees, capability listings, search-memory hits) keep working because
-    /// the prose is preserved verbatim under `result.text`.
-    ///
-    /// Convenience for tools that have no structured payload — equivalent to
-    /// `success(tool:, result: ["text": text], warnings:)`.
-    public static func success(
-        tool: String? = nil,
-        text: String,
-        warnings: [String]? = nil
-    ) -> String {
-        success(tool: tool, result: ["text": text], warnings: warnings)
-    }
-
     /// Map any thrown error (or generic NSError from registry rejection)
     /// to a structured failure envelope. Used by the chat / HTTP / plugin
     /// tool-call catch sites so the model gets a meaningful `kind` instead
@@ -236,15 +241,24 @@ public enum ToolEnvelope {
                 )
             case .fileNotFound(let path):
                 return failure(
-                    kind: .executionError,
-                    message: "File not found: \(path)",
+                    kind: .notFound,
+                    message:
+                        "File not found: \(path). Check the exact path with "
+                        + "`file_search(target=\"files\", pattern=\"\((path as NSString).lastPathComponent)\")` "
+                        + "or list the parent directory with `file_read` before retrying.",
+                    field: "path",
+                    expected: "path to an existing file under the working folder",
                     tool: tool,
                     retryable: false
                 )
             case .directoryNotFound(let path):
                 return failure(
-                    kind: .executionError,
-                    message: "Directory not found: \(path)",
+                    kind: .notFound,
+                    message:
+                        "Directory not found: \(path). List the parent directory with "
+                        + "`file_read` (a directory path returns a listing) to find the right name before retrying.",
+                    field: "path",
+                    expected: "path to an existing directory under the working folder",
                     tool: tool,
                     retryable: false
                 )
@@ -299,6 +313,76 @@ public enum ToolEnvelope {
             }
         }
 
+        // MCP provider errors map to their honest kinds so the model can
+        // branch (retry on timeout, pivot on unavailable) instead of
+        // treating every remote failure as a generic execution error.
+        if let mcpErr = error as? MCPProviderError {
+            switch mcpErr {
+            case .timeout:
+                return failure(
+                    kind: .timeout,
+                    message: "MCP provider call timed out.",
+                    tool: tool,
+                    retryable: true
+                )
+            case .notConnected, .providerDisabled, .providerNotFound, .invalidURL:
+                return failure(
+                    kind: .unavailable,
+                    message: mcpErr.localizedDescription
+                        + " — the MCP provider is not reachable right now.",
+                    tool: tool,
+                    retryable: false
+                )
+            case .connectionFailed(let detail):
+                return failure(
+                    kind: .unavailable,
+                    message: "MCP provider connection failed: \(detail)",
+                    tool: tool,
+                    retryable: true
+                )
+            case .toolExecutionFailed(let detail):
+                return failure(
+                    kind: .executionError,
+                    message: detail,
+                    tool: tool
+                )
+            }
+        }
+
+        // Sandbox runtime errors: the idle-ceiling timeout gets its honest
+        // `timeout` kind (with wording that explains it's an inactivity
+        // kill, not a wall-clock cap), and "sandbox not ready" states map
+        // to `unavailable` so the model retries instead of pivoting.
+        // Intel: no container sandbox (INC-containers), so no SandboxError.
+        #if os(macOS) && !OSAURUS_INTEL
+            if let sandboxErr = error as? SandboxError {
+                switch sandboxErr {
+                case .timeout:
+                    return failure(
+                        kind: .timeout,
+                        message:
+                            "Command killed by the idle timeout: it produced no output for the configured ceiling. Re-run with a longer `timeout`, or restructure it to emit progress output.",
+                        tool: tool,
+                        retryable: true
+                    )
+                case .unavailable, .containerNotRunning:
+                    return failure(
+                        kind: .unavailable,
+                        message: sandboxErr.localizedDescription
+                            + " — wait a moment and retry, or check the Sandbox settings panel.",
+                        tool: tool,
+                        retryable: true
+                    )
+                default:
+                    return failure(
+                        kind: .executionError,
+                        message: sandboxErr.localizedDescription,
+                        tool: tool
+                    )
+                }
+            }
+        #endif
+
         // Registry permission errors carry their reason in NSError.localizedDescription
         // and a stable code in the `ToolRegistry` NSError domain.
         let nserr = error as NSError
@@ -319,11 +403,18 @@ public enum ToolEnvelope {
                     retryable: false
                 )
             case 7:  // missing system permissions
+                var metadata: [String: Any] = [:]
+                if let permission = nserr.userInfo[ToolRegistry.missingPermissionUserInfoKey] as? String {
+                    metadata["permission"] = permission
+                    metadata["system_settings_url"] =
+                        (nserr.userInfo[ToolRegistry.missingPermissionSettingsURLUserInfoKey] as? String) ?? ""
+                }
                 return failure(
-                    kind: .unavailable,
+                    kind: .permissionDenied,
                     message: nserr.localizedDescription,
                     tool: tool,
-                    retryable: false
+                    retryable: false,
+                    metadata: metadata.isEmpty ? nil : metadata
                 )
             default:
                 break
@@ -359,9 +450,10 @@ public enum ToolEnvelope {
         guard let start = result.firstIndex(where: { !$0.isWhitespace }) else {
             return ""
         }
-        let end = result.index(start, offsetBy: sniffWindow, limitedBy: result.endIndex)
+        let end =
+            result.index(start, offsetBy: sniffWindow, limitedBy: result.endIndex)
             ?? result.endIndex
-        return result[start..<end]
+        return result[start ..< end]
     }
 
     public static func isError(_ result: String) -> Bool {
@@ -397,6 +489,30 @@ public enum ToolEnvelope {
     /// opaque text.
     public static func successPayload(_ result: String) -> Any? {
         guard isSuccess(result),
+            let data = result.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return dict["result"]
+    }
+
+    /// The `warnings` array of a success envelope (empty when absent or
+    /// unparseable). Lets a re-labelling bridge carry model-facing notes
+    /// (relaxed-match quotes, dry-run PREVIEW ONLY) across tool names.
+    public static func warnings(_ result: String) -> [String] {
+        guard isSuccess(result),
+            let data = result.data(using: .utf8),
+            let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return [] }
+        return dict["warnings"] as? [String] ?? []
+    }
+
+    /// Extract a structured `result` payload from either a success envelope
+    /// or a failure envelope that intentionally carries partial/aggregate
+    /// result metadata. Unlike `successPayload`, this does not change the
+    /// caller's success classification; it only preserves useful child rows
+    /// for evaluation and UI surfaces when an aggregate operation fails.
+    public static func resultPayload(_ result: String) -> Any? {
+        guard (isSuccess(result) || isError(result)),
             let data = result.data(using: .utf8),
             let dict = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else { return nil }

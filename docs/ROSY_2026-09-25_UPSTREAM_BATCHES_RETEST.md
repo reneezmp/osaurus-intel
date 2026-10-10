@@ -1530,3 +1530,14 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
 - [ ] A failing command (`ls /nope`) shows its error output in the same
       pane.
 
+## Tool execution boundary (2026-10-10)
+
+- [ ] Ask an agent to run a command with huge output (e.g. `yes | head -c
+      2000000`): the tool card shows the output truncated with a note, and
+      the chat keeps working (no context-overflow error).
+- [ ] Ask an agent to edit a file: the edit applies as before, and deleting
+      text by replacing it with nothing still works.
+- [ ] Ask for something that makes a tool hang (e.g. an MCP tool that
+      never answers): after about 2 minutes the card says it timed out,
+      and the agent carries on.
+

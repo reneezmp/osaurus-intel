@@ -155,10 +155,18 @@ struct SchemaValidatorCoercionTests {
     }
 
     @Test func booleanAcceptsStringVocabulary() {
-        for s in ["true", "false", "TRUE", "False", "1", "0", "yes", "no", "YES"] {
+        for s in ["true", "false", "TRUE", "False", "1", "0", "yes", "no", "YES", " false "] {
             let r = SchemaValidator.validate(arguments: ["b": s], against: boolSchema)
             #expect(r.isValid, "expected `\(s)` to coerce to bool; got: \(r.errorMessage ?? "?")")
         }
+    }
+
+    @Test func booleanWhitespaceStringCoercesToNativeBool() throws {
+        let coerced = try #require(
+            SchemaValidator.coerceArguments(["b": " false "], against: boolSchema) as? [String: Any]
+        )
+        #expect(coerced["b"] as? Bool == false)
+        #expect(SchemaValidator.validate(arguments: coerced, against: boolSchema).isValid)
     }
 
     @Test func booleanRejectsArbitraryString() {
@@ -186,7 +194,7 @@ struct SchemaValidatorCoercionTests {
     }
 
     @Test func arrayAcceptsJSONEncodedString() {
-        // The screenshot bug: `sandbox_pip_install` got
+        // The screenshot bug: `sandbox_install` got
         // `"packages": "[\"matplotlib\", \"numpy\"]"`.
         let r = SchemaValidator.validate(
             arguments: ["xs": "[\"matplotlib\", \"numpy\"]"],
@@ -319,6 +327,17 @@ struct SchemaValidatorCoercionTests {
         #expect((coerced?["path"] as? String) == "report.pdf")
     }
 
+    @Test func preservedEmptyOptionalStringIsKept() throws {
+        // `file_edit` `new_string: ""` is the delete form, not filler (#3031).
+        let coerced =
+            SchemaValidator.coerceArguments(
+                ["path": "report.pdf", "description": ""],
+                against: optionalStringSchema,
+                preservingEmpty: ["description"]
+            ) as? [String: Any]
+        #expect((coerced?["description"] as? String) == "")
+    }
+
     @Test func whitespaceOnlyOptionalStringIsDropped() throws {
         let coerced =
             SchemaValidator.coerceArguments(
@@ -407,6 +426,34 @@ struct SchemaValidatorCoercionTests {
         let r = SchemaValidator.validate(arguments: coerced, against: enumSchema)
         #expect(!r.isValid)
         #expect(r.field == "scope")
+    }
+
+    @Test func nullableEnumAcceptsRequiredNull() {
+        let schema: JSONValue = .object([
+            "type": .string("object"),
+            "properties": .object([
+                "query": .object([
+                    "type": .array([.string("string"), .string("null")]),
+                    "enum": .array([.string("prefix cache"), .string("tool usage"), .null]),
+                ]),
+                "verbose": .object(["type": .string("boolean")]),
+            ]),
+            "required": .array([.string("query"), .string("verbose")]),
+            "additionalProperties": .bool(false),
+        ])
+
+        let nativeNull = SchemaValidator.validate(
+            arguments: ["query": NSNull(), "verbose": true],
+            against: schema
+        )
+        #expect(nativeNull.isValid, "got: \(nativeNull.errorMessage ?? "?")")
+
+        let coerced = SchemaValidator.coerceArguments(
+            ["query": "null", "verbose": true],
+            against: schema
+        )
+        let stringNull = SchemaValidator.validate(arguments: coerced, against: schema)
+        #expect(stringNull.isValid, "got: \(stringNull.errorMessage ?? "?")")
     }
 
     // MARK: - Nested `properties:` wrapper rescue
@@ -502,5 +549,124 @@ struct SchemaValidatorCoercionTests {
         let coerced = SchemaValidator.coerceArguments(raw, against: schema) as? [String: Any]
         let nested = try #require(coerced?["properties"] as? [String: Any])
         #expect((nested["nested"] as? String) == "value")
+    }
+
+    // MARK: - Key-spelling rescue (case / snake-camel drift)
+
+    /// `file_search`-shaped schema: the live failure was gemma-4-12B emitting
+    /// `{"Pattern": "…", "target": "content"}` and spiralling on the resulting
+    /// "Missing required property: pattern" for 18 identical calls.
+    private let fileSearchLikeSchema: JSONValue = .object([
+        "type": .string("object"),
+        "additionalProperties": .bool(false),
+        "properties": .object([
+            "pattern": .object(["type": .string("string")]),
+            "target": .object([
+                "type": .string("string"),
+                "enum": .array([.string("content"), .string("files")]),
+            ]),
+            "file_pattern": .object(["type": .string("string")]),
+        ]),
+        "required": .array([.string("pattern")]),
+    ])
+
+    @Test func renamesCaseDriftedKeyToDeclaredSpelling() throws {
+        let coerced =
+            SchemaValidator.coerceArguments(
+                ["Pattern": "magic-token", "target": "content"],
+                against: fileSearchLikeSchema
+            ) as? [String: Any]
+        #expect((coerced?["pattern"] as? String) == "magic-token")
+        #expect(coerced?["Pattern"] == nil)
+        let r = SchemaValidator.validate(arguments: coerced as Any, against: fileSearchLikeSchema)
+        #expect(r.isValid, "got: \(r.errorMessage ?? "?")")
+    }
+
+    @Test func renamesSnakeCaseDriftToCamelDeclared() throws {
+        // render_chart-shaped: `chart_type` → declared `chartType`.
+        let coerced =
+            SchemaValidator.coerceArguments(
+                [
+                    "data": "x,y\n1,2\n",
+                    "chart_type": "bar",
+                    "series": ["y"],
+                ],
+                against: renderChartLikeSchema
+            ) as? [String: Any]
+        #expect((coerced?["chartType"] as? String) == "bar")
+        #expect(coerced?["chart_type"] == nil)
+    }
+
+    @Test func renamedKeyValueStillGetsTypeCoercion() throws {
+        // The renamed key's value must flow through the normal per-property
+        // coercion (here: stringified array → native array).
+        let coerced =
+            SchemaValidator.coerceArguments(
+                [
+                    "data": "x,y\n1,2\n",
+                    "ChartType": "bar",
+                    "Series": "[\"y\"]",
+                ],
+                against: renderChartLikeSchema
+            ) as? [String: Any]
+        #expect((coerced?["chartType"] as? String) == "bar")
+        #expect((coerced?["series"] as? [String]) == ["y"])
+    }
+
+    @Test func verbatimKeyWinsOverSpellingDrift() throws {
+        // Double-emit: `pattern` AND `Pattern` both present. The verbatim
+        // key keeps its value; the stray key is left for the validator's
+        // unknown-key report rather than silently merged.
+        let coerced =
+            SchemaValidator.coerceArguments(
+                ["pattern": "keep-me", "Pattern": "not-me"],
+                against: fileSearchLikeSchema
+            ) as? [String: Any]
+        #expect((coerced?["pattern"] as? String) == "keep-me")
+        #expect((coerced?["Pattern"] as? String) == "not-me")
+    }
+
+    @Test func ambiguousDeclaredFoldIsNeverRenamed() throws {
+        // Two declared keys that fold identically (`filePattern` +
+        // `file_pattern`) make the fold ambiguous — a drifted key must NOT
+        // be guessed into either one.
+        let schema: JSONValue = .object([
+            "type": .string("object"),
+            "properties": .object([
+                "filePattern": .object(["type": .string("string")]),
+                "file_pattern": .object(["type": .string("string")]),
+            ]),
+        ])
+        let coerced =
+            SchemaValidator.coerceArguments(
+                ["FILEPATTERN": "*.swift"],
+                against: schema
+            ) as? [String: Any]
+        #expect((coerced?["FILEPATTERN"] as? String) == "*.swift")
+        #expect(coerced?["filePattern"] == nil)
+        #expect(coerced?["file_pattern"] == nil)
+    }
+
+    @Test func unrelatedKeysAreLeftAlone() throws {
+        let coerced =
+            SchemaValidator.coerceArguments(
+                ["pattern": "x", "bogus_key": "y"],
+                against: fileSearchLikeSchema
+            ) as? [String: Any]
+        #expect((coerced?["bogus_key"] as? String) == "y")
+    }
+
+    @Test func missingRequiredNamesNearMissKeyWhenCoercionBypassed() {
+        // Validation without coercion (defence in depth): the error must
+        // name the drifted key so the model can correct its next call
+        // instead of re-sending identical arguments.
+        let r = SchemaValidator.validate(
+            arguments: ["Pattern": "magic-token"],
+            against: fileSearchLikeSchema
+        )
+        #expect(!r.isValid)
+        #expect(r.field == "pattern")
+        #expect(r.errorMessage?.contains("you sent `Pattern`") == true)
+        #expect(r.errorMessage?.contains("use `pattern`") == true)
     }
 }

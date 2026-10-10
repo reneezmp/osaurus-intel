@@ -7,6 +7,15 @@
 
 import Foundation
 
+/// Whether a tool body can be owned by a spawned run that must abort and
+/// drain every child operation before returning. The default is deliberately
+/// unsupported: cancelling a Swift `Task` does not terminate synchronous work
+/// or an external process unless the concrete tool cooperates.
+enum SpawnedOperationCancellationSupport: Sendable, Equatable {
+    case unsupported
+    case cooperative
+}
+
 protocol OsaurusTool: Sendable {
     /// Unique tool name exposed to the model
     var name: String { get }
@@ -14,6 +23,20 @@ protocol OsaurusTool: Sendable {
     var description: String { get }
     /// JSON schema for function parameters (OpenAI-compatible minimal subset)
     var parameters: JSONValue? { get }
+
+    /// Authored order for `parameters.properties` on the provider wire.
+    /// Canonical encoding sorts keys alphabetically; schema-constrained
+    /// decoders (xAI, JSON-schema grammars) only let the model emit optional
+    /// keys in declared order, so a pair like `old_string`/`new_string`
+    /// must be declared in the order a model naturally writes it. Keys not
+    /// listed keep their sorted position after the listed ones. Default nil
+    /// (alphabetical). See `ToolWirePropertyOrder`.
+    var parameterOrder: [String]? { get }
+
+    /// Optional string arguments where `""` is meaningful (`new_string: ""`
+    /// deletes the match). Schema coercion otherwise drops empty optional
+    /// strings as placeholders. Default empty.
+    var preservedEmptyStringArguments: Set<String> { get }
 
     /// Execute the tool with arguments provided as a JSON string.
     ///
@@ -28,6 +51,21 @@ protocol OsaurusTool: Sendable {
     /// retryable: false)` so resources are released promptly.
     func execute(argumentsJSON: String) async throws -> String
 
+    /// Classify one concrete invocation for spawned-run ownership. A tool may
+    /// opt in only when every path selected by these arguments observes task
+    /// cancellation (or forwards it to a hard-abort owner) and does not return
+    /// until that work has terminated.
+    func spawnedOperationCancellationSupport(
+        argumentsJSON: String
+    ) -> SpawnedOperationCancellationSupport
+
+    /// Whether this tool has at least one invocation shape that can satisfy
+    /// `spawnedOperationCancellationSupport`. Spawned children only receive
+    /// schemas for tools that opt in here; the argument-aware check above
+    /// remains the final gate for tools whose safe support is narrower than
+    /// their ordinary chat schema.
+    var canExposeToSpawnedOperation: Bool { get }
+
     /// When `true`, the registry skips its own wall-clock race and
     /// dispatches the body straight through. Streaming-aware tools
     /// (`sandbox_exec`, `shell_run`) opt in here because they have no
@@ -41,7 +79,6 @@ protocol OsaurusTool: Sendable {
     /// the agent's sandbox workspace (agent home / `/workspace/shared`).
     /// The registry wraps such calls in a `FileChangeJournal` capture so
     /// every change lands in the chat's file history. Default `false`.
-    /// Intel: no sandbox, so no tool sets it; kept for the journal's API.
     var mutatesSandboxWorkspace: Bool { get }
 
     /// When `true`, executing this tool can create/edit/delete files in the
@@ -57,29 +94,64 @@ protocol OsaurusTool: Sendable {
     /// before/after scan. Directories expand to their subtree.
     func declaredMutationTargets(argumentsJSON: String) -> [String]?
 
+    /// Extra guidance appended to a schema rejection for `property` (an
+    /// unexpected or invalid key), e.g. where a misplaced key belongs.
+    /// Nil for no advice.
+    func argumentHint(_ property: String) -> String?
+
     /// Best-effort precise targets for an opaque tool, used only when the
     /// tree is too large to scan (e.g. the paths of a simple `rm`/`mv`).
     /// `nil` when the call can't be parsed faithfully.
     func fallbackMutationTargets(argumentsJSON: String) -> [String]?
+
+    /// Optional, tool-owned repair for a narrowly documented model-output
+    /// shape before the shared schema validator runs. The default is identity;
+    /// tools must not use this to weaken their schema generally.
+    func normalizeArgumentsBeforeValidation(_ argumentsJSON: String) -> String
 }
 
 extension OsaurusTool {
+    /// Unknown/plugin/MCP operations are not assumed abortable from their
+    /// names. Concrete tools opt in after their cancellation path is audited.
+    func spawnedOperationCancellationSupport(
+        argumentsJSON _: String
+    ) -> SpawnedOperationCancellationSupport {
+        .unsupported
+    }
+
+    /// Unknown/plugin/MCP tools stay out of spawned-worker schemas until
+    /// their concrete cancellation owner has been audited.
+    var canExposeToSpawnedOperation: Bool { false }
+
     /// Default: every tool gets the registry's wall-clock safety net.
     /// Streaming tools (`sandbox_exec`, `shell_run`) override to `true`.
     var bypassRegistryTimeout: Bool { false }
 
-    /// Default: tools do not mutate the sandbox workspace.
+    /// Default: alphabetical wire order (no authored order).
+    var parameterOrder: [String]? { nil }
+
+    /// Default: every empty optional string is a droppable placeholder.
+    var preservedEmptyStringArguments: Set<String> { [] }
+
+    /// Default: tools do not mutate the sandbox workspace. Sandbox
+    /// write/exec/install/plugin tools override to `true`.
     var mutatesSandboxWorkspace: Bool { false }
 
     /// Default: tools do not mutate the selected host folder. Folder
-    /// write/edit/copy/shell tools override to `true`.
+    /// write/edit/shell/undo tools override to `true`.
     var mutatesHostFolder: Bool { false }
 
     /// Default: opaque — the journal scans the root before and after.
     func declaredMutationTargets(argumentsJSON: String) -> [String]? { nil }
 
-    /// Default: no fallback; an over-budget root stays untracked.
+    func argumentHint(_ property: String) -> String? { nil }
+
     func fallbackMutationTargets(argumentsJSON: String) -> [String]? { nil }
+
+    /// Default: preserve the model/client payload byte-for-byte.
+    func normalizeArgumentsBeforeValidation(_ argumentsJSON: String) -> String {
+        argumentsJSON
+    }
 
     /// Build OpenAI-compatible Tool specification
     func asOpenAITool() -> Tool {
@@ -225,6 +297,39 @@ extension OsaurusTool {
         return .value(s)
     }
 
+    /// Require an `action` enum argument and validate it against `allowed`.
+    /// Returns the normalized (lower-cased) action or a typed failure that
+    /// names the allowed set so the model can self-correct. The backbone of
+    /// action-fanning tools like `osaurus_config` and `osaurus_help`, where
+    /// one tool fans out across several verbs.
+    func requireAction(
+        _ args: [String: Any],
+        allowed: [String]
+    ) -> ArgumentRequirement<String> {
+        let list = allowed.joined(separator: ", ")
+        guard let raw = args["action"] else {
+            return .failure(missingArg("action", expected: "one of: \(list)", tool: name))
+        }
+        guard let s = raw as? String else {
+            return .failure(
+                wrongType("action", expected: "one of: \(list)", gotType: "a JSON string", raw: raw, tool: name)
+            )
+        }
+        let normalized = s.lowercased()
+        guard allowed.contains(normalized) else {
+            return .failure(
+                ToolEnvelope.failure(
+                    kind: .invalidArgs,
+                    message: "`action` must be one of: \(list). Got `\(s)`.",
+                    field: "action",
+                    expected: "one of: \(list)",
+                    tool: name
+                )
+            )
+        }
+        return .value(normalized)
+    }
+
     // MARK: - Failure helpers (private)
 
     private func missingArg(_ key: String, expected: String, tool: String?) -> String {
@@ -339,7 +444,7 @@ public enum ArgumentCoercion {
     public static func bool(_ value: Any?) -> Bool? {
         if let b = value as? Bool { return b }
         if let s = value as? String {
-            switch s.lowercased() {
+            switch s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "true", "1", "yes": return true
             case "false", "0", "no": return false
             default: return nil

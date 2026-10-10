@@ -2968,3 +2968,49 @@ upstream's verbatim. The `#if !OSAURUS_INTEL` gates around the terminal in
 `NativeToolCallGroupView` are gone, and upstream's
 `TerminalDisplayViewTests` run again. Upstream's subagent activity feed in
 the same card (`SubagentFeedRegistry`) stays out (`W-subagents`).
+
+### Tool execution boundary (`W-agent-loop-tools`) — 2026-10-10
+
+Intel's `ToolRegistry.execute` (in `IntelStubConformers`) ran a tool and
+returned whatever came back: no argument checks, no timeout, no output cap.
+It now goes through upstream's boundary, copied verbatim into
+`Tools/IntelToolRegistryBoundary.swift` (upstream's `ToolRegistry.swift` is
+excluded on Intel; keep the two in step):
+
+1. **Preflight.** The tool's `normalizeArgumentsBeforeValidation`, then
+   `SchemaValidator` coercion and validation. `SchemaValidator.swift` is no
+   longer excluded and is upstream's current version. Invalid arguments
+   return an `invalid_args` envelope with the tool's `argumentHint`.
+   `preservedEmptyStringArguments` keeps `file_edit`'s `new_string: ""` (the
+   #3048 trap). The cloud engine asks `preflightRejection` before the
+   approval card, so a call that cannot run is never put in front of you
+   (upstream validates before its permission gate). Difference: the card
+   shows the original arguments, not the coerced ones.
+2. **Timeout.** Each body races a 120 s wall clock (`runToolBody`, GCD
+   timer, 5 s grace for late writes inside the file-history capture).
+   Tools with `bypassRegistryTimeout` (`shell_run`, the orchestrator tool)
+   run untimed. A timeout returns a retryable `timeout` envelope.
+3. **Normalization.** Lossless `ToolOutputCompressor` (JSON whitespace,
+   trailing spaces). Plain text is wrapped in a success envelope. The
+   universal 100,000-byte cap truncates head and tail with a recovery hint.
+   **Intel had no cap at all before**, so one huge shell or MCP result went
+   to the model whole.
+
+Also from upstream: `OsaurusTool.swift` (protocol hooks: `parameterOrder`,
+`preservedEmptyStringArguments`, `argumentHint`,
+`normalizeArgumentsBeforeValidation`), and `ToolWirePropertyOrder`, which
+the registry records and the cloud engine applies to the encoded body
+before Router signing. `file_edit` sends `old_string` before `new_string`
+to constrained decoders (xAI, JSON-schema grammars). `file_write` and
+`file_edit` got upstream's orders, and `file_edit` its operation-key hints.
+Intel's order omits `edits` (no batch edits yet, `W-doc-editing`).
+`ToolEnvelope.swift` is upstream's: missing files and folders are
+`not_found` with recovery hints, and MCP errors map to `timeout` /
+`unavailable` / `execution_error`. Its sandbox mapping is gated
+(`INC-containers`).
+
+Tests: upstream's `SchemaCoercionTests`, the three `SchemaValidator*` suites,
+`PreflightTestHelper`, `ToolRegistryTimeoutTests`, `ToolOutputCompressorTests`,
+`ToolResultNormalizationTests` (minus three sandbox-error cases),
+`ToolWirePropertyOrderTests` (Intel's `file_edit` order) and
+`ToolEnvelopeTests`.

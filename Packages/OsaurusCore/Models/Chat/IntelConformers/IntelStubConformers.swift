@@ -1267,6 +1267,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// Register (or overwrite) a tool by name. Used by FolderToolManager.
     func register(_ tool: OsaurusTool) {
         toolsByName[tool.name] = tool
+        ToolWirePropertyOrder.register(toolName: tool.name, order: tool.parameterOrder)
         objectWillChange.send()
         NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
@@ -1414,6 +1415,42 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 tool: name
             )
         }
+        // Upstream's registry boundary (IntelToolRegistryBoundary.swift):
+        // tool-owned shape repair, then schema coercion + validation. An
+        // invalid call returns its `invalid_args` envelope without running
+        // (the cloud engine also checks this before the approval card).
+        let effectiveArgumentsJSON: String
+        switch Self.preflight(
+            argumentsJSON: tool.normalizeArgumentsBeforeValidation(argumentsJSON),
+            schema: tool.parameters,
+            toolName: name,
+            hint: tool.argumentHint,
+            preservingEmpty: tool.preservedEmptyStringArguments
+        ) {
+        case .rejected(let envelopeJSON):
+            return envelopeJSON
+        case .ready(let checked):
+            effectiveArgumentsJSON = checked
+        }
+        // Every result is normalized (lossless compression, envelope, the
+        // universal byte cap) and every body runs under the 120 s wall-clock
+        // race unless the tool streams and opts out (upstream).
+        let runBody: () async throws -> String = {
+            if tool.bypassRegistryTimeout {
+                return Self.normalizeToolResult(
+                    try await Self.runToolBodyUntimed(tool, argumentsJSON: effectiveArgumentsJSON),
+                    tool: name
+                )
+            }
+            return Self.normalizeToolResult(
+                try await Self.runToolBody(
+                    tool,
+                    argumentsJSON: effectiveArgumentsJSON,
+                    timeoutSeconds: Self.defaultToolTimeoutSeconds
+                ),
+                tool: name
+            )
+        }
         // File history (upstream #2907 part A, docs/FILE_HISTORY_INTEL.md):
         // wrap mutating calls in a journal capture so every file the call
         // creates, edits, or deletes lands in the owning chat's history (and
@@ -1432,13 +1469,31 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             )
             return try await FileChangeCapture.run(
                 tool: tool,
-                argumentsJSON: argumentsJSON,
+                argumentsJSON: effectiveArgumentsJSON,
                 context: context
             ) {
-                try await tool.execute(argumentsJSON: argumentsJSON)
+                try await runBody()
             }
         }
-        return try await tool.execute(argumentsJSON: argumentsJSON)
+        return try await runBody()
+    }
+
+    /// The `invalid_args` envelope `execute` would return for these
+    /// arguments, or nil when they pass. The cloud engine calls it before the
+    /// approval card so nobody is asked to approve a call that cannot run
+    /// (upstream runs preflight before its permission gate).
+    func preflightRejection(name: String, argumentsJSON: String) -> String? {
+        guard let tool = toolsByName[name] else { return nil }
+        if case .rejected(let envelopeJSON) = Self.preflight(
+            argumentsJSON: tool.normalizeArgumentsBeforeValidation(argumentsJSON),
+            schema: tool.parameters,
+            toolName: name,
+            hint: tool.argumentHint,
+            preservingEmpty: tool.preservedEmptyStringArguments
+        ) {
+            return envelopeJSON
+        }
+        return nil
     }
 
     /// True for `PerCallApprovalTool`s: every call needs its own approval.

@@ -93,6 +93,28 @@ struct ToolEnvelopeTests {
         #expect(result?["text"] as? String == "./\n├── a\n└── b")
     }
 
+    @Test func successDoesNotEscapeSlashesInToolReplayJSON() throws {
+        let text = "     1| #!/usr/bin/env python3\n"
+        let json = ToolEnvelope.success(tool: "file_read", text: text)
+
+        #expect(json.contains(#"\/"#) == false)
+        #expect(json.contains("#!/usr/bin/env python3"))
+        let payload = try #require(ToolEnvelope.successPayload(json) as? [String: Any])
+        #expect(payload["text"] as? String == text)
+    }
+
+    @Test func failureDoesNotEscapeSlashesInToolReplayJSON() throws {
+        let json = ToolEnvelope.failure(
+            kind: .executionError,
+            message: "File not found: /Users/eric/Desktop/testmandel/mandelbrot.py",
+            tool: "file_read"
+        )
+
+        #expect(json.contains(#"\/"#) == false)
+        #expect(json.contains("/Users/eric/Desktop/testmandel/mandelbrot.py"))
+        #expect(ToolEnvelope.failureMessage(json) == "File not found: /Users/eric/Desktop/testmandel/mandelbrot.py")
+    }
+
     // MARK: - Detection
 
     @Test func isErrorDetectsNewShape() {
@@ -196,7 +218,10 @@ struct ToolEnvelopeTests {
             tool: "file_read"
         )
         let dict = try parse(env)
-        #expect(dict["kind"] as? String == "execution_error")
+        // Distinct `not_found` kind so the harness can classify the result
+        // as a not-found transition (steer to the last listing) instead of a
+        // generic execution error.
+        #expect(dict["kind"] as? String == "not_found")
         #expect(dict["retryable"] as? Bool == false)
     }
 

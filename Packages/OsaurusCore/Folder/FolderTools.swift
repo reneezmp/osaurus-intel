@@ -2236,6 +2236,7 @@ struct FileWriteTool: OsaurusTool, PermissionedTool {
     var requirements: [String] { [] }
     var defaultPermissionPolicy: ToolPermissionPolicy { .auto }
     var mutatesHostFolder: Bool { true }
+    var parameterOrder: [String]? { ["path", "content", "mode", "dry_run"] }
 
     func declaredMutationTargets(argumentsJSON: String) -> [String]? {
         FileChangeCapture.declaredPaths(argumentsJSON, keys: ["path"])
@@ -2515,6 +2516,38 @@ struct FileEditTool: OsaurusTool, PermissionedTool {
     var requirements: [String] { [] }
     var defaultPermissionPolicy: ToolPermissionPolicy { .auto }
     var mutatesHostFolder: Bool { true }
+    /// `old_string` must precede `new_string` on the wire — see
+    /// `ToolWirePropertyOrder` for the constrained-decoder evidence.
+    /// (Upstream lists `edits` too; Intel's `file_edit` has no batch edits yet.)
+    var parameterOrder: [String]? {
+        ["path", "old_string", "new_string", "replace_all", "operations", "dry_run"]
+    }
+    var preservedEmptyStringArguments: Set<String> { ["new_string"] }
+
+    /// Keys models put at the top level that belong inside an `operations`
+    /// entry, with the operation they usually mean. Guidance only (upstream).
+    static let operationKeyHints: [String: String] = [
+        "sheet": "{\"op\": \"set_cells\", \"sheet\": \"Q3\", \"cells\": {\"B2\": 42}}",
+        "cells": "{\"op\": \"set_cells\", \"cells\": {\"B2\": 42}}",
+        "slide": "{\"op\": \"replace_text\", \"slide\": 3, \"old_string\": \"old\", \"new_string\": \"new\"}",
+        "shape": "{\"op\": \"set_slide_text\", \"slide\": 2, \"shape\": \"title\", \"text\": \"…\"}",
+        "page": "{\"op\": \"add_note\", \"page\": 1, \"text\": \"…\"}",
+        "pages": "{\"op\": \"delete_pages\", \"pages\": [3]}",
+        "op": "{\"op\": \"replace_text\", \"old_string\": \"old\", \"new_string\": \"new\"}",
+        "text": "{\"op\": \"insert_paragraph\", \"text\": \"…\", \"after\": 3}",
+        "markdown": "{\"op\": \"append_markdown\", \"markdown\": \"…\"}",
+        "fields": "{\"op\": \"fill_form\", \"fields\": {\"Name\": \"…\"}}",
+        "order": "{\"op\": \"reorder_slides\", \"order\": [2, 1, 3]}",
+    ]
+
+    func argumentHint(_ property: String) -> String? {
+        guard let example = Self.operationKeyHints[property] else { return nil }
+        var hint = "`\(property)` belongs inside an `operations` entry: {\"path\": \"…\", \"operations\": [\(example)]}."
+        if property == "slide" || property == "sheet" || property == "page" {
+            hint += " A plain text swap needs no `\(property)`: top-level `old_string`/`new_string` searches the whole document."
+        }
+        return hint
+    }
 
     func declaredMutationTargets(argumentsJSON: String) -> [String]? {
         FileChangeCapture.declaredPaths(argumentsJSON, keys: ["path"])

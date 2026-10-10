@@ -70,13 +70,34 @@ public struct SchemaValidator {
         _ obj: [String: Any],
         schemaObject: [String: JSONValue]
     ) -> ValidationResult {
+        let properties = propertiesMap(schemaObject)
         for key in requiredKeys(schemaObject) {
-            if obj[key] == nil || obj[key] is NSNull {
+            let propertySchema: [String: JSONValue]? = {
+                if case .object(let prop)? = properties[key] { return prop }
+                return nil
+            }()
+            if obj[key] == nil || (obj[key] is NSNull && propertySchema.map(permitsNull) != true) {
+                // Near-miss diagnosis: quantized local models routinely emit
+                // the right key in the wrong spelling (`Pattern`, `chart_type`).
+                // `coerceArguments` rescues the unambiguous cases before
+                // validation; when a mismatch still reaches here (coercion
+                // bypassed, or the fold was ambiguous), name the offending key
+                // so the model can fix its next call instead of re-sending the
+                // same arguments against a "Missing required property" it
+                // believes it satisfied (observed live: an 18-call retry
+                // spiral on `file_search {"Pattern": …}`).
+                if let nearMiss = obj.keys.first(where: {
+                    properties[$0] == nil && foldKey($0) == foldKey(key)
+                }) {
+                    return .fail(
+                        "Missing required property: \(key) (you sent `\(nearMiss)` — "
+                            + "JSON keys are exact; use `\(key)`)",
+                        field: key
+                    )
+                }
                 return .fail("Missing required property: \(key)", field: key)
             }
         }
-
-        let properties = propertiesMap(schemaObject)
 
         // `additionalProperties: false` rejects keys not declared in
         // `properties`. JSON Schema's default is to allow extras, and we
@@ -86,6 +107,35 @@ public struct SchemaValidator {
             for key in obj.keys where properties[key] == nil {
                 let allowed = properties.keys.sorted().joined(separator: ", ")
                 return .fail("Unexpected property `\(key)`. Allowed: \(allowed)", field: key)
+            }
+        }
+
+        // Object-level `anyOf` / `oneOf` of `required` branches: the
+        // standard way to express "at least one of these key groups must
+        // be present" (e.g. share_artifact's path-XOR-content). Only
+        // presence is checked here — branches carrying their own
+        // `properties` constraints are out of scope (per-property
+        // validation below covers the declared property schemas).
+        if case .array(let branches)? = schemaObject["anyOf"] ?? schemaObject["oneOf"] {
+            let requiredGroups: [[String]] = branches.compactMap { branch in
+                guard case .object(let branchObj) = branch else { return nil }
+                let keys = requiredKeys(branchObj)
+                return keys.isEmpty ? nil : keys
+            }
+            if !requiredGroups.isEmpty {
+                let satisfied = requiredGroups.contains { group in
+                    group.allSatisfy { obj[$0] != nil && !(obj[$0] is NSNull) }
+                }
+                if !satisfied {
+                    let alternatives =
+                        requiredGroups
+                        .map { "`" + $0.joined(separator: "` + `") + "`" }
+                        .joined(separator: " OR ")
+                    return .fail(
+                        "Arguments must include \(alternatives).",
+                        field: requiredGroups.first?.first
+                    )
+                }
             }
         }
 
@@ -99,10 +149,24 @@ public struct SchemaValidator {
                 let nested = value as? [String: Any]
             {
                 let inner = validateObject(nested, schemaObject: propSchemaObj)
-                if !inner.isValid { return inner }
+                if !inner.isValid { return prefixingPath(inner, parent: key) }
             }
         }
         return .ok()
+    }
+
+    /// Re-anchor a nested failure at its parent path so the model can find
+    /// the offending value — `intents[2]: Property 'kind' must be one of ...`
+    /// instead of a bare `kind` complaint that is unactionable in a batch.
+    private static func prefixingPath(
+        _ result: ValidationResult,
+        parent: String
+    ) -> ValidationResult {
+        guard !result.isValid else { return result }
+        let field = result.field.map { "\(parent).\($0)" } ?? parent
+        let message = result.errorMessage.map { "\(parent): \($0)" }
+            ?? "Invalid value at \(parent)."
+        return .fail(message, field: field)
     }
 
     // MARK: - Value validation (single value against its schema)
@@ -116,6 +180,11 @@ public struct SchemaValidator {
         schemaObject: [String: JSONValue],
         key: String?
     ) -> ValidationResult {
+        if value is NSNull {
+            guard permitsNull(schemaObject) else { return typeMismatch("non-null", key: key) }
+            return enumCheck(value: value, schemaObject: schemaObject, key: key)
+        }
+
         // First-match dispatch on combinators. We match OpenAI's
         // observed JSON-Schema usage: `oneOf` and `anyOf` are common
         // tool-arg patterns; `allOf` is rare. We treat `oneOf` and
@@ -157,6 +226,25 @@ public struct SchemaValidator {
         // `maxLength`. Pattern compilation failures are tolerated — a
         // bad regex in the schema shouldn't break the tool call.
         if let s = value as? String {
+            let length = s.unicodeScalars.count
+            if case .number(let min)? = schemaObject["minLength"],
+                length < Int(min)
+            {
+                let label = key.map { " '\($0)'" } ?? ""
+                return .fail(
+                    "Property\(label) must contain at least \(Int(min)) characters (got \(length)).",
+                    field: key
+                )
+            }
+            if case .number(let max)? = schemaObject["maxLength"],
+                length > Int(max)
+            {
+                let label = key.map { " '\($0)'" } ?? ""
+                return .fail(
+                    "Property\(label) must contain at most \(Int(max)) characters (got \(length)).",
+                    field: key
+                )
+            }
             if case .string(let pat)? = schemaObject["pattern"] {
                 if let regex = try? NSRegularExpression(pattern: pat),
                     regex.firstMatch(
@@ -209,7 +297,7 @@ public struct SchemaValidator {
                     let nested = element as? [String: Any]
                 {
                     let inner = validateObject(nested, schemaObject: itemsSchema)
-                    if !inner.isValid { return inner }
+                    if !inner.isValid { return prefixingPath(inner, parent: elementKey) }
                 }
             }
         }
@@ -259,7 +347,71 @@ public struct SchemaValidator {
             return .ok()
         }
         let label = key.map { " '\($0)'" } ?? ""
-        return .fail("Property\(label) must be one of: \(allowed)", field: key)
+        return .fail(
+            "Property\(label) must be one of: \(enumValueList(allowed)). "
+                + "Got \(enumValueDescription(value))\(enumWrappingHint(value: value, allowed: allowed))",
+            field: key
+        )
+    }
+
+    /// Render the allowed enum values as a comma-separated list of bare
+    /// values (`"enabled", "disabled"`), never as a Swift/JSON array literal.
+    /// Observed live: `must be one of: ["enabled"]` read as "send the JSON
+    /// array `["enabled"]`", and the model did exactly that — the rendered
+    /// list was byte-identical to the rejected value, so the error was
+    /// uncorrectable from the model's side.
+    private static func enumValueList(_ allowed: [Any]) -> String {
+        allowed.map(enumValueDescription).joined(separator: ", ")
+    }
+
+    /// Quote strings the way a model would type them; leave numbers/bools
+    /// bare; JSON-encode containers compactly.
+    private static func enumValueDescription(_ value: Any) -> String {
+        if let s = value as? String {
+            let escaped =
+                s
+                .replacingOccurrences(of: "\\", with: "\\\\")
+                .replacingOccurrences(of: "\"", with: "\\\"")
+            return "\"\(escaped)\""
+        }
+        if value is NSNull { return "null" }
+        if let n = value as? NSNumber, isObjCBool(n) {
+            return n.boolValue ? "true" : "false"
+        }
+        if JSONSerialization.isValidJSONObject(value),
+            let data = try? JSONSerialization.data(withJSONObject: value, options: [.sortedKeys]),
+            let text = String(data: data, encoding: .utf8)
+        {
+            return text
+        }
+        return String(describing: value)
+    }
+
+    /// When the rejected value is an allowed value wrapped in an array —
+    /// either a real JSON array or a stringified one such as
+    /// `"[\"enabled\"]"` — name the fix explicitly. Without this the
+    /// received value and the allowed list look identical to the model.
+    private static func enumWrappingHint(value: Any, allowed: [Any]) -> String {
+        var wrapped: [Any]? = nil
+        if let arr = value as? [Any] {
+            wrapped = arr
+        } else if let s = value as? String {
+            let trimmed = s.trimmingCharacters(in: .whitespacesAndNewlines)
+            if trimmed.hasPrefix("["), let data = trimmed.data(using: .utf8),
+                let arr = try? JSONSerialization.jsonObject(with: data) as? [Any]
+            {
+                wrapped = arr
+            }
+        }
+        guard let wrapped, !wrapped.isEmpty,
+            wrapped.allSatisfy({ element in
+                allowed.contains(where: { equalJSONValues($0, element) })
+            })
+        else { return "." }
+        if value is String {
+            return " — pass the bare string value, not a JSON array."
+        }
+        return " — pass the bare value, not an array."
     }
 
     /// Format a "Property [name] must be a[n] [type]" failure with the
@@ -311,7 +463,7 @@ public struct SchemaValidator {
     private static func isBoolLike(_ value: Any) -> Bool {
         if let n = value as? NSNumber, isObjCBool(n) { return true }
         if let s = value as? String {
-            switch s.lowercased() {
+            switch s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() {
             case "true", "false", "1", "0", "yes", "no": return true
             default: return false
             }
@@ -348,6 +500,7 @@ public struct SchemaValidator {
 
     private static func equalJSONValues(_ a: Any, _ b: Any) -> Bool {
         switch (a, b) {
+        case (_ as NSNull, _ as NSNull): return true
         case (let x as String, let y as String): return x == y
         case (let x as Bool, let y as Bool): return x == y
         case (let x as Int, let y as Int): return x == y
@@ -384,8 +537,20 @@ public struct SchemaValidator {
     /// and idempotent: passing already-coerced arguments is a no-op.
     /// Schemas without enough type information (no `type`, untyped
     /// `oneOf` / `anyOf`) fall through unchanged.
-    public static func coerceArguments(_ arguments: Any, against schema: JSONValue) -> Any {
+    /// `preservingEmpty` names top-level properties where an empty string is
+    /// meaningful (`new_string: ""` deletes the match), so the empty-optional
+    /// drop leaves them alone.
+    public static func coerceArguments(
+        _ arguments: Any,
+        against schema: JSONValue,
+        preservingEmpty: Set<String> = []
+    ) -> Any {
         guard case .object(let schemaObj) = schema else { return arguments }
+        if !preservingEmpty.isEmpty, case .string("object")? = schemaObj["type"],
+            let dict = arguments as? [String: Any]
+        {
+            return coerceObject(dict, schemaObject: schemaObj, preservingEmpty: preservingEmpty)
+        }
         return coerceValue(arguments, schemaObject: schemaObj)
     }
 
@@ -402,6 +567,13 @@ public struct SchemaValidator {
         _ value: Any,
         schemaObject: [String: JSONValue]
     ) -> Any {
+        if let s = value as? String,
+            s.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() == "null",
+            permitsNull(schemaObject)
+        {
+            return NSNull()
+        }
+
         let typeName: String? = {
             if case .string(let t)? = schemaObject["type"] { return t }
             return nil
@@ -458,16 +630,90 @@ public struct SchemaValidator {
 
     private static func coerceObject(
         _ obj: [String: Any],
-        schemaObject: [String: JSONValue]
+        schemaObject: [String: JSONValue],
+        preservingEmpty: Set<String> = []
     ) -> [String: Any] {
         guard case .object(let propsDict)? = schemaObject["properties"] else { return obj }
-        var out = unwrapPropertiesWrapper(in: obj, propsDict: propsDict)
-        out = dropEmptyOptionalStrings(in: out, propsDict: propsDict, required: requiredKeys(schemaObject))
+        var out = unwrapSchemaBodyWrapper(in: obj, key: "properties", propsDict: propsDict)
+        // Some local models copy the conventional function-call envelope
+        // (`{"tool": ..., "arguments": {...}}`) one level too deep and
+        // send that inner `arguments` object as the tool's entire payload.
+        // The live Bonsai chart route emitted the nested object as a JSON
+        // string. Rescue only when `arguments` is not a real declared field
+        // and the decoded object contains at least one declared key.
+        out = unwrapSchemaBodyWrapper(in: out, key: "arguments", propsDict: propsDict)
+        out = normalizeKeySpelling(in: out, propsDict: propsDict)
+        out = dropEmptyOptionalStrings(in: out, propsDict: propsDict, required: requiredKeys(schemaObject) + preservingEmpty)
         for (key, value) in out {
             guard case .object(let propSchema)? = propsDict[key] else { continue }
             out[key] = coerceValue(value, schemaObject: propSchema)
         }
         return out
+    }
+
+    /// Rename argument keys to their declared schema spelling when the
+    /// match is unambiguous. Quantized local models routinely emit
+    /// `{"Pattern": …}` for a schema declaring `pattern`, or
+    /// `{"chart_type": …}` for `chartType` — the value is right, only the
+    /// key spelling drifted, and the strict validator then reports
+    /// "Missing required property" for a key the model believes it sent
+    /// (observed live: an 18-call identical-retry spiral on `file_search`).
+    /// Same rescue class as `normalizeStringEnumCase` (enum VALUE case) and
+    /// `unwrapPropertiesWrapper` (schema-body confusion), extended to keys.
+    ///
+    /// A key is renamed only when ALL of:
+    ///   1. it is not itself a declared property (verbatim keys always win),
+    ///   2. exactly one declared property has the same alphanumeric fold
+    ///      (lowercased, `_`/`-` stripped — covers case drift AND
+    ///      snake/camel drift in one rule; declared keys whose folds
+    ///      collide with each other are excluded as ambiguous),
+    ///   3. the declared spelling is not already present in the arguments
+    ///      (a double-emit keeps the verbatim key; the stray one falls
+    ///      through to the validator's unknown-key / near-miss report).
+    static func normalizeKeySpelling(
+        in obj: [String: Any],
+        propsDict: [String: JSONValue]
+    ) -> [String: Any] {
+        var declaredByFold: [String: String?] = [:]  // fold → key (nil = ambiguous)
+        for declared in propsDict.keys {
+            let fold = foldKey(declared)
+            declaredByFold[fold] = declaredByFold[fold] == nil ? declared : .some(nil)
+        }
+        var out = obj
+        for key in obj.keys {
+            guard propsDict[key] == nil,
+                let foldEntry = declaredByFold[foldKey(key)],
+                let declared = foldEntry,
+                declared != key,
+                out[declared] == nil
+            else { continue }
+            out[declared] = out.removeValue(forKey: key)
+        }
+        // Synonym rescue: local models routinely emit `filename` /
+        // `file_path` for a schema declaring `path` (observed live: a
+        // sandbox_write_file rejected with "Missing required property:
+        // path", forcing a full re-stream of the file). Same guards as
+        // the fold rescue — the alias must not itself be declared, the
+        // declared key must be absent from the arguments.
+        for (declared, aliases) in Self.keySynonyms {
+            guard propsDict[declared] != nil, out[declared] == nil else { continue }
+            for alias in aliases where propsDict[alias] == nil && out[alias] != nil {
+                out[declared] = out.removeValue(forKey: alias)
+                break
+            }
+        }
+        return out
+    }
+
+    /// Declared key → alias spellings models commonly substitute for it.
+    static let keySynonyms: [String: [String]] = [
+        "path": ["filename", "file_name", "filepath", "file_path", "file"]
+    ]
+
+    /// Alphanumeric fold used for key-spelling rescue: lowercase, keep
+    /// only letters and digits (drops `_`, `-`, and other separators).
+    static func foldKey(_ key: String) -> String {
+        String(key.lowercased().unicodeScalars.filter { CharacterSet.alphanumerics.contains($0) })
     }
 
     /// Quantized models occasionally emit `{"properties": {chartType:
@@ -477,17 +723,28 @@ public struct SchemaValidator {
     /// a declared property of this schema and (b) the inner object
     /// contains at least one declared key. Outer keys win on collision
     /// so a partial double-emit doesn't get clobbered.
-    private static func unwrapPropertiesWrapper(
+    private static func unwrapSchemaBodyWrapper(
         in obj: [String: Any],
+        key: String,
         propsDict: [String: JSONValue]
     ) -> [String: Any] {
-        guard propsDict["properties"] == nil,
-            let nested = obj["properties"] as? [String: Any]
-        else { return obj }
+        guard propsDict[key] == nil, let wrapped = obj[key] else { return obj }
+        let nested: [String: Any]?
+        if let object = wrapped as? [String: Any] {
+            nested = object
+        } else if let string = wrapped as? String,
+            let data = string.data(using: .utf8),
+            let object = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        {
+            nested = object
+        } else {
+            nested = nil
+        }
+        guard let nested else { return obj }
         let declared = Set(propsDict.keys)
         guard !declared.intersection(Set(nested.keys)).isEmpty else { return obj }
         var out = obj
-        out.removeValue(forKey: "properties")
+        out.removeValue(forKey: key)
         for (key, value) in nested where out[key] == nil {
             out[key] = value
         }
@@ -564,6 +821,23 @@ public struct SchemaValidator {
     ) -> Any? {
         guard let s = value as? String, let coerced = coercer(s) else { return nil }
         return coerced
+    }
+
+    private static func permitsNull(_ schemaObject: [String: JSONValue]) -> Bool {
+        if case .bool(true)? = schemaObject["nullable"] {
+            return true
+        }
+        if case .array(let entries)? = schemaObject["type"],
+            entries.contains(.string("null"))
+        {
+            return true
+        }
+        if case .array(let entries)? = schemaObject["enum"],
+            entries.contains(.null)
+        {
+            return true
+        }
+        return false
     }
 }
 

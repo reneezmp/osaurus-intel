@@ -919,6 +919,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: body, options: .osaurusCanonical)
+        // Authored tool property order (upstream `ToolWirePropertyOrder`,
+        // applied by RemoteProviderService right before send): constrained
+        // decoders can only emit keys in declared order, so `file_edit`'s
+        // `old_string` must precede `new_string`. Before any Router signing.
+        urlRequest.httpBody = urlRequest.httpBody.map { ToolWirePropertyOrder.apply(to: $0) }
                         // Osaurus Router: EIP-191 wallet-sign the request body.
                         if endpoint.isOsaurusRouter {
                             try await OsaurusRouterAuthSigner().sign(
@@ -1025,7 +1030,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
-                                let policy = ToolRegistry.shared.effectivePolicy(
+                                // Upstream checks arguments before its permission gate: a call
+                                // that cannot run is never put in front of the user. Treated
+                                // as Auto here; `execute` returns the `invalid_args` envelope.
+                                let preflightRejected = await ToolRegistry.shared.preflightRejection(
+                                    name: call.name, argumentsJSON: call.arguments) != nil
+                                let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
                                     for: call.name, argumentsJSON: call.arguments)
                                 let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                                 let approved: Bool
@@ -1274,7 +1284,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Enforce the user's per-tool permission policy
                             // (Tools / Permissions tab). Deny blocks the tool;
                             // Ask shows a confirmation before running; Auto runs.
-                            let policy = ToolRegistry.shared.effectivePolicy(
+                            // Upstream checks arguments before its permission gate (see
+                            // the batch path above).
+                            let preflightRejected = await ToolRegistry.shared.preflightRejection(
+                                name: call.name, argumentsJSON: call.arguments) != nil
+                            let policy = preflightRejected ? .auto : ToolRegistry.shared.effectivePolicy(
                                 for: call.name, argumentsJSON: call.arguments)
                             let ownsApproval = ToolRegistry.shared.handlesOwnApproval(for: call.name)
                             let approved: Bool
@@ -1466,6 +1480,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // contract (JSONDeterminism.swift). (Renée, 2026-06-13 — 11M cache miss.)
         urlRequest.httpBody = try JSONSerialization.data(
             withJSONObject: body, options: .osaurusCanonical)
+        // Authored tool property order (upstream `ToolWirePropertyOrder`,
+        // applied by RemoteProviderService right before send): constrained
+        // decoders can only emit keys in declared order, so `file_edit`'s
+        // `old_string` must precede `new_string`. Before any Router signing.
+        urlRequest.httpBody = urlRequest.httpBody.map { ToolWirePropertyOrder.apply(to: $0) }
         // Osaurus Router: EIP-191 wallet-sign the request body.
         if endpoint.isOsaurusRouter {
             try await OsaurusRouterAuthSigner().sign(request: &urlRequest, body: urlRequest.httpBody)
