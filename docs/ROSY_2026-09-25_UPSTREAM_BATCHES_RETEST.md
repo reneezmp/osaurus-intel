@@ -1504,3 +1504,14 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
 - [ ] A plugin README with an image shows the image. Hovering shows a
       download button.
 
+## Shortcuts and Siri (2026-10-10)
+
+- [ ] Open the Shortcuts app and search "Osaurus": "Ask Osaurus" and
+      "Run Osaurus Agent" are listed (after Osaurus has been opened once).
+- [ ] Run "Ask Osaurus" with a short question: the answer appears in
+      Shortcuts, and a chat with that exchange shows up in Osaurus.
+- [ ] Run "Run Osaurus Agent", pick one of your agents, add some input:
+      Shortcuts says "Started …", and Osaurus shows a toast when the agent
+      finishes.
+- [ ] (If you use Siri on that Mac) "Ask Osaurus" starts the shortcut.
+

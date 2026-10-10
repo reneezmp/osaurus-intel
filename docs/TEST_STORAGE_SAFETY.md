@@ -183,6 +183,8 @@ After the run:
   - `~/.osaurus/memory/memory.sqlite` at 09:33:45 (tests ran
     09:36:37–09:37:13), a checkpoint of the database the upstream app holds
     open.
+  - `~/.osaurus/knowledge/knowledge.sqlite` and its `-wal` at 09:50:44
+    (tests ran 09:53:14–09:53:47), the upstream app's Knowledge index.
 
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`

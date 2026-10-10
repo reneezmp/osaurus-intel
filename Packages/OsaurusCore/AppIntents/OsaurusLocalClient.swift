@@ -48,13 +48,15 @@ public final class OsaurusLocalClient: Sendable {
 
     // MARK: - Agent resolution
 
-    /// The currently active agent's id. "Ask Osaurus" targets whatever agent
-    /// the user has selected in the app (`AgentManager.activeAgentId`), which is
-    /// restored from persistence on launch. This may resolve to the built-in
-    /// "Osaurus" agent when that is the active one — which is why the run/dispatch
-    /// endpoints relax their built-in guard for loopback callers.
+    /// The agent a fresh "Ask Osaurus" targets: the new-chat agent
+    /// (`AgentManager.newChatAgentId` — the Orchestrator unless
+    /// `new_chat_agent` was applied), restored from persistence on launch.
+    /// Not the foreground chat's agent: a Siri/Shortcuts ask is a new
+    /// conversation, so it follows the same default as ⌘N. This commonly
+    /// resolves to the built-in "Osaurus" agent — which is why the
+    /// run/dispatch endpoints relax their built-in guard for loopback callers.
     public func activeAgentID() async -> String {
-        await MainActor.run { AgentManager.shared.activeAgentId.uuidString }
+        await MainActor.run { AgentManager.shared.newChatAgentId.uuidString }
     }
 
     // MARK: - Execution
@@ -220,6 +222,141 @@ public final class OsaurusLocalClient: Sendable {
     private struct SSEErrorEnvelope: Decodable {
         struct Detail: Decodable { let message: String? }
         let error: Detail?
+    }
+}
+#else
+
+// MARK: - Intel: in-process client (W-app-intents, 2026-10-10)
+//
+// Upstream's intents are thin HTTP clients of `/agents/{id}/run` and
+// `/agents/{id}/dispatch`. Intel's server has neither route (`W-server-api`),
+// but App Intents run inside the app process, so this client hands the same
+// requests straight to `TaskDispatcher`. That is the path the server's
+// dispatch route and plugin `dispatch` take, so behaviour matches:
+//
+//  - `runAgent` (Ask Osaurus) runs the agent's full tool loop headlessly and
+//    waits for its reply. Like upstream's loopback-trusted `/run`, it may
+//    target the built-in Default agent (`allowsBuiltInAgent`). Difference:
+//    the run is saved as a chat (source "HTTP") instead of being
+//    connection-bound.
+//  - `startAgent` (Run Agent) is fire-and-confirm, like `/dispatch`:
+//    custom agents only, and the result surfaces as a toast.
+
+import Foundation
+
+/// Errors surfaced to the App Intents layer in a user-readable form.
+public enum OsaurusLocalClientError: LocalizedError {
+    case agentNotFound
+    case emptyPrompt
+    case couldNotStart
+    case runFailed(String)
+    case cancelled
+    case emptyReply
+
+    public var errorDescription: String? {
+        switch self {
+        case .agentNotFound:
+            return "That Osaurus agent no longer exists."
+        case .emptyPrompt:
+            return "Tell Osaurus what to ask."
+        case .couldNotStart:
+            return "Osaurus couldn't start the request. Too many tasks may be running; try again shortly."
+        case .runFailed(let reason):
+            return "Osaurus couldn't finish the request: \(reason)"
+        case .cancelled:
+            return "The request was cancelled."
+        case .emptyReply:
+            return "Osaurus didn't return a response."
+        }
+    }
+}
+
+public final class OsaurusLocalClient: Sendable {
+    public static let shared = OsaurusLocalClient()
+
+    private init() {}
+
+    // MARK: - Agent resolution
+
+    /// The agent a fresh "Ask Osaurus" targets: the new-chat agent, as upstream
+    /// (a Siri/Shortcuts ask is a new conversation, like ⌘N).
+    public func activeAgentID() async -> String {
+        await MainActor.run { AgentManager.shared.newChatAgentId.uuidString }
+    }
+
+    // MARK: - Execution
+
+    /// Runs the agent on `prompt` and returns its final reply text.
+    public func runAgent(id: String, prompt: String?) async throws -> String {
+        let text = prompt?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        guard !text.isEmpty else { throw OsaurusLocalClientError.emptyPrompt }
+        let agentId = try await resolveAgent(id)
+        let request = DispatchRequest(
+            prompt: text,
+            agentId: agentId,
+            title: String(text.prefix(60)),
+            showToast: false,
+            source: .http,
+            allowsBuiltInAgent: true
+        )
+        let reply = try await Self.dispatchAndWait(request)
+        let trimmed = reply.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { throw OsaurusLocalClientError.emptyReply }
+        return trimmed
+    }
+
+    /// Fire-and-confirm: starts a background run of a custom agent and returns
+    /// once it is accepted. Progress and results surface as toasts.
+    public func startAgent(id: String, input: String?) async throws {
+        let agentId = try await resolveAgent(id)
+        // Upstream `/dispatch` needs a non-empty prompt; with no input, a
+        // minimal kickoff still starts the agent.
+        let trimmedInput = input?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+        let prompt = trimmedInput.isEmpty ? "Begin." : trimmedInput
+        let request = DispatchRequest(prompt: prompt, agentId: agentId, showToast: true, source: .http)
+        guard await TaskDispatcher.shared.dispatch(request) != nil else { throw OsaurusLocalClientError.couldNotStart }
+    }
+
+    // MARK: - Helpers
+
+    private func resolveAgent(_ id: String) async throws -> UUID {
+        guard let uuid = UUID(uuidString: id) else { throw OsaurusLocalClientError.agentNotFound }
+        let exists = await MainActor.run { AgentManager.shared.agents.contains { $0.id == uuid } }
+        guard exists else { throw OsaurusLocalClientError.agentNotFound }
+        return uuid
+    }
+
+    @MainActor
+    private static func dispatchAndWait(_ request: DispatchRequest) async throws -> String {
+        guard let handle = await TaskDispatcher.shared.dispatch(request) else {
+            throw OsaurusLocalClientError.couldNotStart
+        }
+        switch await TaskDispatcher.shared.awaitCompletion(handle) {
+        case .completed(let sessionId):
+            return finalReply(taskId: handle.id, sessionId: sessionId)
+        case .cancelled:
+            throw OsaurusLocalClientError.cancelled
+        case .failed(let reason):
+            throw OsaurusLocalClientError.runFailed(reason)
+        }
+    }
+
+    /// The last non-empty assistant message of the finished run: from the live
+    /// task while it is still registered, else from the saved chat.
+    @MainActor
+    static func finalReply(taskId: UUID, sessionId: UUID?) -> String {
+        if let turns = BackgroundTaskManager.shared.taskState(for: taskId)?.chatSession?.turns,
+            let text = turns.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.content
+        {
+            return text
+        }
+        if let sessionId,
+            let saved = ChatSessionsManager.shared.session(for: sessionId)?.turns,
+            let text = saved.last(where: { $0.role == .assistant && !$0.content.isEmpty })?.content
+        {
+            return text
+        }
+        return ""
     }
 }
 

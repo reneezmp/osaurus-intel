@@ -63,7 +63,7 @@ GATED = {
     "Views/Sandbox/ProvisioningJourneyView.swift": ("INC-containers", "I", ""),
     "Views/Sandbox/SandboxView.swift": ("INC-containers", "I", ""),
     # --- Needs work: a feature Intel lacks, not hardware-bound ---
-    "AppIntents/OsaurusLocalClient.swift": ("W-app-intents", "W", "Shortcuts / Siri"),
+    "AppIntents/OsaurusLocalClient.swift": ("W-app-intents", "C", "Intel in-process client in the #else body (no /agents routes on Intel)"),
     "Models/Plugin/ExternalPlugin.swift": ("W-plugin-reliability", "W", "upstream plugin host"),
     "Views/Plugin/PluginConfigView.swift": ("W-plugin-reliability", "W", "per-agent plugin config sections"),
     "Services/Chat/DefaultAgentSystemPromptBuilder.swift": ("W-declarative-config", "W", "Default-agent guide addendum (#2268)"),
@@ -101,9 +101,6 @@ GATED = {
     "Views/Chat/MarkdownImageView.swift": ("W-gated-sweep", "P", "ported; also the full-screen image preview"),
     "Views/Plugin/ToolSecretsSheet.swift": ("W-plugin-reliability", "P", "ported in stage 1"),
     # --- App target (App/osaurus/...) ---
-    "App/osaurus/AppIntents/AgentEntity.swift": ("W-app-intents", "W", "removed in sync row 41"),
-    "App/osaurus/AppIntents/OsaurusIntents.swift": ("W-app-intents", "W", "removed in sync row 41"),
-    "App/osaurus/AppIntents/OsaurusShortcuts.swift": ("W-app-intents", "W", "removed in sync row 41"),
 }
 
 pkg = open(PRE + "Package.swift").read()

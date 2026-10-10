@@ -889,6 +889,8 @@ these Intel-owned customizations survived:**
 | `scripts/release/cut_intel_release.sh` | `REPO="reneezmp/osaurus-intel"` | upstream repo |
 | `scripts/build/build_rosy.sh` | bakes `OsaurusCanonicalData` | — |
 | `App/osaurus/osaurusApp.swift` | `About Osaurus (Intel)` + `OsaurusBuildInfo.upstreamShortLabel`; no Discord / "Report an Issue…" in Help (2026-10-10) | `.applicationName: "Osaurus"`, `discord.gg`, `osaurus-ai/osaurus/issues/new` |
+| `App/osaurus/AppIntents/AgentEntity.swift` | `AgentManager.shared.agents` (2026-10-10) | `AgentStore.loadAll()` (not compiled on Intel) |
+| `Packages/OsaurusCore/AppIntents/OsaurusLocalClient.swift` | Intel `#else` body: in-process `TaskDispatcher` client | upstream's HTTP client only |
 | `App/osaurus/Acknowledgements.json` | generated from Intel's own `Package.resolved` (30 packages on 2026-10-10; no vMLX, Containerization, FluidAudio) — rerun `scripts/release/generate_acknowledgements.py` when dependencies change | upstream's list |
 | `Packages/OsaurusCore/Identity/MasterKey.swift` (DO NOT isolate) | `com.osaurus.account`, synchronizable — **shared identity, leave as-is** | a `.intel` variant (would fracture identity) |
 
@@ -2922,3 +2924,30 @@ doesn't compile. It cannot see three things, now covered by
 
 The gap script also caught three new upstream files: channel activity
 logging, SSD model residency and picker previews.
+
+### Shortcuts and Siri (`W-app-intents`) — 2026-10-10
+
+Upstream's App Intents are back: "Ask Osaurus" (asks the new-chat agent and
+returns its reply), "Run Osaurus Agent" (starts a custom agent in the
+background) and the two automatic App Shortcuts. `App/osaurus/AppIntents/`
+is upstream's except `AgentEntity`, which reads `AgentManager` because
+`AgentStore` isn't compiled. The built app's `Metadata.appintents` lists
+both intents and both shortcuts. They were dropped in sync row 41 (no
+`OSAURUS_INTEL` define in the App target) and never tracked.
+
+**Intel difference:** upstream's `OsaurusLocalClient` is an HTTP client of
+`/agents/{id}/run` and `/agents/{id}/dispatch`. Intel's server has neither
+route (`W-server-api`), so Intel's client (the `#else` body) hands the same
+request to `TaskDispatcher` in process. That is the path HTTP dispatch and
+plugin `dispatch` use.
+
+- "Run Agent" behaves like upstream: custom agents only, a toast when done.
+- "Ask Osaurus" runs the agent's full tool loop headlessly and returns the
+  last assistant message. It may target the built-in Default agent through
+  `DispatchRequest.allowsBuiltInAgent`, which mirrors upstream's relaxed
+  guard for loopback `/run` callers and is set by nothing else.
+- Unlike upstream's connection-bound `/run`, the ask is saved as a chat
+  (source "HTTP").
+
+Tests: `IntelAppIntentsClientTests` (only the checks before dispatch; no
+real run).

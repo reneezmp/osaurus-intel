@@ -46,6 +46,13 @@ public struct DispatchRequest: Sendable {
     /// feed straight into `SessionToolStateStore.appendLoadedTools` since
     /// the names are pre-validated.
     public let requestedToolNames: [String]
+    /// Intel: lets this dispatch target a built-in agent (the Default agent),
+    /// which background dispatch otherwise refuses. Set only by the in-process
+    /// App Intents client (`OsaurusLocalClient`), whose callers have the same
+    /// trust as upstream's loopback callers of `/agents/{id}/run`, where
+    /// upstream relaxes the same guard. Never set from HTTP, plugins,
+    /// schedules or watchers.
+    public let allowsBuiltInAgent: Bool
 
     public init(
         id: UUID = UUID(),
@@ -60,7 +67,8 @@ public struct DispatchRequest: Sendable {
         source: SessionSource = .chat,
         externalSessionKey: String? = nil,
         reattachSession: Bool = true,
-        requestedToolNames: [String] = []
+        requestedToolNames: [String] = [],
+        allowsBuiltInAgent: Bool = false
     ) {
         self.id = id
         self.prompt = prompt
@@ -75,6 +83,7 @@ public struct DispatchRequest: Sendable {
         self.externalSessionKey = externalSessionKey
         self.reattachSession = reattachSession
         self.requestedToolNames = requestedToolNames
+        self.allowsBuiltInAgent = allowsBuiltInAgent
     }
 }
 

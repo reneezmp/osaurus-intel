@@ -345,7 +345,9 @@ public final class BackgroundTaskManager: ObservableObject {
         // are only reachable from the in-app Chat (upstream
         // `BuiltInAgentGuard`). Plugins dispatch as the calling chat's agent
         // (`IntelPluginExecution`), so they get no exemption.
-        if Agent.rejectBuiltInForExternalSurface(request.agentId, source: "background/dispatchChat") != nil {
+        if !request.allowsBuiltInAgent,
+            Agent.rejectBuiltInForExternalSurface(request.agentId, source: "background/dispatchChat") != nil
+        {
             return nil
         }
         guard canDispatchNewTask(source: request.source, agentId: request.agentId) else { return nil }
