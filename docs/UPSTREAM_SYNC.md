@@ -3118,3 +3118,28 @@ Tests: `IntelAnthropicMessagesAdapterTests`, `IntelGeminiAdapterTests`, and
 `IntelCodexEngineTests` end to end through `ChatEngine` with an HTTP
 fixture (OpenAI Responses, Anthropic stream / one-shot / error event,
 Gemini). None of it has met the real APIs yet; that's Rosy's checklist.
+
+### Tool-result images (`W-agent-loop-tools`) — 2026-10-10
+
+With a vision model, `file_read` on a picture (and MCP image content) now
+reaches the model as an image, not only as text. `ChatView` sets
+`toolResultImagesEnabled` from `selectedModelSupportsImages` around the
+engine call (upstream), so `file_read` stages the image.
+`ToolResultMediaBridge` is upstream's verbatim. Intel's engine keeps its
+running conversation as wire dicts, so `IntelToolImageWire` applies
+upstream's rules there:
+
+- The tool message carries `[envelope text, image_url…]`.
+- Only the two newest tool images stay live; older ones collapse with
+  upstream's note.
+- For wires with a text-only tool role (OpenAI-compatible, Gemini), the
+  images are hoisted into one user message after the run of tool results,
+  with upstream's intro. Anthropic keeps them in `tool_result`.
+- The Responses path (Codex, OpenAI) appends a user item with
+  `input_image` parts after the round's outputs.
+
+**Intel differences:** the images last for the run. Upstream also turns
+them into turn attachments, so later turns replay them and the tool card
+shows the picture. Intel's turns keep the text envelope only. Upstream's
+`FileReadImageAndFormatContractTests` runs, minus three cases that need
+upstream-only chat machinery.

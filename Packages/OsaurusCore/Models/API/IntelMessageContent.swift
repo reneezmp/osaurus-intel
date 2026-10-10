@@ -120,3 +120,18 @@ extension MessageContentPart {
         return true
     }
 }
+
+extension ChatMessage {
+    /// Same message with its parts replaced (upstream; used by
+    /// `ToolResultMediaBridge` to attach tool-result images).
+    func replacingContentParts(_ parts: [MessageContentPart]?) -> ChatMessage {
+        ChatMessage(
+            role: role,
+            content: content,
+            tool_calls: tool_calls,
+            tool_call_id: tool_call_id,
+            reasoning_content: reasoning_content,
+            contentParts: parts
+        )
+    }
+}

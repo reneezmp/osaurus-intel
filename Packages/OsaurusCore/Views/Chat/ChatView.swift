@@ -3471,7 +3471,12 @@ final class ChatSession: ObservableObject {
                                                     // button, row spinner).
                                                     try await ChatExecutionContext.$currentAssistantTurnId
                                                         .withValue(assistantTurn.id) {
-                                                            try await engine.streamChat(request: req)
+                                                            // Upstream: `file_read` stages an image only
+                                                            // when the model can take it.
+                                                            try await ChatExecutionContext.$toolResultImagesEnabled
+                                                                .withValue(self.selectedModelSupportsImages) {
+                                                                    try await engine.streamChat(request: req)
+                                                                }
                                                         }
                                                 }
                                             }
@@ -3872,7 +3877,10 @@ final class ChatSession: ObservableObject {
                                                     // button, row spinner).
                                                     try await ChatExecutionContext.$currentAssistantTurnId
                                                         .withValue(assistantTurn.id) {
-                                                            try await engine.streamChat(request: finalReq)
+                                                            try await ChatExecutionContext.$toolResultImagesEnabled
+                                                                .withValue(self.selectedModelSupportsImages) {
+                                                                    try await engine.streamChat(request: finalReq)
+                                                                }
                                                         }
                                                 }
                                             }

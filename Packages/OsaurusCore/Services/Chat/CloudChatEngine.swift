@@ -911,7 +911,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         var body: [String: Any] = [
                             "model": endpoint.modelId,
-                            "messages": wireMessages,
+                            "messages": IntelToolImageWire.preparedForSend(
+                                wireMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire),
                             "stream": true,
                         ]
                         if let liveToolSpecs {
@@ -1078,6 +1079,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             }
 
                             var results: [IntelCodexResponsesToolResult] = []
+                            var resultImages: [Data] = []
                             var runEndedByTool = false
                             for rawCall in finalized.completion.toolCalls {
                                 try Task.checkCancellation()
@@ -1177,6 +1179,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                 )
                                 results.append(.init(callID: call.callID, output: result))
+                                if ChatExecutionContext.toolResultImagesEnabled {
+                                    resultImages += ToolResultMediaBridge.attachments(toolName: call.name, result: result)
+                                        .loadImages()
+                                }
                                 if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
                                     runEndedByTool = true
                                 }
@@ -1193,6 +1199,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             codexReplayItems.append(
                                 contentsOf: try finalized.completion.replayInputItems(toolResults: results)
                             )
+                            // Responses tool outputs are text-only: hoist the
+                            // round's tool images into one user item (upstream
+                            // `hoistingToolImagesToUserMessages`).
+                            if !resultImages.isEmpty {
+                                codexReplayItems.append([
+                                    "type": "message",
+                                    "role": "user",
+                                    "content": [["type": "input_text", "text": ToolResultMediaBridge.hoistedImageIntro]]
+                                        + resultImages.suffix(ToolResultMediaBridge.maxLiveImages).map {
+                                            ["type": "input_image", "image_url": MessageContentPart.imageDataURL($0)]
+                                        },
+                                ])
+                            }
                             continue
                         }
 
@@ -1462,11 +1481,13 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     isError: result.hasPrefix("⛔️")
                                 )
                             )
-                            wireMessages.append([
-                                "role": "tool",
-                                "tool_call_id": callId,
-                                "content": result,
-                            ])
+                            // Images a tool staged (`file_read` on a picture) ride
+                            // with its result when the model takes images (upstream
+                            // `ToolResultMediaBridge`).
+                            wireMessages.append(
+                                IntelToolImageWire.toolMessage(
+                                    callId: callId, toolName: call.name, result: result,
+                                    imagesEnabled: ChatExecutionContext.toolResultImagesEnabled))
                             if AgentLoopRunEnd.endsRun(toolName: call.name, result: result) {
                                 runEndedByTool = true
                             }

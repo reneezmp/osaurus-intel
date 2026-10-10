@@ -1575,3 +1575,9 @@ Providers). Before this build, these three could list models but not chat.
       second tool call in the same reply (e.g. "time in Tokyo and in Lima").
 - [ ] With each, a chat title appears after the first exchange.
 
+## Images from tools (2026-10-10)
+
+- [ ] With a vision model in a working-folder chat that has a picture in
+      it: "read photo.png and tell me what's in it". The agent describes the
+      picture (not only its size or name).
+
