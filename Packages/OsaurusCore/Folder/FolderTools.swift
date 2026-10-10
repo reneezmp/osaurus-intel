@@ -4692,13 +4692,12 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
         "Run a shell command in the working directory. **Reserve this for builds, tests, "
         + "git, processes, network calls, and filesystem mutations (`mv`/`cp`/`rm`/`mkdir`).** "
         + "For file IO, search, edit, write, and directory listing, prefer the dedicated "
-        + "`file_*` tools — each one's description states the `shell_run` pattern it "
-        + "replaces. This action requires approval. Long-running commands stream their "
-        + "output live to the chat — the user sees it as it happens and can press [Terminate] "
-        + "at any time. Final stdout truncated to 10,000 characters. No built-in timeout: "
-        + "pass `timeout: <seconds>` ONLY if you want a hard idle ceiling (kill the process "
-        + "if no output for N seconds). Avoid `2>/dev/null` in pipelines — pipefail is on "
-        + "and suppressing stderr will trigger an empty-output warning."
+        + "`file_*` tools. This action requires approval. Long-running commands stream their "
+        + "output live to the chat and the user can press [Terminate] at any time. Output is "
+        + "truncated to 10,000 characters (head + tail kept). No built-in timeout: pass "
+        + "`timeout: <seconds>` (1-3600) ONLY if you want a hard idle ceiling (kill the "
+        + "process if no output for N seconds). Avoid `2>/dev/null` in pipelines — pipefail "
+        + "is on and suppressing stderr will trigger an empty-output warning."
     let parameters: JSONValue? = .object([
         "type": .string("object"),
         "additionalProperties": .bool(false),
@@ -4744,9 +4743,14 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
     }
 
     func execute(argumentsJSON: String) async throws -> String {
-        let rootPath = try FolderToolHelpers.requireRoot(fixed: fixedRootPath)
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+
+        // Intel: no VM sandbox (`INC-containers`), so upstream's
+        // `sandbox_exec` bridge and VM-only `background` jobs are omitted.
+        guard let rootPath = FolderToolHelpers.resolveRoot(fixed: fixedRootPath) else {
+            return FolderToolHelpers.noActiveFolderEnvelope(tool: name)
+        }
 
         let cmdReq = requireString(
             args,
@@ -4759,7 +4763,16 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
         }
 
         // Optional idle ceiling; nil = run forever (user terminates).
-        let idleTimeout: TimeInterval? = coerceInt(args["timeout"]).map(TimeInterval.init)
+        // Clamped to 1...3600s — `0`/negative is treated as omitted (the
+        // model almost certainly meant "no timeout", and an instant-kill
+        // watchdog would terminate every command before its first byte),
+        // and anything above an hour is capped. When the model passed no
+        // timeout at all, a headless surface may supply a default via
+        // `ChatExecutionContext.defaultShellIdleTimeout` (there is no
+        // [Terminate] button on those surfaces).
+        let requestedTimeout = Self.clampIdleTimeout(coerceInt(args["timeout"]))
+        let idleTimeout: TimeInterval? =
+            requestedTimeout ?? ChatExecutionContext.defaultShellIdleTimeout
 
         // `set -o pipefail` wrapping so a real upstream pipeline
         // failure surfaces as the rightmost non-zero exit instead of
@@ -4767,9 +4780,29 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
         // identically to bash.
         let prefixedCommand = "set -o pipefail; \(command)"
 
+        // Seatbelt confinement: writes outside the selected folder (+ temp
+        // dirs) are kernel-denied and inherited by every child process.
+        // Fail closed — never run the shell unconfined.
+        let invocation: (executableURL: URL, arguments: [String])
+        do {
+            invocation = try ShellSandboxProfile.wrappedInvocation(
+                executable: "/bin/zsh",
+                arguments: ["-c", prefixedCommand],
+                writableRoot: rootPath
+            )
+        } catch {
+            return ToolEnvelope.failure(
+                kind: .unavailable,
+                message: "Cannot confine `shell_run` to the working folder: "
+                    + error.localizedDescription,
+                tool: name,
+                retryable: false
+            )
+        }
+
         let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/bin/zsh")
-        process.arguments = ["-c", prefixedCommand]
+        process.executableURL = invocation.executableURL
+        process.arguments = invocation.arguments
         process.currentDirectoryURL = rootPath
         process.environment = await Self.resolvedChildEnvironment(inherited: ProcessInfo.processInfo.environment)
 
@@ -4827,6 +4860,9 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
 
         // Idle-timeout watchdog. Only runs when `idleTimeout` is set;
         // resets implicitly on every chunk via `collector.lastActivity`.
+        // A watchdog kill is flagged on the collector so the result
+        // envelope can say WHY output stopped (`killed_by: idle_timeout`)
+        // instead of looking like a spontaneous non-zero exit.
         let idleWatcher: Task<Void, Never>?
         if let idleTimeout {
             idleWatcher = Task.detached { @Sendable in
@@ -4836,6 +4872,7 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
                     if Task.isCancelled { return }
                     let last = collector.lastActivity
                     if Date().timeIntervalSince(last) >= idleTimeout {
+                        collector.markIdleKilled()
                         await processBox.terminate()
                         return
                     }
@@ -4884,21 +4921,46 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
             "stdout": truncateOutput(trimmedStdout),
             "stderr": truncateOutput(trimmedStderr),
             "exit_code": Int(exitCode),
+            "working_directory": rootPath.standardizedFileURL.path,
         ]
         if sink.terminationReason == .user {
             payload["killed_by"] = "user"
+        } else if collector.wasIdleKilled, let idleTimeout {
+            payload["killed_by"] = "idle_timeout"
+            payload["idle_timeout_seconds"] = Int(idleTimeout)
         }
-        let warnings = diagnosticWarnings(
+        var warnings = diagnosticWarnings(
             command: command,
             exitCode: exitCode,
             stdout: trimmedStdout,
-            stderr: trimmedStderr
+            stderr: trimmedStderr,
+            workingDirectory: rootPath.standardizedFileURL.path
         )
+        if payload["killed_by"] as? String == "idle_timeout", let idleTimeout {
+            warnings.append(
+                "Process was killed by the idle-timeout watchdog: no output for \(Int(idleTimeout))s. "
+                    + "The command did not finish on its own — the output above is incomplete."
+            )
+        }
+
+        if let setId = ChatExecutionContext.currentChangeSetId {
+            payload["operation_id"] = setId.uuidString
+        }
+
         return ToolEnvelope.success(
             tool: name,
-            result: FolderToolHelpers.withOperationId(payload),
+            result: payload,
             warnings: warnings.isEmpty ? nil : warnings
         )
+    }
+
+    /// Clamp the model-supplied idle timeout to 1...3600 seconds. `nil`,
+    /// zero, and negative all mean "omitted" — zero/negative would
+    /// otherwise arm a watchdog that kills the process before it can emit
+    /// a single byte.
+    static func clampIdleTimeout(_ raw: Int?) -> TimeInterval? {
+        guard let raw, raw > 0 else { return nil }
+        return TimeInterval(min(raw, 3600))
     }
 
     /// Install a `readabilityHandler` that streams every chunk into
@@ -4929,11 +4991,15 @@ struct ShellRunTool: OsaurusTool, PermissionedTool {
         }
     }
 
-    private func truncateOutput(_ output: String, maxLength: Int = 10000) -> String {
-        if output.count > maxLength {
-            return String(output.prefix(maxLength)) + "\n... (truncated)"
-        }
-        return output
+    /// Tail-biased like `sandbox_exec`: for build/test output the failure
+    /// summary the model needs lives at the end.
+    private func truncateOutput(_ output: String) -> String {
+        HeadTailTruncation.apply(
+            output,
+            cap: ToolOutputCaps.shellOutput,
+            headFraction: 0.4,
+            hint: "pipe through `grep`/`tail` or redirect to a file and use file_read to see the rest"
+        )
     }
 }
 
@@ -4953,9 +5019,21 @@ final class ShellRunOutputCollector: @unchecked Sendable {
     private var stdoutBuf = Data()
     private var stderrBuf = Data()
     private var _lastActivity = Date()
+    private var _idleKilled = false
 
     var lastActivity: Date {
         lock.withLock { _lastActivity }
+    }
+
+    /// True when the idle-timeout watchdog terminated the process. Set by
+    /// the watchdog task BEFORE it sends the terminate, read after exit to
+    /// stamp `killed_by: "idle_timeout"` on the result envelope.
+    var wasIdleKilled: Bool {
+        lock.withLock { _idleKilled }
+    }
+
+    func markIdleKilled() {
+        lock.withLock { _idleKilled = true }
     }
 
     func append(_ chunk: Data, isStderr: Bool) {
@@ -5192,9 +5270,11 @@ struct GitCommitTool: OsaurusTool, PermissionedTool {
     }
 
     func execute(argumentsJSON: String) async throws -> String {
-        let rootPath = try FolderToolHelpers.requireRoot(fixed: fixedRootPath)
         let argsReq = requireArgumentsDictionary(argumentsJSON, tool: name)
         guard case .value(let args) = argsReq else { return argsReq.failureEnvelope ?? "" }
+        guard let rootPath = FolderToolHelpers.resolveRoot(fixed: fixedRootPath) else {
+            return FolderToolHelpers.noActiveFolderEnvelope(tool: name)
+        }
 
         let messageReq = requireString(
             args,
@@ -5218,10 +5298,13 @@ struct GitCommitTool: OsaurusTool, PermissionedTool {
         }
 
         // Stage files
+        // Intel keeps `--` (4a315acd2): a staged path starting with `-` is
+        // never read as a git option. Upstream passes the paths bare.
         let stageArgs = (files != nil && !files!.isEmpty) ? ["add", "--"] + files! : ["add", "-A"]
         let (stageOutput, stageExitCode) = try await FolderToolHelpers.runGitCommand(
             arguments: stageArgs,
-            in: rootPath
+            in: rootPath,
+            confineWritesToDirectory: true
         )
 
         if stageExitCode != 0 {
@@ -5231,7 +5314,8 @@ struct GitCommitTool: OsaurusTool, PermissionedTool {
         // Commit
         let (commitOutput, commitExitCode) = try await FolderToolHelpers.runGitCommand(
             arguments: ["commit", "-m", message],
-            in: rootPath
+            in: rootPath,
+            confineWritesToDirectory: true
         )
 
         if commitExitCode != 0 {

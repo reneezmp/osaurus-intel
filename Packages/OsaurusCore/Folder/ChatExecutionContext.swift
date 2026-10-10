@@ -123,11 +123,19 @@ public enum ChatExecutionContext {
     /// chat binds it around `engine.streamChat` since 2026-10-10.
     @TaskLocal public static var toolResultImagesEnabled: Bool = false
 
-    /// Intel: the surface can split an ungrounded final answer from its
-    /// corrected retry (upstream's `prepareGroundedClaimRetry` /
-    /// `assistantVisibleText` hooks, which only chat supplies). The cloud
-    /// engine runs the grounded-claim checks only when this is bound.
-    @TaskLocal public static var groundedClaimChecksEnabled: Bool = false
+    /// Intel: the run comes from the chat window, which supplies what
+    /// upstream wires through chat-only `AgentLoopHooks`. The cloud engine
+    /// then runs the grounded-claim checks (the chat splits an ungrounded
+    /// answer from its corrected retry) and trims history to the model's
+    /// window every round. Other callers (HTTP API, schedules) are unchanged.
+    @TaskLocal public static var interactiveChatRun: Bool = false
+
+    /// Default idle-timeout (seconds) for `shell_run`, applied ONLY when the
+    /// model passed no `timeout` argument. Bound by headless drivers
+    /// (`AgentLoopEvaluator`) where no user [Terminate] button exists, so a
+    /// hung command can't wedge a run forever. `nil` on the chat / HTTP /
+    /// plugin surfaces, preserving run-to-completion semantics there.
+    @TaskLocal public static var defaultShellIdleTimeout: TimeInterval?
 
     /// Upstream's combined sandbox + host-read mode scope; non-nil turns on
     /// the secret-file refusal in `FolderToolHelpers`. Intel has no sandbox

@@ -3493,7 +3493,7 @@ final class ChatSession: ObservableObject {
                                                             // when the model can take it.
                                                             try await ChatExecutionContext.$toolResultImagesEnabled
                                                                 .withValue(self.selectedModelSupportsImages) {
-                                                                    try await ChatExecutionContext.$groundedClaimChecksEnabled
+                                                                    try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
                                                                             try await engine.streamChat(request: req)
                                                                         }
@@ -3900,7 +3900,7 @@ final class ChatSession: ObservableObject {
                                                         .withValue(assistantTurn.id) {
                                                             try await ChatExecutionContext.$toolResultImagesEnabled
                                                                 .withValue(self.selectedModelSupportsImages) {
-                                                                    try await ChatExecutionContext.$groundedClaimChecksEnabled
+                                                                    try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
                                                                             try await engine.streamChat(request: finalReq)
                                                                         }

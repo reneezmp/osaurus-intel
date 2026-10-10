@@ -371,6 +371,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return held
     }
 
+    /// Upstream `AgentToolLoop.contextNearLimitNotice(spawnAvailable: false)`:
+    /// Intel has no spawn tool yet (`W-subagents`).
+    static let contextNearLimitNotice =
+        "[System Notice] Context is nearly full — older messages are being compacted. "
+        + "Wrap up the current work and provide a summary."
+
+    /// Wire-token estimate of the offered tool schema (upstream reserves it
+    /// out of the history budget).
+    static func estimatedToolSpecTokens(_ specs: [[String: Any]]?) -> Int {
+        guard let specs, !specs.isEmpty,
+            let data = try? JSONSerialization.data(withJSONObject: specs)
+        else { return 0 }
+        return TokenEstimator.estimate(String(decoding: data, as: UTF8.self))
+    }
+
     /// Upstream `stageBiasNotice`: the next-step bias rides first.
     static func stageBiasNotice(_ bias: String, into notices: inout [String]) {
         let notice = "[System Notice] " + bias
@@ -961,15 +976,30 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // next request only.
                     let taskState = AgentTaskState()
                     var pendingHarnessNotices: [String] = []
-                    // Upstream's grounded-claim checks, for surfaces that can
-                    // split a corrected answer into its own turn (chat).
-                    let groundedChecksEnabled = ChatExecutionContext.groundedClaimChecksEnabled
+                    // Chat runs get what upstream wires through chat-only
+                    // loop hooks: the grounded-claim checks (the chat splits a
+                    // corrected answer into its own turn) and the history trim.
+                    let interactiveChatRun = ChatExecutionContext.interactiveChatRun
                     var grounded = IntelGroundedClaimGuard()
                     // Upstream scopes the config check to runs offering
                     // `osaurus_config`; read live, as `capabilities` loads tools.
                     func configToolOffered() -> Bool {
                         activeTools?.contains { $0.function.name == GroundedConfigClaimCheck.configToolName } == true
                     }
+                    // Upstream's per-iteration history trim (chat runs): once
+                    // the conversation outgrows the model's window, old tool
+                    // results are summarized and the oldest middle messages
+                    // dropped, stickily (`CompactionWatermark`). Window: the
+                    // model catalog, else Settings' Context Length, else
+                    // upstream's 128k fallback.
+                    let trimWindow: Int? =
+                        interactiveChatRun
+                        ? await MainActor.run {
+                            IntelContextBudget.resolveWindow(modelId: resolvedModel)?.tokens
+                        } ?? IntelWireHistoryTrim.fallbackContextWindow
+                        : nil
+                    let compactionWatermark = CompactionWatermark()
+                    var tokenBudgetNoticeFired = false
                     var codexReplayItems: [[String: Any]] = []
                     let maxToolRounds = 12
                     var round = 0
@@ -979,12 +1009,35 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         try Task.checkCancellation()
                         round += 1
 
+                        // Trim first, then the transient notices (upstream's
+                        // order): compaction decisions stay notice-independent.
+                        var sendMessages = wireMessages
+                        if let trimWindow {
+                            let manager = IntelWireHistoryTrim.makeBudgetManager(
+                                contextWindow: trimWindow,
+                                systemPromptChars: (wireMessages.first?["role"] as? String == "system")
+                                    ? ((wireMessages.first?["content"] as? String)?.count ?? 0) : 0,
+                                toolTokens: Self.estimatedToolSpecTokens(liveToolSpecs),
+                                maxResponseTokens: request.max_tokens)
+                            sendMessages = IntelWireHistoryTrim.trim(
+                                wireMessages, manager: manager, watermark: compactionWatermark)
+                            // Upstream's mid-run near-limit notice, once per run.
+                            if !tokenBudgetNoticeFired,
+                                sendMessages.last?["role"] as? String == "tool",
+                                manager.historyBudget > 0,
+                                IntelWireHistoryTrim.historyTokens(sendMessages)
+                                    >= Int(Double(manager.historyBudget) * 0.9)
+                            {
+                                tokenBudgetNoticeFired = true
+                                pendingHarnessNotices.insert(Self.contextNearLimitNotice, at: 0)
+                            }
+                        }
                         var body: [String: Any] = [
                             "model": endpoint.modelId,
                             "messages": Self.appendingTransientNotices(
                                 pendingHarnessNotices,
                                 to: IntelToolImageWire.preparedForSend(
-                                    wireMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire)),
+                                    sendMessages, keepsImagesInToolResults: endpoint.usesAnthropicWire)),
                             "stream": true,
                         ]
                         let roundNotices = pendingHarnessNotices
@@ -1159,7 +1212,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.yield(emission)
                             }
                             if finalized.completion.toolCalls.isEmpty {
-                                if groundedChecksEnabled,
+                                if interactiveChatRun,
                                     let notice = grounded.finalAnswerNotice(
                                         visibleText: roundVisibleText(), configToolOffered: configToolOffered())
                                 {
@@ -1309,7 +1362,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             if let bias = taskState.nextStepBias() {
                                 Self.stageBiasNotice(bias, into: &pendingHarnessNotices)
                             }
-                            if groundedChecksEnabled,
+                            if interactiveChatRun,
                                 let notice = grounded.toolTurnNotice(narration: roundVisibleText()),
                                 !pendingHarnessNotices.contains(notice)
                             {
@@ -1457,7 +1510,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // grounded stays visible, never enters the next
                             // request, and is regenerated once with the
                             // factual notice (bounded per run).
-                            if groundedChecksEnabled,
+                            if interactiveChatRun,
                                 let notice = grounded.finalAnswerNotice(
                                     visibleText: assistantContent, configToolOffered: configToolOffered())
                             {
@@ -1636,7 +1689,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         // Upstream's file side-effect advisory: narration
                         // claiming a write this round's calls never made.
-                        if groundedChecksEnabled,
+                        if interactiveChatRun,
                             let notice = grounded.toolTurnNotice(narration: assistantContent),
                             !pendingHarnessNotices.contains(notice)
                         {

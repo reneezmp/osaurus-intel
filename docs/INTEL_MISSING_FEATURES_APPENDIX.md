@@ -663,9 +663,9 @@ Generated 2026-09-29 from `upstream/main` (`3dad2dad4`) against Intel `Package.s
 - `Services/Chat/ChatEngine.swift` (excluded, 1737)
 - `Services/Chat/ChatEngineProtocol.swift` (excluded, 11)
 - `Services/Chat/ChatTitleService.swift` (absent, 183)
-- `Services/Chat/CompactionWatermark.swift` (absent, 139)
+- `Services/Chat/CompactionWatermark.swift` (absent, 139) — **ported 2026-10-10** (`W-agent-loop-tools`; this was not covered by Intel's own: on-request compaction is a different feature)
 - `Services/Chat/ComposeRequest.swift` (excluded, 81)
-- `Services/Chat/ContextBudgetManager.swift` (excluded, 931)
+- `Services/Chat/ContextBudgetManager.swift` (excluded, 931) — the manager and trim **ported 2026-10-10** as `IntelContextBudgetManager.swift`; the popover types stay Intel's
 - `Services/Chat/ContextCompactionService.swift` (absent, 551)
 - `Services/Chat/ContextSizeClass.swift` (excluded, 286)
 - `Services/Chat/PromptBuilder.swift` (excluded, 83)

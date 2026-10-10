@@ -150,7 +150,7 @@ struct IntelGroundedClaimEngineTests {
         let engine = ChatEngine(provider: provider, session: URLSession(configuration: configuration))
         let request = ChatCompletionRequest(
             model: "fixture-model", messages: [ChatMessage(role: "user", content: "Write me a report")])
-        let stream = try await ChatExecutionContext.$groundedClaimChecksEnabled.withValue(checksEnabled) {
+        let stream = try await ChatExecutionContext.$interactiveChatRun.withValue(checksEnabled) {
             try await engine.streamChat(request: request)
         }
         var deltas: [String] = []

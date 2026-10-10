@@ -3300,7 +3300,7 @@ upstream's bounds live in `Services/Chat/IntelGroundedClaimGuard.swift`.
     when true). `buildMessages` skips such turns, as upstream's
     `modelVisibleAssistantMessage` does.
 - **Scope:** only surfaces that bind
-  `ChatExecutionContext.groundedClaimChecksEnabled` run the checks; chat
+  `ChatExecutionContext.interactiveChatRun` run the checks; chat
   binds it around both `engine.streamChat` calls. Other callers (the HTTP
   API, schedules) are unaffected, as upstream leaves their hooks nil.
 - **Intel differences:**
@@ -3316,4 +3316,77 @@ are cut, with a note) and `IntelGroundedClaimGuardTests`. The latter covers
 upstream's driver scenarios against the guard, plus engine runs against an
 in-process fixture: an ungrounded final is regenerated with the notice and
 without the answer, and surfaces that don't opt in are unaffected.
+
+### `shell_run` at upstream, history trim (`W-agent-loop-tools` complete) — 2026-10-10
+
+**`shell_run` at upstream.** `ShellRunTool` and `ShellRunOutputCollector`
+are upstream's, minus two VM-only pieces (`INC-containers`): the
+`sandbox_exec` bridge and `background` jobs. Changes on Intel:
+
+- **Seatbelt confinement.** Writes outside the selected folder and the temp
+  folders are denied by the kernel, for every child process. If
+  `sandbox-exec` is missing, the call fails closed.
+  - `git_commit` is confined the same way.
+  - Intel keeps `git add --`.
+- **Timeout.** `timeout` is clamped to 1–3600 s; 0 or a negative value means
+  none. `ChatExecutionContext.defaultShellIdleTimeout` exists for headless
+  drivers (none on Intel).
+- **Idle kill is reported:** `killed_by: idle_timeout` plus a warning.
+- **Results** carry `working_directory`.
+- **Output** keeps head + tail: 10k characters, 40% head.
+- **Diagnostics.** Upstream's warnings now run: empty piped output, SIGPIPE,
+  inline-code / heredoc / quote / install-failure hints, and a leading
+  `cd` out of the folder. They are copied verbatim into
+  `Tools/IntelShellDiagnostics.swift`, because `BuiltinSandboxTools` is VM
+  code. Intel's old `diagnosticWarnings` stub returned nothing.
+
+**History trim.** Intel never trimmed history; long chats grew until the
+provider refused them. Chat runs now get upstream's per-round trim:
+
+- **What it does.** Once the conversation exceeds the history budget, old
+  tool results become one-line `[Compressed: …]` summaries. If it is still
+  over, the oldest middle messages are dropped in whole assistant+tool
+  units.
+- **What is protected:** the system prompt, the first message and the
+  recent pairs. Decisions are sticky within a run (`CompactionWatermark`).
+- **The budget:**
+  - window × 0.85, minus the system prompt, the tool schema and the
+    response reservation;
+  - the window comes from the model catalog, else Settings' Context
+    Length, else upstream's 128k fallback.
+- **Near-limit notice.** At 90% of the budget with a tool result last,
+  upstream's once-per-run "Context is nearly full" notice rides along.
+- **Files:**
+  - `IntelContextBudgetManager.swift` is upstream's manager verbatim. It
+    replaces Intel's static-only class; its two Intel-only estimators
+    remain as an extension.
+  - `CompactionWatermark.swift` is verbatim.
+  - `IntelWireHistoryTrim.swift` applies the trim to the engine's wire
+    dictionaries by replaying the watermark's decisions, as upstream's
+    `render()` does, so image parts and Gemini signatures survive on kept
+    messages.
+- **Intel differences:**
+  - Only chat runs are trimmed. `interactiveChatRun`, renamed from
+    `groundedClaimChecksEnabled`, also gates the grounded checks; the HTTP
+    API and schedules are unchanged.
+  - The watermark lives per run, not per chat session.
+  - On the Responses wire (Codex, OpenAI Responses), only the history part
+    is trimmed; in-run replay items are not. Those models have 400k
+    windows.
+  - Remote models without a catalog entry use the Context Length setting
+    or 128k. Upstream reads provider metadata from its picker cache.
+
+Tests:
+
+- upstream's `HarnessStabilityFixesTests` (now complete),
+  `ShellSandboxProfileTests` and `CompactionWatermarkTests`;
+- `IntelWireHistoryTrimTests`. It checks that the adapter renders what
+  upstream's `ChatMessage` trim renders at three window sizes, that no
+  tool result is orphaned, that provider fields are kept and that
+  decisions are sticky.
+
+Upstream's Seatbelt end-to-end test tries to write a uniquely named dotfile
+in the home folder and expects the write to be denied. The file is removed
+in a `defer` either way. That is the only test write outside the temporary
+root, and no file is left behind.
 

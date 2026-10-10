@@ -1716,66 +1716,6 @@ struct PairedRelayAgent: Identifiable, Sendable {
     var providerType: String { "" }
 }
 
-final class ContextBudgetManager: @unchecked Sendable {
-    static let shared = ContextBudgetManager()
-
-    /// Cheap GPT-style estimator. Mirrors the upstream's "≈4 chars / token"
-    /// approximation that ChatView documents at L590. Off-by-a-few is fine
-    /// for the chip — it's a budget tracker, not a billing meter.
-    static func estimateTokens(for text: String) -> Int { max(1, text.count / 4) }
-
-    /// Sum the content + thinking footprint of an arbitrary turn list. The
-    /// previous Intel stub returned 0 here, which meant the FloatingInputCard
-    /// Context Budget popover only showed the typing tokens — every other
-    /// row stayed at zero. Now the popover reflects the live conversation
-    /// the way it does on Apple Silicon.
-    static func estimateTokens(for turns: [ChatTurn]) -> Int {
-        turns.reduce(0) { acc, turn in
-            acc + estimateTokens(for: turn.content) + estimateTokens(for: turn.thinking)
-        }
-    }
-
-    /// The "output" rail tracks just the active streaming turn. ChatView
-    /// uses this to peel it off the total conversation tokens so the
-    /// popover can show "Conversation" + "Output" as distinct lines.
-    static func estimateOutputTokens(for turns: [ChatTurn]) -> Int {
-        guard let last = turns.last, last.role == .assistant else { return 0 }
-        return estimateTokens(for: last.content) + estimateTokens(for: last.thinking)
-    }
-
-    /// Estimate the wire-token cost of a tool schema (name + description +
-    /// serialized JSON-Schema parameters). Shared by `composeChatContext`
-    /// (the real send) and the restored-session budget preview so both agree.
-    static func estimateToolTokens(_ tools: [IntelTool]) -> Int {
-        var total = 0
-        for t in tools {
-            total += estimateTokens(for: t.function.name)
-            total += estimateTokens(for: t.function.description ?? "")
-            if let params = t.function.parameters,
-                let data = try? JSONSerialization.data(withJSONObject: params.anyValue),
-                let json = String(data: data, encoding: .utf8)
-            {
-                total += estimateTokens(for: json)
-            }
-        }
-        return total
-    }
-
-    /// Overload for callers whose value is statically typed `Any?` — notably
-    /// `ChatView.refreshMemoryTokens()`, which calls this with
-    /// `MemoryContextAssembler.assembleContext(...)`'s return value. Swift
-    /// binds overloads by the argument's STATIC type, so with this
-    /// hard-returning `0` (as it used to), the `String` overload above was
-    /// unreachable for that value no matter what `assembleContext` returned
-    /// or how big it was: the context-budget popover's memory row was
-    /// wired to always read 0. Unwrap the concrete case that call site
-    /// actually produces and delegate to the real estimator.
-    static func estimateTokens(for item: Any?) -> Int {
-        if let text = item as? String { return estimateTokens(for: text) }
-        return 0
-    }
-}
-
 // M12 Gap 3: the real `ToolEnvelope` (Tools/ToolEnvelope.swift) + the legacy
 // `ToolErrorEnvelope` (Tools/ToolErrorEnvelope.swift) are un-excluded so the
 // restored file/shell tools return their real structured result/error JSON.
@@ -1805,11 +1745,6 @@ final class LiveExecSink: @unchecked Sendable {
     func close() throws {}
 }
 
-// M12 Gap 3: the real `diagnosticWarnings` lives in the excluded
-// `Tools/BuiltinSandboxTools.swift`. `shell_run` calls it to flag suspicious
-// empty output; on Intel we return no warnings (the command result itself is
-// unaffected).
-func diagnosticWarnings(command: String, exitCode: Int32, stdout: String, stderr: String) -> [String] { [] }
 
 final actor SessionToolStateStore {
     static let shared = SessionToolStateStore()

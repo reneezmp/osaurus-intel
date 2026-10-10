@@ -1623,3 +1623,18 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] With a folder attached, ask the same: the file is written and there is
       only one answer.
 
+## `shell_run` at upstream, history trim (2026-10-10)
+
+- [ ] With a folder attached, ask the agent to run
+      `echo hi > ~/Desktop/osaurus-test.txt`: the command fails
+      (operation not permitted) and no file appears on the Desktop. Then
+      `echo hi > notes.txt`: it works inside the folder.
+- [ ] Ask for `sleep 5; echo done` with a 2-second timeout: the result
+      says the idle-timeout watchdog killed it.
+- [ ] Ask the agent to commit a change with git: the commit still works.
+- [ ] In Settings, set Context Length to 16,000. Have an agent read five or
+      six largish files in one reply, then ask a follow-up about the first
+      one. The chat keeps working (no provider "context too long" error);
+      the agent may say it needs to re-read the file. Set Context Length
+      back afterwards.
+
