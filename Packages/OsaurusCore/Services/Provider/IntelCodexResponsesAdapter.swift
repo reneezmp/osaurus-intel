@@ -71,6 +71,12 @@ enum IntelCodexResponsesAdapter {
                 // Replaying it as ordinary text would mutate model context, so refuse it.
                 throw Error.unsupportedInput("messages[\(messageIndex)].reasoning_content; replay completed Responses output items instead")
             }
+            // A user message with images arrives as an OpenAI parts array;
+            // Responses takes it as `input_text` / `input_image` parts.
+            if role == "user", let parts = message["content"] as? [[String: Any]] {
+                input.append(["type": "message", "role": "user", "content": try inputParts(parts, messageIndex: messageIndex)])
+                continue
+            }
             let content = try stringContent(message["content"], path: "messages[\(messageIndex)].content")
 
             switch role {
@@ -248,6 +254,28 @@ enum IntelCodexResponsesAdapter {
 
     fileprivate static func validateKeys(_ value: [String: Any], allowed: Set<String>, path: String) throws {
         for key in value.keys where !allowed.contains(key) { throw Error.unsupportedInput("\(path).\(key)") }
+    }
+
+    /// OpenAI chat parts → Responses input parts (upstream
+    /// `OpenResponsesInputImagePart`: `{type: input_image, image_url}`).
+    /// Audio and video have no Responses input form here and are refused.
+    private static func inputParts(_ parts: [[String: Any]], messageIndex: Int) throws -> [[String: Any]] {
+        try parts.enumerated().map { partIndex, part in
+            let path = "messages[\(messageIndex)].content[\(partIndex)]"
+            switch part["type"] as? String {
+            case "text":
+                return ["type": "input_text", "text": (part["text"] as? String) ?? ""]
+            case "image_url":
+                guard let image = part["image_url"] as? [String: Any], let url = nonEmptyString(image["url"]) else {
+                    throw Error.invalidInput("\(path).image_url.url must be a non-empty string")
+                }
+                var item: [String: Any] = ["type": "input_image", "image_url": url]
+                if let detail = nonEmptyString(image["detail"]) { item["detail"] = detail }
+                return item
+            default:
+                throw Error.unsupportedInput("\(path) of type \((part["type"] as? String) ?? "unknown")")
+            }
+        }
     }
 
     private static func stringContent(_ value: Any?, path: String) throws -> String? {

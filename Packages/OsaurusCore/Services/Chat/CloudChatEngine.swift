@@ -189,6 +189,10 @@ func extractAPIErrorMessage(_ body: String) -> String {
             if let upstream = openRouterUpstreamMessage(err) {
                 msg = "\(msg): \(upstream)"
             }
+            // Upstream `friendlyUpstreamRejection`.
+            if msg.lowercased().contains("user message content must be a string") {
+                return "This model rejected multimodal message content. Remove the attachment and retry, or switch to a model that supports that media type."
+            }
             if let code = err["code"] as? String { return "\(msg) (code: \(code))" }
             if let code = err["code"] as? Int { return "\(msg) (code: \(code))" }
             return msg
@@ -341,9 +345,31 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// INCLUDING `tool_calls` (assistant) and `tool_call_id` (tool results) —
     /// the original Intel engine dropped both, so multi-turn tool context was
     /// lost. (M12 Gap 3.)
+    /// One OpenAI chat-completions content part as a wire dict.
+    static func wirePart(_ part: MessageContentPart) -> [String: Any] {
+        switch part {
+        case .text(let text):
+            return ["type": "text", "text": text]
+        case .imageUrl(let url, let detail):
+            var image: [String: Any] = ["url": url]
+            if let detail { image["detail"] = detail }
+            return ["type": "image_url", "image_url": image]
+        case .audioInput(let data, let format):
+            return ["type": "input_audio", "input_audio": ["data": data, "format": format]]
+        case .videoUrl(let url):
+            return ["type": "video_url", "video_url": ["url": url]]
+        }
+    }
+
     private func encodeMessage(_ msg: ChatMessage) -> [String: Any] {
         var m: [String: Any] = ["role": msg.role]
-        m["content"] = msg.content ?? ""
+        // Images (and audio / video) ride as an OpenAI parts array, as
+        // upstream's `ChatMessage` encodes them; text-only stays a string.
+        if let parts = msg.contentParts, msg.hasMediaParts {
+            m["content"] = parts.map(Self.wirePart)
+        } else {
+            m["content"] = msg.content ?? ""
+        }
         if let calls = msg.tool_calls, !calls.isEmpty {
             m["tool_calls"] = calls.map { call -> [String: Any] in
                 [
@@ -857,6 +883,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     var wireMessages = Self.sanitizeToolSequence(
                         request.messages.map { self.encodeMessage($0) }
                     )
+                    // A model that already refused images this session gets
+                    // them flattened up front (IntelImageInputFallback).
+                    if IntelImageInputFallback.isRejected(provider: endpoint.providerLabel, model: endpoint.modelId) {
+                        wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
+                    }
+                    var retriedWithoutImages = false
                     var codexReplayItems: [[String: Any]] = []
                     let maxToolRounds = 12
                     var round = 0
@@ -942,6 +974,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var errorBody = ""
                             for try await line in asyncBytes.lines { errorBody += line }
                             wireProbe.appendResponseChunk(Data(errorBody.utf8))
+                            // A text-only model refused the images: remember it,
+                            // strip them and retry this round once (upstream's
+                            // Router quarantine, #2559, for every provider).
+                            if statusCode == 400, !retriedWithoutImages,
+                                IntelImageInputFallback.containsImages(wireMessages),
+                                IntelImageInputFallback.isImageInputRejection(errorBody)
+                            {
+                                NSLog("[CloudChatEngine] \(endpoint.modelId) rejected image input; retrying without images")
+                                IntelImageInputFallback.recordRejection(
+                                    provider: endpoint.providerLabel, model: endpoint.modelId)
+                                wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
+                                retriedWithoutImages = true
+                                round -= 1
+                                continue
+                            }
                             let message = extractAPIErrorMessage(errorBody)
                             NSLog("[CloudChatEngine] HTTP \(statusCode) error body: \(message)")
                             let httpError = CloudChatError.httpError(

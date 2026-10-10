@@ -3077,10 +3077,14 @@ final class ServerController: ObservableObject, @unchecked Sendable {
 }
 
 extension ChatMessage {
+    /// Upstream: text plus images as `data:` URL parts. (Until 2026-10-10
+    /// this Intel initializer dropped the images.)
     init(role: String, text: String, imageData: [Data]) {
-        self.init(role: role, content: text.isEmpty ? nil : text)
+        self.init(role: role, text: text, imageData: imageData, audios: [], videos: [])
     }
 
+    /// Upstream's multimodal initializer: text, image, audio and video parts.
+    /// Local audio samples are an MLX-only shortcut and are ignored on Intel.
     init(
         role: String,
         text: String,
@@ -3089,7 +3093,22 @@ extension ChatMessage {
         localAudioSamples: [LocalAudioSamples?] = [],
         videos: [(data: Data, mimeSubtype: String)]
     ) {
-        self.init(role: role, content: text.isEmpty ? nil : text)
+        var parts: [MessageContentPart] = []
+        if !text.isEmpty { parts.append(.text(text)) }
+        for data in imageData {
+            parts.append(.imageUrl(url: MessageContentPart.imageDataURL(data), detail: nil))
+        }
+        for audio in audios {
+            parts.append(.audioInput(data: audio.data.base64EncodedString(), format: audio.format))
+        }
+        for video in videos {
+            parts.append(.videoUrl(url: "data:video/\(video.mimeSubtype);base64,\(video.data.base64EncodedString())"))
+        }
+        self.init(
+            role: role,
+            content: text.isEmpty ? nil : text,
+            contentParts: parts.contains(where: \.isMedia) ? parts : nil
+        )
     }
 }
 

@@ -20,14 +20,70 @@ struct ChatMessage: Codable, Sendable {
     let tool_calls: [ToolCall]?
     let tool_call_id: String?
     let reasoning_content: String?
+    /// Multimodal parts (upstream): set when the message carries images,
+    /// audio or video. `content` keeps the joined text.
+    var contentParts: [MessageContentPart]? = nil
 
     init(role: String, content: String? = nil, tool_calls: [ToolCall]? = nil,
-         tool_call_id: String? = nil, reasoning_content: String? = nil) {
+         tool_call_id: String? = nil, reasoning_content: String? = nil,
+         contentParts: [MessageContentPart]? = nil) {
         self.role = role
         self.content = content
         self.tool_calls = tool_calls
         self.tool_call_id = tool_call_id
         self.reasoning_content = reasoning_content
+        self.contentParts = contentParts
+    }
+
+    /// Image URLs carried by the parts (data: or http(s):), upstream.
+    var imageUrls: [String] {
+        (contentParts ?? []).compactMap { part in
+            if case .imageUrl(let url, _) = part { return url }
+            return nil
+        }
+    }
+
+    var hasMediaParts: Bool { contentParts?.contains(where: \.isMedia) == true }
+
+    private enum CodingKeys: String, CodingKey {
+        case role, content, tool_calls, tool_call_id, reasoning_content
+    }
+
+    /// Upstream: `content` may be a string or an OpenAI array of parts.
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        self.role = try container.decode(String.self, forKey: .role)
+        self.tool_calls = try? container.decode([ToolCall].self, forKey: .tool_calls)
+        self.tool_call_id = try? container.decode(String.self, forKey: .tool_call_id)
+        self.reasoning_content = try? container.decode(String.self, forKey: .reasoning_content)
+        if let stringContent = try? container.decode(String.self, forKey: .content) {
+            self.content = stringContent
+            self.contentParts = nil
+        } else if let parts = try? container.decode([MessageContentPart].self, forKey: .content) {
+            self.contentParts = parts
+            let texts = parts.compactMap { part -> String? in
+                if case .text(let text) = part { return text }
+                return nil
+            }
+            self.content = texts.isEmpty ? nil : texts.joined()
+        } else {
+            self.content = nil
+            self.contentParts = nil
+        }
+    }
+
+    /// Upstream: parts with media encode as an array, otherwise the string.
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(role, forKey: .role)
+        if let parts = contentParts, parts.contains(where: \.isMedia) {
+            try container.encode(parts, forKey: .content)
+        } else if let content {
+            try container.encode(content, forKey: .content)
+        }
+        try container.encodeIfPresent(tool_calls, forKey: .tool_calls)
+        try container.encodeIfPresent(tool_call_id, forKey: .tool_call_id)
+        try container.encodeIfPresent(reasoning_content, forKey: .reasoning_content)
     }
 }
 

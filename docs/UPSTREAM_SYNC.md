@@ -3033,3 +3033,41 @@ upstream's, with Intel differences:
 - **Placement:** the chip overlays the bottom of the thread instead of
   sitting in the composer stack, because Intel gives the thread an explicit
   Ventura height that an extra row would push.
+
+### Images reach cloud models — 2026-10-10
+
+**Found while porting tool-result images:** Intel never sent an image to
+any cloud model. Intel's `ChatMessage` (in `Networking/HTTPHandler.swift`)
+was text-only, and its image initializers in `IntelDataConformers` threw the
+image data away. So a picture attached in chat, pasted or dropped, reached
+no model. The local server couldn't decode an OpenAI vision request either
+(array `content`).
+
+Now, as upstream:
+
+- `ChatMessage` carries `contentParts` (upstream's `MessageContentPart`,
+  verbatim, in `Models/API/IntelMessageContent.swift`). It decodes string
+  or parts content, and encodes parts when they hold media.
+- The image initializers keep images as `data:` URLs. Intel sniffs the
+  type; upstream always says `image/png`.
+- The cloud engine sends OpenAI parts arrays.
+- The Codex translator sends `input_text` / `input_image`.
+
+**Text-only models (Intel safeguard).** Upstream treats every cloud model
+as image-capable, and for the Router only, remembers a model that rejected
+images (#2559). Intel applies that memory to every provider
+(`IntelImageInputFallback`). Existing DeepSeek chats may already contain
+image attachments that were never sent, so without it they would start
+failing. When a provider's 400 says it refused image content (upstream's
+"user message content must be a string", DeepSeek's "unknown variant
+`image_url`", or "image … not supported"):
+
+- the engine remembers that provider + model for the session;
+- it replaces each image with "[image not sent: this model does not accept
+  images]" and retries the round once;
+- later requests to that model are flattened before sending.
+
+Upstream's friendlier rejection message is in `extractAPIErrorMessage`.
+
+**Still broken (`W-provider-wire-formats`, new):** the Anthropic, Google
+Gemini and OpenAI presets use native API types the engine cannot speak.

@@ -1549,3 +1549,16 @@ Manual: [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md).
 - [ ] Ask it to run `sleep 150`: after 2 minutes the chip turns to "No
       response for a while…" with Stop, and Stop ends the run.
 
+## Images reach cloud models (2026-10-10)
+
+- [ ] With a vision model (e.g. an OpenRouter GPT/Claude/Gemini model, or
+      the Router's vision models), attach a photo and ask what's in it: the
+      answer describes the photo. (Before this build, images never left the
+      app.)
+- [ ] With a ChatGPT (Codex) model, the same works.
+- [ ] With DeepSeek (text-only), attach an image and ask something: you
+      still get an answer (the image is skipped and the model is told it
+      couldn't be sent), and later messages in that chat keep working.
+- [ ] Open an older DeepSeek chat that has an image in it and continue
+      it: it still works.
+
