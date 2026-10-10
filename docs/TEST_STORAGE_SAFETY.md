@@ -98,11 +98,55 @@ the shared storage-path lock.
    the validation if it is zero. The Intel define belongs to the production
    target; do not wrap Intel test files in `#if OSAURUS_INTEL` unless the test
    target also defines it, because that silently compiles the tests out.
-10. **Never write the system pasteboard.** `NSPasteboard.general` is the
+10. **Delete the test root when the run is done (Renée, 2026-10-10).** After
+   the postflight checks pass, `rm -rf "$TEST_STORAGE_ROOT"`. Every run works
+   in a brand-new folder and leaves nothing behind. 72 leftover
+   `/tmp/osaurus-tests.*` folders (69 MB) were cleared on 2026-10-10.
+11. **Never write the system pasteboard.** `NSPasteboard.general` is the
    user's real clipboard; a test that calls a view's `copy(_:)` or
    `ChatCrossSelection.copyIfActive` replaces it (happened once on
    2026-10-01 while porting cross-block selection). Assert on the string
    that would be copied, or on menu validation, instead.
+
+## Dev-Mac rule: keep `~/.osaurus`, never touch it (Renée, 2026-10-10)
+
+Decision: Intel keeps `~/.osaurus` as its data root (the `~/.osaurus-intel`
+split stays gone). On the dev Mac that folder belongs to the running
+upstream app, so **every Intel test run or app launch here works in a
+brand-new folder that is deleted afterwards. It never backs up and restores
+`~/.osaurus`.** Backup/restore was considered and rejected: the upstream app
+writes there continuously (activity log, memory database), so a restore
+would roll back its real writes, and copying open SQLite files mid-write can
+corrupt them.
+
+- **Tests:** the gate in rule 7, then the postflight checks, then rule 10.
+- **Launching an Intel build on the dev Mac** (none so far; Xcode builds
+  only compile). The data folder is not the only thing it shares: both apps
+  are `com.dinoki.osaurus`, so preferences (UserDefaults), bundle-id caches
+  and keychain items are shared too. Procedure:
+  1. Build with a dev bundle id: add
+     `PRODUCT_BUNDLE_IDENTIFIER=com.dinoki.osaurus.intel-dev` to the
+     `xcodebuild` line. That gives it its own preferences, caches and
+     Sparkle state.
+  2. Assign `INTEL_RUN_ROOT="$(mktemp -d /tmp/osaurus-intel-run.XXXXXX)"`
+     as its own statement, check it is non-empty, and touch a marker.
+  3. Launch the binary directly with
+     `OSAURUS_TEST_ROOT="$INTEL_RUN_ROOT" OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`
+     as a command prefix. `OsaurusPaths.root()` honours `OSAURUS_TEST_ROOT`
+     in any process, and the flag turns every keychain wrapper into a no-op.
+     Identity, provider keys and plugin keys then read as absent, and
+     nothing is written.
+  4. Quit the app, then run the postflight `find ~/.osaurus -newer marker`
+     check and the identity `mdat` check.
+  5. Delete `$INTEL_RUN_ROOT`, the dev defaults domain
+     (`defaults delete com.dinoki.osaurus.intel-dev`) and
+     `~/Library/Caches/com.dinoki.osaurus.intel-dev`. All three are ours.
+
+  Known read-only leak: `DirectoryPickerService.effectiveModelsDirectory()`
+  (Intel stub in `IntelDataConformers.swift`) hard-codes `~/.osaurus/models`.
+  It only checks whether that folder exists, and never writes.
+  Not yet tried end to end: do a first launch carefully and update this
+  section with what it shows.
 
 ## Preflight and postflight
 
@@ -134,14 +178,12 @@ mention). Intel code under test writes only to the test root. Any other hit
 is still a failed run.
 
 **Correction (2026-10-10): Intel's live root is `~/.osaurus`, not
-`~/.osaurus-intel`.** The `~/.osaurus-intel` split (`62aec8881`, M11) and
+`~/.osaurus-intel`** (kept on purpose, see "Dev-Mac rule" above). The `~/.osaurus-intel` split (`62aec8881`, M11) and
 its Info.plist opt-out for Rosy's builds (`02c0871d4`, M7) were dropped from
 `OsaurusPaths` by the 2026-06-08 sync port `109d1e3e0`. Nothing has put
 them back since. So **an Intel build launched on the dev Mac reads and
-writes the same `~/.osaurus` as the upstream app.** Don't launch Intel
-builds here (the Xcode build check only compiles) until Renée decides
-whether to restore the split. Restoring it also needs the Rosy opt-out, or
-Rosy's data would move. Stale `~/.osaurus-intel` comments remain in
+writes the same `~/.osaurus` as the upstream app.** Renée decided on
+2026-10-10 to keep `~/.osaurus`. Launches here follow the Dev-Mac rule. Stale `~/.osaurus-intel` comments remain in
 `AppDelegate`, `IntelManagerConformers`, `IntelPluginExecution` and
 `PluginsView`. The `find ~/.osaurus ~/.osaurus-intel` check is still right;
 the second path simply doesn't exist.
