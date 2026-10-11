@@ -3751,3 +3751,31 @@ an explicit Sleep still win. The preference
   completed and cancelled runs don't. Upstream's tests are mapped onto
   Intel's enum.
 
+### Public release 1.0.60 (build 61) — 2026-10-11
+
+Cut with `scripts/release/cut_intel_release.sh 1.0.60` from `fc926b4f9`
+(build 61, the appcast's 60 + 1; no Rosy candidates in between). Contents:
+everything from 2026-10-08 to 10-11 in this ledger:
+
+- the agent loop harness, grounded checks, history trim and `shell_run` at
+  upstream;
+- the approval card with run lease and run location;
+- images to vision models and native OpenAI / Anthropic / Gemini presets;
+- web search, Credits and the composer wallet chip at upstream;
+- retained run tabs;
+- the keychain layer and storage recovery;
+- output tools, keep-awake, Schedules, and document editing.
+
+Released at Renée's request with the backlog not yet cleared (paused for
+usage limits); "Where things stand" in `INTEL_MISSING_FEATURES_BACKLOG.md`
+lists what is left.
+
+Verified after publishing: x86_64, `codesign --verify --deep --strict`
+passes, version 1.0.60 / 61, `SUPublicEDKey` `bYYJJqFx…`, minimum macOS
+13.0. The asset is `Osaurus-Intel-1.0.60.zip` (78,536,642 bytes), matching
+the appcast `length`, and the live feed (raw `intel-fork/docs/appcast.xml`)
+serves it. The appcast commit is `98d25c4c8`. Rosy validation is pending:
+every checklist section from "Loop harness" through "Keep Mac awake while
+agents run" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`. The next
+release needs a build number above 61.
+
