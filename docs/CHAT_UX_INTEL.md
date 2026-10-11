@@ -377,3 +377,14 @@ All ten remaining items are done, moved or staged:
     with the model picker.
 
 Next: the model picker (`W-model-picker-2947`, with #3017's popup style).
+
+## Closed (2026-10-11)
+
+`W-chat-ux` is complete. The gap classifier's five remaining files:
+`SlashCommandRegistry.swift` (excluded; Intel's synced `ObservableObject`
+copy, since upstream's is `@Observable`, macOS 14), `ContextAttribution`
+(`N-dev-tooling`), `AgentDetailChrome` (`W-agent-detail-redesign`),
+`RecentFoldersPanel` (no callers upstream, re-checked 2026-10-11) and
+`ChatPersistenceNotice` (upstream's SQLite chat writer; Intel's chat storage
+is in the new `W-cov-reaudit` row).
+
