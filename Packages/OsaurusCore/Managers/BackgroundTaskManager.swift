@@ -14,7 +14,7 @@ import Foundation
 /// `RetainedActivityTabRecord`). The live chat session is deliberately not
 /// encoded; chat history stays the canonical transcript store and is loaded
 /// when the tab is selected. Intel: no `contextPreview` / inbound-run fields
-/// (`W-channels`, `W-workspaces-identity-mobile`), and Intel's status enum
+/// (`W-channels`, `W-workspaces-sharing`), and Intel's status enum
 /// (`completed(success:summary:)`) maps onto upstream's three kinds.
 private struct RetainedActivityTabRecord: Codable {
     enum TerminalKind: String, Codable {

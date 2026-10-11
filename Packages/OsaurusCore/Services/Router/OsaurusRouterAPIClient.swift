@@ -26,7 +26,7 @@ actor OsaurusRouterAPIClient {
         signer: OsaurusRouterAuthSigner = OsaurusRouterAuthSigner(),
         authOverride: (@Sendable (inout URLRequest, Data?) async throws -> Void)? = nil,
         // Intel: no Osaurus ID session store yet (keychain-backed; it comes
-        // with `W-workspaces-identity-mobile` / `W-keychain-layer`), so `/id/*`
+        // with `W-identity-mobile` / `W-keychain-layer`), so `/id/*`
         // calls fall back to wallet signing.
         idSessionToken: @escaping @Sendable () -> String? = { nil },
         clearIDSession: @escaping @Sendable () -> Void = {}
@@ -233,7 +233,7 @@ actor OsaurusRouterAPIClient {
 
     // MARK: - Workspaces (`/workspaces/*`)
 
-    // Intel: workspace sync frames come with `W-workspaces-identity-mobile`.
+    // Intel: workspace sync frames come with `W-workspaces-sharing`.
     #if !OSAURUS_INTEL
     func observeWorkspaceSync(_ receive: @Sendable (WorkspaceSyncFrame) async -> Void) async throws {
         var request = try await signedJSONRequest(method: "GET", path: "/workspaces/sync")
@@ -447,7 +447,7 @@ actor OsaurusRouterAPIClient {
         )
     }
 
-    // Intel: membership attestation comes with `W-workspaces-identity-mobile`.
+    // Intel: membership attestation comes with `W-workspaces-sharing`.
     #if !OSAURUS_INTEL
     /// Mints a short-lived (10 min) membership attestation for the caller.
     /// Wallet-signed; any active member. `409 INVALID_STATE` when the router

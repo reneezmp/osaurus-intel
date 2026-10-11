@@ -281,7 +281,7 @@ what Intel adapted; everything else is upstream verbatim.
   one-shot without a visible delegate chat), the folder-unreadable preamble,
   and the richer watcher badges (folder and changed files), which need
   upstream's newer watcher prompt. `AgentDispatchTarget` (shared workspace
-  agents as run targets) belongs to `W-workspaces-identity-mobile`.
+  agents as run targets) belongs to `W-workspaces-sharing`.
 - `SymbolImageCache` is upstream's now (sized symbols, rotated chevron), so
   the badge row, the roll-up and the compaction marker use it as upstream
   does.

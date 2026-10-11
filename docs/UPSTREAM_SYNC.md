@@ -2659,7 +2659,7 @@ review starts after `66ea7ebc4`.
   - Found while porting: #2239 server hardening (shared event loop group,
     connection registry and cap).
 - Needs work, on the backlog: #2979 (`W-privacy-filter`), #2980 / #2982
-  workspaces / #3018 pairing (`W-workspaces-identity-mobile`), #3008 / #3010
+  workspaces / #3018 pairing (`W-workspaces-sharing` / `W-identity-mobile`), #3008 / #3010
   (`W-channels`), the #2922 Seatbelt check (`W-tools-misc`). Also new:
   `W-router-billing`, file tool parity from #2791, the external-caller tool
   policy (`W-server-api`) and the `existsCached()` identity memo.
@@ -2703,7 +2703,7 @@ code fences (#3034), login-shell PATH for stdio MCP servers plus upstream's
 current stdio transport and spawn limiter (#3038), per-host "reasoning off"
 and truncation-safe compaction (#3042), the image-paste notice and focused
 paste monitor (#3040), and the `calculate` tool (#3039). Needs work: #3033
-(`W-agent-loop-tools`), #3044 (`W-workspaces-identity-mobile`), the channel
+(`W-agent-loop-tools`), #3044 (`W-identity-mobile`), the channel
 half of #3034 (`W-channels`). Also shipped the same day: `W-router-billing`
 (see the 2026-10-07 audit). The next review starts after `02604ca60`.
 
@@ -3167,7 +3167,7 @@ and `FittedSheetFrame.swift` are upstream's.
   (`IntelWorkspaceRosterStub.swift`: `WorkspaceRosterStore`,
   `OsaurusRouterWorkspacePerson.shortWallet`, and a
   `RemoteAgentManager.remoteAgent(forAddress:workspaceId:)` stub). Only
-  local agents can be picked until `W-workspaces-identity-mobile`.
+  local agents can be picked until `W-workspaces-sharing`.
 - The screen's 19 two-argument `onChange` calls use the macOS 13
   single-value form.
 - Watchers did not get `target` (upstream did).
@@ -3531,7 +3531,7 @@ closes them, across relaunch, as upstream's retained Activity tabs do.
 - **Test isolation.** Test processes never persist (`OsaurusPaths.isTestProcess`).
   Tests use `makeForTestingRetaining(defaults:)` with a throwaway suite.
 - **Not ported:** `contextPreview`, quick-reply rehydration and the
-  inbound-run flag (`W-channels`, `W-workspaces-identity-mobile`).
+  inbound-run flag (`W-channels`, `W-workspaces-sharing`).
 
 Upstream's manager has moved much further: the status reshape, admission
 queue and power assertion are now `W-background-runs-sync`. The Help menu
@@ -3571,7 +3571,7 @@ are upstream's (Intel's card was nine upstream commits behind). What changes:
 - **Ventura.** `safeAreaRegions` is behind `#available(macOS 13.3, *)`, as
   in Intel's MCP prompt.
 - **Paired phone.** `ChatExecutionContext.hasRemoteReviewer` exists but is
-  never bound (`W-workspaces-identity-mobile`).
+  never bound (`W-identity-mobile`).
 - **File-history prompt.** It keeps using the compatible `requestApproval`
   (per-call only).
 

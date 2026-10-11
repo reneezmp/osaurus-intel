@@ -349,7 +349,7 @@ Generated 2026-09-29 from `upstream/main` (`3dad2dad4`) against Intel `Package.s
 - `Tools/SandboxSecretTools.swift` (excluded, 535)
 - `Tools/WorkspaceInspectPayload.swift` (absent, 160)
 
-## `W-workspaces-identity-mobile` — 75 files, 24,810 lines
+## `W-workspaces-identity-mobile` — 75 files, 24,810 lines (split 2026-10-11 into `W-identity-mobile` and the deferred `W-workspaces-sharing`; `HostAPIBridgeServer` is `INC-containers`)
 
 - `Identity/APIKeyValidatorEpoch.swift` (absent, 36)
 - `Identity/AgentIdentityRegistry.swift` (absent, 64)

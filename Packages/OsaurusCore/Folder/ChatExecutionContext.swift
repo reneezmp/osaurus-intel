@@ -136,7 +136,7 @@ public enum ChatExecutionContext {
 
     /// Upstream: the run came from the user's paired phone, which answers
     /// approval cards remotely. Intel has no paired phone yet
-    /// (`W-workspaces-identity-mobile`), so nothing binds it.
+    /// (`W-identity-mobile`), so nothing binds it.
     @TaskLocal static var hasRemoteReviewer: Bool = false
 
     /// Default idle-timeout (seconds) for `shell_run`, applied ONLY when the

@@ -507,7 +507,7 @@ public struct Schedule: Codable, Identifiable, Sendable, Equatable {
     public var instructions: String
     /// Who runs the schedule: an agent hosted here or a teammate's shared
     /// workspace agent. nil = no agent (refused at execution time).
-    /// (Intel: workspace targets cannot be chosen yet, W-workspaces-identity-mobile.)
+    /// (Intel: workspace targets cannot be chosen yet, W-workspaces-sharing.)
     public var target: AgentDispatchTarget?
     /// The local agent, for readers that only understand local agents.
     /// nil for workspace targets; setting it replaces `target` with `.local`.

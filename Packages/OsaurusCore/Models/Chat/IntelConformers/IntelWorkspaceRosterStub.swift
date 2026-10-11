@@ -7,7 +7,7 @@
 //  model (`AgentDispatchTarget`, `AgentTargetResolver`) and the trigger
 //  editors' `WorkspaceAgentPickerOption` compile verbatim (2026-10-10, with
 //  the schedule history port). Intel has no workspaces yet
-//  (W-workspaces-identity-mobile): the roster is always empty, so no shared
+//  (W-workspaces-sharing): the roster is always empty, so no shared
 //  workspace agent is ever offered and every schedule targets a local agent.
 //  Replace with upstream's store when workspaces land.
 //
@@ -59,7 +59,7 @@ final class WorkspaceRosterStore: ObservableObject {
 // `OsaurusRouterWorkspacePerson` is upstream's (OsaurusRouterWorkspaceTypes.swift,
 // ported 2026-10-10 with W-credits-ui-sync).
 
-/// Intel stub: no workspaces yet (`W-workspaces-identity-mobile`). A Router
+/// Intel stub: no workspaces yet (`W-workspaces-sharing`). A Router
 /// summary billed to a workspace pool can't happen without one, so upstream's
 /// "refresh that pool's ledger" hook has nothing to do.
 @MainActor
@@ -78,7 +78,7 @@ enum FeatureTelemetry {
 /// Intel stub: only upstream's `normalized(_:)` (verbatim), which the ported
 /// workspace invite type decodes through. The rest of
 /// `WorkspacesDeepLinkRouter` (the `osaurus://workspaces/...` handler) comes
-/// with `W-workspaces-identity-mobile`; drop this stub then.
+/// with `W-workspaces-sharing`; drop this stub then.
 enum WorkspacesDeepLinkRouter {
     nonisolated static let host = "workspaces"
     nonisolated static let legacyHost = "teams"

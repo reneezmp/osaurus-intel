@@ -10,7 +10,7 @@
 //  (#1583 history sheet, run summaries, Markdown export). Intel changes:
 //  `onChange` uses the single-value form (macOS 13); workspace targets come
 //  from an empty stub roster (`IntelWorkspaceRosterStub`,
-//  W-workspaces-identity-mobile), so only local agents are offered.
+//  W-workspaces-sharing), so only local agents are offered.
 //
 import AppKit
 import SwiftUI
