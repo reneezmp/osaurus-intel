@@ -3658,3 +3658,26 @@ knowledge write log's path under the test root, then checks that Retry
 records the issue, and that Reset quarantines the file and opens a fresh
 store.
 
+### Composer credits chip (`W-model-picker-2947` complete) — 2026-10-11
+
+Upstream's `FloatingCreditsChip` and `WalletPopover` are verbatim in
+`Views/Chat/ComposerWalletViews.swift`. Intel's composer is its own file.
+They show the Router balance (or this session's Router spend and cache
+savings on a Router-billed chat), and hovering opens the wallet panel:
+recent activity, web usage, Add credits.
+
+- **Placement.** The chip sits left of the context ring in the button bar,
+  where Intel's context indicator lives. Upstream's selector-row
+  `metaCluster` is not ported.
+- **Session totals.** `ChatSession` gains upstream's `sessionRouterSpendMicro`,
+  `sessionRouterCacheStats` (summed from each turn's `routerBilling`) and
+  `isOsaurusRouterSession`.
+- **Add credits** opens `CreditsTopUpSheet` from `ChatContentView`.
+- **Intel edits:**
+  - single-value `onChange`;
+  - `intelScrollBounceBasedOnSize` (13.3+);
+  - no `.symbolEffect(.replace)` icon transition (macOS 14);
+  - `SelectorChip` made internal so the chip can use it;
+  - no offline gate (Intel has no offline flag; the chip stays hidden until
+    a balance was fetched).
+

@@ -54,6 +54,7 @@ struct ChatContentView: View {
     /// and edits (upstream `ChatView` observes it the same way).
     @ObservedObject private var projectManager = ProjectManager.shared
     @State private var measuredHeaderHeight: CGFloat = 44
+    @State private var showCreditsTopUp = false
     @State private var measuredComposerHeight: CGFloat = 100
 
     /// User-adjustable width of the History sidebar, persisted across launches
@@ -494,7 +495,17 @@ struct ChatContentView: View {
                                 guard let observedSession else { return [] }
                                 return ChatInputHistory.entries(from: observedSession.turns)
                             },
-                            inputHistoryKey: observedSession.sessionId
+                            inputHistoryKey: observedSession.sessionId,
+                            sessionSpendMicro: observedSession.sessionRouterSpendMicro,
+                            sessionCachedInputLabel: {
+                                let stats = observedSession.sessionRouterCacheStats
+                                return OsaurusRouter.formatCachedInputLabel(
+                                    cachedTokens: stats.cachedInputTokens,
+                                    inputTokens: stats.inputTokens
+                                )
+                            }(),
+                            isRouterBilledSession: observedSession.isOsaurusRouterSession,
+                            onAddCredits: { showCreditsTopUp = true }
                         )
                         .padding(.horizontal, 12)
                         .padding(.bottom, 12)
@@ -652,6 +663,9 @@ struct ChatContentView: View {
         }
         .environment(\.theme, windowState.theme)
         .tint(theme.accentColor)
+        .sheet(isPresented: $showCreditsTopUp) {
+            CreditsTopUpSheet()
+        }
         .sheet(item: $pendingWhatsNew) { release in
             whatsNewContent(release)
         }

@@ -10807,6 +10807,40 @@
         }
       }
     },
+    "Open the Credits tab for full usage and transaction history." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Öffnen Sie den Credits-Tab für die vollständige Nutzungs- und Transaktionshistorie."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 사용 및 거래 내역을 보려면 크레딧 탭을 여세요."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Откройте вкладку «Кредиты», чтобы увидеть полную историю использования и транзакций."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打开积分标签页查看完整的使用和交易记录。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "打開積分標籤頁查看完整的使用和交易記錄。"
+          }
+        }
+      }
+    },
     "Open this conversation" : {
       "extractionState" : "stale",
       "localizations" : {
@@ -11835,6 +11869,40 @@
         }
       }
     },
+    "Premium search is paused - add credits to resume." : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Premium search is paused - add credits to resume."
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Premium search is paused - add credits to resume."
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Premium search is paused - add credits to resume."
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "高级搜索已暂停 — 添加积分以恢复。"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "進階搜尋已暫停 — 新增積分以邊原。"
+          }
+        }
+      }
+    },
     "Premium search ran out of credits and is quietly using the built-in sources. Add credits to resume - nothing else to reset." : {
       "localizations" : {
         "de" : {
@@ -12001,6 +12069,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "私募市場公司、交易和投資者"
+          }
+        }
+      }
+    },
+    "Prompt cache" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Prompt-Cache"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "프롬프트 캐시"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "Кэш промпта"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "提示缓存"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "needs_review",
+            "value" : "提示快取"
           }
         }
       }
@@ -16846,6 +16948,40 @@
         }
       }
     },
+    "This session" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Diese Sitzung"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "이 세션"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Эта сессия"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "当前会话"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "當前會話"
+          }
+        }
+      }
+    },
     "This store was written by a newer version of Osaurus, so this build won't open it. Update Osaurus to read it again. Do not Reset, your data is intact." : {},
     "This uses the exact same search your agents get — what you see here is what they see." : {
       "comment" : "A description under the Try-it box, explaining that the results shown here are the same as those that the user's agents would see.",
@@ -17933,6 +18069,40 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "驗證並儲存"
+          }
+        }
+      }
+    },
+    "View all" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Alle anzeigen"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "전체 보기"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Показать все"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看全部"
+          }
+        },
+        "zh-Hant" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "查看全部"
           }
         }
       }
@@ -21342,6 +21512,34 @@
           "stringUnit" : {
             "state" : "translated",
             "value" : "積分"
+          }
+        }
+      }
+    },
+    "credits available" : {
+      "localizations" : {
+        "de" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "Credits verfügbar"
+          }
+        },
+        "zh-Hans" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "可用积分"
+          }
+        },
+        "ko" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "크레딧 사용 가능"
+          }
+        },
+        "ru" : {
+          "stringUnit" : {
+            "state" : "translated",
+            "value" : "кредитов доступно"
           }
         }
       }

@@ -58,6 +58,13 @@ struct FloatingInputCard: View {
     /// Callback when the user selects a skill slash command. Passes the skill UUID so the
     /// caller can inject that skill's instructions as one-off context for the next send.
     var onSkillSelected: ((UUID) -> Void)? = nil
+    /// Upstream composer credits chip (W-model-picker-2947, 2026-10-11).
+    var sessionSpendMicro: Int = 0
+    var sessionCachedInputLabel: String? = nil
+    var isRouterBilledSession: Bool = false
+    var onAddCredits: (() -> Void)? = nil
+    @ObservedObject private var routerAccount = OsaurusRouterAccountService.shared
+    @ObservedObject private var routerProviders = RemoteProviderManager.shared
     /// Binding to the session's pending one-off skill. Non-nil shows a dismissable skill chip.
     @Binding var pendingSkillId: UUID?
     /// Binding to the session's auto-speak preference. When true, a chip is shown
@@ -128,8 +135,16 @@ struct FloatingInputCard: View {
         onDraftChange: ((String) -> Void)? = nil,
         onWillRehydrate: (() -> Void)? = nil,
         inputHistoryProvider: (() -> [String])? = nil,
-        inputHistoryKey: UUID? = nil
+        inputHistoryKey: UUID? = nil,
+        sessionSpendMicro: Int = 0,
+        sessionCachedInputLabel: String? = nil,
+        isRouterBilledSession: Bool = false,
+        onAddCredits: (() -> Void)? = nil
     ) {
+        self.sessionSpendMicro = sessionSpendMicro
+        self.sessionCachedInputLabel = sessionCachedInputLabel
+        self.isRouterBilledSession = isRouterBilledSession
+        self.onAddCredits = onAddCredits
         self.inputHistoryProvider = inputHistoryProvider
         self.inputHistoryKey = inputHistoryKey
         self.onDraftChange = onDraftChange
@@ -1926,6 +1941,19 @@ extension FloatingInputCard {
         }
     }
 
+    // MARK: - Credits chip (upstream)
+
+    /// Upstream gate: Router on and a signing identity. (Upstream also hides
+    /// it offline; Intel has no offline flag, and the chip stays hidden until
+    /// a balance was actually fetched, which covers that case.)
+    private var creditsChipAvailable: Bool {
+        routerProviders.isOsaurusRouterEnabled && OsaurusIdentity.existsCached()
+    }
+
+    private var showCreditsChip: Bool {
+        creditsChipAvailable && routerAccount.balance != nil
+    }
+
     // MARK: - Context Budget Ring
 
     /// Context budget as a circular progress ring in the button bar, left of
@@ -3494,7 +3522,25 @@ extension FloatingInputCard {
 
             HStack(spacing: 8) {
                 keyboardHint
+                // Upstream's credits chip sits beside the context indicator.
+                if showCreditsChip {
+                    FloatingCreditsChip(
+                        isRouterBilledSession: isRouterBilledSession,
+                        sessionSpendMicro: sessionSpendMicro,
+                        sessionCachedInputLabel: sessionCachedInputLabel,
+                        metaCompact: isCompact,
+                        metaUltraCompact: false,
+                        onAddCredits: onAddCredits
+                    )
+                }
                 contextBudgetRing
+                    // Upstream: the first balance fetch (the chip stays hidden
+                    // until one lands); a fresh-enough balance is reused.
+                    .task(id: creditsChipAvailable) {
+                        if creditsChipAvailable {
+                            await routerAccount.refreshBalance(ifOlderThan: 300)
+                        }
+                    }
                 if isStreaming {
                     stopButton
                     if queuedSend != nil {
@@ -4781,7 +4827,7 @@ func computeContextBudgetSegmentWidths(
 // MARK: - Selector Chip
 
 /// Polished selector chip for model pickers
-private struct SelectorChip<Content: View>: View {
+struct SelectorChip<Content: View>: View {  // Intel: shared with ComposerWalletViews
     let isActive: Bool
     let action: () -> Void
     @ViewBuilder let content: () -> Content

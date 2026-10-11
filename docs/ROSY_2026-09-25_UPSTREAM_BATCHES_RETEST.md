@@ -1704,3 +1704,12 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] Change a provider setting and quit right away (⌘Q). On relaunch the
       change is kept.
 
+## Composer credits chip (2026-10-11)
+
+- [ ] With the Router on and an identity, the composer shows your balance
+      next to the context ring. Hovering it opens the wallet panel (recent
+      activity); "Add credits" opens the top-up sheet.
+- [ ] In a chat using an Osaurus Cloud model, after a reply the chip shows
+      what this chat has spent.
+- [ ] Turn the Router off in Credits: the chip disappears.
+

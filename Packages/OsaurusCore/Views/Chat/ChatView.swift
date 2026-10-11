@@ -82,7 +82,42 @@ private struct GenerativeGreetingTrigger: ViewModifier {
 
 @MainActor
 final class ChatSession: ObservableObject {
-    @Published var turns: [ChatTurn] = []
+    @Published var turns: [ChatTurn] = [] {
+        didSet {
+            // Upstream: this session's Router spend and prompt-cache totals,
+            // summed from each turn's persisted `routerBilling`, for the
+            // composer credits chip.
+            _cachedRouterSpendMicro = turns.reduce(0) { sum, turn in
+                guard let raw = turn.routerBilling?.costMicro else { return sum }
+                let trimmed = raw.trimmingCharacters(in: .whitespacesAndNewlines)
+                return sum + (Int(trimmed) ?? 0)
+            }
+            _cachedRouterCacheStats = turns.reduce((cachedInputTokens: 0, inputTokens: 0)) { acc, turn in
+                guard let billing = turn.routerBilling else { return acc }
+                return (
+                    acc.cachedInputTokens + max(0, billing.cachedInputTokens),
+                    acc.inputTokens + max(0, billing.inputTokens)
+                )
+            }
+        }
+    }
+
+    private var _cachedRouterSpendMicro: Int = 0
+    private var _cachedRouterCacheStats: (cachedInputTokens: Int, inputTokens: Int) = (0, 0)
+
+    /// Upstream: micro-USD this session spent through the Osaurus Router.
+    var sessionRouterSpendMicro: Int { _cachedRouterSpendMicro }
+
+    /// Upstream: Router prompt-cache telemetry for this session.
+    var sessionRouterCacheStats: (cachedInputTokens: Int, inputTokens: Int) { _cachedRouterCacheStats }
+
+    /// Upstream: the selected model is served by the Osaurus Router.
+    var isOsaurusRouterSession: Bool {
+        if case .remote(_, let providerId)? = selectedPickerItem?.source {
+            return providerId == RemoteProviderManager.osaurusRouterProviderId
+        }
+        return false
+    }
     /// Compaction summary for this chat (upstream #136) and its run state.
     @Published var conversationSummary: ConversationSummary?
     /// Live compaction progress (upstream), shown by the context popover,
