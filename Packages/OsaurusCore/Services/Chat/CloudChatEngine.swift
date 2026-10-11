@@ -386,6 +386,25 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return TokenEstimator.estimate(String(decoding: data, as: UTF8.self))
     }
 
+    /// Upstream's chat loop post-processes `share_artifact` (copy the file
+    /// into the chat's artifact folder, enrich the result so the transcript
+    /// shows a file card, notify artifact plugins). Intel's engine runs the
+    /// tool itself, so it does the same here with the chat's bindings.
+    static func processedShareArtifactResult(name: String, result: String) async -> String {
+        guard name == "share_artifact", !ToolEnvelope.isError(result) else { return result }
+        let sessionId = ChatExecutionContext.currentSessionId.flatMap(UUID.init(uuidString:))
+        let agentId = ChatExecutionContext.currentAgentId
+        let mode = ChatExecutionContext.currentExecutionMode ?? .none
+        let processed = await MainActor.run {
+            ChatSession.processShareArtifactResult(
+                toolResult: result, sessionId: sessionId, agentId: agentId, executionMode: mode)
+        }
+        if let artifact = SharedArtifact.fromEnrichedToolResult(processed) {
+            await PluginManager.shared.notifyArtifactHandlers(artifact: artifact)
+        }
+        return processed
+    }
+
     /// Upstream `stageBiasNotice`: the next-step bias rides first.
     static func stageBiasNotice(_ bias: String, into notices: inout [String]) {
         let notice = "[System Notice] " + bias
@@ -1252,7 +1271,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
-                                let result: String
+                                var result: String
                                 if let harnessResult = Self.harnessResult(
                                     taskState, name: call.name, arguments: call.arguments,
                                     notices: &pendingHarnessNotices)
@@ -1338,6 +1357,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         }
                                     }
                                 }
+                                result = await Self.processedShareArtifactResult(name: call.name, result: result)
                                 continuation.yield(
                                     StreamingToolHint.encodeDone(
                                         callId: call.callID,
@@ -1593,7 +1613,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 )
                                 throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                             }
-                            let result: String
+                            var result: String
                             let toolStart = Date()
 
                             if let harnessResult = Self.harnessResult(
@@ -1693,6 +1713,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     }
                                 }
                             }
+                            result = await Self.processedShareArtifactResult(name: call.name, result: result)
                             continuation.yield(
                                 StreamingToolHint.encodeDone(
                                     callId: callId,

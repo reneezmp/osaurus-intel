@@ -1149,6 +1149,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         registerAgentLoopTools()
         registerSelfSchedulingTools()
         registerWebSearchTools()
+        registerOutputTools()
         let folderPrompt = PromptWorkingFolderTool()
         toolsByName[folderPrompt.name] = folderPrompt
         builtInToolNames.insert(folderPrompt.name)
@@ -1187,6 +1188,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// by the agent/project grant scope at prompt composition and again at
     /// execution time inside each tool; registration itself is global so the
     /// tool loop can resolve an approved call without per-agent mutation.
+    /// Upstream built-ins Intel never registered until 2026-10-11
+    /// (W-tools-misc): `share_artifact` (baseline), `render_chart` and
+    /// `search_memory` (per-agent switches, filtered at composition).
+    private func registerOutputTools() {
+        let tools: [OsaurusTool] = [ShareArtifactTool(), RenderChartTool(), SearchMemoryTool()]
+        for tool in tools {
+            toolsByName[tool.name] = tool
+            builtInToolNames.insert(tool.name)
+        }
+    }
+
     private func registerKnowledgeTools() {
         let tools: [OsaurusTool] = [
             SearchKnowledgeTool(),
@@ -2067,97 +2079,11 @@ final class GenerativeGreetingService: @unchecked Sendable {
 
 // MARK: - SharedArtifact (stub)
 
-enum ArtifactContextType: String, Codable, Sendable {
-    case work
-    case chat
-}
-
 struct ProcessingResult: Sendable {
     let enrichedToolResult: String
 }
+// SharedArtifact: the real one (Models/Chat/SharedArtifact.swift), un-excluded 2026-10-11 (W-tools-misc).
 
-/// Codable with upstream's synthesized keys, so a turn's artifacts persist in
-/// the saved chat exactly as upstream writes them (`ChatTurnData`).
-struct SharedArtifact: Identifiable, Codable, Sendable, Equatable {
-    let id: String
-    let contextId: String
-    let contextType: ArtifactContextType
-    let filename: String
-    let mimeType: String
-    let fileSize: Int
-    let hostPath: String
-    let isDirectory: Bool
-    let content: String?
-    let description: String?
-    let isFinalResult: Bool
-    let createdAt: Date
-
-    init(
-        id: String = UUID().uuidString,
-        contextId: String,
-        contextType: ArtifactContextType,
-        filename: String,
-        mimeType: String,
-        fileSize: Int,
-        hostPath: String,
-        isDirectory: Bool = false,
-        content: String? = nil,
-        description: String? = nil,
-        isFinalResult: Bool = false,
-        createdAt: Date = Date()
-    ) {
-        self.id = id
-        self.contextId = contextId
-        self.contextType = contextType
-        self.filename = filename
-        self.mimeType = mimeType
-        self.fileSize = fileSize
-        self.hostPath = hostPath
-        self.isDirectory = isDirectory
-        self.content = content
-        self.description = description
-        self.isFinalResult = isFinalResult
-        self.createdAt = createdAt
-    }
-
-    var isImage: Bool { mimeType.hasPrefix("image/") }
-    var isAudio: Bool { mimeType.hasPrefix("audio/") }
-    var isText: Bool { mimeType.hasPrefix("text/") || mimeType == "application/json" }
-    var isHTML: Bool { mimeType == "text/html" }
-    var isVideo: Bool { mimeType.hasPrefix("video/") }
-    var isPDF: Bool { mimeType == "application/pdf" }
-    var categoryLabel: String {
-        if isDirectory { return "Directory" }
-        if isImage { return "Image" }
-        if isPDF { return "PDF" }
-        if isAudio { return "Audio" }
-        if isVideo { return "Video" }
-        if isHTML { return "Web Page" }
-        if isText { return "Text" }
-        return "File"
-    }
-
-    enum ResolutionFailure: Error {
-        case markersMissing
-        case noContentOrPath
-        case destinationRejected(filename: String)
-        case pathRejected(path: String)
-        case fileNotFound(path: String, searchedLocations: [String])
-        case copyFailed(source: String, detail: String)
-    }
-
-    static func fromEnrichedToolResult(_ resultText: String) -> Any? { nil }
-
-    static func processToolResultDetailed(
-        _ text: String,
-        contextId: String,
-        contextType: ArtifactContextType,
-        executionMode: ExecutionMode,
-        sandboxAgentName: String? = nil
-    ) -> Result<ProcessingResult, ResolutionFailure> {
-        .success(ProcessingResult(enrichedToolResult: text))
-    }
-}
 
 // MARK: - Data + SHA256
 

@@ -130,6 +130,11 @@ public enum ChatExecutionContext {
     /// window every round. Other callers (HTTP API, schedules) are unchanged.
     @TaskLocal public static var interactiveChatRun: Bool = false
 
+    /// Intel: the chat's execution mode (folder or none), bound by chat
+    /// around the cloud engine so engine-run `share_artifact` calls resolve
+    /// paths as upstream's chat loop does (`processShareArtifactResult`).
+    @TaskLocal public static var currentExecutionMode: ExecutionMode?
+
     /// One logical agent run's interactive approval lease (upstream). Intel's
     /// cloud engine creates one per `streamChat` run.
     @TaskLocal static var toolPermissionRunScope: ToolPermissionRunScope?

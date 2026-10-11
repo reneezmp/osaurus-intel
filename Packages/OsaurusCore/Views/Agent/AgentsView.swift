@@ -2549,8 +2549,20 @@ struct AgentDetailView: View {
             )
         }
 
-        // Upstream groups the Speak Tool under Output.
+        // Upstream groups Charts and the Speak Tool under Output.
         AgentDetailSection(title: L("Output"), icon: "speaker.wave.2") {
+            if agent.id != Agent.defaultId {
+                abilityToggleRow(
+                    title: "Charts",
+                    description: "Render data as inline chart cards.",
+                    icon: "chart.bar.xaxis",
+                    isOn: Binding(
+                        get: { currentAgent.settings.renderChartEnabled },
+                        set: { enabled in setAgentToolSetting(\.renderChartEnabled, enabled) }
+                    ),
+                    destination: nil
+                )
+            }
             if agent.id == Agent.defaultId {
                 abilityUnavailableRow(
                     title: "Speak Tool",
@@ -2565,6 +2577,22 @@ struct AgentDetailView: View {
                     isOn: Binding(
                         get: { currentAgent.settings.speakEnabled },
                         set: { setSpeakEnabled($0) }
+                    ),
+                    destination: nil
+                )
+            }
+        }
+
+        // Upstream's "Memory & Recall" group.
+        if agent.id != Agent.defaultId {
+            AgentDetailSection(title: L("Memory & Recall"), icon: "magnifyingglass") {
+                abilityToggleRow(
+                    title: "Memory Recall",
+                    description: "Let the agent search its own memory mid-conversation to pull up past details on demand. Separate from Memory above, which only auto-injects and saves.",
+                    icon: "magnifyingglass",
+                    isOn: Binding(
+                        get: { currentAgent.settings.searchMemoryEnabled },
+                        set: { enabled in setAgentToolSetting(\.searchMemoryEnabled, enabled) }
                     ),
                     destination: nil
                 )
@@ -3581,6 +3609,17 @@ struct AgentDetailView: View {
         guard var current = agentManager.agent(for: agent.id), !current.isBuiltIn else { return }
         guard current.settings.speakEnabled != enabled else { return }
         current.settings.speakEnabled = enabled
+        current.updatedAt = Date()
+        agentManager.update(current)
+        showSaveIndicator()
+    }
+
+    /// Charts / Memory Recall switches (upstream `renderChartEnabled`,
+    /// `searchMemoryEnabled`), written directly like the Speak Tool.
+    private func setAgentToolSetting(_ key: WritableKeyPath<AgentSettings, Bool>, _ enabled: Bool) {
+        guard var current = agentManager.agent(for: agent.id), !current.isBuiltIn else { return }
+        guard current.settings[keyPath: key] != enabled else { return }
+        current.settings[keyPath: key] = enabled
         current.updatedAt = Date()
         agentManager.update(current)
         showSaveIndicator()
@@ -5913,7 +5952,10 @@ struct AgentDetailView: View {
                 // Written directly by the Self-scheduling switch.
                 selfSchedulingEnabled: current.settings.selfSchedulingEnabled,
                 // Written directly by the Speak Tool switch.
-                speakEnabled: current.settings.speakEnabled
+                speakEnabled: current.settings.speakEnabled,
+                // Written directly by the Charts / Memory Recall switches.
+                renderChartEnabled: current.settings.renderChartEnabled,
+                searchMemoryEnabled: current.settings.searchMemoryEnabled
             ),
             order: current.order,
             workingFolderBookmark: current.workingFolderBookmark,

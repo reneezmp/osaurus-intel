@@ -3681,3 +3681,33 @@ recent activity, web usage, Add credits.
   - no offline gate (Intel has no offline flag; the chip stays hidden until
     a balance was fetched).
 
+### Output tools (`W-tools-misc` complete) — 2026-10-11
+
+Intel had never registered upstream's `render_chart`, `share_artifact` or
+`search_memory`, though the transcript already rendered their results. Their
+four files are now upstream's and un-excluded: the three tools and
+`SharedArtifact`, which replaces Intel's stand-in struct.
+
+- **Registration.** `registerOutputTools()` adds them as built-ins. Upstream's
+  per-agent switches `AgentSettings.renderChartEnabled` and
+  `searchMemoryEnabled` (default off) gate the last two at composition and
+  grant them in Manual mode. `share_artifact` is baseline, as upstream.
+- **Agent page.** Toggles: "Charts" under Output, and a "Memory & Recall"
+  section, for custom agents (the Speak Tool pattern).
+- **`share_artifact` in cloud chats.** Intel's engine runs tools itself, so
+  `CloudChatEngine.processedShareArtifactResult` applies upstream's chat-loop
+  post-processing: copy the file into the chat's artifact folder, enrich the
+  result for the file card, notify artifact plugins.
+  - It uses `ChatSession.processShareArtifactResult` (now also static).
+  - It reads the new `ChatExecutionContext.currentExecutionMode`, which chat
+    binds around `streamChat`.
+- **Intel edit.** `ShareArtifactTool`'s AppleScript working-document guard
+  is behind `#if !OSAURUS_INTEL` until `W-applescript-agent`.
+
+Tests: upstream's `RenderChartToolTests`, `ShareArtifactToolTests`,
+`SearchMemoryToolTests` and `SharedArtifact*Tests` (three un-excluded), plus
+`IntelOutputToolsTests`.
+
+**Found:** upstream's sandbox tools have a Seatbelt host fallback for Macs
+without the VM. That is the new `W-seatbelt-sandbox`.
+

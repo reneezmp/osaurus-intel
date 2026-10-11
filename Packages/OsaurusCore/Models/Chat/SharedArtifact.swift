@@ -91,7 +91,15 @@ public struct SharedArtifact: Identifiable, Codable, Sendable, Equatable {
         case "md", "markdown": return "text/markdown"
         case "txt": return "text/plain"
         case "csv": return "text/csv"
+        case "tsv": return "text/tab-separated-values"
         case "pdf": return "application/pdf"
+        case "docx": return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+        case "xlsx": return "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+        case "pptx": return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+        case "doc": return "application/msword"
+        case "xls": return "application/vnd.ms-excel"
+        case "ppt": return "application/vnd.ms-powerpoint"
+        case "rtf": return "application/rtf"
         case "zip": return "application/zip"
         case "tar": return "application/x-tar"
         case "gz": return "application/gzip"
@@ -136,11 +144,48 @@ public struct SharedArtifact: Identifiable, Codable, Sendable, Equatable {
     /// Whether this artifact is a PDF document.
     public var isPDF: Bool { mimeType == "application/pdf" }
 
+    /// Office document family (OOXML or legacy binary).
+    public enum OfficeDocumentKind: Sendable {
+        case wordProcessing
+        case spreadsheet
+        case presentation
+
+        /// Human-readable category label.
+        public var label: String {
+            switch self {
+            case .wordProcessing: return "Word Document"
+            case .spreadsheet: return "Spreadsheet"
+            case .presentation: return "Presentation"
+            }
+        }
+    }
+
+    /// Office document family, or nil for anything else.
+    public var officeDocumentKind: OfficeDocumentKind? {
+        switch mimeType {
+        case "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            "application/msword", "application/rtf":
+            return .wordProcessing
+        case "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "application/vnd.ms-excel":
+            return .spreadsheet
+        case "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+            "application/vnd.ms-powerpoint":
+            return .presentation
+        default:
+            return nil
+        }
+    }
+
+    /// Whether this artifact is an Office document (Word/Excel/PowerPoint).
+    public var isOfficeDocument: Bool { officeDocumentKind != nil }
+
     /// Human-readable content category label.
     public var categoryLabel: String {
         if isDirectory { return "Directory" }
         if isImage { return "Image" }
         if isPDF { return "PDF" }
+        if let office = officeDocumentKind { return office.label }
         if isAudio { return "Audio" }
         if isVideo { return "Video" }
         if isHTML { return "Web Page" }
@@ -167,7 +212,7 @@ extension SharedArtifact {
     }
 
     /// Result of fully processing a share_artifact tool result.
-    struct ProcessingResult {
+    struct ProcessingResult: Sendable {
         let artifact: SharedArtifact
         let enrichedToolResult: String
     }
@@ -390,6 +435,152 @@ extension SharedArtifact {
         return .success(ProcessingResult(artifact: artifact, enrichedToolResult: enriched))
     }
 
+    /// Process a host file that Osaurus itself produced, such as a native image
+    /// generation output. This deliberately bypasses the model-controlled
+    /// `path` resolver used by `share_artifact`; callers must only pass paths
+    /// returned by trusted local services.
+    static func processTrustedLocalFileResult(
+        fileURL: URL,
+        filename requestedFilename: String? = nil,
+        mimeType requestedMimeType: String? = nil,
+        description: String? = nil,
+        contextId: String,
+        contextType: ArtifactContextType
+    ) -> Result<ProcessingResult, ResolutionFailure> {
+        let sourceURL = canonicalizedURL(fileURL)
+        let sourcePath = sourceURL.path
+        let filename = sanitizeArtifactFilename(requestedFilename ?? sourceURL.lastPathComponent)
+        let mimeType = requestedMimeType ?? SharedArtifact.mimeType(from: filename)
+
+        var isDir: ObjCBool = false
+        guard FileManager.default.fileExists(atPath: sourcePath, isDirectory: &isDir) else {
+            return .failure(.fileNotFound(path: sourcePath, searchedLocations: [sourcePath]))
+        }
+        guard !isDir.boolValue else {
+            return .failure(.copyFailed(source: sourcePath, reason: "native image result is a directory"))
+        }
+
+        let contextDir = OsaurusPaths.contextArtifactsDir(contextId: contextId)
+        OsaurusPaths.ensureExistsSilent(contextDir)
+        guard let destPath = resolveDestinationPath(filename: filename, contextDir: contextDir) else {
+            return .failure(.destinationRejected(filename: filename))
+        }
+
+        if FileManager.default.fileExists(atPath: destPath.path) {
+            try? FileManager.default.removeItem(at: destPath)
+        }
+        do {
+            try FileManager.default.copyItem(at: sourceURL, to: destPath)
+        } catch {
+            return .failure(.copyFailed(source: sourcePath, reason: error.localizedDescription))
+        }
+
+        let fileSize = (try? FileManager.default.attributesOfItem(atPath: destPath.path)[.size] as? Int) ?? 0
+        let artifact = SharedArtifact(
+            contextId: contextId,
+            contextType: contextType,
+            filename: filename,
+            mimeType: mimeType,
+            fileSize: fileSize,
+            hostPath: destPath.path,
+            description: description,
+            isFinalResult: false
+        )
+
+        var metadata: [String: Any] = [
+            "filename": filename,
+            "mime_type": mimeType,
+            "has_content": false,
+            "path": sourcePath,
+            "host_path": artifact.hostPath,
+            "context_id": contextId,
+            "context_type": contextType.rawValue,
+            "file_size": artifact.fileSize,
+        ]
+        if let description { metadata["description"] = description }
+
+        let markerText = makeMarkerText(metadata: metadata)
+        guard let parsed = parseMarkers(from: markerText) else {
+            return .failure(.markersMissing)
+        }
+        let enriched = rebuildToolResult(markerText, parsed: parsed, contentLines: [])
+        return .success(ProcessingResult(artifact: artifact, enrichedToolResult: enriched))
+    }
+
+    /// Re-home an artifact into another context's artifact store: copy the
+    /// backing file (or re-write inline content) into the destination
+    /// context's directory and return a new artifact keyed to that context.
+    ///
+    /// Used by the delegated-spawn pass-through: a delegated child chat
+    /// session shares artifacts into ITS OWN store; after the run the parent
+    /// adopts them so the cards survive the child session's deletion.
+    ///
+    /// Security: `sourceRootContextId` pins where the source file is allowed
+    /// to live — the artifact's `hostPath` must sit inside THAT context's
+    /// store directory. Transcript-carried paths never get to name an
+    /// arbitrary host location. Inline-content artifacts need no source file
+    /// and are re-written from `content`.
+    static func adoptIntoContext(
+        _ artifact: SharedArtifact,
+        contextId destinationContextId: String,
+        sourceRootContextId: String
+    ) -> SharedArtifact? {
+        let destDir = OsaurusPaths.contextArtifactsDir(contextId: destinationContextId)
+        OsaurusPaths.ensureExistsSilent(destDir)
+        guard
+            let dest = resolveDestinationPath(
+                filename: sanitizeArtifactFilename(artifact.filename),
+                contextDir: destDir
+            )
+        else { return nil }
+
+        let fm = FileManager.default
+        let sourceRoot = canonicalizedURL(
+            OsaurusPaths.contextArtifactsDir(contextId: sourceRootContextId)
+        )
+        let sourcePath = artifact.hostPath
+        let containedSource: URL? = {
+            guard !sourcePath.isEmpty else { return nil }
+            let url = canonicalizedURL(URL(fileURLWithPath: sourcePath))
+            guard isContained(url, in: sourceRoot), fm.fileExists(atPath: url.path) else {
+                return nil
+            }
+            return url
+        }()
+
+        if fm.fileExists(atPath: dest.path) { try? fm.removeItem(at: dest) }
+        if let source = containedSource {
+            do { try fm.copyItem(at: source, to: dest) } catch {
+                NSLog(
+                    "[SharedArtifact] adopt copy failed %@ → %@: %@",
+                    source.path, dest.path, error.localizedDescription
+                )
+                return nil
+            }
+        } else if let content = artifact.content {
+            do { try content.write(to: dest, atomically: true, encoding: .utf8) } catch {
+                return nil
+            }
+        } else {
+            // No in-store source file and no inline content — nothing safe
+            // to adopt (an out-of-store hostPath lands here by design).
+            return nil
+        }
+
+        return SharedArtifact(
+            contextId: destinationContextId,
+            contextType: .chat,
+            filename: dest.lastPathComponent,
+            mimeType: artifact.mimeType,
+            fileSize: artifact.fileSize,
+            hostPath: dest.path,
+            isDirectory: artifact.isDirectory,
+            content: artifact.content,
+            description: artifact.description,
+            isFinalResult: false
+        )
+    }
+
     /// Reconstructs a SharedArtifact from an enriched tool result string (for display).
     /// Only succeeds when the result has been enriched with host_path, context_id, etc.
     ///
@@ -459,6 +650,98 @@ extension SharedArtifact {
             content: textContent,
             description: description
         )
+    }
+
+    /// Translate a `ResolutionFailure` into a `ToolEnvelope.failure` whose
+    /// `message` tells the model exactly what went wrong AND what to try
+    /// next. The "next" hint is keyed on `executionMode` so every mode gets
+    /// a callable public file-tool hint. Shared by the direct-chat wrapper
+    /// (`ChatView.processShareArtifactResult`) and the spawned-worker
+    /// intercept (`SpawnArtifactCollector`) so the diagnostics can't drift.
+    static func failureEnvelope(
+        reason: ResolutionFailure,
+        executionMode: ExecutionMode
+    ) -> String {
+        let toolName = "share_artifact"
+        let listingHint: String
+        switch executionMode {
+        case .sandbox:
+            listingHint =
+                "Verify the file with `file_read`/`file_search`, "
+                + "or pass `content`+`filename` for inline data."
+        case .hostFolder:
+            listingHint =
+                "Verify the file with `file_read`/`file_search`, or pass `content`+`filename` "
+                + "for inline data."
+        case .none:
+            listingHint =
+                "Pass `content`+`filename` for inline data, or attach a working folder/sandbox first."
+        }
+
+        // Local helper prefixes every message with `share_artifact failed: `
+        // and fills in the always-the-same `tool` / `retryable` fields, so
+        // the per-case branches read at the level of the actual diagnostic.
+        func fail(
+            _ kind: ToolEnvelope.Kind,
+            _ message: String,
+            field: String? = nil,
+            expected: String? = nil
+        ) -> String {
+            ToolEnvelope.failure(
+                kind: kind,
+                message: "share_artifact failed: \(message)",
+                field: field,
+                expected: expected,
+                tool: toolName,
+                retryable: true
+            )
+        }
+
+        switch reason {
+        case .markersMissing:
+            return fail(
+                .executionError,
+                "marker block missing from tool result. This is a tool-runtime bug — "
+                    + "retry once; if it persists, share the content inline."
+            )
+        case .noContentOrPath:
+            return fail(
+                .invalidArgs,
+                "neither `path` nor `content` was provided. Pass an existing file path, "
+                    + "or `content`+`filename` for inline text."
+            )
+        case .destinationRejected(let filename):
+            return fail(
+                .invalidArgs,
+                "filename `\(filename)` was rejected (would escape the artifacts directory). "
+                    + "Pass a plain basename like `report.md`.",
+                field: "filename",
+                expected: "single-segment filename without `..` or absolute path"
+            )
+        case .pathRejected(let path):
+            return fail(
+                .invalidArgs,
+                "path `\(path)` was rejected (escapes the trusted root, is an unrelated absolute "
+                    + "path, or contains traversal). \(listingHint)",
+                field: "path",
+                expected: "path under the agent home / working folder"
+            )
+        case .fileNotFound(let path, let searchedLocations):
+            let searchedSummary =
+                searchedLocations.isEmpty
+                ? "(no candidates resolved)"
+                : searchedLocations.joined(separator: ", ")
+            return fail(
+                .executionError,
+                "file not found for `\(path)`. Searched: \(searchedSummary). \(listingHint)"
+            )
+        case .copyFailed(let source, let detail):
+            return fail(
+                .executionError,
+                "copy from `\(source)` to artifacts dir threw: \(detail). "
+                    + "Retry once; if it persists, share the content inline."
+            )
+        }
     }
 
     // MARK: - Private Helpers
@@ -542,8 +825,47 @@ extension SharedArtifact {
             return .rejected
 
         case .hostFolder(let ctx):
-            if let resolved = resolveContainedPath(path, within: ctx.rootPath) {
-                return .candidate(resolved, attempted: [resolved.path])
+            let root = ctx.rootPath
+            var attempted: [String] = []
+            var firstCandidate: URL?
+
+            if let primary = resolveContainedPath(path, within: root) {
+                attempted.append(primary.path)
+                firstCandidate = primary
+                if FileManager.default.fileExists(atPath: primary.path) {
+                    return .candidate(primary, attempted: attempted)
+                }
+            }
+
+            // Basename fallback, matching the sandbox branch above. This method
+            // has always documented "falling back to a basename search", but
+            // host-folder mode only ever tried the literal path — so a model
+            // that wrote `report.md` into the selected folder and then shared
+            // `MyFolder/report.md` (repeating the folder's own name) or dropped
+            // it in `output/` was told the file did not exist while it sat in
+            // the folder the whole time.
+            //
+            // Deliberately limited to relative paths with no `..`: an escape
+            // attempt must stay `.rejected` so the model learns the PATH was
+            // refused, not that the file was missing. Recovering the basename of
+            // `../secret.txt` would quietly turn one failure into the other.
+            let escapes = path.hasPrefix("/") || path.split(separator: "/").contains("..")
+            if !escapes, let basename = extractPathComponent(path) {
+                for sub in ["", "output", "out", "build", "dist"] {
+                    let relative = sub.isEmpty ? basename : "\(sub)/\(basename)"
+                    guard let attempt = resolveContainedPath(relative, within: root),
+                        !attempted.contains(attempt.path)
+                    else { continue }
+                    attempted.append(attempt.path)
+                    if firstCandidate == nil { firstCandidate = attempt }
+                    if FileManager.default.fileExists(atPath: attempt.path) {
+                        return .candidate(attempt, attempted: attempted)
+                    }
+                }
+            }
+
+            if let candidate = firstCandidate {
+                return .candidate(candidate, attempted: attempted)
             }
             return .rejected
 
@@ -555,7 +877,7 @@ extension SharedArtifact {
     /// Resolves an artifact destination under `contextDir`, refusing anything
     /// that would escape the context directory via `..`, symlinks, or an
     /// absolute path smuggled in through the filename.
-    private static func resolveDestinationPath(filename: String, contextDir: URL) -> URL? {
+    static func resolveDestinationPath(filename: String, contextDir: URL) -> URL? {
         let contextRoot = canonicalizedURL(contextDir)
         let destination = contextRoot.appendingPathComponent(filename).standardizedFileURL
         guard isContained(destination, in: contextRoot) else { return nil }
@@ -580,7 +902,7 @@ extension SharedArtifact {
         return resolved
     }
 
-    private static func sanitizeArtifactFilename(_ rawFilename: String) -> String {
+    static func sanitizeArtifactFilename(_ rawFilename: String) -> String {
         extractPathComponent(rawFilename) ?? "artifact"
     }
 
@@ -596,11 +918,11 @@ extension SharedArtifact {
         return cleaned
     }
 
-    private static func canonicalizedURL(_ url: URL) -> URL {
+    static func canonicalizedURL(_ url: URL) -> URL {
         url.resolvingSymlinksInPath().standardizedFileURL
     }
 
-    private static func isContained(_ candidate: URL, in root: URL) -> Bool {
+    static func isContained(_ candidate: URL, in root: URL) -> Bool {
         let candidatePath = candidate.path
         let rootPath = root.path
         return candidatePath == rootPath || candidatePath.hasPrefix(rootPath + "/")
@@ -625,5 +947,11 @@ extension SharedArtifact {
         }
 
         return prefix + inner + suffix
+    }
+
+    private static func makeMarkerText(metadata: [String: Any]) -> String {
+        let jsonData = try? JSONSerialization.data(withJSONObject: metadata, options: .osaurusCanonical)
+        let jsonLine = jsonData.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+        return startMarker + jsonLine + endMarker
     }
 }

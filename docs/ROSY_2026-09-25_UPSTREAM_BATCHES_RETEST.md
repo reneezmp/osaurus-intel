@@ -1713,3 +1713,13 @@ Providers). Before this build, these three could list models but not chat.
       what this chat has spent.
 - [ ] Turn the Router off in Credits: the chip disappears.
 
+## Output tools (2026-10-11)
+
+- [ ] Agents › an agent › Output › turn on Charts. Ask "chart these sales:
+      Jan 10, Feb 14, Mar 9": a chart card appears in the reply.
+- [ ] Ask an agent to "save a short summary as notes.md and share it": a file
+      card appears, and clicking it opens the file.
+- [ ] Turn on Memory Recall (Memory & Recall section) for an agent with
+      memory; ask "what did we talk about last week?": the agent searches
+      memory (tool row) before answering.
+

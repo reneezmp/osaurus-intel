@@ -678,6 +678,13 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// Speak Tool (upstream): the agent gets the `speak` tool to read a reply
     /// aloud when asked. Default off.
     public var speakEnabled: Bool
+    /// Per-agent opt-in for the `render_chart` tool (upstream). Default off:
+    /// stripped from the schema unless enabled.
+    public var renderChartEnabled: Bool
+    /// Per-agent opt-in for the `search_memory` recall tool (upstream).
+    /// Independent of the memory switch (injection + recording); only
+    /// controls mid-session recall through the tool. Default off.
+    public var searchMemoryEnabled: Bool
     /// Self-scheduling bounds. Always present so the UI never has to disambiguate
     /// "schedule disabled" vs "schedule with default bounds"; `mode = .manual`
     /// (dailyRunCap = 0) is the off state.
@@ -705,8 +712,12 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         webSearchEnabled: Bool = false,
         enabledAppleApps: Set<AppleApp> = [],
         selfSchedulingEnabled: Bool = false,
-        speakEnabled: Bool = false
+        speakEnabled: Bool = false,
+        renderChartEnabled: Bool = false,
+        searchMemoryEnabled: Bool = false
     ) {
+        self.renderChartEnabled = renderChartEnabled
+        self.searchMemoryEnabled = searchMemoryEnabled
         self.dbEnabled = dbEnabled
         self.webSearchEnabled = webSearchEnabled
         self.enabledAppleApps = enabledAppleApps
@@ -727,6 +738,8 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         enabledAppleApps = Set(rawAppleApps.compactMap(AppleApp.init(rawValue:)))
         selfSchedulingEnabled = try c.decodeIfPresent(Bool.self, forKey: .selfSchedulingEnabled) ?? false
         speakEnabled = try c.decodeIfPresent(Bool.self, forKey: .speakEnabled) ?? false
+        renderChartEnabled = try c.decodeIfPresent(Bool.self, forKey: .renderChartEnabled) ?? false
+        searchMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .searchMemoryEnabled) ?? false
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
@@ -760,6 +773,8 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case enabledAppleApps
         case selfSchedulingEnabled
         case speakEnabled
+        case renderChartEnabled
+        case searchMemoryEnabled
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -775,6 +790,8 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(AppleApp.sorted(enabledAppleApps).map(\.rawValue), forKey: .enabledAppleApps)
         try c.encode(selfSchedulingEnabled, forKey: .selfSchedulingEnabled)
         try c.encode(speakEnabled, forKey: .speakEnabled)
+        try c.encode(renderChartEnabled, forKey: .renderChartEnabled)
+        try c.encode(searchMemoryEnabled, forKey: .searchMemoryEnabled)
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)

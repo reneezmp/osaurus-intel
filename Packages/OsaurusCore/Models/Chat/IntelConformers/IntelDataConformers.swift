@@ -2368,6 +2368,11 @@ final class SystemPromptComposer: @unchecked Sendable {
         let speakEnabled = await MainActor.run {
             AgentManager.shared.effectiveSpeakEnabled(for: id)
         }
+        // Upstream per-agent opt-ins for `render_chart` / `search_memory`.
+        let (renderChartEnabled, searchMemoryEnabled) = await MainActor.run {
+            let settings = AgentManager.shared.agent(for: id)?.settings
+            return (settings?.renderChartEnabled ?? false, settings?.searchMemoryEnabled ?? false)
+        }
         let appleAppToolNames = await MainActor.run {
             AppleApp.toolNames(for: AgentManager.shared.effectiveAppleApps(for: id))
         }
@@ -2501,6 +2506,10 @@ final class SystemPromptComposer: @unchecked Sendable {
                 .filter { spec in
                     speakEnabled || spec.function.name != ToolRegistry.speakToolName
                 }
+                .filter { spec in
+                    (renderChartEnabled || spec.function.name != "render_chart")
+                        && (searchMemoryEnabled || spec.function.name != "search_memory")
+                }
             if let enabled = enabledToolNames {
                 // Folder/runtime tools (file_read, file_write, file_edit,
                 // file_search, file_tree, shell_run, git_*) are auto-mounted with
@@ -2537,6 +2546,11 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if speakEnabled {
                     allowed.insert(ToolRegistry.speakToolName)
                 }
+                // Upstream: `share_artifact` is baseline; Charts and Memory
+                // Recall switches are their own grants.
+                allowed.insert("share_artifact")
+                if renderChartEnabled { allowed.insert("render_chart") }
+                if searchMemoryEnabled { allowed.insert("search_memory") }
                 if id == Agent.defaultId {
                     allowed.formUnion(ToolRegistry.orchestratorOnlyToolNames)
                 }

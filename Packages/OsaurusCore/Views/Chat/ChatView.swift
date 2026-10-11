@@ -2321,6 +2321,18 @@ final class ChatSession: ObservableObject {
         toolResult: String,
         executionMode: ExecutionMode
     ) -> String {
+        Self.processShareArtifactResult(
+            toolResult: toolResult, sessionId: sessionId, agentId: agentId, executionMode: executionMode)
+    }
+
+    /// Static form for Intel's cloud engine, which runs `share_artifact`
+    /// itself (W-tools-misc, 2026-10-11). Same upstream logic.
+    static func processShareArtifactResult(
+        toolResult: String,
+        sessionId: UUID?,
+        agentId: UUID?,
+        executionMode: ExecutionMode
+    ) -> String {
         guard let sessionId else { return toolResult }
         let agentName = SandboxAgentProvisioner.linuxName(
             for: (agentId ?? Agent.defaultId).uuidString
@@ -3530,7 +3542,9 @@ final class ChatSession: ObservableObject {
                                                                 .withValue(self.selectedModelSupportsImages) {
                                                                     try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
-                                                                            try await engine.streamChat(request: req)
+                                                                            try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
+                                                                                try await engine.streamChat(request: req)
+                                                                            }
                                                                         }
                                                                 }
                                                         }
@@ -3937,7 +3951,9 @@ final class ChatSession: ObservableObject {
                                                                 .withValue(self.selectedModelSupportsImages) {
                                                                     try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
-                                                                            try await engine.streamChat(request: finalReq)
+                                                                            try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
+                                                                                try await engine.streamChat(request: finalReq)
+                                                                            }
                                                                         }
                                                                 }
                                                         }
