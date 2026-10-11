@@ -3622,3 +3622,39 @@ Tests: upstream's `KeychainTests` (fake backend) and
 `ToolSecretsLegacyMigrationTests` (in-memory store). `OsaurusKeychainGroup`
 and its tests come with `W-identity-mobile`.
 
+### Storage health (`W-storage-health` complete) — 2026-10-11
+
+**Taken verbatim:** `PersistenceHealth`, `FileVaultStatus` and
+`ConfigDiskWriter`.
+
+- **Off-main config writes** (an upstream hang fix):
+  `RemoteProviderConfiguration`, `ServerConfigurationStore` and
+  `MemoryConfiguration` write through it.
+  - Intel writes synchronously in any test process (`OsaurusPaths.isTestProcess`),
+    not only with `overrideRoot`, because Intel's tests use
+    `OSAURUS_TEST_ROOT`.
+  - `DefaultAgentConfigurationStore.saveChecked` stays synchronous: its
+    callers need the error.
+- **Flushes at quit.** `applicationWillTerminate` now flushes
+  `ToolConfigurationStore`, `ConfigDiskWriter` and `Keychain` pending
+  writes, as upstream does. Intel flushed nothing before.
+- **Recovery.** `IntelStorageRecovery` is upstream's
+  `StorageRecoveryService` over Intel's own stores. Retry records and clears
+  `PersistenceHealth` issues; Reset quiesces through
+  `OsaurusDatabaseHandle.withAllHandlesQuiesced` (the key-rotation path),
+  quarantines and reopens. Intel differences:
+  - upstream's store list is mostly databases Intel doesn't compile;
+  - upstream's reset uses `StorageMutationGate` / `StorageFile`.
+- **Storage page.** It probes on open and shows "Stores needing attention"
+  with Retry / Reset… (never Reset for a newer-version store), plus a
+  FileVault line in Intel wording. Intel always encrypts; upstream defaults
+  to plaintext and leans on FileVault.
+
+Details: `docs/STORAGE.md`, "Stores needing attention".
+
+Tests: upstream's `ConfigDiskWriterFlushTests` and
+`IntelStorageRecoveryTests`. The latter writes a non-database file at the
+knowledge write log's path under the test root, then checks that Retry
+records the issue, and that Reset quarantines the file and opens a fresh
+store.
+

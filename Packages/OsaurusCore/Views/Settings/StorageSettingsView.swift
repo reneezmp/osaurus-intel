@@ -35,6 +35,13 @@ public struct StorageSettingsView: View {
     @State private var showMismatchDetails: Bool = false
 
     @State private var hasAppeared = false
+    // W-storage-health (upstream): stores that failed to open, with
+    // Retry / Reset, and the FileVault status.
+    @State private var storeIssues: [StorageStoreIssue] = []
+    @State private var fileVaultOn: Bool?
+    @State private var recoveringStore: String?
+    @State private var pendingResetStore: IntelStorageRecovery.Store?
+    @State private var showStoreResetConfirm = false
 
     /// Upstream #2950: rendered inside General → Advanced → Data & Storage
     /// (no header, no own scroll view). Settings no longer shows the
@@ -105,6 +112,10 @@ public struct StorageSettingsView: View {
                 coreKeyMismatchCard
             } else if !pluginMismatchTargets.isEmpty {
                 pluginOrphanCard
+            }
+
+            if !storeIssues.isEmpty {
+                storesNeedingAttentionCard
             }
 
             if let outcome = lastOutcome, !outcome.failedTargets.isEmpty {
@@ -260,6 +271,25 @@ public struct StorageSettingsView: View {
                     .foregroundColor(theme.tertiaryText)
             }
             .accentColor(theme.tertiaryText)
+
+            // Upstream's FileVault row (Intel wording: Osaurus encrypts its
+            // own data either way; FileVault covers the rest of the disk).
+            if let fileVaultOn {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: fileVaultOn ? "lock.laptopcomputer" : "laptopcomputer")
+                        .font(.system(size: 11))
+                        .foregroundColor(fileVaultOn ? theme.successColor : theme.secondaryText)
+                    Text(
+                        fileVaultOn
+                            ? "FileVault is on, so the rest of your disk is encrypted at rest too."
+                            : "FileVault is off. Osaurus still encrypts its own data; turning on FileVault (System Settings › Privacy & Security) protects the rest of your disk.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+            }
         }
         .padding(16)
         .frame(maxWidth: .infinity, alignment: .leading)
@@ -296,6 +326,152 @@ public struct StorageSettingsView: View {
     /// "your data is encrypted with a different key than what's in
     /// my Keychain right now" situation. We block destructive
     /// actions (rotate) until the user takes a corrective step.
+    // MARK: - Stores needing attention (upstream recovery card)
+
+    private var storesNeedingAttentionCard: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            Label {
+                Text("Stores needing attention", bundle: .module)
+            } icon: {
+                Image(systemName: "exclamationmark.triangle.fill")
+                    .foregroundColor(theme.warningColor)
+            }
+            .font(.system(size: 13, weight: .semibold))
+            .foregroundColor(theme.primaryText)
+
+            ForEach(storeIssues.sorted { $0.store < $1.store }, id: \.store) { issue in
+                storeIssueRow(issue)
+            }
+        }
+        .padding(16)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.warningColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 12)
+                        .stroke(theme.warningColor.opacity(0.4), lineWidth: 1)
+                )
+        )
+        .alert("Reset this store?", isPresented: $showStoreResetConfirm) {
+            Button(localized: "Cancel", role: .cancel) { pendingResetStore = nil }
+            Button(localized: "Reset", role: .destructive) {
+                if let store = pendingResetStore { resetStore(store) }
+            }
+        } message: {
+            Text(
+                "Osaurus moves the unreadable file to ~/.osaurus/quarantine/ (nothing is deleted) and starts this store empty, so the feature works again. Restore the original Keychain key first if you can.",
+                bundle: .module
+            )
+        }
+    }
+
+    @ViewBuilder
+    private func storeIssueRow(_ issue: StorageStoreIssue) -> some View {
+        let store = IntelStorageRecovery.Store(rawValue: issue.store)
+        VStack(alignment: .leading, spacing: 6) {
+            HStack(spacing: 8) {
+                Text(LocalizedStringKey(store?.displayName ?? issue.store), bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(LocalizedStringKey(Self.issueKindBadge(issue.kind)), bundle: .module)
+                    .font(.system(size: 9, weight: .bold))
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(Capsule().fill(issueKindColor(issue.kind)))
+                Spacer(minLength: 8)
+                if recoveringStore == issue.store {
+                    ProgressView().scaleEffect(0.55)
+                } else if let store {
+                    actionButton(
+                        icon: "arrow.clockwise", label: "Retry", isPrimary: false,
+                        isDisabled: recoveringStore != nil, disabledHelp: nil
+                    ) { retryStore(store) }
+                    // Upstream: never offer Reset for a store written by a
+                    // newer build — the data is intact, only unreadable here.
+                    if issue.kind != .forwardVersion {
+                        actionButton(
+                            icon: "trash", label: "Reset…", isPrimary: false,
+                            isDisabled: recoveringStore != nil, disabledHelp: nil
+                        ) {
+                            pendingResetStore = store
+                            showStoreResetConfirm = true
+                        }
+                    }
+                }
+            }
+            Text(LocalizedStringKey(Self.issueKindCause(issue.kind)), bundle: .module)
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    static func issueKindBadge(_ kind: StorageOpenIssueKind) -> String {
+        switch kind {
+        case .locked: return "LOCKED"
+        case .corrupt: return "CORRUPT"
+        case .migration: return "MIGRATION"
+        case .forwardVersion: return "NEWER VERSION"
+        case .unknown: return "ERROR"
+        }
+    }
+
+    private func issueKindColor(_ kind: StorageOpenIssueKind) -> Color {
+        switch kind {
+        case .locked, .forwardVersion: return theme.warningColor
+        case .corrupt, .migration: return theme.errorColor
+        case .unknown: return theme.secondaryText
+        }
+    }
+
+    /// Upstream's wording.
+    static func issueKindCause(_ kind: StorageOpenIssueKind) -> String {
+        switch kind {
+        case .locked:
+            return
+                "Encrypted, but the storage key is unavailable on this Mac. Restore the Keychain key and Retry, or Reset to start fresh."
+        case .corrupt:
+            return
+                "The file isn't a readable database (corruption or a key mismatch). Reset to recreate it; the original is quarantined."
+        case .migration:
+            return "A schema migration failed. Retry after updating, or Reset to recreate the store."
+        case .forwardVersion:
+            return
+                "This store was written by a newer version of Osaurus, so this build won't open it. Update Osaurus to read it again. Do not Reset, your data is intact."
+        case .unknown:
+            return "The store failed to open for an unrecognized reason. Retry, or Reset if it persists."
+        }
+    }
+
+    private func retryStore(_ store: IntelStorageRecovery.Store) {
+        recoveringStore = store.rawValue
+        Task {
+            let ok = await Task.detached { IntelStorageRecovery.retry(store) }.value
+            await MainActor.run {
+                recoveringStore = nil
+                storeIssues = PersistenceHealth.shared.storeIssues()
+                lastSummary = ok ? "\(store.displayName) opened." : "\(store.displayName) still can't be opened."
+            }
+        }
+    }
+
+    private func resetStore(_ store: IntelStorageRecovery.Store) {
+        recoveringStore = store.rawValue
+        pendingResetStore = nil
+        Task {
+            let destination = await Task.detached { IntelStorageRecovery.reset(store) }.value
+            await MainActor.run {
+                recoveringStore = nil
+                storeIssues = PersistenceHealth.shared.storeIssues()
+                lastSummary =
+                    destination.map { "\(store.displayName) was reset. The original is in \($0.path)." }
+                    ?? "\(store.displayName) was reset."
+            }
+        }
+    }
+
     private var coreKeyMismatchCard: some View {
         VStack(alignment: .leading, spacing: 12) {
             Label {
@@ -683,6 +859,14 @@ public struct StorageSettingsView: View {
     // MARK: - Actions
 
     private func refresh() async {
+        // Upstream recovery surface: probe Intel's stores off the main
+        // thread (opening an encrypted store reads the Keychain).
+        let (issues, fileVault) = await Task.detached {
+            IntelStorageRecovery.probe()
+            return (PersistenceHealth.shared.storeIssues(), FileVaultStatus.isEnabled())
+        }.value
+        storeIssues = issues
+        fileVaultOn = fileVault
         keyPresent = StorageKeyManager.shared.keyExists()
         lastOutcome = await StorageMigrator.shared.loadLastOutcome()
         keyMismatchTargets = await StorageMigrator.shared.detectKeyMismatch()

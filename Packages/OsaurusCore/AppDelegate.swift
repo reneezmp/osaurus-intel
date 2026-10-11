@@ -492,6 +492,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     public func applicationWillTerminate(_ notification: Notification) {
         NSLog("Osaurus (Intel) terminating")
         SharedConfigurationService.shared.remove()
+        // Upstream: land pending off-main writes before the process exits, so
+        // a setting or secret saved right before quit isn't dropped.
+        ToolConfigurationStore.flushPendingWrites()
+        ConfigDiskWriter.flushPendingWrites(timeout: 2.5)
+        Keychain.flushPendingWrites(timeout: 2.5)
     }
 
     // MARK: - Status Item

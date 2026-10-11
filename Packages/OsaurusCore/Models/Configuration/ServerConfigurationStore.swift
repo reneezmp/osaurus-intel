@@ -33,7 +33,16 @@ enum ServerConfigurationStore {
         do {
             let encoder = JSONEncoder()
             encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
-            try encoder.encode(configuration).write(to: url, options: [.atomic])
+            // Persist off the main thread (upstream ConfigDiskWriter, a hang
+            // fix). Tests read the file back immediately, so they write
+            // synchronously. Intel: any test process (OSAURUS_TEST_ROOT
+            // runs don't set overrideRoot).
+            ConfigDiskWriter.write(
+                try encoder.encode(configuration),
+                to: url,
+                synchronous: OsaurusPaths.overrideRoot != nil || OsaurusPaths.isTestProcess,
+                onError: { print("[Osaurus] Failed to save ServerConfiguration: \($0)") }
+            )
         } catch {
             print("[Osaurus] Failed to save ServerConfiguration: \(error)")
         }

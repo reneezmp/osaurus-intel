@@ -291,8 +291,16 @@ public enum MemoryConfigurationStore: Sendable {
         OsaurusPaths.ensureExistsSilent(url.deletingLastPathComponent())
         do {
             let data = try encoder.encode(validated)
-            try data.write(to: url, options: .atomic)
+            // Upstream: update the cache before the write so in-process reads
+            // see the new value immediately; the disk write lands off the
+            // main thread (synchronous in tests).
             lock.withLock { $0 = validated }
+            ConfigDiskWriter.write(
+                data,
+                to: url,
+                synchronous: OsaurusPaths.overrideRoot != nil || OsaurusPaths.isTestProcess,
+                onError: { print("[Osaurus] Failed to save memory config: \($0.localizedDescription)") }
+            )
             #if OSAURUS_INTEL
             AgentManager.shared.bumpCapabilityRevision()
             #endif

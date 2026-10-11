@@ -1696,3 +1696,11 @@ Providers). Before this build, these three could list models but not chat.
 - [ ] Agents › an agent › Secrets: add a secret, quit and reopen; it is still
       listed (before this build it was silently dropped).
 
+## Storage health (2026-10-11)
+
+- [ ] Settings › Storage opens normally; the status card says whether
+      FileVault is on. With healthy data there is no "Stores needing
+      attention" card.
+- [ ] Change a provider setting and quit right away (⌘Q). On relaunch the
+      change is kept.
+

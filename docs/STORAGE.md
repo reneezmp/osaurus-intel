@@ -227,6 +227,33 @@ If a database on disk was written with a different DEK than the one currently in
 - **Loud red card** for any of the four core databases. Rotation is disabled; user is directed to restore the right Keychain entry or import the matching plaintext backup.
 - **Quiet warning card** for plugin databases, with a **Show details** list and a **Clean up orphaned plugin data** button. Plugins whose backing DB can't be decrypted are usually leftovers from an uninstalled or replaced plugin; cleaning them up deletes only the unreadable files.
 
+### Stores needing attention (2026-10-11)
+
+Opening the Storage page tries every core store that isn't open yet
+(memory, schedules, activity log, Router billing, file history, the
+knowledge write log). Any that fail appear in an amber card with the cause,
+using upstream's wording:
+
+- **LOCKED:** the key is unavailable.
+- **CORRUPT:** not a readable database.
+- **MIGRATION:** a schema step failed.
+- **NEWER VERSION:** written by a newer build.
+- **ERROR:** anything else.
+
+Two actions:
+
+- **Retry** re-attempts the open, for example after the Keychain unlocks or
+  the right key is restored.
+- **Reset…** moves the unreadable file and its sidecars to
+  `~/.osaurus/quarantine/<timestamp>-<store>/`, never deleting them, and
+  opens an empty store, so the feature works again. It is not offered for
+  **NEWER VERSION**: that data is intact, and updating Osaurus reads it again.
+
+The knowledge index is not listed: it rebuilds itself
+(`openOrRecoverDerivedIndex`). Code: `Storage/IntelStorageRecovery.swift`,
+upstream's `PersistenceHealth`. The status card also shows whether FileVault
+is on (`fdesetup status`, no admin rights needed).
+
 ### Idle state
 
 When everything is healthy, the panel shows a green "Encrypted" badge and a single line: "All databases are encrypted with the current key."
