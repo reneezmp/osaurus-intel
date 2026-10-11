@@ -6,6 +6,30 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.60</title>
+      <pubDate>Sun, 11 Oct 2026 11:46:57 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>61</sparkle:version>
+      <sparkle:shortVersionString>1.0.60</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.60/Osaurus-Intel-1.0.60.zip" length="78536642" type="application/octet-stream" sparkle:edSignature="aRrGRI71S4LKOxbSvv18vlY7sw6tJoZDGGdwFOi6qsuCXvNa5ZlvoYdR1qO5tClBekmhCEkYNkdweSTF8HXRCg=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.60
+
+Catch-up with upstream Osaurus, 2026-10-08 to 10-11.
+
+- Agents: a loop harness (no repeated identical reads, corrections when a reply claims a file write or change that never happened), automatic history trimming for long runs, shell commands confined to the selected folder with a timeout, charts, sharing files, memory recall, keep-Mac-awake during agent runs.
+- Tool approval: one queued card at a time, Allow for This Task, and where each call runs.
+- Images: chats can send images to vision models; OpenAI, Anthropic and Google presets chat natively.
+- Web search, Credits (balance in credits, redeem codes, usage center, click-to-claim welcome credit) and the composer wallet chip at upstream.
+- Finished schedule/watcher runs stay as tabs across relaunch.
+- Keychain layer at upstream (agent secrets now actually save); storage recovery (Retry / Reset with quarantine) on the Storage page.
+- Schedules, document editing (file_edit / file_write) and many smaller fixes.
+
+_Intel fork · synced to upstream Osaurus 0.24.7 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.59</title>
       <pubDate>Wed, 07 Oct 2026 21:35:03 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
