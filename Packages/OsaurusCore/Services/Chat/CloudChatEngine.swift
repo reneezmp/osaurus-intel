@@ -975,6 +975,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     // next-step bias. Notices are transient: they ride on the
                     // next request only.
                     let taskState = AgentTaskState()
+                    // Upstream: "Allow for This Task" grants last for this run only.
+                    let permissionRunScope = ToolPermissionRunScope()
                     var pendingHarnessNotices: [String] = []
                     // Chat runs get what upstream wires through chat-only
                     // loop hooks: the grounded-claim checks (the chat splits a
@@ -1284,13 +1286,33 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             break
                                         }
                                         let description = activeTools?.first(where: { $0.function.name == call.name })?.function.description ?? ""
-                                        approved = await ToolPermissionPromptService.requestApproval(
+                                        // Upstream #2734 / run lease: the card names where the call
+                                        // runs and offers "Allow for This Task" (not for per-call tools).
+                                        let perCallOnly = ToolRegistry.shared.requiresApprovalEveryCall(
+                                            call.name, argumentsJSON: call.arguments)
+                                        if !perCallOnly, permissionRunScope.allows(call.name) {
+                                            approved = true
+                                            break
+                                        }
+                                        let outcome = await ToolPermissionPromptService.requestApprovalOutcome(
                                             toolName: call.name,
                                             description: description,
                                             argumentsJSON: call.arguments,
                                             knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
+                                                for: call.name, argumentsJSON: call.arguments),
+                                            perCallApprovalOnly: perCallOnly,
+                                            executionSurface: await ToolRegistry.shared.executionSurface(
                                                 for: call.name, argumentsJSON: call.arguments)
                                         )
+                                        switch outcome {
+                                        case .denied:
+                                            approved = false
+                                        case .allowOnce, .alwaysAllow:
+                                            approved = true
+                                        case .allowForRun:
+                                            if !perCallOnly { permissionRunScope.allow(call.name) }
+                                            approved = true
+                                        }
                                     }
                                     if !approved {
                                         let reason = policy == .deny
@@ -1617,12 +1639,33 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         activeTools?
                                         .first(where: { $0.function.name == call.name })?
                                         .function.description ?? ""
-                                    approved = await ToolPermissionPromptService.requestApproval(
+                                    // Upstream #2734 / run lease: the card names where the call
+                                    // runs and offers "Allow for This Task" (not for per-call tools).
+                                    let perCallOnly = ToolRegistry.shared.requiresApprovalEveryCall(
+                                        call.name, argumentsJSON: call.arguments)
+                                    if !perCallOnly, permissionRunScope.allows(call.name) {
+                                        approved = true
+                                        break
+                                    }
+                                    let outcome = await ToolPermissionPromptService.requestApprovalOutcome(
                                         toolName: call.name,
                                         description: toolDescription,
                                         argumentsJSON: call.arguments,
                                         knowledgeWritePreview: await ToolRegistry.shared.knowledgeWritePreview(
-                                            for: call.name, argumentsJSON: call.arguments))
+                                            for: call.name, argumentsJSON: call.arguments),
+                                        perCallApprovalOnly: perCallOnly,
+                                        executionSurface: await ToolRegistry.shared.executionSurface(
+                                            for: call.name, argumentsJSON: call.arguments)
+                                    )
+                                    switch outcome {
+                                    case .denied:
+                                        approved = false
+                                    case .allowOnce, .alwaysAllow:
+                                        approved = true
+                                    case .allowForRun:
+                                        if !perCallOnly { permissionRunScope.allow(call.name) }
+                                        approved = true
+                                    }
                                 }
 
                                 if !approved {

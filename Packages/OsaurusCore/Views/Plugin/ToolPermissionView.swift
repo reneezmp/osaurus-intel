@@ -15,11 +15,28 @@ struct ToolPermissionView: View {
     let onAllow: () -> Void
     let onDeny: () -> Void
     let onAlwaysAllow: () -> Void
-    /// False for per-call tools (deletions): no Always Allow button.
-    var allowsAlwaysAllow: Bool = true
-    /// Knowledge writes (upstream): paths, create/replace/delete and a diff
-    /// per document replace the raw JSON arguments.
+    var onAllowForRun: (() -> Void)? = nil
+    /// Knowledge writes replace the generic JSON arguments block with a
+    /// per-document manifest and diffs. Approving a document replacement out
+    /// of a pretty-printed JSON blob is not informed consent, and knowledge
+    /// consent moved to this modal precisely so it could be reviewed here.
+    /// Nil for every other tool, which keeps the JSON block.
     var knowledgeWritePreview: KnowledgeWritePreview? = nil
+    /// Hides "Always Allow" (the caller also passes a nil `onAllowForRun`) so
+    /// this call cannot be pre-granted. Set for destructive tools where a
+    /// blanket grant would be the wrong thing to be able to give. See
+    /// `PerCallApprovalTool`.
+    var perCallApprovalOnly: Bool = false
+    /// Number of approval requests waiting behind this one. The prompt
+    /// service presents one card at a time; telling the user more are coming
+    /// explains why another card appears right after this decision.
+    var queuedBehind: Int = 0
+    /// Where the approved call will run — the isolated sandbox VM, this Mac,
+    /// or a remote MCP server. `shell_run` and the `file_*` tools keep one
+    /// name in every mode and are routed at execution time, so without this
+    /// the card cannot tell the user whether "run this command" touches the
+    /// host (osaurus#2651). Nil hides the row (billing / policy prompts).
+    var executionSurface: ToolExecutionSurface? = nil
 
     @ObservedObject private var themeManager = ThemeManager.shared
     private var theme: ThemeProtocol { themeManager.currentTheme }
@@ -75,17 +92,28 @@ struct ToolPermissionView: View {
                     .opacity(appeared ? 1 : 0)
                     .offset(y: appeared ? 0 : -8)
 
-                if !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
-                    Text(description)
-                        .font(.system(size: 13))
-                        .foregroundColor(theme.secondaryText)
-                        .multilineTextAlignment(.center)
-                        .lineSpacing(2)
-                        .padding(.top, 8)
+                if let executionSurface {
+                    ExecutionSurfaceNotice(surface: executionSurface)
+                        .padding(.top, 12)
                         .padding(.horizontal, 24)
-                        .fixedSize(horizontal: false, vertical: true)
                         .opacity(appeared ? 1 : 0)
                         .offset(y: appeared ? 0 : -4)
+                }
+
+                if !description.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty {
+                    ContentSizedScrollView(maxHeight: 140) {
+                        Text(description)
+                            .font(.system(size: 13))
+                            .foregroundColor(theme.secondaryText)
+                            .multilineTextAlignment(.center)
+                            .lineSpacing(2)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .frame(maxWidth: .infinity)
+                    }
+                    .padding(.top, 8)
+                    .padding(.horizontal, 24)
+                    .opacity(appeared ? 1 : 0)
+                    .offset(y: appeared ? 0 : -4)
                 }
 
                 if let knowledgeWritePreview {
@@ -96,6 +124,14 @@ struct ToolPermissionView: View {
                         .offset(y: appeared ? 0 : 4)
                 } else if hasArguments {
                     argumentsBlock
+                        .padding(.top, 12)
+                        .padding(.horizontal, 24)
+                        .opacity(appeared ? 1 : 0)
+                        .offset(y: appeared ? 0 : 4)
+                }
+
+                if queuedBehind > 0 {
+                    queuedFootnote
                         .padding(.top, 12)
                         .padding(.horizontal, 24)
                         .opacity(appeared ? 1 : 0)
@@ -116,8 +152,7 @@ struct ToolPermissionView: View {
                     .offset(y: appeared ? 0 : 8)
             }
         }
-        // A knowledge write manifest needs room for its diffs.
-        .frame(width: knowledgeWritePreview == nil ? 380 : 560)
+        .frame(width: 460)
         .fixedSize(horizontal: true, vertical: true)
         .clipShape(RoundedRectangle(cornerRadius: 16, style: .continuous))
         .overlay(
@@ -144,12 +179,14 @@ struct ToolPermissionView: View {
         }
         .environment(\.theme, themeManager.currentTheme)
         .themedAlert(
-            "Always Allow \"\(toolName)\"?",
+            L("Always Allow \"\(toolName)\"?"),
             isPresented: $showAlwaysAllowConfirm,
             message:
-                "This tool will be automatically allowed to run without prompting in the future. You can change this in the Tools settings.",
-            primaryButton: .primary("Always Allow") { onAlwaysAllow() },
-            secondaryButton: .cancel("Cancel")
+                L(
+                    "This tool will be automatically allowed to run without prompting in the future. You can change this in the Tools settings."
+                ),
+            primaryButton: .primary(L("Always Allow")) { onAlwaysAllow() },
+            secondaryButton: .cancel(L("Cancel"))
         )
         .themedAlertScope(alertScope)
         .overlay(ThemedAlertHost(scope: alertScope))
@@ -173,6 +210,23 @@ struct ToolPermissionView: View {
                 .foregroundColor(theme.primaryText)
                 .multilineTextAlignment(.center)
         }
+    }
+
+    // MARK: - Queue Footnote
+
+    private var queuedFootnote: some View {
+        Label {
+            Text(
+                queuedBehind == 1
+                    ? L("1 more approval is waiting behind this one.")
+                    : L("\(queuedBehind) more approvals are waiting behind this one.")
+            )
+        } icon: {
+            Image(systemName: "rectangle.stack")
+        }
+        .font(.system(size: 11, weight: .medium))
+        .foregroundColor(theme.secondaryText)
+        .frame(maxWidth: .infinity, alignment: .center)
     }
 
     // MARK: - Arguments Block
@@ -201,16 +255,16 @@ struct ToolPermissionView: View {
                 .buttonStyle(.plain)
             }
 
-            ScrollView([.vertical, .horizontal], showsIndicators: true) {
+            ContentSizedScrollView(maxHeight: 200) {
                 Text(prettyArguments)
                     .font(theme.monoFont(size: 11.5))
                     .foregroundColor(theme.primaryText.opacity(0.9))
                     .textSelection(.enabled)
+                    .fixedSize(horizontal: false, vertical: true)
                     .padding(.horizontal, 12)
                     .padding(.vertical, 10)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
-            .frame(maxHeight: 160)
             .background(RoundedRectangle(cornerRadius: 8, style: .continuous).fill(theme.codeBlockBackground))
             .overlay(
                 RoundedRectangle(cornerRadius: 8, style: .continuous).stroke(
@@ -243,8 +297,13 @@ struct ToolPermissionView: View {
                     action: onAllow
                 )
             }
-            if allowsAlwaysAllow {
-                AlwaysAllowButton(action: { showAlwaysAllowConfirm = true })
+            if !perCallApprovalOnly {
+                HStack(spacing: 10) {
+                    if let onAllowForRun {
+                        RunAllowButton(action: onAllowForRun)
+                    }
+                    AlwaysAllowButton(action: { showAlwaysAllowConfirm = true })
+                }
             }
         }
     }
@@ -257,6 +316,111 @@ struct ToolPermissionView: View {
             try? await Task.sleep(nanoseconds: 2_000_000_000)
             withAnimation(theme.animationQuick()) { copied = false }
         }
+    }
+}
+
+/// Execution-surface row on the approval card: which machine the call will
+/// run on, tinted so the host case reads as the one that needs a closer
+/// look. Host = warning tint (it can change this Mac), VM = success tint
+/// (isolated), remote = neutral.
+private struct ExecutionSurfaceNotice: View {
+    let surface: ToolExecutionSurface
+
+    @Environment(\.theme) private var theme
+
+    private var accent: Color {
+        switch surface {
+        case .sandboxVM: theme.successColor
+        case .nativeHost: theme.warningColor
+        case .remoteServer: theme.secondaryText
+        }
+    }
+
+    var body: some View {
+        HStack(alignment: .top, spacing: 10) {
+            Image(systemName: surface.symbolName)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(accent)
+                .frame(width: 18, alignment: .center)
+                .padding(.top, 1)
+
+            VStack(alignment: .leading, spacing: 2) {
+                HStack(spacing: 6) {
+                    Text("Runs in", bundle: .module)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                    Text(surface.title)
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+                }
+                Text(surface.consentDetail)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 0)
+        }
+        .padding(.horizontal, 12)
+        .padding(.vertical, 8)
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(accent.opacity(0.08))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .stroke(accent.opacity(0.35), lineWidth: 1)
+        )
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel(Text(verbatim: "\(L("Runs in")) \(surface.title). \(surface.consentDetail)"))
+        .accessibilityIdentifier("toolPermission.executionSurface.\(surface.rawValue)")
+    }
+}
+
+/// Vertical scroll area sized to its content up to `maxHeight`. The card sits
+/// under `.fixedSize`, which lays children out at their ideal height — and a
+/// plain ScrollView's ideal height is its minimum, so capped scroll areas can
+/// collapse to a sliver depending on which layout pass the panel settles on.
+/// Measuring the content and setting an explicit height sidesteps that.
+private struct ContentSizedScrollView<Content: View>: View {
+    let maxHeight: CGFloat
+    @ViewBuilder let content: () -> Content
+
+    @State private var contentHeight: CGFloat?
+
+    var body: some View {
+        ScrollView(.vertical, showsIndicators: true) {
+            content()
+                .onGeometryChange(for: CGFloat.self, of: \.size.height) {
+                    contentHeight = $0
+                }
+        }
+        .frame(height: min(contentHeight ?? maxHeight, maxHeight))
+    }
+}
+
+private struct RunAllowButton: View {
+    let action: () -> Void
+
+    @Environment(\.theme) private var theme
+    @State private var isHovered = false
+
+    var body: some View {
+        Button(action: action) {
+            Label {
+                Text("Allow for This Task", bundle: .module)
+            } icon: {
+                Image(systemName: "checkmark.circle")
+            }
+            .font(.system(size: 12, weight: .medium))
+            .foregroundColor(isHovered ? theme.primaryText : theme.secondaryText)
+            .padding(.horizontal, 12)
+            .padding(.vertical, 6)
+            .background(Capsule().fill(theme.tertiaryBackground.opacity(isHovered ? 0.8 : 0.5)))
+        }
+        .buttonStyle(.plain)
+        .scaleEffect(isHovered ? 1.02 : 1.0)
+        .animation(.easeInOut(duration: 0.15), value: isHovered)
+        .onHover { isHovered = $0 }
     }
 }
 
@@ -278,7 +442,7 @@ private struct PermissionButton: View {
             VStack(spacing: 4) {
                 Label(title, systemImage: icon)
                     .font(.system(size: 13, weight: .semibold))
-                    .foregroundColor(isPrimary ? (theme.isDark ? theme.primaryBackground : .white) : theme.primaryText)
+                    .foregroundColor(isPrimary ? .white : theme.primaryText)
                 KeyboardShortcutBadge(shortcut: shortcutHint, isPrimary: isPrimary)
             }
             .frame(maxWidth: .infinity)
@@ -356,18 +520,17 @@ private struct AlwaysAllowButton: View {
 #if DEBUG && canImport(PreviewsMacros)
     #Preview("Tool Permission - Dark") {
         ToolPermissionView(
-            toolName: "execute_code",
-            description: "This tool will execute Python code on your system.",
+            toolName: "shell_run",
+            description: "Run a shell command in the working directory.",
             argumentsJSON: """
                 {
-                    "language": "python",
-                    "code": "import os\\nprint(os.getcwd())",
-                    "timeout": 30
+                    "command": "rm -rf build && swift build"
                 }
                 """,
             onAllow: { print("Allowed") },
             onDeny: { print("Denied") },
-            onAlwaysAllow: { print("Always Allow") }
+            onAlwaysAllow: { print("Always Allow") },
+            executionSurface: .nativeHost
         )
         .environment(\.theme, DarkTheme())
         .preferredColorScheme(.dark)
@@ -377,16 +540,17 @@ private struct AlwaysAllowButton: View {
 
     #Preview("Tool Permission - Light") {
         ToolPermissionView(
-            toolName: "read_file",
-            description: "Read the contents of a file from disk.",
+            toolName: "shell_run",
+            description: "Run a shell command in the working directory.",
             argumentsJSON: """
                 {
-                    "path": "/Users/example/Documents/config.json"
+                    "command": "pip install requests && python3 fetch.py"
                 }
                 """,
             onAllow: { print("Allowed") },
             onDeny: { print("Denied") },
-            onAlwaysAllow: { print("Always Allow") }
+            onAlwaysAllow: { print("Always Allow") },
+            executionSurface: .sandboxVM
         )
         .environment(\.theme, LightTheme())
         .preferredColorScheme(.light)
@@ -407,5 +571,70 @@ private struct AlwaysAllowButton: View {
         .preferredColorScheme(.dark)
         .padding(40)
         .background(Color.black.opacity(0.8))
+    }
+
+    /// The batch shape that motivated this rendering: the 62-document import
+    /// from osaurus#2439, shown as a manifest rather than a JSON blob.
+    #Preview("Tool Permission - Knowledge Batch Write") {
+        ToolPermissionView(
+            toolName: "write_knowledge",
+            description: "Create or replace documents in a knowledge collection.",
+            argumentsJSON: "{}",
+            onAllow: { print("Allowed") },
+            onDeny: { print("Denied") },
+            onAlwaysAllow: { print("Always Allow") },
+            knowledgeWritePreview: KnowledgeWritePreview(
+                collectionName: "packaging",
+                entries: [
+                    KnowledgeWritePreviewEntry(
+                        relPath: "usage/how-to-deploy.md",
+                        operation: .replace,
+                        diff: """
+                            --- usage/how-to-deploy.md (before)
+                            +++ usage/how-to-deploy.md (after)
+                            -Applies to PSAppDeployToolkit v3.
+                            +Applies to PSAppDeployToolkit v4.1.
+                            """,
+                        diffTruncated: false,
+                        deletedContent: "",
+                        addedLines: 1,
+                        removedLines: 1,
+                        problem: nil
+                    ),
+                    KnowledgeWritePreviewEntry(
+                        relPath: "getting-started/download.md",
+                        operation: .create,
+                        diff: """
+                            --- getting-started/download.md (before (new file))
+                            +++ getting-started/download.md (after)
+                            +# Download
+                            +Install from the PowerShell Gallery.
+                            """,
+                        diffTruncated: false,
+                        deletedContent: "",
+                        addedLines: 2,
+                        removedLines: 0,
+                        problem: nil
+                    ),
+                    KnowledgeWritePreviewEntry(
+                        relPath: "manual.pdf",
+                        operation: .create,
+                        diff: "",
+                        diffTruncated: false,
+                        deletedContent: "",
+                        addedLines: 0,
+                        removedLines: 0,
+                        problem: "Path manual.pdf is not a markdown document; "
+                            + "only markdown documents can be written."
+                    ),
+                ],
+                rationale: "Replace the v3 wiki content with the 4.1 docs site.",
+                parseError: nil
+            )
+        )
+        .environment(\.theme, LightTheme())
+        .preferredColorScheme(.light)
+        .padding(40)
+        .background(Color.gray.opacity(0.2))
     }
 #endif

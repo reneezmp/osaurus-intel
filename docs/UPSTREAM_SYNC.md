@@ -3544,3 +3544,49 @@ Tests: `IntelRetainedRunTabsTests` covers:
 - a hibernated tab comes back and closing it dismisses the run;
 - the remembered-tabs record skips it.
 
+### Approval card at upstream (`W-tool-catalog-ui` complete) — 2026-10-11
+
+`ToolPermissionPromptService`, `ToolPermissionView` and `ToolExecutionSurface`
+are upstream's (Intel's card was nine upstream commits behind). What changes:
+
+- **One queue.** Concurrent prompts are entries in one queue, presented one
+  at a time with a "more waiting" count (#2720). Before, a second prompt
+  could overwrite the first panel and leave dead buttons.
+- **Readable card.** It sizes to its content and scrolls long descriptions
+  (#2241, #2244, #2575).
+- **Allow for This Task** (run lease): grants the tool until the next user
+  message. Never offered for per-call tools.
+- **Run location** (#2734). On Intel the card shows "Native · this Mac", or
+  "Remote MCP server" for HTTP MCP tools. There is no VM
+  (`INC-containers`).
+
+**Intel edits:**
+
+- **Lease scope.** The engine owns one `ToolPermissionRunScope` per
+  `streamChat` run; upstream binds it in `AgentToolLoop`. The engine calls
+  `requestApprovalOutcome` at both tool paths.
+- **Run-location resolver.** `ToolRegistry.executionSurface` lives in
+  `IntelStubConformers`: workspace tools are this Mac, and MCP tools follow
+  their provider.
+- **Ventura.** `safeAreaRegions` is behind `#available(macOS 13.3, *)`, as
+  in Intel's MCP prompt.
+- **Paired phone.** `ChatExecutionContext.hasRemoteReviewer` exists but is
+  never bound (`W-workspaces-identity-mobile`).
+- **File-history prompt.** It keeps using the compatible `requestApproval`
+  (per-call only).
+
+Tests:
+
+- **Taken from upstream:** `ToolPermissionPromptServiceTests` and
+  `ToolPermissionHeadlessGuardTests`.
+- **Surface tests.** `ToolExecutionSurfaceTests` keeps upstream's pure
+  resolver suite; its VM registry and gate suites are replaced by
+  `IntelToolExecutionSurfaceTests`.
+- **Removed.** Intel's `ToolPermissionPromptQueueTests` tested the old slot
+  API.
+
+`AgentCapabilityReadiness` (upstream model, ported the same day): its
+subagent factory is behind `#if !OSAURUS_INTEL` until `W-subagents`, and its
+subagent test cases are cut with a note. Intel's agent page has no ability
+cards to show its notes yet (`W-agent-detail-redesign`).
+

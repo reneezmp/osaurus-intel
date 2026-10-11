@@ -130,6 +130,15 @@ public enum ChatExecutionContext {
     /// window every round. Other callers (HTTP API, schedules) are unchanged.
     @TaskLocal public static var interactiveChatRun: Bool = false
 
+    /// One logical agent run's interactive approval lease (upstream). Intel's
+    /// cloud engine creates one per `streamChat` run.
+    @TaskLocal static var toolPermissionRunScope: ToolPermissionRunScope?
+
+    /// Upstream: the run came from the user's paired phone, which answers
+    /// approval cards remotely. Intel has no paired phone yet
+    /// (`W-workspaces-identity-mobile`), so nothing binds it.
+    @TaskLocal static var hasRemoteReviewer: Bool = false
+
     /// Default idle-timeout (seconds) for `shell_run`, applied ONLY when the
     /// model passed no `timeout` argument. Bound by headless drivers
     /// (`AgentLoopEvaluator`) where no user [Terminate] button exists, so a
@@ -187,3 +196,20 @@ public enum ChatExecutionContext {
     /// from assertion and scopes `complete`'s unchecked-item check to the run.
     @TaskLocal static var agentTodoRunScope: AgentTodoRunScope?
 }
+
+/// User-granted approval lease scoped to one canonical agent-loop run.
+/// A choice such as “Allow for this task” avoids repeated shell panels while
+/// expiring automatically before the next user message. Upstream.
+final class ToolPermissionRunScope: @unchecked Sendable {
+    private let lock = NSLock()
+    private var allowedToolNames: Set<String> = []
+
+    func allows(_ toolName: String) -> Bool {
+        lock.withLock { allowedToolNames.contains(toolName) }
+    }
+
+    func allow(_ toolName: String) {
+        lock.withLock { _ = allowedToolNames.insert(toolName) }
+    }
+}
+

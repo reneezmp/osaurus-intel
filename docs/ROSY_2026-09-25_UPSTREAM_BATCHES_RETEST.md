@@ -1676,3 +1676,15 @@ Providers). Before this build, these three could list models but not chat.
       History).
 - [ ] Quit within a few seconds of a run finishing: the tab still comes back.
 
+## Approval card at upstream (2026-10-11)
+
+- [ ] Ask an agent with a folder to run a shell command: the approval card
+      shows "Native · this Mac" and four choices (Deny, Allow, Allow for This
+      Task, Always Allow).
+- [ ] Choose Allow for This Task, then ask for a second command in the same
+      reply: no card. Send a new message asking for another: the card is
+      back.
+- [ ] A long tool description scrolls inside the card; the buttons stay
+      visible.
+- [ ] If you use an HTTP MCP server, its tools show "Remote MCP server".
+

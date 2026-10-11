@@ -1606,6 +1606,19 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
         return await tool.approvalPreview(argumentsJSON: argumentsJSON)
     }
 
+    /// Where calling `name` will land, for the approval card (upstream
+    /// `executionSurface(for:argumentsJSON:)`, #2734). Intel has no sandbox
+    /// VM (`INC-containers`), so the workspace tools always run on this Mac;
+    /// MCP tools follow their provider (HTTP = remote server).
+    func executionSurface(for name: String, argumentsJSON: String) async -> ToolExecutionSurface {
+        guard let mcp = toolsByName[name] as? MCPProviderTool else { return .nativeHost }
+        let providerId = mcp.providerId
+        let provider = await MainActor.run {
+            MCPProviderManager.shared.configuration.providers.first { $0.id == providerId }
+        }
+        return .forMCPProvider(transport: provider?.transport, executionHost: provider?.executionHost)
+    }
+
     func handlesOwnApproval(for name: String) -> Bool {
         (toolsByName[name] as? any PermissionedTool)?.handlesOwnApproval == true
     }
