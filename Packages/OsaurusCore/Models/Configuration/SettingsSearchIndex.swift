@@ -239,6 +239,10 @@ public enum SettingsSearchIndex {
             title: "Check Spelling While Typing",
             keywords: ["spelling", "spell check", "spellcheck", "typos", "underline", "typing"]),
         .init(
+            id: "settings.chat.keepAwakeForAgentRuns", tab: .chat, section: "Agent Sessions",
+            title: "Keep Mac Awake While Agents Run",
+            keywords: ["sleep", "awake", "caffeinate", "idle sleep", "power", "keep awake"]),
+        .init(
             id: "settings.chat.titles", tab: .chat, section: "Behavior",
             title: "Automatically Name Chats", keywords: ["chat titles", "rename", "auto title"]),
         .init(

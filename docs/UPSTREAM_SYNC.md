@@ -923,7 +923,30 @@ categories to watch for:
 | `.onChange(of:){ named, v in }` | Manual: `@State` prev-value var |
 | `.symbolEffect` | Remove or `.contentTransition(.opacity)` |
 | `.activateAllWindows` | Use `.activateIgnoringOtherApps` |
-| new 14+ decorative APIs | Plain 13-compatible replacement (no `#available` gates) |
+| new 14+ decorative APIs | ~~Plain 13-compatible replacement (no `#available` gates)~~ superseded 2026-10-11, see below |
+
+**Universal rule (Renée, 2026-10-11): `if macOS 14 => use it`.** When
+upstream code needs a macOS 14+ (or 15+) API and a runtime branch is
+possible, branch with `#available(macOS 14, *)`: the real upstream API on
+14+, a Ventura fallback below. Don't drop the feature or flatten it to the
+13 behaviour for everyone. This applies to capabilities as much as to
+cosmetics.
+
+- **Capabilities this unlocks:**
+  - per-agent browser profiles (`WKWebsiteDataStore(forIdentifier:)`, Browser
+    Use);
+  - `SCScreenshotManager` (Computer Use; Ventura falls back to
+    `CGWindowListCreateImage`);
+  - `.symbolEffect` transitions, `scrollBounceBehavior` (13.3) and
+    `safeAreaRegions` (13.3), as `intelScrollBounceBasedOnSize` already does.
+- **What stays compile-time:**
+  - `@Observable`, which can't be branched at runtime (keep
+    `ObservableObject`);
+  - two-value `onChange`, where the single-value form works on every
+    version.
+- **Retrofit:** earlier Intel edits that removed a 14+ API outright (for
+  example `ComposerWalletViews`' dropped `.symbolEffect(.replace)`) should
+  get the branch when that file is next touched.
 
 **Post-sync Ventura build check:**
 ```bash
@@ -3710,4 +3733,21 @@ Tests: upstream's `RenderChartToolTests`, `ShareArtifactToolTests`,
 
 **Found:** upstream's sandbox tools have a Seatbelt host fallback for Macs
 without the VM. That is the new `W-seatbelt-sandbox`.
+
+### Keep Mac awake while agents run (`W-ui-misc`, part) — 2026-10-11
+
+Upstream's `AgentRunPowerManager` holds a `.idleSystemSleepDisabled`
+activity while background runs are running. Display sleep, lid close and
+an explicit Sleep still win. The preference
+`agentRunsKeepMacAwake` defaults to on.
+
+- **Run manager.** `BackgroundTaskManager.refreshPowerAssertion()` runs on
+  register, completion, cancel, finalize and the throttled view-update tick.
+  Test processes get no power manager.
+- **Settings.** Settings › Chat › **Agent Sessions** has the switch and a
+  live status line; it is also in the Settings search index.
+- **Intel difference.** No `.queued` / `.waitingForInput` statuses yet
+  (`W-background-runs-sync`). `.running` holds power; clarify-paused,
+  completed and cancelled runs don't. Upstream's tests are mapped onto
+  Intel's enum.
 

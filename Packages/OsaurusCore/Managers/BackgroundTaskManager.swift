@@ -93,6 +93,9 @@ public final class BackgroundTaskManager: ObservableObject {
     /// (upstream). Test processes never read or write them, so suites can't
     /// leak records into each other through the shared manager.
     private let persistsRetainedTabs: Bool
+    /// Upstream: holds the idle-sleep assertion while runs are active. Nil in
+    /// test processes so tests never change the host's power state.
+    private let powerManager: AgentRunPowerManager?
     private let retainedTabsDefaults: UserDefaults
     private static let retainedTabsDefaultsKey = "retainedNotchTabs.v1"
 
@@ -123,17 +126,30 @@ public final class BackgroundTaskManager: ObservableObject {
 
     private init(
         persistsRetainedTabs: Bool = !OsaurusPaths.isTestProcess,
-        retainedTabsDefaults: UserDefaults = .standard
+        retainedTabsDefaults: UserDefaults = .standard,
+        powerManager: AgentRunPowerManager? = OsaurusPaths.isTestProcess ? nil : .shared
     ) {
+        self.powerManager = powerManager
         self.persistsRetainedTabs = persistsRetainedTabs
         self.retainedTabsDefaults = retainedTabsDefaults
         viewUpdateCancellable =
             viewUpdateSubject
             .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] in
+                self?.refreshPowerAssertion()
                 self?.objectWillChange.send()
             }
         restoreRetainedTabs()
+    }
+
+    /// Upstream: re-evaluate idle-sleep prevention after task state or the
+    /// keep-awake preference changes.
+    func refreshPowerAssertion() {
+        powerManager?.update(for: backgroundTasks.values.map(\.status))
+    }
+
+    var isPreventingIdleSystemSleep: Bool {
+        powerManager?.isPreventingIdleSystemSleep ?? false
     }
 
     // MARK: - Public API
@@ -296,6 +312,7 @@ public final class BackgroundTaskManager: ObservableObject {
 
         backgroundTasks.removeValue(forKey: backgroundId)
         persistRetainedTabs()
+        refreshPowerAssertion()
     }
 
     /// Cancel all active background tasks. Called during app termination.
@@ -336,6 +353,7 @@ public final class BackgroundTaskManager: ObservableObject {
 
         state.chatSession?.stop()
         state.status = .cancelled
+        refreshPowerAssertion()
         // Mirror the markCompleted finalisation for the agent_runs row
         // so cancelled runs don't sit in `running` forever in the
         // Activity tab.
@@ -675,6 +693,7 @@ public final class BackgroundTaskManager: ObservableObject {
     /// Register a new task state and log an initial activity entry.
     private func registerTask(_ state: BackgroundTaskState) {
         backgroundTasks[state.id] = state
+        refreshPowerAssertion()
         state.appendActivity(kind: .info, title: "Running in background")
         emitPluginEvent(state, type: .started, json: PluginHostContext.serializeStartedEvent(state: state))
         // Upstream #2630: a user-visible run surfaces as a tab of its agent
@@ -708,6 +727,13 @@ public final class BackgroundTaskManager: ObservableObject {
         /// a real `ExecutionContext` + MLX-backed engine.
         func registerTaskForTesting(_ state: BackgroundTaskState) {
             backgroundTasks[state.id] = state
+            refreshPowerAssertion()
+        }
+
+        /// Test-only (upstream): an isolated manager with an injected power
+        /// manager and no retained-tab persistence.
+        static func makeForTesting(powerManager: AgentRunPowerManager) -> BackgroundTaskManager {
+            BackgroundTaskManager(persistsRetainedTabs: false, powerManager: powerManager)
         }
 
         /// Test-only (upstream): an isolated manager that persists retained
@@ -842,6 +868,7 @@ public final class BackgroundTaskManager: ObservableObject {
             outputText: outputText
         )
         emitPluginEvent(state, type: eventType, json: json)
+        refreshPowerAssertion()
         // Upstream: release the live session after 15 s (visible runs stay
         // as retained tabs; headless ones finalize). Intel never scheduled
         // this for completions, so finished runs held their session until a

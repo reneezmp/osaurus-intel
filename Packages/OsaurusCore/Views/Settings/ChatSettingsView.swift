@@ -65,6 +65,10 @@ struct ChatSettingsView: View {
     /// however bursty the network is. Read per delta by
     /// `StreamingDeltaProcessor`.
     @AppStorage("chatSmoothStreamingEnabled") private var smoothStreamingEnabled: Bool = true
+    /// Upstream: prevent idle system sleep while agent runs are active.
+    @AppStorage(AgentRunPowerManager.keepAwakeDefaultsKey)
+    private var keepMacAwakeForAgentRuns: Bool = true
+    @ObservedObject private var taskManager = BackgroundTaskManager.shared
     /// Upstream: keep reasoning open while the model thinks. Read by
     /// `ChatSession.updateStreamingThinkingExpansion`.
     @AppStorage(ChatSession.expandThinkingWhileStreamingKey)
@@ -96,6 +100,7 @@ struct ChatSettingsView: View {
         } content: {
             appearanceSection
             behaviorSection
+            agentSessionsSection
             greetingsSection
             folderToolsSection
             advancedSection
@@ -207,6 +212,48 @@ struct ChatSettingsView: View {
                 anchorId: "settings.chat.memory",
                 isOn: $tempMemoryEnabled
             )
+        }
+    }
+
+    // MARK: - Agent Sessions (upstream)
+
+    private var agentSessionsSection: some View {
+        SettingsSection(title: "Agent Sessions", icon: "bolt.horizontal.circle.fill") {
+            SettingsToggle(
+                title: L("Keep Mac Awake While Agents Run"),
+                description:
+                    "Prevent idle sleep while agents are running or queued so long tasks can finish. The display may still sleep; closing the lid or choosing Sleep always wins.",
+                anchorId: "settings.chat.keepAwakeForAgentRuns",
+                isOn: $keepMacAwakeForAgentRuns
+            )
+            .onChange(of: keepMacAwakeForAgentRuns) { _ in
+                taskManager.refreshPowerAssertion()
+            }
+
+            if keepMacAwakeForAgentRuns {
+                HStack(spacing: 9) {
+                    Image(
+                        systemName: taskManager.isPreventingIdleSystemSleep
+                            ? "bolt.fill"
+                            : "moon.stars.fill"
+                    )
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(
+                        taskManager.isPreventingIdleSystemSleep
+                            ? Color.accentColor
+                            : theme.tertiaryText
+                    )
+
+                    Text(
+                        taskManager.isPreventingIdleSystemSleep
+                            ? L("Keeping this Mac awake while agents work")
+                            : L("Ready — activates automatically with the next agent run")
+                    )
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+            }
         }
     }
 

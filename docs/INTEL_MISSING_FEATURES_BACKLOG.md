@@ -32,6 +32,46 @@ mobile (~25k), which wait on backends B3 and B1/B2/B7.
 | `INC-containers` | The Linux VM sandbox (Apple Containerization), sandbox plugins, egress proxy, `/workspace` tools | Apple's Containerization framework runs only on Apple Silicon. | A different VM backend (Lima/QEMU) would be a new project. **Not the same as the host shell sandbox**, which is portable (see `W-tools-misc`: Seatbelt). |
 | `INC-upstream-only` | Product Hunt campaign dialogs; mock drivers used by upstream tests | Marketing for upstream's launch; test doubles for code Intel does not run. | Nothing to port. |
 
+## Where things stand — 2026-10-11 (work paused for 1.0.60)
+
+**Done in the 2026-10-10/11 stretch:**
+
+- `W-agent-loop-tools` (loop harness, grounded checks, `shell_run` at
+  upstream, history trim);
+- `W-web-search-sync`, `W-credits-ui-sync`, `W-chat-tabs` (retained run
+  tabs);
+- `W-chat-ux` and `W-insights-sync` closed;
+- `W-tool-catalog-ui` (approval card, run lease, run location);
+- `W-keychain-layer`, `W-storage-health`;
+- `W-model-picker-2947` (composer credits chip);
+- `W-provider-wire-formats` and `W-mcp-providers` closed;
+- `W-tools-misc` (`render_chart`, `share_artifact`, `search_memory`);
+- part of `W-ui-misc` (keep-awake during agent runs).
+
+**Deferred until someone asks** (Renée is the only user): `W-channels`,
+`W-workspaces-sharing`.
+
+**Next, in Renée's order (2026-10-11): the medium items:**
+
+- `W-ui-misc` remainder: system accent colour, the theme library service,
+  the What's New hero, the onboarding design system, the in-app guide with
+  `osaurus_help`;
+- `W-providers-ux` (with the MCP probe and health);
+- `W-media-generation`;
+- `W-applescript-agent`;
+- `W-browser-use` (profile decision recorded on its row);
+- `W-agent-detail-redesign`.
+
+**Then the large items:** `W-identity-mobile`, `W-server-api` (re-sized),
+`W-plugin-reliability` stage 2, `W-background-runs-sync`, `W-cov-reaudit`,
+`W-seatbelt-sandbox` (new), `W-computer-use`, `W-subagents`,
+`W-privacy-filter`, `W-declarative-config`, `W-skills-plugins-import`.
+`W-report-issue` stays last.
+
+**New universal rule:** `#available(macOS 14, *)` branches instead of
+dropping 14+ features (`UPSTREAM_SYNC.md`, Ventura section). Re-check
+`W-computer-use` and `W-browser-use` with it.
+
 ## 2. Covered — Intel has its own implementation
 
 92 files (listed in the appendix under `COV-intel-own`) are replaced by Intel
@@ -80,7 +120,7 @@ feature had been labelled before this sweep.
 | `W-model-picker-2947` | **Shipped 2026-10-06** ([`MODEL_PICKER_INTEL.md`](MODEL_PICKER_INTEL.md)): column picker, options column, Cloud browser, starter favourites, #3017 popups and context card. ~~Composer credits chip + wallet card~~ **shipped 2026-10-11** (`UPSTREAM_SYNC.md`, "Composer credits chip"). **Complete.** Original scope: | Upstream #2947 (2026-09-30) chat model picker redesign (provider / model / options columns), Cloud model browser, Credits card in the chat, `AnchoredCardPresenter`; then #2958 starter favourites | L (5.5k) | Staged in [`UPSTREAM_AUDIT_2026-10-01.md`](UPSTREAM_AUDIT_2026-10-01.md#staged-w-model-picker-2947-2947-then-2958). Needs favourite models (#1811) first. |
 | `W-insights-sync` | **Complete.** Shipped 2026-10-01 as upstream's persisted activity log (#2964, [`INSIGHTS_INTEL.md`](INSIGHTS_INTEL.md)); re-checked 2026-10-11: the Insights files differ from upstream only by Intel edits (no sandbox secret scrubber, Apple Speech cloud rows, SQLCipher store, "Data & Storage" wording until `W-privacy-filter` adds the Privacy tab). The search logger's structured `format` detail came back with `W-web-search-sync`. Original scope: Insights catch-up: request log turn/request ids and wire bodies, hardened secret redactor, `logs` off `@Published` (#1595), focus API so Inspect response opens its own log (#1350), off-main snapshots (#2926) | S (0.6k) | Staged in [`UPSTREAM_AUDIT_2026-10-01.md`](UPSTREAM_AUDIT_2026-10-01.md#staged-w-insights-sync-2926-and-its-prerequisites). Redactor first. |
 | `W-file-history` | Per-chat file change history with revert, history/inspector panes | L (8.0k) | #2907 part A. **Stage 1 shipped 2026-10-01** ([`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md)): journal + content-addressed object store, rows in a new encrypted `FileHistoryDatabase`, capture in `ToolRegistry.execute` for `file_write`/`file_edit`/`file_copy`/`shell_run`, File Changes inspector pane (Timeline/Files, revert/rollback/Revert All with conflicts and Undo), `file_undo` + `file_operation_history`, History-row badge, transcript links, retention setting; `FileOperationLog` removed. **Stage 2 shipped the same day**: inline diff cards (`NativeFileDiffView`, `.fileDiff` block, live streaming preview, #1683) and text `dry_run` for `file_write`/`file_edit`. Not yet tested on Rosy. |
-| `W-ui-misc` | Chat layout tour, onboarding design system (then wire the ported `ImportHistoryPromptGate` prompt after onboarding), theme library management (~~built-in Dark/Light as appearance modes, #1931~~ shipped 2026-10-10 with `W-app-menus`; remaining: the System card, sources/validation, #1776 deferred theme loading off the launch path; theme sharing to themes.osaurus.ai and import by id, `ShareThemeSheet` / `ImportThemeByIdSheet` / `ThemeShareService`, identity-signed), system accent colour (#2115), in-app guide, keep-awake during agent runs, keychain helpers, shared UI components | M (3.2k) | Small pieces; keep-awake during long runs is useful on laptops. |
+| `W-ui-misc` | ~~Keep-awake during agent runs~~ **shipped 2026-10-11** (`AgentRunPowerManager`, Settings › Chat › Agent Sessions). `CapsuleBadge` / `InlineBanner` are used only by workspace views → `W-workspaces-sharing`. Chat layout tour, onboarding design system (then wire the ported `ImportHistoryPromptGate` prompt after onboarding), theme library management (~~built-in Dark/Light as appearance modes, #1931~~ shipped 2026-10-10 with `W-app-menus`; remaining: the System card, sources/validation, #1776 deferred theme loading off the launch path; theme sharing to themes.osaurus.ai and import by id, `ShareThemeSheet` / `ImportThemeByIdSheet` / `ThemeShareService`, identity-signed), system accent colour (#2115), in-app guide, keep-awake during agent runs, keychain helpers, shared UI components | M (3.2k) | Small pieces; keep-awake during long runs is useful on laptops. |
 | `W-app-menus` | **Shipped 2026-10-10** (see `UPSTREAM_SYNC.md`, "App menu bar"): upstream's menu bar, entry point (SIGPIPE ignored) and #1931 theme model. Intel keeps its About panel and leaves Discord / Report an Issue out of Help. Original scope: Upstream's main menu bar (`App/osaurus/osaurusApp.swift`): File › New Window with Agent, Schedules and Watchers submenus (New / Manage), Agents submenu, Voice Detection toggle (⇧⌘V); View › Theme submenu (System / Light / Dark, installed themes, Manage Themes…); Window › Models / Tools / Server; Help › Osaurus Help, Documentation, Discord, Report an Issue, Keyboard Shortcuts, Acknowledgements. Intel's App target is a trimmed entry point (About, New Window/Chat, Toggle Sidebar, Next Agent, Zoom, Settings, Chat Layout Tour). | S (0.4k) | Found by the 2026-10-09 audit (#3052, #3054 fix hangs in these menus). The managers exist on Intel (`ScheduleManager`, `WatcherManager`, `ThemeManager`). When ported, use upstream's post-#3052 shape: no `@ObservedObject` on the App struct, state in `VADToggleMenuItem` / `ThemeMenuItems`, `LCached` for submenu labels. Intel's zoom items already follow it (`ZoomMenuItems`). |
 | `W-providers-ux` | Provider catalog, connectivity centre, credential prompt sheet, replay diagnostics, wire probe, Fireworks, Codex CLI integration, favourite models | M (3.2k) | Codex CLI mirrors the existing Claude Code integration. **2026-10-11:** also the MCP provider probe and health snapshots (`MCPProviderProbeService`, `MCPProviderHealthSnapshotStore`, from `W-mcp-providers`). |
 | `W-media-generation` | Cloud image/video generation (Venice, Osaurus Cloud), `video` tool, OpenAI image API on the server | M (2.9k) | Cloud-based: runs on Intel. Local image generation stays in `INC-mlx`. **2026-10-10:** the cloud media endpoints in `OsaurusRouterAPIClient` are `#if !OSAURUS_INTEL` until this item brings their types. |

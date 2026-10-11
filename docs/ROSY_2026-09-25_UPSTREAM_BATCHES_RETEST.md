@@ -1723,3 +1723,10 @@ Providers). Before this build, these three could list models but not chat.
       memory; ask "what did we talk about last week?": the agent searches
       memory (tool row) before answering.
 
+## Keep Mac awake while agents run (2026-10-11)
+
+- [ ] Settings › Chat › Agent Sessions: the switch is on; while a schedule
+      runs, the line says "Keeping this Mac awake while agents work", and
+      afterwards "Ready…". `pmset -g assertions` in Terminal lists
+      "Running agent sessions" during the run.
+
