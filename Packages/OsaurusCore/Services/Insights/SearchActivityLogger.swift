@@ -193,7 +193,7 @@ enum SearchActivityLogger {
         ]
         if let title = extraction.title, !title.isEmpty { details["title"] = title }
         if let canonical = extraction.canonicalURL, canonical != url { details["canonical_url"] = canonical }
-        // Intel: no `structuredFormat` (upstream #2656 structured-page extraction).
+        if let format = extraction.structuredFormat { details["format"] = format }
         if let message = extraction.message { details["message"] = message }
         let host = EgressInfo.host(from: url)
         return EgressInfo(
