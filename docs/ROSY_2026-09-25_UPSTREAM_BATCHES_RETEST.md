@@ -1667,3 +1667,12 @@ Providers). Before this build, these three could list models but not chat.
       the balance comes back.
 - [ ] Click a chat link on an activity row: the chat opens as a tab.
 
+## Retained run tabs (2026-10-11)
+
+- [ ] Run a schedule ("Run now"). When it finishes, its tab stays. Quit and
+      reopen Osaurus: the tab is still there (dimmed until selected);
+      selecting it shows the full conversation.
+- [ ] Close that tab, quit and reopen: it does not come back (it is still in
+      History).
+- [ ] Quit within a few seconds of a run finishing: the tab still comes back.
+

@@ -1519,6 +1519,26 @@ final class ChatWindowState: ObservableObject {
         return true
     }
 
+    /// Surface a finished run the registry retained across relaunch (no
+    /// live session any more) as a hibernated tab of its agent, so a run
+    /// that completed while the app was closed is still there to review.
+    /// The transcript loads from disk when the tab is selected; closing the
+    /// tab dismisses the retained task. Returns whether a tab was added.
+    /// Upstream; Intel reads the stand-in from `ChatSessionsManager`.
+    @discardableResult
+    func attachRetainedTab(for task: BackgroundTaskState) -> Bool {
+        guard task.chatSession == nil, !task.status.isActive else { return false }
+        guard !tabs.contains(where: { $0.session.sessionId == task.id }) else { return false }
+        guard var snapshot = ChatSessionsManager.shared.session(for: task.id) else { return false }
+        snapshot.turns = []
+        let cold = makeFreshSession(agentId: snapshot.agentId, loading: snapshot)
+        var tab = ChatTab(id: UUID(), session: cold)
+        tab.isHibernated = true
+        tab.lastActivatedAt = task.createdAt
+        tabs.append(tab)
+        return true
+    }
+
     /// Bring the tab showing `sessionId` to the front (waking it if
     /// hibernated). Returns false when no tab here shows it.
     @discardableResult

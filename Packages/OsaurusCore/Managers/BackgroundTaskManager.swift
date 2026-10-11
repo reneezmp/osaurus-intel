@@ -10,6 +10,59 @@
 import Combine
 import Foundation
 
+/// Durable metadata for a user-owned terminal run tab (upstream
+/// `RetainedActivityTabRecord`). The live chat session is deliberately not
+/// encoded; chat history stays the canonical transcript store and is loaded
+/// when the tab is selected. Intel: no `contextPreview` / inbound-run fields
+/// (`W-channels`, `W-workspaces-identity-mobile`), and Intel's status enum
+/// (`completed(success:summary:)`) maps onto upstream's three kinds.
+private struct RetainedActivityTabRecord: Codable {
+    enum TerminalKind: String, Codable {
+        case completed
+        case failed
+        case cancelled
+    }
+
+    let id: UUID
+    let title: String
+    let agentId: UUID
+    let kind: TerminalKind
+    let summary: String?
+    let createdAt: Date
+    let source: SessionSource
+    let sourcePluginId: String?
+    let externalSessionKey: String?
+
+    @MainActor
+    init?(state: BackgroundTaskState) {
+        switch state.status {
+        case .completed(let success, let summary):
+            kind = success ? .completed : .failed
+            self.summary = summary
+        case .cancelled:
+            kind = .cancelled
+            summary = nil
+        case .running, .awaitingClarification:
+            return nil
+        }
+        id = state.id
+        title = state.taskTitle
+        agentId = state.agentId
+        createdAt = state.createdAt
+        source = state.source
+        sourcePluginId = state.sourcePluginId
+        externalSessionKey = state.externalSessionKey
+    }
+
+    var status: BackgroundTaskStatus {
+        switch kind {
+        case .completed: return .completed(success: true, summary: summary ?? "Chat completed")
+        case .failed: return .completed(success: false, summary: summary ?? "Chat failed")
+        case .cancelled: return .cancelled
+        }
+    }
+}
+
 // MARK: - Background Task Manager
 
 /// Single owner of all backgrounded chat tasks (dispatched).
@@ -36,6 +89,13 @@ public final class BackgroundTaskManager: ObservableObject {
     /// Scheduled auto-finalize timers for completed/cancelled tasks
     private var autoFinalizeTasks: [UUID: Task<Void, Never>] = [:]
 
+    /// Production managers persist terminal run tabs across relaunches
+    /// (upstream). Test processes never read or write them, so suites can't
+    /// leak records into each other through the shared manager.
+    private let persistsRetainedTabs: Bool
+    private let retainedTabsDefaults: UserDefaults
+    private static let retainedTabsDefaultsKey = "retainedNotchTabs.v1"
+
     /// Tasks whose dispatch() hasn't returned to the plugin yet; events are
     /// buffered in `heldTaskEvents` until `releaseEventsForDispatch` flushes them.
     private var dispatchHoldTasks: Set<UUID> = []
@@ -61,13 +121,19 @@ public final class BackgroundTaskManager: ObservableObject {
 
     // MARK: - Initialization
 
-    private init() {
+    private init(
+        persistsRetainedTabs: Bool = !OsaurusPaths.isTestProcess,
+        retainedTabsDefaults: UserDefaults = .standard
+    ) {
+        self.persistsRetainedTabs = persistsRetainedTabs
+        self.retainedTabsDefaults = retainedTabsDefaults
         viewUpdateCancellable =
             viewUpdateSubject
             .throttle(for: .milliseconds(50), scheduler: DispatchQueue.main, latest: true)
             .sink { [weak self] in
                 self?.objectWillChange.send()
             }
+        restoreRetainedTabs()
     }
 
     // MARK: - Public API
@@ -229,6 +295,7 @@ public final class BackgroundTaskManager: ObservableObject {
         state.releaseReferences()
 
         backgroundTasks.removeValue(forKey: backgroundId)
+        persistRetainedTabs()
     }
 
     /// Cancel all active background tasks. Called during app termination.
@@ -642,6 +709,22 @@ public final class BackgroundTaskManager: ObservableObject {
         func registerTaskForTesting(_ state: BackgroundTaskState) {
             backgroundTasks[state.id] = state
         }
+
+        /// Test-only (upstream): an isolated manager that persists retained
+        /// tabs to `defaults` instead of the user's.
+        static func makeForTestingRetaining(defaults: UserDefaults) -> BackgroundTaskManager {
+            BackgroundTaskManager(persistsRetainedTabs: true, retainedTabsDefaults: defaults)
+        }
+
+        /// Test-only (upstream): run the 15 s dehydrate step now.
+        func dehydrateTaskForTesting(_ id: UUID) {
+            dehydrateTerminalTask(id)
+        }
+
+        func isTaskDehydratedForTesting(_ id: UUID) -> Bool {
+            guard let state = backgroundTasks[id] else { return false }
+            return state.chatSession == nil && !state.status.isActive
+        }
     #endif
 
     private func createContext(for request: DispatchRequest) -> ExecutionContext {
@@ -759,6 +842,11 @@ public final class BackgroundTaskManager: ObservableObject {
             outputText: outputText
         )
         emitPluginEvent(state, type: eventType, json: json)
+        // Upstream: release the live session after 15 s (visible runs stay
+        // as retained tabs; headless ones finalize). Intel never scheduled
+        // this for completions, so finished runs held their session until a
+        // tab closed.
+        scheduleAutoFinalize(state.id)
     }
 
     // MARK: - Private: Run-Trace Persistence
@@ -870,18 +958,78 @@ public final class BackgroundTaskManager: ObservableObject {
 
     // MARK: - Private: Auto-Finalize
 
-    /// Schedule automatic toast removal after 15 seconds.
-    /// Called when a task completes or is cancelled. If the user opens the
-    /// task window before the timer fires, `finalizeTask` cancels it.
+    /// After 15 seconds, release live resources for a terminal task. Visible
+    /// runs remain as durable lightweight records (retained tabs) until the
+    /// user closes their tab; headless tasks still finalize completely.
+    /// Upstream. The record is persisted right away, so quitting inside the
+    /// 15 s still keeps the tab.
     private func scheduleAutoFinalize(_ taskId: UUID) {
         cancelAutoFinalize(taskId)
+        persistRetainedTabs()
         autoFinalizeTasks[taskId] = Task { @MainActor in
             try? await Task.sleep(nanoseconds: 15_000_000_000)
             guard !Task.isCancelled else { return }
             guard let state = backgroundTasks[taskId], !state.status.isActive else { return }
             guard !dispatchHoldTasks.contains(taskId) else { return }
-            finalizeTask(taskId)
+            if state.showToast {
+                dehydrateTerminalTask(taskId)
+            } else {
+                finalizeTask(taskId)
+            }
         }
+    }
+
+    // MARK: - Private: Retained Run Tabs (upstream)
+
+    private func restoreRetainedTabs() {
+        guard persistsRetainedTabs,
+            let data = retainedTabsDefaults.data(forKey: Self.retainedTabsDefaultsKey),
+            let records = try? JSONDecoder().decode([RetainedActivityTabRecord].self, from: data)
+        else { return }
+        for record in records {
+            backgroundTasks[record.id] = BackgroundTaskState(
+                retainedId: record.id,
+                taskTitle: record.title,
+                agentId: record.agentId,
+                status: record.status,
+                createdAt: record.createdAt,
+                source: record.source,
+                sourcePluginId: record.sourcePluginId,
+                externalSessionKey: record.externalSessionKey
+            )
+        }
+    }
+
+    private func persistRetainedTabs() {
+        guard persistsRetainedTabs else { return }
+        let records = backgroundTasks.values
+            .filter { $0.showToast && !$0.status.isActive }
+            .compactMap(RetainedActivityTabRecord.init(state:))
+            .sorted { $0.createdAt < $1.createdAt }
+        guard !records.isEmpty else {
+            retainedTabsDefaults.removeObject(forKey: Self.retainedTabsDefaultsKey)
+            return
+        }
+        if let data = try? JSONEncoder().encode(records) {
+            retainedTabsDefaults.set(data, forKey: Self.retainedTabsDefaultsKey)
+        }
+    }
+
+    /// Release the live session and Combine observers while leaving a
+    /// lightweight, persisted terminal tab (upstream). A window already
+    /// showing the run keeps its own reference, so the visible tab is
+    /// untouched; the registry simply stops holding the session.
+    private func dehydrateTerminalTask(_ taskId: UUID) {
+        guard let state = backgroundTasks[taskId], !state.status.isActive else { return }
+        cancelAutoFinalize(taskId)
+        taskObservers[taskId]?.forEach { $0.cancel() }
+        taskObservers.removeValue(forKey: taskId)
+        chatTurnCounts.removeValue(forKey: taskId)
+        streamingObserved.remove(taskId)
+        taskIdByWindow = taskIdByWindow.filter { $0.value != taskId }
+        state.releaseReferences()
+        persistRetainedTabs()
+        objectWillChange.send()
     }
 
     private func cancelAutoFinalize(_ taskId: UUID) {

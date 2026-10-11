@@ -122,11 +122,18 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   opening a new window (upstream `revealTask`).
 - Opening a running chat from History attaches its live session
   (`liveTask(forSessionId:)`), so the reply keeps streaming in view.
-- Intel difference: upstream keeps finished runs in the registry (and
-  across relaunch, as retained tabs) until their tab closes. Intel's
-  registry still auto-finalizes a finished run after 15 seconds; its tab
-  stays and simply becomes an ordinary saved chat. Retained runs across
-  relaunch are not ported (Intel never persisted the registry).
+- Retained runs (2026-10-11, upstream): a finished visible run stays in
+  the registry until its tab closes. Fifteen seconds after it ends, the live
+  session is released and a lightweight record stays
+  (`retainedNotchTabs.v1` in the app's defaults). At launch those records
+  come back and every new window shows them as hibernated tabs
+  (`attachRetainedTab`); the transcript loads from History when the tab is
+  selected, and closing the tab dismisses the run. Headless runs finalize
+  as before. Intel differences: no `contextPreview` (channel quick replies,
+  `W-channels`) and no rehydrate-for-reply path (`hydrateRetainedTask`).
+  Found in passing: Intel never scheduled the 15-second release for
+  *completed* runs (only cancelled ones), so finished runs held their whole
+  live session until a tab closed.
 
 ## Step 6 notes (tour, window size, full screen)
 
@@ -137,9 +144,9 @@ chats), #2910 (strip clear of the inspector), and the full-screen header.
   Changes shipped the third stop said "Past chats" only; it now uses
   upstream's "Past chats and file changes" copy.) Anchors: the navigator's
   lens bar, the tab strip, the inspector toggle.
-- Help ▸ **Chat Layout Tour** replays it. Intel adds this one item after the
-  system Help item; upstream's full Help menu (docs, Discord, report an
-  issue) is not part of this port.
+- Help ▸ **Chat Layout Tour** replays it. The Help menu itself is upstream's
+  (shipped with `W-app-menus`), minus Discord and "Report an Issue…", which
+  are upstream's support channels (`W-report-issue` will add the fork's own).
 - Upstream's onboarding hand-off (`holdAutoStart` / `releaseAutoStart`
   around first-run dialogs) has no Intel counterpart: Intel has no
   onboarding window flow. The tour's own wait for open dialogs covers it.

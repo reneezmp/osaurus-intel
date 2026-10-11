@@ -1185,9 +1185,14 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     /// Surface every registry run not shown in another window as tabs of a
     /// freshly created window.
     private func attachRegistryRuns(to state: ChatWindowState) {
-        for task in BackgroundTaskManager.shared.tasksForTabs() where task.chatSession != nil {
+        for task in BackgroundTaskManager.shared.tasksForTabs() {
             if let shownIn = findWindow(bySessionId: task.id), shownIn != state.windowId { continue }
-            state.attachBackgroundTab(for: task)
+            if task.chatSession != nil {
+                state.attachBackgroundTab(for: task)
+            } else {
+                // Finished before relaunch: retained as a lightweight record.
+                state.attachRetainedTab(for: task)
+            }
         }
     }
 
@@ -1203,7 +1208,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             return
         }
         if let targetId = preferredWindowId(), let target = windowStates[targetId] {
-            target.attachBackgroundTab(for: state)
+            if state.chatSession != nil {
+                target.attachBackgroundTab(for: state)
+            } else {
+                target.attachRetainedTab(for: state)
+            }
             target.focusTab(forSessionId: taskId)
             showWindow(id: targetId)
             return

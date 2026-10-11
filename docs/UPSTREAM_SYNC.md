@@ -3512,3 +3512,35 @@ Tests:
 i18n: upstream keys merged, plus hand translations for the welcome card. The
 missing-key count is 115.
 
+### Retained run tabs (`W-chat-tabs` complete) — 2026-10-11
+
+Finished scheduled, watcher and API runs now stay as tabs until the user
+closes them, across relaunch, as upstream's retained Activity tabs do.
+
+- **Manager.** `RetainedActivityTabRecord`, `restoreRetainedTabs`,
+  `persistRetainedTabs` and `dehydrateTerminalTask` are upstream's, built
+  into Intel's `BackgroundTaskManager`. Intel's status enum maps onto the
+  record's completed / failed / cancelled. Records persist at every terminal
+  transition, so quitting inside the 15 s still keeps the tab.
+- **Window.** `attachRetainedTab` adds the run as a hibernated tab; window
+  open and `revealTask` both use it. The remembered-tabs snapshot already
+  skipped registry-owned runs, so nothing is restored twice.
+- **Fix.** Completed runs now get upstream's 15 s release. Before, only
+  cancelled runs did, and a finished run held its live session until its
+  tab closed.
+- **Test isolation.** Test processes never persist (`OsaurusPaths.isTestProcess`).
+  Tests use `makeForTestingRetaining(defaults:)` with a throwaway suite.
+- **Not ported:** `contextPreview`, quick-reply rehydration and the
+  inbound-run flag (`W-channels`, `W-workspaces-identity-mobile`).
+
+Upstream's manager has moved much further: the status reshape, admission
+queue and power assertion are now `W-background-runs-sync`. The Help menu
+was already upstream's (`W-app-menus`).
+
+Tests: `IntelRetainedRunTabsTests` covers:
+
+- restore across a manager relaunch;
+- running and headless runs are never retained;
+- a hibernated tab comes back and closing it dismisses the run;
+- the remembered-tabs record skips it.
+

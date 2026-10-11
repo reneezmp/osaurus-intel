@@ -229,6 +229,34 @@ public final class BackgroundTaskState: ObservableObject, Identifiable {
         self.showToast = showToast
     }
 
+    /// A terminal run restored after relaunch (upstream `init(retainedId:)`):
+    /// no live session; the transcript loads from chat history when its tab
+    /// is selected. Intel: no `contextPreview` (it feeds channel quick replies,
+    /// `W-channels`).
+    init(
+        retainedId id: UUID,
+        taskTitle: String,
+        agentId: UUID,
+        status: BackgroundTaskStatus,
+        createdAt: Date,
+        source: SessionSource,
+        sourcePluginId: String?,
+        externalSessionKey: String?
+    ) {
+        self.id = id
+        self.taskTitle = taskTitle
+        self.agentId = agentId
+        self.chatSession = nil
+        self.executionContext = nil
+        self.status = status
+        self.currentStep = nil
+        self.createdAt = createdAt
+        self.source = source
+        self.sourcePluginId = sourcePluginId
+        self.externalSessionKey = externalSessionKey
+        self.showToast = true
+    }
+
     deinit {
         print("[BackgroundTaskState] deinit – id: \(id)")
     }
@@ -237,6 +265,12 @@ public final class BackgroundTaskState: ObservableObject, Identifiable {
     func releaseReferences() {
         chatSession = nil
         executionContext = nil
+    }
+
+    /// Re-link a live session (upstream).
+    func restoreReferences(context: ExecutionContext) {
+        chatSession = context.chatSession
+        executionContext = context
     }
 
     // MARK: - Activity Feed
