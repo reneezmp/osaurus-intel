@@ -1688,3 +1688,11 @@ Providers). Before this build, these three could list models but not chat.
       visible.
 - [ ] If you use an HTTP MCP server, its tools show "Remote MCP server".
 
+## Keychain layer at upstream (2026-10-11)
+
+- [ ] Your provider keys, search provider keys and plugin secrets still work
+      after updating (no "missing key" errors). If any key reads as missing,
+      report it before re-entering it (it points at signing, not the key).
+- [ ] Agents › an agent › Secrets: add a secret, quit and reopen; it is still
+      listed (before this build it was silently dropped).
+

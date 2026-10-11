@@ -15,132 +15,149 @@ import Security
 public enum AgentSecretsKeychain {
     private static let service = "ai.osaurus.agent-secrets"
 
-    #if DEBUG
-        private static let inMemoryStoreLock = NSLock()
-        nonisolated(unsafe) private static var inMemoryStoreForTesting: [String: String]?
+    // MARK: - In-Memory Store (tests + hermetic harnesses)
 
-        static func _withInMemoryStoreForTesting<T>(
-            _ body: () throws -> T
-        ) rethrows -> T {
-            inMemoryStoreLock.lock()
-            let previous = inMemoryStoreForTesting
-            inMemoryStoreForTesting = [:]
-            inMemoryStoreLock.unlock()
+    /// Lock-guarded mutable dictionary usable as a `@TaskLocal` value.
+    final class InMemorySecretStore: @unchecked Sendable {
+        private let lock = NSLock()
+        private var storage: [String: String] = [:]
 
-            defer {
-                inMemoryStoreLock.lock()
-                inMemoryStoreForTesting = previous
-                inMemoryStoreLock.unlock()
-            }
-
-            return try body()
+        func get(_ account: String) -> String? {
+            lock.lock()
+            defer { lock.unlock() }
+            return storage[account]
         }
 
-        private static func testingSave(_ value: String, account: String) -> (enabled: Bool, saved: Bool) {
-            inMemoryStoreLock.lock()
-            defer { inMemoryStoreLock.unlock() }
-            guard inMemoryStoreForTesting != nil else {
-                return (enabled: false, saved: false)
-            }
-            inMemoryStoreForTesting?[account] = value
-            return (enabled: true, saved: true)
+        func set(_ account: String, _ value: String?) {
+            lock.lock()
+            defer { lock.unlock() }
+            storage[account] = value
         }
 
-        private static func testingGet(account: String) -> (enabled: Bool, value: String?) {
-            inMemoryStoreLock.lock()
-            defer { inMemoryStoreLock.unlock() }
-            guard let store = inMemoryStoreForTesting else {
-                return (enabled: false, value: nil)
-            }
-            return (enabled: true, value: store[account])
+        func accounts() -> [String] {
+            lock.lock()
+            defer { lock.unlock() }
+            return Array(storage.keys)
         }
 
-        private static func testingDelete(account: String) -> (enabled: Bool, deleted: Bool) {
-            inMemoryStoreLock.lock()
-            defer { inMemoryStoreLock.unlock() }
-            guard inMemoryStoreForTesting != nil else {
-                return (enabled: false, deleted: false)
-            }
-            inMemoryStoreForTesting?[account] = nil
-            return (enabled: true, deleted: true)
+        func removeAll(prefix: String) {
+            lock.lock()
+            defer { lock.unlock() }
+            storage = storage.filter { !$0.key.hasPrefix(prefix) }
         }
+    }
 
-        private static func testingAllAccounts() -> [String]? {
-            inMemoryStoreLock.lock()
-            defer { inMemoryStoreLock.unlock() }
-            guard let store = inMemoryStoreForTesting else { return nil }
-            return Array(store.keys)
+    /// In-memory backend, active in two situations:
+    ///
+    ///  1. Scoped (tests): `_withInMemoryStoreForTesting` binds a fresh
+    ///     TASK-LOCAL store for the closure's task tree. Task-local (not
+    ///     process-global) because parallel test suites each bind their own
+    ///     store — a shared global raced and wiped secrets mid-test.
+    ///  2. Whole-process: `OSAURUS_AGENT_SECRETS_IN_MEMORY=1` (set by the
+    ///     eval CLI). The harness runs Keychain-free
+    ///     (`OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1` — legacy-item ACL prompts
+    ///     hang headless runs), but the sandbox secrets pipeline
+    ///     (`sandbox_secret_set` → exec env injection → output scrubbing)
+    ///     is a scored surface that needs a WORKING store. The pipeline
+    ///     logic is exercised for real; only the persistence medium
+    ///     changes, and the user's login Keychain stays untouched.
+    ///
+    /// The in-memory store is checked BEFORE the Keychain-free no-op gate,
+    /// so both env vars together mean "no login Keychain, memory instead".
+    @TaskLocal private static var taskLocalStore: InMemorySecretStore?
+
+    private static let processStore: InMemorySecretStore? =
+        ProcessInfo.processInfo.environment["OSAURUS_AGENT_SECRETS_IN_MEMORY"] == "1"
+        ? InMemorySecretStore() : nil
+
+    private static var activeInMemoryStore: InMemorySecretStore? {
+        taskLocalStore ?? processStore
+    }
+
+    static func _withInMemoryStoreForTesting<T>(
+        _ body: () throws -> T
+    ) rethrows -> T {
+        try $taskLocalStore.withValue(InMemorySecretStore()) {
+            try body()
         }
-    #endif
+    }
+
+    /// Async-body variant for tests that drive async tool surfaces (e.g.
+    /// `SandboxSecretSetTool.execute`) against the in-memory store.
+    static func _withInMemoryStoreForTesting<T>(
+        _ body: @Sendable () async throws -> T
+    ) async rethrows -> T {
+        try await $taskLocalStore.withValue(InMemorySecretStore()) {
+            try await body()
+        }
+    }
+
+    private static func testingSave(_ value: String, account: String) -> (enabled: Bool, saved: Bool) {
+        guard let store = activeInMemoryStore else {
+            return (enabled: false, saved: false)
+        }
+        store.set(account, value)
+        return (enabled: true, saved: true)
+    }
+
+    private static func testingGet(account: String) -> (enabled: Bool, value: String?) {
+        guard let store = activeInMemoryStore else {
+            return (enabled: false, value: nil)
+        }
+        return (enabled: true, value: store.get(account))
+    }
+
+    private static func testingDelete(account: String) -> (enabled: Bool, deleted: Bool) {
+        guard let store = activeInMemoryStore else {
+            return (enabled: false, deleted: false)
+        }
+        store.set(account, nil)
+        return (enabled: true, deleted: true)
+    }
+
+    private static func testingAllAccounts() -> [String]? {
+        activeInMemoryStore?.accounts()
+    }
 
     @discardableResult
     public static func saveSecret(_ value: String, id: String, agentId: UUID) -> Bool {
         let account = "\(agentId.uuidString).\(id)"
         guard let valueData = value.data(using: .utf8) else { return false }
 
-        #if DEBUG
-            let testing = testingSave(value, account: account)
-            if testing.enabled {
-                return testing.saved
-            }
-        #endif
-
-        deleteSecret(id: id, agentId: agentId)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: valueData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-        return SecItemAdd(query as CFDictionary, nil) == errSecSuccess
+        let testing = testingSave(value, account: account)
+        if testing.enabled {
+            return testing.saved
+        }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return false }
+        let didWrite = Keychain.write(service: service, account: account, data: valueData)
+        if didWrite { noteAccountSaved(account) }
+        return didWrite
     }
 
     public static func getSecret(id: String, agentId: UUID) -> String? {
         let account = "\(agentId.uuidString).\(id)"
 
-        #if DEBUG
-            let testing = testingGet(account: account)
-            if testing.enabled {
-                return testing.value
-            }
-        #endif
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,        ]
-
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-            let data = result as? Data
-        else { return nil }
-
-        return String(data: data, encoding: .utf8)
+        let testing = testingGet(account: account)
+        if testing.enabled {
+            return testing.value
+        }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return nil }
+        return Keychain.read(service: service, account: account)
+            .flatMap { String(data: $0, encoding: .utf8) }
     }
 
     @discardableResult
     public static func deleteSecret(id: String, agentId: UUID) -> Bool {
         let account = "\(agentId.uuidString).\(id)"
 
-        #if DEBUG
-            let testing = testingDelete(account: account)
-            if testing.enabled {
-                return testing.deleted
-            }
-        #endif
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-        let status = SecItemDelete(query as CFDictionary)
-        return status == errSecSuccess || status == errSecItemNotFound
+        let testing = testingDelete(account: account)
+        if testing.enabled {
+            return testing.deleted
+        }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return true }
+        let didDelete = Keychain.delete(service: service, account: account)
+        if didDelete { noteAccountsRemoved { $0 == account } }
+        return didDelete
     }
 
     /// Enumerates accounts then fetches each value individually.
@@ -162,9 +179,19 @@ public enum AgentSecretsKeychain {
     /// Prompt construction only needs to tell the model which secret names are
     /// available. Fetching the values here is both unnecessary and can hit the
     /// slow Keychain data-decryption path during ordinary chat composition.
+    /// Secret *names* for `agentId`, for listing in the system prompt so the
+    /// model knows which env vars exist. Non-blocking: this is reached
+    /// synchronously from chat-preview composition on the main actor, and a
+    /// cold-cache enumeration takes the process-wide Keychain lock (the
+    /// SecItemCopyMatching that hung the UI). On a cold cache we kick the
+    /// background seed and return `[]`; the next compose (seed lands in ms,
+    /// and composes re-run on every budget/input change) lists the real
+    /// names. The value paths that must be exact — `getAllSecrets` for env
+    /// injection, `deleteAllSecrets` — still go through the blocking
+    /// `allAccounts()`.
     public static func secretIDs(agentId: UUID) -> [String] {
         let prefix = "\(agentId.uuidString)."
-        return allAccounts()
+        return cachedAccountsOrSeed()
             .filter { $0.hasPrefix(prefix) }
             .map { String($0.dropFirst(prefix.count)) }
             .sorted()
@@ -172,14 +199,20 @@ public enum AgentSecretsKeychain {
 
     public static func deleteAllSecrets(agentId: UUID) {
         let prefix = "\(agentId.uuidString)."
-        for account in allAccounts() where account.hasPrefix(prefix) {
-            let query: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-            ]
-            SecItemDelete(query as CFDictionary)
+
+        // In-memory store: purge matching entries directly. Without this,
+        // an eval harness running many cases in one process would leak
+        // one case's secrets into the next (per-case cleanup calls here).
+        if let store = activeInMemoryStore {
+            store.removeAll(prefix: prefix)
+            return
         }
+
+        if KeychainQueryHelpers.disablesKeychainForProcess { return }
+        for account in allAccounts() where account.hasPrefix(prefix) {
+            Keychain.delete(service: service, account: account)
+        }
+        noteAccountsRemoved { $0.hasPrefix(prefix) }
     }
 
     // MARK: - Environment Safety
@@ -208,27 +241,110 @@ public enum AgentSecretsKeychain {
         return env
     }
 
+    /// Resolve the account-name memo off the caller's thread so the first
+    /// synchronous `secretIDs` read on a latency-sensitive path (chat-preview
+    /// composition runs on the main actor) finds a warm cache instead of a
+    /// blocking `SecItemCopyMatching` + `LAContext` round-trip.
+    public static func prewarmAccounts() {
+        // Single-flight: a cold read can be reached from every compose while
+        // the seed is still in flight (or from every compose forever while
+        // the keychain is locked and the enumeration stays non-definitive),
+        // and each spawn would take the process-wide Keychain lock again.
+        accountsCacheLock.lock()
+        let shouldSeed = cachedAccounts == nil && !seedInFlight
+        if shouldSeed { seedInFlight = true }
+        accountsCacheLock.unlock()
+        guard shouldSeed else { return }
+        Task.detached(priority: .utility) {
+            _ = allAccounts()
+            clearSeedInFlight()
+        }
+    }
+
+    /// Synchronous so the detached seed can take the lock; bare `lock()` /
+    /// `unlock()` are unavailable inside async contexts.
+    private static func clearSeedInFlight() {
+        accountsCacheLock.lock()
+        seedInFlight = false
+        accountsCacheLock.unlock()
+    }
+
     // MARK: - Private
 
+    private static let accountsCacheLock = NSLock()
+    nonisolated(unsafe) private static var cachedAccounts: [String]?
+
+    /// Return the memoized account names without ever blocking on the
+    /// Keychain. Warm cache → the names. Cold cache → kick the background
+    /// seed and return `[]` (the caller re-reads on a later pass). The
+    /// in-memory test store and disabled-keychain postures resolve inline
+    /// since neither can block. Backs the display-only `secretIDs` reader.
+    private static func cachedAccountsOrSeed() -> [String] {
+        if let accounts = testingAllAccounts() {
+            return accounts
+        }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return [] }
+        accountsCacheLock.lock()
+        let cached = cachedAccounts
+        accountsCacheLock.unlock()
+        if let cached {
+            return cached
+        }
+        prewarmAccounts()
+        return []
+    }
+
+    nonisolated(unsafe) private static var seedInFlight = false
+
+    /// Maintain the memo in place after a write rather than dropping it: the
+    /// non-blocking `secretIDs` reader would otherwise answer `[]` for every
+    /// compose between the mutation and the re-seed — including the very send
+    /// that follows a `store_secret` — telling the model no secrets exist on
+    /// exactly the turns that matter. Account names only change through this
+    /// type, so the edit is exact. A never-seeded memo stays nil.
+    private static func noteAccountSaved(_ account: String) {
+        accountsCacheLock.lock()
+        if var cached = cachedAccounts, !cached.contains(account) {
+            cached.append(account)
+            cachedAccounts = cached
+        }
+        accountsCacheLock.unlock()
+    }
+
+    private static func noteAccountsRemoved(where shouldRemove: (String) -> Bool) {
+        accountsCacheLock.lock()
+        if let cached = cachedAccounts {
+            cachedAccounts = cached.filter { !shouldRemove($0) }
+        }
+        accountsCacheLock.unlock()
+    }
+
     private static func allAccounts() -> [String] {
-        #if DEBUG
-            if let accounts = testingAllAccounts() {
-                return accounts
-            }
-        #endif
+        if let accounts = testingAllAccounts() {
+            return accounts
+        }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return [] }
 
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnAttributes as String: true,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,        ]
+        accountsCacheLock.lock()
+        let cached = cachedAccounts
+        accountsCacheLock.unlock()
+        if let cached {
+            return cached
+        }
 
-        var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-            let items = result as? [[String: Any]]
-        else { return [] }
-
-        return items.compactMap { $0[kSecAttrAccount as String] as? String }
+        // `SecItemCopyMatching` takes a process-wide Keychain lock and has hung
+        // the UI when reached from `secretIDs` during chat-preview composition
+        // on the main thread. Account names change only through this type's own
+        // writes, so memoize the enumeration and maintain it in place on every
+        // mutation. Only a definitive enumeration is cached: a locked or
+        // transiently failing keychain must not latch an empty account list.
+        let outcome = Keychain.fetchAllItems(service: service, returnData: false)
+        let accounts = outcome.items.compactMap { $0[kSecAttrAccount as String] as? String }
+        if outcome.isDefinitive {
+            accountsCacheLock.lock()
+            cachedAccounts = accounts
+            accountsCacheLock.unlock()
+        }
+        return accounts
     }
 }

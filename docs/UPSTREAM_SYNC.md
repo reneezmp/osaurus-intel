@@ -3590,3 +3590,35 @@ subagent factory is behind `#if !OSAURUS_INTEL` until `W-subagents`, and its
 subagent test cases are cut with a note. Intel's agent page has no ability
 cards to show its notes yet (`W-agent-detail-redesign`).
 
+### Keychain layer at upstream (`W-keychain-layer` complete) — 2026-10-11
+
+**Now upstream's verbatim:** `Keychain.swift`, `SecretSaveOutcome`,
+`SecretAvailability`, `OsaurusKeychainServices`, `ToolSecretsKeychain`,
+`AgentSecretsKeychain` and `MainThreadOperationLedger` (the hang ledger
+`Keychain` reports into).
+
+- **Central test gate.** `Keychain` itself now refuses every operation
+  under `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1`, returning typed `.disabled`
+  outcomes. Before, Intel relied on each caller to check the flag first.
+  Tests that need storage install a fake backend (`_setBackendForTesting`)
+  or use the wrappers' in-memory stores.
+- **Typed outcomes.** Reads and writes distinguish not-found, unavailable
+  (locked keychain) and access-denied, so a locked keychain is never cached
+  as "no secret".
+- **Agent secrets now persist.** `AgentSecretsKeychain` was an Intel stub
+  that discarded every save, so the agent page's Secrets section stored
+  nothing. It is upstream's real store now (un-excluded).
+- **Legacy plugin secrets.** Old `{pluginId}.{key}` items migrate on first
+  read (read-through).
+
+**Rosy signing note (keep):** upstream's reads attach a non-interactive
+`LAContext`. In June (`fd0c70781`), that made every read return nil on
+**ad-hoc-signed** builds. Current Rosy builds carry a stable signing identity
+(strict codesign passes), and Intel's provider keychain has read this way
+since September with Rosy's keys working. If Rosy ever reports keys
+"missing" after saving, check the build's signature first.
+
+Tests: upstream's `KeychainTests` (fake backend) and
+`ToolSecretsLegacyMigrationTests` (in-memory store). `OsaurusKeychainGroup`
+and its tests come with `W-identity-mobile`.
+

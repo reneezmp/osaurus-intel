@@ -228,13 +228,8 @@ final class RemoteAgentManager: ObservableObject, @unchecked Sendable {
 // Agent Bundle Service: the real one (Services/AgentBridge/AgentBundleService.swift),
 // un-excluded with Release 3 of docs/AGENT_DATABASE_INTEL_PLAN.md.
 
-// MARK: - Agent Secrets Keychain (Intel stub)
-
-enum AgentSecretsKeychain {
-    static func getAllSecrets(agentId: UUID) -> [String: String] { [:] }
-    static func saveSecret(_ value: String, id: String, agentId: UUID) {}
-    static func deleteSecret(id: String, agentId: UUID) {}
-}
+// Agent Secrets Keychain: the real one (Services/Keychain/AgentSecretsKeychain.swift),
+// un-excluded 2026-10-11 with W-keychain-layer. The old stub dropped every save.
 
 // MARK: - Agent Store (Intel stub)
 

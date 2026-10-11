@@ -28,6 +28,20 @@ public enum ToolSecretsKeychain {
     private static let presenceLock = NSLock()
     private nonisolated(unsafe) static var presenceCache: [String: Bool] = [:]
 
+    private static func cachedPresence(_ account: String, compute: () -> Bool) -> Bool {
+        presenceLock.lock()
+        if let cached = presenceCache[account] {
+            presenceLock.unlock()
+            return cached
+        }
+        presenceLock.unlock()
+        let result = compute()
+        presenceLock.lock()
+        presenceCache[account] = result
+        presenceLock.unlock()
+        return result
+    }
+
     private static func notePresence(_ present: Bool, account: String) {
         presenceLock.lock()
         presenceCache[account] = present
@@ -44,57 +58,72 @@ public enum ToolSecretsKeychain {
 
     @discardableResult
     public static func saveSecret(_ value: String, id: String, for pluginId: String, agentId: UUID) -> Bool {
+        saveSecretOutcome(value, id: id, for: pluginId, agentId: agentId).isSuccess
+    }
+
+    /// Typed variant of `saveSecret` so callers can surface the exact
+    /// Keychain failure (locked vs. access denied vs. OSStatus) instead of a
+    /// generic "storage was unavailable".
+    static func saveSecretOutcome(
+        _ value: String, id: String, for pluginId: String, agentId: UUID
+    ) -> KeychainMutationOutcome {
         let account = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
         if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
             testStoreLock.withLock { testStore[account] = value }
-            return true
+            return .success
         }
-        guard let valueData = value.data(using: .utf8) else { return false }
-        if KeychainQueryHelpers.disablesKeychainForProcess { return false }
-
-        deleteSecret(id: id, for: pluginId, agentId: agentId)
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecValueData as String: valueData,
-            kSecAttrAccessible as String: kSecAttrAccessibleWhenUnlockedThisDeviceOnly,
-        ]
-
-        let status = SecItemAdd(query as CFDictionary, nil)
-        let succeeded = status == errSecSuccess
-        if succeeded { notePresence(true, account: account) }
-        return succeeded
+        guard let valueData = value.data(using: .utf8) else { return .failure(errSecParam) }
+        if KeychainQueryHelpers.disablesKeychainForProcess { return .disabled }
+        let outcome = Keychain.writeItem(service: service, account: account, data: valueData)
+        if outcome.isSuccess { notePresence(true, account: account) }
+        return outcome
     }
 
     public static func getSecret(id: String, for pluginId: String, agentId: UUID) -> String? {
         let account = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
         if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
-            return testStoreLock.withLock { testStore[account] }
+            if let value = testStoreLock.withLock({ testStore[account] }) { return value }
+            return migrateLegacySecretIfPresent(id: id, pluginId: pluginId, agentId: agentId)
         }
         if KeychainQueryHelpers.disablesKeychainForProcess { return nil }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-            kSecReturnData as String: true,
-            kSecMatchLimit as String: kSecMatchLimitOne,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
-            kSecUseAuthenticationContext as String: KeychainQueryHelpers.nonInteractiveContext(),
-        ]
-
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
-
-        guard status == errSecSuccess,
-            let data = result as? Data,
-            let value = String(data: data, encoding: .utf8)
-        else {
-            return nil
+        if let data = Keychain.read(service: service, account: account),
+            let value = String(data: data, encoding: .utf8) {
+            return value
         }
+        return migrateLegacySecretIfPresent(id: id, pluginId: pluginId, agentId: agentId)
+    }
 
+    /// Read-through migration for pre-agent-scoping secrets stored as
+    /// `"{pluginId}.{key}"`. Uninstall has cleanup code for that format but
+    /// nothing ever *read* it after the agent-scoping migration, so a user
+    /// upgrading from an old build silently lost those credentials. Only the
+    /// default-agent namespace falls back (per-agent reads already fall back
+    /// to `Agent.defaultId` via `resolvedSecret`, so every resolution path
+    /// benefits). On a hit the value is copied to the canonical account, and
+    /// the legacy item is deleted only after the canonical copy reads back —
+    /// an interrupted migration can never lose the secret.
+    private static func migrateLegacySecretIfPresent(
+        id: String, pluginId: String, agentId: UUID
+    ) -> String? {
+        guard agentId == Agent.defaultId else { return nil }
+        let legacyAccount = "\(pluginId).\(id)"
+        let canonicalAccount = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
+
+        if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
+            return testStoreLock.withLock {
+                guard let value = testStore[legacyAccount] else { return nil }
+                testStore[canonicalAccount] = value
+                testStore.removeValue(forKey: legacyAccount)
+                return value
+            }
+        }
+        guard case .found(let data) = Keychain.readItem(service: service, account: legacyAccount),
+            let value = String(data: data, encoding: .utf8)
+        else { return nil }
+        if Keychain.write(service: service, account: canonicalAccount, data: data),
+            Keychain.read(service: service, account: canonicalAccount) == data {
+            Keychain.delete(service: service, account: legacyAccount)
+        }
         return value
     }
 
@@ -112,28 +141,44 @@ public enum ToolSecretsKeychain {
         }
         presenceLock.unlock()
 
-        let present = getSecret(id: id, for: pluginId, agentId: agentId) != nil
-        notePresence(present, account: account)
-        return present
+        let outcome = Keychain.readItem(service: service, account: account)
+        switch outcome {
+        case .found:
+            notePresence(true, account: account)
+            return true
+        case .notFound:
+            // The legacy read-through migration can still surface the secret
+            // under the pre-agent-scoping account.
+            let migrated =
+                migrateLegacySecretIfPresent(id: id, pluginId: pluginId, agentId: agentId) != nil
+            notePresence(migrated, account: account)
+            return migrated
+        default:
+            // Transient (locked keychain, securityd unavailable) or denied:
+            // report absent for now but never latch it in the cache.
+            return false
+        }
     }
 
     @discardableResult
     public static func deleteSecret(id: String, for pluginId: String, agentId: UUID) -> Bool {
         let account = agentAccount(agentId: agentId, pluginId: pluginId, key: id)
+        // Deleting from the default-agent namespace also removes any
+        // pre-migration `"{pluginId}.{key}"` twin — otherwise the legacy
+        // read-through fallback would resurrect a secret the user deleted.
+        let legacyAccount = agentId == Agent.defaultId ? "\(pluginId).\(id)" : nil
         if KeychainQueryHelpers.usesInMemoryKeychainStoreForTests {
-            testStoreLock.withLock { _ = testStore.removeValue(forKey: account) }
+            testStoreLock.withLock {
+                _ = testStore.removeValue(forKey: account)
+                if let legacyAccount { _ = testStore.removeValue(forKey: legacyAccount) }
+            }
             return true
         }
         if KeychainQueryHelpers.disablesKeychainForProcess { return true }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
-        ]
-
-        let status = SecItemDelete(query as CFDictionary)
-        let deleted = status == errSecSuccess || status == errSecItemNotFound
+        let deleted = Keychain.delete(service: service, account: account)
+        if let legacyAccount {
+            Keychain.delete(service: service, account: legacyAccount)
+        }
         notePresence(false, account: account)
         return deleted
     }
@@ -153,12 +198,7 @@ public enum ToolSecretsKeychain {
             guard let account = item[kSecAttrAccount as String] as? String,
                 account.contains(suffix)
             else { continue }
-            let deleteQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-            ]
-            SecItemDelete(deleteQuery as CFDictionary)
+            Keychain.delete(service: service, account: account)
         }
     }
 
@@ -201,7 +241,7 @@ public enum ToolSecretsKeychain {
     /// `resolvedSecretsWithDefaults` and must be used by every read path
     /// that feeds plugins — `config_get`, initial config delivery, and
     /// required-secret checks — so they can't disagree with tool payload
-    /// injection about whether a key is configured. (Upstream #2061.)
+    /// injection about whether a key is configured.
     public static func resolvedSecret(id: String, for pluginId: String, agentId: UUID) -> String? {
         if let exact = getSecret(id: id, for: pluginId, agentId: agentId) {
             return exact
@@ -214,7 +254,7 @@ public enum ToolSecretsKeychain {
     /// fallback). Goes through the memoized `hasSecret` rather than reading
     /// the value: plugin cards call this on appear for every agent, and
     /// uncached misses (the common case) cost up to three securityd
-    /// round-trips each, which froze scrolling the plugin grid. (#3057.)
+    /// round-trips each, which froze scrolling the plugin grid.
     public static func hasResolvedSecret(id: String, for pluginId: String, agentId: UUID) -> Bool {
         if hasSecret(id: id, for: pluginId, agentId: agentId) { return true }
         guard agentId != Agent.defaultId else { return false }
@@ -264,49 +304,6 @@ public enum ToolSecretsKeychain {
         deleteAllMatchingPrefix("\(pluginId).")
     }
 
-    // MARK: - Migration Support
-
-    /// Returns all legacy (non-agent-scoped) keychain entries for a given plugin.
-    /// Legacy accounts match `"{pluginId}.{key}"` but NOT `"{uuid}.{pluginId}.{key}"`.
-    public static func legacySecrets(for pluginId: String) -> [String: String] {
-        let legacyPrefix = "\(pluginId)."
-        let allItems = fetchAllItems(attributesOnly: false)
-
-        var secrets: [String: String] = [:]
-        for item in allItems {
-            guard let account = item[kSecAttrAccount as String] as? String,
-                account.hasPrefix(legacyPrefix),
-                !isAgentScopedAccount(account),
-                let data = item[kSecValueData as String] as? Data,
-                let value = String(data: data, encoding: .utf8)
-            else { continue }
-
-            secrets[String(account.dropFirst(legacyPrefix.count))] = value
-        }
-        return secrets
-    }
-
-    /// Delete all legacy (non-agent-scoped) entries for a plugin.
-    public static func deleteLegacySecrets(for pluginId: String) {
-        if KeychainQueryHelpers.disablesKeychainForProcess { return }
-        let legacyPrefix = "\(pluginId)."
-        let allItems = fetchAllItems(attributesOnly: true)
-
-        for item in allItems {
-            guard let account = item[kSecAttrAccount as String] as? String,
-                account.hasPrefix(legacyPrefix),
-                !isAgentScopedAccount(account)
-            else { continue }
-
-            let deleteQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-            ]
-            SecItemDelete(deleteQuery as CFDictionary)
-        }
-    }
-
     // MARK: - Internal Helpers
 
     private static func agentAccount(agentId: UUID, pluginId: String, key: String) -> String {
@@ -340,25 +337,21 @@ public enum ToolSecretsKeychain {
             }
         }
         if KeychainQueryHelpers.disablesKeychainForProcess { return [] }
-        var query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: service,
-            kSecMatchLimit as String: kSecMatchLimitAll,
-            kSecReturnAttributes as String: true,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
-            kSecUseAuthenticationContext as String: KeychainQueryHelpers.nonInteractiveContext(),
-        ]
-        if !attributesOnly {
-            query[kSecReturnData as String] = true
-        }
+        return Keychain.fetchAll(service: service, returnData: !attributesOnly)
+    }
 
-        var result: AnyObject?
-        let status = SecItemCopyMatching(query as CFDictionary, &result)
+    // MARK: - Test seams
 
-        guard status == errSecSuccess, let items = result as? [[String: Any]] else {
-            return []
-        }
-        return items
+    /// Seed a raw account (e.g. a pre-agent-scoping `"{pluginId}.{key}"`
+    /// entry) into the in-memory test store. Test-only: production code has
+    /// no API that writes the legacy format anymore.
+    static func _testSeedRawAccount(_ account: String, value: String) {
+        testStoreLock.withLock { testStore[account] = value }
+    }
+
+    /// Raw account lookup in the in-memory test store. Test-only.
+    static func _testRawAccountValue(_ account: String) -> String? {
+        testStoreLock.withLock { testStore[account] }
     }
 
     private static func deleteAllMatchingPrefix(_ prefix: String) {
@@ -380,12 +373,7 @@ public enum ToolSecretsKeychain {
             guard let account = item[kSecAttrAccount as String] as? String,
                 account.hasPrefix(prefix)
             else { continue }
-            let deleteQuery: [String: Any] = [
-                kSecClass as String: kSecClassGenericPassword,
-                kSecAttrService as String: service,
-                kSecAttrAccount as String: account,
-            ]
-            SecItemDelete(deleteQuery as CFDictionary)
+            Keychain.delete(service: service, account: account)
         }
     }
 }
