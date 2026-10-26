@@ -164,7 +164,9 @@ struct IntelGroundedClaimEngineTests {
         #expect(deltas.contains(StreamingGroundedRetryHint.sentinel))
         #expect(deltas.last == "I cannot write files in this chat; here is the content.")
         #expect(bodies.count == 2)
-        #expect(bodies[1].contains("[System Notice] Your previous message says a file was written"))
+        // Upstream #3203 made the notice a factual statement (no instruction
+        // to write); pin it through the constant rather than its wording.
+        #expect(bodies[1].contains(GroundedFileSideEffectCheck.ungroundedFileClaimNotice))
         #expect(!bodies[1].contains("Saved the report."))
     }
 

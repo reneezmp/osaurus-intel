@@ -730,7 +730,8 @@ public final class MCPProviderManager: ObservableObject {
                     client: client,
                     toolName: toolName,
                     arguments: arguments,
-                    timeout: timeout
+                    timeout: timeout,
+                    progressHardCap: provider.progressHardCap
                 )
             } catch let error where Self.isRecoverableSessionError(error) {
                 result = try await reconnectAndRetry(
@@ -809,7 +810,8 @@ public final class MCPProviderManager: ObservableObject {
             client: freshClient,
             toolName: toolName,
             arguments: arguments,
-            timeout: timeout
+            timeout: timeout,
+            progressHardCap: provider.progressHardCap
         )
     }
 
@@ -854,9 +856,6 @@ public final class MCPProviderManager: ObservableObject {
     }
 
     static let authRequiredProviderMessage = "A tool call needs you to sign in to this service."
-
-    /// Longest a single tool call may run while the server keeps reporting progress.
-    nonisolated static let progressHardCap: TimeInterval = 600
 
     nonisolated static func authRequiredToolMessage(providerName: String, authType: MCPProviderAuthType) -> String {
         let action =
@@ -931,13 +930,13 @@ public final class MCPProviderManager: ObservableObject {
     /// cancellation the server gets `notifications/cancelled` so it can stop.
     ///
     /// `timeout` is an idle budget: each `notifications/progress` for this
-    /// call's token restarts it, up to `progressHardCap` in total.
+    /// call's token restarts it, up to `progressHardCap` (per provider) in total.
     nonisolated static func callMCPTool(
         client: MCP.Client,
         toolName: String,
         arguments: [String: MCP.Value],
         timeout: TimeInterval,
-        progressHardCap: TimeInterval = MCPProviderManager.progressHardCap
+        progressHardCap: TimeInterval = MCPProvider.defaultProgressHardCap
     ) async throws -> MCP.CallTool.Result {
         let token = UUID().uuidString
         let toolCallId = ChatExecutionContext.currentToolCallId
@@ -964,6 +963,7 @@ public final class MCPProviderManager: ObservableObject {
                 .init(name: toolName, arguments: arguments, meta: Metadata(progressToken: .string(token)))
             )
         )
+        let startedAt = Date()
         let work = Task { try await context.value }
         do {
             return try await valueWithActivityDeadline(
@@ -977,13 +977,26 @@ public final class MCPProviderManager: ObservableObject {
             notifyServerOfCancellation(
                 client: client,
                 requestID: context.requestID,
-                reason: "Timed out after \(Int(timeout))s"
+                reason: Self.deadlineReason(
+                    elapsed: Date().timeIntervalSince(startedAt), idleTimeout: timeout, hardCap: progressHardCap)
             )
             throw MCPProviderError.timeout
         } catch is CancellationError {
             notifyServerOfCancellation(client: client, requestID: context.requestID, reason: "Cancelled by user")
             throw CancellationError()
         }
+    }
+
+    /// Cancellation reason for a tripped deadline: the total cap when the call
+    /// ran that long (it kept reporting progress), otherwise the idle gap.
+    nonisolated static func deadlineReason(
+        elapsed: TimeInterval, idleTimeout: TimeInterval, hardCap: TimeInterval
+    ) -> String {
+        let cap = max(hardCap, idleTimeout)
+        if elapsed >= cap - 1 {
+            return "Reached the \(Int(cap / 60)) min limit for calls that report progress"
+        }
+        return "No progress for \(Int(idleTimeout))s"
     }
 
     /// Fire-and-forget `notifications/cancelled`. Cancellation is advisory in

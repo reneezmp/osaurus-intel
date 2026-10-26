@@ -5,14 +5,37 @@
 //  Coverage for the file side-effect advisory: a message that narrates a
 //  file write ("appended to the file") while no file-writing tool succeeded
 //  this run gets a factual `[System Notice]` staged for the next step. The
-//  loop never stops on it — the model either calls the file tool or says
-//  nothing was written.
+//  notice describes recorded execution only; it does not authorize or
+//  instruct a file write.
 //
 
 import Foundation
 import Testing
 
 @testable import OsaurusCore
+
+private enum LiveReadOnlyFileRegression {
+    static let request =
+        "Use a file-reading tool to read probe.json in the working folder and report its nonce and integer value. Do not modify it."
+
+    // Exact first final answer from the native 9aac/877 SQL transcript,
+    // session D97F5BFB-F49E-4C8E-92DA-D59008FF7BCF. The old bare "to file"
+    // regex misclassified the closing memory comparison as a write claim.
+    static let answer = "\n\n" + #"""
+        I read `probe.json` in the working folder. Here are its contents (unmodified):
+
+        **probe.json**
+        ```json
+        {"nonce":"responses-integrated-20261025","value":42}
+        ```
+
+        **Reported values:**
+        - **Nonce:** `responses-integrated-20261025`
+        - **Integer value:** `42`
+
+        The file is 53 bytes, one line, valid JSON, and was read without any modification. (Note: the file's actual `value` is 42, which matches the "Integer value: 42" memory entry; the "Current integer value in probe.json is 43" memory entry appears stale relative to the file on disk.)
+        """#
+}
 
 @Suite
 struct GroundedFileSideEffectCheckTests {
@@ -100,6 +123,34 @@ struct GroundedFileSideEffectCheckTests {
                 "The page describes how the compiler writes object files."
             )
         )
+    }
+
+    @Test func exactLiveReadOnlyAnswerWithFencedJSONAndMemoryComparisonIsNotAWriteClaim() {
+        #expect(!GroundedFileSideEffectCheck.containsFileSideEffectClaim(LiveReadOnlyFileRegression.answer))
+    }
+
+    @Test(arguments: [
+        "The memory entry appears stale relative to the file on disk.",
+        "These values are identical to the file contents.",
+        "The report refers to the file we read.",
+        "The written report contains the nonce ABC and value 42.",
+        "The written report points to the file.",
+        "The written instructions refer to the file.",
+    ])
+    func fileDestinationWithoutWritePredicateIsNotAClaim(text: String) {
+        #expect(!GroundedFileSideEffectCheck.containsFileSideEffectClaim(text))
+    }
+
+    @Test(arguments: [
+        "The summary was written to the file.",
+        "Appended it to your file.",
+        "Wrote the extracted content to the file.",
+        "I added the summary to the file.",
+        "I pasted the result to the file.",
+        "I have written the report.",
+    ])
+    func affirmativeWritePredicateWithDestinationStillTrips(text: String) {
+        #expect(GroundedFileSideEffectCheck.containsFileSideEffectClaim(text))
     }
 
     // MARK: isGroundedFileWriteOutcome

@@ -10,6 +10,7 @@
 import Combine
 import Foundation
 import SwiftUI
+import os
 
 // MARK: - ChatTurn
 
@@ -19,10 +20,30 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     let createdAt: Date
     var completedAt: Date?
 
+    // MARK: - Token-estimate revision (upstream #3112)
+
+    /// Process-wide counter bumped whenever any turn mutates a field that
+    /// feeds the context-budget token estimates (content, thinking, tool
+    /// calls/results, attachments). `ChatSession` keys its cached transcript
+    /// token totals on this value so the readout rendered from the chat view
+    /// body doesn't re-walk every turn per render, while still picking up
+    /// in-place turn edits that never reassign the session's `turns` array.
+    private static let _tokenEstimateRevision = OSAllocatedUnfairLock<UInt64>(initialState: 0)
+
+    /// Current value of the process-wide token-estimate revision.
+    static var tokenEstimateRevision: UInt64 {
+        _tokenEstimateRevision.withLock { $0 }
+    }
+
+    private static func bumpTokenEstimateRevision() {
+        _tokenEstimateRevision.withLock { $0 &+= 1 }
+    }
+
     @Published var content: String {
         didSet {
             _contentLength = content.count
             _cachedVisibleContent = nil
+            Self.bumpTokenEstimateRevision()
         }
     }
     var contentLength: Int { _contentLength }
@@ -34,7 +55,10 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     }
 
     @Published var thinking: String {
-        didSet { _thinkingLength = thinking.count }
+        didSet {
+            _thinkingLength = thinking.count
+            Self.bumpTokenEstimateRevision()
+        }
     }
     var thinkingLength: Int { _thinkingLength }
     private var _thinkingLength: Int
@@ -47,10 +71,16 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     var hasThinking: Bool { _thinkingLength > 0 }
     var hasRenderableThinking: Bool { hasThinking && !thinkingIsBlank }
 
-    @Published var attachments: [Attachment] = []
-    @Published var toolCalls: [ToolCall]? = nil
+    @Published var attachments: [Attachment] = [] {
+        didSet { Self.bumpTokenEstimateRevision() }
+    }
+    @Published var toolCalls: [ToolCall]? = nil {
+        didSet { Self.bumpTokenEstimateRevision() }
+    }
     var toolCallId: String? = nil
-    @Published var toolResults: [String: String] = [:]
+    @Published var toolResults: [String: String] = [:] {
+        didSet { Self.bumpTokenEstimateRevision() }
+    }
     /// Artifact cards on this turn (upstream), e.g. a `/screenshot` capture.
     @Published var sharedArtifacts: [SharedArtifact] = []
 

@@ -84,6 +84,7 @@ private struct GenerativeGreetingTrigger: ViewModifier {
 final class ChatSession: ObservableObject {
     @Published var turns: [ChatTurn] = [] {
         didSet {
+            invalidateTranscriptTokenTotals()
             // Upstream: this session's Router spend and prompt-cache totals,
             // summed from each turn's persisted `routerBilling`, for the
             // composer credits chip.
@@ -119,7 +120,51 @@ final class ChatSession: ObservableObject {
         return false
     }
     /// Compaction summary for this chat (upstream #136) and its run state.
-    @Published var conversationSummary: ConversationSummary?
+    @Published var conversationSummary: ConversationSummary? {
+        didSet { invalidateTranscriptTokenTotals() }
+    }
+
+    /// Memoized conversation/output token totals for the transcript, read by
+    /// `estimatedContextBreakdown` from the chat view body. Walking every turn
+    /// on each SwiftUI render stalled the main thread on long conversations
+    /// (upstream #3112, APPLE-MACOS-2NW). Keyed on the session's transcript
+    /// revision (bumped when `turns` or `conversationSummary` change) plus
+    /// `ChatTurn.tokenEstimateRevision` (bumped on in-place turn edits), so it
+    /// never serves stale numbers.
+    private struct TranscriptTokenTotals {
+        let sessionRevision: UInt64
+        let turnRevision: UInt64
+        let outputTokens: Int
+        let conversationTokens: Int
+    }
+    private var transcriptRevision: UInt64 = 0
+    private var cachedTranscriptTokenTotals: TranscriptTokenTotals?
+
+    private func invalidateTranscriptTokenTotals() {
+        transcriptRevision &+= 1
+        cachedTranscriptTokenTotals = nil
+    }
+
+    /// Output and conversation (non-output) token estimates. O(1) on a hit.
+    func transcriptTokenTotals() -> (outputTokens: Int, conversationTokens: Int) {
+        let turnRevision = ChatTurn.tokenEstimateRevision
+        if let cached = cachedTranscriptTokenTotals,
+            cached.sessionRevision == transcriptRevision,
+            cached.turnRevision == turnRevision
+        {
+            return (cached.outputTokens, cached.conversationTokens)
+        }
+        let outputTokens = ContextBudgetManager.estimateOutputTokens(for: turns)
+        let conversationTokens =
+            IntelContextCompaction.conversationTokens(turns: turns, summary: conversationSummary) - outputTokens
+        cachedTranscriptTokenTotals = TranscriptTokenTotals(
+            sessionRevision: transcriptRevision,
+            turnRevision: turnRevision,
+            outputTokens: outputTokens,
+            conversationTokens: conversationTokens
+        )
+        return (outputTokens, conversationTokens)
+    }
     /// Live compaction progress (upstream), shown by the context popover,
     /// the composer notice and `CompactionDialogView`.
     @Published var compactionState: ContextCompactionUIState = .idle
@@ -1086,9 +1131,7 @@ final class ChatSession: ObservableObject {
         let effectiveId = agentId ?? Agent.defaultId
         let executionMode = estimatedChatExecutionMode(agentId: effectiveId)
 
-        let outputTokens = ContextBudgetManager.estimateOutputTokens(for: turns)
-        let conversationTokens =
-            IntelContextCompaction.conversationTokens(turns: turns, summary: conversationSummary) - outputTokens
+        let (outputTokens, conversationTokens) = transcriptTokenTotals()
         var inputTokens = 0
         if !input.isEmpty { inputTokens += ContextBudgetManager.estimateTokens(for: input) }
         for attachment in pendingAttachments { inputTokens += attachment.estimatedTokens }
