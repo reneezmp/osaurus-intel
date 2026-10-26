@@ -66,8 +66,8 @@ struct ConfigurationView: View {
         ZStack {
             SettingsPage {
                 ManagerHeader(
-                    title: L("General"),
-                    subtitle: L("App behavior, the Core Model, notifications, and data")
+                    title: LCached("General"),
+                    subtitle: LCached("App behavior, the Core Model, notifications, and data")
                 )
             } content: {
                 generalSection
@@ -94,31 +94,34 @@ struct ConfigurationView: View {
 
     // MARK: - Sections
 
+    // Static labels use `LCached` rather than `L`: this getter re-runs on every
+    // render, and the uncached catalog lookup was the leaf of a main-thread
+    // hang (APPLE-MACOS-3BN).
     private var generalSection: some View {
         SettingsSection(title: "General", icon: "gear") {
             SettingsRow(
-                title: L("Global Hotkey"), description: "Open Osaurus from anywhere",
+                title: LCached("Global Hotkey"), description: "Open Osaurus from anywhere",
                 anchorId: "settings.general.hotkey"
             ) {
                 HotkeyRecorder(value: $tempChatHotkey)
             }
 
             SettingsToggle(
-                title: L("Start at Login"),
+                title: LCached("Start at Login"),
                 description: "Launch Osaurus when you sign in",
                 anchorId: "settings.general.login",
                 isOn: $tempStartAtLogin
             )
 
             SettingsToggle(
-                title: L("Hide Dock Icon"),
+                title: LCached("Hide Dock Icon"),
                 description: "Run in menu bar only (requires restart)",
                 anchorId: "settings.general.dock",
                 isOn: $tempHideDockIcon
             )
 
             SettingsToggle(
-                title: L("Beta Updates"),
+                title: LCached("Beta Updates"),
                 description: "Receive pre-release updates with new features before they're generally available",
                 anchorId: "settings.general.updates",
                 isOn: $updater.isBetaChannel
@@ -144,7 +147,7 @@ struct ConfigurationView: View {
     private var notificationsSection: some View {
         SettingsSection(title: "Notifications", icon: "bell") {
             SettingsToggle(
-                title: L("Show Toast Notifications"),
+                title: LCached("Show Toast Notifications"),
                 description: "Display notifications for background tasks and events",
                 anchorId: "settings.notifications.toasts",
                 isOn: $tempToastEnabled
@@ -152,7 +155,7 @@ struct ConfigurationView: View {
             .onChange(of: tempToastEnabled) { _ in saveToastConfig() }
 
             SettingsRow(
-                title: L("Toast Position"), description: "Where toasts appear on screen",
+                title: LCached("Toast Position"), description: "Where toasts appear on screen",
                 anchorId: "settings.notifications.position"
             ) {
                 ToastPositionPicker(selection: $tempToastPosition)
@@ -160,7 +163,7 @@ struct ConfigurationView: View {
                     .onChange(of: tempToastPosition) { _ in saveToastConfig() }
             }
 
-            SettingsRow(title: L("Test Toast"), description: "Show a sample notification") {
+            SettingsRow(title: LCached("Test Toast"), description: "Show a sample notification") {
                 Button(action: showTestToast) {
                     HStack(spacing: 6) {
                         Image(systemName: "bell.badge")

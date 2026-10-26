@@ -67,7 +67,12 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     // array was a single throwaway. Now backed by real on-disk
     // persistence (same pattern as SlashCommandStore / SkillStore).
     @Published public internal(set) var agents: [Agent] = [Agent.default] {
-        didSet { Self.refreshAgentNameCache(agents) }
+        didSet {
+            // Avatars are added and removed alongside agent edits, so this is
+            // the moment the cached existence probes can become wrong.
+            AvatarExistenceCache.shared.invalidateAll()
+            Self.refreshAgentNameCache(agents)
+        }
     }
 
     // MARK: - Nonisolated name lookup (activity log attribution)

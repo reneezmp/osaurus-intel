@@ -147,10 +147,33 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     /// Vendor-advertised context windows for custom (non-router) providers'
     /// models, keyed by provider id then model id. Populated from the
     /// `/models` discovery probe when a custom OpenAI-compatible endpoint
-    /// reports `max_model_len`/`context_length`/`max_context_length` for a
+    /// reports `max_model_len`/`context_length`/`max_context_length`/
+    /// `context_window` (or DeepInfra's `metadata.context_length`) for a
     /// model, so the picker + context-budget logic can honor it instead of
     /// falling back to the generic default.
     @Published private(set) var customProviderContextLengths: [UUID: [String: Int]] = [:]
+
+    /// The context window a `/models` entry advertises, if any. Upstream's
+    /// precedence: vLLM `max_model_len`, OpenRouter/LM Studio
+    /// `context_length`, llama.cpp `max_context_length`, gateway
+    /// `context_window`, then DeepInfra's nested `metadata.context_length`
+    /// (upstream #3068). Ints, finite doubles and numeric strings count; a
+    /// non-object `metadata` just means no window.
+    nonisolated static func advertisedContextLength(in entry: [String: Any]) -> Int? {
+        let metadata = entry["metadata"] as? [String: Any]
+        let candidates = [
+            entry["max_model_len"], entry["context_length"], entry["max_context_length"],
+            entry["context_window"], metadata?["context_length"],
+        ]
+        for raw in candidates {
+            if let n = raw as? Int, n > 0 { return n }
+            if let d = raw as? Double, d.isFinite, d > 0 { return Int(d) }
+            if let s = raw as? String, let n = Int(s.trimmingCharacters(in: .whitespaces)), n > 0 {
+                return n
+            }
+        }
+        return nil
+    }
 
     func customProviderContextLength(providerId: UUID, modelId: String) -> Int? {
         customProviderContextLengths[providerId]?[modelId]
@@ -256,20 +279,8 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             for entry in arr {
                 guard let id = entry["id"] as? String else { continue }
                 ids.append(id)
-                let candidates = [entry["max_model_len"], entry["context_length"], entry["max_context_length"]]
-                for raw in candidates {
-                    if let n = raw as? Int, n > 0 {
-                        lengths[id] = n
-                        break
-                    }
-                    if let d = raw as? Double, d.isFinite, d > 0 {
-                        lengths[id] = Int(d)
-                        break
-                    }
-                    if let s = raw as? String, let n = Int(s.trimmingCharacters(in: .whitespaces)), n > 0 {
-                        lengths[id] = n
-                        break
-                    }
+                if let n = Self.advertisedContextLength(in: entry) {
+                    lengths[id] = n
                 }
             }
             return (ids.sorted(), lengths)

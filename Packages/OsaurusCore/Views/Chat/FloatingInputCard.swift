@@ -342,6 +342,7 @@ struct FloatingInputCard: View {
     /// Set on chip tap; cleared on dismiss.
     @State private var pastedContentPreview: Attachment?
     @State private var pastedContentEdit: Attachment?
+    @State private var attachmentPickerPresented = false
     /// Character threshold above which clipboard text is converted to a
     /// pasted-content attachment instead of being inlined into the input.
     // Compared against `.utf8.count`, not `.count`: grapheme-cluster
@@ -555,7 +556,7 @@ struct FloatingInputCard: View {
 
                 if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
                     && !speechService.isLoadingModel
-                    && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                    && speechService.microphonePermissionGranted
                 {
                     if let model = SpeechModelManager.shared.selectedModel {
                         print("[VoiceDebug] Kicking off model load for: \(model.id)")
@@ -602,7 +603,7 @@ struct FloatingInputCard: View {
 
                 if voiceConfig.voiceInputEnabled && !speechService.isModelLoaded
                     && !speechService.isLoadingModel
-                    && AVCaptureDevice.authorizationStatus(for: .audio) == .authorized
+                    && speechService.microphonePermissionGranted
                 {
                     if let model = SpeechModelManager.shared.selectedModel {
                         Task { try? await speechService.loadModel(model.id) }
@@ -3229,6 +3230,8 @@ extension FloatingInputCard {
     }
 
     private func pickAttachment() {
+        guard !attachmentPickerPresented else { return }
+        let window = windowId.flatMap { ChatWindowManager.shared.getNSWindow(id: $0) }
         let panel = NSOpenPanel()
         panel.allowedContentTypes = pickerAllowedTypes
         panel.allowsMultipleSelection = true
@@ -3239,7 +3242,16 @@ extension FloatingInputCard {
             ? "Select files to attach (\(mediaCapabilities.summary) supported)"
             : "Select files to attach"
 
-        if panel.runModal() == .OK {
+        attachmentPickerPresented = true
+        Task { @MainActor in
+            defer { attachmentPickerPresented = false }
+            let response: NSApplication.ModalResponse
+            if let window {
+                response = await panel.beginSheetModal(for: window)
+            } else {
+                response = await panel.beginModal()
+            }
+            guard response == .OK else { return }
             for url in panel.urls {
                 attachIfAllowed(url: url)
             }

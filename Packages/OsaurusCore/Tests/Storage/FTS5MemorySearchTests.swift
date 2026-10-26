@@ -81,6 +81,166 @@ struct FTS5MemorySearchTests {
     }
 
     @Test
+    func pinnedFactSearchFallsBackToLooseNaturalRecallTerms() throws {
+        let db = try openInMemory()
+        defer { db.close() }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        try db.insertPinnedFact(
+            PinnedFact(
+                agentId: "a",
+                content: "The user's sailboat is named Peregrine Dusk.",
+                salience: 0.9,
+                lastUsed: now,
+                createdAt: now
+            )
+        )
+        try db.insertPinnedFact(
+            PinnedFact(
+                agentId: "a",
+                content: "The user has a dermatology appointment on the 14th.",
+                salience: 0.9,
+                lastUsed: now,
+                createdAt: now
+            )
+        )
+
+        // Full natural-language question: the OR-with-prefix FTS recall
+        // (see `ftsMatchQuery`) surfaces the boat fact. A broad question may
+        // also pull in tangential facts that share common words, so assert
+        // the boat fact is recalled rather than a strict count (mirrors
+        // `transcriptSearchFindsKeywordsViaFTS`).
+        let hits = try db.searchPinnedFactsText(
+            query: "What is the name of my boat?",
+            agentId: "a",
+            limit: 5
+        )
+        #expect(hits.contains { $0.content.contains("Peregrine Dusk") })
+    }
+
+    @Test
+    func pinnedRelevanceSurvivesHigherSalienceClutter() throws {
+        let db = try openInMemory()
+        defer { db.close() }
+        let relevant = PinnedFact(
+            id: "boat",
+            agentId: "a",
+            content: "My boat is named Peregrine Dusk.",
+            salience: 0.6
+        )
+        try db.insertPinnedFact(relevant)
+        for day in 14 ..< 26 {
+            try db.insertPinnedFact(
+                PinnedFact(
+                    id: "appointment-\(day)",
+                    agentId: "a",
+                    content: "The user's dermatology appointment is on day \(day).",
+                    salience: 0.9
+                )
+            )
+        }
+        let hits = try db.searchPinnedFactsText(
+            query: "What is the name of my boat?",
+            agentId: "a",
+            limit: 5
+        )
+        #expect(
+            hits.first?.id == relevant.id,
+            "relevance must survive generic-word matches with greater salience"
+        )
+        #expect(hits.count <= 5)
+    }
+
+    @Test
+    func pinnedFTSRankingRetainsAgentAndActiveFilters() throws {
+        let db = try openInMemory()
+        defer { db.close() }
+        try db.insertPinnedFact(
+            PinnedFact(
+                id: "ours",
+                agentId: "a",
+                content: "Our boat is named Peregrine Dusk.",
+                salience: 0.4
+            )
+        )
+        try db.insertPinnedFact(
+            PinnedFact(
+                id: "foreign",
+                agentId: "b",
+                content: "Our boat is named Peregrine Dusk.",
+                salience: 1
+            )
+        )
+        try db.insertPinnedFact(
+            PinnedFact(
+                id: "evicted",
+                agentId: "a",
+                content: "Our boat is named Peregrine Dusk.",
+                salience: 1,
+                status: "evicted"
+            )
+        )
+        let hits = try db.searchPinnedFactsText(query: "boat Peregrine", agentId: "a", limit: 1)
+        #expect(hits.map(\.id) == ["ours"])
+        #expect(hits.allSatisfy { $0.agentId == "a" && $0.status == "active" })
+    }
+
+    @Test
+    func equalFTSRelevanceUsesSalienceThenStableId() throws {
+        let db = try openInMemory()
+        defer { db.close() }
+        for (id, salience) in [("z-high", 0.9), ("low", 0.3), ("a-high", 0.9)] {
+            try db.insertPinnedFact(
+                PinnedFact(
+                    id: id,
+                    agentId: "a",
+                    content: "The boat is Peregrine Dusk.",
+                    salience: salience
+                )
+            )
+        }
+        let hits = try db.searchPinnedFactsText(query: "Peregrine", agentId: "a", limit: 3)
+        #expect(hits.map(\.id) == ["a-high", "z-high", "low"])
+    }
+
+    @Test
+    func episodeSearchFallsBackToLooseNaturalRecallTerms() throws {
+        let db = try openInMemory()
+        defer { db.close() }
+
+        let now = ISO8601DateFormatter().string(from: Date())
+        _ = try db.insertEpisode(
+            Episode(
+                agentId: "a",
+                conversationId: "c1",
+                summary: "Discussed the greenhouse project: cedar frame, $900 budget.",
+                topicsCSV: "greenhouse,woodworking",
+                entitiesCSV: "greenhouse,cedar",
+                salience: 0.9,
+                conversationAt: now
+            )
+        )
+        _ = try db.insertEpisode(
+            Episode(
+                agentId: "a",
+                conversationId: "c2",
+                summary: "Talked about tax filing deadlines.",
+                topicsCSV: "taxes",
+                entitiesCSV: "taxes",
+                salience: 0.9,
+                conversationAt: now
+            )
+        )
+
+        let hits = try db.searchEpisodesText(
+            query: "What did we decide about the greenhouse project last time we talked?",
+            agentId: "a",
+            limit: 5
+        )
+        #expect(hits.first?.summary.contains("greenhouse") == true)
+    }
+
+    @Test
     func emptyQueryReturnsNoHits() throws {
         let db = try openInMemory()
         defer { db.close() }
@@ -99,11 +259,14 @@ struct FTS5MemorySearchTests {
 
     @Test
     func querySanitizerStripsSQLOperators() {
-        // Single-word queries get quoted; multi-word with operator-ish
-        // characters should still produce safe quoted tokens.
-        #expect(MemoryDatabase.ftsMatchQuery("foo AND bar OR baz") == "\"foo\" \"AND\" \"bar\" \"OR\" \"baz\"")
-        #expect(MemoryDatabase.ftsMatchQuery("(rm -rf /)") == "\"rm\" \"-rf\"")
-        #expect(MemoryDatabase.ftsMatchQuery("\u{0}\"NEAR\"") == "\"NEAR\"")
+        // Terms are quoted, prefix-matched, and OR-joined; operator-ish
+        // characters embedded by the user become safe literal tokens.
+        #expect(
+            MemoryDatabase.ftsMatchQuery("foo AND bar OR baz")
+                == "\"foo\"* OR \"AND\"* OR \"bar\"* OR \"OR\"* OR \"baz\"*"
+        )
+        #expect(MemoryDatabase.ftsMatchQuery("(rm -rf /)") == "\"rm\"* OR \"-rf\"*")
+        #expect(MemoryDatabase.ftsMatchQuery("\u{0}\"NEAR\"") == "\"NEAR\"*")
         #expect(MemoryDatabase.ftsMatchQuery("   ") == nil)
     }
 }

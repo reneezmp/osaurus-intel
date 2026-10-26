@@ -151,18 +151,56 @@ class SystemMonitorService: ObservableObject {
         host_page_size(hostPort, &rawPage)
         let pageSize = rawPage
         let totalMemory = Double(ProcessInfo.processInfo.physicalMemory)
-        let freeMemory = Double(vmInfo.free_count) * Double(pageSize)
-        let inactiveMemory = Double(vmInfo.inactive_count) * Double(pageSize)
-        let _ = Double(vmInfo.wire_count) * Double(pageSize)
-        let _ = Double(vmInfo.compressor_page_count) * Double(pageSize)
+        // Use the same reclaimable-capacity definition as normal loads and
+        // delegation admission. Free/inactive queues do not describe ownership:
+        // ACTIVE file-backed pages can be reclaimed, while INACTIVE anonymous
+        // pages still consume RAM. Adding purgeable pages to inactive pages can
+        // also count the same capacity twice. Keep the host gauge separate from
+        // appMemoryMB: GPU-resident mapped weights can raise system wired memory
+        // without appearing in the process's phys_footprint ledger.
+        // Intel: upstream's helper lives in `ChatResidencyHandoff` (local
+        // models, not compiled here), so the same arithmetic is kept below.
+        let availableMemory = Double(Self.reclaimableMemoryBytes(
+            physicalBytes: Int64(ProcessInfo.processInfo.physicalMemory),
+            pageSize: Int64(pageSize),
+            wiredPages: Int64(vmInfo.wire_count),
+            compressorPages: Int64(vmInfo.compressor_page_count),
+            internalPages: Int64(vmInfo.internal_page_count),
+            purgeablePages: Int64(vmInfo.purgeable_count)
+        ))
 
-        let usedMemory = totalMemory - freeMemory - inactiveMemory
+        let usedMemory = max(0.0, totalMemory - availableMemory)
         let percentage = (usedMemory / totalMemory) * 100.0
 
         let totalGB = totalMemory / (1024 * 1024 * 1024)
         let usedGB = usedMemory / (1024 * 1024 * 1024)
 
         return (min(100.0, max(0.0, percentage)), totalGB, usedGB)
+    }
+
+    /// Bytes the system could reclaim for new work: physical memory minus
+    /// wired, compressor and non-purgeable anonymous pages. Upstream's
+    /// `ChatResidencyHandoff.reclaimableMemoryBytes`, verbatim.
+    static func reclaimableMemoryBytes(
+        physicalBytes: Int64,
+        pageSize: Int64,
+        wiredPages: Int64,
+        compressorPages: Int64,
+        internalPages: Int64,
+        purgeablePages: Int64
+    ) -> Int64 {
+        guard physicalBytes > 0, pageSize > 0 else { return 0 }
+        let nonPurgeableInternal = max(0, internalPages - max(0, purgeablePages))
+        let (first, overflow1) = max(0, wiredPages).addingReportingOverflow(
+            max(0, compressorPages))
+        guard !overflow1 else { return 0 }
+        let (unreclaimablePages, overflow2) = first.addingReportingOverflow(
+            nonPurgeableInternal)
+        guard !overflow2 else { return 0 }
+        let (unreclaimableBytes, overflow3) = unreclaimablePages
+            .multipliedReportingOverflow(by: pageSize)
+        guard !overflow3 else { return 0 }
+        return max(0, physicalBytes - unreclaimableBytes)
     }
 
     /// Returns the app's own physical memory footprint in MB.

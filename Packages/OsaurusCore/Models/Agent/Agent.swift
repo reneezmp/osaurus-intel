@@ -225,12 +225,25 @@ public struct Agent: Codable, Identifiable, Sendable, Equatable {
     /// Absolute URL of the custom avatar image, if one is set and the file
     /// exists on disk. Returns nil when no custom avatar is configured or
     /// the file has been removed out from under us.
+    ///
+    /// Read from SwiftUI body getters — once per chat tab, sidebar row and
+    /// picker entry, on every render — and the existence probe is a `stat`.
+    /// On a slow or networked models volume that per-row syscall was enough to
+    /// trip the hang watchdog, so the answer is cached. `AvatarExistenceCache`
+    /// holds it briefly and is cleared whenever the agent list changes, which
+    /// is when an avatar is added or removed, so a newly set avatar still
+    /// appears immediately.
+    ///
+    /// The filename component is appended with `isDirectory: false`. Without
+    /// it, Foundation probes the filesystem (`getattrlist`) on every call to
+    /// decide whether to add a trailing slash — an uncached, blocking syscall
+    /// that bypassed `AvatarExistenceCache` and hung the main thread.
     public var customAvatarURL: URL? {
         guard let name = customAvatarFilename, !name.isEmpty else { return nil }
         let url = OsaurusPaths.agents()
             .appendingPathComponent("avatars", isDirectory: true)
-            .appendingPathComponent(name)
-        return FileManager.default.fileExists(atPath: url.path) ? url : nil
+            .appendingPathComponent(name, isDirectory: false)
+        return AvatarExistenceCache.shared.exists(atPath: url.path) ? url : nil
     }
 
     // MARK: - Localized Display Helpers
@@ -821,5 +834,45 @@ extension Agent {
     /// at the call site.
     public func shouldUseGenerativeGreetings(globallyEnabled: Bool) -> Bool {
         settings.generativeGreetingsEnabled ?? globallyEnabled
+    }
+}
+
+/// Short-lived cache for avatar-file existence probes.
+///
+/// The probe is a `stat` issued from SwiftUI body getters, once per row per
+/// render. Entries expire after `ttl` so a file appearing or vanishing behind
+/// the app's back is picked up without any explicit signal, and
+/// `invalidateAll()` clears them immediately when the agent list changes —
+/// the path by which avatars are actually added and removed.
+public final class AvatarExistenceCache: @unchecked Sendable {
+    public static let shared = AvatarExistenceCache()
+
+    private let lock = NSLock()
+    private var entries: [String: (exists: Bool, checkedAt: Date)] = [:]
+    private let ttl: TimeInterval = 10
+
+    private init() {}
+
+    func exists(atPath path: String) -> Bool {
+        let now = Date()
+        lock.lock()
+        if let entry = entries[path], now.timeIntervalSince(entry.checkedAt) < ttl {
+            lock.unlock()
+            return entry.exists
+        }
+        lock.unlock()
+
+        let result = FileManager.default.fileExists(atPath: path)
+        lock.lock()
+        entries[path] = (result, now)
+        lock.unlock()
+        return result
+    }
+
+    /// Drop every entry. Called when the agent list changes.
+    public func invalidateAll() {
+        lock.lock()
+        entries.removeAll()
+        lock.unlock()
     }
 }

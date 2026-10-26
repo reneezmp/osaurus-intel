@@ -212,6 +212,15 @@ final class ChatSession: ObservableObject {
     private var composerDraftIsAuthoritative = false
     @Published var pendingAttachments: [Attachment] = []
     @Published var selectedModel: String? = nil
+    /// The model the user picked in this chat. A manual pick outranks the
+    /// agent default for as long as it remains a valid option, so model
+    /// discovery finishing later can't swap it out (upstream ChatSession).
+    private var lastManualModelSelection: String?
+    /// A restored chat can hydrate before its saved model reaches the picker
+    /// (provider models arrive later). Retain that choice across discovery
+    /// without changing the agent default; a later manual pick or a different
+    /// conversation replaces it (upstream #3200).
+    private var restoredWindowModelSelection: String?
     @Published var pickerItems: [ModelPickerItem] = []
     @Published var activeModelOptions: [String: ModelOptionValue] = [:]
     @Published var hasAnyModel: Bool = false
@@ -538,6 +547,8 @@ final class ChatSession: ObservableObject {
             .removeDuplicates()
             .sink { [weak self] newModel in
                 guard let self = self, !self.isLoadingModel, let model = newModel else { return }
+                self.lastManualModelSelection = model
+                self.restoredWindowModelSelection = nil
                 self.loadActiveModelOptions(for: model)
 
                 // Clear pending image attachments when switching to a non-VLM model
@@ -734,15 +745,13 @@ final class ChatSession: ObservableObject {
         // Options changed (e.g., remote models loaded) - re-check agent's preferred model.
         // This corrects the initial fallback to "foundation" when remote models weren't yet available.
         let effectiveModel = AgentManager.shared.effectiveModel(for: agentId ?? Agent.defaultId)
-        let newSelected: String?
-
-        if let model = effectiveModel, let resolved = Self.resolvePickerModel(model, among: newOptions) {
-            newSelected = resolved
-        } else if let prev = selectedModel, let resolved = Self.resolvePickerModel(prev, among: newOptions) {
-            newSelected = resolved
-        } else {
-            newSelected = newOptions.firstChatCapable?.id
-        }
+        let newSelected = Self.modelAfterDiscovery(
+            manual: lastManualModelSelection,
+            restored: source == .chat ? restoredWindowModelSelection : nil,
+            agentDefault: effectiveModel,
+            previous: selectedModel,
+            among: newOptions
+        )
 
         pickerItems = newOptions
         isLoadingModel = true
@@ -750,6 +759,25 @@ final class ChatSession: ObservableObject {
         loadActiveModelOptions(for: selectedModel)
         isLoadingModel = false
         hasAnyModel = !newOptions.isEmpty
+    }
+
+    /// The selection once discovery replaces the picker items: the user's pick
+    /// in this chat, then a restored chat's saved model, then the agent
+    /// default, then the previous selection, then the first chat model
+    /// (upstream ChatSession's order, #3200).
+    static func modelAfterDiscovery(
+        manual: String?,
+        restored: String?,
+        agentDefault: String?,
+        previous: String?,
+        among items: [ModelPickerItem]
+    ) -> String? {
+        for candidate in [manual, restored, agentDefault, previous] {
+            if let candidate, let resolved = resolvePickerModel(candidate, among: items) {
+                return resolved
+            }
+        }
+        return items.firstChatCapable?.id
     }
 
     /// Preserve provider ownership in picker ids while accepting old sessions
@@ -1530,6 +1558,8 @@ final class ChatSession: ObservableObject {
     func reset() {
         stashDraft()
         stop()
+        lastManualModelSelection = nil
+        restoredWindowModelSelection = nil
         turns.removeAll()
         input = ""
         pendingAttachments = []
@@ -2126,6 +2156,8 @@ final class ChatSession: ObservableObject {
         // fall back to the agent's preferred model. `isLoadingModel`
         // suppresses the auto-persist sink so a load doesn't look like
         // the user just picked a model.
+        lastManualModelSelection = nil
+        restoredWindowModelSelection = source == .chat ? data.selectedModel : nil
         if let savedModel = data.selectedModel,
             pickerItems.contains(where: { $0.id == savedModel })
         {
@@ -4868,17 +4900,13 @@ extension ChatView {
         return markers
     }
 
-    /// Copy a turn's thinking + content to the clipboard
+    /// Copy a turn's content to the clipboard.
     private func copyTurnContent(turnId: UUID) {
         guard let turn = session.turns.first(where: { $0.id == turnId }) else { return }
-        var textToCopy = ""
-        if turn.hasRenderableThinking {
-            textToCopy += turn.thinking
-        }
-        if !turn.contentIsBlank {
-            if !textToCopy.isEmpty { textToCopy += "\n\n" }
-            textToCopy += turn.visibleContent
-        }
+        // Thinking is left out: the copy button sits under the response, and
+        // chat export covers the reasoning (upstream #3067).
+        guard !turn.contentIsBlank else { return }
+        let textToCopy = turn.visibleContent
         guard !textToCopy.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return }
         NSPasteboard.general.clearContents()
         NSPasteboard.general.setString(textToCopy, forType: .string)
