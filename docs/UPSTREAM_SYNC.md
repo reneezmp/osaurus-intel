@@ -1920,6 +1920,24 @@ reach outside it. Package gate: 1,252 tests in 186 suites, serial, isolated
   rather than follow it, and `createDirectory` through a dangling folder link
   fails, so this is defence in depth, not a live escape. Offer it with the
   PR, but it doesn't need its own.
+  **Status 2026-10-26:** both were still on `upstream/main` (`fc75a1e06`).
+  Upstream's `docs/SECURITY.md` asks for private reports, but its GitHub
+  private vulnerability reporting is off and no security email is listed,
+  so Renée is contacting the maintainers directly. The upstream-shaped
+  fix is the local branch `fix/folder-tools-git-options-context-symlinks`
+  (`b935eac30`, one commit on `fc75a1e06` with
+  `GitArgumentAndContextLinkTests`). It is not pushed. What happens next is
+  upstream's call; drop this item once they ship a fix or decline.
+- **Building upstream on the dev Mac needs Xcode's Metal Toolchain**
+  (`xcodebuild -downloadComponent MetalToolchain`, about 840 MB, installed
+  2026-10-26). Without it, vmlx-swift's `.metal` kernels fail with
+  "missing Metal Toolchain" before any Osaurus code compiles. The Intel
+  build never needs it. Upstream's focused test lane, run natively on arm64
+  (no `arch -x86_64`), uses their isolation variables:
+  `OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1 OSAURUS_TEST_ROOT=<tmp>/root
+  OSU_MODELS_DIR=<tmp>/models swift test --package-path Packages/OsaurusCore
+  --scratch-path <tmp>/build --no-parallel --disable-xctest --filter ...`.
+  A separate `--scratch-path` keeps the Intel `.build` cache intact.
 - Tests: `Tests/Folder/FolderToolsSymlinkContainmentTests.swift` (linked
   folder, linked file, relative `../` link, dangling link, loop, new file under
   a linked parent, for read, write, edit, search, tree, git and context files;
