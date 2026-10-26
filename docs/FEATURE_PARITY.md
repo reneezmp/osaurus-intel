@@ -94,6 +94,44 @@ final Intel release is tested as one integrated product.
 | Cross-block chat selection | Ported | Shipped 2026-10-01 ([`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md)): drag-select across paragraphs, code blocks and table cells of a reply, with auto-scroll and ⌘C / menu Copy of the whole selection (upstream #2247, #2899). **Not yet tested on Rosy.** |
 | Per-chat file history (File Changes, `file_undo`, diff cards) | Ported | Shipped 2026-10-01 ([`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md)): every file a chat's folder tools create, edit or delete (shell commands included) is snapshotted and listed in the File Changes panel, revertible per change, per file or all at once, with conflict checks and Undo; agents get `file_undo` and `file_operation_history`; retention under Data & Storage. Inline diff cards under every write/edit (live while the model writes). Rows in an encrypted `FileHistoryDatabase` (upstream: its chat-history database). Package gate green. **Not yet tested on Rosy** (checklist section "Per-chat file history"). |
 
+## 2026-10-26 upstream range audit — product impact
+
+Commit coverage current through `fc75a1e06` (102 commits,
+[`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md)). Automated
+tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
+
+### Working and tested (automated)
+- Hang and crash fixes on Intel files (#3065, #3053, #3144, #3092, #3131,
+  #2946, #2925, #3079 ×3, #3130, #3195), the copy button (#3067), the model
+  picker (#3133, #3169, #3200), chat window drag and attachment sheet
+  (#3173, #3185), RAM gauge (#3157), avatars (#3159).
+- Folder documents: `file_write` without a length cap and with
+  `source_path` (#3066); workbook formatting kept through edits (#3073).
+- Provider context windows from `context_window` / DeepInfra metadata
+  (#3068); `gpt-6.1-sol` (#3141); MCP progress past 120 s (#3193).
+- Memory recall: OR-prefix FTS matching (#1815, found SKIPped) and
+  relevance-first pinned ranking (#3083).
+
+### Partial
+| Area | Missing behavior exposed by upstream | Next Intel gate |
+|---|---|---|
+| Hosted Gemini | Reasoning-effort control (#3115). | Port `GeminiReasoningContract`, wire into Intel's provider path and picker. |
+| Chat transcript performance | Height-note batching (#3080). | Hand port into Intel's `MessageTableRepresentable`; long tool-heavy chat check. |
+| Chat engine slices | #3203's tool-choice, streaming, image-payload, probe and tool-card slices. | Check each against `CloudChatEngine`. |
+| Memory store | Forward-version refusal and newer schema (`W-memory-db-sync`). | Port the refusal first (shared `~/.osaurus` on the dev Mac). |
+
+### Dependency-blocked
+| Area | Dependency before implementation/promotion |
+|---|---|
+| Harness runtimes (Claude Code, Pi) | `W-harness-runtimes`; replaces Intel's own Claude Code integration. |
+| Agent templates, Osaurus bundles | `W-declarative-config`, then `W-agent-templates` / `W-osaurus-bundles`. |
+| Local access key for sensitive routes | `W-server-api` (#3178). |
+| Phone, privacy filter, media, computer use, subagents, Seatbelt | Existing rows (`W-identity-mobile`, `W-privacy-filter`, `W-media-generation`, `W-computer-use`, `W-subagents`, `W-seatbelt-sandbox`). |
+
+### Intentionally omitted
+None in this range. Channels and workspace pairing work is deferred, not
+omitted (Renée, 2026-10-11).
+
 ## 2026-09-25 upstream range audit — product impact
 
 The [complete 171-commit feasibility audit](UPSTREAM_AUDIT_2026-09-25.md)

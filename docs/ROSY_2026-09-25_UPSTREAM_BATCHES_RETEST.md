@@ -1730,3 +1730,46 @@ Providers). Before this build, these three could list models but not chat.
       afterwards "Ready…". `pmset -g assertions` in Terminal lists
       "Running agent sessions" during the run.
 
+
+## Upstream audit 2026-10-26 (ports through `fc75a1e06`)
+
+Details: `UPSTREAM_AUDIT_2026-10-26.md`, "Shipped on Intel".
+
+- [ ] **Settings window (#3079, #3130):** first open after launch shows the
+      normal window, not an empty or black one. Drag it smaller: it stops at
+      its minimum and the content is never clipped. If a second display is
+      available, move it there and back.
+- [ ] **Apple apps (#3065):** ask an agent with Calendar to open an event (and
+      Maps to open a place). The chat keeps scrolling and typing while the app
+      launches.
+- [ ] **Copy (#3067):** on a reply with visible thinking, the copy button
+      copies only the reply text.
+- [ ] **Large documents (#3066):** ask for a Word document of roughly 40,000
+      characters in the working folder; it is written in one go. Then: "turn
+      `notes.md` into a PDF" with an existing Markdown file; the PDF is built
+      from the file (`source_path`), and `notes.md` is unchanged.
+- [ ] **Workbooks (#3073):** with an `.xlsx` that has column widths or frozen
+      rows, ask to change one value. The edit keeps the formatting; asking to
+      rewrite the whole workbook is refused with a pointer to editing it.
+- [ ] **Memory (#3083 and #1815's recall):** with a pinned fact such as a
+      pet's name, ask in a full sentence ("what's my dog called?"); the fact is
+      recalled.
+- [ ] **Model picker (#3133, #3200):** search for a model that sorts below the
+      selected one; the list stays visible. Open an older chat that used a
+      different model than the agent's, quit, relaunch: it reopens on its own
+      model after providers finish loading. Picking a model in a chat survives
+      providers loading late.
+- [ ] **Chat window (#3173, #3185, #3171):** dragging the tab strip moves the
+      window. The paperclip opens the file picker as a sheet on that chat
+      window, and a second click while it is open does nothing. In a dark
+      theme, the selected segment in Settings tab pickers is visible against
+      the track.
+- [ ] **Clipboard and plugins (#3079):** copying text still offers it in the
+      composer as before. Intel plugins (e.g. the time plugin) still load and
+      run.
+- [ ] **Status panel (#3157):** the menu-bar panel's RAM figure is roughly
+      Activity Monitor's "Memory Used", not lower.
+- [ ] **MCP (#3193):** a connector tool that runs longer than two minutes
+      keeps showing progress and finishes without the chat nudging it.
+- [ ] **Context readout (#3112):** during a long tool-heavy reply, the context
+      ring keeps updating and typing stays responsive.

@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Before that: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `fc75a1e06` (2026-10-26; 102 commits after `24f4c416a`, see [`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md)). Before that: `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Earlier: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -3796,4 +3796,40 @@ serves it. The appcast commit is `98d25c4c8`. Rosy validation is pending:
 every checklist section from "Loop harness" through "Keep Mac awake while
 agents run" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`. The next
 release needs a build number above 61.
+
+### Upstream audit through `fc75a1e06` — 2026-10-26
+
+102 commits (upstream 0.25.21–0.25.26 era) classified in
+[`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md): Port 25,
+Split 6, Needs work 15, Deferred 6, Covered 4, Incompatible 46. 23 Port commits
+and the Port parts of five Splits shipped (hang and crash fixes, `file_write`
+without a cap plus `source_path`, workbook preservation, model-picker and
+restored-model fixes, MCP progress, the grounded-check fix); #3080, #3115 and
+#3203's other slices are open Port verdicts. New backlog rows:
+`W-harness-runtimes`, `W-agent-templates`, `W-osaurus-bundles`,
+`W-memory-db-sync`. Package gate: 3,238 tests in 401 suites (6 known issues); Rosy section
+"Upstream audit 2026-10-26" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+Lessons for the next audit:
+
+- **A title is not a verdict.** Three commits were first guessed wrong
+  (#3060 needs a service Intel lacks, #3130 applies to Intel's own Settings
+  window, #3143 was already true on Intel). Read Intel's equivalent code
+  before writing the verdict.
+- **Test-apply each commit** (`git apply --check` of the diff limited to
+  compiled files) to separate clean ports from hand ports, then
+  `git apply --3way` for the hand ports. When a 3-way merge pulls in large
+  unrelated upstream blocks, the Intel file has diverged; restore it and port
+  the fix by hand (#3171's strings, #3080's table, #3060's theme view).
+- **String catalog conflicts:** merge the keys a commit adds as JSON, in
+  upstream's position. The catalog is written with `indent=2`, `" : "`
+  separators, no key sorting and no trailing newline; a round trip through
+  those settings is byte-identical.
+- **SKIP commits hide fixes** again: upstream's OR-prefix memory recall
+  (#1815, triaged SKIP with knowledge collections) was missing. Grep SKIP
+  commits for files Intel compiles.
+- **Combine on `RunLoop.main` in SwiftPM tests:** the helper's main run loop
+  may have no sources, and an unshown `NSWindow` collapses to 1x1 once the
+  loop turns, so window-geometry assertions after a run-loop drain are
+  unreliable there (`ManagementWindowFloorTests`).
 
