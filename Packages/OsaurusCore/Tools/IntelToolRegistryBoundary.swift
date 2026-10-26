@@ -211,12 +211,19 @@ extension ToolRegistry {
             if let field = result.field, let extra = hint?(field) {
                 message += (message.hasSuffix(".") ? " " : ". ") + extra
             }
+            // Schema validation is a pure function of (schema, arguments):
+            // the identical call is rejected identically every time, so the
+            // envelope must not advertise it as retryable — a model that
+            // trusted `retryable: true` re-sent the same oversized
+            // `file_write` for an hour and a half. The arguments must change
+            // (upstream #3066).
             return .rejected(
                 envelopeJSON: ToolEnvelope.failure(
                     kind: .invalidArgs,
                     message: message,
                     field: result.field,
-                    tool: toolName
+                    tool: toolName,
+                    retryable: false
                 )
             )
         }
