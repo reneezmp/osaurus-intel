@@ -47,30 +47,51 @@ public final class ClipboardService: ObservableObject {
     /// Whether the clipboard content has been "seen" or used
     @Published public var hasNewContent: Bool = false
 
-    private var lastChangeCount: Int = NSPasteboard.general.changeCount
+    /// The generation of the poller's own pasteboard connection at the last
+    /// publish (see `IsolatedPasteboard.changeCount`). Starts at that
+    /// connection's baseline, 0.
+    private var lastChangeCount: Int = 0
     private var timer: AnyCancellable?
     /// Guards against overlapping pasteboard reads if one outlives the poll interval.
     private var isChecking = false
     private let keyboardService = KeyboardSimulationService.shared
 
-    /// Serializes every `NSPasteboard` access. `NSPasteboard` is not thread-safe:
-    /// its internal type cache (`_updateTypeCacheIfNeeded`) is shared mutable state,
-    /// so concurrent reads — from independent `Task.detached` jobs on the cooperative
-    /// pool and from the main actor — can double-free it (Sentry: malloc "pointer
-    /// being freed was not allocated"). Routing all reads through a single serial queue
-    /// keeps them off the main thread (preserving the hang fix) while guaranteeing no
-    /// two pasteboard touches ever overlap.
+    /// Serializes every poller pasteboard access and confines
+    /// `isolatedPasteboard` to one thread. Reads stay off the main thread
+    /// because each one is a synchronous XPC round-trip to the pasteboard
+    /// server that can block for seconds (the hang fix).
     nonisolated private static let pasteboardQueue = DispatchQueue(
         label: "com.dinoki.osaurus.clipboard.pasteboard"
     )
 
-    /// Runs `work` against the shared pasteboard on the serial pasteboard queue.
+    /// The poller's private connection to the clipboard, used ONLY on
+    /// `pasteboardQueue`. It is deliberately not `NSPasteboard.general`:
+    /// that object is shared with AppKit's own main-thread reads (menu
+    /// validation, text-view key handling), its type cache is not
+    /// thread-safe, and a serial queue on our side cannot order AppKit's
+    /// accesses — the race crashed in production as Sentry APPLE-MACOS-1QM
+    /// (SIGSEGV in `-[NSPasteboard _typesAtIndex:combinesItems:]` under
+    /// `detectContent`) and, earlier, as a double free of the same cache.
+    /// `IsolatedPasteboard` shares no state with AppKit's object; the
+    /// pasteboard server keeps the two coherent.
+    // Lazy initialization happens on the first access inside onPasteboardQueue.
+    // Dispatching synchronously to that same queue here would deadlock on first poll.
+    nonisolated private static let isolatedPasteboard = IsolatedPasteboard()
+
+    /// Runs `work` against the poller's private pasteboard connection on the
+    /// serial pasteboard queue, after pulling the latest generation from the
+    /// server. Returns `nil` when no connection could be made.
     nonisolated private static func onPasteboardQueue<T: Sendable>(
-        _ work: @escaping @Sendable (NSPasteboard) -> T
-    ) async -> T {
+        _ work: @escaping @Sendable (IsolatedPasteboard) -> T
+    ) async -> T? {
         await withCheckedContinuation { continuation in
             pasteboardQueue.async {
-                continuation.resume(returning: work(NSPasteboard.general))
+                guard let pasteboard = isolatedPasteboard else {
+                    continuation.resume(returning: nil)
+                    return
+                }
+                pasteboard.synchronize()
+                continuation.resume(returning: work(pasteboard))
             }
         }
     }
@@ -110,7 +131,7 @@ public final class ClipboardService: ObservableObject {
     }
 
     /// Timer entry point: skip if a previous read is still in flight, otherwise refresh.
-    private func refreshFromPasteboardIfChanged() async {
+    func refreshFromPasteboardIfChanged() async {
         guard !isChecking else { return }
         isChecking = true
         defer { isChecking = false }
@@ -121,20 +142,19 @@ public final class ClipboardService: ObservableObject {
     private func performPasteboardRefresh() async {
         let knownChangeCount = lastChangeCount
 
-        // Both the `changeCount` poll and the content read run off-main: every
-        // `NSPasteboard` accessor makes a synchronous XPC round-trip to the pasteboard
+        // Both the generation poll and the content read run off-main: every
+        // pasteboard accessor makes a synchronous XPC round-trip to the pasteboard
         // server that can block for seconds when that server is slow, hanging the UI.
-        // The reads only use the typed `string(forType:)`/`data(forType:)` accessors
-        // (never `readObjects(forClasses:)`), which are safe to call off the main actor.
-        // They run on the shared serial pasteboard queue so they never overlap another
-        // pasteboard access and corrupt its internal type cache.
-        let changeCount = await Self.onPasteboardQueue { $0.changeCount }
+        // They go through the poller's own `IsolatedPasteboard` connection on the
+        // serial pasteboard queue, never through `NSPasteboard.general`, so they
+        // cannot race AppKit's main-thread use of that object (APPLE-MACOS-1QM).
+        guard let changeCount = await Self.onPasteboardQueue({ $0.changeCount }) else { return }
         guard changeCount != knownChangeCount else { return }
 
         print("[ClipboardService] Pasteboard change detected. Count: \(changeCount) (was \(knownChangeCount))")
         lastChangeCount = changeCount
 
-        let detected = await Self.onPasteboardQueue { Self.detectContent(in: $0) }
+        let detected = await Self.onPasteboardQueue { Self.detectContent(in: $0) } ?? nil
         guard let content = detected else {
             print("[ClipboardService] Change detected but no meaningful content found on pasteboard.")
             return
@@ -165,11 +185,13 @@ public final class ClipboardService: ObservableObject {
         }
     }
 
-    nonisolated private static func detectContent(in pb: NSPasteboard) -> ClipboardContent? {
+    nonisolated static func detectContent(in pb: some PasteboardReading) -> ClipboardContent? {
         // 1. try file URLs (copied files in Finder). Avoid
         // `readObjects(forClasses:)`: Sentry APPLE-MACOS-2N showed AppKit
         // mutating its internal type-conversion array while enumerating there.
         // Reading explicit pasteboard types avoids that conversion path.
+        // (`pb` is the poller's private connection, so even the typed reads
+        // below cannot collide with AppKit's `NSPasteboard.general` cache.)
         let fileURLTypes: [NSPasteboard.PasteboardType] = [
             .fileURL,
             NSPasteboard.PasteboardType("public.file-url"),
@@ -206,7 +228,7 @@ public final class ClipboardService: ObservableObject {
     /// Attempt to grab the current selection from the active application
     /// by simulating Cmd+C and waiting for the pasteboard to update.
     public func grabSelection() async -> String? {
-        let startChangeCount = await Self.onPasteboardQueue { $0.changeCount }
+        guard let startChangeCount = await Self.onPasteboardQueue({ $0.changeCount }) else { return nil }
         print("[ClipboardService] Starting grabSelection. Current changeCount: \(startChangeCount)")
 
         // 1. simulate Cmd+C
@@ -222,9 +244,11 @@ public final class ClipboardService: ObservableObject {
         print("[ClipboardService] Waiting for pasteboard update...")
         for i in 0 ..< 10 {
             try? await Task.sleep(nanoseconds: 50_000_000)  // 50ms
-            let currentChangeCount = await Self.onPasteboardQueue { $0.changeCount }
+            guard let currentChangeCount = await Self.onPasteboardQueue({ $0.changeCount }) else { continue }
             if currentChangeCount != startChangeCount {
-                print("[ClipboardService] Pasteboard update detected at iteration \(i+1). New count: \(currentChangeCount)")
+                print(
+                    "[ClipboardService] Pasteboard update detected at iteration \(i+1). New count: \(currentChangeCount)"
+                )
                 await performPasteboardRefresh()
 
                 if case .text(let text) = currentContent {

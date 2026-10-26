@@ -27,6 +27,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     /// replacement controls only during construction is not sufficient.
     private var managementWindowLifecycle: IntelManagementWindowLifecycle?
     private var managementScreenObserver: NSObjectProtocol?
+    /// Keeps the Settings hosting controller fed with the clamped floor its
+    /// SwiftUI root enforces (upstream #3079, `WindowManager.makeHostingController`).
+    private var managementFloorSubscription: AnyCancellable?
 
     /// Largest content area a titled window can show on `screen` (visible
     /// frame minus titlebar chrome). `.zero` when no screen is known, which
@@ -591,6 +594,26 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     @MainActor
+    /// The Settings window's hosting controller: AppKit owns the frame (no
+    /// `NSHostingSizingOptions`) and the floor `ManagementStateManager`
+    /// publishes (re-clamped per screen) is forwarded into it, so the
+    /// window's `contentMinSize` follows the same value the SwiftUI root
+    /// applies. Upstream's `WindowManager.makeHostingController(for: .management)`.
+    static func makeManagementHostingController<Content: View>(
+        rootView: Content
+    ) -> (AppKitOwnedWindowHostingController<Content>, AnyCancellable) {
+        let host = AppKitOwnedWindowHostingController(
+            rootView: rootView,
+            minimumContentSize: ManagementStateManager.shared.minimumContentSize
+        )
+        let subscription = ManagementStateManager.shared.$minimumContentSize
+            .receive(on: RunLoop.main)
+            .sink { [weak host] size in
+                host?.minimumContentSize = size
+            }
+        return (host, subscription)
+    }
+
     public func showManagementWindow(
         initialTab: ManagementTab? = nil,
         deeplinkAgentId: UUID? = nil,
@@ -633,11 +656,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
         // Mirror the upstream `WindowManager.createWindow` construction
         // order: build the window with an explicit `contentRect` first,
-        // attach the hosting controller second, then call
-        // `layoutSubtreeIfNeeded` + a final `setContentSize` so the
-        // SwiftUI tree doesn't render against a 0x0 frame on first show
-        // (which produced an empty black window in Phase 11.0's first
-        // launch). See `Packages/OsaurusCore/Managers/WindowManager.swift`
+        // attach the hosting controller second, then a final
+        // `setContentSize` so the SwiftUI tree doesn't render against a
+        // 0x0 frame on first show (which produced an empty black window in
+        // Phase 11.0's first launch). See `Packages/OsaurusCore/Managers/WindowManager.swift`
         // L257-326 for the upstream reference (excluded on Intel but
         // readable on disk).
         // Fit the window to small screens (upstream 210685eb9, #2761): clamp
@@ -645,12 +667,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // visible area so the title bar never hides under the menu bar.
         let available = Self.managementAvailableContentSize(on: NSScreen.main)
         ManagementStateManager.shared.updateMinimumContentSize(availableContentSize: available)
-        let minimum = ManagementStateManager.shared.minimumContentSize
         let defaultSize = NSSize(
             width: available.width > 0 ? min(1000, available.width) : 1000,
             height: available.height > 0 ? min(700, available.height) : 700
         )
-        let host = NSHostingController(rootView: root)
+        // AppKit owns this window's frame (upstream #3079, Sentry 1ZM): a
+        // hosting controller with sizing options lets SwiftUI resize the
+        // window from `windowDidLayout`, and when the size it wants is one
+        // the window can't hold, the constraint passes exhaust AppKit's
+        // budget. The floor is mirrored into `contentMinSize` instead.
+        let (host, floorSubscription) = Self.makeManagementHostingController(rootView: root)
+        managementFloorSubscription = floorSubscription
 
         let window = NSWindow(
             contentRect: NSRect(origin: .zero, size: defaultSize),
@@ -659,7 +686,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             defer: false
         )
         window.title = "Osaurus Settings"
-        window.contentMinSize = NSSize(width: min(900, minimum.width), height: minimum.height)
+        // `contentMinSize` is mirrored from the hosting controller's floor
+        // (`AppKitOwnedWindowHostingController.preferredMinimumSize`), the
+        // same value the SwiftUI root applies. Intel used to set it here as
+        // `min(900, width)`, below the root's own 940-point floor.
         window.isReleasedWhenClosed = false
         window.isRestorable = false
 
@@ -698,9 +728,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         let windowLifecycle = IntelManagementWindowLifecycle(window: window)
         managementWindowLifecycle = windowLifecycle
 
-        // Pre-layout to avoid jank + force-set the size again so the
-        // first paint uses the intended dimensions.
-        host.view.layoutSubtreeIfNeeded()
+        // Explicitly set the content size so the window starts at the
+        // intended dimensions rather than 0x0 before SwiftUI's first layout
+        // pass. Upstream #3130 dropped the synchronous pre-layout pass that
+        // used to precede this: it hung the main thread creating windows.
         window.setContentSize(defaultSize)
 
         window.center()
@@ -716,9 +747,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             MainActor.assumeIsolated {
                 guard let window else { return }
                 let size = AppDelegate.managementAvailableContentSize(on: window.screen)
+                // The floor subscription forwards the re-clamped value into
+                // the hosting controller, which mirrors it into `contentMinSize`.
                 ManagementStateManager.shared.updateMinimumContentSize(availableContentSize: size)
-                let floor = ManagementStateManager.shared.minimumContentSize
-                window.contentMinSize = NSSize(width: min(900, floor.width), height: floor.height)
             }
         }
         windowLifecycle.repairAfterPresentation(reason: "initial-presentation")
