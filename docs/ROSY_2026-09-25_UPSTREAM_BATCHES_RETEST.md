@@ -1933,3 +1933,18 @@ changes the active agent, creates a Dino and pins default models.
 - [ ] **Text fields on Ventura:** the name and key fields show a caret.
 - [ ] **Close early:** the X on any step closes onboarding and opens chat;
       relaunching does not show onboarding again.
+
+## In-app guide (2026-10-27)
+
+Details: `GUIDE_INTEL.md`. In a chat with the Orchestrator:
+
+- [ ] **"What can Osaurus do on this Mac?"** — it reads the guide (an
+      `osaurus_help` tool row) and answers from it, mentioning that local
+      models and the sandbox need Apple Silicon.
+- [ ] **"Can I generate images?"** or **"Can I connect Slack?"** — it says
+      this Intel build doesn't have that, without inventing a setting.
+- [ ] **"Where do I change the context length?"** — it quotes Settings ›
+      Conversation › Advanced › Context Length.
+- [ ] **"How do I share a theme?"** — it describes Themes › Share correctly.
+- [ ] **A custom agent** asked the same questions doesn't call `osaurus_help`
+      (the tool is the Orchestrator's only).

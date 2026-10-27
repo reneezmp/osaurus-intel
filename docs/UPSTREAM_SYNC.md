@@ -4180,3 +4180,22 @@ Tests: `IntelOnboardingExistingInstallTests`, and upstream's
 `RemoteProviderEndpointPasteTests`. Package gate: 3,366 tests in 421 suites
 (6 known issues). Rosy: "Onboarding" in
 `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md` (on a separate macOS user).
+
+### In-app guide (`osaurus_help`, `W-ui-misc`) — 2026-10-27
+
+Upstream's guide loader (`OsaurusGuide`) and the Orchestrator's
+`osaurus_help` tool (`topics`, `read`, `find`), with a 22-topic guide written
+for this Intel build. Upstream's topics were checked one by one; seven are
+left out (features Intel lacks), one is new ("What runs on this Intel Mac"),
+and the rest are rewritten or edited to match Intel. Details, the facts found
+and the corpus checker: [`GUIDE_INTEL.md`](GUIDE_INTEL.md).
+
+Found while checking, recorded on `W-server-api`: Intel's `osaurus mcp` CLI
+calls `/mcp/tools` and `/mcp/call`, which Intel's server doesn't serve; the
+Server tab's endpoint list shows about 25 upstream routes Intel doesn't
+have; `/chat/completions` reads its DeepSeek key only from the
+`DEEPSEEK_API_KEY` environment variable; `/mcp` offers demo tools only.
+
+Tests: `OsaurusHelpToolTests` (upstream's loader and tool cases, plus Intel
+corpus pins). Package gate: 3,382 tests in 423 suites (6 known issues). Rosy:
+"In-app guide" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

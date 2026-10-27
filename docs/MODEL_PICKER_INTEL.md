@@ -142,9 +142,9 @@ ports upstream/main's current files, not the commits one by one. Plan:
   `themes.borders.*`). Intel adaptations: single-value `onChange`, and the
   landing picks the built-in theme by `isBuiltIn` + light/dark (Intel has no
   appearance-mode built-in ids).
-- Not ported: upstream's `guide-chat.md` / `guide-settings.md` text (Intel
-  has no in-app guide yet, `W-ui-misc`) and the `SettingsSearchSelfFindProbe`
-  test helper.
+- Not ported: upstream's `guide-chat.md` / `guide-settings.md` text (Intel's
+  in-app guide, shipped 2026-10-27, has its own corpus; `GUIDE_INTEL.md`) and
+  the `SettingsSearchSelfFindProbe` test helper.
 
 ## Status
 
