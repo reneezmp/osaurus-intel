@@ -3918,3 +3918,46 @@ Lesson: test paths in `Package.swift`'s test-target `exclude:` are relative to
 gate: 3,268 tests in 406 suites (6 known issues). Rosy section "Upstream audit
 2026-10-27".
 
+### Chat table height-note batching (#3080) — 2026-10-27
+
+Upstream #3080 (`bd5b5b1a5`), the last open Port verdict in the chat
+transcript, hand-ported into Intel's `MessageTableRepresentable` (a 3-way
+merge pulls in upstream's find bar and anchor code). Every nested child view
+(thinking segment, each tool-call row, the markdown view's `layout()`)
+reported its height while its cell was being configured, and each report
+called `noteHeightOfRows` synchronously: a row-span recompute, a table
+`setFrameSize` and a scroll-view `tile()` per child. The coordinator now
+batches:
+
+- `withHeightNoteBatch` wraps `applyBlocks`, `configureCell`, both
+  reconfigure loops, the hover reconfigure and the post-streaming fix;
+  inside it `reportMeasuredHeight` and `noteRowHeightsChanged` only record
+  block ids, and the outermost scope issues one `noteHeightOfRows`;
+- `applyFullSnapshot` flushes before saving the anchor and before `tile()`,
+  so the scroll handlers read the geometry the synchronous notes gave them;
+- pending notes are keyed by block id and resolved at flush time;
+- row lookups use `rowIndexByBlockId`, rebuilt when `blockIds` changes,
+  instead of `firstIndex(of:)` per report.
+
+Intel kept two things of its own: the measured-height comparison is against
+`lastNotedHeight` (what AppKit laid out), not the cache, in both the batched
+and the direct path; and `noteRowHeightsChanged` has no `animated` variant,
+so every note inside a batch is deferred. The other half of #3080 (dropping
+`String.count` from `ContentBlockKind ==`) was already true: Intel's equality
+in `IntelDataConformers` never had the length check.
+
+Measured with upstream's `MessageTableHeightNoteCascadeTests` (12 expanded
+activity groups of thinking + 8 tool calls, offscreen window), on Intel's
+previous code and after the port:
+
+| Phase | `noteHeightOfRows` before → after | table `tile()` before → after |
+|---|---|---|
+| Initial apply | 134 → 9 | 133 → 13 |
+| New exchange (path 3) | 26 → 3 | 29 → 6 |
+| Streaming thinking, 40 tokens (path 2) | 5 → 5 | 10 → 10 |
+
+The after figures equal upstream's. `ContentBlockEqualityCostTests` (Intel's
+equality, 200 unchanged 168 KB blocks ×50) runs in 2.3 ms, the same as short
+blocks. Package gate: 3,273 tests in 408 suites (6 known issues). Rosy:
+"Chat table height-note batching" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+

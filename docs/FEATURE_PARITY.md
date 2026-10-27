@@ -107,6 +107,9 @@ tests only; Rosy section "Upstream audit 2026-10-27".
   and episodes (#1967); Knowledge search OR-prefix (#1815's knowledge half);
   distill prompt caps (#1635 I4).
 - Storage figure counts purgeable space (#3217).
+- Chat transcript performance (#3080, from the 2026-10-26 range, shipped
+  2026-10-27): height notes batched per update; first load of a tool-heavy
+  chat 134 → 9 `noteHeightOfRows` calls in the test harness.
 
 ## 2026-10-26 upstream range audit — product impact
 
@@ -134,7 +137,6 @@ tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
 | Area | Missing behavior exposed by upstream | Next Intel gate |
 |---|---|---|
 | Hosted Gemini | Reasoning-effort control (#3115). | Port `GeminiReasoningContract`, wire into Intel's provider path and picker. |
-| Chat transcript performance | Height-note batching (#3080). | Hand port into Intel's `MessageTableRepresentable`; long tool-heavy chat check. |
 | Chat engine slices | #3203's tool-choice, streaming, image-payload, probe and tool-card slices. | Check each against `CloudChatEngine`. |
 
 ### Dependency-blocked

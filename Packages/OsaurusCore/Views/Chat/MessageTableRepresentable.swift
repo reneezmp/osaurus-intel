@@ -480,7 +480,23 @@ extension MessageTableRepresentable {
         // MARK: Block State
 
         /// Ordered block IDs matching the current snapshot.
-        private(set) var blockIds: [String] = []
+        private(set) var blockIds: [String] = [] {
+            didSet { rebuildRowIndex() }
+        }
+        /// Row index per block id. Height reports arrive once per nested
+        /// child view (every tool-call row, every thinking segment) and each
+        /// used to resolve its row with a linear `firstIndex(of:)` over the
+        /// whole thread (upstream #3080).
+        private var rowIndexByBlockId: [String: Int] = [:]
+
+        private func rebuildRowIndex() {
+            var index: [String: Int] = [:]
+            index.reserveCapacity(blockIds.count)
+            for (row, id) in blockIds.enumerated() where index[id] == nil {
+                index[id] = row
+            }
+            rowIndexByBlockId = index
+        }
         /// Block lookup keyed by block ID.
         private(set) var blockLookup: [String: ContentBlock] = [:]
         /// The block ID currently streaming (for fast-path updates).
@@ -535,7 +551,7 @@ extension MessageTableRepresentable {
             }
             isReapplyingRestore = true
             defer { isReapplyingRestore = false }
-            _ = scrollAnchor.restorePosition(held, rowForBlockId: { blockIds.firstIndex(of: $0) })
+            _ = scrollAnchor.restorePosition(held, rowForBlockId: { rowIndexByBlockId[$0] })
         }
 
         /// The user took over scrolling: stop holding or re-pinning.
@@ -608,6 +624,78 @@ extension MessageTableRepresentable {
         private var streamingHeightWorkItem: DispatchWorkItem?
         private let streamingHeightInterval: TimeInterval = 0.016
 
+        // MARK: Height Note Batching (upstream #3080)
+
+        /// Depth of the enclosing `withHeightNoteBatch` scopes. While > 0,
+        /// measured-height reports and `noteRowHeightsChanged` calls only
+        /// record which blocks changed; the outermost scope then issues a
+        /// single `noteHeightOfRows` for all of them.
+        ///
+        /// Every nested child view reports its height through
+        /// `onHeightChanged` while its parent is still being configured: a
+        /// thinking segment on `configure`, each tool-call row on
+        /// `configure`, the markdown view again from `layout()`. Each report
+        /// used to call `noteHeightOfRows` synchronously, and AppKit answers
+        /// that with a row-span recompute from the row to the end of the
+        /// table, a table `setFrameSize`, and a scroll-view `tile()` — so
+        /// one cell with N children cost N full table relayouts, and
+        /// `applyBlocks` repeated that for every reconfigured cell on every
+        /// streamed token (upstream Sentry APPLE-MACOS-4M / 1JW / 1JV / 2AS /
+        /// 2FM / 1KZ / 1D0 / 1M1). The batch keeps the same end state in the
+        /// same run-loop turn, before anything is drawn.
+        private var heightNoteBatchDepth = 0
+        /// Blocks whose measured height changed inside the current batch.
+        /// Keyed by id (not row) so a snapshot applied inside the batch
+        /// cannot leave the pending set pointing at the wrong rows.
+        private var pendingHeightNoteIds: Set<String> = []
+
+        /// Coalesce every height note issued inside `body` into one
+        /// `noteHeightOfRows` when the outermost scope exits.
+        @discardableResult
+        func withHeightNoteBatch<T>(_ body: () -> T) -> T {
+            heightNoteBatchDepth += 1
+            let result = body()
+            heightNoteBatchDepth -= 1
+            if heightNoteBatchDepth == 0 {
+                flushPendingHeightNotes()
+            }
+            return result
+        }
+
+        /// Apply the pending height notes now. Called at the end of the
+        /// outermost batch, and explicitly before any step that reads the
+        /// table's geometry (anchor capture, document tiling, scroll
+        /// restore) so those see exactly what the synchronous notes used to
+        /// give them.
+        private func flushPendingHeightNotes() {
+            guard !pendingHeightNoteIds.isEmpty else { return }
+            guard let tv = tableView else {
+                pendingHeightNoteIds.removeAll()
+                return
+            }
+            var rows = IndexSet()
+            for id in pendingHeightNoteIds {
+                if let row = rowIndexByBlockId[id], row < tv.numberOfRows {
+                    rows.insert(row)
+                }
+            }
+            pendingHeightNoteIds.removeAll()
+            guard !rows.isEmpty else { return }
+            ChatPerfTrace.shared.count("heightNotes.flush")
+            // Read before re-noting: the height change itself can move the
+            // bottom away and flip the pinned flag in the bounds callback.
+            let wasPinned = scrollAnchor.isPinnedToBottom
+            noteRowHeightsChanged(rows, bypassBatch: true)
+            reapplyHeldRestore()
+            // Freshly shown rows usually measure taller than their
+            // estimate, growing the content below a reader who was just
+            // put at the bottom. Follow it, but only while settling, so a
+            // reader starting to scroll up is never pulled back down.
+            if wasPinned, Date() < pinSettleDeadline {
+                scrollAnchor.scrollToBottomCoalesced()
+            }
+        }
+
         // MARK: Minimap Tracking
 
         /// Callback fired when the user-message turn nearest the current
@@ -661,7 +749,7 @@ extension MessageTableRepresentable {
                 return self.blockIds[row]
             }
             scrollAnchor.rowForBlockId = { [weak self] id in
-                self?.blockIds.firstIndex(of: id)
+                self?.rowIndexByBlockId[id]
             }
             scrollAnchor.attach(to: scrollView, tableView: tableView)
 
@@ -833,8 +921,17 @@ extension MessageTableRepresentable {
         ///
         /// Stateless: uses `captureAnchor` / `applyAnchor` directly so the
         /// outer Path 3 `saveAnchor` / `restoreAnchor` bracket is undisturbed.
-        private func noteRowHeightsChanged(_ rows: IndexSet) {
+        private func noteRowHeightsChanged(_ rows: IndexSet, bypassBatch: Bool = false) {
             guard let tableView else { return }
+            // Inside a batch, a note joins the pending set and lands with the
+            // batch's single `noteHeightOfRows` (upstream #3080; Intel has no
+            // animated notes, which upstream lets through).
+            if heightNoteBatchDepth > 0, !bypassBatch {
+                for row in rows where row < blockIds.count {
+                    pendingHeightNoteIds.insert(blockIds[row])
+                }
+                return
+            }
             ChatPerfTrace.shared.count("noteHeightOfRows")
             ChatPerfTrace.shared.count("noteHeightOfRows.rows", rows.count)
 
@@ -881,14 +978,20 @@ extension MessageTableRepresentable {
             autoScrollEnabled: Bool
         ) {
             ChatPerfTrace.shared.time("applyBlocks") {
-                applyBlocksImpl(
-                    blocks,
-                    groupHeaderMap: groupHeaderMap,
-                    context: context,
-                    isStreaming: isStreaming,
-                    lastAssistantTurnId: lastAssistantTurnId,
-                    autoScrollEnabled: autoScrollEnabled
-                )
+                // One batch for the whole update: every cell configured and
+                // every child height reported in here is noted to the table
+                // once, when this scope exits (or at the explicit flushes in
+                // `applyFullSnapshot` before geometry is read).
+                withHeightNoteBatch {
+                    applyBlocksImpl(
+                        blocks,
+                        groupHeaderMap: groupHeaderMap,
+                        context: context,
+                        isStreaming: isStreaming,
+                        lastAssistantTurnId: lastAssistantTurnId,
+                        autoScrollEnabled: autoScrollEnabled
+                    )
+                }
             }
         }
 
@@ -1134,7 +1237,9 @@ extension MessageTableRepresentable {
 
             // Save the anchor while `blockIds` still matches the table's
             // rows, so it records the block the reader is actually on
-            // (upstream #2909).
+            // (upstream #2909). Heights noted earlier in this update must be
+            // in the table first: the anchor is read from row rects.
+            flushPendingHeightNotes()
             let wasPinnedToBottom = scrollAnchor.isPinnedToBottom
             scrollAnchor.saveAnchor()
 
@@ -1168,7 +1273,7 @@ extension MessageTableRepresentable {
             if !stableChangedIds.isEmpty {
                 var reconfiguredRows = IndexSet()
                 for id in stableChangedIds {
-                    if let row = blockIds.firstIndex(of: id),
+                    if let row = rowIndexByBlockId[id],
                         let block = blockLookup[id],
                         let cell = tableView?.view(
                             atColumn: 0,
@@ -1185,6 +1290,11 @@ extension MessageTableRepresentable {
                     noteRowHeightsChanged(reconfiguredRows)
                 }
             }
+
+            // Every cell AppKit built or we reconfigured during the apply
+            // reported its measured height into the pending set; note them
+            // all in one call before the document frame is read.
+            flushPendingHeightNotes()
 
             // Unlike `reloadData`, the incremental apply defers the
             // document-frame recalculation; the scroll handlers below read
@@ -1203,7 +1313,7 @@ extension MessageTableRepresentable {
             // schedule a deferred re-measurement after the hosting view's
             // layout has settled, then re-pin scroll position.
             if streamingJustEnded, let streamId = previousStreamingBlockId,
-                let row = blockIds.firstIndex(of: streamId)
+                let row = rowIndexByBlockId[streamId]
             {
                 schedulePostStreamingHeightFix(
                     streamId: streamId,
@@ -1247,7 +1357,7 @@ extension MessageTableRepresentable {
             if let restore = pendingScrollRestore, !blockIds.isEmpty {
                 pendingScrollRestore = nil
                 if !restore.isPinnedToBottom,
-                    scrollAnchor.restorePosition(restore, rowForBlockId: { blockIds.firstIndex(of: $0) })
+                    scrollAnchor.restorePosition(restore, rowForBlockId: { rowIndexByBlockId[$0] })
                 {
                     // Keep the next streaming snapshot from homing to the
                     // current turn's header and undoing the restore.
@@ -1267,7 +1377,7 @@ extension MessageTableRepresentable {
 
             if isNewTurn, wasPinnedToBottom, let turnId = lastAssistantTurnId {
                 let headerId = "header-\(turnId.uuidString)"
-                if let row = blockIds.firstIndex(of: headerId) {
+                if let row = rowIndexByBlockId[headerId] {
                     scrollAnchor.scrollToRow(row, animated: true)
                 } else {
                     scrollAnchor.scrollToBottom()
@@ -1317,12 +1427,17 @@ extension MessageTableRepresentable {
 
         private func configureCell(_ cell: NativeMessageCellView, with block: ContentBlock) {
             ChatPerfTrace.shared.time("configureCell") {
-                let groupId = groupHeaderMap[block.turnId] ?? block.turnId
-                var context = ctx
-                context.expandedIds = expandedIds
-                context.isTurnHovered = hoveredGroupId == groupId
-                context.responseStatsForTurn = { [weak self] in self?.responseStatsByTurn[$0] }
-                cell.configure(block: block, context: context)
+                // A cell's nested children each report a height while it is
+                // configured (one per tool-call row, per thinking segment);
+                // note the row once for the whole configure.
+                withHeightNoteBatch {
+                    let groupId = groupHeaderMap[block.turnId] ?? block.turnId
+                    var context = ctx
+                    context.expandedIds = expandedIds
+                    context.isTurnHovered = hoveredGroupId == groupId
+                    context.responseStatsForTurn = { [weak self] in self?.responseStatsByTurn[$0] }
+                    cell.configure(block: block, context: context)
+                }
             }
         }
 
@@ -1330,39 +1445,45 @@ extension MessageTableRepresentable {
 
         private func reconfigureCellsForTurn(_ turnId: UUID?) {
             guard let turnId, let tableView else { return }
-            var affectedRows = IndexSet()
-            for (index, blockId) in blockIds.enumerated() {
-                guard let block = blockLookup[blockId], block.turnId == turnId else { continue }
-                if let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NativeMessageCellView
-                {
-                    heightCache.removeValue(forKey: blockId)
-                    configureCell(cell, with: block)
+            withHeightNoteBatch {
+                var affectedRows = IndexSet()
+                for (index, blockId) in blockIds.enumerated() {
+                    guard let block = blockLookup[blockId], block.turnId == turnId else { continue }
+                    if let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+                        as? NativeMessageCellView
+                    {
+                        heightCache.removeValue(forKey: blockId)
+                        configureCell(cell, with: block)
+                    }
+                    affectedRows.insert(index)
                 }
-                affectedRows.insert(index)
+                guard !affectedRows.isEmpty else { return }
+                noteRowHeightsChanged(affectedRows)
             }
-            guard !affectedRows.isEmpty else { return }
-            noteRowHeightsChanged(affectedRows)
         }
 
         /// Reconfigure every visible row when block data is unchanged but `CellRenderingContext` changed
         /// (e.g. `isStreaming`, `lastAssistantTurnId`).
         private func reconfigureAllCellsFromLookup(_ newLookup: [String: ContentBlock]) {
             guard let tableView else { return }
-            var affectedRows = IndexSet()
-            for (index, id) in blockIds.enumerated() {
-                guard let block = newLookup[id],
-                    let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NativeMessageCellView
-                else { continue }
-                heightCache.removeValue(forKey: id)
-                configureCell(cell, with: block)
-                affectedRows.insert(index)
-            }
-            guard !affectedRows.isEmpty else { return }
-            ChatPerfTrace.shared.count("reconfigureAllCells.rows", affectedRows.count)
-            noteRowHeightsChanged(affectedRows)
-            if scrollAnchor.isPinnedToBottom {
-                ChatPerfTrace.shared.count("scrollToBottom.allCells")
-                scrollAnchor.scrollToBottomCoalesced()
+            withHeightNoteBatch {
+                var affectedRows = IndexSet()
+                for (index, id) in blockIds.enumerated() {
+                    guard let block = newLookup[id],
+                        let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false)
+                            as? NativeMessageCellView
+                    else { continue }
+                    heightCache.removeValue(forKey: id)
+                    configureCell(cell, with: block)
+                    affectedRows.insert(index)
+                }
+                guard !affectedRows.isEmpty else { return }
+                ChatPerfTrace.shared.count("reconfigureAllCells.rows", affectedRows.count)
+                noteRowHeightsChanged(affectedRows)
+                if scrollAnchor.isPinnedToBottom {
+                    ChatPerfTrace.shared.count("scrollToBottom.allCells")
+                    scrollAnchor.scrollToBottomCoalesced()
+                }
             }
         }
 
@@ -1406,7 +1527,7 @@ extension MessageTableRepresentable {
             streamingHeightWorkItem = nil
 
             guard let tv = tableView, let streamId = streamingBlockId,
-                let row = blockIds.firstIndex(of: streamId),
+                let row = rowIndexByBlockId[streamId],
                 row < tv.numberOfRows
             else { return }
 
@@ -1425,12 +1546,13 @@ extension MessageTableRepresentable {
             // Reconfigure the cell with final content (isStreaming: false).
             // Path 3's snapshot apply doesn't reconfigure cells whose IDs
             // haven't changed, so the cell may still show stale state.
-            if let cell = tv.view(atColumn: 0, row: row, makeIfNecessary: false) as? NativeMessageCellView {
-                heightCache.removeValue(forKey: streamId)
-                configureCell(cell, with: block)
+            withHeightNoteBatch {
+                if let cell = tv.view(atColumn: 0, row: row, makeIfNecessary: false) as? NativeMessageCellView {
+                    heightCache.removeValue(forKey: streamId)
+                    configureCell(cell, with: block)
+                }
+                noteRowHeightsChanged(IndexSet(integer: row))
             }
-
-            noteRowHeightsChanged(IndexSet(integer: row))
 
             if wasPinnedToBottom {
                 scrollAnchor.scrollToBottom()
@@ -1472,27 +1594,29 @@ extension MessageTableRepresentable {
             let range = tableView.rows(in: tableView.visibleRect)
             var reconfiguredRows = 0
             var fastPathRows = 0
-            for row in range.location ..< (range.location + range.length) {
-                guard row < blockIds.count,
-                    let block = blockLookup[blockIds[row]]
-                else { continue }
-                let groupId = groupHeaderMap[block.turnId] ?? block.turnId
-                guard groupId == oldGroupId || groupId == newGroupId else { continue }
-                guard
-                    let cell = tableView.view(
-                        atColumn: 0,
-                        row: row,
-                        makeIfNecessary: false
-                    ) as? NativeMessageCellView
-                else { continue }
+            withHeightNoteBatch {
+                for row in range.location ..< (range.location + range.length) {
+                    guard row < blockIds.count,
+                        let block = blockLookup[blockIds[row]]
+                    else { continue }
+                    let groupId = groupHeaderMap[block.turnId] ?? block.turnId
+                    guard groupId == oldGroupId || groupId == newGroupId else { continue }
+                    guard
+                        let cell = tableView.view(
+                            atColumn: 0,
+                            row: row,
+                            makeIfNecessary: false
+                        ) as? NativeMessageCellView
+                    else { continue }
 
-                // for header rows, use the fast hover path
-                if case .header = block.kind {
-                    cell.setTurnHovered(groupId == newGroupId)
-                    fastPathRows += 1
-                } else {
-                    configureCell(cell, with: block)
-                    reconfiguredRows += 1
+                    // for header rows, use the fast hover path
+                    if case .header = block.kind {
+                        cell.setTurnHovered(groupId == newGroupId)
+                        fastPathRows += 1
+                    } else {
+                        configureCell(cell, with: block)
+                        reconfiguredRows += 1
+                    }
                 }
             }
             ChatPerfTrace.shared.count("hover.fastPathRows", fastPathRows)
@@ -1540,7 +1664,21 @@ extension MessageTableRepresentable {
         /// 0.5pt threshold (was 2pt): short rows like the user bubble corner
         /// stroke clipped before the next scroll at the coarser threshold.
         func reportMeasuredHeight(_ height: CGFloat, forBlockId blockId: String, row: Int) {
-            guard let tv = tableView, row < tv.numberOfRows else { return }
+            guard let tv = tableView else { return }
+            // Inside a batch (any `applyBlocks` / cell configure): record
+            // the height and let the batch note the row once. Rows AppKit
+            // is still inserting (row >= numberOfRows during a snapshot
+            // apply) are resolved again at flush time, after the apply
+            // (upstream #3080). Same baseline as below: what AppKit laid out.
+            if heightNoteBatchDepth > 0 {
+                let laidOut = lastNotedHeight[blockId] ?? heightCache[blockId] ?? 0
+                heightCache[blockId] = height
+                if abs(laidOut - height) > 0.5 {
+                    pendingHeightNoteIds.insert(blockId)
+                }
+                return
+            }
+            guard row < tv.numberOfRows else { return }
             let laidOut = lastNotedHeight[blockId] ?? heightCache[blockId] ?? 0
             heightCache[blockId] = height
             if abs(laidOut - height) > 0.5 {
@@ -1564,7 +1702,7 @@ extension MessageTableRepresentable {
         /// Overload called from native cells that only know their blockId.
         /// Looks up the row from the coordinator's blockIds array.
         func reportMeasuredHeight(_ height: CGFloat, forBlockId blockId: String) {
-            guard let row = blockIds.firstIndex(of: blockId) else { return }
+            guard let row = rowIndexByBlockId[blockId] else { return }
             reportMeasuredHeight(height, forBlockId: blockId, row: row)
         }
 
@@ -1651,8 +1789,8 @@ extension MessageTableRepresentable {
             let userBlockId = "usermsg-\(turnId.uuidString)"
             let headerBlockId = "header-\(turnId.uuidString)"
             let row =
-                blockIds.firstIndex(of: userBlockId)
-                ?? blockIds.firstIndex(of: headerBlockId)
+                rowIndexByBlockId[userBlockId]
+                ?? rowIndexByBlockId[headerBlockId]
             guard let targetRow = row, targetRow < tableView.numberOfRows else { return }
 
             // drop pinned to bottom so subsequent applyBlocks restore our

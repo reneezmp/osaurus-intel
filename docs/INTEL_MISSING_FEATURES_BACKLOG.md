@@ -45,8 +45,8 @@ and five Split parts shipped, awaiting Rosy. New rows: `W-harness-runtimes`,
 
 - ~~`W-memory-db-sync`'s forward-version refusal~~ (**done 2026-10-27**,
   with v10 and the distill retry cap; see the row);
-- #3080 chat-table height-note batching (hand port into Intel's diverged
-  `MessageTableRepresentable`);
+- ~~#3080 chat-table height-note batching~~ (**done 2026-10-27**, hand port;
+  see `UPSTREAM_SYNC.md`);
 - #3115 Gemini reasoning effort (`W-providers-ux` row);
 - #3203's remaining Intel-file slices (listed in the audit).
 

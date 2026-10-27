@@ -178,7 +178,9 @@ can't be observed in SwiftPM (the forwarding into the controller is asserted).
 
 ## Not yet shipped (Port verdicts still open)
 
-- **#3080 `bd5b5b1a5`, chat table height-note batching.** Intel's
+- **#3080 `bd5b5b1a5`, chat table height-note batching.** **Done
+  2026-10-27** (hand port; `UPSTREAM_SYNC.md`, "Chat table height-note
+  batching"). Intel's
   `MessageTableRepresentable` has diverged from upstream (no find bar, its own
   anchor code), so a 3-way merge drags in unrelated upstream code. Needs a hand
   port of the batching (`heightNoteBatchDepth`, `pendingHeightNoteIds`,
@@ -226,7 +228,7 @@ and #3203 above. Automated tests only; Rosy is pending (checklist section
 
 ### Partial
 - Hosted Gemini models: no reasoning-effort control yet (#3115).
-- Chat transcript performance on long, tool-heavy chats: #3080 batching open.
+- ~~Chat transcript performance on long, tool-heavy chats: #3080 batching open.~~ Shipped 2026-10-27.
 
 ### Dependency-blocked / Absent (new backlog rows)
 - `W-harness-runtimes` (#3175, #3180): Claude Code and Pi as per-agent

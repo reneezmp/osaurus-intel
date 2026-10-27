@@ -1810,3 +1810,19 @@ Details: `UPSTREAM_AUDIT_2026-10-27.md`.
       output starts; the live output appears without collapsing and
       re-expanding the row.
 
+## Chat table height-note batching (2026-10-27)
+
+#3080. Details: `UPSTREAM_SYNC.md`, "Chat table height-note batching".
+
+- [ ] **Long tool-heavy chat:** open a chat with many tool calls and
+      thinking (an agent run of 20+ steps). It opens without a beachball,
+      scrolling is smooth, and expanding or collapsing an activity group
+      resizes only that row with no jump.
+- [ ] **Streaming at the bottom:** during a long agent run, the transcript
+      stays pinned to the bottom while thinking and tool rows grow, and
+      typing in the composer stays responsive.
+- [ ] **Reading up:** scroll up while a reply streams; the view stays where
+      you put it as rows below change height.
+- [ ] **Reopen position:** switch to another chat and back; the scroll
+      position is restored, and no row is clipped or overlaps its neighbour.
+
