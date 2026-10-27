@@ -38,6 +38,14 @@ private final class RecordingEngine: ChatEngineProtocol, @unchecked Sendable {
 
 @Suite("Intel agent descriptions")
 struct IntelAgentDescriptionTests {
+    // Upstream #3197: long single-line strings take the fast path, no per-character scan.
+    @Test func normalizationFastPathOnLongSingleLineString() {
+        let long = String(repeating: "a", count: 10_000)
+        #expect(AgentDescriptionPolicy.normalized(long) == long)
+        let longUnicode = String(repeating: "é", count: 10_000)
+        #expect(AgentDescriptionPolicy.normalized(longUnicode) == longUnicode)
+    }
+
     @Test("Normalization collapses lines; quoting keeps text as a single JSON string")
     func policy() {
         #expect(AgentDescriptionPolicy.normalized("  Reads\n\n  books  \n") == "Reads books")
