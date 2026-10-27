@@ -22,7 +22,7 @@
 **Last synced upstream commit:** `7e109ade` (cold-load retry ownership, #2668)
 **Upstream version era:** `0.24.7` (`0.24.7-24-g7e109ade`)
 **Last sync date:** 2026-09-07
-**Last full upstream audit:** `fc75a1e06` (2026-10-26; 102 commits after `24f4c416a`, see [`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md)). Before that: `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Earlier: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
+**Last full upstream audit:** `bce907045` (2026-10-27; 11 commits after `fc75a1e06`, see [`UPSTREAM_AUDIT_2026-10-27.md`](UPSTREAM_AUDIT_2026-10-27.md)). Before that: `fc75a1e06` (2026-10-26; 102 commits after `24f4c416a`, see [`UPSTREAM_AUDIT_2026-10-26.md`](UPSTREAM_AUDIT_2026-10-26.md)). Earlier: `24f4c416a` (2026-10-10; 2 commits after `ec654e8c5`, see [`UPSTREAM_AUDIT_2026-10-10.md`](UPSTREAM_AUDIT_2026-10-10.md)). Earlier: `ec654e8c5` (2026-10-09; 5 commits after `02604ca60`, see [`UPSTREAM_AUDIT_2026-10-09.md`](UPSTREAM_AUDIT_2026-10-09.md)). Earlier: `02604ca60` (2026-10-08; 14 commits after `66ea7ebc4`, upstream 0.25.20, see [`UPSTREAM_AUDIT_2026-10-08.md`](UPSTREAM_AUDIT_2026-10-08.md)). Earlier: `66ea7ebc4` (2026-10-07; 40 commits after `4064a6fde`, see [`UPSTREAM_AUDIT_2026-10-07.md`](UPSTREAM_AUDIT_2026-10-07.md)). Earlier: `3dad2dad4` (2026-09-29; 33 commits after `a4daf94c4`, classified and the Port slices shipped — see [`UPSTREAM_AUDIT_2026-09-29.md`](UPSTREAM_AUDIT_2026-09-29.md)). Previous: `a4daf94c4` (2026-09-25; 171 commits after the last synced checkpoint)
 **Commit-coverage status:** 🟢 **Classified through `a4daf94c4`**, but **synced only through `7e109ade`**. This does not claim feature parity or that any newly classified work shipped. The previous 53-commit batch after the 0.24.3 checkpoint received verdicts and applicable Intel slices were hand-ported; the new range is an assessment and backlog. Intel releases: 1.0.20 (cache + Ventura layout), 1.0.21 (0.19.15→0.20.0 absorb), 1.0.22 (deferred shelf), 1.0.23 (0.20.0→0.20.3 sync), 1.0.24 (global proxy batch), … 1.0.34 (Projects).
 
 ---
@@ -3886,3 +3886,35 @@ v10 file gets the embedding columns and accepts embedding writes; an older
 Intel v9 file moves to v10 with its rows). Package gate: 3,251 tests in 403
 suites (6 known issues), `~/.osaurus` and the identity key untouched. Rosy
 section "Memory database sync" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Upstream audit through `bce907045` — 2026-10-27
+
+11 commits classified in
+[`UPSTREAM_AUDIT_2026-10-27.md`](UPSTREAM_AUDIT_2026-10-27.md): two Splits
+ported, nine Incompatible (DeepSeek-V4.1 local bundles, `vmlx` pins, allocator
+and GPU diagnostics, the appcast). Shipped:
+
+- **#3210 memory quality:** the distillate screen (a verbatim one-off
+  instruction is never pinned; "not specified" identity facts are dropped),
+  the distiller prompt's rules, function words dropped from Memory and
+  Knowledge FTS queries (`FTSQueryTerms`), and delegated-session provenance
+  (`delegated_conversations`, `bufferTurn(provenance:)`; nothing on Intel
+  passes `.delegated` until `W-subagents`). Expanded tool rows keep watching
+  for a late live-exec entry.
+- **#3217 free space:** the purgeable-inclusive volume figure
+  (`VolumeAvailableCapacityCache`), used by the menu-bar panel's storage
+  reading.
+
+Found while porting, all ported:
+
+- **#1967** (SKIP-triaged evals commit) held the loose-term recall fallback
+  for pinned facts and episodes and the gate's possessive signal.
+- **#1815's knowledge half:** Intel's `KnowledgeDatabase.ftsQuery`
+  AND-joined unquoted terms; it is now upstream's `ftsMatchQuery`.
+- **#1635 I4:** the distill prompt's 80-turn / 2,000-character caps.
+
+Lesson: test paths in `Package.swift`'s test-target `exclude:` are relative to
+`Tests/`; strip the prefix before checking a commit's test files. Package
+gate: 3,268 tests in 406 suites (6 known issues). Rosy section "Upstream audit
+2026-10-27".
+

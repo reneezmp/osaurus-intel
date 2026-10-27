@@ -148,6 +148,15 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
     /// model unavailable) and cancellations deliberately do NOT count toward
     /// this cap — they stay `pending` and recover once the model is ready.
     public static let distillMaxAttempts = 3
+    /// Cap on conversation turns folded into a single distillation prompt.
+    /// Oversized sessions are clamped (opening head + most-recent tail) so
+    /// the prompt can't overflow a small core model's context and get stuck
+    /// erroring. Identity-bearing opening turns are preserved via the head.
+    public static let distillMaxTurns = 80
+    /// Per-message character clamp inside the distillation prompt. Long
+    /// individual turns are truncated so one giant paste can't blow the
+    /// context budget on its own.
+    public static let distillMaxTurnChars = 2000
     /// Salience half-life in days, used by the consolidator's decay step.
     public static let salienceHalfLifeDays: Double = 30
     /// Number of episodes a candidate must appear in before the

@@ -1790,3 +1790,23 @@ schema".
       the debounce a new episode appears, and the memory diagnostics show no
       growing count of errors for one conversation.
 
+## Upstream audit 2026-10-27
+
+Details: `UPSTREAM_AUDIT_2026-10-27.md`.
+
+- [ ] **Knowledge search (#1815's knowledge half):** with a Knowledge
+      collection attached, ask a full-sentence question whose words are
+      spread over a note ("how do refunds work for customers?"); the note is
+      found.
+- [ ] **Memory quality (#3210):** in a memory-enabled chat, ask the agent to
+      do a one-off task ("use file_read to read notes.md and return its first
+      line"). After distillation, Memory has no pinned fact repeating that
+      instruction, and the identity list has no "not specified" entries.
+- [ ] **Unrelated questions (#3210):** ask "what is the capital of France?";
+      no unrelated stored memory is injected (check the context preview).
+- [ ] **Storage figure (#3217):** the menu-bar panel's free disk space is
+      close to Finder's "Available" for the startup disk.
+- [ ] **Tool rows (#3210):** expand a running shell tool row before its
+      output starts; the live output appears without collapsing and
+      re-expanding the row.
+

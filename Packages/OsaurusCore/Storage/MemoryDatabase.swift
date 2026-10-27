@@ -252,6 +252,26 @@ public final class MemoryDatabase: @unchecked Sendable {
             try migrateToV10()
         }
         try ensureIntelEmbeddingColumns()
+        try ensureDelegatedConversationsTable()
+    }
+
+    /// Conversations buffered by `MemoryService.bufferDelegatedTurn`, whose
+    /// "user" turns are another agent's instructions, not the user's words.
+    /// A side table created idempotently on every open, deliberately not a
+    /// schema version: a version bump would make every older build refuse
+    /// this database (`databaseFromNewerVersion`), while an extra table is
+    /// invisible to them. `pending_signals` is not touched (see v7-v9).
+    /// Intel: `bufferTurn(provenance: .delegated)` is the only writer; no
+    /// Intel caller passes it until agent delegation (`W-subagents`) lands.
+    private func ensureDelegatedConversationsTable() throws {
+        try executeRaw(
+            """
+            CREATE TABLE IF NOT EXISTS delegated_conversations (
+                conversation_id TEXT PRIMARY KEY,
+                created_at TEXT NOT NULL DEFAULT (datetime('now'))
+            )
+            """
+        )
     }
 
     /// Run one migration body atomically. Called only from `runMigrations`,
@@ -1548,7 +1568,13 @@ public final class MemoryDatabase: @unchecked Sendable {
                     }
                 }
             )
-            return facts
+            // Natural-language queries ("What is the name of my boat?")
+            // AND-match nothing against short facts; fall through to the
+            // loose-term pass instead of returning empty (mirrors
+            // `searchTranscriptText`).
+            if !facts.isEmpty {
+                return facts
+            }
         }
 
         // Legacy LIKE fallback (no FTS5 available).
@@ -1573,7 +1599,31 @@ public final class MemoryDatabase: @unchecked Sendable {
                 }
             }
         )
-        return facts
+        if !facts.isEmpty {
+            return facts
+        }
+
+        // Loose-term recall: score active facts by how many meaningful query
+        // words they contain (same shape as `searchTranscriptLooseText`).
+        let terms = Self.looseSearchTerms(trimmed)
+        guard !terms.isEmpty else { return [] }
+        let candidates = try loadPinnedFacts(agentId: agentId, limit: max(limit * 50, 250))
+        let scored = candidates.compactMap { fact -> (fact: PinnedFact, score: Int)? in
+            let content = fact.content.lowercased()
+            let score = terms.reduce(0) { partial, term in
+                partial + (content.contains(term) ? 1 : 0)
+            }
+            guard score > 0 else { return nil }
+            return (fact, score)
+        }
+        return
+            scored
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.fact.salience > $1.fact.salience
+            }
+            .prefix(limit)
+            .map(\.fact)
     }
 
     public func decayPinnedSalience(halfLifeDays: Double) throws {
@@ -1980,7 +2030,12 @@ public final class MemoryDatabase: @unchecked Sendable {
                     }
                 }
             )
-            return episodes
+            // Same rationale as `searchPinnedFactsText`: an AND-match of a
+            // full natural-language question rarely hits an episode summary;
+            // fall through to the loose-term pass instead of returning empty.
+            if !episodes.isEmpty {
+                return episodes
+            }
         }
 
         var sql = """
@@ -2006,7 +2061,31 @@ public final class MemoryDatabase: @unchecked Sendable {
                 }
             }
         )
-        return episodes
+        if !episodes.isEmpty {
+            return episodes
+        }
+
+        // Loose-term recall over summary/topics/entities (same shape as
+        // `searchTranscriptLooseText`).
+        let terms = Self.looseSearchTerms(trimmed)
+        guard !terms.isEmpty else { return [] }
+        let candidates = try loadEpisodes(agentId: agentId, days: 0, limit: max(limit * 50, 250))
+        let scored = candidates.compactMap { episode -> (episode: Episode, score: Int)? in
+            let haystack = "\(episode.summary) \(episode.topicsCSV) \(episode.entitiesCSV)".lowercased()
+            let score = terms.reduce(0) { partial, term in
+                partial + (haystack.contains(term) ? 1 : 0)
+            }
+            guard score > 0 else { return nil }
+            return (episode, score)
+        }
+        return
+            scored
+            .sorted {
+                if $0.score != $1.score { return $0.score > $1.score }
+                return $0.episode.conversationAt > $1.episode.conversationAt
+            }
+            .prefix(limit)
+            .map(\.episode)
     }
 
     public func episodeStats(agentId: String? = nil) throws -> Int {
@@ -2648,7 +2727,9 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// (BM25 still ranks rows matching more terms first), and the prefix
     /// aligns singular/plural forms under the non-stemming `unicode61`
     /// tokenizer. (Upstream #1815, missed because that commit was triaged
-    /// SKIP with knowledge collections.)
+    /// SKIP with knowledge collections.) Function words are dropped first
+    /// (`FTSQueryTerms`, upstream #3210): under OR they match nearly every
+    /// row, so they only add unrelated hits.
     static func ftsMatchQuery(_ raw: String) -> String? {
         let allowed = CharacterSet.alphanumerics.union(.whitespaces).union(CharacterSet(charactersIn: "-_"))
         let scrubbed = String(raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : " " })
@@ -2658,7 +2739,7 @@ public final class MemoryDatabase: @unchecked Sendable {
             .map { String($0) }
             .filter { !$0.isEmpty }
         guard !words.isEmpty else { return nil }
-        return words.map { "\"\($0)\"*" }.joined(separator: " OR ")
+        return FTSQueryTerms.droppingStopwords(words).map { "\"\($0)\"*" }.joined(separator: " OR ")
     }
 
     public func pruneTranscript(olderThanDays days: Int) throws -> Int {
@@ -2774,6 +2855,26 @@ public final class MemoryDatabase: @unchecked Sendable {
             Self.bindText(stmt, index: 4, value: signal.assistantMessage)
             Self.bindText(stmt, index: 5, value: signal.status)
         }
+    }
+
+    public func markDelegatedConversation(_ conversationId: String) throws {
+        _ = try executeUpdate(
+            "INSERT OR IGNORE INTO delegated_conversations (conversation_id) VALUES (?1)"
+        ) { stmt in
+            Self.bindText(stmt, index: 1, value: conversationId)
+        }
+    }
+
+    public func isDelegatedConversation(_ conversationId: String) throws -> Bool {
+        var found = false
+        try prepareAndExecute(
+            "SELECT 1 FROM delegated_conversations WHERE conversation_id = ?1 LIMIT 1",
+            bind: { stmt in Self.bindText(stmt, index: 1, value: conversationId) },
+            process: { stmt in
+                if sqlite3_step(stmt) == SQLITE_ROW { found = true }
+            }
+        )
+        return found
     }
 
     public func loadPendingSignals(conversationId: String) throws -> [PendingSignal] {

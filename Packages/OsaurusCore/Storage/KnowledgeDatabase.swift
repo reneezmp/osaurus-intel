@@ -433,9 +433,14 @@ public final class KnowledgeDatabase: @unchecked Sendable {
                 WHERE chunks_fts MATCH ?1 AND d.collection_id IN (\(placeholders)) ORDER BY bm25(chunks_fts) LIMIT ?\(collectionIds.count + 2)
                 """
             var hits: [KnowledgeChunkHit] = []
+            // Upstream #1815: no usable FTS tokens (punctuation-only query)
+            // falls back to LIKE, like upstream's search.
+            guard let match = Self.ftsMatchQuery(text) else {
+                return try searchChunksLike(connection, text: text, collectionIds: collectionIds, limit: limit)
+            }
             do {
                 try query(connection, sql, bind: { statement in
-                    bindText(statement, 1, ftsQuery(text)); for (index, id) in collectionIds.enumerated() { bindText(statement, Int32(index + 2), id) }; sqlite3_bind_int(statement, Int32(collectionIds.count + 2), Int32(limit))
+                    bindText(statement, 1, match); for (index, id) in collectionIds.enumerated() { bindText(statement, Int32(index + 2), id) }; sqlite3_bind_int(statement, Int32(collectionIds.count + 2), Int32(limit))
                 }) { statement in while sqlite3_step(statement) == SQLITE_ROW { hits.append(readHit(statement)) } }
             } catch { return try searchChunksLike(connection, text: text, collectionIds: collectionIds, limit: limit) }
             return hits
@@ -527,5 +532,44 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     private func readHit(_ statement: OpaquePointer) -> KnowledgeChunkHit { .init(documentId: Int(sqlite3_column_int64(statement, 0)), chunkIndex: Int(sqlite3_column_int(statement, 1)), headingPath: columnText(statement, 2), content: columnText(statement, 3), collectionId: columnText(statement, 4), relPath: columnText(statement, 5), title: columnText(statement, 6), docType: columnText(statement, 7), tagsCSV: columnText(statement, 8)) }
     private func readVector(_ statement: OpaquePointer, index: Int32) -> [Float]? { guard let bytes = sqlite3_column_blob(statement, index) else { return nil }; let count = Int(sqlite3_column_bytes(statement, index)); guard count > 0, count % MemoryLayout<Float>.stride == 0 else { return nil }; return Array(UnsafeRawBufferPointer(start: bytes, count: count).bindMemory(to: Float.self)) }
     private func now() -> String { ISO8601DateFormatter().string(from: Date()) }
-    private func ftsQuery(_ query: String) -> String { query.split(whereSeparator: { !$0.isLetter && !$0.isNumber }).map { "\($0)*" }.joined(separator: " AND ") }
+
+    /// Sanitize a free-text query for FTS5 MATCH: strip everything that
+    /// isn't alphanumeric, then quote each term so embedded SQL operators
+    /// are treated as literal tokens.
+    ///
+    /// Terms are combined with `OR` and prefix-matched (`"term"*`), not
+    /// joined by whitespace. Whitespace in FTS5 is an implicit AND, which
+    /// forces every word of a natural-language query into a single chunk —
+    /// so a multi-word question almost never matches heading-split docs.
+    /// OR keeps recall (BM25 still ranks chunks matching more terms first),
+    /// and the prefix aligns singular/plural forms under the non-stemming
+    /// `unicode61` tokenizer (`customer` matches `customers`).
+    ///
+    /// Intel (2026-10-27): upstream #1815's knowledge half and #3210's
+    /// function-word drop. Intel AND-joined every word (`term*`, unquoted)
+    /// until then; the memory half of #1815 was ported 2026-10-26.
+    static func ftsMatchQuery(_ raw: String) -> String? {
+        let allowed = CharacterSet.alphanumerics.union(.whitespaces).union(CharacterSet(charactersIn: "-_"))
+        let scrubbed = String(raw.unicodeScalars.map { allowed.contains($0) ? Character($0) : " " })
+        let words =
+            scrubbed
+            .split(whereSeparator: { $0.isWhitespace })
+            .map { String($0) }
+            .filter { !$0.isEmpty }
+        guard !words.isEmpty else { return nil }
+        // Drop low-signal tokens before OR-prefixing. A short or purely
+        // numeric term like "2" becomes `"2"*`, which prefix-matches every
+        // token starting with 2 (2, 20, 2024, …) — in a large or code-heavy
+        // corpus that pulls in a huge fraction of chunks, so bm25 must rank
+        // them all. That both starves the query (multi-minute searches that
+        // blow the tool's 120s budget) and floods the results with noise.
+        // Keep only terms >= 3 chars that aren't all digits; if that leaves
+        // nothing (e.g. the query is just "AI" or "v2"), fall back to the
+        // full token list so short deliberate queries still match.
+        // Function words are dropped with the same list Memory recall uses.
+        let meaningful = FTSQueryTerms.droppingStopwords(words)
+            .filter { $0.count >= 3 && !$0.allSatisfy(\.isNumber) }
+        let effective = meaningful.isEmpty ? words : meaningful
+        return effective.map { "\"\($0)\"*" }.joined(separator: " OR ")
+    }
 }

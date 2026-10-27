@@ -94,6 +94,20 @@ final Intel release is tested as one integrated product.
 | Cross-block chat selection | Ported | Shipped 2026-10-01 ([`CROSS_SELECTION_INTEL.md`](CROSS_SELECTION_INTEL.md)): drag-select across paragraphs, code blocks and table cells of a reply, with auto-scroll and ⌘C / menu Copy of the whole selection (upstream #2247, #2899). **Not yet tested on Rosy.** |
 | Per-chat file history (File Changes, `file_undo`, diff cards) | Ported | Shipped 2026-10-01 ([`FILE_HISTORY_INTEL.md`](FILE_HISTORY_INTEL.md)): every file a chat's folder tools create, edit or delete (shell commands included) is snapshotted and listed in the File Changes panel, revertible per change, per file or all at once, with conflict checks and Undo; agents get `file_undo` and `file_operation_history`; retention under Data & Storage. Inline diff cards under every write/edit (live while the model writes). Rows in an encrypted `FileHistoryDatabase` (upstream: its chat-history database). Package gate green. **Not yet tested on Rosy** (checklist section "Per-chat file history"). |
 
+## 2026-10-27 upstream range audit — product impact
+
+Commit coverage current through `bce907045` (11 commits,
+[`UPSTREAM_AUDIT_2026-10-27.md`](UPSTREAM_AUDIT_2026-10-27.md)). Automated
+tests only; Rosy section "Upstream audit 2026-10-27".
+
+- Memory quality (#3210): no verbatim one-off instruction pinned, no
+  placeholder identity facts, function words out of Memory and Knowledge
+  search; delegated-session provenance ready for `W-subagents`.
+- Recall found in SKIP-triaged commits: loose-term fallback for pinned facts
+  and episodes (#1967); Knowledge search OR-prefix (#1815's knowledge half);
+  distill prompt caps (#1635 I4).
+- Storage figure counts purgeable space (#3217).
+
 ## 2026-10-26 upstream range audit — product impact
 
 Commit coverage current through `fc75a1e06` (102 commits,

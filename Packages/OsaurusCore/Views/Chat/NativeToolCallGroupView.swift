@@ -619,6 +619,7 @@ final class NativeToolCallRowView: NSView {
         self.lastConfiguredTheme = theme
 
         let isNew = item.call.id != currentItemId
+        if isNew { stopRegistryObservation() }
         currentItemId = item.call.id
         currentItem = item
 
@@ -683,11 +684,12 @@ final class NativeToolCallRowView: NSView {
             // (and after we stopped dumping the raw result turn into the chat,
             // the result vanished entirely — Renée 2026-06-03).
             applyResultOrLiveState(width: width, theme: theme)
-            bindLiveOutputIfPresent(toolCallId: item.call.id, theme: theme)
+            bindLiveOutputIfPresent(toolCallId: item.call.id)
         }
 
         // Tear down terminal pane when the row collapses.
         if !isExpanded {
+            stopRegistryObservation()
             tearDownTerminalView()
         }
 
@@ -799,22 +801,36 @@ final class NativeToolCallRowView: NSView {
     ///
     /// Idempotent on the same id so layout-only re-configures don't
     /// re-subscribe.
-    private func bindLiveOutputIfPresent(toolCallId: String, theme: any ThemeProtocol) {
+    ///
+    /// Upstream #3210: the sink reads the row's current width and theme and
+    /// re-checks that it still shows this call, expanded, instead of a
+    /// width and theme captured at subscribe time.
+    private func bindLiveOutputIfPresent(toolCallId: String) {
         if liveExecBoundCallId == toolCallId, liveExecSubscription != nil {
             return
         }
         liveExecSubscription?.cancel()
         liveExecBoundCallId = toolCallId
 
-        let width = currentWidth
         liveExecSubscription = LiveExecRegistry.shared.entriesPublisher
             .receive(on: RunLoop.main)
             .sink { [weak self] _ in
-                guard let self else { return }
                 MainActor.assumeIsolated {
-                    self.applyResultOrLiveState(width: width, theme: theme)
+                    guard let self, self.isExpanded, self.currentItemId == toolCallId,
+                        let theme = self.lastConfiguredTheme else { return }
+                    self.applyResultOrLiveState(width: self.currentWidth, theme: theme)
                 }
             }
+    }
+
+    /// Observation belongs to the expanded row, including the interval before
+    /// dispatch registers a terminal. Removing a pane must not cancel the
+    /// observer that will discover its replacement (upstream #3210; Intel has
+    /// no subagent feed pane, so only the live-exec subscription is here).
+    private func stopRegistryObservation() {
+        liveExecSubscription?.cancel()
+        liveExecSubscription = nil
+        liveExecBoundCallId = nil
     }
 
     /// Lazily install (or reuse) a `TerminalDisplayView` and bind it
@@ -876,9 +892,6 @@ final class NativeToolCallRowView: NSView {
     }
 
     private func tearDownTerminalView() {
-        liveExecSubscription?.cancel()
-        liveExecSubscription = nil
-        liveExecBoundCallId = nil
         guard let view = terminalView else { return }
         view.unbind()
         terminalBottomConstraint?.isActive = false

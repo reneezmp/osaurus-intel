@@ -87,10 +87,19 @@ public actor MemoryService {
 
     // MARK: - Buffer Turn (no LLM)
 
+    public enum TurnProvenance: Sendable, Equatable {
+        case user
+        case delegated
+    }
+
     /// Buffer a conversation turn for later distillation. Hot path for every
     /// chat turn — no LLM call. The debounce timer is (re)armed; if no new turn
     /// arrives within `summaryDebounceSeconds`, the session is distilled.
     /// Switching to a different conversation flushes the previous one.
+    /// A delegated session (upstream #3210) passes `.delegated`, so the
+    /// delegating agent's instructions never write the user's identity.
+    /// Intel has no delegated sessions yet (`W-subagents`); every caller
+    /// uses the `.user` default.
     public func bufferTurn(
         userMessage: String,
         assistantMessage: String?,
@@ -98,7 +107,8 @@ public actor MemoryService {
         conversationId: String,
         sessionDate: String? = nil,
         projectId: UUID? = nil,
-        personalMemoryEnabled: Bool = true
+        personalMemoryEnabled: Bool = true,
+        provenance: TurnProvenance = .user
     ) async {
         telemetry.attempts += 1
         telemetry.lastAttemptAt = Date()
@@ -136,6 +146,12 @@ public actor MemoryService {
         }
 
         do {
+            // Record provenance before a signal can become eligible for any
+            // distillation path (including restart recovery). If this fails,
+            // do not enqueue an agent's instructions as the user's words.
+            if provenance == .delegated {
+                try db.markDelegatedConversation(conversationId)
+            }
             try db.insertPendingSignal(
                 PendingSignal(
                     agentId: agentId,
@@ -532,11 +548,25 @@ public actor MemoryService {
             return Self.iso8601Now()
         }()
 
+        // A delegated session's "user" turns are the delegating agent's
+        // instructions. They are labeled as such for the distiller, and the
+        // session never writes the user's global identity: upstream's replay
+        // minted "User's token is BG_TOKEN_9 within the delegated task
+        // context" from a helper run and injected it into every later request.
+        let delegated: Bool
+        do {
+            delegated = try db.isDelegatedConversation(conversationId)
+        } catch {
+            // Unknown provenance must not be downgraded to user identity.
+            MemoryLogger.service.error("distill: provenance lookup failed for \(conversationId): \(error)")
+            return
+        }
         let prompt = buildDistillPrompt(
             signals: signals,
             identity: identity,
             recentEpisodes: recentEpisodes,
-            sessionDate: resolvedDate
+            sessionDate: resolvedDate,
+            requesterLabel: delegated ? "Delegating agent" : "User"
         )
 
         do {
@@ -555,7 +585,13 @@ public actor MemoryService {
                     throw error
                 }
             }
-            let parsed = parseDistillResponse(response)
+            // Screen once, before the episode / pinned / project-mirror /
+            // identity fan-out, so every sink sees the same distillate
+            // (upstream #3210).
+            let parsed = MemoryDistillateScreen.screen(
+                parseDistillResponse(response),
+                userMessages: signals.map(\.userMessage)
+            )
             guard let episode = parsed.episode else {
                 // Terminal: the model ran but produced no usable episode.
                 // Mark these signals processed (id-scoped) so an unparseable
@@ -634,7 +670,9 @@ public actor MemoryService {
                     conversationId: conversationId
                 )
 
-                if !parsed.identityFacts.isEmpty {
+                // Never from a delegated session: its requester is an agent,
+                // not the user.
+                if !delegated, !parsed.identityFacts.isEmpty {
                     applyIdentityDelta(facts: parsed.identityFacts, model: model)
                 }
             } else if let projectId {
@@ -671,7 +709,7 @@ public actor MemoryService {
                 outputTokens: response.count / MemoryConfiguration.charsPerToken,
                 durationMs: durationMs)
             MemoryLogger.service.info(
-                "distill: \(conversationId) → episode #\(episodeId), \(storedPinned) pinned, \(parsed.identityFacts.count) identity facts (\(durationMs)ms)"
+                "distill: \(conversationId) → episode #\(episodeId), \(storedPinned) pinned, \(personalDistillationEnabled && !delegated ? parsed.identityFacts.count : 0) identity facts\(delegated ? " (delegated session: identity not written)" : "") (\(durationMs)ms)"
             )
         } catch is CancellationError {
             // Interrupted (app quitting, caller walked away). Not an error
@@ -1062,9 +1100,14 @@ public actor MemoryService {
         "entities" (string array of person/project/place/tool names mentioned), \
         "pinned_candidates" (array of {"content": string, "salience": number 0-1, "tags": string array} for \
         facts worth remembering long-term: explicit user identity facts, strong preferences, decisions the \
-        user clearly committed to. Be conservative — most sessions yield 0-2 candidates.), \
+        user clearly committed to. Be conservative — most sessions yield 0-2 candidates. Restate each fact \
+        in your own words. Never pin a request or instruction the user gave for this session, a task \
+        result, a tool or file output, a value that may change, or a token/nonce produced during the \
+        session; those belong in the episode summary.), \
         "identity_facts" (string array of facts that should appear in the user's identity profile, e.g. \
-        "User's name is X" or "User works at Y". Empty when nothing identity-relevant came up.). \
+        "User's name is X" or "User works at Y", only when the user actually stated them. Never write a \
+        placeholder such as "not specified" or "no facts found", and never describe what the user did in \
+        this session. Use an empty array when nothing identity-relevant came up.). \
         Salience scoring: 0.9+ = critical identity/decision, 0.6-0.8 = clear preference, \
         0.3-0.5 = casual mention, <0.3 = transient chitchat. \
         Do NOT invent facts. Use only what the conversation actually contains.
@@ -1074,7 +1117,8 @@ public actor MemoryService {
         signals: [PendingSignal],
         identity: Identity,
         recentEpisodes: [Episode],
-        sessionDate: String
+        sessionDate: String,
+        requesterLabel: String = "User"
     ) -> String {
         var prompt = "Conversation date: \(sessionDate)\n\n"
 
@@ -1090,16 +1134,48 @@ public actor MemoryService {
             prompt += "\n"
         }
 
+        // I4 — input caps (upstream #1635). A session is one LLM call, so an
+        // unbounded concatenation of every buffered turn (bulk imports, giant
+        // pastes) can overflow a small core model's context and get stuck
+        // erroring on every retry. Clamp the turn count (keeping the
+        // identity-bearing opening head + the most-recent tail) and clamp
+        // each individual message, with explicit truncation markers so the
+        // model knows the transcript was trimmed.
+        let maxTurns = MemoryConfiguration.distillMaxTurns
+        let headCount = max(1, maxTurns / 4)
+        let included: [PendingSignal]
+        let omittedCount: Int
+        if signals.count > maxTurns {
+            let tailCount = maxTurns - headCount
+            included = Array(signals.prefix(headCount)) + Array(signals.suffix(tailCount))
+            omittedCount = signals.count - included.count
+        } else {
+            included = signals
+            omittedCount = 0
+        }
+
         prompt += "Conversation turns:\n"
-        for signal in signals {
-            prompt += "\nUser: \(signal.userMessage)"
+        for (i, signal) in included.enumerated() {
+            if omittedCount > 0, i == headCount {
+                prompt += "\n[... \(omittedCount) middle turn(s) omitted to fit the core model's context ...]\n"
+            }
+            prompt += "\n\(requesterLabel): \(Self.clampTurnText(signal.userMessage))"
             if let asst = signal.assistantMessage {
-                prompt += "\nAssistant: \(asst)"
+                prompt += "\nAssistant: \(Self.clampTurnText(asst))"
             }
         }
 
         prompt += "\n\nDistill this session into the JSON digest."
         return prompt
+    }
+
+    /// Clamp a single turn's text to `MemoryConfiguration.distillMaxTurnChars`,
+    /// appending a marker when truncated so the model doesn't mistake the cut
+    /// for the end of the message.
+    private static func clampTurnText(_ text: String) -> String {
+        let limit = MemoryConfiguration.distillMaxTurnChars
+        guard text.count > limit else { return text }
+        return String(text.prefix(limit)) + " …[truncated \(text.count - limit) chars]"
     }
 
     // MARK: - Response Parsing (lifted from upstream MemoryService)
