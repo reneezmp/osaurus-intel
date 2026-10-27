@@ -70,8 +70,6 @@ GATED = {
     "Tools/Configuration/ConfigurationDomain.swift": ("W-declarative-config", "W", ""),
     "Services/Context/CapabilityClaimsEvaluator.swift": ("W-agent-loop-tools", "W", "grounded claim checks"),
     "Services/Documents/PDFPPTXWorkflowService.swift": ("W-doc-editing", "W", ""),
-    "Services/Provider/ProviderNetworkDiagnostics.swift": ("W-providers-ux", "W", "connectivity centre"),
-    "Views/Settings/ProviderDiagnosticsRowsView.swift": ("W-providers-ux", "W", "connectivity centre"),
     "Services/Plugin/InstalledClaudePluginsAggregator.swift": ("W-skills-plugins-import", "W", "Claude plugins"),
     "Services/Skill/ClaudePluginManifestStore.swift": ("W-skills-plugins-import", "W", "Claude plugins"),
     "Views/Plugin/ClaudePluginCard.swift": ("W-skills-plugins-import", "W", "Claude plugins"),

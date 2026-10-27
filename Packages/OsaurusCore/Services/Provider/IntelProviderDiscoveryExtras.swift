@@ -109,6 +109,31 @@ enum IntelProviderDiscoveryExtras {
         }
     }
 
+    // MARK: - Headers and manual model fallback (upstream `RemoteProviderService`)
+
+    /// Rejects header names/values `URLRequest` can choke on — CR/LF (header
+    /// injection / request splitting) and other C0 controls or DEL — and
+    /// empty names, so a malformed custom header is dropped, not sent.
+    static func isSafeHeader(name: String, value: String) -> Bool {
+        if name.isEmpty { return false }
+        let hasControl: (String) -> Bool = { text in
+            text.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }
+        }
+        return !hasControl(name) && !hasControl(value)
+    }
+
+    /// Upstream: an OpenAI-compatible server without a usable `/models`
+    /// route still connects when the user typed model ids.
+    static func manualModelFallback(
+        providerType: RemoteProviderType, statusCode: Int, manualModelIds: [String]
+    ) -> [String]? {
+        guard providerType == .openaiLegacy || providerType == .openResponses || providerType == .azureOpenAI
+        else { return nil }
+        guard [400, 404, 405, 406, 410, 415, 422, 501].contains(statusCode) else { return nil }
+        let manual = manualModelIds.map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }.filter { !$0.isEmpty }
+        return manual.isEmpty ? nil : manual
+    }
+
     // MARK: - MCP URL pasted as a provider
 
     struct MCPEndpointDetected: LocalizedError {

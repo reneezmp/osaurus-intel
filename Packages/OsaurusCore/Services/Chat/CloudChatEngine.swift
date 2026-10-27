@@ -1155,7 +1155,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             urlRequest.setValue(OpenAICodexOAuthService.codexClientVersion, forHTTPHeaderField: "version")
                             urlRequest.setValue("true", forHTTPHeaderField: "x-openai-internal-codex-responses-lite")
                         }
-                        urlRequest.timeoutInterval = 300
+                        // Intel keeps its fixed 300 s between bytes (the per-provider
+                        // Timeout slider isn't honoured yet, `W-providers-ux`); a
+                        // provider set to Disable Timeout gets upstream's 24 h ceiling.
+                        urlRequest.timeoutInterval =
+                            endpoint.provider?.disableTimeout == true ? RemoteProvider.unboundedTimeout : 300
                         // CANONICAL (sorted-key) serialization — bare JSONSerialization emits
         // keys in hash order, which differs across app launches (and can differ
         // per nested dict), changing the request bytes for a logically-identical

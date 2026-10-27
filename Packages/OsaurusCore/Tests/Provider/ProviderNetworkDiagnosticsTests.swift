@@ -61,6 +61,12 @@ struct ProviderNetworkDiagnosticsTests {
         #expect(!report.pasteboardText.contains("secret-code"))
     }
 
+    @Test func codexModelDiscoveryDetailDocumentsFallbackBeforeFirstLiveFetch() {
+        let detail = ProviderNetworkDiagnostics.codexModelDiscoveryDetail()
+
+        #expect(detail.contains("static Codex fallback"))
+    }
+
     @Test func xaiOAuthReportFlagsMissingTokensWithoutLeakingSecrets() {
         let provider = XAIOAuthService.makeProvider(id: UUID())
         var state = RemoteProviderState(providerId: provider.id)

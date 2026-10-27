@@ -38,7 +38,9 @@ enum RemoteProviderHeaderRedactor {
     private static let exactSensitiveHeaderNames: Set<String> = [
         "authorization",
         "api-key",
+        "cookie",
         "proxy-authorization",
+        "set-cookie",
         "x-api-key",
         "x-goog-api-key",
     ]
@@ -157,7 +159,22 @@ public struct RemoteProvider: Codable, Identifiable, Sendable, Equatable {
     public var enabled: Bool
     public var autoConnect: Bool
     public var timeout: TimeInterval
+    /// When true, requests run effectively unbounded — the request, resource, and
+    /// stream inactivity limits are all lifted. Intended for trusted long-running
+    /// workloads  where time doesn't matter.
+    /// Discovery/probe timeouts are deliberately unaffected and stay short.
+    public var disableTimeout: Bool
     public var manualModelIds: [String]
+
+    /// Hard ceiling applied at runtime when `disableTimeout` is set. "No
+    /// timeout" is a UX statement about generation length, not a license for
+    /// a dead peer holding an open socket to pin a request task forever — so
+    /// the connect / request / stream-inactivity limits stay finite at 24
+    /// hours, which no legitimate single turn approaches. Finite is also
+    /// structurally required: `.infinity` / `.greatestFiniteMagnitude` would
+    /// crash the streaming path (`UInt64(timeout * 1e9)` overflows) and can't
+    /// be JSON encoded.
+    public static let unboundedTimeout: TimeInterval = 60 * 60 * 24
 
     // Keys for headers that should be stored in Keychain (not persisted in config)
     public var secretHeaderKeys: [String]
@@ -171,7 +188,7 @@ public struct RemoteProvider: Codable, Identifiable, Sendable, Equatable {
 
     private enum CodingKeys: String, CodingKey {
         case id, name, host, providerProtocol, port, basePath
-        case customHeaders, authType, providerType, enabled, autoConnect, timeout
+        case customHeaders, authType, providerType, enabled, autoConnect, timeout, disableTimeout
         case manualModelIds
         case secretHeaderKeys, remoteAgentId, remoteAgentAddress
     }
@@ -189,6 +206,7 @@ public struct RemoteProvider: Codable, Identifiable, Sendable, Equatable {
         enabled: Bool = true,
         autoConnect: Bool = true,
         timeout: TimeInterval = 60,
+        disableTimeout: Bool = false,
         manualModelIds: [String] = [],
         secretHeaderKeys: [String] = [],
         remoteAgentId: UUID? = nil,
@@ -206,6 +224,7 @@ public struct RemoteProvider: Codable, Identifiable, Sendable, Equatable {
         self.enabled = enabled
         self.autoConnect = autoConnect
         self.timeout = timeout
+        self.disableTimeout = disableTimeout
         self.manualModelIds = manualModelIds
         self.secretHeaderKeys = secretHeaderKeys
         self.remoteAgentId = remoteAgentId
@@ -229,6 +248,7 @@ public struct RemoteProvider: Codable, Identifiable, Sendable, Equatable {
         enabled = try container.decodeIfPresent(Bool.self, forKey: .enabled) ?? true
         autoConnect = try container.decodeIfPresent(Bool.self, forKey: .autoConnect) ?? true
         timeout = try container.decodeIfPresent(TimeInterval.self, forKey: .timeout) ?? 60
+        disableTimeout = try container.decodeIfPresent(Bool.self, forKey: .disableTimeout) ?? false
         manualModelIds = try container.decodeIfPresent([String].self, forKey: .manualModelIds) ?? []
         secretHeaderKeys = try container.decodeIfPresent([String].self, forKey: .secretHeaderKeys) ?? []
         remoteAgentId = try container.decodeIfPresent(UUID.self, forKey: .remoteAgentId)
@@ -468,16 +488,33 @@ public struct RemoteProviderState: Sendable {
     public var isConnected: Bool
     public var isConnecting: Bool
     public var lastError: String?
+    public var lastReplayDiagnostics: ProviderReplayDiagnosticBundle?
     public var discoveredModels: [String]
     public var lastConnectedAt: Date?
+    /// True when the most recent connect attempt failed for a *transient*
+    /// reason (offline, timeout, DNS/TLS, server 5xx) rather than a terminal
+    /// one (auth, bad config). Drives network-recovery auto-reconnect so a
+    /// provider that failed while the machine was offline comes back on its
+    /// own when connectivity returns, without hammering providers whose keys
+    /// or endpoints are actually wrong.
+    public var lastFailureWasTransient: Bool
+    /// True when the provider's OAuth refresh failed permanently
+    /// (`invalid_grant` / 401): the stored tokens have been cleared and the
+    /// user must sign in again. Mirrors `MCPProviderState.requiresAuth` so
+    /// the UI can show a durable "Sign in again" affordance instead of a
+    /// transient connection error that retries can never fix.
+    public var requiresAuth: Bool
 
     public init(providerId: UUID) {
         self.providerId = providerId
         self.isConnected = false
         self.isConnecting = false
         self.lastError = nil
+        self.lastReplayDiagnostics = nil
         self.discoveredModels = []
         self.lastConnectedAt = nil
+        self.lastFailureWasTransient = false
+        self.requiresAuth = false
     }
 
     public var modelCount: Int {

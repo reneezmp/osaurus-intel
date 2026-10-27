@@ -4231,3 +4231,43 @@ and `RemoteProviderMCPDetectionTests`, plus stub-transport cases for the
 catalog fallback and the handshake. Package gate: 3,398 tests in 425 suites
 (6 known issues). Rosy: "Provider discovery" in
 `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Cloud Models dashboard and Add Provider sheet (`W-providers-ux`, part) — 2026-10-27
+
+Upstream's provider screens on Intel's own provider manager.
+
+- **Taken from upstream:** `RemoteProvidersView` (provider list with
+  connectivity status, issue badges and per-provider Reconnect; the
+  connectivity centre summary rides the sidebar's Developer Tools switch,
+  as upstream), `RemoteProviderEditSheet` (the catalog-driven Add Provider
+  flow: sign-in rows for ChatGPT, OpenRouter and Grok, then the grouped API
+  key list; paste a full endpoint URL into Host; test with manual model ids;
+  Disable Timeout), `ProviderRowCard`, `ProviderInputFields`,
+  `ProviderConnectivityCenter`, `ProviderNetworkDiagnostics` (was wholly
+  gated) with `ProviderDiagnosticsRowsView`, and `ProviderReplayDiagnostics`
+  (its `ProviderDiagnosticRedactor`). `RemoteProviderConfiguration` gained
+  upstream's `disableTimeout`, the cookie headers in the redactor, and the
+  state's `lastReplayDiagnostics` / `lastFailureWasTransient` /
+  `requiresAuth`; Intel's Codex OAuth headers and test-process saves stay.
+  `PastedProviderEndpoint.swift` is gone (the sheet has the parser again).
+- **Intel adaptations:** the Claude Code card stays at the top of Cloud
+  Models, and opening the tab re-probes providers. `reconnect` / `connect`
+  on Intel's `RemoteProviderManager` were empty; they now run discovery with
+  `isConnecting` set. Header checks and the manual-model fallback live in
+  `IntelProviderDiscoveryExtras`; `RemoteProviderKeychain` gained
+  `apiKeyAvailability` / `oauthTokensAvailability` (present / absent on
+  Intel's keychain). Two-value `onChange` became single-value, or
+  `onChangeWithPrevious` (`Views/Common/OnChangeWithPrevious.swift`, new)
+  where the host fields need the old value to detect a paste. The Codex
+  discovery diagnostics row keeps the pre-first-fetch text (Intel's Codex
+  catalog records no upstream summary). The sidebar now posts
+  `SidebarSectionExpansion.changed`. Intel's three credential-mode enums are
+  removed (the catalog replaced them).
+- **Timeouts:** Disable Timeout is honoured (24 h ceiling). The per-provider
+  Timeout slider is still not: Intel's engine keeps a fixed 300 s between
+  bytes (true before this change too; recorded on `W-providers-ux`).
+
+Tests: upstream's `ProviderNetworkDiagnosticsTests` (un-excluded; the two
+Codex summary cases are dropped). Package gate: 3,406 tests in 426 suites (6
+known issues), including the Ventura control guards. Rosy: "Cloud Models and
+Add Provider" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

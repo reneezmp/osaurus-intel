@@ -280,7 +280,7 @@ let package = Package(
                 "Plugin/PluginTests.swift",
                 "Plugin/SSRFTighteningTests.swift",
                 "PrivacyFilter/PostScrubInvariantTests.swift",
-                "Provider/ProviderNetworkDiagnosticsTests.swift",
+                
                 "Provider/RemoteChatRequestEncodingTests.swift",
                 "Provider/RemoteProviderConnectRetryTests.swift",
                 "Provider/RemoteProviderManagerRefreshTests.swift",

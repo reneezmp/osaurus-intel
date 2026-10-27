@@ -50,8 +50,16 @@ struct SidebarSectionData: Identifiable {
     var isCollapsible: Bool = false
 }
 
-private enum SidebarSectionExpansion {
+enum SidebarSectionExpansion {
     static let defaultsKey = "settingsSidebarExpandedSections"
+    /// Posted after the expansion set persists, so open settings tabs can
+    /// react to the Developer Tools switch without relaunching (upstream).
+    static let changed = Notification.Name("sidebarSectionExpansionChanged")
+
+    static var isDeveloperToolsOn: Bool {
+        UserDefaults.standard.stringArray(forKey: defaultsKey)?
+            .contains(ManagementSection.developerTools.rawValue) ?? false
+    }
 }
 
 // MARK: - Layout Constants
@@ -264,6 +272,7 @@ private extension SidebarNavigation {
             Array(expandedCollapsibleSections).sorted(),
             forKey: SidebarSectionExpansion.defaultsKey
         )
+        NotificationCenter.default.post(name: SidebarSectionExpansion.changed, object: nil)
     }
 
     /// Group label when expanded; a thin divider between groups when

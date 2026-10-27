@@ -478,6 +478,22 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         id.split(separator: "/").last?.lowercased() == firstRunOsaurusModelSlug
     }
 
+    /// Upstream: a native Osaurus peer (`.osaurus`) with an empty catalog is a
+    /// chat/delegation target, not a model provider, so the Cloud Models
+    /// dashboard leaves it out.
+    nonisolated static func exposesModelsForInference(
+        providerType: RemoteProviderType, discoveredModels: [String]
+    ) -> Bool {
+        providerType != .osaurus || !discoveredModels.isEmpty
+    }
+
+    func exposesModelsForInference(_ provider: RemoteProvider) -> Bool {
+        Self.exposesModelsForInference(
+            providerType: provider.providerType,
+            discoveredModels: providerStates[provider.id]?.discoveredModels ?? []
+        )
+    }
+
     func setOsaurusRouterEnabled(_ enabled: Bool) {
         guard enabled != isOsaurusRouterEnabled else { return }
         OsaurusRouter.setEnabled(enabled)
@@ -574,9 +590,21 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     }
 
     // Cloud-routing no-ops kept for compatibility with chat-side callers.
-    func connect(providerId: UUID) async throws {}
+    /// Intel has no persistent provider sessions: "connecting" is running
+    /// discovery for that provider (`refreshModels`), with `isConnecting`
+    /// set meanwhile so the dashboard shows progress. Failures land in the
+    /// provider's `lastError`, as upstream's do.
+    func connect(providerId: UUID) async throws {
+        var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
+        state.isConnecting = true
+        providerStates[providerId] = state
+        notifyModelsChanged()
+        await refreshModels(for: providerId)
+        providerStates[providerId]?.isConnecting = false
+        notifyModelsChanged()
+    }
     func disconnect(providerId: UUID) {}
-    func reconnect(providerId: UUID) async throws {}
+    func reconnect(providerId: UUID) async throws { try await connect(providerId: providerId) }
 
     /// AgentDetailView's per-agent model picker calls `findService` to
     /// resolve a provider's live connection. Cloud streaming on Intel
@@ -635,6 +663,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         providerType: RemoteProviderType = .openaiLegacy,
         apiKey: String?,
         headers: [String: String],
+        manualModelIds: [String] = [],
         providerId: UUID? = nil
     ) async throws -> [String] {
         // The Osaurus Router rejects a plain unsigned /models probe (its catalog
@@ -695,6 +724,11 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
         let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            if let manual = IntelProviderDiscoveryExtras.manualModelFallback(
+                providerType: providerType, statusCode: http.statusCode, manualModelIds: manualModelIds)
+            {
+                return manual
+            }
             if await IntelProviderDiscoveryExtras.looksLikeMCPServer(
                 providerType: providerType, baseURL: tempProvider.baseURL, headers: testHeaders)
             {

@@ -1961,3 +1961,23 @@ URLs".
       (e.g. `https://runalyze.com/mcp`). Test, or the card after saving, says
       to add it under Tools & MCP > Services instead of "HTTP 404" or
       "connected, 0 models". Delete it afterwards.
+
+## Cloud Models and Add Provider (2026-10-27)
+
+Details: `UPSTREAM_SYNC.md`, "Cloud Models dashboard and Add Provider sheet".
+Your existing providers must keep working: check them first.
+
+- [ ] **Existing providers:** Settings › Cloud Models lists every provider you
+      had, each connected with its model count; a chat with each still works.
+      The Claude Code card is at the top.
+- [ ] **Reconnect:** a provider's Reconnect shows progress and refreshes its
+      model count.
+- [ ] **Add Provider:** the sheet opens on sign-in rows (ChatGPT, OpenRouter,
+      Grok) and "Use an API key" with grouped vendors. Text and controls are
+      readable, and text fields show the caret.
+- [ ] **Paste a URL:** in a custom provider's Host field, paste
+      `http://localhost:11434/v1/chat/completions`; host, port and base path
+      split out (`/v1`).
+- [ ] **Edit:** editing a provider keeps its key; saving keeps it connected.
+- [ ] **Developer Tools:** with the sidebar's Developer Tools switch on, the
+      connectivity summary appears above the list; Copy report works.

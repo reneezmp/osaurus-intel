@@ -137,6 +137,18 @@ public enum RemoteProviderKeychain {
     }
 
     /// Check if an API key exists for a provider ID
+    /// Upstream's typed availability. Intel's keychain reads report found or
+    /// not, so this answers `.present` / `.absent` (no `.unavailable`).
+    public static func apiKeyAvailability(for providerId: UUID) -> SecretAvailability {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return .absent }
+        return getAPIKey(for: providerId) != nil ? .present : .absent
+    }
+
+    public static func oauthTokensAvailability(for providerId: UUID) -> SecretAvailability {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return .absent }
+        return getOAuthTokens(for: providerId) != nil ? .present : .absent
+    }
+
     public static func hasAPIKey(for providerId: UUID) -> Bool {
         return getAPIKey(for: providerId) != nil
     }
