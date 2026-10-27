@@ -3961,3 +3961,40 @@ equality, 200 unchanged 168 KB blocks ×50) runs in 2.3 ms, the same as short
 blocks. Package gate: 3,273 tests in 408 suites (6 known issues). Rosy:
 "Chat table height-note batching" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
+### Gemini reasoning effort (#3115) — 2026-10-27
+
+Upstream #3115 (`fc7ef8184`) ported onto Intel's own paths.
+`GeminiReasoningContract` is upstream's file: per-model level sets from
+Google's thinking docs, with 3 Pro offering only low/high, 3.6 Flash adding
+minimal, and 2.5 models taking a token budget. Image, TTS, embedding, live
+and unlisted Gemini models get no control. Two Intel adaptations: the
+capabilities come back as plain level ids, and `thinkingConfig` is a
+dictionary. Where Intel differs from upstream:
+
+- **Picker:** upstream attaches `ModelReasoningCapabilities` to picker items
+  in `ModelPickerItemCache`; Intel has no live reasoning catalog. The new
+  `GeminiReasoningProfile` in `ModelOptions.swift` builds the levels per
+  model. For that, `ModelProfile` gained `options(forModelId:)` /
+  `defaults(forModelId:)`, which default to the static values; the registry
+  reads only these. The default level is display-only.
+- **Route scoping:** upstream offers the control only where the provider
+  forwards the effort (native Gemini, Google's OpenAI-compatible endpoint,
+  OpenRouter). Intel's profiles see only the model id, so the composer asks
+  `IntelGeminiReasoningRoute.offersEffort`, which resolves the owning
+  provider from the provider-qualified id the way
+  `CloudChatEngine.resolveEndpoint` does. An unqualified id is treated as
+  not forwarding.
+- **Wire:** `CloudChatEngine.applyReasoningMode` sends a Gemini model's
+  `reasoning_effort` only when `GeminiReasoningContract.wireAccepts` (a
+  forwarding route and a documented level). `IntelGeminiAdapter.makeRequest`
+  turns it into `generationConfig.thinkingConfig`: `thinkingLevel` on
+  Gemini 3, a `thinkingBudget` (1024 / 8192 / 24576) on 2.5. "Off" still
+  sends nothing to Gemini, as before.
+
+Tests: `GeminiReasoningContractTests` (upstream's) and
+`IntelGeminiReasoningTests`. The latter covers the per-model profile, the
+display-only default, the composer route check, the engine gate, and
+upstream's two `toGeminiRequest` cases against `IntelGeminiAdapter`. Package
+gate: 3,282 tests in 410 suites (6 known issues). Rosy: "Gemini reasoning
+effort" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+

@@ -42,7 +42,7 @@ F=[
 ("W-chat-ux","W",r"AtFile|ChatCrossSelection|ChatInputHistory|FollowUpSuggestion|CompactionDialogView|NativeCompactionMarkerView|NativeActivityGroupView|NativeDispatchBadgeRow|DispatchEnvelope|ShimmerLabel|RecentFoldersPanel|ImportGuideSheet|ImportHistoryPromptGate|ChatPersistenceNotice|MarkdownBlockParsing|MarkdownDocumentView|IMEAwareTextField|ScreenshotCaptureService|SlashCommandRegistry|WorkspaceFileReference|WorkspaceSessionContext|AgentDispatchTarget|BuiltInAgentGuard|Views/Agent/AgentDetailChrome|ContextAttribution"),
 ("W-server-api","W",r"LocalAPIKeyPolicy|ServerModelsTabContent|InferenceActivityRegistry|Networking/|MCPServerHub|ModelExposureStore|EvidenceReport|Services/Auth/"),
 ("W-mcp-providers","W",r"Services/MCP/"),
-("W-providers-ux","W",r"Provider|GeminiReasoningContract|FireworksAPI|CodexCLIConfiguration|FavoriteModelsStore|WireTransportProbe"),
+("W-providers-ux","W",r"Provider|FireworksAPI|CodexCLIConfiguration|FavoriteModelsStore|WireTransportProbe"),
 ("W-self-scheduling","W",r"SchedulerTools|Schedule"),
 ("W-seatbelt-sandbox","W",r"Services/Sandbox/Seatbelt/"),
 ("W-tools-misc","W",r"RenderChartTool|SearchMemoryTool|ShareArtifactTool|SharedArtifact|ShellSandboxProfile"),

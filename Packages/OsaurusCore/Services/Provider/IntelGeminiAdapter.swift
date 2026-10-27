@@ -13,6 +13,8 @@
 //    the turn); tool results batched into one user content of
 //    `functionResponse` parts; tool schemas cleaned with upstream's
 //    `geminiCompatibleSchema` rules; `tool_choice` → `toolConfig`.
+//    `reasoning_effort` → `generationConfig.thinkingConfig` through
+//    `GeminiReasoningContract` (upstream #3115, 2026-10-27).
 //    **Intel difference:** `functionResponse.name` is the called function's
 //    name, looked up from the preceding call. Upstream passes the
 //    `tool_call_id` there (a random `gemini-…` id), which Gemini matches
@@ -151,6 +153,15 @@ enum IntelGeminiAdapter {
         }
         if let topP = body["top_p"] { generation["topP"] = topP }
         if let stop = body["stop"] { generation["stopSequences"] = stop }
+        // Upstream #3115: the picker's effort becomes Gemini's native thinking
+        // control, `thinkingLevel` on Gemini 3 and a `thinkingBudget` on 2.5;
+        // an effort the model doesn't document sends nothing.
+        if let model = body["model"] as? String,
+            let thinking = GeminiReasoningContract.thinkingConfig(
+                forModelId: model, effort: body["reasoning_effort"] as? String)
+        {
+            generation["thinkingConfig"] = thinking
+        }
         if !generation.isEmpty { request["generationConfig"] = generation }
         return request
     }

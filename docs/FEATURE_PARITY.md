@@ -110,6 +110,10 @@ tests only; Rosy section "Upstream audit 2026-10-27".
 - Chat transcript performance (#3080, from the 2026-10-26 range, shipped
   2026-10-27): height notes batched per update; first load of a tool-heavy
   chat 134 → 9 `noteHeightOfRows` calls in the test harness.
+- Gemini reasoning effort (#3115, shipped 2026-10-27): each Gemini text
+  model's documented levels in the picker on native Gemini, Google's
+  OpenAI-compatible endpoint and OpenRouter; native requests carry
+  `thinkingConfig`.
 
 ## 2026-10-26 upstream range audit — product impact
 
@@ -136,7 +140,6 @@ tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
 ### Partial
 | Area | Missing behavior exposed by upstream | Next Intel gate |
 |---|---|---|
-| Hosted Gemini | Reasoning-effort control (#3115). | Port `GeminiReasoningContract`, wire into Intel's provider path and picker. |
 | Chat engine slices | #3203's tool-choice, streaming, image-payload, probe and tool-card slices. | Check each against `CloudChatEngine`. |
 
 ### Dependency-blocked

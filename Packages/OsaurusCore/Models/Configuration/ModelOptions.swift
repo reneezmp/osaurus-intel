@@ -66,10 +66,19 @@ protocol ModelProfile: Sendable {
     /// Returns the option ID (like "disableThinking") and whether the stored
     /// boolean is inverted (`true` means disabled, so the UI shows OFF).
     static var thinkingOption: (id: String, inverted: Bool)? { get }
+
+    /// Intel: options and defaults for one model id. Defaults to the static
+    /// `options` / `defaults`; a profile whose level set differs per model
+    /// (`GeminiReasoningProfile`, upstream #3115) overrides these. The
+    /// registry reads only these two.
+    static func options(forModelId modelId: String) -> [ModelOptionDefinition]
+    static func defaults(forModelId modelId: String) -> [String: ModelOptionValue]
 }
 
 extension ModelProfile {
     static var thinkingOption: (id: String, inverted: Bool)? { nil }
+    static func options(forModelId modelId: String) -> [ModelOptionDefinition] { options }
+    static func defaults(forModelId modelId: String) -> [String: ModelOptionValue] { defaults }
 }
 
 // MARK: - Registry
@@ -83,6 +92,7 @@ enum ModelProfileRegistry {
         NemotronThinkingProfile.self,
         LagunaThinkingProfile.self,
         DSV4ReasoningProfile.self,
+        GeminiReasoningProfile.self,
         Hy3ReasoningProfile.self,
         LingRuntimeProfile.self,
         ZayaThinkingProfile.self,
@@ -98,7 +108,7 @@ enum ModelProfileRegistry {
     }
 
     static func defaults(for modelId: String) -> [String: ModelOptionValue] {
-        profile(for: modelId)?.defaults ?? [:]
+        profile(for: modelId)?.defaults(forModelId: modelId) ?? [:]
     }
 
     /// The chat pill's "· effort" suffix (upstream): the explicit
@@ -109,7 +119,7 @@ enum ModelProfileRegistry {
         values: [String: ModelOptionValue]
     ) -> String? {
         guard
-            let option = profile(for: modelId)?.options
+            let option = profile(for: modelId)?.options(forModelId: modelId)
                 .first(where: { $0.id == "reasoningEffort" }),
             case .segmented(let segments) = option.kind
         else { return nil }
@@ -132,7 +142,7 @@ enum ModelProfileRegistry {
     }
 
     static func options(for modelId: String) -> [ModelOptionDefinition] {
-        profile(for: modelId)?.options ?? []
+        profile(for: modelId)?.options(forModelId: modelId) ?? []
     }
 
     static func normalizedOptions(
@@ -169,6 +179,53 @@ enum ModelProfileRegistry {
             return nil
         }
         return option.inverted ? !value : value
+    }
+}
+
+// MARK: - Gemini Reasoning Profile (upstream #3115)
+
+/// Gemini text models' documented thinking levels
+/// (`GeminiReasoningContract`). Each model has its own set (3 Pro: low/high;
+/// 3.6 Flash adds minimal), so the options are built per model id. The
+/// stored value is the level id, sent as `reasoning_effort`; native Gemini
+/// gets `thinkingConfig` from `IntelGeminiAdapter`. The default is
+/// display-only (the API's own default), never synthesized into requests.
+/// The composer hides the control on routes that don't forward the effort
+/// (`IntelGeminiReasoningRoute`), and the engine never sends it there.
+struct GeminiReasoningProfile: ModelProfile {
+    static let displayName = "Gemini Reasoning"
+
+    static func matches(modelId: String) -> Bool {
+        GeminiReasoningContract.entry(forModelId: modelId) != nil
+    }
+
+    static let options: [ModelOptionDefinition] = []
+    static let defaults: [String: ModelOptionValue] = [:]
+
+    private static let levelLabels: [String: String] = [
+        "minimal": "Minimal", "low": "Low", "medium": "Medium", "high": "High",
+    ]
+
+    static func options(forModelId modelId: String) -> [ModelOptionDefinition] {
+        guard let capabilities = GeminiReasoningContract.capabilities(forModelId: modelId) else { return [] }
+        return [
+            ModelOptionDefinition(
+                id: "reasoningEffort",
+                label: "Reasoning Effort",
+                icon: "brain.head.profile",
+                kind: .segmented(
+                    capabilities.levels.map {
+                        ModelOptionSegment(id: $0, label: levelLabels[$0] ?? $0.capitalized)
+                    })
+            )
+        ]
+    }
+
+    static func defaults(forModelId modelId: String) -> [String: ModelOptionValue] {
+        guard let level = GeminiReasoningContract.capabilities(forModelId: modelId)?.defaultLevel else {
+            return [:]
+        }
+        return ["reasoningEffort": .string(level)]
     }
 }
 

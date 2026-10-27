@@ -586,6 +586,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         case "instruct", "chat", "none", "no_think", "nothink", "off", "disabled", "false":
             Self.applyReasoningOff(offForm, into: &body)
         case .some(let nonEmpty) where !nonEmpty.isEmpty:
+            // Upstream #3115: a Gemini text model's effort goes only to a
+            // route that forwards it, and only as one of its documented
+            // levels; anything else sends nothing.
+            guard
+                GeminiReasoningContract.wireAccepts(
+                    effort: nonEmpty, modelId: endpoint.modelId,
+                    providerType: endpoint.provider?.providerType,
+                    host: URL(string: endpoint.url)?.host ?? "")
+            else { return }
             body["reasoning_effort"] = nonEmpty
         case .some, .none:
             Self.applyReasoningOff(offForm, into: &body)

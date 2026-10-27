@@ -1902,7 +1902,12 @@ extension FloatingInputCard {
 
     private var activeProfileOptions: [ModelOptionDefinition] {
         guard let model = selectedModel else { return [] }
-        return ModelProfileRegistry.options(for: model)
+        let options = ModelProfileRegistry.options(for: model)
+        // Upstream #3115: Gemini levels only on routes that forward them.
+        guard IntelGeminiReasoningRoute.offersEffort(forModelId: model) else {
+            return options.filter { $0.id != "reasoningEffort" }
+        }
+        return options
     }
 
     private var selectorRow: some View {
@@ -2041,7 +2046,9 @@ extension FloatingInputCard {
     /// "· Medium": the explicit `reasoningEffort` choice, else the profile
     /// default (upstream's "model · effort").
     private var inlineReasoningSuffix: String? {
-        guard let model = selectedModel else { return nil }
+        guard let model = selectedModel, IntelGeminiReasoningRoute.offersEffort(forModelId: model) else {
+            return nil
+        }
         return ModelProfileRegistry.inlineReasoningSuffixLabel(for: model, values: activeModelOptions)
     }
 

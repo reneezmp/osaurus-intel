@@ -185,7 +185,8 @@ can't be observed in SwiftPM (the forwarding into the controller is asserted).
   anchor code), so a 3-way merge drags in unrelated upstream code. Needs a hand
   port of the batching (`heightNoteBatchDepth`, `pendingHeightNoteIds`,
   `rowIndexByBlockId`) and a long-transcript UI check.
-- **#3115 `fc7ef8184`, Gemini reasoning effort.** `GeminiReasoningContract`
+- **#3115 `fc7ef8184`, Gemini reasoning effort.** **Done 2026-10-27**
+  (`UPSTREAM_SYNC.md`, "Gemini reasoning effort"). `GeminiReasoningContract`
   ports as is; the picker capability and request mapping must go into Intel's
   own provider path (`IntelGeminiAdapter`, Intel's picker cache).
 - **#3203 `fc75a1e06`, remaining Intel-file slices.** `ChatToolChoicePolicy`,
@@ -227,7 +228,7 @@ and #3203 above. Automated tests only; Rosy is pending (checklist section
 "Upstream audit 2026-10-26").
 
 ### Partial
-- Hosted Gemini models: no reasoning-effort control yet (#3115).
+- ~~Hosted Gemini models: no reasoning-effort control yet (#3115).~~ Shipped 2026-10-27.
 - ~~Chat transcript performance on long, tool-heavy chats: #3080 batching open.~~ Shipped 2026-10-27.
 
 ### Dependency-blocked / Absent (new backlog rows)

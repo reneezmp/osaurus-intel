@@ -1826,3 +1826,19 @@ Details: `UPSTREAM_AUDIT_2026-10-27.md`.
 - [ ] **Reopen position:** switch to another chat and back; the scroll
       position is restored, and no row is clipped or overlaps its neighbour.
 
+## Gemini reasoning effort (2026-10-27)
+
+#3115. Details: `UPSTREAM_SYNC.md`, "Gemini reasoning effort". Needs a
+Gemini API key (native Gemini provider) and, if available, OpenRouter.
+
+- [ ] **Native Gemini 3 model:** pick a Gemini 3 Flash model. The model
+      picker's options show Reasoning Effort with that model's levels and the
+      pill shows the default. Choose Low, then High, and ask the same hard
+      question: High thinks longer (visible Thinking, slower first token).
+- [ ] **3 Pro:** a Gemini 3 Pro model offers only Low and High.
+- [ ] **Gemini 2.5:** a 2.5 Flash or Pro model offers Low / Medium / High and
+      replies normally at each.
+- [ ] **No control where it can't work:** a Gemini image model shows no
+      Reasoning Effort; a Gemini model through a custom OpenAI-compatible
+      proxy shows none either, and replies as before.
+
