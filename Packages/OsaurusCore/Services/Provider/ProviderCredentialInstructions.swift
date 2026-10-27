@@ -17,7 +17,7 @@ import Foundation
 
 /// How the user authenticates to a given provider. Drives which fields
 /// the credential prompt sheet renders.
-enum ProviderAuthMethod: Sendable, Equatable {
+public enum ProviderAuthMethod: Sendable, Equatable {
     /// API key + optional secret HTTP headers.
     case apiKey
     /// OAuth flow handled by `OAuthSignInCoordinator` (Codex, OpenRouter, …).
@@ -27,15 +27,15 @@ enum ProviderAuthMethod: Sendable, Equatable {
 /// One extra field the user has to fill in alongside the secret.
 /// Used for Azure (endpoint + deployment), custom OpenAI-compatible
 /// hosts (base URL), etc.
-struct ProviderCredentialField: Sendable, Equatable {
-    let key: String
-    let label: String
-    let placeholder: String
+public struct ProviderCredentialField: Sendable, Equatable {
+    public let key: String
+    public let label: String
+    public let placeholder: String
     /// Optional one-liner shown beneath the field. Use for value-format hints
     /// (e.g. "Comma or newline-separated") that wouldn't fit in the placeholder.
-    let helpText: String?
-    let isRequired: Bool
-    init(
+    public let helpText: String?
+    public let isRequired: Bool
+    public init(
         key: String,
         label: String,
         placeholder: String,
@@ -51,28 +51,28 @@ struct ProviderCredentialField: Sendable, Equatable {
 }
 
 /// Per-provider, non-secret guidance for the credential prompt sheet.
-struct ProviderCredentialInstructions: Sendable, Equatable {
-    let providerType: RemoteProviderType
-    let displayName: String
-    let authMethod: ProviderAuthMethod
+public struct ProviderCredentialInstructions: Sendable, Equatable {
+    public let providerType: RemoteProviderType
+    public let displayName: String
+    public let authMethod: ProviderAuthMethod
     /// Marketing-grade URL the user can open to obtain credentials.
-    let getKeyURL: URL?
+    public let getKeyURL: URL?
     /// One-line hint about the key's expected shape, e.g. "Keys start with `sk-ant-`."
-    let keyFormatHint: String?
+    public let keyFormatHint: String?
     /// Optional extra fields (Azure endpoint, OpenAI-compatible host, etc.).
-    let extraFields: [ProviderCredentialField]
+    public let extraFields: [ProviderCredentialField]
     /// Default `RemoteProviderAuthType` to assign to the persisted record
     /// once the user finishes the sheet. Distinct from `authMethod`
     /// because the manager-side enum has historical case names that
     /// don't map 1:1 to UI labels.
-    let storageAuthType: RemoteProviderAuthType
+    public let storageAuthType: RemoteProviderAuthType
     /// Stable `ProviderPreset.rawValue` used by UI to resolve branding
     /// (gradient, icon asset, help steps). Lives here as a string so this
     /// module can stay free of UI imports. Empty means "no preset" — the
     /// sheet falls back to a generic key glyph.
-    let presetId: String
+    public let presetId: String
 
-    init(
+    public init(
         providerType: RemoteProviderType,
         displayName: String,
         authMethod: ProviderAuthMethod,
@@ -99,10 +99,10 @@ struct ProviderCredentialInstructions: Sendable, Equatable {
 /// `RemoteProviderType` (OpenRouter, DeepSeek, xAI, Venice, Ollama all
 /// use `.openaiLegacy`) each get their own entry with vendor-specific
 /// branding, OAuth path, and key-format hints.
-enum ProviderCredentialInstructionsCatalog {
+public enum ProviderCredentialInstructionsCatalog {
     /// Returns curated instructions for `preset`. Every preset has an
     /// entry, so the sheet always has fields to render.
-    static func entry(for preset: ProviderPreset) -> ProviderCredentialInstructions {
+    public static func entry(for preset: ProviderPreset) -> ProviderCredentialInstructions {
         let providerType = preset.configuration.providerType
         let getKeyURL = preset.consoleURL.isEmpty ? nil : URL(string: preset.consoleURL)
         switch preset {
@@ -193,6 +193,26 @@ enum ProviderCredentialInstructionsCatalog {
                 storageAuthType: .apiKey,
                 presetId: preset.rawValue
             )
+        case .fireworks:
+            return ProviderCredentialInstructions(
+                providerType: providerType,
+                displayName: L("Fireworks AI"),
+                authMethod: .apiKey,
+                getKeyURL: getKeyURL,
+                keyFormatHint: L("Get a key from app.fireworks.ai."),
+                storageAuthType: .apiKey,
+                presetId: preset.rawValue
+            )
+        case .mistral:
+            return ProviderCredentialInstructions(
+                providerType: providerType,
+                displayName: L("Mistral"),
+                authMethod: .apiKey,
+                getKeyURL: getKeyURL,
+                keyFormatHint: L("Get a key from console.mistral.ai."),
+                storageAuthType: .apiKey,
+                presetId: preset.rawValue
+            )
         case .minimax:
             return ProviderCredentialInstructions(
                 providerType: providerType,
@@ -210,7 +230,8 @@ enum ProviderCredentialInstructionsCatalog {
                 authMethod: .oauth,
                 getKeyURL: getKeyURL,
                 keyFormatHint: L(
-                    "Connect with Grok using a SuperGrok or X Premium+ subscription, or paste a key from console.x.ai."),
+                    "Sign in with Grok using a SuperGrok or X Premium+ subscription, or paste a key from console.x.ai."
+                ),
                 storageAuthType: .xaiOAuth,
                 presetId: preset.rawValue
             )
@@ -259,7 +280,7 @@ enum ProviderCredentialInstructionsCatalog {
     /// `ProviderPreset` because it isn't a third-party vendor — it's
     /// another Osaurus instance reachable over the local network. The
     /// sheet still needs an entry so the user can paste a pairing key.
-    static func osaurusAgentEntry() -> ProviderCredentialInstructions {
+    public static func osaurusAgentEntry() -> ProviderCredentialInstructions {
         ProviderCredentialInstructions(
             providerType: .osaurus,
             displayName: L("Osaurus Agent"),
@@ -274,7 +295,7 @@ enum ProviderCredentialInstructionsCatalog {
     /// Codex OAuth uses the same brand as the OpenAI preset but is a
     /// distinct `RemoteProviderType`. Kept as a separate entry the
     /// chat tool can request explicitly via `provider: "codex_oauth"`.
-    static func openAICodexEntry() -> ProviderCredentialInstructions {
+    public static func openAICodexEntry() -> ProviderCredentialInstructions {
         ProviderCredentialInstructions(
             providerType: .openAICodex,
             displayName: L("OpenAI Codex"),

@@ -425,6 +425,41 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         )
     }
 
+    // MARK: - First-run model picks (upstream, for onboarding)
+
+    /// Picker ids of a connected provider's discovered models, prefixed the
+    /// way `ModelPickerItemCache` lists them; empty until it connects.
+    private func pickerModelIds(forProviderId providerId: UUID) -> [String] {
+        guard let provider = configuration.providers.first(where: { $0.id == providerId }),
+            let state = providerStates[providerId], state.isConnected
+        else { return [] }
+        let prefix = provider.name.lowercased()
+            .replacingOccurrences(of: " ", with: "-")
+            .replacingOccurrences(of: "/", with: "-")
+        return state.discoveredModels.map { "\(prefix)/\($0)" }
+    }
+
+    /// First chat-capable model of a connected provider (skips embedding /
+    /// reranker ids, falls back to the first model). Onboarding pins it as
+    /// the new agents' default after connecting a provider.
+    func firstChatCapableModelId(forProviderId providerId: UUID) -> String? {
+        let models = pickerModelIds(forProviderId: providerId)
+        return models.first { !ModelPickerItem.isLikelyEmbeddingOrRerankerID($0) } ?? models.first
+    }
+
+    /// DeepSeek V4.1 Flash for first-run Cloud, with the chat-capable
+    /// fallback if the Router temporarily omits that model.
+    func firstRunOsaurusRouterModelId() -> String? {
+        let models = pickerModelIds(forProviderId: Self.osaurusRouterProviderId)
+        return models.first(where: Self.isFirstRunOsaurusModelId)
+            ?? models.first { !ModelPickerItem.isLikelyEmbeddingOrRerankerID($0) }
+            ?? models.first
+    }
+
+    static func isFirstRunOsaurusModelId(_ id: String) -> Bool {
+        id.split(separator: "/").last?.lowercased() == firstRunOsaurusModelSlug
+    }
+
     func setOsaurusRouterEnabled(_ enabled: Bool) {
         guard enabled != isOsaurusRouterEnabled else { return }
         OsaurusRouter.setEnabled(enabled)

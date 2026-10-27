@@ -73,6 +73,10 @@ final class WorkspacesService {
 enum FeatureTelemetry {
     static func balanceTopUpInitiated() {}
     static func balanceTopUpSucceeded() {}
+    // Onboarding (upstream `OnboardingView.finishOnboarding`).
+    static func armFirstTimeChatShown() {}
+    static func recordOnboardingBrainSource(_ value: String?) {}
+    static func recordOnboardingBrainSourceAbsent() {}
 }
 
 /// Intel stub: only upstream's `normalized(_:)` (verbatim), which the ported

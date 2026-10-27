@@ -421,6 +421,34 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return configured
     }
 
+    /// A new, unsaved custom agent record (upstream; onboarding's "Create
+    /// your Dino" step sets more fields before `add`). Intel has no
+    /// sandbox, so upstream's `autonomousExec` default is omitted.
+    static func newCustomAgentRecord(
+        name: String,
+        description: String = "",
+        systemPrompt: String = "",
+        themeId: UUID? = nil,
+        defaultModel: String? = nil,
+        temperature: Float? = nil,
+        maxTokens: Int? = nil,
+        now: Date = Date()
+    ) -> Agent {
+        Agent(
+            id: UUID(),
+            name: name,
+            description: description,
+            systemPrompt: systemPrompt,
+            themeId: themeId,
+            defaultModel: defaultModel,
+            temperature: temperature,
+            maxTokens: maxTokens,
+            isBuiltIn: false,
+            createdAt: now,
+            updatedAt: now
+        )
+    }
+
     func add(_ agent: Agent) {
         persist(agent)
         reload()

@@ -81,11 +81,6 @@ GATED = {
     "Views/Agent/IncomingPairSheet.swift": ("W-identity-mobile", "W", ""),
     "Views/Agent/RemoteAgentViews.swift": ("W-workspaces-sharing", "D", "invite-link agent sharing"),
     "Views/Agent/ShareAgentSheet.swift": ("W-workspaces-sharing", "D", "invite-link agent sharing"),
-    "Views/Onboarding/OnboardingConfigureAIView.swift": ("W-ui-misc", "W", "onboarding"),
-    "Views/Onboarding/OnboardingCreateAgentView.swift": ("W-ui-misc", "W", "onboarding"),
-    "Views/Onboarding/OnboardingTokens.swift": ("W-ui-misc", "W", "onboarding"),
-    "Views/Onboarding/OnboardingView.swift": ("W-ui-misc", "W", "onboarding"),
-    "Views/Onboarding/OnboardingWelcomeView.swift": ("W-ui-misc", "W", "onboarding"),
     # --- Covered by Intel's own implementation elsewhere ---
     "Services/Context/CapabilitySearch.swift": ("COV-tool-discovery", "C", "TOOL_DISCOVERY_INTEL.md"),
     "Services/Context/SessionToolState.swift": ("COV-tool-discovery", "C", "TOOL_DISCOVERY_INTEL.md"),

@@ -1,11 +1,11 @@
-#if !OSAURUS_INTEL
 //
 //  OnboardingWelcomeView.swift
 //  osaurus
 //
-//  Welcome step body + CTA — a single-column hero hosted in the chrome
-//  shell. No wordmark or eyebrow on this screen; the dinosaur and the
-//  headline carry the brand. Animation phases in over a tight cadence.
+//  Welcome step — Figma screen 1. Left column (bottom-aligned): 40pt hero
+//  title, 14pt subtitle, white "Get started →" pill, 10pt legal acceptance
+//  line, and the usage-data checkbox. Right: rounded panel with the
+//  dino-team hero image.
 //
 
 import SwiftUI
@@ -13,84 +13,108 @@ import SwiftUI
 // MARK: - State
 
 /// Welcome step state. Holds the anonymous-usage opt-in so the choice made
-/// via the `WelcomeUsageOptIn` checkbox survives the slide transition and can
-/// be read by the parent's "Get Started" CTA. Moving usage consent here (the
-/// *first* step) is deliberate: `TelemetryService` buffers the onboarding
-/// funnel until a decision is made, so opting in up front lets us capture the
-/// drop-off point even when the user bails partway through.
+/// via the checkbox survives the slide transition and can be read by the
+/// parent's "Get started" CTA. Moving usage consent here (the *first* step)
+/// is deliberate: `TelemetryService` buffers the onboarding funnel until a
+/// decision is made, so opting in up front lets us capture the drop-off
+/// point even when the user bails partway through.
 @MainActor
 final class WelcomeState: ObservableObject {
-    /// Opt-IN, so it defaults OFF. The parent reads this on the "Get Started"
-    /// CTA and, when on, calls `TelemetryService.setEnabled(true)` to flush
-    /// the buffered funnel and send everything that follows live.
-    @Published var shareUsageData: Bool = false
+    /// Opt-OUT, so it defaults ON (consistent with crash reporting). The
+    /// parent reads this on the "Get started" CTA and, when on, calls
+    /// `TelemetryService.setEnabled(true)` to flush the buffered funnel and
+    /// send everything that follows live; unchecking it leaves telemetry
+    /// undecided so `finishOnboarding` finalizes a decline.
+    @Published var shareUsageData: Bool = true
 }
 
-// MARK: - Welcome Body
+// MARK: - Step view
 
-struct WelcomeBody: View {
+struct WelcomeStepView: View {
     @ObservedObject var state: WelcomeState
-
-    @Environment(\.theme) private var theme
-    @State private var visible = false
+    let onGetStarted: () -> Void
 
     var body: some View {
-        // The usage opt-in lives in the chrome footer caption slot (rendered by
-        // `OnboardingView`, see `WelcomeUsageOptIn`) so it sits directly above
-        // the CTA — consistent with the caption on the "Meet your dino" step.
-        OnboardingHeroBody(
-            illustrationAsset: "osaurus-main",
-            headline: "Own your AI.",
-            subtitle:
-                "Runs on your Mac. Your chats, files, and keys stay with you. No account, no cloud required."
-        )
-        .opacity(visible ? 1 : 0)
-        .scaleEffect(visible ? 1 : 0.98)
-        .animation(.easeOut(duration: 0.5), value: visible)
-        .onAppearAfter(0.05) { visible = true }
-    }
-}
-
-// MARK: - Usage Opt-In
-
-/// The anonymous-usage opt-in, surfaced in the footer caption slot just above
-/// the "Get Started" CTA. Rendered as a custom checkbox row because the native
-/// `.checkbox` toggle style was nearly invisible on the light hero — we draw
-/// our own SF Symbol box with theme colors for reliable contrast.
-struct WelcomeUsageOptIn: View {
-    @ObservedObject var state: WelcomeState
-
-    @Environment(\.theme) private var theme
-
-    var body: some View {
-        Button {
-            state.shareUsageData.toggle()
-        } label: {
-            HStack(spacing: 7) {
-                Image(systemName: state.shareUsageData ? "checkmark.square.fill" : "square")
-                    .font(.system(size: 14, weight: .medium))
-                    .foregroundColor(
-                        state.shareUsageData ? theme.accentColor : theme.tertiaryText
-                    )
-                Text("Share anonymous usage data to help improve Osaurus", bundle: .module)
-                    .font(theme.font(size: 12))
-                    .foregroundColor(theme.secondaryText)
-            }
-            .contentShape(Rectangle())
+        OnboardingStepLayout {
+            leftColumn
+        } right: {
+            heroPanel
         }
-        .buttonStyle(.plain)
-        .accessibilityAddTraits(state.shareUsageData ? [.isSelected] : [])
     }
-}
 
-// MARK: - Welcome CTA
+    // MARK: Left column
 
-struct WelcomeCTA: View {
-    let onContinue: () -> Void
+    /// Staggered cascade: title → subtitle → CTA → legal → checkbox.
+    private var leftColumn: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            Text("A Dino for every side of your work.", bundle: .module)
+                .font(OnboardingTypography.heroTitle)
+                .tracking(0.4)
+                .foregroundColor(OnboardingPalette.labelPrimary)
+                .fixedSize(horizontal: false, vertical: true)
+                .onboardingEntrance(0)
 
-    var body: some View {
-        OnboardingBrandButton(title: "Get Started", action: onContinue)
-            .fixedSize(horizontal: true, vertical: false)
+            Spacer().frame(height: 16)
+
+            // Intel: upstream's "No account or cloud required." is dropped:
+            // without local models, Intel always chats through a cloud
+            // provider or Osaurus Cloud.
+            Text(
+                "Build your own team of Dinos for every side of your life. Your chats, files, and keys stay private on your Mac.",
+                bundle: .module
+            )
+            .font(OnboardingTypography.subtitle)
+            .foregroundColor(OnboardingPalette.labelSecondary)
+            .lineSpacing(1.5)
+            .fixedSize(horizontal: false, vertical: true)
+            .onboardingEntrance(1)
+
+            Spacer().frame(height: 40)
+
+            OnboardingPillButton(
+                title: "Get started",
+                style: .primary,
+                size: .large,
+                trailingSymbol: "arrow.right",
+                action: onGetStarted
+            )
+            .onboardingEntrance(2)
+
+            Spacer().frame(height: 16)
+
+            legalNotice
+                .onboardingEntrance(3)
+            // Intel: no usage-data checkbox; Intel sends no telemetry.
+        }
+    }
+
+    /// First-run affirmative acceptance: proceeding is the action that
+    /// accepts the Terms and Privacy Policy, which is more defensible than a
+    /// passive footer link alone.
+    private var legalNotice: some View {
+        MarkdownLinkText(
+            markdown: OsaurusWebLinks.acceptanceMarkdown,
+            font: OnboardingTypography.footnote,
+            textColor: OnboardingPalette.labelSecondary,
+            linkColor: OnboardingPalette.accentBlue,
+            alignment: .leading
+        )
+        .fixedSize(horizontal: false, vertical: true)
+    }
+
+    // MARK: Right panel
+
+    /// Hero panel fades in alongside the left cascade — no scale settle; on
+    /// a surface this large even a 2% zoom is perceptible and adds nothing.
+    private var heroPanel: some View {
+        OnboardingRightPanel {
+            Image("osaurus-main", bundle: .module)
+                .resizable()
+                .aspectRatio(contentMode: .fit)
+                .padding(.horizontal, 16)
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+        }
+        .onboardingEntrance(1)
     }
 }
 
@@ -99,15 +123,11 @@ struct WelcomeCTA: View {
 #if DEBUG
     struct OnboardingWelcomeView_Previews: PreviewProvider {
         static var previews: some View {
-            let state = WelcomeState()
-            return VStack(spacing: 12) {
-                WelcomeBody(state: state)
-                    .frame(height: 420)
-                WelcomeUsageOptIn(state: state)
-                WelcomeCTA(onContinue: {})
+            ZStack {
+                OnboardingPalette.windowBackground
+                WelcomeStepView(state: WelcomeState(), onGetStarted: {})
             }
-            .frame(width: OnboardingMetrics.windowWidth, height: 540)
+            .frame(width: OnboardingMetrics.windowWidth, height: OnboardingMetrics.windowHeight)
         }
     }
-#endif
 #endif

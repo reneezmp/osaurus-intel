@@ -366,7 +366,7 @@ private struct OptionChip: View {
 /// between them and wraps to a new line when the next child would
 /// overflow the proposed width. Each child gets exactly its ideal
 /// size — no equal-width column squashing.
-private struct ChipFlowLayout: Layout {
+struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 8
     var lineSpacing: CGFloat = 8
 

@@ -4141,3 +4141,42 @@ Tests: upstream's `ThemeLibraryManagementServiceTests`, `ThemeFilterTests`,
 `ThemeShareServiceTests` and `ThemePreviewImageCacheTests`. Package gate:
 3,323 tests in 416 suites (6 known issues). Rosy: "Theme library and
 sharing" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Onboarding (`W-ui-misc`) — 2026-10-27
+
+Upstream's current three-step onboarding (Welcome → Create your Dino →
+brain) and its design system, replacing Intel's dead, fully gated older
+generation. Details and the Intel differences table:
+[`ONBOARDING_INTEL.md`](ONBOARDING_INTEL.md).
+
+- **The brain step without MLX:** the local-model card, chooser, downloads
+  and bundled-Raptor skip are removed; an "Osaurus Cloud" card (the managed
+  Router) takes the card's place above upstream's provider chips, Claude
+  Code and Custom. Claude Code pins Intel's `claude-code/sonnet` model
+  rather than upstream's harness runtime.
+- **Copy:** Welcome drops "No account or cloud required." and the
+  usage-data checkbox; the brain step no longer promises a model that runs
+  on the Mac.
+- **Existing installs:** no Intel build ever recorded
+  `hasCompletedOnboarding`, which also kept upstream announcements blocked
+  forever ("onboarding pending"). `OnboardingService.reconcileExistingInstall`
+  marks an install with user data complete once, at the very start of
+  launch (`StorageMigrator.isPristineInstall()`, now `nonisolated`).
+- **App wiring:** launch, reopen and the status item show onboarding while
+  it is pending; completion opens chat, then the one-time chat-history
+  import prompt (now wired, `CHAT_UX_INTEL.md`) and any deferred
+  announcement, with the layout tour held until they are queued.
+- **Shared files taken from upstream:** `ProviderCatalog` (new),
+  `ProviderPresets` (Fireworks, Mistral; Intel's credential-mode enums
+  kept), `ProviderCredentialInstructions`, `AgentStarterTemplate`;
+  `PastedProviderEndpoint.swift` holds upstream's endpoint-paste parser
+  until `RemoteProviderEditSheet` is ported (`W-providers-ux`).
+- **Not ported:** the What's New hero (Renée, 2026-10-27: skipped; Intel's
+  What's New never shows and upstream's pages announce upstream features).
+
+Tests: `IntelOnboardingExistingInstallTests`, and upstream's
+`CustomProviderFormParseTests`, `ProviderCatalogTests`,
+`ProviderPresetsTests`, `AgentStarterTemplateTests` and
+`RemoteProviderEndpointPasteTests`. Package gate: 3,366 tests in 421 suites
+(6 known issues). Rosy: "Onboarding" in
+`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md` (on a separate macOS user).

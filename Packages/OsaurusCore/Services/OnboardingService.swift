@@ -39,6 +39,47 @@ public final class OnboardingService: ObservableObject {
         UserDefaults.standard.set(currentOnboardingVersion, forKey: onboardingVersionKey)
     }
 
+    // MARK: - Intel: existing installs
+
+    /// Set once the existing-install check below has run.
+    private let intelExistingInstallReconciledKey = "intelOnboardingExistingInstallReconciled"
+
+    /// Intel builds before 2026-10-27 had no onboarding, so no install ever
+    /// recorded `hasCompletedOnboarding`. Without this, the first launch
+    /// with onboarding would push every existing user through it (and
+    /// `presentAnnouncementIfEligible` read "onboarding pending" forever).
+    /// Runs once per install, at launch, before anything writes to
+    /// `~/.osaurus`: an install that already has user data is marked
+    /// complete; a pristine one keeps onboarding. A later
+    /// `resetOnboarding()` (Identity reset) is not undone, since the check
+    /// never runs again.
+    public func reconcileExistingInstall(isPristineInstall: Bool) {
+        let defaults = UserDefaults.standard
+        let decision = Self.existingInstallDecision(
+            alreadyReconciled: defaults.bool(forKey: intelExistingInstallReconciledKey),
+            isPristineInstall: isPristineInstall,
+            shouldShowOnboarding: shouldShowOnboarding
+        )
+        guard decision != .alreadyReconciled else { return }
+        defaults.set(true, forKey: intelExistingInstallReconciledKey)
+        if decision == .markComplete { completeOnboarding() }
+    }
+
+    enum ExistingInstallDecision: Equatable {
+        case alreadyReconciled
+        case markComplete
+        case keepOnboarding
+    }
+
+    nonisolated static func existingInstallDecision(
+        alreadyReconciled: Bool,
+        isPristineInstall: Bool,
+        shouldShowOnboarding: Bool
+    ) -> ExistingInstallDecision {
+        if alreadyReconciled { return .alreadyReconciled }
+        return (!isPristineInstall && shouldShowOnboarding) ? .markComplete : .keepOnboarding
+    }
+
     /// Reset onboarding state (for re-running via help button)
     public func resetOnboarding() {
         UserDefaults.standard.set(false, forKey: hasCompletedOnboardingKey)

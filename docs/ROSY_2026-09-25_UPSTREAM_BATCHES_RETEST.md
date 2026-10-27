@@ -1907,3 +1907,29 @@ Details: `UPSTREAM_SYNC.md`, "Theme library and sharing".
       Themes with the import sheet filled in.
 - [ ] **Settings link:** `osaurus://settings?tab=themes` opens Settings on
       Themes.
+
+## Onboarding (2026-10-27)
+
+Details: `ONBOARDING_INTEL.md`. **Run the flow in a separate macOS user
+account** (System Settings › Users & Groups), not on your own: finishing it
+changes the active agent, creates a Dino and pins default models.
+
+- [ ] **Your account:** after updating, Osaurus opens straight into chat as
+      before; no onboarding window. Announcements can appear again.
+- [ ] **New account, Welcome:** first launch shows the dark onboarding
+      window: Welcome text (no "no cloud required", no usage-data checkbox),
+      Terms link, Get started.
+- [ ] **Create your Dino:** type a name, roll the avatar (the badge spins),
+      pick a specialty; Continue.
+- [ ] **Brain, Osaurus Cloud:** Use Osaurus Cloud finishes; chat opens on the
+      Orchestrator with a Router model, and the "Import your chat history"
+      prompt appears once (Skip it).
+- [ ] **Brain, provider:** in another fresh run (or after an Identity reset
+      in the test account), pick OpenRouter or Grok › browser sign-in, or
+      paste a key; the connection shows as verified and Continue finishes;
+      the first chat uses that provider's model.
+- [ ] **Brain, Claude Code and Custom:** Claude Code shows the CLI setup;
+      Custom accepts `http://localhost:11434/v1` without a key.
+- [ ] **Text fields on Ventura:** the name and key fields show a caret.
+- [ ] **Close early:** the X on any step closes onboarding and opens chat;
+      relaunching does not show onboarding again.

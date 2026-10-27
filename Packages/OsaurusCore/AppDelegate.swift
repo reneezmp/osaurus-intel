@@ -90,6 +90,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // fatally on `kqueue(): Too many open files` (APPLE-MACOS-19T).
         FileDescriptorLimit.raiseToMaximum()
 
+        // Intel onboarding (2026-10-27): decide "existing install or new"
+        // before anything below writes to `~/.osaurus`. Existing installs
+        // never ran onboarding, so they are marked complete once.
+        OnboardingService.shared.reconcileExistingInstall(
+            isPristineInstall: StorageMigrator.shared.isPristineInstall())
+
         // Seed the identity-existence memo off the main thread so the first
         // `existsCached()` caller (Credits, Search, Router chrome) doesn't pay
         // a synchronous keychain probe on the main thread (upstream #1523).
@@ -319,7 +325,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 sweepSwiftUISettingsPlaceholder()
             }
 
-            showChatWindow()
+            // Upstream: onboarding is the mandatory first step for a new
+            // install; everyone else lands in chat.
+            if OnboardingService.shared.shouldShowOnboarding {
+                showOnboardingWindow()
+            } else {
+                showChatWindow()
+            }
 
             if #available(macOS 26.0, *) {
                 for name in Self.swiftUISettingsPlaceholderNotifications {
@@ -484,7 +496,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // set. When false (all windows closed/hidden, or only the
             // status-bar item is alive), focus an existing hidden window
             // or create one.
-            if flag {
+            // Show onboarding if not completed (mandatory step, upstream).
+            if OnboardingService.shared.shouldShowOnboarding {
+                self.showOnboardingWindow()
+            } else if flag {
                 NSApp.unhide(nil)
                 _ = NSRunningApplication.current.activate(options: .activateIgnoringOtherApps)
             } else {
@@ -569,6 +584,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     }
 
     public func showPopover() {
+        // Onboarding is a mandatory first step (matches the reopen path,
+        // upstream): a fresh install must not reach chat unconfigured.
+        if OnboardingService.shared.shouldShowOnboarding {
+            showOnboardingWindow()
+            return
+        }
         guard let statusButton = statusItem?.button else { return }
         if let popover, popover.isShown {
             NSApp.activate(ignoringOtherApps: true)
@@ -1281,5 +1302,162 @@ extension AppDelegate {
             scope: scope
         )
         return nil
+    }
+}
+
+// MARK: - Onboarding Window (upstream, 2026-10-27)
+
+extension AppDelegate {
+    private static var onboardingWindow: NSWindow?
+
+    /// Upstream's onboarding window: a fixed, dark 1000×640 window hosting
+    /// `OnboardingView`. On completion it opens chat, then offers the
+    /// one-time chat-history import (fresh installs) and any deferred
+    /// announcement, holding the layout tour until those dialogs are queued.
+    @MainActor public func showOnboardingWindow(forceFresh: Bool = false) {
+        if let popover, popover.isShown { popover.performClose(nil) }
+
+        if !forceFresh, let existingWindow = Self.onboardingWindow, existingWindow.isVisible {
+            existingWindow.makeKeyAndOrderFront(nil)
+            NSApp.activate(ignoringOtherApps: true)
+            return
+        }
+        if forceFresh {
+            Self.onboardingWindow?.close()
+            Self.onboardingWindow = nil
+        }
+
+        // Read before building the view: `completeOnboarding()` flips
+        // `hasCompletedOnboarding` before `onComplete` runs. Re-onboarding
+        // users are not fresh and never see the import prompt.
+        let wasFreshInstall = OnboardingService.shared.isFreshInstall
+        let contentView = OnboardingView(
+            onComplete: { [weak self] in
+                Self.onboardingWindow?.close()
+                Self.onboardingWindow = nil
+                // Providers connected during onboarding must show in the picker.
+                ModelPickerItemCache.shared.invalidateCache()
+                // Hold the chat window's layout tour until the first-run
+                // dialogs below are queued, so its coachmarks don't start
+                // underneath the import prompt.
+                ChatLayoutTour.shared.holdAutoStart()
+                self?.showChatWindow()
+                Task { @MainActor [weak self] in
+                    defer { ChatLayoutTour.shared.releaseAutoStart() }
+                    try? await Task.sleep(for: .seconds(1))
+                    if wasFreshInstall {
+                        self?.presentImportHistoryPromptIfEligible()
+                    }
+                    // Fresh installs deferred any live announcement behind
+                    // onboarding; recheck now that chat is up to host it.
+                    self?.presentAnnouncementIfEligible()
+                }
+            }
+        )
+
+        let windowWidth: CGFloat = OnboardingMetrics.windowWidth
+        let windowHeight: CGFloat = OnboardingMetrics.windowHeight
+
+        // Dark-only (Figma kit): an explicit dark theme for nested theme
+        // consumers, plus Intel's Ventura caret/control repair for the
+        // connect dialog's text fields.
+        let theme = DarkTheme()
+        let hostingView = NSHostingView(
+            rootView: contentView
+                .environment(\.theme, theme)
+                .intelControlRendering(theme: theme)
+        )
+        hostingView.translatesAutoresizingMaskIntoConstraints = false
+        // The window size is fixed; don't let SwiftUI grow the hosting view.
+        hostingView.sizingOptions = []
+
+        let containerView = NSView(frame: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight))
+        containerView.addSubview(hostingView)
+        NSLayoutConstraint.activate([
+            hostingView.leadingAnchor.constraint(equalTo: containerView.leadingAnchor),
+            hostingView.trailingAnchor.constraint(equalTo: containerView.trailingAnchor),
+            hostingView.topAnchor.constraint(equalTo: containerView.topAnchor),
+            hostingView.bottomAnchor.constraint(equalTo: containerView.bottomAnchor),
+        ])
+
+        let window = NSWindow(
+            contentRect: NSRect(x: 0, y: 0, width: windowWidth, height: windowHeight),
+            styleMask: [.titled, .closable, .fullSizeContentView],
+            backing: .buffered,
+            defer: false
+        )
+        window.title = ""
+        window.contentView = containerView
+        window.center()
+        window.isReleasedWhenClosed = false
+        window.isRestorable = false
+        window.titlebarAppearsTransparent = true
+        window.titleVisibility = .hidden
+        window.standardWindowButton(.closeButton)?.isHidden = true
+        window.standardWindowButton(.miniaturizeButton)?.isHidden = true
+        window.standardWindowButton(.zoomButton)?.isHidden = true
+        window.appearance = NSAppearance(named: .darkAqua)
+        window.backgroundColor = NSColor(OnboardingPalette.windowBackground)
+        window.isMovableByWindowBackground = true
+        window.collectionBehavior = [.canJoinAllSpaces, .fullScreenAuxiliary]
+
+        Self.onboardingWindow = window
+        window.makeKeyAndOrderFront(nil)
+        NSApp.activate(ignoringOtherApps: true)
+    }
+
+    /// Upstream's one-time post-onboarding "Import your chat history"
+    /// suggestion for brand-new users (`ImportHistoryPromptGate`). Defers
+    /// behind any competing modal; the sidebar's Import button stays the
+    /// discoverable entry point. Intel: no telemetry.
+    @MainActor
+    func presentImportHistoryPromptIfEligible() {
+        let gate = ImportHistoryPromptGate.shared
+        guard gate.isEligible else { return }
+
+        guard NSApp.modalWindow == nil else { return }
+        guard !NSApp.windows.contains(where: { $0.attachedSheet != nil }) else { return }
+        guard !ThemedAlertCenter.shared.hasAnyActiveAlert else { return }
+        guard !ChatLayoutTour.shared.isActive else { return }
+
+        let scope: ThemedAlertScope
+        if let chatId = ChatWindowManager.shared.lastFocusedWindowId,
+            ChatWindowManager.shared.getNSWindow(id: chatId) != nil
+        {
+            scope = .chat(chatId)
+        } else if managementWindow?.isVisible == true {
+            scope = .management
+        } else {
+            scope = .toastOverlay
+        }
+
+        // Seen is persisted at presentation time, so even a force-quit
+        // while the dialog is up can't make it reappear.
+        gate.willPresent()
+
+        let requestId = UUID()
+        let sheet = ImportGuideSheet(showsSkipToggle: false) {
+            ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+            // nil agent = default agent; imported sessions refresh every
+            // window via `.chatSessionsImported`.
+            ChatSessionImportCoordinator.run(agentId: nil, scope: scope, onOpen: nil)
+        }
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Import your chat history"),
+                message: nil,
+                buttons: [.cancel(L("Skip")) {}],
+                showsCloseButton: true,
+                customContent: AnyView(sheet),
+                width: 470,
+                onDismiss: { [weak self] in
+                    gate.didDismiss()
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                    self?.presentAnnouncementIfEligible()
+                }
+            ),
+            scope: scope
+        )
     }
 }

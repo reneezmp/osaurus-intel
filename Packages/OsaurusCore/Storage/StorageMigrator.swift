@@ -203,7 +203,10 @@ public actor StorageMigrator {
     /// migrate. Dotfiles like `.storage-migration.lock` and
     /// `.pre-encryption-backup` are ignored so a lingering hidden marker
     /// from a previous launch doesn't mis-classify a real fresh install.
-    public func isPristineInstall() -> Bool {
+    /// `nonisolated` (pure file checks): Intel's launch reads it
+    /// synchronously, before anything writes, to tell an existing install
+    /// from a new one for onboarding (`OnboardingService`).
+    public nonisolated func isPristineInstall() -> Bool {
         let fm = FileManager.default
         let root = OsaurusPaths.root()
         var isDir: ObjCBool = false
@@ -218,7 +221,7 @@ public actor StorageMigrator {
         return meaningful.isEmpty
     }
 
-    private func isFreshInstallBootstrapEntry(_ entry: String, under root: URL) -> Bool {
+    private nonisolated func isFreshInstallBootstrapEntry(_ entry: String, under root: URL) -> Bool {
         let url = root.appendingPathComponent(entry)
         var isDir: ObjCBool = false
         guard FileManager.default.fileExists(atPath: url.path, isDirectory: &isDir), isDir.boolValue else {
@@ -245,7 +248,7 @@ public actor StorageMigrator {
         return false
     }
 
-    private func isDirectoryEmpty(_ url: URL) -> Bool {
+    private nonisolated func isDirectoryEmpty(_ url: URL) -> Bool {
         let contents =
             (try? FileManager.default.contentsOfDirectory(
                 at: url,
@@ -255,7 +258,7 @@ public actor StorageMigrator {
         return contents.isEmpty
     }
 
-    private func containsOnlyBuiltInThemeJSON(_ url: URL) -> Bool {
+    private nonisolated func containsOnlyBuiltInThemeJSON(_ url: URL) -> Bool {
         let files =
             (try? FileManager.default.contentsOfDirectory(
                 at: url,
@@ -285,7 +288,7 @@ public actor StorageMigrator {
         "server.json",
     ]
 
-    private func containsOnlyBootstrapConfigFiles(_ url: URL) -> Bool {
+    private nonisolated func containsOnlyBootstrapConfigFiles(_ url: URL) -> Bool {
         let entries =
             (try? FileManager.default.contentsOfDirectory(
                 at: url,

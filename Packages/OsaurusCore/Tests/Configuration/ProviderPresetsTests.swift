@@ -111,6 +111,54 @@ struct ProviderPresetsTests {
         )
     }
 
+    @Test func fireworksPreset_configurationMatchesOfficialAPI() throws {
+        let config = ProviderPreset.fireworks.configuration
+
+        #expect(config.name == "Fireworks AI")
+        #expect(config.host == "api.fireworks.ai")
+        #expect(config.providerProtocol == .https)
+        #expect(config.port == nil)
+        #expect(config.basePath == "/inference/v1")
+        #expect(config.authType == .apiKey)
+        #expect(config.providerType == .openaiLegacy)
+    }
+
+    @Test func fireworksPreset_isListedAsKnownPreset() throws {
+        #expect(ProviderPreset.knownPresets.contains(.fireworks))
+    }
+
+    @Test func matching_providerWithFireworksHost_resolvesToFireworksPreset() throws {
+        let provider = RemoteProvider(
+            name: "My Fireworks",
+            host: "api.fireworks.ai",
+            basePath: "/inference/v1",
+            authType: .apiKey,
+            providerType: .openaiLegacy
+        )
+
+        #expect(ProviderPreset.matching(provider: provider) == .fireworks)
+    }
+
+    @Test func fireworksPreset_chatEndpointResolvesToChatCompletions() throws {
+        let provider = RemoteProvider(
+            name: "Fireworks AI",
+            host: ProviderPreset.fireworks.configuration.host,
+            basePath: ProviderPreset.fireworks.configuration.basePath,
+            authType: .apiKey,
+            providerType: ProviderPreset.fireworks.configuration.providerType
+        )
+
+        #expect(
+            provider.url(for: provider.providerType.chatEndpoint)?.absoluteString
+                == "https://api.fireworks.ai/inference/v1/chat/completions"
+        )
+    }
+
+    // Intel: upstream's `fireworksPreset_isDetectedByFireworksModelDiscovery`
+    // tests `RemoteProviderService.isFireworksProvider`, which Intel's
+    // excluded service holds; Intel's discovery lacks the Fireworks
+    // serverless-catalog augmentation (`W-providers-ux`).
+
     @Test func minimaxPreset_configurationMatchesOfficialAPI() throws {
         let config = ProviderPreset.minimax.configuration
 
@@ -160,5 +208,53 @@ struct ProviderPresetsTests {
             provider.url(for: provider.providerType.chatEndpoint)?.absoluteString
                 == "https://api.minimax.io/v1/chat/completions"
         )
+    }
+
+    // MARK: - OAuth-first picker grouping
+
+    @Test func oauthProviders_areTheThreeOneClickProviders() throws {
+        #expect(ProviderPreset.oauthProviders == [.openai, .xai, .openrouter])
+    }
+
+    @Test func apiKeyProviders_includeDualModeProvidersButNotLocalOrCustom() throws {
+        let keyVendors = ProviderPreset.apiKeyProviders
+        // The OAuth-first presets each also expose a paste-a-key path, so they
+        // appear in the API-key list too (no in-form fork).
+        #expect(keyVendors.contains(.openai))
+        #expect(keyVendors.contains(.xai))
+        #expect(keyVendors.contains(.openrouter))
+        #expect(keyVendors.contains(.anthropic))
+        #expect(keyVendors.contains(.azureOpenAI))
+        // Ollama (local, no key) and Custom (its own section) stay out.
+        #expect(!keyVendors.contains(.ollama))
+        #expect(!keyVendors.contains(.custom))
+    }
+
+    @Test func apiKeyPickerGroups_omitAzureWhenRequested() throws {
+        let onboarding = ProviderPreset.apiKeyPickerGroups(includeAzure: false)
+        let onboardingPresets = onboarding.flatMap { $0.presets }
+        #expect(!onboardingPresets.contains(.azureOpenAI))
+
+        let settings = ProviderPreset.apiKeyPickerGroups(includeAzure: true)
+        let settingsPresets = settings.flatMap { $0.presets }
+        #expect(settingsPresets.contains(.azureOpenAI))
+    }
+
+    @Test func apiKeyPickerGroups_includeLocalAndCustomSections() throws {
+        let groups = ProviderPreset.apiKeyPickerGroups(includeAzure: true)
+        #expect(groups.contains { $0.presets == [.ollama] })
+        #expect(groups.contains { $0.presets == [.custom] })
+    }
+
+    /// The OAuth top level plus the "Use an API key" sub-list (settings variant)
+    /// must collectively cover every known preset plus custom — nothing dropped.
+    @Test func oauthAndAPIKeyPicker_coverAllKnownPresetsPlusCustom() throws {
+        let topLevel = Set(ProviderPreset.oauthProviders)
+        let subList = Set(
+            ProviderPreset.apiKeyPickerGroups(includeAzure: true).flatMap { $0.presets }
+        )
+        let covered = topLevel.union(subList)
+        let expected = Set(ProviderPreset.knownPresets).union([.custom])
+        #expect(covered == expected)
     }
 }

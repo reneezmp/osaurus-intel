@@ -5,9 +5,8 @@
 //  Lightweight presets used by the create-agent flows (both the in-app
 //  AgentEditorSheet and the onboarding "Create your agent" step). Picking
 //  one prefills the system prompt and (only when the user hasn't typed yet)
-//  a default name. Description, generation overrides, and visual theme are
-//  intentionally NOT part of the create flow — they're all editable
-//  post-creation in Configure.
+//  a default name. Creation requires an explicit routing description.
+//  Generation overrides and visual theme remain editable in Configure.
 //
 
 import Foundation
@@ -22,21 +21,20 @@ enum AgentStarterTemplate: String, CaseIterable, Identifiable {
 
     var id: String { rawValue }
 
-    /// Curated, ordered archetype list shown in the onboarding "Meet your
-    /// dino" step. Excludes `.blank` (a from-scratch option that only makes
-    /// sense in the in-app editor) and leads with the general-purpose
-    /// `.assistant` so a brand-new user can pick one and move on.
-    static let onboardingArchetypes: [AgentStarterTemplate] =
-        [.assistant, .writer, .researcher, .coder, .productivity]
+    /// Ids accepted by the declarative `agents[].template` key (everything
+    /// but `blank`, which has nothing to seed).
+    static var configTemplateIds: [String] {
+        allCases.filter { $0 != .blank }.map(\.rawValue)
+    }
 
     var label: String {
         switch self {
-        case .blank: return "Blank"
-        case .assistant: return "Assistant"
-        case .writer: return "Writer"
-        case .researcher: return "Researcher"
-        case .coder: return "Coder"
-        case .productivity: return "Productivity"
+        case .blank: return L("Blank")
+        case .assistant: return L("Assistant")
+        case .writer: return L("Writer")
+        case .researcher: return L("Researcher")
+        case .coder: return L("Coder")
+        case .productivity: return L("Productivity")
         }
     }
 
@@ -56,11 +54,11 @@ enum AgentStarterTemplate: String, CaseIterable, Identifiable {
     var defaultName: String {
         switch self {
         case .blank: return ""
-        case .assistant: return "Assistant"
-        case .writer: return "Writer"
-        case .researcher: return "Researcher"
-        case .coder: return "Coder"
-        case .productivity: return "Productivity"
+        case .assistant: return L("Assistant")
+        case .writer: return L("Writer")
+        case .researcher: return L("Researcher")
+        case .coder: return L("Coder")
+        case .productivity: return L("Productivity")
         }
     }
 
@@ -72,15 +70,28 @@ enum AgentStarterTemplate: String, CaseIterable, Identifiable {
         case .blank:
             return ""
         case .assistant:
-            return "A friendly all-rounder for everyday questions and tasks."
+            return L("A friendly all-rounder for everyday questions and tasks.")
         case .writer:
-            return "A thoughtful partner for drafting, editing, and polishing prose."
+            return L("A thoughtful partner for drafting, editing, and polishing prose.")
         case .researcher:
-            return "A careful guide for digging into topics and weighing sources."
+            return L("A careful guide for digging into topics and weighing sources.")
         case .coder:
-            return "A pragmatic pair-programmer for reading and writing code."
+            return L("A pragmatic pair-programmer for reading and writing code.")
         case .productivity:
-            return "A focused helper for planning, todos, and staying on track."
+            return L("A focused helper for planning, todos, and staying on track.")
+        }
+    }
+
+    /// Reviewed metadata for the explicit built-in starter-library action.
+    /// Manual UI/config creation still requires its own description.
+    var routingDescription: String {
+        switch self {
+        case .blank: return ""
+        case .assistant: return "Handles a separate everyday task when an independent assistant is useful. General questions can stay in the current chat."
+        case .writer: return "Drafts, edits and polishes prose. Use for a focused writing or revision task with a specified audience and style."
+        case .researcher: return "Researches questions, compares sources and flags uncertainty. Use when a task needs evidence gathering and synthesis."
+        case .coder: return "Reads, writes and reviews code. Use for a focused programming task with relevant code, requirements and workspace access."
+        case .productivity: return "Organizes plans, priorities and action lists. Use to break a complex goal into practical next steps."
         }
     }
 

@@ -230,11 +230,10 @@ what Intel adapted; everything else is upstream verbatim.
 - Files: `Views/Chat/ImportGuideSheet.swift` (upstream; the checkbox uses
   `ThemedCheckboxToggleStyle` for Ventura) and the upstream
   `requestImport()` in `ChatHistoryPane`.
-- **Not wired yet:** upstream's one-time "Import your chat history" prompt
-  after onboarding. `Services/ImportHistoryPromptGate.swift` and its tests
-  are ported, but Intel doesn't run upstream's onboarding flow, which is
-  the prompt's only trigger. Wire `presentImportHistoryPromptIfEligible`
-  when onboarding lands (`W-ui-misc`).
+- **Wired 2026-10-27** with onboarding (`ONBOARDING_INTEL.md`): upstream's
+  one-time "Import your chat history" prompt after a fresh install finishes
+  onboarding (`AppDelegate.presentImportHistoryPromptIfEligible`,
+  `ImportHistoryPromptGate`).
 - No telemetry on Intel, so the coordinator keeps no `source:` entry point.
 
 ## Markdown block parser and document view
@@ -365,8 +364,8 @@ All ten remaining items are done, moved or staged:
 2. Activity roll-up and expand thinking while streaming: done.
 3. Smooth streaming: done.
 4. Screenshot attach: done.
-5. Chat import guide: done (the post-onboarding prompt waits for
-   onboarding, `W-ui-misc`).
+5. Chat import guide: done (the post-onboarding prompt is wired since
+   2026-10-27).
 6. Markdown block parser and document view: done.
 7. Dispatch rows: done for self-scheduled and watcher runs; channel and
    delegated kinds wait for `W-channels` / `W-subagents`.
