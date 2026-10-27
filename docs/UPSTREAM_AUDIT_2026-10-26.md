@@ -205,7 +205,8 @@ can't be observed in SwiftPM (the forwarding into the controller is asserted).
   than upstream's v10. On the dev Mac, Intel and the installed upstream app
   share `~/.osaurus/memory/memory.sqlite`, so an Intel launch there could open
   a newer-schema database without refusing. Not ported here; recorded on the
-  backlog (`W-memory-db-sync`).
+  backlog (`W-memory-db-sync`). **Done 2026-10-27**, see `UPSTREAM_SYNC.md`
+  "Memory database at upstream's schema".
 - **Intel's Settings window floor was `min(900, …)`,** below the SwiftUI
   root's own 940-point minimum and older than the per-screen clamp (#2761).
   It now follows the controller-mirrored floor, as upstream.

@@ -3833,3 +3833,56 @@ Lessons for the next audit:
   loop turns, so window-geometry assertions after a run-loop drain are
   unreliable there (`ManagementWindowFloorTests`).
 
+### Memory database at upstream's schema (`W-memory-db-sync`) — 2026-10-27
+
+Intel's `MemoryDatabase` now matches upstream's schema v10 and refuses a file
+written by a newer build. Ported from #1323 / #1635 (forward-version refusal,
+`pending_signals.attempts`, D1 dead-letter cap, D2 id-scoped marking), #1444
+(a failed migration closes the connection; rename-free `pending_signals`
+rebuild at v9) and #1452 (v5 defers foreign keys), plus the diagnostics
+accessors (`lastOpenErrorDescription`, `schemaUserVersion()`,
+`expectedSchemaVersion`). The refusal is a `ForwardVersionStoreError`, so
+`StorageOpenIssueKind.classify` reports `.forwardVersion` and Storage settings
+show "NEWER VERSION" with no Reset.
+
+**Found: the version numbers collided.** Intel's v8 and v9 were its own
+migrations (embedding columns on `transcript`, then `episodes` and
+`pinned_facts`), while upstream's v8 and v9 re-run the orphan `signal_type`
+drop and its v10 adds `attempts`. A `memory.sqlite` the upstream app had
+stamped v9 or v10 (the dev Mac shares `~/.osaurus` with the installed upstream
+app; a Migration Assistant copy would too) skipped Intel's embedding steps, so
+embedding writes failed and recall fell back to text search. Porting only the
+refusal would have been worse: Intel at v9 would have refused its own memory
+on any file upstream had already moved to v10. Now:
+
+- the version chain is upstream's, step for step, and `latestSchemaVersion`
+  is 10;
+- Intel's embedding columns are `ensureIntelEmbeddingColumns()`, idempotent
+  and run on every open, never a version (upstream keeps its own side tables
+  out of the chain for the same reason);
+- **rule:** an Intel-only schema change is an ensure step, never a version
+  bump; bump `latestSchemaVersion` only when porting upstream's next step;
+- upstream always names its columns, so the extra nullable columns are
+  invisible to it.
+
+`IntelMemoryService.performDistillSession` follows upstream's outcome rules:
+a terminal "no episode" or "empty summary" marks the snapshotted signals
+processed (they were retried on every launch before); failures, timeouts and
+hung models count toward `MemoryConfiguration.distillMaxAttempts` (3) and
+then dead-letter; an unreachable model (Intel's `.unavailable`, upstream's
+`.modelUnavailable`) and cancellation stay pending and don't count. The
+diagnostics counted a `'dead'` status nothing wrote; they now count
+upstream's `'dead_letter'`.
+
+Not ported: #1635's ingest idempotency deletes (I1) and `DistillOutcome`
+returns, which serve upstream's `/memory/ingest`; #3210's
+`delegated_conversations` side table and loose-term recall (after
+`fc75a1e06`; the next mini-audit).
+
+Tests: `MemoryIngestRobustnessTests` (upstream's, minus I1, plus the
+dead-letter diagnostics count) and `MemoryDatabaseSharedFileTests` (a newer
+file is refused, closed and classified as a downgrade; an upstream-stamped
+v10 file gets the embedding columns and accepts embedding writes; an older
+Intel v9 file moves to v10 with its rows). Package gate: 3,251 tests in 403
+suites (6 known issues), `~/.osaurus` and the identity key untouched. Rosy
+section "Memory database sync" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

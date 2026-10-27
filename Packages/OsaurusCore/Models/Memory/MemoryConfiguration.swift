@@ -140,6 +140,14 @@ public struct MemoryConfiguration: Codable, Equatable, Sendable {
     /// Minimum combined (user+assistant) char count before distillation
     /// considers a turn worth processing.
     public static let distillNoveltyMinChars = 80
+    /// Max distillation attempts before a session's pending signals are
+    /// dead-lettered (`status='dead_letter'`) so an unparseable / repeatedly
+    /// failing session stops re-distilling on every launch/ingest/debounce
+    /// forever (root cause of the "108 error / 5 empty" `processing_log`
+    /// rows in issue #1632). Transient skips (no core model, breaker open,
+    /// model unavailable) and cancellations deliberately do NOT count toward
+    /// this cap — they stay `pending` and recover once the model is ready.
+    public static let distillMaxAttempts = 3
     /// Salience half-life in days, used by the consolidator's decay step.
     public static let salienceHalfLifeDays: Double = 30
     /// Number of episodes a candidate must appear in before the

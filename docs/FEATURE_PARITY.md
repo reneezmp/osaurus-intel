@@ -111,6 +111,10 @@ tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
   (#3068); `gpt-6.1-sol` (#3141); MCP progress past 120 s (#3193).
 - Memory recall: OR-prefix FTS matching (#1815, found SKIPped) and
   relevance-first pinned ranking (#3083).
+- Memory store at upstream's schema (`W-memory-db-sync`, 2026-10-27): v10 with
+  upstream's numbering, refusal of a newer file, a failed migration closes the
+  store, and the distill retry cap with dead-lettering (#1323, #1444, #1452,
+  #1635 D1/D2).
 
 ### Partial
 | Area | Missing behavior exposed by upstream | Next Intel gate |
@@ -118,7 +122,6 @@ tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
 | Hosted Gemini | Reasoning-effort control (#3115). | Port `GeminiReasoningContract`, wire into Intel's provider path and picker. |
 | Chat transcript performance | Height-note batching (#3080). | Hand port into Intel's `MessageTableRepresentable`; long tool-heavy chat check. |
 | Chat engine slices | #3203's tool-choice, streaming, image-payload, probe and tool-card slices. | Check each against `CloudChatEngine`. |
-| Memory store | Forward-version refusal and newer schema (`W-memory-db-sync`). | Port the refusal first (shared `~/.osaurus` on the dev Mac). |
 
 ### Dependency-blocked
 | Area | Dependency before implementation/promotion |

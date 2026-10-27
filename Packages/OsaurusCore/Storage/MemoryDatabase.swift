@@ -24,11 +24,12 @@ import CryptoKit
 import Foundation
 import OsaurusSQLCipher
 
-public enum MemoryDatabaseError: Error, LocalizedError {
+public enum MemoryDatabaseError: Error, LocalizedError, ForwardVersionStoreError {
     case failedToOpen(String)
     case failedToExecute(String)
     case failedToPrepare(String)
     case migrationFailed(String)
+    case databaseFromNewerVersion(found: Int, expected: Int)
     case notOpen
 
     public var errorDescription: String? {
@@ -37,15 +38,25 @@ public enum MemoryDatabaseError: Error, LocalizedError {
         case .failedToExecute(let msg): return "Failed to execute query: \(msg)"
         case .failedToPrepare(let msg): return "Failed to prepare statement: \(msg)"
         case .migrationFailed(let msg): return "Memory migration failed: \(msg)"
+        case .databaseFromNewerVersion(let found, let expected):
+            return
+                "Memory database is schema v\(found) but this build supports up to v\(expected). Refusing to open to avoid forward-version corruption."
         case .notOpen: return "Memory database is not open"
         }
+    }
+
+    /// Only the forward-version refusal is a healthy-file downgrade; every
+    /// other case here is a real fault.
+    public var isForwardVersion: Bool {
+        if case .databaseFromNewerVersion = self { return true }
+        return false
     }
 }
 
 public final class MemoryDatabase: @unchecked Sendable {
     public static let shared = MemoryDatabase()
 
-    private static let schemaVersion = 9
+    private static let schemaVersion = 10
 
     nonisolated(unsafe) private static let iso8601Formatter: ISO8601DateFormatter = {
         let f = ISO8601DateFormatter()
@@ -61,8 +72,30 @@ public final class MemoryDatabase: @unchecked Sendable {
 
     private let stmtCache = PreparedStatementCache(capacity: 96)
 
+    /// Why the most recent `open()` failed (connection or migration),
+    /// kept for the diagnostics panel — `isOpen == false` alone gives the
+    /// user nothing actionable. Guarded by `queue`.
+    private var _lastOpenError: String?
+
     public var isOpen: Bool {
         queue.sync { db != nil }
+    }
+
+    public var lastOpenErrorDescription: String? {
+        queue.sync { _lastOpenError }
+    }
+
+    /// Schema version this build expects (`PRAGMA user_version` once all
+    /// migrations have run). Surfaced by diagnostics.
+    public static var expectedSchemaVersion: Int { latestSchemaVersion }
+
+    /// Current `PRAGMA user_version` of the open database, or nil when
+    /// closed. Surfaced by diagnostics.
+    public func schemaUserVersion() -> Int? {
+        queue.sync {
+            guard db != nil else { return nil }
+            return try? getSchemaVersion()
+        }
     }
 
     public static func waitForSharedOpen(
@@ -96,8 +129,31 @@ public final class MemoryDatabase: @unchecked Sendable {
         try queue.sync {
             guard db == nil else { return }
             OsaurusPaths.ensureExistsSilent(OsaurusPaths.memory())
-            try openConnection()
-            try runMigrations()
+            do {
+                try openConnection()
+            } catch {
+                _lastOpenError = error.localizedDescription
+                throw error
+            }
+            do {
+                try runMigrations()
+                _lastOpenError = nil
+            } catch {
+                // Close the half-opened connection before rethrowing.
+                // Leaving `db` set here turns every retry of `open()` into
+                // an instant no-op success (`guard db == nil`), so the app
+                // would run against the unmigrated schema and the migration
+                // failure would never surface anywhere. For the
+                // forward-version refusal it would also leave Intel reading
+                // and writing a newer build's file.
+                _lastOpenError = "migration: \(error.localizedDescription)"
+                stmtCache.clear()
+                if let connection = db {
+                    sqlite3_close(connection)
+                    db = nil
+                }
+                throw error
+            }
         }
         OsaurusDatabaseHandle.register(maintenanceHandle)
     }
@@ -151,22 +207,64 @@ public final class MemoryDatabase: @unchecked Sendable {
 
     // MARK: - Schema & Migrations
 
+    /// Highest schema version this build knows how to produce. Opening a DB
+    /// stamped newer than this is refused (forward-version fail-fast).
+    /// Intel: must match upstream's numbering exactly (see
+    /// `ensureIntelEmbeddingColumns`); bump only when porting upstream's
+    /// next step.
+    private static let latestSchemaVersion = 10
+
     private func runMigrations() throws {
         let currentVersion = try getSchemaVersion()
+        // Refuse a database written by a newer build: reading its rows under
+        // the older schema would silently corrupt forward-version data.
+        if currentVersion > Self.latestSchemaVersion {
+            throw MemoryDatabaseError.databaseFromNewerVersion(
+                found: currentVersion,
+                expected: Self.latestSchemaVersion
+            )
+        }
+        // Each step is atomic (BEGIN/COMMIT). A failure mid-migration rolls
+        // back to the prior version instead of leaving a half-applied schema;
+        // the `setSchemaVersion` bump commits with the step.
         if currentVersion < 5 {
-            try migrateToV5(from: currentVersion)
+            try runMigrationStep(5) { try self.migrateToV5(from: currentVersion) }
         }
         if currentVersion < 6 {
-            try migrateToV6()
+            try runMigrationStep(6, migrateToV6)
         }
         if currentVersion < 7 {
+            // `migrateToV7` owns its own BEGIN/COMMIT (table rebuild), so it
+            // must NOT be double-wrapped — a nested BEGIN traps SQLite.
             try migrateToV7()
         }
         if currentVersion < 8 {
+            // Same self-managed BEGIN/COMMIT as v7 — do not double-wrap.
             try migrateToV8()
         }
         if currentVersion < 9 {
+            // Same self-managed BEGIN/COMMIT as v7/v8 — do not double-wrap.
             try migrateToV9()
+        }
+        if currentVersion < 10 {
+            // Single `ALTER TABLE ... ADD COLUMN`; no rebuild/rename, so it
+            // owns its own (trivial) statement and stamps the version itself.
+            try migrateToV10()
+        }
+        try ensureIntelEmbeddingColumns()
+    }
+
+    /// Run one migration body atomically. Called only from `runMigrations`,
+    /// which already holds the database queue, so it uses raw
+    /// `BEGIN/COMMIT/ROLLBACK` (no nested `queue.sync`).
+    private func runMigrationStep(_ version: Int, _ body: () throws -> Void) throws {
+        try executeRaw("BEGIN TRANSACTION")
+        do {
+            try body()
+            try executeRaw("COMMIT")
+        } catch {
+            try? executeRaw("ROLLBACK")
+            throw MemoryDatabaseError.migrationFailed("v\(version): \(error.localizedDescription)")
         }
     }
 
@@ -191,6 +289,17 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// `embeddings`, and the graph tables (`entities` / `relationships`).
     private func migrateToV5(from previousVersion: Int) throws {
         MemoryLogger.database.info("Running v5 migration (previous version: \(previousVersion))")
+
+        // Connections open with foreign_keys = ON, so the DROP TABLE sweep below
+        // would implicitly delete rows from each old table as it is dropped and
+        // fail with "FOREIGN KEY constraint failed" whenever a not-yet-dropped
+        // child still references a parent being dropped. Defer FK checks to the
+        // commit of this migration: unlike foreign_keys, defer_foreign_keys is
+        // settable inside a transaction and resets when it commits. By then every
+        // old table is gone and the v5 tables declare no FKs, so nothing is left
+        // to violate. Without this, v5 rolls back on affected installs and the
+        // whole migration chain (v6-v9) never runs.
+        try executeRaw("PRAGMA defer_foreign_keys = ON")
 
         // Create v2 tables first so we can copy into them within the same migration.
         try createV5Tables()
@@ -390,7 +499,93 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// migration a fast no-op for fresh installs.
     private func migrateToV7() throws {
         MemoryLogger.database.info("Running v7 migration (drop orphan pending_signals.signal_type)")
+        try dropOrphanSignalTypeColumnIfPresent()
+        try setSchemaVersion(7)
+    }
 
+    /// V8 migration: re-run the orphan `signal_type` drop.
+    ///
+    /// `migrateToV7` is version-gated behind `currentVersion < 7`, so any
+    /// database that was stamped `user_version = 7` *while still carrying*
+    /// the orphan column (an intermediate pre-release build bumped the
+    /// version without effectively dropping it) never got repaired — and
+    /// because the runtime `INSERT INTO pending_signals` doesn't bind
+    /// `signal_type`, every buffer-turn write throws
+    /// `SQLITE_CONSTRAINT_NOTNULL` (extended code 1299), so no turn ever
+    /// reaches the database and no episodes are ever produced. Re-running
+    /// the same idempotent drop at v8 lets those stuck databases self-heal;
+    /// it's a fast no-op for everyone already canonical.
+    private func migrateToV8() throws {
+        MemoryLogger.database.info("Running v8 migration (re-check orphan pending_signals.signal_type)")
+        try dropOrphanSignalTypeColumnIfPresent()
+        try setSchemaVersion(8)
+    }
+
+    /// V9 migration: re-run the orphan `signal_type` drop, now rename-free.
+    ///
+    /// The v7/v8 rebuild started with `ALTER TABLE ... RENAME`, which makes
+    /// SQLite re-parse every view and trigger in the database — a single
+    /// stale schema object left behind by an earlier build fails that
+    /// statement, and with it the whole migration, on every launch.
+    /// Combined with the old `open()` behavior (a failed migration left the
+    /// connection set, so retries no-opped into "success"), affected
+    /// installs kept running against the orphan schema with no visible
+    /// error and their `user_version` never advanced. The rebuild in
+    /// `dropOrphanSignalTypeColumnIfPresent` is now a copy-out/copy-back
+    /// through a scratch table that only ever parses `pending_signals`
+    /// itself, so unrelated schema debris can't block it. Re-running it at
+    /// v9 heals databases whose earlier repair attempts kept failing; it's
+    /// a fast no-op for everyone already canonical.
+    private func migrateToV9() throws {
+        MemoryLogger.database.info("Running v9 migration (rename-free orphan signal_type drop)")
+        try dropOrphanSignalTypeColumnIfPresent()
+        try setSchemaVersion(9)
+    }
+
+    /// V10 migration: add `pending_signals.attempts` to back the
+    /// distillation retry cap + dead-letter (issue #1632). A session that
+    /// never yields a parseable episode used to be retried on every launch,
+    /// ingest, and debounce forever (the 108 error / 5 empty
+    /// `processing_log` rows). The distiller now bumps `attempts` on each
+    /// retryable failure and flips the rows to `status='dead_letter'` once
+    /// they exceed `MemoryConfiguration.distillMaxAttempts`, dropping them
+    /// out of `loadPendingSignals` / `pendingConversations`.
+    ///
+    /// Implemented as a guarded `ADD COLUMN` rather than the v7-v9
+    /// copy-out/copy-back rebuild: `ADD COLUMN` does not RENAME the table,
+    /// so it can't be tripped by unrelated stale views/triggers. The
+    /// column-presence check keeps it idempotent for fresh installs (which
+    /// already created the canonical table at v5) and for re-runs.
+    private func migrateToV10() throws {
+        MemoryLogger.database.info("Running v10 migration (pending_signals.attempts + dead-letter)")
+        if !pendingSignalsHasColumn("attempts") {
+            try executeRaw(
+                "ALTER TABLE pending_signals ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0"
+            )
+        }
+        try setSchemaVersion(10)
+    }
+
+    /// Whether `pending_signals` currently has `column`. Cheap
+    /// `PRAGMA table_info` scan; used by `migrateToV10` to stay idempotent.
+    private func pendingSignalsHasColumn(_ column: String) -> Bool {
+        var found = false
+        try? executeRaw("PRAGMA table_info(pending_signals)") { stmt in
+            while sqlite3_step(stmt) == SQLITE_ROW {
+                if String(cString: sqlite3_column_text(stmt, 1)) == column {
+                    found = true
+                    break
+                }
+            }
+        }
+        return found
+    }
+
+    /// Detect and drop the orphan `pending_signals.signal_type` column if it
+    /// is present, leaving the canonical schema behind. Idempotent: a no-op
+    /// when the column is already absent. Does **not** stamp the schema
+    /// version — the calling migration owns that.
+    private func dropOrphanSignalTypeColumnIfPresent() throws {
         var hasOrphan = false
         try executeRaw("PRAGMA table_info(pending_signals)") { stmt in
             while sqlite3_step(stmt) == SQLITE_ROW {
@@ -403,20 +598,33 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
 
         guard hasOrphan else {
-            try setSchemaVersion(7)
-            MemoryLogger.database.info("v7 migration: no orphan column found, schema already canonical")
+            MemoryLogger.database.info("pending_signals already canonical, no orphan column to drop")
             return
         }
 
-        // SQLite 3.35+ supports ALTER TABLE DROP COLUMN, but the
-        // vendored SQLCipher build's exact version is unknown to us
-        // here. The rename + recreate + copy + drop pattern works on
-        // every SQLite 3.x and is the SQLite-recommended path for
-        // schema rewrites. Wrap in a transaction so a crash mid-flight
-        // doesn't leave a half-rebuilt table.
+        // Rebuild without `ALTER TABLE`: a RENAME makes SQLite re-parse
+        // every view and trigger in the database, so a single stale schema
+        // object from an earlier build fails the rebuild outright. A
+        // copy-out/copy-back through a scratch table only ever parses
+        // `pending_signals` itself. Wrap in a transaction so a crash
+        // mid-flight doesn't leave a half-rebuilt table.
         try executeRaw("BEGIN TRANSACTION")
         do {
-            try executeRaw("ALTER TABLE pending_signals RENAME TO pending_signals_v6")
+            // Scratch tables an interrupted earlier rebuild may have left
+            // behind; they only ever hold a stale duplicate of
+            // `pending_signals`, never the sole copy.
+            try executeRaw("DROP TABLE IF EXISTS pending_signals_v6")
+            try executeRaw("DROP TABLE IF EXISTS pending_signals_old")
+            try executeRaw("DROP TABLE IF EXISTS pending_signals_scratch")
+            try executeRaw(
+                """
+                    CREATE TABLE pending_signals_scratch AS
+                    SELECT id, agent_id, conversation_id, user_message,
+                           assistant_message, status, created_at
+                    FROM pending_signals
+                """
+            )
+            try executeRaw("DROP TABLE pending_signals")
             try executeRaw(
                 """
                     CREATE TABLE pending_signals (
@@ -436,12 +644,12 @@ public final class MemoryDatabase: @unchecked Sendable {
                         (id, agent_id, conversation_id, user_message, assistant_message, status, created_at)
                     SELECT
                         id, agent_id, conversation_id, user_message, assistant_message, status, created_at
-                    FROM pending_signals_v6
+                    FROM pending_signals_scratch
                 """
             )
-            try executeRaw("DROP TABLE pending_signals_v6")
-            // Indexes were attached to the old table name and got
-            // dropped along with it; recreate against the new table.
+            try executeRaw("DROP TABLE pending_signals_scratch")
+            // The indexes were dropped with the original table; recreate
+            // against the rebuilt one.
             try executeRaw(
                 "CREATE INDEX IF NOT EXISTS idx_pending_conv_status ON pending_signals(conversation_id, status)"
             )
@@ -454,46 +662,24 @@ public final class MemoryDatabase: @unchecked Sendable {
             throw error
         }
 
-        try setSchemaVersion(7)
-        MemoryLogger.database.info("v7 migration: rebuilt pending_signals without signal_type column")
+        MemoryLogger.database.info("rebuilt pending_signals without orphan signal_type column")
     }
 
-    /// V8 migration (Intel fork): add embedding columns to `transcript` so the
-    /// pure-Swift / cloud embedders can store vectors inline (the Intel build has
-    /// no VecturaKit — vectors live as a float32 BLOB and are cosine-ranked with
-    /// Accelerate). `embedding_dim` + `embedding_provider` are stored alongside so
-    /// a backend switch can detect a dimension mismatch and trigger a re-embed.
-    /// Idempotent: skips columns that already exist (mirrors the v7 table_info guard).
-    private func migrateToV8() throws {
-        MemoryLogger.database.info("Running v8 migration (transcript embedding columns)")
-        var existing = Set<String>()
-        try executeRaw("PRAGMA table_info(transcript)") { stmt in
-            while sqlite3_step(stmt) == SQLITE_ROW {
-                if let cName = sqlite3_column_text(stmt, 1) {
-                    existing.insert(String(cString: cName))
-                }
-            }
-        }
-        if !existing.contains("embedding") {
-            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding BLOB")
-        }
-        if !existing.contains("embedding_dim") {
-            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding_dim INTEGER")
-        }
-        if !existing.contains("embedding_provider") {
-            try executeRaw("ALTER TABLE transcript ADD COLUMN embedding_provider TEXT")
-        }
-        try setSchemaVersion(8)
-        MemoryLogger.database.info("v8 migration completed (transcript embedding columns)")
-    }
-
-    /// V9 migration (Intel memory Phase 2): mirror the v8 transcript embedding
-    /// columns onto `episodes` and `pinned_facts` so distilled memory (episodes,
-    /// pinned facts) is semantically searchable via the same SQLCipher-BLOB +
-    /// Accelerate-cosine path. Idempotent.
-    private func migrateToV9() throws {
-        MemoryLogger.database.info("Running v9 migration (episode/pinned embedding columns)")
-        for table in ["episodes", "pinned_facts"] {
+    /// Intel: the embedding columns behind Intel's own semantic recall
+    /// (float32 BLOBs ranked with Accelerate; Intel has no VecturaKit) on
+    /// `transcript`, `episodes` and `pinned_facts`. Ensured idempotently on
+    /// every open and deliberately not a schema version, the way upstream
+    /// keeps `delegated_conversations` out of the version chain: Intel's
+    /// version numbers must mean what upstream's mean, because both builds
+    /// can open one `memory.sqlite` (a dev Mac that also runs the upstream
+    /// app, or a Migration Assistant copy). Until 2026-10-27 these columns
+    /// were Intel's v8 and v9, numbers upstream uses for other steps, so a
+    /// file the upstream app had stamped v9 or v10 skipped them and Intel's
+    /// embedding writes failed (recall fell back to text search). Upstream
+    /// always names its columns, so the extra nullable ones are invisible
+    /// to it.
+    private func ensureIntelEmbeddingColumns() throws {
+        for table in ["transcript", "episodes", "pinned_facts"] {
             var existing = Set<String>()
             try executeRaw("PRAGMA table_info(\(table))") { stmt in
                 while sqlite3_step(stmt) == SQLITE_ROW {
@@ -512,8 +698,6 @@ public final class MemoryDatabase: @unchecked Sendable {
                 try executeRaw("ALTER TABLE \(table) ADD COLUMN embedding_provider TEXT")
             }
         }
-        try setSchemaVersion(9)
-        MemoryLogger.database.info("v9 migration completed (episode/pinned embedding columns)")
     }
 
     private func createV5Tables() throws {
@@ -1634,8 +1818,17 @@ public final class MemoryDatabase: @unchecked Sendable {
         return Int(sqlite3_last_insert_rowid(db))
     }
 
-    /// Atomically insert an episode and mark its pending signals as processed.
-    public func insertEpisodeAndMarkProcessed(_ ep: Episode) throws -> Int {
+    /// Atomically insert an episode and mark exactly the signals folded
+    /// into it as processed.
+    ///
+    /// `signalIds` are the primary keys snapshotted by the distiller before
+    /// the LLM call. Marking only those (rather than every `status='pending'`
+    /// row for the conversation) means a turn buffered *while the LLM call
+    /// was in flight* survives as `pending` and lands in the next episode,
+    /// instead of being silently marked processed without ever appearing in
+    /// any episode (issue #1632 D2). An empty `signalIds` is treated as "mark
+    /// nothing" rather than "mark all".
+    public func insertEpisodeAndMarkProcessed(_ ep: Episode, signalIds: [Int]) throws -> Int {
         try inTransaction { _ in
             var rowid: Int = 0
             var stmt: OpaquePointer?
@@ -1670,13 +1863,18 @@ public final class MemoryDatabase: @unchecked Sendable {
             sqlite3_finalize(s)
             rowid = Int(sqlite3_last_insert_rowid(self.db))
 
+            guard !signalIds.isEmpty else { return rowid }
+
+            let placeholders = signalIds.indices.map { "?\($0 + 1)" }.joined(separator: ", ")
             var clear: OpaquePointer?
             let clearSQL =
-                "UPDATE pending_signals SET status = 'processed' WHERE conversation_id = ?1 AND status = 'pending'"
+                "UPDATE pending_signals SET status = 'processed' WHERE id IN (\(placeholders))"
             guard sqlite3_prepare_v2(self.db, clearSQL, -1, &clear, nil) == SQLITE_OK, let c = clear else {
                 throw MemoryDatabaseError.failedToPrepare(String(cString: sqlite3_errmsg(self.db)))
             }
-            Self.bindText(c, index: 1, value: ep.conversationId)
+            for (i, id) in signalIds.enumerated() {
+                sqlite3_bind_int(c, Int32(i + 1), Int32(id))
+            }
             _ = sqlite3_step(c)
             sqlite3_finalize(c)
             return rowid
@@ -2623,6 +2821,69 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
+    /// Set `status` on exactly the given signal ids. Used by the distiller
+    /// to clear only the signals that were folded into an episode (or a
+    /// terminal empty result) without touching turns buffered after the
+    /// snapshot (issue #1632 D2). No-op for an empty id list.
+    public func markSignals(ids: [Int], status: String) throws {
+        guard !ids.isEmpty else { return }
+        let placeholders = ids.indices.map { "?\($0 + 2)" }.joined(separator: ", ")
+        _ = try executeUpdate(
+            "UPDATE pending_signals SET status = ?1 WHERE id IN (\(placeholders))"
+        ) { stmt in
+            Self.bindText(stmt, index: 1, value: status)
+            for (i, id) in ids.enumerated() {
+                sqlite3_bind_int(stmt, Int32(i + 2), Int32(id))
+            }
+        }
+    }
+
+    /// Record one failed distillation attempt for `ids` and dead-letter
+    /// them once they exceed `maxAttempts`. Returns the new max attempt
+    /// count across the ids and whether they were dead-lettered.
+    ///
+    /// Dead-lettered rows (`status='dead_letter'`) drop out of
+    /// `loadPendingSignals` / `pendingConversations`, so a session that
+    /// keeps failing stops re-distilling on every launch/ingest/debounce
+    /// forever (issue #1632 D1). Only `pending` rows are dead-lettered, so
+    /// a concurrently-processed row is never clobbered.
+    @discardableResult
+    public func recordDistillFailure(
+        ids: [Int],
+        maxAttempts: Int
+    ) throws -> (attempts: Int, deadLettered: Bool) {
+        guard !ids.isEmpty else { return (0, false) }
+        let placeholders = ids.indices.map { "?\($0 + 1)" }.joined(separator: ", ")
+        let bindIds: (OpaquePointer) -> Void = { stmt in
+            for (i, id) in ids.enumerated() {
+                sqlite3_bind_int(stmt, Int32(i + 1), Int32(id))
+            }
+        }
+
+        _ = try executeUpdate(
+            "UPDATE pending_signals SET attempts = attempts + 1 WHERE id IN (\(placeholders)) AND status = 'pending'",
+            bind: bindIds
+        )
+
+        var maxSoFar = 0
+        try prepareAndExecute(
+            "SELECT COALESCE(MAX(attempts), 0) FROM pending_signals WHERE id IN (\(placeholders))",
+            bind: bindIds,
+            process: { stmt in
+                if sqlite3_step(stmt) == SQLITE_ROW { maxSoFar = Int(sqlite3_column_int(stmt, 0)) }
+            }
+        )
+
+        let deadLettered = maxSoFar >= maxAttempts
+        if deadLettered {
+            _ = try executeUpdate(
+                "UPDATE pending_signals SET status = 'dead_letter' WHERE id IN (\(placeholders)) AND status = 'pending'",
+                bind: bindIds
+            )
+        }
+        return (maxSoFar, deadLettered)
+    }
+
     private static func readPendingSignal(_ stmt: OpaquePointer) -> PendingSignal {
         PendingSignal(
             id: Int(sqlite3_column_int(stmt, 0)),
@@ -2799,12 +3060,11 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// from "buffered then drained" (= some N with empty `pending`).
     ///
     /// `processedSignals` and `deadLetteredSignals` were added for the
-    /// diagnostics panel — `PendingSignalsSummary` already declared these
-    /// fields, but the query below previously left them at their `0`
-    /// default. No write path currently sets `status = 'dead'` (there is
-    /// no dead-letter mechanism yet — that's Phase 2 consolidation work),
-    /// so `deadLetteredSignals` reads `0` honestly today; the column is
-    /// wired so it starts reporting real numbers the moment one exists.
+    /// diagnostics panel. `deadLetteredSignals` counts upstream's
+    /// `status = 'dead_letter'` rows, written by `recordDistillFailure`
+    /// once a session exceeds `MemoryConfiguration.distillMaxAttempts`
+    /// (Intel: this read `'dead'`, a status nothing wrote, until the
+    /// 2026-10-27 port of upstream #1635's dead-letter cap).
     public func pendingSignalsSummary() throws -> PendingSignalsSummary {
         var summary = PendingSignalsSummary()
         try prepareAndExecute(
@@ -2814,7 +3074,7 @@ public final class MemoryDatabase: @unchecked Sendable {
                 COUNT(DISTINCT CASE WHEN status = 'pending' THEN conversation_id END),
                 COUNT(*),
                 SUM(CASE WHEN status = 'processed' THEN 1 ELSE 0 END),
-                SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END)
+                SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END)
             FROM pending_signals
             """,
             bind: { _ in },
@@ -2888,11 +3148,8 @@ public final class MemoryDatabase: @unchecked Sendable {
     /// breakdown), but this query previously only filled `successCount` /
     /// `errorCount`, leaving the rest at their `0` default. Extended to
     /// match every status string `IntelMemoryService.performDistillSession`
-    /// actually logs via `logProcessing`: "success", "error", "skipped",
-    /// "empty". No live path logs "dead" yet (no dead-letter mechanism —
-    /// Phase 2 consolidation work), so `deadLetterCount` reads `0` today;
-    /// the column is wired so it starts reporting real numbers the moment
-    /// one exists, rather than lying by omission.
+    /// logs via `logProcessing`: "success", "error", "skipped", "empty" and
+    /// upstream's "dead_letter" (the retry cap ported 2026-10-27).
     public func processingStats() throws -> ProcessingStats {
         var stats = ProcessingStats()
         try prepareAndExecute(
@@ -2902,7 +3159,7 @@ public final class MemoryDatabase: @unchecked Sendable {
                    SUM(CASE WHEN status = 'error' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN status = 'skipped' THEN 1 ELSE 0 END),
                    SUM(CASE WHEN status = 'empty' THEN 1 ELSE 0 END),
-                   SUM(CASE WHEN status = 'dead' THEN 1 ELSE 0 END)
+                   SUM(CASE WHEN status = 'dead_letter' THEN 1 ELSE 0 END)
             FROM processing_log
             """,
             bind: { _ in },

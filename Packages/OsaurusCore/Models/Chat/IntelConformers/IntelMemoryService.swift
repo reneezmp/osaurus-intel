@@ -499,13 +499,19 @@ public actor MemoryService {
             return
         }
         guard !signals.isEmpty else { return }
+        // Snapshot the ids so we only ever mark *these* signals processed —
+        // turns buffered while the LLM call is in flight stay pending
+        // (upstream #1635, issue #1632 D2).
+        let signalIds = signals.map(\.id)
 
         // Cheap pre-LLM gate: combined char count must clear novelty floor.
         let combinedChars = signals.reduce(0) {
             $0 + $1.userMessage.count + ($1.assistantMessage?.count ?? 0)
         }
         guard combinedChars >= MemoryConfiguration.distillNoveltyMinChars else {
-            try? db.markSignalsProcessed(conversationId: conversationId)
+            // Terminal + non-retryable: clear exactly these signals
+            // (id-scoped) so a low-novelty session can't loop forever.
+            try? db.markSignals(ids: signalIds, status: "processed")
             MemoryLogger.service.warning(
                 "distill: skipping low-novelty session \(conversationId) (\(combinedChars) chars)"
             )
@@ -551,20 +557,29 @@ public actor MemoryService {
             }
             let parsed = parseDistillResponse(response)
             guard let episode = parsed.episode else {
+                // Terminal: the model ran but produced no usable episode.
+                // Mark these signals processed (id-scoped) so an unparseable
+                // session is not retried on every launch/sync forever
+                // (upstream #1635, issue #1632 D1).
+                try? db.markSignals(ids: signalIds, status: "processed")
                 MemoryLogger.service.warning("distill: no episode produced for \(conversationId)")
                 logProcessing(
                     agentId: agentId, taskType: "distill", model: model, status: "empty",
-                    durationMs: Int(Date().timeIntervalSince(startTime) * 1000))
+                    durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
+                    details: "no_episode")
+                debounceTasks[conversationId] = nil
                 return
             }
 
             let summaryText = stripPreamble(episode.summary)
             guard !summaryText.isEmpty else {
+                try? db.markSignals(ids: signalIds, status: "processed")
                 MemoryLogger.service.warning("distill: empty summary for \(conversationId)")
                 logProcessing(
                     agentId: agentId, taskType: "distill", model: model, status: "empty",
                     durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
                     details: "empty_summary")
+                debounceTasks[conversationId] = nil
                 return
             }
 
@@ -593,10 +608,17 @@ public actor MemoryService {
             let storedPinned: Int
             if personalDistillationEnabled {
                 do {
-                    episodeId = try db.insertEpisodeAndMarkProcessed(ep)
+                    // Id-scoped marking (D2): only the snapshotted ids are
+                    // cleared inside the same transaction as the episode insert.
+                    episodeId = try db.insertEpisodeAndMarkProcessed(ep, signalIds: signalIds)
                 } catch {
                     MemoryLogger.service.error(
                         "distill: failed to insert episode for \(conversationId): \(error)")
+                    recordRetryableDistillFailure(
+                        message: "episode_insert_failed: \(error.localizedDescription)",
+                        agentId: agentId, conversationId: conversationId, model: model,
+                        signalIds: signalIds,
+                        durationMs: Int(Date().timeIntervalSince(startTime) * 1000))
                     return
                 }
 
@@ -620,10 +642,15 @@ public actor MemoryService {
                 projectEpisode.agentId = MemoryNamespace.project(projectId).key
                 do {
                     episodeId = try db.insertEpisode(projectEpisode)
-                    try db.markSignalsProcessed(conversationId: conversationId)
+                    try db.markSignals(ids: signalIds, status: "processed")
                 } catch {
                     MemoryLogger.service.error(
                         "distill: failed to insert project episode for \(conversationId): \(error)")
+                    recordRetryableDistillFailure(
+                        message: "episode_insert_failed: \(error.localizedDescription)",
+                        agentId: agentId, conversationId: conversationId, model: model,
+                        signalIds: signalIds,
+                        durationMs: Int(Date().timeIntervalSince(startTime) * 1000))
                     return
                 }
                 projectEpisode.id = episodeId
@@ -646,13 +673,68 @@ public actor MemoryService {
             MemoryLogger.service.info(
                 "distill: \(conversationId) → episode #\(episodeId), \(storedPinned) pinned, \(parsed.identityFacts.count) identity facts (\(durationMs)ms)"
             )
-        } catch {
-            MemoryLogger.service.error("distill: failed for \(conversationId): \(error)")
+        } catch is CancellationError {
+            // Interrupted (app quitting, caller walked away). Not an error
+            // and NOT counted toward the dead-letter cap — signals stay
+            // pending and recover next launch.
+            MemoryLogger.service.info("distill: cancelled for \(conversationId)")
             logProcessing(
-                agentId: agentId, taskType: "distill", model: model, status: "error",
-                details: error.localizedDescription)
+                agentId: agentId, taskType: "distill", model: model, status: "skipped",
+                durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
+                details: "cancelled")
+        } catch {
+            let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
+            if Self.classifyCoreModelFailure(error) == .unavailable {
+                // Intel's counterpart of upstream's `.modelUnavailable`: the
+                // request never reached a model. Stay pending and recover once
+                // the model resolves; a misconfiguration must not permanently
+                // lose the user's turns, so this does not count toward the cap.
+                MemoryLogger.service.warning("distill: core model unavailable for \(conversationId): \(error)")
+                logProcessing(
+                    agentId: agentId, taskType: "distill", model: model, status: "skipped",
+                    durationMs: durationMs, details: "core_model_unavailable")
+            } else {
+                // Timeouts and hung models (`.hung`) count, like upstream's
+                // `.timedOut` / `.unresponsive`, so a session that is always
+                // too slow eventually dead-letters instead of retrying forever.
+                MemoryLogger.service.error("distill: failed for \(conversationId): \(error)")
+                recordRetryableDistillFailure(
+                    message: error.localizedDescription,
+                    agentId: agentId, conversationId: conversationId, model: model,
+                    signalIds: signalIds, durationMs: durationMs)
+            }
         }
 
+        debounceTasks[conversationId] = nil
+    }
+
+    /// Record one retryable distillation failure and dead-letter the
+    /// session's signals once they reach `distillMaxAttempts` (upstream
+    /// #1635, issue #1632 D1). Writes the matching `processing_log` row
+    /// (`error` or `dead_letter`).
+    private func recordRetryableDistillFailure(
+        message: String,
+        agentId: String,
+        conversationId: String,
+        model: String,
+        signalIds: [Int],
+        durationMs: Int
+    ) {
+        let failure =
+            (try? db.recordDistillFailure(
+                ids: signalIds,
+                maxAttempts: MemoryConfiguration.distillMaxAttempts
+            )) ?? (attempts: 0, deadLettered: false)
+        logProcessing(
+            agentId: agentId,
+            taskType: "distill",
+            model: model,
+            status: failure.deadLettered ? "dead_letter" : "error",
+            durationMs: durationMs,
+            details: failure.deadLettered
+                ? "dead_letter_after_\(failure.attempts)_attempts: \(message)"
+                : message
+        )
         debounceTasks[conversationId] = nil
     }
 

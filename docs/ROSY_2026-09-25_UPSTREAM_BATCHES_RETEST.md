@@ -1773,3 +1773,20 @@ Details: `UPSTREAM_AUDIT_2026-10-26.md`, "Shipped on Intel".
       keeps showing progress and finishes without the chat nudging it.
 - [ ] **Context readout (#3112):** during a long tool-heavy reply, the context
       ring keeps updating and typing stays responsive.
+
+## Memory database sync (2026-10-27)
+
+`W-memory-db-sync`: the memory store is at upstream's schema v10 and refuses
+a newer file. Details: `UPSTREAM_SYNC.md`, "Memory database at upstream's
+schema".
+
+- [ ] **Upgrade in place:** launch the new build over Rosy's existing data.
+      Memory still lists its pinned facts and episodes, and Settings →
+      Storage shows no memory issue.
+- [ ] **Recall still semantic:** with embeddings on, ask about something said
+      in an older chat in different words; it is recalled (the embedding
+      columns survived the renumbering).
+- [ ] **Distillation still runs:** finish a short chat with memory on; after
+      the debounce a new episode appears, and the memory diagnostics show no
+      growing count of errors for one conversation.
+

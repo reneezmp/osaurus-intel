@@ -43,7 +43,8 @@ warning does not apply.
 
 ### Works today
 - Distillation pipeline (`IntelMemoryService`), incl. novelty gate, dedup, telemetry.
-- `MemoryDatabase` (2725 lines, SQLCipher, schema v9) with all tables and every
+- `MemoryDatabase` (SQLCipher, schema v10 since 2026-10-27, numbered as upstream;
+  Intel's embedding columns are an ensure step, not a version) with all tables and every
   decay/evict/prune method already implemented.
 - Embedding stack — `potion-base-8M` static embedder, downloaded on first use.
   This is the *retrieval* half; it does not summarise anything.
@@ -150,8 +151,9 @@ Projects section in the Agents tab. No migration required.
 - **Memories console gaps** (from the Phase 4 port, each needs a
   `MemoryDatabase` change first): per-row disable — nothing here ever writes a
   status other than `active`; per-turn transcript forget — only
-  `deleteTranscriptForConversation` exists; the storage-health panel — no public
-  schema-version accessor; the context preview's query field — the Intel
+  `deleteTranscriptForConversation` exists; the storage-health panel — the
+  schema-version accessors (`schemaUserVersion()`, `expectedSchemaVersion`,
+  `lastOpenErrorDescription`) exist since 2026-10-27, the panel does not; the context preview's query field — the Intel
   assembler takes no query by construction.
 - **Completed 2026-09-08 — per-agent recall scoping.** Personal recall now
   passes the active agent id; the project namespace remains an additive lane.
