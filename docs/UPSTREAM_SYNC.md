@@ -4199,3 +4199,35 @@ have; `/chat/completions` reads its DeepSeek key only from the
 Tests: `OsaurusHelpToolTests` (upstream's loader and tool cases, plus Intel
 corpus pins). Package gate: 3,382 tests in 423 suites (6 known issues). Rosy:
 "In-app guide" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Provider discovery: Fireworks catalog and MCP URLs (`W-providers-ux`, part) — 2026-10-27
+
+Two refinements upstream keeps in the excluded `RemoteProviderService`,
+added to Intel's own discovery (`RemoteProviderManager.probeModelsDiscovery`
+and `testConnection`) through `Services/Provider/IntelProviderDiscoveryExtras.swift`:
+
+- **Fireworks:** `/inference/v1/models` lists only the account's own
+  deployments, so the serverless gateway catalog
+  (`/v1/accounts/fireworks/models`, `FireworksAPI.swift`) is merged after
+  them; a catalog failure keeps the `/models` list.
+- **MCP URL pasted as a provider:** after `/models` fails with an HTTP error
+  on an OpenAI-compatible provider, an MCP `initialize` handshake at the base
+  URL (`RemoteProviderMCPDetection`, upstream's file) replaces the error with
+  "add it under Tools & MCP > Services". Intel previously showed such a
+  provider as connected with no models. Other HTTP errors keep Intel's
+  behaviour (connected, empty list), since some providers lack `/models`.
+
+Re-scope of the row (`gap_features.py`): upstream's typed Responses streams
+and capability fallback are covered by Intel's engine; the native Anthropic
+stream is `W-anthropic-thinking-replay`; `ProviderCredentialPromptService` /
+`Sheet` / `ProviderInputFields` serve only the declarative config applier
+(`W-declarative-config`); `CodexCLIConfiguration` needs a local
+`/v1/responses` (`W-server-api`); `ProviderReplayDiagnostics` is used only by
+upstream tests. `classify_gap.py` now prints an id with several pattern rows
+once.
+
+Tests: upstream's `FireworksModelDiscoveryTests` (against Intel's helper)
+and `RemoteProviderMCPDetectionTests`, plus stub-transport cases for the
+catalog fallback and the handshake. Package gate: 3,398 tests in 425 suites
+(6 known issues). Rosy: "Provider discovery" in
+`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

@@ -270,9 +270,20 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         req.timeoutInterval = 20
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
         guard let (data, response) = try? await GlobalProxySettings.makeSession().data(for: req),
-            let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode),
-            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let http = response as? HTTPURLResponse
         else { return ([], [:]) }
+        guard (200...299).contains(http.statusCode) else {
+            // Upstream: an MCP server URL pasted as an API provider 404s on
+            // `/models`; say so instead of showing a connected provider with
+            // no models. Any other HTTP error keeps Intel's empty result.
+            if await IntelProviderDiscoveryExtras.looksLikeMCPServer(
+                providerType: provider.providerType, baseURL: provider.baseURL, headers: headers)
+            {
+                throw IntelProviderDiscoveryExtras.MCPEndpointDetected()
+            }
+            return ([], [:])
+        }
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else { return ([], [:]) }
         if let arr = json["data"] as? [[String: Any]] {
             var ids: [String] = []
             var lengths: [String: Int] = [:]
@@ -282,6 +293,13 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 if let n = Self.advertisedContextLength(in: entry) {
                     lengths[id] = n
                 }
+            }
+            // Upstream: Fireworks' `/models` lists only the account's own
+            // deployments; merge the serverless catalog after them.
+            if IntelProviderDiscoveryExtras.isFireworksProvider(provider) {
+                let merged = await IntelProviderDiscoveryExtras.augmentFireworks(
+                    discovered: ids.sorted(), headers: headers)
+                return (merged, lengths)
             }
             return (ids.sorted(), lengths)
         }
@@ -677,6 +695,11 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
 
         let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
         if let http = response as? HTTPURLResponse, !(200...299).contains(http.statusCode) {
+            if await IntelProviderDiscoveryExtras.looksLikeMCPServer(
+                providerType: providerType, baseURL: tempProvider.baseURL, headers: testHeaders)
+            {
+                throw IntelProviderDiscoveryExtras.MCPEndpointDetected()
+            }
             throw NSError(
                 domain: "RemoteProvider",
                 code: http.statusCode,

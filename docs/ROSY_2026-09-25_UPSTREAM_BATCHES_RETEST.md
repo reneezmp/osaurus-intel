@@ -1948,3 +1948,16 @@ Details: `GUIDE_INTEL.md`. In a chat with the Orchestrator:
 - [ ] **"How do I share a theme?"** — it describes Themes › Share correctly.
 - [ ] **A custom agent** asked the same questions doesn't call `osaurus_help`
       (the tool is the Orchestrator's only).
+
+## Provider discovery (2026-10-27)
+
+Details: `UPSTREAM_SYNC.md`, "Provider discovery: Fireworks catalog and MCP
+URLs".
+
+- [ ] **Fireworks** (needs a Fireworks key): add the Fireworks AI provider.
+      Its card shows dozens of models (the serverless catalog), not only a
+      handful, and a catalog model replies in chat.
+- [ ] **MCP URL as a provider:** add a Custom provider with an MCP server URL
+      (e.g. `https://runalyze.com/mcp`). Test, or the card after saving, says
+      to add it under Tools & MCP > Services instead of "HTTP 404" or
+      "connected, 0 models". Delete it afterwards.

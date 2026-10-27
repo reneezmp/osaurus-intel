@@ -54,7 +54,11 @@ for kind, f, n in rows:
         unassigned.append((f, n))
 
 print(f"{len(rows)} upstream source files not compiled on Intel ({REF})")
+printed = set()
 for fid, verdict, _ in F:
+    if fid in printed:  # an id can have several pattern rows
+        continue
+    printed.add(fid)
     items = assign[fid]
     print(f"{fid:32s} {verdict} {len(items):4d} files {sum(n for _, n, _ in items):7d} lines")
 print("UNASSIGNED", len(unassigned))
