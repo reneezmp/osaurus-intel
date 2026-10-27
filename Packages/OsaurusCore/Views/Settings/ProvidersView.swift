@@ -4,17 +4,34 @@
 //
 //  UI for managing remote MCP providers.
 //
-//  M12 follow-up (Renée 2026-06-03): un-body-swapped for Intel. MCP runs on
-//  Intel (the MCP bridge serves on :1338), so Tools → Remote should manage
-//  remote providers, not show "Apple Silicon only". Amputated sub-bits gated
-//  inline.
+//  Intel (2026-10-27, `W-providers-ux`): upstream's Services page (hub
+//  summary, filter, Reconnect All / Test Connections / Copy Diagnostics,
+//  per-service probe and health). Intel edits: themed segmented pickers and
+//  single-value `onChange` for macOS 13, and the Sandbox execution warning
+//  always shows (no sandbox on this Mac).
 //
 
 import AppKit
 import SwiftUI
 
-/// Where the Add Service sheet starts (upstream #2950): the catalog, a
-/// directory template, or the custom-server editor.
+/// A successful probe may refresh the executable catalog only when it tested
+/// the exact persisted configuration. Publishing tools from a new or edited
+/// draft would let unsaved settings affect active chats.
+enum MCPProviderCatalogRefreshPolicy {
+    static func shouldRefresh(
+        savedProvider: MCPProvider?,
+        configuredProvider: MCPProvider,
+        hasCredentialEdits: Bool
+    ) -> Bool {
+        guard let savedProvider, savedProvider.enabled, !hasCredentialEdits else {
+            return false
+        }
+        return savedProvider == configuredProvider
+    }
+}
+
+/// Where the Add Service sheet opens. Tapping a Directory card skips the
+/// sheet's own catalog step and lands straight on that service's setup.
 enum MCPAddServiceStart: Equatable {
     case catalog
     case template(MCPProviderTemplate)
@@ -26,109 +43,79 @@ struct ProvidersView: View {
     @ObservedObject private var manager = MCPProviderManager.shared
     @ObservedObject private var managementState = ManagementStateManager.shared
     /// Owned by the Tools & MCP shell so its header "Add Service" button can
-    /// open the sheet from outside this view (upstream #2950).
+    /// open the sheet from outside this view.
     @Binding var showAddSheet: Bool
     @State private var editingProvider: MCPProvider?
+    /// Prefill for the add sheet when opened via a `pendingMCPProviderDraft`
+    /// hand-off; cleared on dismiss so a manual "Add" starts blank.
+    @State private var addSheetPrefill: MCPProviderDraft?
     /// Starting step for the add sheet; set by the inline Directory.
     @State private var addSheetStart: MCPAddServiceStart = .catalog
     @State private var directoryQuery: String = ""
-    @State private var hasAppeared = false
     @State private var directoryCategory: MCPProviderCategory?
     @State private var metadataDocumentPublished = false
 
     init(showAddSheet: Binding<Bool> = .constant(false)) {
         _showAddSheet = showAddSheet
     }
+    @State private var hasAppeared = false
+    @State private var providerFilter: MCPServerHubFilter = .all
+    @State private var credentialPresence: [UUID: MCPProviderCredentialPresence] = [:]
+    @State private var healthSnapshots: [UUID: MCPProviderHealthSnapshot] = MCPProviderHealthSnapshotStore.load()
+    @State private var reconnectingAll = false
+    @State private var probingAll = false
+    @State private var probingProviderIds: Set<UUID> = []
 
     var body: some View {
         ScrollView {
-            LazyVStack(alignment: .leading, spacing: 16) {
-                SettingsSectionHeader(title: "Services", caption: servicesCaption)
-
-                if manager.configuration.providers.isEmpty {
-                    emptyState
-                } else {
-                    ForEach(Array(manager.configuration.providers.enumerated()), id: \.element.id) {
-                        index,
-                        provider in
-                        ProviderCard(
-                            provider: provider,
-                            state: manager.providerStates[provider.id],
-                            animationIndex: index,
-                            onEdit: { editingProvider = provider },
-                            onDelete: { manager.removeProvider(id: provider.id) },
-                            onConnect: { Task { try? await manager.connect(providerId: provider.id) } },
-                            onDisconnect: { manager.disconnect(providerId: provider.id) },
-                            onToggleEnabled: { enabled in
-                                manager.setEnabled(enabled, for: provider.id)
-                            },
-                            onSignIn: {
-                                Task {
-                                    do {
-                                        _ = try await manager.oauthSignIn(providerId: provider.id)
-                                    } catch {
-                                        // The manager already wrote the error into
-                                        // `MCPProviderState.lastError`, so the inline
-                                        // card banner will show it; we additionally
-                                        // toast it so the user notices even if their
-                                        // card is scrolled off-screen.
-                                        await MainActor.run {
-                                            ToastManager.shared.error(
-                                                L("OAuth sign-in failed"),
-                                                message: error.localizedDescription
-                                            )
-                                        }
-                                    }
-                                }
-                            },
-                            onSaveBearerToken: { token in
-                                // Persist directly to Keychain (the provider record
-                                // itself doesn't change) and immediately retry.
-                                _ = MCPProviderKeychain.saveToken(token, for: provider.id)
-                                // Enable the provider so the retry connect doesn't no-op.
-                                if !provider.enabled {
-                                    manager.setEnabled(true, for: provider.id)
-                                }
-                                Task {
-                                    do {
-                                        try await manager.connect(providerId: provider.id)
-                                    } catch {
-                                        await MainActor.run {
-                                            ToastManager.shared.error(
-                                                L("Couldn't connect with new token"),
-                                                message: error.localizedDescription
-                                            )
-                                        }
-                                    }
-                                }
-                            }
-                        )
-                    }
-                }
-
+            VStack(alignment: .leading, spacing: 28) {
+                servicesSection
                 directorySection
-                    .padding(.top, 12)
             }
-            .padding(24)
+            .padding(.horizontal, 24)
+            .padding(.top, 8)
+            .padding(.bottom, 32)
         }
         .opacity(hasAppeared ? 1 : 0)
         .onAppear {
             withAnimation(.easeOut(duration: 0.25).delay(0.1)) {
                 hasAppeared = true
             }
+            refreshCredentialPresence()
+            refreshHealthSnapshots()
+            applyPendingEditRequest()
+            applyPendingDraftRequest()
+        }
+        .onChange(of: managementState.pendingMCPProviderEditId) { _ in  // Intel: single-value onChange (macOS 13)
             applyPendingEditRequest()
         }
-        .onChange(of: managementState.pendingMCPProviderEditId) { _ in
-            applyPendingEditRequest()
+        .onChange(of: managementState.pendingMCPProviderDraft) { _ in  // Intel: single-value onChange (macOS 13)
+            applyPendingDraftRequest()
         }
-        .sheet(isPresented: $showAddSheet, onDismiss: { addSheetStart = .catalog }) {
-            ProviderEditSheet(provider: nil, start: addSheetStart) { provider, token in
+        .onReceive(
+            NotificationCenter.default.publisher(
+                for: Foundation.Notification.Name.mcpProviderHealthSnapshotChanged
+            )
+        ) { _ in
+            refreshHealthSnapshots()
+        }
+        .sheet(
+            isPresented: $showAddSheet,
+            onDismiss: {
+                addSheetPrefill = nil
+                addSheetStart = .catalog
+            }
+        ) {
+            ProviderEditSheet(provider: nil, prefill: addSheetPrefill, start: addSheetStart) { provider, token in
                 manager.addProvider(provider, token: token)
+                refreshCredentialPresence()
             }
         }
         .sheet(item: $editingProvider) { provider in
             ProviderEditSheet(provider: provider) { updatedProvider, token in
                 manager.updateProvider(updatedProvider, token: token)
+                refreshCredentialPresence()
+                refreshHealthSnapshots()
             }
         }
     }
@@ -144,40 +131,364 @@ struct ProvidersView: View {
         managementState.pendingMCPProviderEditId = nil
     }
 
-    /// "2 connected · 14 tools" beside the Services title.
-    private var servicesCaption: String {
-        let providers = manager.configuration.providers
-        guard !providers.isEmpty else { return "" }
-        let connected = providers.filter { manager.providerStates[$0.id]?.isConnected == true }.count
-        let tools = providers.reduce(0) { $0 + (manager.providerStates[$1.id]?.discoveredToolCount ?? 0) }
-        return String(format: L("%d connected · %d tools"), connected, tools)
+    /// Honour a one-shot `pendingMCPProviderDraft` hand-off (the API provider
+    /// form detected an MCP server URL): open the add sheet straight in the
+    /// custom editor with the URL and token carried over.
+    private func applyPendingDraftRequest() {
+        guard let draft = managementState.pendingMCPProviderDraft else { return }
+        addSheetPrefill = draft
+        showAddSheet = true
+        managementState.pendingMCPProviderDraft = nil
     }
 
-    /// With no services configured, a one-line invitation; the Directory
-    /// below does the rest.
-    private var emptyState: some View {
-        SettingsGroup {
-            HStack(spacing: 12) {
-                Image(systemName: "server.rack")
-                    .font(.system(size: 15, weight: .medium))
-                    .foregroundColor(theme.tertiaryText)
-                VStack(alignment: .leading, spacing: 2) {
-                    Text("No services yet", bundle: .module)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(theme.primaryText)
-                    Text("Pick a service below to give your agents more tools.", bundle: .module)
-                        .font(.system(size: 11))
-                        .foregroundColor(theme.tertiaryText)
+    private var hubSnapshot: MCPServerHubSnapshot {
+        MCPServerHub.snapshot(
+            providers: manager.configuration.providers,
+            states: manager.providerStates,
+            proxy: GlobalProxySettings.currentDiagnostic(),
+            credentialsByProvider: credentialPresence,
+            healthSnapshots: healthSnapshots
+        )
+    }
+
+    private var visibleProviderReports: [MCPServerHubProviderReport] {
+        hubSnapshot.filtered(by: providerFilter)
+    }
+
+    // MARK: - Services
+
+    /// Configured services as one grouped list. The header carries the live
+    /// summary and a single ⋯ menu (filter + maintenance); there is no
+    /// separate status panel.
+    private var servicesSection: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            SettingsSectionHeader(title: "Services", caption: servicesCaption) {
+                if !manager.configuration.providers.isEmpty {
+                    servicesMenu
                 }
-                Spacer()
+            }
+            .settingsLandingAnchor("tools.services")
+
+            SettingsGroup {
+                if manager.configuration.providers.isEmpty {
+                    emptyState
+                } else {
+                    ForEach(Array(visibleProviderReports.enumerated()), id: \.element.id) { index, report in
+                        serviceRow(report, index: index)
+                    }
+                    if visibleProviderReports.isEmpty {
+                        Text("No services match this filter.", bundle: .module)
+                            .font(.system(size: 12))
+                            .foregroundColor(theme.tertiaryText)
+                            .frame(maxWidth: .infinity, alignment: .leading)
+                    }
+                }
             }
         }
     }
 
+    /// "1 connected · 1 needs attention · 12 tools" — nil until there is
+    /// at least one service.
+    private var servicesCaption: String? {
+        let summary = hubSnapshot.compactSummary
+        guard hubSnapshot.totalCount > 0 else { return nil }
+        var parts: [String] = []
+        parts.append(
+            summary.connected == 1 ? L("1 connected") : L("\(summary.connected) connected")
+        )
+        if summary.attention > 0 {
+            parts.append(
+                summary.attention == 1 ? L("1 needs attention") : L("\(summary.attention) need attention")
+            )
+        }
+        parts.append(summary.tools == 1 ? L("1 tool") : L("\(summary.tools) tools"))
+        return parts.joined(separator: " · ")
+    }
+
+    private var servicesMenu: some View {
+        Menu {
+            Picker(selection: $providerFilter) {
+                ForEach(MCPServerHubFilter.allCases, id: \.self) { option in
+                    Text(option.displayName).tag(option)
+                }
+            } label: {
+                Text("Show", bundle: .module)
+            }
+
+            Divider()
+
+            Button(action: reconnectEnabledProviders) {
+                Label {
+                    Text("Reconnect All", bundle: .module)
+                } icon: {
+                    Image(systemName: "arrow.clockwise")
+                }
+            }
+            .disabled(reconnectingAll || hubSnapshot.enabledCount == 0)
+
+            Button(action: probeEnabledProviders) {
+                Label {
+                    Text("Test Connections", bundle: .module)
+                } icon: {
+                    Image(systemName: "antenna.radiowaves.left.and.right")
+                }
+            }
+            .disabled(probingAll || hubSnapshot.enabledCount == 0)
+
+            Divider()
+
+            Button(action: copyHubReport) {
+                Label {
+                    Text("Copy Diagnostics", bundle: .module)
+                } icon: {
+                    Image(systemName: "doc.on.doc")
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                if probingAll || reconnectingAll {
+                    ProgressView()
+                        .scaleEffect(0.5)
+                        .frame(width: 14, height: 14)
+                }
+                if providerFilter != .all {
+                    Text(providerFilter.displayName)
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                }
+                Image(systemName: "ellipsis.circle")
+                    .font(.system(size: 14, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .frame(minWidth: 22, minHeight: 22)
+            .contentShape(Rectangle())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("Connection maintenance and diagnostics", bundle: .module))
+        .accessibilityLabel(Text("Connection maintenance and diagnostics", bundle: .module))
+    }
+
+    private func serviceRow(_ report: MCPServerHubProviderReport, index: Int) -> some View {
+        ProviderCard(
+            report: report,
+            animationIndex: index,
+            isTesting: probingProviderIds.contains(report.id),
+            onEdit: { editingProvider = report.provider },
+            onDelete: { manager.removeProvider(id: report.id) },
+            onConnect: { Task { try? await manager.connect(providerId: report.id) } },
+            onDisconnect: { manager.disconnect(providerId: report.id) },
+            onTest: { probeProvider(report.provider) },
+            onCopyDiagnostics: { copyDiagnostics(report.diagnostics) },
+            onToggleEnabled: { enabled in
+                manager.setEnabled(enabled, for: report.id)
+            },
+            onSignIn: {
+                Task {
+                    do {
+                        _ = try await manager.oauthSignIn(providerId: report.id)
+                        await MainActor.run {
+                            refreshCredentialPresence()
+                        }
+                    } catch {
+                        // The manager already wrote the error into
+                        // `MCPProviderState.lastError`, so the inline
+                        // row banner will show it; we additionally
+                        // toast it so the user notices even if their
+                        // row is scrolled off-screen.
+                        await MainActor.run {
+                            _ = ToastManager.shared.error(
+                                L("OAuth sign-in failed"),
+                                message: error.localizedDescription
+                            )
+                        }
+                    }
+                }
+            },
+            onSaveBearerToken: { token in
+                // Persist directly to Keychain (the provider record
+                // itself doesn't change) and immediately retry.
+                _ = MCPProviderKeychain.saveToken(token, for: report.id)
+                refreshCredentialPresence()
+                // Enable the provider so the retry connect doesn't no-op.
+                if !report.provider.enabled {
+                    manager.setEnabled(true, for: report.id)
+                }
+                Task {
+                    do {
+                        try await manager.connect(providerId: report.id)
+                    } catch {
+                        await MainActor.run {
+                            _ = ToastManager.shared.error(
+                                L("Couldn't connect with new token"),
+                                message: error.localizedDescription
+                            )
+                        }
+                    }
+                }
+            }
+        )
+    }
+
+    private func refreshCredentialPresence() {
+        let providers = manager.configuration.providers
+        let previous = credentialPresence
+        Task {
+            var next: [UUID: MCPProviderCredentialPresence] = [:]
+            for provider in providers {
+                let providerID = provider.id
+                let previousPresence = previous[providerID]
+                // Typed availability: a transiently unavailable keychain
+                // (locked, interaction required) keeps the previous known
+                // presence instead of flashing a false "missing token" warning.
+                let presence = await Task.detached(priority: .utility) {
+                    MCPProviderCredentialPresence(
+                        bearerTokenPresent: MCPProviderKeychain.tokenAvailability(for: providerID)
+                            .presenceForUI(previous: previousPresence?.bearerTokenPresent),
+                        oauthTokensPresent: MCPProviderKeychain.oauthTokensAvailability(
+                            for: providerID
+                        )
+                        .presenceForUI(previous: previousPresence?.oauthTokensPresent)
+                    )
+                }.value
+                next[providerID] = presence
+            }
+            await MainActor.run {
+                credentialPresence = next
+            }
+        }
+    }
+
+    private func refreshHealthSnapshots() {
+        healthSnapshots = MCPProviderHealthSnapshotStore.load()
+    }
+
+    private func reconnectEnabledProviders() {
+        let targets = manager.configuration.providers.filter(\.enabled)
+        guard !targets.isEmpty else { return }
+        reconnectingAll = true
+        Task {
+            for provider in targets {
+                do {
+                    try await manager.reconnect(providerId: provider.id)
+                } catch {
+                    // Row state keeps the user-facing diagnostic.
+                }
+            }
+            await MainActor.run {
+                reconnectingAll = false
+            }
+        }
+    }
+
+    private func probeEnabledProviders() {
+        let targets = manager.configuration.providers.filter(\.enabled)
+        guard !targets.isEmpty else { return }
+        probingAll = true
+        probingProviderIds.formUnion(targets.map(\.id))
+        Task {
+            for provider in targets {
+                let result = await probeResult(for: provider)
+                MCPProviderHealthSnapshotStore.record(result, for: provider)
+                if result.succeeded {
+                    try? await manager.reconnect(providerId: provider.id)
+                }
+            }
+            await MainActor.run {
+                refreshHealthSnapshots()
+                probingProviderIds.subtract(targets.map(\.id))
+                probingAll = false
+            }
+        }
+    }
+
+    private func probeProvider(_ provider: MCPProvider) {
+        guard !probingProviderIds.contains(provider.id) else { return }
+        probingProviderIds.insert(provider.id)
+        Task {
+            let result = await probeResult(for: provider)
+            MCPProviderHealthSnapshotStore.record(result, for: provider)
+            if result.succeeded, provider.enabled {
+                try? await manager.reconnect(providerId: provider.id)
+            }
+            await MainActor.run {
+                refreshHealthSnapshots()
+                _ = probingProviderIds.remove(provider.id)
+            }
+        }
+    }
+
+    private func probeResult(for provider: MCPProvider) async -> MCPProviderProbeResult {
+        switch provider.transport {
+        case .http:
+            let credentials = await Task.detached(priority: .utility) {
+                let token: String? =
+                    switch provider.authType {
+                    case .bearerToken:
+                        MCPProviderKeychain.getToken(for: provider.id)
+                    case .oauth:
+                        MCPProviderKeychain.getOAuthTokens(for: provider.id)?.accessToken
+                    case .none:
+                        nil
+                    }
+                return (
+                    token,
+                    provider.resolvedHeaders()
+                )
+            }.value
+            return await MCPProviderProbeService.probeHTTP(
+                providerId: provider.id,
+                name: provider.name,
+                url: provider.url,
+                token: credentials.0,
+                headers: credentials.1,
+                streamingEnabled: provider.streamingEnabled,
+                discoveryTimeout: provider.discoveryTimeout
+            )
+        case .stdio:
+            return await MCPProviderProbeService.probeStdio(provider: provider)
+        }
+    }
+
+    private func copyHubReport() {
+        copyText(hubSnapshot.pasteboardText)
+    }
+
+    private func copyDiagnostics(_ report: ProviderDiagnosticReport) {
+        copyText(report.pasteboardText)
+    }
+
+    private func copyText(_ value: String) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(value, forType: .string)
+    }
+
+    /// With no services configured, the group holds a one-line invitation and
+    /// the Directory below does the rest.
+    private var emptyState: some View {
+        HStack(spacing: 12) {
+            Image(systemName: "server.rack")
+                .font(.system(size: 15, weight: .medium))
+                .foregroundColor(theme.tertiaryText)
+            VStack(alignment: .leading, spacing: 2) {
+                Text("No services yet", bundle: .module)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                Text("Pick a service below to give your agents more tools.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
+            Spacer()
+        }
+        .frame(maxWidth: .infinity, minHeight: SettingsGroupMetrics.rowMinHeight, alignment: .leading)
+    }
+
     // MARK: - Directory
 
-    /// Always-visible provider directory as a flat list (upstream #2950).
-    /// Tapping a row opens the Add Service sheet on that service's setup step.
+    /// Always-visible provider directory as a flat list. Tapping a row opens
+    /// the Add Service sheet directly on that service's setup step.
     private var directorySection: some View {
         VStack(alignment: .leading, spacing: 8) {
             SettingsSectionHeader(title: "Directory") {
@@ -278,13 +589,15 @@ private struct MCPProviderErrorText: View {
 
 private struct ProviderCard: View {
     @Environment(\.theme) private var theme
-    let provider: MCPProvider
-    let state: MCPProviderState?
+    let report: MCPServerHubProviderReport
     var animationIndex: Int = 0
+    let isTesting: Bool
     let onEdit: () -> Void
     let onDelete: () -> Void
     let onConnect: () -> Void
     let onDisconnect: () -> Void
+    let onTest: () -> Void
+    let onCopyDiagnostics: () -> Void
     let onToggleEnabled: (Bool) -> Void
     let onSignIn: () -> Void
     /// Inline "Add API token" submit for bearer-token providers that hit a 401.
@@ -293,11 +606,13 @@ private struct ProviderCard: View {
     let onSaveBearerToken: (String) -> Void
 
     @State private var isExpanded = false
-    @State private var isHovering = false
     @State private var hasAppeared = false
     @State private var showDeleteConfirm = false
     /// Inline secure-field text for the bearer-token 401 banner. Cleared on submit.
     @State private var inlineBearerToken: String = ""
+
+    private var provider: MCPProvider { report.provider }
+    private var state: MCPProviderState? { report.state }
 
     private var isConnected: Bool {
         state?.isConnected ?? false
@@ -311,148 +626,19 @@ private struct ProviderCard: View {
         state?.requiresAuth ?? false
     }
 
+    private var diagnosticsReport: ProviderDiagnosticReport {
+        report.prioritizedDiagnostics
+    }
+
+    /// True while an auth/error line is rendered under the header, so the
+    /// header's one-line summary (which says the same thing) is suppressed.
+    private var showsAttentionLine: Bool {
+        requiresAuth || (state?.lastError != nil && !isConnected)
+    }
+
     var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            // Header row
-            HStack(spacing: 14) {
-                // Provider icon with status
-                ZStack {
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(statusColor.opacity(0.12))
-                    Image(systemName: "server.rack")
-                        .font(.system(size: 20))
-                        .foregroundColor(statusColor)
-                }
-                .frame(width: 44, height: 44)
-
-                // Provider info
-                Button(action: { withAnimation(.spring(response: 0.3)) { isExpanded.toggle() } }) {
-                    HStack(spacing: 10) {
-                        VStack(alignment: .leading, spacing: 4) {
-                            HStack(spacing: 8) {
-                                Text(provider.name)
-                                    .font(.system(size: 15, weight: .semibold, design: .rounded))
-                                    .foregroundColor(theme.primaryText)
-
-                                statusBadge
-
-                                if provider.transport == .stdio {
-                                    executionHostBadge
-                                }
-                            }
-
-                            // Stdio providers don't have a meaningful `url`,
-                            // so the second row shows the command + args
-                            // instead. Middle-truncation preserves the
-                            // binary name (left edge) and the final arg
-                            // (right edge) — for `npx -y @scope/server-x
-                            // --root /Users/me/long/path`, that's the
-                            // signal users actually care about.
-                            Text(providerSubtitle)
-                                .font(.system(size: 12, design: .monospaced))
-                                .foregroundColor(theme.tertiaryText)
-                                .lineLimit(1)
-                                .truncationMode(
-                                    provider.transport == .stdio ? .middle : .tail
-                                )
-                        }
-
-                        Spacer()
-
-                        // Tool count when connected
-                        if isConnected, let toolCount = state?.discoveredToolCount, toolCount > 0 {
-                            HStack(spacing: 4) {
-                                Image(systemName: "wrench.and.screwdriver")
-                                    .font(.system(size: 10))
-                                Text("\(toolCount) tools", bundle: .module)
-                                    .font(.system(size: 11, weight: .medium))
-                            }
-                            .foregroundColor(theme.secondaryText)
-                            .padding(.horizontal, 8)
-                            .padding(.vertical, 4)
-                            .background(Capsule().fill(theme.tertiaryBackground))
-                        }
-
-                        Image(systemName: "chevron.right")
-                            .font(.system(size: 11, weight: .semibold))
-                            .foregroundColor(theme.tertiaryText)
-                            .rotationEffect(.degrees(isExpanded ? 90 : 0))
-                    }
-                    .contentShape(Rectangle())
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                // Actions
-                HStack(spacing: 8) {
-                    // Connection button with fixed size to prevent jiggling
-                    Group {
-                        if isConnecting {
-                            ProgressView()
-                                .scaleEffect(0.6)
-                        } else if isConnected {
-                            Button(action: onDisconnect) {
-                                Text("Disconnect", bundle: .module)
-                                    .font(.system(size: 12, weight: .medium))
-                                    .foregroundColor(theme.errorColor)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                        } else {
-                            Button(action: onConnect) {
-                                Text("Connect", bundle: .module)
-                                    .font(.system(size: 12, weight: .semibold))
-                                    .foregroundColor(.white)
-                            }
-                            .buttonStyle(PlainButtonStyle())
-                            .disabled(!provider.enabled)
-                            .opacity(provider.enabled ? 1 : 0.5)
-                        }
-                    }
-                    .frame(width: 80, height: 28)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6)
-                            .fill(
-                                isConnected
-                                    ? theme.errorColor.opacity(0.1) : (isConnecting ? Color.clear : theme.accentColor)
-                            )
-                    )
-
-                    Menu {
-                        Button(action: onEdit) {
-                            Label {
-                                Text(localized: "Edit")
-                            } icon: {
-                                Image(systemName: "pencil")
-                            }
-                        }
-                        Divider()
-                        Button(role: .destructive, action: { showDeleteConfirm = true }) {
-                            Label {
-                                Text("Delete", bundle: .module)
-                            } icon: {
-                                Image(systemName: "trash")
-                            }
-                        }
-                    } label: {
-                        Image(systemName: "ellipsis.circle")
-                            .font(.system(size: 16))
-                            .foregroundColor(theme.secondaryText)
-                            .frame(width: 28, height: 28)
-                    }
-                    .menuStyle(.borderlessButton)
-                    .fixedSize()
-
-                    Toggle(
-                        "",
-                        isOn: Binding(
-                            get: { provider.enabled },
-                            set: { onToggleEnabled($0) }
-                        )
-                    )
-                    .toggleStyle(SwitchToggleStyle())
-                    .labelsHidden()
-                    .scaleEffect(0.85)
-                }
-            }
+        VStack(alignment: .leading, spacing: 10) {
+            providerHeader
 
             // Auth-required prompt. Branched so OAuth providers get a Sign In
             // button (which kicks off the loopback flow) while bearer-token
@@ -472,48 +658,30 @@ private struct ProviderCard: View {
                 // For the common "command not found on PATH" case we add an
                 // inline "Edit" CTA so nvm/asdf users can jump straight to
                 // the command field without hunting through the row.
-                HStack(spacing: 8) {
+                HStack(alignment: .firstTextBaseline, spacing: 8) {
                     Image(systemName: errorIcon(for: error))
-                        .font(.system(size: 12))
+                        .font(.system(size: 11))
                         .foregroundColor(theme.errorColor)
                     MCPProviderErrorText(raw: error, providerName: provider.name, color: theme.errorColor)
                     if isCommandNotFoundError(error) {
                         Spacer(minLength: 6)
-                        Button(action: onEdit) {
-                            Text(localized: "Edit")
-                                .font(.system(size: 11, weight: .semibold))
-                                .foregroundColor(theme.accentColor)
-                                .padding(.horizontal, 8)
-                                .padding(.vertical, 3)
-                                .background(
-                                    RoundedRectangle(cornerRadius: 6)
-                                        .fill(theme.accentColor.opacity(0.12))
-                                )
-                        }
-                        .buttonStyle(PlainButtonStyle())
+                        inlineActionButton(L("Edit"), action: onEdit)
                     }
                 }
-                .padding(10)
                 .frame(maxWidth: .infinity, alignment: .leading)
-                .background(
-                    RoundedRectangle(cornerRadius: 8)
-                        .fill(theme.errorColor.opacity(0.08))
-                )
+                .padding(.leading, 18)
             }
 
             // Expanded content
             if isExpanded {
                 Divider()
-                    .padding(.vertical, 4)
+                    .padding(.vertical, 2)
 
                 expandedContent
                     .transition(.opacity.combined(with: .move(edge: .top)))
             }
         }
-        .padding(16)
-        .background(cardBackground)
-        .animation(.easeOut(duration: 0.15), value: isHovering)
-        .onHover { hovering in isHovering = hovering }
+        .frame(maxWidth: .infinity, alignment: .leading)
         .opacity(hasAppeared ? 1 : 0)
         .onAppear {
             let delay = Double(animationIndex) * 0.03
@@ -522,12 +690,204 @@ private struct ProviderCard: View {
             }
         }
         .themedAlert(
-            "Delete Provider?",
+            L("Delete Provider?"),
             isPresented: $showDeleteConfirm,
-            message: "This will remove the provider and all its tools. This cannot be undone.",
-            primaryButton: .destructive("Delete") { onDelete() },
-            secondaryButton: .cancel("Cancel")
+            message: L("This will remove the provider and all its tools. This cannot be undone."),
+            primaryButton: .destructive(L("Delete")) { onDelete() },
+            secondaryButton: .cancel(L("Cancel"))
         )
+    }
+
+    private var providerHeader: some View {
+        HStack(spacing: 12) {
+            providerDisclosure
+                .frame(maxWidth: .infinity, alignment: .leading)
+            providerControls
+        }
+    }
+
+    private var providerDisclosure: some View {
+        Button {
+            withAnimation(.spring(response: 0.3, dampingFraction: 0.8)) {
+                isExpanded.toggle()
+            }
+        } label: {
+            HStack(spacing: 10) {
+                Circle()
+                    .fill(statusColor)
+                    .frame(width: 8, height: 8)
+
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(provider.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                        .lineLimit(1)
+
+                    HStack(spacing: 6) {
+                        Text(statusLabel)
+                            .font(.system(size: 11, weight: .medium))
+                            .foregroundColor(statusColor)
+
+                        Text(verbatim: "·")
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.tertiaryText)
+
+                        Text(provider.transport == .http ? "HTTP" : "stdio")
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.secondaryText)
+
+                        if provider.transport == .stdio {
+                            executionHostBadge
+                        }
+
+                        Text(providerSubtitle)
+                            .font(.system(size: 11, design: .monospaced))
+                            .foregroundColor(theme.tertiaryText)
+                            .lineLimit(1)
+                            .truncationMode(provider.transport == .stdio ? .middle : .tail)
+
+                        if let toolCount = state?.discoveredToolCount, toolCount > 0 {
+                            Text(verbatim: "·")
+                                .font(.system(size: 11))
+                                .foregroundColor(theme.tertiaryText)
+                            Text(toolCount == 1 ? L("1 tool") : L("\(toolCount) tools"))
+                                .font(.system(size: 11))
+                                .foregroundColor(theme.secondaryText)
+                                .lineLimit(1)
+                        }
+                    }
+
+                    if report.hasAttention && !showsAttentionLine {
+                        Text(report.summary)
+                            .font(.system(size: 11))
+                            .foregroundColor(statusColor)
+                            .lineLimit(1)
+                            .truncationMode(.tail)
+                    }
+                }
+                .frame(maxWidth: .infinity, alignment: .leading)
+
+                Image(systemName: "chevron.right")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(theme.tertiaryText)
+                    .rotationEffect(.degrees(isExpanded ? 90 : 0))
+            }
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(PlainButtonStyle())
+    }
+
+    private var providerControls: some View {
+        HStack(spacing: 8) {
+            connectionButton
+
+            Toggle(
+                "",
+                isOn: Binding(
+                    get: { provider.enabled },
+                    set: { onToggleEnabled($0) }
+                )
+            )
+            .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
+            .labelsHidden()
+            .controlSize(.small)
+            .help(Text("Enable this service", bundle: .module))
+
+            Menu {
+                Button(action: onTest) {
+                    Label {
+                        Text("Test Connection", bundle: .module)
+                    } icon: {
+                        Image(systemName: "antenna.radiowaves.left.and.right")
+                    }
+                }
+                .disabled(isTesting)
+
+                Button(action: onCopyDiagnostics) {
+                    Label {
+                        Text("Copy Diagnostics", bundle: .module)
+                    } icon: {
+                        Image(systemName: "doc.on.doc")
+                    }
+                }
+
+                Button(action: onEdit) {
+                    Label {
+                        Text("Edit", bundle: .module)
+                    } icon: {
+                        Image(systemName: "pencil")
+                    }
+                }
+
+                Divider()
+
+                Button(role: .destructive, action: { showDeleteConfirm = true }) {
+                    Label {
+                        Text("Delete", bundle: .module)
+                    } icon: {
+                        Image(systemName: "trash")
+                    }
+                }
+            } label: {
+                Group {
+                    if isTesting {
+                        ProgressView()
+                            .scaleEffect(0.5)
+                    } else {
+                        Image(systemName: "ellipsis.circle")
+                            .font(.system(size: 15))
+                            .foregroundColor(theme.secondaryText)
+                    }
+                }
+                .frame(width: 28, height: 28)
+            }
+            .menuStyle(.borderlessButton)
+            .fixedSize()
+            .accessibilityLabel(Text("Connection actions", bundle: .module))
+        }
+    }
+
+    private var connectionButton: some View {
+        Group {
+            if isConnecting {
+                ProgressView()
+                    .scaleEffect(0.5)
+                    .frame(width: 76, height: 24)
+            } else if isConnected {
+                inlineActionButton(L("Disconnect"), tint: theme.errorColor, action: onDisconnect)
+            } else {
+                inlineActionButton(L("Connect"), action: onConnect)
+                    .disabled(!provider.enabled)
+                    .opacity(provider.enabled ? 1 : 0.5)
+            }
+        }
+    }
+
+    /// Small bordered text button used for row-level actions (Connect,
+    /// Disconnect, Sign In, Retry, Edit). Matches `SettingsDestructiveRow`.
+    private func inlineActionButton(
+        _ title: String,
+        tint: Color? = nil,
+        action: @escaping () -> Void
+    ) -> some View {
+        Button(action: action) {
+            Text(title)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(tint ?? theme.accentColor)
+                .lineLimit(1)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 5)
+                .background(
+                    RoundedRectangle(cornerRadius: 7)
+                        .fill(theme.tertiaryBackground)
+                        .overlay(
+                            RoundedRectangle(cornerRadius: 7)
+                                .stroke(theme.inputBorder, lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(PlainButtonStyle())
+        .pointingHandCursor()
     }
 
     private var statusColor: Color {
@@ -568,7 +928,7 @@ private struct ProviderCard: View {
             return provider.url
         case .stdio:
             if provider.command.isEmpty {
-                return "stdio (command not set)"
+                return L("stdio (command not set)")
             }
             let args = ShellArgs.join(provider.args)
             return args.isEmpty ? provider.command : "\(provider.command) \(args)"
@@ -596,60 +956,20 @@ private struct ProviderCard: View {
         )
     }
 
-    @ViewBuilder
-    private var statusBadge: some View {
+    /// One word for the second line of the row; colored with `statusColor`.
+    private var statusLabel: String {
         if !provider.enabled {
-            Text("Disabled", bundle: .module)
-                .font(.system(size: 10, weight: .medium))
-                .foregroundColor(theme.tertiaryText)
-                .padding(.horizontal, 6)
-                .padding(.vertical, 2)
-                .background(Capsule().fill(theme.tertiaryBackground))
+            return L("Disabled")
         } else if isConnected {
-            HStack(spacing: 4) {
-                Circle().fill(theme.successColor).frame(width: 6, height: 6)
-                Text("Connected", bundle: .module)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(theme.successColor)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(theme.successColor.opacity(0.12)))
+            return L("Connected")
         } else if state?.isAutoReconnecting == true {
-            HStack(spacing: 4) {
-                ProgressView()
-                    .scaleEffect(0.4)
-                    .frame(width: 6, height: 6)
-                Text("Reconnecting…", bundle: .module)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(theme.accentColor)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+            return L("Reconnecting…")
         } else if isConnecting {
-            HStack(spacing: 4) {
-                ProgressView()
-                    .scaleEffect(0.4)
-                    .frame(width: 6, height: 6)
-                Text("Connecting...", bundle: .module)
-                    .font(.system(size: 10, weight: .medium))
-                    .foregroundColor(theme.accentColor)
-            }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(theme.accentColor.opacity(0.12)))
+            return L("Connecting...")
         } else if state?.lastError != nil {
-            HStack(spacing: 4) {
-                Image(systemName: "exclamationmark.circle.fill")
-                    .font(.system(size: 8))
-                Text("Error", bundle: .module)
-                    .font(.system(size: 10, weight: .medium))
-            }
-            .foregroundColor(theme.errorColor)
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(theme.errorColor.opacity(0.12)))
+            return L("Error")
+        } else {
+            return L("Not connected")
         }
     }
 
@@ -663,11 +983,11 @@ private struct ProviderCard: View {
                 systemName: signInError == nil
                     ? "person.badge.key.fill" : "exclamationmark.triangle.fill"
             )
-            .font(.system(size: 13))
-            .foregroundColor(signInError == nil ? .orange : theme.errorColor)
+            .font(.system(size: 11))
+            .foregroundColor(signInError == nil ? theme.warningColor : theme.errorColor)
             VStack(alignment: .leading, spacing: 2) {
                 Text("Sign in required", bundle: .module)
-                    .font(.system(size: 12, weight: .semibold))
+                    .font(.system(size: 12, weight: .medium))
                     .foregroundColor(theme.primaryText)
                 if let signInError {
                     MCPProviderErrorText(raw: signInError, providerName: provider.name, color: theme.errorColor)
@@ -679,24 +999,10 @@ private struct ProviderCard: View {
                 }
             }
             Spacer()
-            Button(action: onSignIn) {
-                Text(signInError == nil ? "Sign In" : "Retry", bundle: .module)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 12)
-                    .padding(.vertical, 6)
-                    .background(
-                        RoundedRectangle(cornerRadius: 6).fill(theme.accentColor)
-                    )
-            }
-            .buttonStyle(PlainButtonStyle())
+            inlineActionButton(signInError == nil ? L("Sign In") : L("Retry"), action: onSignIn)
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill((signInError == nil ? Color.orange : theme.errorColor).opacity(0.10))
-        )
+        .padding(.leading, 18)
     }
 
     /// Bearer-token-flavoured auth-required banner. Shows an inline secure
@@ -709,11 +1015,11 @@ private struct ProviderCard: View {
         VStack(alignment: .leading, spacing: 8) {
             HStack(spacing: 10) {
                 Image(systemName: "key.fill")
-                    .font(.system(size: 13))
-                    .foregroundColor(.orange)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.warningColor)
                 VStack(alignment: .leading, spacing: 2) {
                     Text("API token required", bundle: .module)
-                        .font(.system(size: 12, weight: .semibold))
+                        .font(.system(size: 12, weight: .medium))
                         .foregroundColor(theme.primaryText)
                     if let lastError {
                         MCPProviderErrorText(raw: lastError, providerName: provider.name, color: theme.errorColor)
@@ -749,28 +1055,14 @@ private struct ProviderCard: View {
                 )
                 .onSubmit(submitInlineBearerToken)
 
-                Button(action: submitInlineBearerToken) {
-                    Text("Save & Retry", bundle: .module)
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(.white)
-                        .padding(.horizontal, 12)
-                        .padding(.vertical, 6)
-                        .background(
-                            RoundedRectangle(cornerRadius: 6).fill(theme.accentColor)
-                        )
-                }
-                .buttonStyle(PlainButtonStyle())
-                .disabled(
-                    inlineBearerToken.trimmingCharacters(in: .whitespaces).isEmpty
-                )
+                inlineActionButton(L("Save & Retry"), action: submitInlineBearerToken)
+                    .disabled(
+                        inlineBearerToken.trimmingCharacters(in: .whitespaces).isEmpty
+                    )
             }
         }
-        .padding(10)
         .frame(maxWidth: .infinity, alignment: .leading)
-        .background(
-            RoundedRectangle(cornerRadius: 8)
-                .fill(Color.orange.opacity(0.10))
-        )
+        .padding(.leading, 18)
     }
 
     private func submitInlineBearerToken() {
@@ -790,17 +1082,20 @@ private struct ProviderCard: View {
                 if provider.transport == .http {
                     settingItem(
                         icon: "bolt.fill",
-                        label: "Streaming",
-                        value: provider.streamingEnabled ? "On" : "Off"
+                        label: L("Streaming"),
+                        value: provider.streamingEnabled ? L("On") : L("Off")
                     )
                 }
-                settingItem(icon: "clock", label: "Timeout", value: "\(Int(provider.toolCallTimeout))s")
+                settingItem(icon: "clock", label: L("Timeout"), value: L("\(Int(provider.toolCallTimeout))s"))
                 settingItem(
                     icon: "arrow.clockwise",
-                    label: "Auto-connect",
-                    value: provider.autoConnect ? "Yes" : "No"
+                    label: L("Auto-connect"),
+                    value: provider.autoConnect ? L("Yes") : L("No")
                 )
             }
+
+            ProviderDiagnosticsRowsView(report: diagnosticsReport, maxRows: 3)
+                .padding(.horizontal, -16)
 
             // Custom headers summary
             if !provider.customHeaders.isEmpty || !provider.secretHeaderKeys.isEmpty {
@@ -880,21 +1175,6 @@ private struct ProviderCard: View {
                 .foregroundColor(theme.secondaryText)
         }
     }
-
-    private var cardBackground: some View {
-        RoundedRectangle(cornerRadius: 12)
-            .fill(theme.cardBackground)
-            .overlay(
-                RoundedRectangle(cornerRadius: 12)
-                    .stroke(isHovering ? theme.accentColor.opacity(0.2) : theme.cardBorder, lineWidth: 1)
-            )
-            .shadow(
-                color: theme.shadowColor.opacity(isHovering ? theme.shadowOpacity * 1.5 : theme.shadowOpacity),
-                radius: isHovering ? 12 : theme.cardShadowRadius,
-                x: 0,
-                y: isHovering ? 4 : theme.cardShadowY
-            )
-    }
 }
 
 // MARK: - Provider Edit Sheet
@@ -904,7 +1184,13 @@ private struct ProviderEditSheet: View {
     @Environment(\.dismiss) private var dismiss
 
     let provider: MCPProvider?
-    /// Add-mode starting step (upstream #2950 inline Directory).
+    /// Add-mode prefill from a hand-off (e.g. the API provider form detected
+    /// an MCP server URL). Skips the catalog and lands on the custom editor
+    /// with URL/token filled in. Ignored in edit mode.
+    var prefill: MCPProviderDraft? = nil
+    /// Add-mode starting step. `.catalog` shows the directory first; the
+    /// inline Directory on the Services tab passes the tapped service so the
+    /// sheet opens straight on its setup. Ignored in edit mode or with a prefill.
     var start: MCPAddServiceStart = .catalog
     let onSave: (MCPProvider, String?) -> Void
 
@@ -937,13 +1223,14 @@ private struct ProviderEditSheet: View {
     // Manual OAuth override fields. Surfaced under an "Advanced" disclosure
     // inside the OAuth section so users can wire up MCP servers that don't
     // implement RFC 9728 PRM — those servers must supply at least the
-    // authorize + token endpoints by hand.
+    // authorize + token endpoints by hand. `manualClientId` /
+    // `manualClientSecret` are also reused by the connect-known
+    // confidential-client flow (HubSpot's MCP Auth Apps) which forces both
+    // values to be entered up front before sign-in is allowed.
     @State private var showOAuthAdvanced: Bool = false
     @State private var manualAuthEndpoint: String = ""
     @State private var manualTokenEndpoint: String = ""
     @State private var manualClientId: String = ""
-    /// Confidential-client flow (HubSpot's MCP Auth Apps): entered up front
-    /// with `manualClientId` before sign-in is allowed.
     @State private var manualClientSecret: String = ""
     @State private var manualScopes: String = ""
 
@@ -966,11 +1253,49 @@ private struct ProviderEditSheet: View {
         case configureCustom
     }
 
-    @State private var phase: Phase = .chooseProvider
+    @State private var phase: Phase
 
     /// Search/filter query for the catalog grid. Reset whenever the user
     /// returns to `.chooseProvider` so re-entering the catalog starts fresh.
     @State private var catalogQuery: String = ""
+
+    /// The starting phase is decided here, not in `onAppear`, so a sheet
+    /// opened from the inline Directory renders its service's setup on the
+    /// very first frame instead of flashing the catalog and animating away.
+    init(
+        provider: MCPProvider?,
+        prefill: MCPProviderDraft? = nil,
+        start: MCPAddServiceStart = .catalog,
+        onSave: @escaping (MCPProvider, String?) -> Void
+    ) {
+        self.provider = provider
+        self.prefill = prefill
+        self.start = start
+        self.onSave = onSave
+
+        let initialPhase: Phase
+        if provider != nil || prefill != nil {
+            initialPhase = .configureCustom
+        } else {
+            switch start {
+            case .catalog:
+                initialPhase = .chooseProvider
+            case .template(let template):
+                initialPhase = .configureKnown(template)
+            case .custom:
+                initialPhase = .configureCustom
+            }
+        }
+        _phase = State(initialValue: initialPhase)
+
+        // Seed the draft for template starts so the fields are populated on
+        // the first frame too; `loadProvider` handles edit/prefill.
+        if provider == nil, prefill == nil, case .template(let template) = start {
+            _name = State(initialValue: template.displayName)
+            _url = State(initialValue: template.url)
+            _authType = State(initialValue: template.authType)
+        }
+    }
 
     private var isEditing: Bool { provider != nil }
 
@@ -991,8 +1316,15 @@ private struct ProviderEditSheet: View {
     }
 
     enum TestResult {
-        case success(Int)
-        case failure(String)
+        case success(MCPProviderProbeResult)
+        case failure(MCPProviderProbeResult)
+
+        var probeResult: MCPProviderProbeResult {
+            switch self {
+            case .success(let result), .failure(let result):
+                return result
+            }
+        }
     }
 
     var body: some View {
@@ -1006,7 +1338,7 @@ private struct ProviderEditSheet: View {
 
             sheetFooter
         }
-        .frame(width: 560, height: 660)
+        .fittedSheetFrame(width: 560, height: 660)
         .background(themeManager.currentTheme.primaryBackground)
         .clipShape(RoundedRectangle(cornerRadius: 16))
         .overlay(
@@ -1037,23 +1369,23 @@ private struct ProviderEditSheet: View {
     private var headerInfo: (icon: String, title: Text, subtitle: Text) {
         if isEditing {
             return (
-                "pencil.circle.fill",
-                Text("Edit MCP Provider", bundle: .module),
-                Text("Modify your MCP server connection", bundle: .module)
+                "pencil",
+                Text("Edit Service", bundle: .module),
+                Text("Modify this MCP service", bundle: .module)
             )
         }
         switch phase {
         case .chooseProvider:
             return (
-                "square.grid.2x2.fill",
-                Text("Add MCP Provider", bundle: .module),
+                "square.grid.2x2",
+                Text("Add Service", bundle: .module),
                 Text("Choose a service to connect", bundle: .module)
             )
         case .configureKnown(let template):
             return (
                 template.iconSystemName,
                 Text("Connect to \(template.displayName)", bundle: .module),
-                Text("Sign in with your account to give Osaurus access", bundle: .module)
+                Text(LocalizedStringKey(template.tagline), bundle: .module)
             )
         case .configureCustom:
             return (
@@ -1064,75 +1396,55 @@ private struct ProviderEditSheet: View {
         }
     }
 
+    /// Flat header on the same surface as the content: small icon tile,
+    /// title, one-line subtitle, close. No gradient band — the body below
+    /// never repeats the service name.
     private var sheetHeader: some View {
         let info = headerInfo
+        let theme = themeManager.currentTheme
         return HStack(spacing: 12) {
             ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [
-                                themeManager.currentTheme.accentColor.opacity(0.2),
-                                themeManager.currentTheme.accentColor.opacity(0.05),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.accentColor.opacity(0.12))
                 Image(systemName: info.icon)
-                    .font(.system(size: 18, weight: .semibold))
-                    .foregroundStyle(
-                        LinearGradient(
-                            colors: [
-                                themeManager.currentTheme.accentColor,
-                                themeManager.currentTheme.accentColor.opacity(0.7),
-                            ],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(theme.accentColor)
             }
-            .frame(width: 40, height: 40)
+            .frame(width: 32, height: 32)
 
             VStack(alignment: .leading, spacing: 2) {
                 info.title
                     .font(.system(size: 16, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.primaryText)
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
 
                 info.subtitle
                     .font(.system(size: 12))
-                    .foregroundColor(themeManager.currentTheme.secondaryText)
+                    .foregroundColor(theme.secondaryText)
+                    .lineLimit(1)
             }
 
             Spacer()
 
             Button(action: { dismiss() }) {
                 Image(systemName: "xmark")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.secondaryText)
-                    .frame(width: 28, height: 28)
-                    .background(
-                        Circle()
-                            .fill(themeManager.currentTheme.tertiaryBackground)
-                    )
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+                    .frame(width: 26, height: 26)
+                    .background(Circle().fill(theme.tertiaryBackground))
             }
             .buttonStyle(PlainButtonStyle())
             .keyboardShortcut(.escape, modifiers: [])
         }
         .padding(.horizontal, 24)
-        .padding(.vertical, 20)
-        .background(
-            themeManager.currentTheme.secondaryBackground
-                .overlay(
-                    LinearGradient(
-                        colors: [
-                            themeManager.currentTheme.accentColor.opacity(0.03),
-                            Color.clear,
-                        ],
-                        startPoint: .topLeading,
-                        endPoint: .bottomTrailing
-                    )
-                )
+        .padding(.top, 20)
+        .padding(.bottom, 16)
+        .background(theme.primaryBackground)
+        .overlay(
+            Rectangle()
+                .fill(theme.primaryBorder)
+                .frame(height: 1),
+            alignment: .bottom
         )
     }
 
@@ -1148,7 +1460,7 @@ private struct ProviderEditSheet: View {
         .padding(.horizontal, 24)
         .padding(.vertical, 16)
         .background(
-            themeManager.currentTheme.secondaryBackground
+            themeManager.currentTheme.primaryBackground
                 .overlay(
                     Rectangle()
                         .fill(themeManager.currentTheme.primaryBorder)
@@ -1183,13 +1495,13 @@ private struct ProviderEditSheet: View {
         cancelButton
         if case .configureKnown(let template) = phase {
             primarySaveButton(
-                label: Text("Add Provider", bundle: .module),
+                label: Text("Add Service", bundle: .module),
                 enabled: canSaveKnown(template)
             )
         }
         if case .configureCustom = phase {
             primarySaveButton(
-                label: Text(isEditing ? "Save" : "Add Provider", bundle: .module),
+                label: Text(isEditing ? "Save" : "Add Service", bundle: .module),
                 enabled: canSave
             )
         }
@@ -1214,11 +1526,7 @@ private struct ProviderEditSheet: View {
     @ViewBuilder
     private var testConnectionButton: some View {
         Button(action: {
-            if testResult != nil {
-                testResult = nil
-            } else {
-                testConnection()
-            }
+            testConnection()
         }) {
             HStack(spacing: 6) {
                 Group {
@@ -1242,11 +1550,15 @@ private struct ProviderEditSheet: View {
 
                 if let result = testResult {
                     switch result {
-                    case .success(let count):
-                        Text("Connected! (\(count) tools)", bundle: .module)
+                    case .success(let probe):
+                        Text(
+                            probe.toolCount == 1
+                                ? L("Connected! (1 tool)")
+                                : L("Connected! (\(probe.toolCount) tools)")
+                        )
                             .font(.system(size: 12, weight: .medium))
-                    case .failure:
-                        Text("Failed - Tap to retry", bundle: .module)
+                    case .failure(let probe):
+                        Text("Failed - \(probe.reasonCode.rawValue)", bundle: .module)
                             .font(.system(size: 12, weight: .medium))
                     }
                 } else {
@@ -1284,7 +1596,9 @@ private struct ProviderEditSheet: View {
 
     /// Reset the draft to a blank slate. Used when transitioning between phases
     /// so a previous selection's name / url / OAuth state doesn't leak through.
-    /// Token state is dropped from Keychain via `resetDraftOAuthState`.
+    /// Token state is dropped from Keychain via `resetDraftOAuthState`. Manual
+    /// OAuth override fields are also wiped so a half-typed Client ID /
+    /// Client Secret from one template doesn't bleed into the next.
     private func clearDraft(authType: MCPProviderAuthType, name: String = "", url: String = "") {
         self.name = name
         self.url = url
@@ -1293,7 +1607,12 @@ private struct ProviderEditSheet: View {
         toolCallTimeout = 45
         progressHardCap = MCPProvider.defaultProgressHardCap
         testResult = nil
+        manualAuthEndpoint = ""
+        manualTokenEndpoint = ""
+        manualClientId = ""
         manualClientSecret = ""
+        manualScopes = ""
+        showOAuthAdvanced = false
         resetDraftOAuthState()
     }
 
@@ -1305,8 +1624,6 @@ private struct ProviderEditSheet: View {
 
     // MARK: - Catalog Grid (Phase 1)
 
-    /// The catalog grid is upstream #2950's shared `MCPProviderDirectoryView`,
-    /// the same list the Services page shows inline.
     private var catalogGridBody: some View {
         MCPProviderDirectoryView(
             query: $catalogQuery,
@@ -1333,47 +1650,7 @@ private struct ProviderEditSheet: View {
     @ViewBuilder
     private func configureKnownBody(template: MCPProviderTemplate) -> some View {
         VStack(spacing: 24) {
-            // Hero
-            VStack(spacing: 14) {
-                ZStack {
-                    Circle()
-                        .fill(
-                            LinearGradient(
-                                colors: [
-                                    themeManager.currentTheme.accentColor.opacity(0.22),
-                                    themeManager.currentTheme.accentColor.opacity(0.06),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                    Image(systemName: template.iconSystemName)
-                        .font(.system(size: 30, weight: .semibold))
-                        .foregroundStyle(
-                            LinearGradient(
-                                colors: [
-                                    themeManager.currentTheme.accentColor,
-                                    themeManager.currentTheme.accentColor.opacity(0.7),
-                                ],
-                                startPoint: .topLeading,
-                                endPoint: .bottomTrailing
-                            )
-                        )
-                }
-                .frame(width: 72, height: 72)
-
-                VStack(spacing: 4) {
-                    Text(LocalizedStringKey(template.displayName), bundle: .module)
-                        .font(.system(size: 20, weight: .semibold))
-                        .foregroundColor(themeManager.currentTheme.primaryText)
-                    Text(LocalizedStringKey(template.tagline), bundle: .module)
-                        .font(.system(size: 13))
-                        .foregroundColor(themeManager.currentTheme.secondaryText)
-                        .multilineTextAlignment(.center)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
-            }
-            .padding(.top, 12)
+            Spacer(minLength: 24)
 
             // Auth-specific block
             VStack(spacing: 12) {
@@ -1419,35 +1696,7 @@ private struct ProviderEditSheet: View {
     @ViewBuilder
     private func signInBlock(template: MCPProviderTemplate) -> some View {
         VStack(spacing: 10) {
-            Button(action: signInWithOAuth) {
-                HStack(spacing: 8) {
-                    if isSigningIn {
-                        ProgressView()
-                            .scaleEffect(0.7)
-                            .frame(width: 14, height: 14)
-                    } else {
-                        Image(systemName: "person.badge.key.fill")
-                            .font(.system(size: 13, weight: .semibold))
-                    }
-                    Group {
-                        if isSigningIn {
-                            Text("Waiting for browser…", bundle: .module)
-                        } else {
-                            Text("Sign In with \(template.displayName)", bundle: .module)
-                        }
-                    }
-                    .font(.system(size: 14, weight: .semibold))
-                }
-                .foregroundColor(.white)
-                .padding(.horizontal, 22)
-                .padding(.vertical, 12)
-                .background(
-                    RoundedRectangle(cornerRadius: 10)
-                        .fill(themeManager.currentTheme.accentColor)
-                )
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(isSigningIn)
+            oauthSignInButton(template: template, enabled: true)
 
             Text(
                 "We'll open your browser to sign in. After approving, you'll be redirected back to Osaurus.",
@@ -1460,6 +1709,11 @@ private struct ProviderEditSheet: View {
         }
     }
 
+    /// Big "Sign In with [Provider]" button shared by the OAuth+DCR and
+    /// confidential-client OAuth flows. Visual treatment matches across
+    /// both so the connect-known screen reads as one design family — only
+    /// the gating predicate differs (DCR is always enabled; confidential-
+    /// client waits on Client ID + Client Secret being filled in).
     @ViewBuilder
     private func oauthSignInButton(template: MCPProviderTemplate, enabled: Bool) -> some View {
         Button(action: signInWithOAuth) {
@@ -1497,7 +1751,50 @@ private struct ProviderEditSheet: View {
         .disabled(isSigningIn || !enabled)
     }
 
+    @ViewBuilder
+    private func connectedBlock(template: MCPProviderTemplate) -> some View {
+        VStack(spacing: 12) {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 18))
+                    .foregroundColor(themeManager.currentTheme.successColor)
+                Text("Connected to \(template.displayName)", bundle: .module)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(themeManager.currentTheme.primaryText)
+            }
+            .padding(.horizontal, 16)
+            .padding(.vertical, 10)
+            .background(
+                RoundedRectangle(cornerRadius: 10)
+                    .fill(themeManager.currentTheme.successColor.opacity(0.12))
+            )
 
+            if let scopes = oauthConfig?.scopes, !scopes.isEmpty {
+                HStack(spacing: 4) {
+                    Image(systemName: "key.fill")
+                        .font(.system(size: 9))
+                    Text(scopes.joined(separator: " "))
+                        .font(.system(size: 10, design: .monospaced))
+                        .lineLimit(2)
+                        .multilineTextAlignment(.center)
+                }
+                .foregroundColor(themeManager.currentTheme.tertiaryText)
+                .frame(maxWidth: 360)
+            }
+
+            Button(action: signInWithOAuth) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.clockwise")
+                        .font(.system(size: 11))
+                    Text("Re-authenticate", bundle: .module)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(themeManager.currentTheme.secondaryText)
+            }
+            .buttonStyle(PlainButtonStyle())
+            .disabled(isSigningIn)
+        }
+    }
 
     /// Connect-known body for OAuth providers without DCR (HubSpot's MCP Auth
     /// Apps). Walks the user through registering an OAuth app in the vendor's
@@ -1672,52 +1969,6 @@ private struct ProviderEditSheet: View {
         pasteboard.setString(value, forType: .string)
     }
 
-
-    @ViewBuilder
-    private func connectedBlock(template: MCPProviderTemplate) -> some View {
-        VStack(spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: "checkmark.circle.fill")
-                    .font(.system(size: 18))
-                    .foregroundColor(themeManager.currentTheme.successColor)
-                Text("Connected to \(template.displayName)", bundle: .module)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.primaryText)
-            }
-            .padding(.horizontal, 16)
-            .padding(.vertical, 10)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(themeManager.currentTheme.successColor.opacity(0.12))
-            )
-
-            if let scopes = oauthConfig?.scopes, !scopes.isEmpty {
-                HStack(spacing: 4) {
-                    Image(systemName: "key.fill")
-                        .font(.system(size: 9))
-                    Text(scopes.joined(separator: " "))
-                        .font(.system(size: 10, design: .monospaced))
-                        .lineLimit(2)
-                        .multilineTextAlignment(.center)
-                }
-                .foregroundColor(themeManager.currentTheme.tertiaryText)
-                .frame(maxWidth: 360)
-            }
-
-            Button(action: signInWithOAuth) {
-                HStack(spacing: 4) {
-                    Image(systemName: "arrow.clockwise")
-                        .font(.system(size: 11))
-                    Text("Re-authenticate", bundle: .module)
-                        .font(.system(size: 12, weight: .medium))
-                }
-                .foregroundColor(themeManager.currentTheme.secondaryText)
-            }
-            .buttonStyle(PlainButtonStyle())
-            .disabled(isSigningIn)
-        }
-    }
-
     @ViewBuilder
     private func apiKeyBlock(template: MCPProviderTemplate) -> some View {
         VStack(spacing: 10) {
@@ -1771,7 +2022,9 @@ private struct ProviderEditSheet: View {
     }
 
     /// "Add Provider" enable rule for the connect-known footer. OAuth waits on
-    /// sign-in, bearer-token waits on a non-empty key, none is always ready.
+    /// sign-in (which for confidential-client templates also implies that
+    /// client_id + client_secret were filled in beforehand), bearer-token
+    /// waits on a non-empty key, none is always ready.
     private func canSaveKnown(_ template: MCPProviderTemplate) -> Bool {
         switch template.authType {
         case .oauth:
@@ -1833,8 +2086,76 @@ private struct ProviderEditSheet: View {
             }
 
             advancedCard
+
+            if let result = testResult {
+                probeResultCard(result.probeResult)
+            }
         }
         .padding(0)
+    }
+
+    private func probeResultCard(_ result: MCPProviderProbeResult) -> some View {
+        EditorCard(
+            title: result.succeeded ? "Probe Passed" : "Probe Failed",
+            icon: result.succeeded ? "checkmark.seal.fill" : "exclamationmark.triangle.fill"
+        ) {
+            VStack(alignment: .leading, spacing: 10) {
+                HStack(spacing: 8) {
+                    probeChip(title: "Reason", value: result.reasonCode.rawValue)
+                    probeChip(title: "Stage", value: result.stage.rawValue)
+                    probeChip(title: "Tools", value: "\(result.toolCount)")
+                }
+
+                Text(result.redactedMessage)
+                    .font(.system(size: 12))
+                    .foregroundColor(themeManager.currentTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if let action = result.redactedAction {
+                    Text(action)
+                        .font(.system(size: 12, weight: .medium))
+                        .foregroundColor(themeManager.currentTheme.accentColor)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Button(action: { copyProbeResult(result) }) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "doc.on.doc")
+                            .font(.system(size: 11, weight: .semibold))
+                        Text("Copy Probe Result", bundle: .module)
+                            .font(.system(size: 12, weight: .medium))
+                    }
+                    .foregroundColor(themeManager.currentTheme.accentColor)
+                }
+                .buttonStyle(PlainButtonStyle())
+                .localizedHelp("Copy")
+            }
+        }
+    }
+
+    private func probeChip(title: String, value: String) -> some View {
+        HStack(spacing: 4) {
+            Text(LocalizedStringKey(title), bundle: .module)
+                .font(.system(size: 10, weight: .medium))
+                .foregroundColor(themeManager.currentTheme.tertiaryText)
+            Text(value)
+                .font(.system(size: 10, weight: .semibold, design: .monospaced))
+                .foregroundColor(themeManager.currentTheme.primaryText)
+                .lineLimit(1)
+                .truncationMode(.middle)
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 4)
+        .background(
+            RoundedRectangle(cornerRadius: 6)
+                .fill(themeManager.currentTheme.tertiaryBackground)
+        )
+    }
+
+    private func copyProbeResult(_ result: MCPProviderProbeResult) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        pasteboard.setString(result.pasteboardText, forType: .string)
     }
 
     private var customHeadersCard: some View {
@@ -1958,10 +2279,11 @@ private struct ProviderEditSheet: View {
             Text("Transport", bundle: .module)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
-            ThemedSegmentedPicker(
+            ThemedSegmentedPicker(  // Intel: native segmented pickers render blank on Ventura
                 selection: $transport,
                 options: [(MCPProviderTransport.http, "HTTP / SSE"), (MCPProviderTransport.stdio, "Stdio")]
             )
+            .labelsHidden()
         }
     }
 
@@ -1970,10 +2292,11 @@ private struct ProviderEditSheet: View {
             Text("Run in", bundle: .module)
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
-            ThemedSegmentedPicker(
+            ThemedSegmentedPicker(  // Intel: native segmented pickers render blank on Ventura
                 selection: $executionHost,
                 options: [(MCPProviderExecutionHost.sandbox, "Sandbox"), (MCPProviderExecutionHost.host, "Host")]
             )
+            .labelsHidden()
         }
     }
 
@@ -1986,23 +2309,49 @@ private struct ProviderEditSheet: View {
     private var executionHostExplainer: some View {
         switch executionHost {
         case .sandbox:
-            HStack(alignment: .top, spacing: 8) {
-                Image(systemName: "shippingbox.fill")
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.accentColor)
-                Text(
-                    "Runs in an isolated Linux VM. Outbound network is allowed; no access to host files or credentials.",
-                    bundle: .module
+            // Seatbelt backend: sandboxed stdio doesn't exist (no VM
+            // interactive exec bridge), so a provider left on Sandbox
+            // will fail to start. Warn at selection time — the same
+            // guidance the connect-time error gives.
+            // Intel: there is no sandbox at all on this Mac, so the
+            // warning always applies (upstream: Seatbelt backend only).
+            if true {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "exclamationmark.triangle.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(.orange)
+                    Text(
+                        "Sandboxed MCP servers aren't available on this Mac and will fail to start. Choose Host to run this provider — note it will then run without sandbox protection.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(themeManager.currentTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(Color.orange.opacity(0.10))
                 )
-                .font(.system(size: 11))
-                .foregroundColor(themeManager.currentTheme.secondaryText)
-                .fixedSize(horizontal: false, vertical: true)
+            } else {
+                HStack(alignment: .top, spacing: 8) {
+                    Image(systemName: "shippingbox.fill")
+                        .font(.system(size: 12, weight: .semibold))
+                        .foregroundColor(themeManager.currentTheme.accentColor)
+                    Text(
+                        "Runs in an isolated Linux VM with no access to host files or credentials. Outbound network is on by default and can be turned off per agent in the agent's Sandbox settings.",
+                        bundle: .module
+                    )
+                    .font(.system(size: 11))
+                    .foregroundColor(themeManager.currentTheme.secondaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+                }
+                .padding(10)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(themeManager.currentTheme.accentColor.opacity(0.08))
+                )
             }
-            .padding(10)
-            .background(
-                RoundedRectangle(cornerRadius: 8)
-                    .fill(themeManager.currentTheme.accentColor.opacity(0.08))
-            )
 
         case .host:
             HStack(alignment: .top, spacing: 8) {
@@ -2037,7 +2386,7 @@ private struct ProviderEditSheet: View {
                     }
                 }) {
                     HStack {
-                        Text(showAdvanced ? "Hide advanced settings" : "Show advanced settings")
+                        Text(showAdvanced ? L("Hide advanced settings") : L("Show advanced settings"))
                             .font(.system(size: 13))
                             .foregroundColor(themeManager.currentTheme.accentColor)
                         Spacer()
@@ -2152,7 +2501,7 @@ private struct ProviderEditSheet: View {
                 .font(.system(size: 12, weight: .medium))
                 .foregroundColor(themeManager.currentTheme.primaryText)
 
-            ThemedSegmentedPicker(
+            ThemedSegmentedPicker(  // Intel: native segmented pickers render blank on Ventura
                 selection: $authType,
                 options: [
                     (MCPProviderAuthType.none, "None"),
@@ -2160,20 +2509,21 @@ private struct ProviderEditSheet: View {
                     (MCPProviderAuthType.oauth, "OAuth"),
                 ]
             )
+            .labelsHidden()
         }
     }
 
     /// Drop any in-flight OAuth credentials for the current draft id and clear
     /// the matching UI flags. Safe to call repeatedly; Keychain delete is
-    /// idempotent on missing items.
+    /// idempotent on missing items. Confidential-client `client_secret` is
+    /// purged too so a half-finished HubSpot draft can't leak its secret into
+    /// a fresh draft on the same `effectiveProviderId`.
     private func resetDraftOAuthState() {
         token = ""
         oauthError = nil
         oauthConfig = nil
         isOAuthSignedIn = false
         MCPProviderKeychain.deleteOAuthTokens(for: effectiveProviderId)
-        // A half-finished HubSpot draft must not leak its secret into a
-        // fresh draft on the same id.
         MCPProviderKeychain.deleteOAuthClientSecret(for: effectiveProviderId)
     }
 
@@ -2252,7 +2602,7 @@ private struct ProviderEditSheet: View {
     private var oauthAdvancedSection: some View {
         VStack(alignment: .leading, spacing: 8) {
             Button(action: {
-                withAnimation(.easeInOut(duration: 0.18)) { showOAuthAdvanced.toggle() }
+                withAnimation(.easeInOut(duration: 0.2)) { showOAuthAdvanced.toggle() }
             }) {
                 HStack(spacing: 4) {
                     Image(systemName: "chevron.right")
@@ -2328,10 +2678,13 @@ private struct ProviderEditSheet: View {
         isSigningIn = true
         oauthError = nil
 
-        // Build a draft provider record carrying any cached client_id plus any
-        // manual endpoint overrides the user typed in the Advanced disclosure.
-        // Whenever both endpoints are present the OAuth service will skip RFC
-        // 9728 discovery entirely.
+        // Build a draft provider record carrying any cached client_id, manual
+        // endpoint overrides from the Advanced disclosure, and the active
+        // template's `oauthFixedLoopbackPort` (when set, e.g. HubSpot). When
+        // both endpoints are present the OAuth service skips RFC 9728
+        // discovery entirely; when `oauthFixedLoopbackPort` is set, the
+        // loopback server binds the exact port the user registered with the
+        // vendor instead of an ephemeral one.
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let mergedOAuth = mergedManualOAuthConfig()
         let draftProvider = MCPProvider(
@@ -2359,7 +2712,10 @@ private struct ProviderEditSheet: View {
     /// Combine the manual override text fields with whatever `oauthConfig`
     /// already has cached from previous sign-ins. Empty manual fields fall
     /// through to the cached value so a partial override doesn't blow away
-    /// data the user can't see.
+    /// data the user can't see. When the user is configuring a known template
+    /// that pins a fixed loopback port (HubSpot), that port is baked into the
+    /// merged config so `MCPOAuthService.signIn` and subsequent refreshes
+    /// keep using it.
     private func mergedManualOAuthConfig() -> MCPOAuthConfig? {
         let auth = manualAuthEndpoint.trimmingCharacters(in: .whitespaces)
         let token = manualTokenEndpoint.trimmingCharacters(in: .whitespaces)
@@ -2416,14 +2772,19 @@ private struct ProviderEditSheet: View {
 
     private func loadProvider() {
         guard let provider = provider else {
-            // Add-mode: start where the caller asked (catalog grid by
-            // default). The draftId is preserved so anything OAuth-saved
-            // mid-flow ends up on this id and persists through save().
-            switch start {
-            case .catalog: phase = .chooseProvider
-            case .template(let template): selectTemplate(template)
-            case .custom: selectCustomServer()
+            if let prefill {
+                // Hand-off from the API provider form: skip the catalog and
+                // land on the custom editor with the detected MCP endpoint.
+                phase = .configureCustom
+                name = prefill.name
+                url = prefill.url
+                token = prefill.bearerToken ?? ""
+                authType = .bearerToken
+                return
             }
+            // Add-mode. `init` already seeded `phase` and the draft fields.
+            // The draftId is preserved so anything OAuth-saved mid-flow ends
+            // up on this id and persists through save().
             return
         }
         // Edit-mode: jump straight to the freeform editor. Re-use the existing
@@ -2487,29 +2848,36 @@ private struct ProviderEditSheet: View {
         testResult = nil
 
         Task {
-            do {
-                let count: Int
-                switch transport {
-                case .http:
-                    count = try await MCPProviderManager.shared.testConnection(
-                        url: url,
-                        token: httpTestToken(),
-                        headers: buildHeaders()
-                    )
-                case .stdio:
-                    count = try await MCPProviderManager.shared.testStdioConnection(
-                        provider: makeStdioProbeProvider()
-                    )
-                }
-                await MainActor.run {
-                    testResult = .success(count)
-                    isTesting = false
-                }
-            } catch {
-                await MainActor.run {
-                    testResult = .failure(error.localizedDescription)
-                    isTesting = false
-                }
+            let probeProvider = makeProbeProvider()
+            let result: MCPProviderProbeResult
+            switch transport {
+            case .http:
+                result = await MCPProviderProbeService.probeHTTP(
+                    providerId: probeProvider.id,
+                    name: probeProvider.name,
+                    url: probeProvider.url,
+                    token: httpTestToken(),
+                    headers: buildHeaders(),
+                    streamingEnabled: probeProvider.streamingEnabled,
+                    discoveryTimeout: probeProvider.discoveryTimeout
+                )
+            case .stdio:
+                result = await MCPProviderProbeService.probeStdio(provider: probeProvider)
+            }
+            MCPProviderHealthSnapshotStore.record(result, for: probeProvider)
+
+            let shouldRefresh = MCPProviderCatalogRefreshPolicy.shouldRefresh(
+                savedProvider: provider,
+                configuredProvider: makeConfiguredProvider(),
+                hasCredentialEdits: hasCredentialEdits
+            )
+            if result.succeeded, shouldRefresh, let provider {
+                try? await MCPProviderManager.shared.reconnect(providerId: provider.id)
+            }
+
+            await MainActor.run {
+                testResult = result.succeeded ? .success(result) : .failure(result)
+                isTesting = false
             }
         }
     }
@@ -2585,14 +2953,44 @@ private struct ProviderEditSheet: View {
         )
     }
 
-    private func save() {
+    private func makeProbeProvider() -> MCPProvider {
+        switch transport {
+        case .http:
+            return MCPProvider(
+                id: effectiveProviderId,
+                name: name.isEmpty ? "HTTP MCP probe" : name,
+                url: url.trimmingCharacters(in: .whitespaces),
+                customHeaders: buildHeaders(),
+                streamingEnabled: streamingEnabled,
+                discoveryTimeout: discoveryTimeout,
+                toolCallTimeout: toolCallTimeout,
+                authType: authType,
+                transport: .http
+            )
+        case .stdio:
+            return makeStdioProbeProvider()
+        }
+    }
+
+    /// Whether the editor contains a secret value that is not represented in
+    /// the persisted provider struct yet. Even if all visible non-secret
+    /// fields match, testing with one of these values must remain probe-only.
+    private var hasCredentialEdits: Bool {
+        !token.isEmpty
+            || !manualClientSecret.isEmpty
+            || customHeaders.contains { $0.isSecret && !$0.value.isEmpty }
+            || envEntries.contains { $0.isSecret && !$0.value.isEmpty }
+    }
+
+    /// Build the exact provider record Save would persist, without writing
+    /// credentials or dismissing the sheet. Shared with the test-refresh
+    /// eligibility check so draft detection cannot drift from Save.
+    private func makeConfiguredProvider() -> MCPProvider {
         let trimmedName = name.trimmingCharacters(in: .whitespaces)
         let trimmedURL = url.trimmingCharacters(in: .whitespaces)
 
-        // Separate regular headers from secret headers
         var regularHeaders: [String: String] = [:]
         var secretKeys: [String] = []
-
         for header in customHeaders where !header.key.isEmpty {
             if header.isSecret {
                 secretKeys.append(header.key)
@@ -2601,17 +2999,11 @@ private struct ProviderEditSheet: View {
             }
         }
 
-        // Merge any manual OAuth overrides into the saved config so they
-        // survive past sheet dismissal, even if the user hasn't clicked
-        // Sign In yet.
         let oauthForSave: MCPOAuthConfig? =
             authType == .oauth ? mergedManualOAuthConfig() : nil
-
-        // Stdio fields (command + args + env). Shared with the
-        // test-connection probe so the two paths can't drift.
         let stdio = parseStdioFields()
 
-        let updatedProvider = MCPProvider(
+        return MCPProvider(
             id: effectiveProviderId,
             name: trimmedName,
             url: trimmedURL,
@@ -2637,22 +3029,32 @@ private struct ProviderEditSheet: View {
             secretEnvKeys: stdio.secretEnvKeys,
             workingDirectory: stdio.workingDirectory
         )
+    }
+
+    private func save() {
+        let updatedProvider = makeConfiguredProvider()
 
         // Save secret env values to Keychain. Like the bearer/secret-header
         // path, blank values mean "don't overwrite" so the user can leave
         // sensitive fields alone after the first save.
         for entry in envEntries
         where entry.isSecret && !entry.key.isEmpty && !entry.value.isEmpty {
-            _ = MCPProviderKeychain.saveEnvSecret(
+            if !MCPProviderKeychain.saveEnvSecret(
                 entry.value,
                 key: entry.key,
                 for: updatedProvider.id
-            )
+            ) {
+                NSLog("ProvidersView: failed to save secret env value to Keychain")
+            }
         }
 
         // Save secret header values to Keychain
         for header in customHeaders where header.isSecret && !header.key.isEmpty && !header.value.isEmpty {
-            MCPProviderKeychain.saveHeaderSecret(header.value, key: header.key, for: updatedProvider.id)
+            if !MCPProviderKeychain.saveHeaderSecret(
+                header.value, key: header.key, for: updatedProvider.id
+            ) {
+                NSLog("ProvidersView: failed to save secret header to Keychain")
+            }
         }
 
         // Pass token (empty string means no change, nil means keep existing).
@@ -2817,39 +3219,9 @@ private struct HeaderRow: View {
 
 // MARK: - Styled Components
 
-private struct EditorCard<Content: View>: View {
-    @ObservedObject private var themeManager = ThemeManager.shared
-    let title: String
-    let icon: String
-    @ViewBuilder let content: () -> Content
-
-    var body: some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack(spacing: 8) {
-                Image(systemName: icon)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(themeManager.currentTheme.accentColor)
-
-                Text(LocalizedStringKey(title), bundle: .module)
-                    .textCase(.uppercase)
-                    .font(.system(size: 11, weight: .bold))
-                    .foregroundColor(themeManager.currentTheme.secondaryText)
-                    .tracking(0.5)
-            }
-
-            content()
-        }
-        .padding(16)
-        .background(
-            RoundedRectangle(cornerRadius: 12)
-                .fill(themeManager.currentTheme.cardBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 12)
-                        .stroke(themeManager.currentTheme.cardBorder, lineWidth: 1)
-                )
-        )
-    }
-}
+/// The editor sheet's cards are the same `SettingsSection` every settings
+/// tab uses; the alias keeps the sheet's call sites short.
+private typealias EditorCard = SettingsSection
 
 private struct MCPStyledTextField: View {
     @ObservedObject private var themeManager = ThemeManager.shared
@@ -3002,6 +3374,11 @@ private struct MCPPrimaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .semibold))
+            // Never wrap the label: in a crowded footer the flexible spacer
+            // should compress, not the button text (keeps the CTA the same
+            // height as its neighbors).
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundColor(.white)
             .padding(.horizontal, 16)
             .padding(.vertical, 10)
@@ -3019,6 +3396,8 @@ private struct MCPSecondaryButtonStyle: ButtonStyle {
     func makeBody(configuration: Configuration) -> some View {
         configuration.label
             .font(.system(size: 13, weight: .medium))
+            .lineLimit(1)
+            .fixedSize(horizontal: true, vertical: false)
             .foregroundColor(themeManager.currentTheme.primaryText)
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

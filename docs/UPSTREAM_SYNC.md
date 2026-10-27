@@ -4271,3 +4271,26 @@ Tests: upstream's `ProviderNetworkDiagnosticsTests` (un-excluded; the two
 Codex summary cases are dropped). Package gate: 3,406 tests in 426 suites (6
 known issues), including the Ventura control guards. Rosy: "Cloud Models and
 Add Provider" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### MCP Services probe and health (`W-providers-ux` complete) — 2026-10-27
+
+Upstream's Tools & MCP › Services page (`ProvidersView`): the hub summary
+(`MCPServerHub`: connected · needs attention · tools), the provider filter,
+the ⋯ menu with Reconnect All, Test Connections and Copy Diagnostics, and a
+per-service probe with its last result (`MCPProviderProbeService`, stable
+reason codes; `MCPProviderHealthSnapshotStore`, `providers/mcp-health.json`).
+`MCPLocalProviderDiagnostics` adds the local-probe and capture-policy rows;
+`MCPCaptureCapabilityPolicy` is upstream's gate definition only (nothing on
+Intel registers a capture tool). These two were filed under `W-server-api`
+but serve this page.
+
+Intel edits: a sandboxed stdio probe reports sandbox-unavailable (no
+container on Intel), and the editor's Sandbox warning always shows; themed
+segmented pickers and single-value `onChange` (the page's 2026-09-26 Ventura
+conversions, re-applied); `MCPProviderKeychain` gained `tokenAvailability` /
+`oauthTokensAvailability`. `ExternalMCPToolPolicy` (external callers) stays
+with `W-server-api`.
+
+Tests: upstream's `MCPProviderProbeServiceTests` and `MCPServerHubTests`.
+Package gate: 3,415 tests in 428 suites (6 known issues). Rosy: "MCP
+Services probe and health" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

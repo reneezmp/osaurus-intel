@@ -1981,3 +1981,19 @@ Your existing providers must keep working: check them first.
 - [ ] **Edit:** editing a provider keeps its key; saving keeps it connected.
 - [ ] **Developer Tools:** with the sidebar's Developer Tools switch on, the
       connectivity summary appears above the list; Copy report works.
+
+## MCP Services probe and health (2026-10-27)
+
+Details: `UPSTREAM_SYNC.md`, "MCP Services probe and health". Needs at least
+one MCP service (e.g. GitHub or a local stdio server).
+
+- [ ] **Summary:** Tools & MCP › Services shows a one-line summary (connected
+      · needs attention · tools) above the list.
+- [ ] **Test Connections:** ⋯ › Test Connections probes each enabled service;
+      each row shows the result and a working service stays connected.
+- [ ] **One service:** a service's Test shows a result card; a broken URL
+      gives a plain reason, not a raw error.
+- [ ] **Copy Diagnostics:** pastes a readable report with no tokens in it.
+- [ ] **Editor:** the Transport, Run in and Authentication pickers are
+      visible on Ventura; choosing Sandbox shows the "not available on this
+      Mac" warning.

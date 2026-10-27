@@ -41,6 +41,8 @@ F=[
 ("W-tool-catalog-ui","W",r"ToolDisplayName|Views/Tool/|Models/Tool/|ToolAvailabilityBadge|CapabilityTools|CapabilityQueryIntent|AgentCapabilityReadiness"),
 ("W-chat-ux","W",r"AtFile|ChatCrossSelection|ChatInputHistory|FollowUpSuggestion|CompactionDialogView|NativeCompactionMarkerView|NativeActivityGroupView|NativeDispatchBadgeRow|DispatchEnvelope|ShimmerLabel|RecentFoldersPanel|ImportGuideSheet|ImportHistoryPromptGate|ChatPersistenceNotice|MarkdownBlockParsing|MarkdownDocumentView|IMEAwareTextField|ScreenshotCaptureService|SlashCommandRegistry|WorkspaceFileReference|WorkspaceSessionContext|AgentDispatchTarget|BuiltInAgentGuard|Views/Agent/AgentDetailChrome|ContextAttribution"),
 ("W-server-api","W",r"CodexCLIConfiguration|LocalAPIKeyPolicy|ServerModelsTabContent|InferenceActivityRegistry|Networking/|MCPServerHub|ModelExposureStore|EvidenceReport|Services/Auth/"),
+# External-caller MCP tool policy is W-server-api (its row since 2026-10-11).
+("W-server-api","W",r"Services/MCP/ExternalMCPToolPolicy"),
 # The MCP provider probe and health snapshots moved to W-providers-ux (2026-10-11).
 ("W-providers-ux","W",r"Services/MCP/(MCPProviderProbeService|MCPProviderHealthSnapshotStore)"),
 ("W-mcp-providers","W",r"Services/MCP/"),

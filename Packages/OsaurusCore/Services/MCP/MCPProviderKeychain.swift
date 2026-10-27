@@ -71,6 +71,18 @@ public enum MCPProviderKeychain {
         deleteItem(account: tokenAccount(for: providerId))
     }
 
+    /// Upstream's typed availability. Intel's keychain reads report found or
+    /// not, so this answers `.present` / `.absent` (no `.unavailable`).
+    public static func tokenAvailability(for providerId: UUID) -> SecretAvailability {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return .absent }
+        return getToken(for: providerId) != nil ? .present : .absent
+    }
+
+    public static func oauthTokensAvailability(for providerId: UUID) -> SecretAvailability {
+        if KeychainQueryHelpers.disablesKeychainForProcess { return .absent }
+        return getOAuthTokens(for: providerId) != nil ? .present : .absent
+    }
+
     public static func hasToken(for providerId: UUID) -> Bool {
         getToken(for: providerId) != nil
     }
