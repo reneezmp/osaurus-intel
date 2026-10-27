@@ -1864,3 +1864,20 @@ Gemini API key (native Gemini provider) and, if available, OpenRouter.
 - [ ] **Image fallback in Insights:** send an image to a text-only model
       (e.g. DeepSeek). The reply comes back without the image, and the
       Insights row's wire request is the image-free one that succeeded.
+
+## System accent colour (2026-10-27)
+
+#2115. Details: `UPSTREAM_SYNC.md`, "System accent colour".
+
+- [ ] **Follows the Mac:** with the built-in Dark or Light theme, set System
+      Settings › Appearance › Accent colour to Purple. Osaurus's buttons,
+      selection, focus rings and sidebar selection turn purple without a
+      relaunch, in the main window and in an open chat window.
+- [ ] **Other themes keep theirs:** switch to Nord or Osaurus Dark; changing
+      the Mac's accent does not change them.
+- [ ] **Editor:** in Themes, edit a copy of Dark. With Follow System Accent
+      on, the preview shows the Mac's accent; turn it off, pick a custom
+      accent, save, and the app uses that one.
+- [ ] **After updating:** on Rosy's existing install, Dark and Light are the
+      macOS-style palettes (`#1c1c1e` / `#f5f5f7` backgrounds) after the
+      first launch of this build; your own themes are unchanged.

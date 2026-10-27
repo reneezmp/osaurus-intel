@@ -4062,3 +4062,31 @@ buffered text). An `IntelInsightsTests` case checks that a refused-then-accepted
 image fallback logs the accepted body. Package gate: 3,297 tests in 411 suites
 (6 known issues). Rosy: "Chat engine slices (#3203)" in
 `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### System accent colour (#2115, `W-ui-misc`) — 2026-10-27
+
+Upstream `402060bce` (#2115), finishing a port that was half in. Intel's
+shared `CustomTheme` already had `followsSystemAccent` (true on the
+canonical Dark/Light), `ThemeColors.applyingAccent` and the editor's "Follow
+System Accent" toggle, but nothing read the Mac's accent, so the toggle did
+nothing and Dark/Light always showed blue. Now as upstream:
+
+- `Models/Theme/SystemAccentColor.swift` (upstream's file) resolves
+  `controlAccentColor` under the theme's own appearance.
+- `CustomizableTheme.init` substitutes it for opted-in themes, which covers
+  every construction site (startup, appearance switches, custom apply,
+  per-agent chat themes, font-scale rebuilds).
+- `ThemeManager` observes `NSColor.systemColorsDidChangeNotification` and
+  `AppleColorPreferencesChangedNotification` and re-applies the theme, so an
+  accent change in System Settings shows at once. Per-agent chat windows
+  rebuild through `.globalThemeChanged`.
+- The theme editor's preview shows the substituted accent.
+- **Built-in theme schema 5 → 6** (`ThemeConfigurationStore`). Intel
+  fast-forwarded the native palettes on 2026-09-02 without upstream's bump,
+  so installs older than that kept the previous Dark/Light files on disk,
+  without the flag. The bump rewrites the built-in presets (fixed ids) once
+  on next launch, as upstream does; user themes are untouched.
+
+Tests: upstream's `ThemeSystemAccentTests`. Package gate: 3,303 tests in 412
+suites (6 known issues). Rosy: "System accent colour" in
+`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

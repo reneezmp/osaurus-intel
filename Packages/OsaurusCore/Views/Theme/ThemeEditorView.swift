@@ -947,11 +947,18 @@ struct ThemeEditorView: View {
         }
     }
 
-    /// The theme as the app will actually render it. Upstream substitutes the
-    /// macOS accent when `followsSystemAccent` is set; the Intel runtime does
-    /// not apply system-accent following (upstream `402060bce` is unported),
-    /// so the preview shows the stored accent, exactly as Intel renders it.
-    private var previewTheme: CustomTheme { editingTheme }
+    /// The theme as the app will actually render it. When the theme follows
+    /// the system accent the runtime substitutes the macOS accent, so the
+    /// preview does the same rather than showing the stored accent.
+    private var previewTheme: CustomTheme {
+        var theme = editingTheme
+        if theme.followsSystemAccent,
+            let accentHex = SystemAccentColor.currentAccentHex(isDark: theme.isDark)
+        {
+            theme.colors = theme.colors.applyingAccent(accentHex, isDark: theme.isDark)
+        }
+        return theme
+    }
 
     /// gradient backdrop behind the preview card
     private var transparencyBackdrop: some View {
