@@ -180,6 +180,10 @@ final class StreamingDeltaProcessor {
     /// happens here, so partial `<think>` fragments cannot leak.
     func receiveReasoning(_ text: String) {
         guard !text.isEmpty else { return }
+        // A later reasoning phase must not be closed by an older visible
+        // delta still sitting in the smooth-reveal buffer. Preserve channel
+        // order before starting that new phase.
+        flush()
         appendThinking(text)
         let now = Date()
         syncIfNeeded(now: now)
@@ -212,7 +216,16 @@ final class StreamingDeltaProcessor {
     func finalize(immediately: Bool = false) async {
         invalidateTimer()
 
-        if smoothStreamingEnabled && pendingCount > 0 && !immediately {
+        // Intel: an immediate finish (stop, cancel, inactive run) goes
+        // through upstream's `finishImmediately` (#3203), which also resumes
+        // a smooth `finalize()` already waiting on the paced tail. Draining
+        // here without resuming it left that waiter suspended for good.
+        if immediately {
+            finishImmediately()
+            return
+        }
+
+        if smoothStreamingEnabled && pendingCount > 0 {
             startPacingTimerIfNeeded()
             // Drain one tick synchronously. Short final tails should not
             // depend on any future run-loop timer delivery before ChatView can
@@ -231,6 +244,16 @@ final class StreamingDeltaProcessor {
             stopPacingTimer()
             appendContent(consume(pendingCount))
         }
+        syncToTurn()
+    }
+
+    /// Finish an interrupted/erroring consumer without leaving scheduled
+    /// reveal work writing into a finalized turn. Every received character
+    /// is retained; only the decorative pacing delay is skipped.
+    func finishImmediately() {
+        flush()
+        stopPacingTimer()
+        resumePacingDoneIfNeeded()
         syncToTurn()
     }
 

@@ -1842,3 +1842,25 @@ Gemini API key (native Gemini provider) and, if available, OpenRouter.
       Reasoning Effort; a Gemini model through a custom OpenAI-compatible
       proxy shows none either, and replies as before.
 
+
+## Chat engine slices (#3203) (2026-10-27)
+
+#3203's last slices. Details: `UPSTREAM_SYNC.md`, "Chat engine slices
+(#3203, the rest)".
+
+- [ ] **Stop mid-reply:** with smooth streaming on, stop a long reply while
+      it is still typing out. Everything received so far appears at once,
+      the composer is ready for the next message right away, and nothing
+      keeps typing into the stopped reply.
+- [ ] **Reasoning after commentary:** with a thinking model (DeepSeek
+      reasoning or Gemini) on a tool-using task, text written before a tool
+      call is complete above the next Thinking block, never cut off by it.
+- [ ] **Running tool arguments:** expand a running tool row (e.g. a long
+      `file_write`) while it runs. Its Arguments section shows the full
+      arguments once they arrive, not a first partial copy.
+- [ ] **Insights endpoint:** after a native Gemini chat, open Insights. The
+      row's endpoint is the model's `…:streamGenerateContent` URL with no
+      `?alt=sse` or key in it.
+- [ ] **Image fallback in Insights:** send an image to a text-only model
+      (e.g. DeepSeek). The reply comes back without the image, and the
+      Insights row's wire request is the image-free one that succeeded.

@@ -194,6 +194,12 @@ can't be observed in SwiftPM (the forwarding into the controller is asserted).
   running tool cards refreshing (`NativeToolCallGroupView`,
   `NativeBlockViews`), Anthropic terminal usage. Each needs checking against
   Intel's `CloudChatEngine`, which owns the request side.
+  **Done 2026-10-27** (`UPSTREAM_SYNC.md`, "Chat engine slices (#3203, the
+  rest)"): streaming, probe and tool-argument refresh ported; tool choice
+  Covered; typing indicator Incompatible (MLX); the image policy's thinking
+  blocks (`W-anthropic-thinking-replay`), "Result not received" rows
+  (`W-workspaces-sharing`) and Anthropic server usage (`W-server-api`) are
+  Needs work.
 
 ## Found while porting
 

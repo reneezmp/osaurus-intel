@@ -264,6 +264,20 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return URL(string: endpointURL)?.path ?? "/chat/completions"
     }
 
+    /// Upstream #3203 (same name on upstream's `ChatEngine`): the Insights
+    /// row names the endpoint the request was really sent to (the probe's
+    /// sanitized URL: no credentials, query or fragment), not the
+    /// provider's configured base. On Intel this matters for native Gemini,
+    /// whose stream URL is built per model from the models endpoint.
+    static func inferenceLogDestination(
+        connection: RequestConnectionInfo?, path: String, endpointURL: URL?
+    ) -> (connection: RequestConnectionInfo?, path: String) {
+        guard let endpointURL else { return (connection, path) }
+        var observed = connection
+        observed?.remoteEndpoint = endpointURL.absoluteString
+        return (observed, endpointURL.path)
+    }
+
     init(
         source: InferenceSource = .httpAPI,
         model: String = "deepseek-v4-pro",
@@ -911,6 +925,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // here, since task-locals aren't reliable on the stream's end path.
         let loggedTurnId = Self.loggedTurnId
         let loggedPath = Self.loggedPath(endpointURL: endpoint.url)
+        let loggedPathIsInternal = Self.activityPurpose != nil
         let loggedSource = Self.loggedSource(default: source)
         let loggedParentTurnId = Self.activityParentTurnId
         let loggedAgentId = ChatExecutionContext.currentAgentId
@@ -923,7 +938,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         )
         // Intel builds its own requests (upstream's RemoteProviderService
         // isn't compiled), so it feeds the probe directly: the first round's
-        // request bytes and the raw response stream, as upstream records them.
+        // request bytes and endpoint, each response head (#3203: a rejected
+        // attempt stays a receipt, and the body the provider accepted, e.g.
+        // after the image fallback, is the one logged), and the raw response
+        // stream, as upstream records them.
         let wireProbe = WireTransportProbe()
 
         return AsyncThrowingStream { continuation in
@@ -957,6 +975,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     let outputTokens = completionTokens
                         ?? max(responseText.isEmpty ? 0 : 1, responseText.count / 4)
                     let wire = wireProbe.snapshot()
+                    let destination = Self.inferenceLogDestination(
+                        connection: connection, path: loggedPath,
+                        endpointURL: wireProbe.acceptedRequestEndpointURL ?? wireProbe.requestEndpointURL)
                     InsightsService.logInference(
                         source: loggedSource,
                         turnId: loggedTurnId,
@@ -974,8 +995,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         responseBody: responseText.isEmpty ? nil : responseText,
                         wireRequestBody: wire.request,
                         wireResponseBody: wire.response.isEmpty ? nil : wire.response,
-                        connection: connection,
-                        path: loggedPath,
+                        connection: destination.connection,
+                        path: loggedPathIsInternal ? loggedPath : destination.path,
                         agentId: loggedAgentId,
                         sessionId: loggedSessionId
                     )
@@ -997,6 +1018,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         wireMessages = IntelImageInputFallback.strippingImages(wireMessages)
                     }
                     var retriedWithoutImages = false
+                    // One Insights row covers the run, so only the first
+                    // accepted round's body replaces the first-built one.
+                    var acceptedAttemptRecorded = false
                     // Upstream's loop harness (`AgentTaskState`, driven by
                     // `AgentToolLoop`): replays identical read calls instead of
                     // re-running them, guards known-bad repeats, and stages the
@@ -1152,10 +1176,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 request: &urlRequest, body: urlRequest.httpBody)
                         }
                         NSLog("[CloudChatEngine] Request body: model=\(resolvedModel) round=\(round) tools=\(liveToolSpecs?.count ?? 0)")
-                        if let httpBody = urlRequest.httpBody { wireProbe.recordRequestBody(httpBody) }
+                        if let httpBody = urlRequest.httpBody {
+                            wireProbe.recordRequestBody(httpBody, endpointURL: urlRequest.url)
+                        }
 
                         let (asyncBytes, response) = try await self.session.bytes(for: urlRequest)
                         let statusCode = (response as? HTTPURLResponse)?.statusCode ?? 0
+                        if response is HTTPURLResponse {
+                            let accepted = (200...299).contains(statusCode)
+                            if !accepted || !acceptedAttemptRecorded {
+                                wireProbe.recordAttempt(request: urlRequest, statusCode: statusCode, accepted: accepted)
+                            }
+                            if accepted { acceptedAttemptRecorded = true }
+                        }
                         NSLog("[CloudChatEngine] HTTP status: \(statusCode)")
                         if !(200...299).contains(statusCode) {
                             // Non-2xx: the body is a JSON error, not an SSE

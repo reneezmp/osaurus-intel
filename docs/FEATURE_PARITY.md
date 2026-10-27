@@ -140,7 +140,7 @@ tests only; Rosy evidence pending (section "Upstream audit 2026-10-26").
 ### Partial
 | Area | Missing behavior exposed by upstream | Next Intel gate |
 |---|---|---|
-| Chat engine slices | #3203's tool-choice, streaming, image-payload, probe and tool-card slices. | Check each against `CloudChatEngine`. |
+| Anthropic signed thinking | Upstream keeps and replays Anthropic's signed thinking blocks (#3203); Intel shows the thinking but drops the blocks. | `W-anthropic-thinking-replay`. |
 
 ### Dependency-blocked
 | Area | Dependency before implementation/promotion |

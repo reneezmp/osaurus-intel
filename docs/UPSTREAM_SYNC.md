@@ -3805,7 +3805,7 @@ Split 6, Needs work 15, Deferred 6, Covered 4, Incompatible 46. 23 Port commits
 and the Port parts of five Splits shipped (hang and crash fixes, `file_write`
 without a cap plus `source_path`, workbook preservation, model-picker and
 restored-model fixes, MCP progress, the grounded-check fix); #3080, #3115 and
-#3203's other slices are open Port verdicts. New backlog rows:
+#3203's other slices were open Port verdicts, all done 2026-10-27. New backlog rows:
 `W-harness-runtimes`, `W-agent-templates`, `W-osaurus-bundles`,
 `W-memory-db-sync`. Package gate: 3,238 tests in 401 suites (6 known issues); Rosy section
 "Upstream audit 2026-10-26" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
@@ -3998,3 +3998,67 @@ upstream's two `toGeminiRequest` cases against `IntelGeminiAdapter`. Package
 gate: 3,282 tests in 410 suites (6 known issues). Rosy: "Gemini reasoning
 effort" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
+
+### Chat engine slices (#3203, the rest) — 2026-10-27
+
+The open slices of upstream #3203 (`fc75a1e06`), each checked against
+Intel's own `CloudChatEngine` (the grounded-check slice shipped with the
+2026-10-26 audit). This closes #3203.
+
+**Ported:**
+
+- **`StreamingDeltaProcessor`:** a reasoning delta first flushes visible
+  text still waiting in the smooth-reveal buffer, so a later reasoning phase
+  can't be closed by older commentary. Upstream's `finishImmediately()` is
+  in as well. Intel's `finalize(immediately: true)` (stop, cancel, inactive
+  run) now goes through it: before, it drained the text but never resumed a
+  smooth `finalize()` already waiting on the paced tail, which stayed
+  suspended.
+- **`WireTransportProbe`:** upstream's file as is (sanitized endpoint with
+  the first-built request; bounded receipts of each HTTP response head with
+  body size and SHA-256; the accepted body replaces the first-built one in
+  `snapshot()`). `CloudChatEngine` feeds it: the endpoint with the first
+  request, and a receipt per response head. Because one Insights row covers
+  a whole run, only the first accepted round is recorded as accepted, so
+  the row keeps showing round one. After the image fallback that is now the
+  image-free retry the provider accepted, not the refused first attempt.
+  The row's endpoint and path come from the probe (upstream's
+  `inferenceLogDestination`, now on Intel's `ChatEngine`), except
+  `/internal/…` one-shot purposes, which keep their path. Native Gemini rows
+  now name the real `models/{model}:streamGenerateContent` URL without its
+  query.
+- **Tool cards (`NativeToolCallGroupView`):** a running call's pretty-printed
+  arguments are rebuilt when its arguments change, instead of being cached
+  from the first configure.
+
+**Not ported:**
+
+- **`ChatToolChoicePolicy.resolve(taskIntent:)` / `ChatTaskIntent`:**
+  Covered. Intel always sends `tool_choice: "auto"` and never calls the
+  policy (same as 2026-09-25 #110), so app-added delivery text can't force a
+  tool call.
+- **Typing indicator scoped to its own request (`NativeBlockViews`):**
+  Incompatible (MLX). It covers local prefill and model-load phases; nothing
+  on Intel calls `modelLoadWillStartAsync`, and Intel's indicator keeps its
+  own "Searching capabilities..." preflight label.
+- **`RemoteImagePayloadPolicy` keeping `anthropic_thinking_blocks`:** Needs
+  work (`W-anthropic-thinking-replay`). Intel's `ChatMessage` has no such
+  field, and `IntelAnthropicMessagesAdapter` neither keeps nor replays
+  signed thinking blocks (`signature_delta`), which upstream's new
+  `RemoteAnthropicNativeStream` does.
+- **"Result not received" tool rows (`unobservedResult`,
+  `RemoteToolStreamEnd`):** Needs work with `W-workspaces-sharing` (remote
+  shared-agent runs; Intel has no remote tool activity).
+- **Anthropic terminal usage:** Needs work with `W-server-api`. It is
+  upstream's `AnthropicSSEResponseWriter` (excluded `ResponseWriters`) for
+  Osaurus's own Anthropic-style `/messages` server, which Intel's
+  `HTTPHandler` doesn't serve: counts stay absent until known instead of
+  being estimated.
+
+Tests: upstream's `WireTransportProbeTests`, which Intel never had, plus
+attempt receipts and a Gemini endpoint case. Two `StreamingDeltaProcessorTests`
+cases (immediate finish resumes a waiting finalizer; reasoning flushes
+buffered text). An `IntelInsightsTests` case checks that a refused-then-accepted
+image fallback logs the accepted body. Package gate: 3,297 tests in 411 suites
+(6 known issues). Rosy: "Chat engine slices (#3203)" in
+`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

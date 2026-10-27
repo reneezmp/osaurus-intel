@@ -211,4 +211,68 @@ struct StreamingDeltaProcessorTests {
         await processor.finalize(immediately: true)
         #expect(turn.content == text)
     }
+
+    // MARK: - Upstream #3203
+
+    /// Upstream's `interruptedRevealDrainsReceivedTextAndStopsItsTimers`
+    /// (`ResponsesVisualLifecycleTests`), on Intel's processor: an
+    /// interrupted reveal keeps every received character, stops its timer
+    /// and resumes a smooth finalizer that was already waiting.
+    @Test("an immediate finish resumes a finalizer waiting on the paced tail")
+    func immediateFinishResumesAWaitingFinalizer() async {
+        let key = "chatSmoothStreamingEnabled"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set(true, forKey: key)
+        let turn = ChatTurn(role: .assistant, content: "")
+        let processor = StreamingDeltaProcessor(turn: turn)
+        let text = String(repeating: "Received text. ", count: 100)
+        processor.receiveDelta(text)
+        var returned = false
+        let finalizer = Task { @MainActor in
+            await processor.finalize()
+            returned = true
+        }
+        await Task.yield()
+        await processor.finalize(immediately: true)
+        await finalizer.value
+        #expect(returned)
+        #expect(turn.content == text)
+        #expect(processor.pacingTimer == nil)
+
+        // The same through upstream's entry point.
+        let second = ChatTurn(role: .assistant, content: "")
+        processor.reset(turn: second)
+        processor.receiveDelta(text)
+        let waiter = Task { @MainActor in await processor.finalize() }
+        await Task.yield()
+        processor.finishImmediately()
+        await waiter.value
+        #expect(second.content == text)
+        #expect(processor.pacingTimer == nil)
+    }
+
+    @Test("a reasoning delta first flushes visible text still in the reveal buffer")
+    func reasoningFlushesBufferedVisibleTextFirst() async {
+        let key = "chatSmoothStreamingEnabled"
+        let previous = UserDefaults.standard.object(forKey: key)
+        defer {
+            if let previous { UserDefaults.standard.set(previous, forKey: key) }
+            else { UserDefaults.standard.removeObject(forKey: key) }
+        }
+        UserDefaults.standard.set(true, forKey: key)
+        let turn = ChatTurn(role: .assistant, content: "")
+        let processor = StreamingDeltaProcessor(turn: turn)
+        let visible = String(repeating: "Commentary before the tool. ", count: 40)
+        processor.receiveDelta(visible)
+        #expect(turn.content.count < visible.count)  // still buffered
+        processor.receiveReasoning("Second reasoning phase.")
+        #expect(turn.content == visible, "older visible text lands before the new phase starts")
+        #expect(turn.thinking == "Second reasoning phase.")
+        await processor.finalize(immediately: true)
+        #expect(turn.content == visible)
+    }
 }

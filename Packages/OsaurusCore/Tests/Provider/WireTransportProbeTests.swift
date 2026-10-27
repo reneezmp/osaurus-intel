@@ -1,0 +1,205 @@
+//
+//  WireTransportProbeTests.swift
+//  osaurusTests
+//
+//  Unit tests for `WireTransportProbe` — the lock-protected sink
+//  the chat layer reads to verify what actually hit the network.
+//  Validates:
+//    • recordRequestBody is idempotent (a retried URLRequest
+//      shouldn't stomp the first snapshot)
+//    • appendResponseChunk accumulates in order and respects the
+//      1 MiB hard cap (with the `truncated` flag set on overflow)
+//    • replaceResponseBody truncates the same way as appendChunk
+//    • Snapshots are stable copies (mutating the probe after a
+//      snapshot doesn't mutate the snapshot)
+//
+//  Intel (2026-10-27): upstream's file as of #3203. Intel's cloud engine
+//  (`ChatEngine` in `CloudChatEngine.swift`) feeds the probe itself and
+//  carries upstream's `inferenceLogDestination`; the attempt-receipt and
+//  Gemini endpoint tests are Intel's.
+//
+
+import Foundation
+import Testing
+
+@testable import OsaurusCore
+
+@Suite("WireTransportProbe")
+struct WireTransportProbeTests {
+
+    @Test func emptyProbe_snapshotsCleanly() {
+        let probe = WireTransportProbe()
+        let snap = probe.snapshot()
+        #expect(snap.request == nil)
+        #expect(snap.response.isEmpty)
+        #expect(snap.truncated == false)
+        #expect(probe.requestEndpointURL == nil)
+    }
+
+    @Test func recordRequestBody_isIdempotent() {
+        let probe = WireTransportProbe()
+        probe.recordRequestBody("first".data(using: .utf8)!)
+        probe.recordRequestBody("second".data(using: .utf8)!)
+        let snap = probe.snapshot()
+        // First write wins — guards against a URLRequest retry
+        // overwriting the original (we always want the verbatim
+        // body the cloud first saw).
+        #expect(snap.request == "first".data(using: .utf8))
+    }
+
+    @Test func endpointIsSanitizedAndPairedWithTheFirstBuiltRequest() throws {
+        let probe = WireTransportProbe()
+        probe.recordRequestBody(Data("first".utf8), endpointURL: try #require(
+            URL(string: "https://user:fixture@example.test/v1/responses?key=fixture&alt=sse#fragment")
+        ))
+        probe.recordRequestBody(Data("retry".utf8), endpointURL: URL(string: "https://other.test/chat/completions"))
+        #expect(probe.requestEndpointURL?.absoluteString == "https://example.test/v1/responses")
+        #expect(probe.snapshot().request == Data("first".utf8))
+        let providerID = UUID()
+        let destination = ChatEngine.inferenceLogDestination(
+            connection: RequestConnectionInfo(
+                providerId: providerID, remoteEndpoint: "https://example.test/chat/completions",
+                transport: .direct, mode: .remoteInference
+            ),
+            path: "/chat/completions", endpointURL: probe.requestEndpointURL
+        )
+        #expect(destination.path == "/v1/responses")
+        #expect(destination.connection?.remoteEndpoint == "https://example.test/v1/responses")
+        #expect(destination.connection?.providerId == providerID)
+        #expect(destination.connection?.transport == .direct)
+        #expect(destination.connection?.mode == .remoteInference)
+    }
+
+    @Test func appendResponseChunk_accumulatesInOrder() {
+        let probe = WireTransportProbe()
+        probe.appendResponseChunk("hello".data(using: .utf8)!)
+        probe.appendResponseChunk(" ".data(using: .utf8)!)
+        probe.appendResponseChunk("world".data(using: .utf8)!)
+        let snap = probe.snapshot()
+        #expect(String(data: snap.response, encoding: .utf8) == "hello world")
+        #expect(snap.truncated == false)
+    }
+
+    @Test func appendResponseChunk_truncatesAtMaxBytes() {
+        let probe = WireTransportProbe()
+        // Fill exactly to the cap, then attempt to write one
+        // more chunk. The extra bytes must be dropped and the
+        // truncated flag flipped on.
+        let cap = WireTransportProbe.maxResponseBytes
+        probe.appendResponseChunk(Data(repeating: 0x41, count: cap))
+        #expect(probe.snapshot().truncated == false)
+        probe.appendResponseChunk(Data(repeating: 0x42, count: 16))
+        let snap = probe.snapshot()
+        #expect(snap.response.count == cap)
+        #expect(snap.truncated == true)
+        // Trailing bytes must be the 0x41 fill — the 0x42
+        // attempted append went past the cap so none of it
+        // should have landed.
+        #expect(snap.response.last == 0x41)
+    }
+
+    @Test func appendResponseChunk_partialOverflowSpillsToCap() {
+        let probe = WireTransportProbe()
+        let cap = WireTransportProbe.maxResponseBytes
+        // Fill to one byte short of the cap, then push a chunk
+        // larger than the remaining space. The probe must take
+        // only the head bytes that fit.
+        probe.appendResponseChunk(Data(repeating: 0x41, count: cap - 1))
+        probe.appendResponseChunk(Data(repeating: 0x42, count: 100))
+        let snap = probe.snapshot()
+        #expect(snap.response.count == cap)
+        #expect(snap.truncated == true)
+        // Last byte should be 0x42 — exactly one B-byte landed.
+        #expect(snap.response.last == 0x42)
+    }
+
+    @Test func replaceResponseBody_truncatesOversizedPayload() {
+        let probe = WireTransportProbe()
+        let cap = WireTransportProbe.maxResponseBytes
+        probe.replaceResponseBody(Data(repeating: 0x43, count: cap + 100))
+        let snap = probe.snapshot()
+        #expect(snap.response.count == cap)
+        #expect(snap.truncated == true)
+    }
+
+    @Test func snapshot_isStableAfterMutation() {
+        let probe = WireTransportProbe()
+        probe.recordRequestBody("orig".data(using: .utf8)!)
+        probe.appendResponseChunk("first".data(using: .utf8)!)
+        let firstSnap = probe.snapshot()
+
+        // Mutate the probe AFTER snapshot. The first snap must
+        // not see the new data — `snapshot()` returns a copy.
+        probe.appendResponseChunk("second".data(using: .utf8)!)
+
+        #expect(String(data: firstSnap.response, encoding: .utf8) == "first")
+        #expect(firstSnap.request == "orig".data(using: .utf8))
+
+        let secondSnap = probe.snapshot()
+        #expect(String(data: secondSnap.response, encoding: .utf8) == "firstsecond")
+    }
+
+    @Test func appendResponseChunk_ignoresEmpty() {
+        let probe = WireTransportProbe()
+        probe.appendResponseChunk(Data())
+        probe.appendResponseChunk("ok".data(using: .utf8)!)
+        let snap = probe.snapshot()
+        #expect(String(data: snap.response, encoding: .utf8) == "ok")
+        #expect(snap.truncated == false)
+    }
+
+    // MARK: - Attempt receipts (#3203)
+
+    private static func request(_ url: String, body: String) -> URLRequest {
+        var request = URLRequest(url: URL(string: url)!)
+        request.httpBody = Data(body.utf8)
+        return request
+    }
+
+    @Test func rejectedAttemptIsAReceiptAndTheAcceptedBodyIsLogged() {
+        let probe = WireTransportProbe()
+        probe.recordRequestBody(Data("with-images".utf8), endpointURL: URL(string: "https://p.test/v1/chat/completions"))
+        probe.recordAttempt(
+            request: Self.request("https://p.test/v1/chat/completions?key=secret", body: "with-images"),
+            statusCode: 400, accepted: false)
+        probe.recordRequestBody(Data("stripped".utf8))
+        probe.recordAttempt(
+            request: Self.request("https://p.test/v1/chat/completions", body: "stripped"),
+            statusCode: 200, accepted: true)
+
+        #expect(probe.snapshot().request == Data("stripped".utf8), "the accepted body, not the refused one")
+        #expect(probe.firstBuiltSnapshot().request == Data("with-images".utf8))
+        let attempts = probe.attempts
+        #expect(attempts.map(\.statusCode) == [400, 200])
+        #expect(attempts.map(\.accepted) == [false, true])
+        #expect(attempts[0].endpoint?.absoluteString == "https://p.test/v1/chat/completions", "query stripped")
+        #expect(attempts[0].bodyBytes == "with-images".utf8.count)
+        #expect(attempts[0].bodySHA256.count == 64)
+        #expect(probe.acceptedRequestEndpointURL?.absoluteString == "https://p.test/v1/chat/completions")
+    }
+
+    @Test func attemptReceiptsAreBounded() {
+        let probe = WireTransportProbe()
+        for _ in 0 ..< WireTransportProbe.maxAttempts + 3 {
+            probe.recordAttempt(request: Self.request("https://p.test/x", body: "b"), statusCode: 429, accepted: false)
+        }
+        #expect(probe.attempts.count == WireTransportProbe.maxAttempts)
+        #expect(probe.attemptsTruncated)
+        #expect(probe.snapshot().request == nil, "no accepted attempt and nothing built")
+    }
+
+    @Test func geminiStreamEndpointIsLoggedWithoutItsQuery() throws {
+        let probe = WireTransportProbe()
+        let url = IntelGeminiAdapter.streamURL(
+            modelsEndpoint: "https://generativelanguage.googleapis.com/v1beta/models", model: "gemini-3-pro")
+        probe.recordRequestBody(Data("{}".utf8), endpointURL: URL(string: url))
+        let destination = ChatEngine.inferenceLogDestination(
+            connection: RequestConnectionInfo(
+                providerId: nil, remoteEndpoint: "https://generativelanguage.googleapis.com/v1beta/models",
+                transport: .direct, mode: .remoteInference),
+            path: "/v1beta/models", endpointURL: probe.requestEndpointURL)
+        #expect(destination.path == "/v1beta/models/gemini-3-pro:streamGenerateContent")
+        #expect(destination.connection?.remoteEndpoint
+            == "https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro:streamGenerateContent")
+    }
+}

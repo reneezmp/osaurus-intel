@@ -620,6 +620,10 @@ final class NativeToolCallRowView: NSView {
 
         let isNew = item.call.id != currentItemId
         if isNew { stopRegistryObservation() }
+        // Upstream #3203: a running call's arguments can still grow (streamed
+        // or replayed), so the pretty-printed copy is rebuilt when they change.
+        let argumentsChanged = item.call.function.arguments != currentItem?.call.function.arguments
+        if argumentsChanged { cachedArgs = nil }
         currentItemId = item.call.id
         currentItem = item
 
@@ -660,7 +664,7 @@ final class NativeToolCallRowView: NSView {
             applyToolDetailSectionHeading(to: argumentsSectionTitle, text: "ARGUMENTS", theme: theme)
 
             let rawArgs = item.call.function.arguments
-            if isNew || cachedArgs == nil {
+            if isNew || argumentsChanged || cachedArgs == nil {
                 let pretty = JSONFormatter.prettyJSON(rawArgs)
                 cachedArgs = pretty.isEmpty ? rawArgs : pretty
             }

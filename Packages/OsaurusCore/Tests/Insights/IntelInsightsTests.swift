@@ -44,15 +44,19 @@ struct IntelInsightsTests {
         agentId: UUID,
         sessionId: UUID,
         provider: RemoteProvider = IntelInsightsTests.provider(),
-        message: String = "Log this"
+        message: String = "Log this",
+        userMessage: ChatMessage? = nil,
+        thenStatus: Int? = nil,
+        thenBody: String? = nil
     ) async throws -> RequestLog? {
         InsightsFixtureProtocol.configure(status: status, body: body)
+        if let thenStatus, let thenBody { InsightsFixtureProtocol.enqueue(status: thenStatus, body: thenBody) }
         let configuration = URLSessionConfiguration.ephemeral
         configuration.protocolClasses = [InsightsFixtureProtocol.self]
         let engine = ChatEngine(provider: provider, session: URLSession(configuration: configuration))
         let request = ChatCompletionRequest(
             model: "fixture-model",
-            messages: [ChatMessage(role: "user", content: message)])
+            messages: [userMessage ?? ChatMessage(role: "user", content: message)])
         do {
             let stream = try await ChatExecutionContext.$currentAgentId.withValue(agentId) {
                 try await ChatExecutionContext.$currentSessionId.withValue(sessionId.uuidString) {
@@ -115,6 +119,30 @@ struct IntelInsightsTests {
         #expect(log.finishReason == .error)
         #expect(log.errorMessage?.contains("invalid api key") == true)
         #expect(log.wireResponseBody?.contains("invalid api key") == true)
+    }
+
+    /// Upstream #3203 (`WireTransportProbe` attempts): when the provider
+    /// refuses the first attempt and accepts the fallback, the row's wire
+    /// request is the body it accepted, sent to the endpoint it reached.
+    @Test("After the image fallback, the row logs the accepted wire request")
+    func acceptedFallbackRequestIsLogged() async throws {
+        IntelImageInputFallback.reset()
+        defer { IntelImageInputFallback.reset() }
+        let png = Data([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A]) + Data(repeating: 0x51, count: 64)
+        let turnId = UUID()
+        let row = try await runLogged(
+            status: 400, body: #"{"error":{"message":"This model does not support image input"}}"#,
+            turnId: turnId, agentId: UUID(), sessionId: UUID(),
+            userMessage: ChatMessage(role: "user", text: "what is this?", imageData: [png]),
+            thenStatus: 200, thenBody: Self.textStream)
+        let log = try #require(row)
+        #expect(log.isError == false)
+        #expect(log.responseBody == "Logged reply.")
+        let wire = try #require(log.wireRequestBody)
+        #expect(wire.contains("what is this?"))
+        #expect(!wire.contains("image_url"), "the logged body is the accepted, image-free retry")
+        #expect(log.path == "/v1/chat/completions")
+        #expect(log.connection?.remoteEndpoint == "https://insights-fixture.invalid/v1/chat/completions")
     }
 
     @Test("Inline images are replaced by a marker in the logged request")
@@ -296,10 +324,17 @@ private final class InsightsFixtureProtocol: URLProtocol, @unchecked Sendable {
     private static let lock = NSLock()
     nonisolated(unsafe) private static var status = 200
     nonisolated(unsafe) private static var body = ""
+    nonisolated(unsafe) private static var queued: [(status: Int, body: String)] = []
     static func configure(status: Int, body: String) {
         lock.lock(); defer { lock.unlock() }
         Self.status = status
         Self.body = body
+        Self.queued = []
+    }
+    /// The response for the next request after the configured one.
+    static func enqueue(status: Int, body: String) {
+        lock.lock(); defer { lock.unlock() }
+        Self.queued.append((status, body))
     }
     override class func canInit(with request: URLRequest) -> Bool { request.url?.host == "insights-fixture.invalid" }
     override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
@@ -307,6 +342,11 @@ private final class InsightsFixtureProtocol: URLProtocol, @unchecked Sendable {
         Self.lock.lock()
         let status = Self.status
         let text = Self.body
+        if !Self.queued.isEmpty {
+            let next = Self.queued.removeFirst()
+            Self.status = next.status
+            Self.body = next.body
+        }
         Self.lock.unlock()
         let contentType = status == 200 ? "text/event-stream" : "application/json"
         let response = HTTPURLResponse(
