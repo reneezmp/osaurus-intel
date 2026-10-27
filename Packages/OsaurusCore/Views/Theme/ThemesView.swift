@@ -4,14 +4,13 @@
 //
 //  Theme gallery and management view with import/export functionality
 //
-//  Intel fork: un-body-swapped in M11 Phase 11.A.1. Theme system is
-//  fully Intel-native (ThemeManager + CustomTheme + ThemeConfigurationStore
-//  all back onto OsaurusRepository's SQLCipher store). Share/Import
-//  cloud sheets render the `AppleSiliconOnlyTab` placeholder via
-//  their Intel stubs (extended in Phase 11.A.0) since
-//  `ThemeShareService` cloud calls are excluded on Intel.
+//  Intel (2026-10-27, `W-ui-misc` theme library): upstream's file, with
+//  single-value `onChange`, themed bordered buttons and the sheets' theme
+//  injection for macOS 13. Sharing and import by link or ID are live (Intel
+//  compiles `ThemeShareService` and the identity master key).
 //
 
+import AppKit
 import SwiftUI
 import UniformTypeIdentifiers
 
@@ -25,6 +24,105 @@ struct IdentifiableTheme: Identifiable {
         self.id = theme.metadata.id
         self.theme = theme
         self.landingAnchor = landingAnchor
+    }
+}
+
+// MARK: - Theme Filter
+
+/// Single source of truth for the gallery's filtering taxonomy. Replaces the
+/// previous dual system (non-interactive stat tiles + a separate chip row with
+/// mismatched names). Counts live on the tabs themselves.
+enum ThemeFilter: String, CaseIterable, Identifiable, Hashable {
+    case all
+    case builtIn
+    case local
+    case imported
+    case shared
+    case needsReview
+    case duplicates
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .all: return L("All")
+        case .builtIn: return L("Built-in")
+        case .local: return L("Local")
+        case .imported: return L("Imported")
+        case .shared: return L("Shared")
+        case .needsReview: return L("Needs Review")
+        case .duplicates: return L("Duplicates")
+        }
+    }
+
+    /// Filters that flag library problems get a warning-styled badge instead
+    /// of a neutral count.
+    var isAttentionFilter: Bool { self == .needsReview || self == .duplicates }
+}
+
+/// Drives the header `AnimatedTabSelector`, so the Themes filter row matches
+/// the segmented control used by every other settings tab. `title` and the
+/// `Hashable`/`CaseIterable` conformances above satisfy the protocol.
+extension ThemeFilter: AnimatedTabItem {}
+
+/// Precomputed membership used by `themeMatches`. Built once per data change so
+/// the per-theme predicate never rebuilds sets.
+struct ThemeFilterContext {
+    let needsReviewIDs: Set<UUID>
+    let duplicateIDs: Set<UUID>
+
+    static let empty = ThemeFilterContext(needsReviewIDs: [], duplicateIDs: [])
+}
+
+/// Pure, side-effect-free predicate deciding whether a theme is visible under
+/// the current filter + search. Extracted so the filtering rules are unit
+/// testable and computed exactly once per change rather than inside `body`.
+func themeMatches(
+    _ theme: CustomTheme,
+    filter: ThemeFilter,
+    search: String,
+    context: ThemeFilterContext
+) -> Bool {
+    let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty {
+        let matchesName = theme.metadata.name.range(of: trimmed, options: .caseInsensitive) != nil
+        let matchesAuthor = theme.metadata.author.range(of: trimmed, options: .caseInsensitive) != nil
+        if !matchesName && !matchesAuthor { return false }
+    }
+
+    switch filter {
+    case .all:
+        return true
+    case .builtIn:
+        return theme.isBuiltIn
+    case .local:
+        return ThemeLibraryManagementService.source(for: theme) == .local
+    case .imported:
+        return ThemeLibraryManagementService.source(for: theme) == .imported
+    case .shared:
+        return ThemeLibraryManagementService.source(for: theme) == .shared
+    case .needsReview:
+        return context.needsReviewIDs.contains(theme.metadata.id)
+    case .duplicates:
+        return context.duplicateIDs.contains(theme.metadata.id)
+    }
+}
+
+/// Whether the synthetic "System" card is visible under the current filter +
+/// search. The card applies the OS-following appearance mode rather than a
+/// disk theme, so `themeMatches` can't cover it: it rides the Built-in bucket
+/// (and All) and matches searches against its localized display name.
+func systemThemeCardMatches(filter: ThemeFilter, search: String) -> Bool {
+    let trimmed = search.trimmingCharacters(in: .whitespacesAndNewlines)
+    if !trimmed.isEmpty {
+        let name = AppearanceMode.system.displayName
+        if name.range(of: trimmed, options: .caseInsensitive) == nil { return false }
+    }
+    switch filter {
+    case .all, .builtIn:
+        return true
+    case .local, .imported, .shared, .needsReview, .duplicates:
+        return false
     }
 }
 
@@ -50,64 +148,44 @@ struct ThemesView: View {
     @State private var sharingTheme: IdentifiableTheme?
     @State private var showingImportByIdSheet = false
     @State private var importByIdInitialHash: String?
+    /// When true, the next successful Import-by-ID completion should also
+    /// apply the imported theme. Set by the deeplink flow so users land on
+    /// the theme they just clicked to install.
+    @State private var applyAfterImportById = false
 
-    /// Cached partitions of `themeManager.installedThemes`. Recomputed only
-    /// when the publisher fires, not on every parent body redraw, so
-    /// scroll-induced re-evaluations no longer re-sort + re-filter the
-    /// full theme list.
+    // MARK: Filtering / search
+
+    @State private var selectedFilter: ThemeFilter = .all
+    @State private var searchText: String = ""
+    @State private var showLibraryHealth = false
+
+    // MARK: Cached partitions + derived state
+    //
+    // Recomputed only when `ThemeManager` republishes (not on every parent
+    // body redraw), so scroll-induced re-evaluations no longer re-sort,
+    // re-validate, or re-filter the full theme list.
     @State private var installedThemes: [CustomTheme] = []
     @State private var builtInThemes: [CustomTheme] = []
     @State private var customThemes: [CustomTheme] = []
+    @State private var visibleThemes: [CustomTheme] = []
+    @State private var validationByID: [UUID: ThemeValidationReport] = [:]
+    @State private var needsReviewIDs: Set<UUID> = []
+    @State private var duplicateIDs: Set<UUID> = []
+    @State private var librarySummary: ThemeLibrarySummary = .empty
+    @State private var filterCounts: [ThemeFilter: Int] = [:]
+    @State private var previewCacheHealth: ThemePreviewCacheHealth = .empty
+    @State private var showRollbackConfirmation = false
+
+    // MARK: - Body
 
     var body: some View {
         VStack(spacing: 0) {
-            // Header
             headerView
-                .opacity(hasAppeared ? 1 : 0)
-                .offset(y: hasAppeared ? 0 : -10)
-                .animation(.spring(response: 0.4, dampingFraction: 0.8), value: hasAppeared)
+                .managerHeaderEntrance(hasAppeared: hasAppeared)
 
-            // Content
             ZStack {
-                if isLoading {
-                    loadingView
-                } else if let error = loadError {
-                    errorView(error)
-                } else if installedThemes.isEmpty {
-                    noThemesView
-                } else {
-                    ScrollView {
-                        VStack(alignment: .leading, spacing: 24) {
-                            // Active theme indicator
-                            if let activeTheme = themeManager.activeCustomTheme {
-                                activeThemeSection(activeTheme)
-                                    .transition(.opacity.combined(with: .move(edge: .top)))
-                            }
-
-                            // Built-in themes
-                            if !builtInThemes.isEmpty {
-                                themesSection(
-                                    title: L("Built-in Themes"),
-                                    count: builtInThemes.count,
-                                    themes: builtInThemes
-                                )
-                                .transition(.opacity)
-                            }
-
-                            // Custom themes
-                            if !customThemes.isEmpty {
-                                themesSection(title: "Custom Themes", count: customThemes.count, themes: customThemes)
-                                    .transition(.opacity)
-                            }
-
-                            // Empty state for custom themes
-                            if customThemes.isEmpty && !builtInThemes.isEmpty {
-                                emptyCustomThemesView
-                            }
-                        }
-                        .padding(24)
-                    }
-                }
+                contentView
+                    .settingsLandingAnchor("themes.appearance")
 
                 if let message = toastMessage {
                     VStack {
@@ -122,6 +200,7 @@ struct ThemesView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
+        .environment(\.theme, themeManager.currentTheme)
         .onAppear {
             loadThemes()
             applyPendingThemeInstall()
@@ -156,22 +235,36 @@ struct ThemesView: View {
             handleExport(result)
         }
         .sheet(item: $sharingTheme) { identifiable in
-            ShareThemeSheet(themeToShare: identifiable.theme) { _ in
+            ShareThemeSheet(themeToShare: identifiable.theme) { outcome in
+                markThemeShared(identifiable.theme, outcome: outcome)
                 showToast(L("Theme shared"))
             }
+            // Intel: a sheet is its own window, so it gets the theme and the
+            // Ventura caret/control repair here (as `ThemeEditorView` does).
+            .environment(\.theme, theme)
+            .intelControlRendering(theme: theme)
         }
         .sheet(isPresented: $showingImportByIdSheet) {
             ImportThemeByIdSheet(
                 initialInput: importByIdInitialHash,
                 onCompleted: { imported in
-                    showToast(L("Imported \"\(imported.metadata.name)\""))
+                    if applyAfterImportById {
+                        themeManager.applyCustomTheme(imported)
+                        showToast(L("Applied \"\(imported.metadata.name)\""))
+                    } else {
+                        showToast(L("Imported \"\(imported.metadata.name)\""))
+                    }
                     importByIdInitialHash = nil
+                    applyAfterImportById = false
                 },
                 onError: { message in
                     showToast(L("Import failed: \(message)"), type: .error)
                     importByIdInitialHash = nil
+                    applyAfterImportById = false
                 }
             )
+            .environment(\.theme, theme)
+            .intelControlRendering(theme: theme)
         }
         .onChange(of: highlightCoordinator.pending) { pending in  // Intel: single-value onChange (macOS 13)
             routeSettingsLanding(pending)
@@ -182,8 +275,16 @@ struct ThemesView: View {
         .onReceive(themeManager.$installedThemes) { latest in
             refreshPartitions(from: latest)
         }
+        .onChange(of: selectedFilter) { _ in
+            withAnimation(theme.animationQuick()) {
+                recomputeVisible()
+            }
+        }
+        .onChange(of: searchText) { _ in
+            recomputeVisible()
+        }
         .themedAlert(
-            "Delete Theme",
+            L("Delete Theme"),
             isPresented: Binding(
                 get: { showDeleteConfirmation && themeToDelete != nil },
                 set: { newValue in
@@ -194,37 +295,90 @@ struct ThemesView: View {
                 }
             ),
             message: themeToDelete.map {
-                "Are you sure you want to delete \"\($0.metadata.name)\"? This action cannot be undone."
+                L("Are you sure you want to delete \"\($0.metadata.name)\"? This action cannot be undone.")
             },
-            primaryButton: .destructive("Delete") {
+            primaryButton: .destructive(L("Delete")) {
                 if let theme = themeToDelete {
                     performDelete(theme)
                 }
                 showDeleteConfirmation = false
                 themeToDelete = nil
             },
-            secondaryButton: .cancel("Cancel") {
+            secondaryButton: .cancel(L("Cancel")) {
                 showDeleteConfirmation = false
                 themeToDelete = nil
             }
         )
+        .themedAlert(
+            String(localized: "Rollback to Default", bundle: .module),
+            isPresented: $showRollbackConfirmation,
+            message: String(
+                localized:
+                    "Clear the active custom theme and return to the built-in theme for the current appearance mode? Installed themes will stay in the library.",
+                bundle: .module
+            ),
+            primaryButton: .destructive(String(localized: "Rollback", bundle: .module)) {
+                rollbackToDefaultTheme()
+            },
+            secondaryButton: .cancel(L("Cancel")) {}
+        )
     }
 
-    // MARK: - Delete Helper
+    // MARK: - Content Switch
 
-    private func performDelete(_ theme: CustomTheme) {
-        let themeName = theme.metadata.name
-        let success = themeManager.deleteTheme(id: theme.metadata.id)
-        if success {
-            print("[Osaurus] Successfully deleted theme: \(themeName)")
-            showToast(L("Deleted \"\(themeName)\""))
+    @ViewBuilder
+    private var contentView: some View {
+        if isLoading {
+            loadingView
+        } else if let error = loadError {
+            errorView(error)
+        } else if installedThemes.isEmpty {
+            noThemesView
         } else {
-            print("[Osaurus] Failed to delete theme: \(themeName)")
+            themeBrowser
         }
-        themeToDelete = nil
     }
 
     // MARK: - Header
+
+    private var showsFilterToolbar: Bool {
+        !isLoading && loadError == nil && !installedThemes.isEmpty
+    }
+
+    @ViewBuilder
+    private var headerView: some View {
+        if showsFilterToolbar {
+            ManagerHeaderWithTabs(
+                title: L("Themes"),
+                subtitle: L("Customize the look and feel of your chat interface"),
+                count: installedThemes.count
+            ) {
+                headerActions
+            } tabsRow: {
+                filterToolbar
+            }
+        } else {
+            ManagerHeaderWithActions(
+                title: L("Themes"),
+                subtitle: L("Customize the look and feel of your chat interface"),
+                count: installedThemes.isEmpty ? nil : installedThemes.count
+            ) {
+                headerActions
+            }
+        }
+    }
+
+    @ViewBuilder
+    private var headerActions: some View {
+        HeaderIconButton("arrow.clockwise", help: "Refresh themes") {
+            loadThemes()
+        }
+        manageMenuButton
+        importMenuButton
+        HeaderPrimaryButton("Create Theme", icon: "plus") {
+            createNewTheme()
+        }
+    }
 
     /// Combined "Import" entry point. A single menu so the header row fits
     /// even on narrow window widths and the two import flavours sit
@@ -242,6 +396,7 @@ struct ThemesView: View {
             }
             Button {
                 importByIdInitialHash = nil
+                applyAfterImportById = false
                 showingImportByIdSheet = true
             } label: {
                 Label {
@@ -277,20 +432,193 @@ struct ThemesView: View {
         .fixedSize()
     }
 
-    private var headerView: some View {
-        ManagerHeaderWithActions(
-            title: L("Themes"),
-            subtitle: L("Customize the look and feel of your chat interface"),
-            count: isLoading || installedThemes.isEmpty ? nil : installedThemes.count
-        ) {
-            HeaderIconButton("arrow.clockwise", help: "Refresh themes") {
+    /// Overflow menu housing the library maintenance tools that used to clutter
+    /// the gallery. Keeps every feature reachable while the default view stays
+    /// clean.
+    private var manageMenuButton: some View {
+        Menu {
+            Button {
+                clearPreviewCache()
+            } label: {
+                Label {
+                    Text("Clear Preview Cache", bundle: .module)
+                } icon: {
+                    Image(systemName: "trash")
+                }
+            }
+
+            Button {
+                showRollbackConfirmation = true
+            } label: {
+                Label {
+                    Text("Rollback to Default", bundle: .module)
+                } icon: {
+                    Image(systemName: "arrow.uturn.backward")
+                }
+            }
+            .disabled(themeManager.activeCustomTheme == nil)
+
+            Button {
+                themeManager.forceReinstallBuiltInThemes()
                 loadThemes()
+            } label: {
+                Label {
+                    Text("Reinstall Built-in Themes", bundle: .module)
+                } icon: {
+                    Image(systemName: "arrow.triangle.2.circlepath")
+                }
             }
-            importMenuButton
-            HeaderPrimaryButton("Create Theme", icon: "plus") {
-                createNewTheme()
+
+            Divider()
+
+            Toggle(isOn: $showLibraryHealth.animation(theme.animationQuick())) {
+                Label {
+                    Text("Library Health", bundle: .module)
+                } icon: {
+                    Image(systemName: "waveform.path.ecg")
+                }
             }
+        } label: {
+            Image(systemName: "ellipsis")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.secondaryText)
+                .frame(width: 32, height: 32)
+                .background(
+                    RoundedRectangle(cornerRadius: 8)
+                        .fill(theme.tertiaryBackground)
+                )
+                .contentShape(RoundedRectangle(cornerRadius: 8))
         }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help(Text("Manage library", bundle: .module))
+    }
+
+    // MARK: - Filter Toolbar
+
+    private var filterToolbar: some View {
+        // Mirror the segmented control every other settings tab uses. Neutral
+        // counts ride the `counts` slot; the library-health filters (Needs
+        // Review, Duplicates) ride `badges` so they keep their warning accent.
+        let neutralCounts = filterCounts.filter { !$0.key.isAttentionFilter }
+        let attentionBadges = filterCounts.filter { $0.key.isAttentionFilter && $0.value > 0 }
+        return HeaderTabsRow(
+            selection: $selectedFilter,
+            tabs: availableFilters,
+            counts: neutralCounts,
+            badges: attentionBadges.isEmpty ? nil : attentionBadges,
+            searchText: $searchText,
+            searchPlaceholder: "Search themes"
+        )
+    }
+
+    /// Only surface filters that currently have results (All is always shown).
+    /// A theme that just lost its last imported/shared member therefore can't
+    /// strand the user on an empty tab.
+    private func availableFilters(from counts: [ThemeFilter: Int]) -> [ThemeFilter] {
+        // `allCases` is declared in tab order (all, builtIn, local, …), so a
+        // straight filter preserves the layout while dropping empty tabs.
+        ThemeFilter.allCases.filter { $0 == .all || (counts[$0] ?? 0) > 0 }
+    }
+
+    private var availableFilters: [ThemeFilter] {
+        availableFilters(from: filterCounts)
+    }
+
+    // MARK: - Theme Browser
+
+    private var isDefaultBrowsing: Bool {
+        selectedFilter == .all && searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var searchActive: Bool {
+        !searchText.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var themeBrowser: some View {
+        ScrollView {
+            VStack(alignment: .leading, spacing: 24) {
+                if showLibraryHealth {
+                    libraryHealthPanel
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if let activeTheme = themeManager.activeCustomTheme {
+                    activeThemeSection(activeTheme)
+                        .transition(.opacity.combined(with: .move(edge: .top)))
+                }
+
+                if isDefaultBrowsing {
+                    defaultBrowsingContent
+                } else {
+                    filteredContent
+                }
+            }
+            .padding(24)
+        }
+    }
+
+    @ViewBuilder
+    private var defaultBrowsingContent: some View {
+        // The synthetic System card is always present, so the Built-in section
+        // renders even if the disk built-ins failed to install.
+        themesSection(
+            title: L("Built-in Themes"),
+            count: builtInThemes.count + 1,
+            themes: builtInThemes,
+            showsSystemCard: true
+        )
+        .transition(.opacity)
+
+        if !customThemes.isEmpty {
+            themesSection(
+                title: L("Custom Themes"),
+                count: customThemes.count,
+                themes: customThemes
+            )
+            .transition(.opacity)
+        } else {
+            firstThemeCTA
+        }
+
+        communityThemesBanner
+            .transition(.opacity)
+    }
+
+    @ViewBuilder
+    private var filteredContent: some View {
+        let showsSystemCard = systemThemeCardMatches(filter: selectedFilter, search: searchText)
+        if visibleThemes.isEmpty && !showsSystemCard {
+            noResultsView
+        } else {
+            themesSection(
+                title: searchActive ? L("Search Results") : sectionTitle(for: selectedFilter),
+                count: visibleThemes.count + (showsSystemCard ? 1 : 0),
+                subtitle: resultsSubtitle,
+                themes: visibleThemes,
+                showsSystemCard: showsSystemCard
+            )
+            .transition(.opacity)
+        }
+    }
+
+    private func sectionTitle(for filter: ThemeFilter) -> String {
+        switch filter {
+        case .all: return L("All Themes")
+        case .builtIn: return L("Built-in Themes")
+        case .local: return L("Local Themes")
+        case .imported: return L("Imported Themes")
+        case .shared: return L("Shared Themes")
+        case .needsReview: return L("Themes Needing Review")
+        case .duplicates: return L("Duplicate Themes")
+        }
+    }
+
+    private var resultsSubtitle: String {
+        installedThemes.count == 1
+            ? L("\(visibleThemes.count) of 1 theme")
+            : L("\(visibleThemes.count) of \(installedThemes.count) themes")
     }
 
     // MARK: - Loading & Error States
@@ -335,7 +663,8 @@ struct ThemesView: View {
                 .buttonStyle(ThemedBorderedButtonStyle(prominent: true))
 
                 Button(action: {
-                    themeManager.forceReinstallBuiltInThemes(); loadThemes()
+                    themeManager.forceReinstallBuiltInThemes()
+                    loadThemes()
                 }) {
                     Label {
                         Text("Reinstall Built-ins", bundle: .module)
@@ -369,7 +698,8 @@ struct ThemesView: View {
             }
 
             Button(action: {
-                themeManager.forceReinstallBuiltInThemes(); loadThemes()
+                themeManager.forceReinstallBuiltInThemes()
+                loadThemes()
             }) {
                 Label {
                     Text("Install Built-in Themes", bundle: .module)
@@ -384,17 +714,603 @@ struct ThemesView: View {
         .frame(maxWidth: .infinity, maxHeight: .infinity)
     }
 
-    private func showToast(_ message: String, type: SimpleToastType = .success) {
-        withAnimation(theme.springAnimation()) {
-            toastType = type
-            toastMessage = message
-        }
-        let duration: Double = type == .error ? 4.0 : 2.5
-        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
-            withAnimation(theme.animationQuick()) {
-                toastMessage = nil
+    // MARK: - Library Health Panel
+
+    private var libraryHealthPanel: some View {
+        SettingsSection(title: "Library Health", icon: "waveform.path.ecg") {
+            VStack(alignment: .leading, spacing: 12) {
+                previewCacheHealthRow
+
+                HStack(spacing: 10) {
+                    healthStat(
+                        icon: "exclamationmark.triangle",
+                        title: "Issues",
+                        value: librarySummary.validationErrorCount + librarySummary.validationWarningCount,
+                        color: issueStatColor,
+                        reviewFilter: .needsReview
+                    )
+                    healthStat(
+                        icon: "doc.on.doc",
+                        title: "Duplicate Sets",
+                        value: librarySummary.duplicateGroupCount,
+                        color: librarySummary.duplicateGroupCount == 0 ? theme.tertiaryText : theme.warningColor,
+                        reviewFilter: .duplicates
+                    )
+                }
             }
         }
+    }
+
+    private var previewCacheHealthRow: some View {
+        HStack(spacing: 10) {
+            Image(systemName: previewCacheHealth.isHealthy ? "checkmark.circle.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(previewCacheHealth.isHealthy ? theme.successColor : theme.warningColor)
+
+            VStack(alignment: .leading, spacing: 2) {
+                Text("Preview cache health", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(verbatim: cacheHealthSummary)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.secondaryText)
+                    .lineLimit(2)
+            }
+
+            Spacer(minLength: 8)
+
+            Button {
+                refreshPreviewCacheHealth()
+            } label: {
+                Image(systemName: "arrow.clockwise")
+                    .font(.system(size: 11, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+                    .frame(width: 28, height: 28)
+                    .background(
+                        RoundedRectangle(cornerRadius: 7)
+                            .fill(theme.tertiaryBackground)
+                    )
+            }
+            .buttonStyle(.plain)
+            .help(Text("Refresh cache health", bundle: .module))
+        }
+        .padding(10)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.secondaryBackground.opacity(0.6))
+        )
+    }
+
+    private func healthStat(
+        icon: String,
+        title: String,
+        value: Int,
+        color: Color,
+        reviewFilter: ThemeFilter
+    ) -> some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(color)
+                .frame(width: 26, height: 26)
+                .background(Circle().fill(color.opacity(0.14)))
+
+            VStack(alignment: .leading, spacing: 1) {
+                Text(verbatim: "\(value)")
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(LocalizedStringKey(title), bundle: .module)
+                    .font(.system(size: 10, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                    .lineLimit(1)
+            }
+
+            Spacer(minLength: 0)
+
+            if value > 0 && (filterCounts[reviewFilter] ?? 0) > 0 {
+                Button {
+                    withAnimation(theme.animationQuick()) {
+                        selectedFilter = reviewFilter
+                    }
+                } label: {
+                    Text("Review", bundle: .module)
+                        .font(.system(size: 11, weight: .semibold))
+                        .foregroundColor(theme.accentColor)
+                }
+                .buttonStyle(.plain)
+            }
+        }
+        .padding(10)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.secondaryBackground.opacity(0.6))
+        )
+    }
+
+    private var issueStatColor: Color {
+        if librarySummary.validationErrorCount > 0 { return theme.errorColor }
+        if librarySummary.validationWarningCount > 0 { return theme.warningColor }
+        return theme.successColor
+    }
+
+    private var cacheHealthSummary: String {
+        let cost = ByteCountFormatter.string(
+            fromByteCount: Int64(previewCacheHealth.cachedCostBytes),
+            countStyle: .file
+        )
+        let limit = ByteCountFormatter.string(
+            fromByteCount: Int64(previewCacheHealth.totalCostLimit),
+            countStyle: .file
+        )
+        return
+            L(
+                "\(previewCacheHealth.cachedEntryCount) images, \(cost) tracked of \(limit), \(previewCacheHealth.inFlightDecodeCount) decoding, \(previewCacheHealth.failedDecodeCount) failed decodes"
+            )
+    }
+
+    // MARK: - Active Theme Section
+
+    private func activeThemeSection(_ activeTheme: CustomTheme) -> some View {
+        HStack {
+            HStack(spacing: 8) {
+                Image(systemName: "checkmark.circle.fill")
+                    .font(.system(size: 14))
+                    .foregroundColor(theme.successColor)
+
+                Text("Currently Active", bundle: .module)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+
+                Text(activeTheme.metadata.name)
+                    .font(.system(size: 13, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                    .padding(.horizontal, 8)
+                    .padding(.vertical, 3)
+                    .background(
+                        Capsule()
+                            .fill(theme.successColor.opacity(0.15))
+                    )
+            }
+
+            Spacer()
+
+            Button(action: {
+                // "Default" is the System theme: follow the OS appearance
+                // rather than whatever fixed mode was last pinned.
+                themeManager.setAppearanceMode(.system, clearActiveTheme: true)
+                showToast(L("Reset to default theme"))
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: "arrow.uturn.backward")
+                        .font(.system(size: 10, weight: .semibold))
+                    Text("Reset to Default", bundle: .module)
+                        .font(.system(size: 12, weight: .medium))
+                }
+                .foregroundColor(theme.secondaryText)
+                .padding(.horizontal, 10)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule()
+                        .fill(theme.tertiaryBackground)
+                )
+            }
+            .buttonStyle(PlainButtonStyle())
+        }
+        .padding(14)
+        .background(
+            RoundedRectangle(cornerRadius: 10)
+                .fill(theme.successColor.opacity(0.08))
+                .overlay(
+                    RoundedRectangle(cornerRadius: 10)
+                        .stroke(theme.successColor.opacity(0.2), lineWidth: 1)
+                )
+        )
+    }
+
+    // MARK: - Themes Section
+
+    private func themesSection(
+        title: String,
+        count: Int,
+        subtitle: String? = nil,
+        themes: [CustomTheme],
+        showsSystemCard: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 14) {
+            HStack(spacing: 8) {
+                Text(title)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+
+                Text(verbatim: "\(count)")
+                    .font(.system(size: 11, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(
+                        Capsule()
+                            .fill(theme.tertiaryBackground)
+                    )
+
+                Spacer()
+
+                if let subtitle {
+                    Text(verbatim: subtitle)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.tertiaryText)
+                }
+            }
+
+            LazyVGrid(
+                columns: [
+                    GridItem(.adaptive(minimum: 280, maximum: 360), spacing: 16)
+                ],
+                spacing: 16
+            ) {
+                if showsSystemCard {
+                    systemThemeCard
+                }
+                ForEach(themes, id: \.metadata.id) { themeItem in
+                    card(for: themeItem)
+                }
+            }
+        }
+    }
+
+    private func card(for themeItem: CustomTheme) -> some View {
+        let isActive = isThemeActive(themeItem)
+        return ThemePreviewCard(
+            theme: themeItem,
+            isActive: isActive,
+            source: ThemeLibraryManagementService.source(for: themeItem),
+            validationReport: validationByID[themeItem.metadata.id],
+            isDuplicate: duplicateIDs.contains(themeItem.metadata.id),
+            onApply: {
+                if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
+                    themeManager.setAppearanceMode(mode, clearActiveTheme: true)
+                } else {
+                    themeManager.applyCustomTheme(themeItem)
+                }
+                showToast(L("Applied \"\(themeItem.metadata.name)\""))
+            },
+            onEdit: { openEditor(for: themeItem) },
+            onExport: { exportTheme(themeItem) },
+            onShare: { shareTheme(themeItem) },
+            onDuplicate: { duplicateTheme(themeItem) },
+            onDelete: themeItem.isBuiltIn ? nil : { confirmDelete(themeItem) }
+        )
+    }
+
+    private func isThemeActive(_ themeItem: CustomTheme) -> Bool {
+        if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
+            return themeManager.activeCustomTheme == nil && themeManager.appearanceMode == mode
+        }
+        return themeManager.activeCustomTheme?.metadata.id == themeItem.metadata.id
+    }
+
+    /// The default "System" theme card. Synthetic (no backing `CustomTheme` on
+    /// disk): applying it switches to `AppearanceMode.system`, which resolves
+    /// to the built-in Dark or Light theme and follows macOS appearance
+    /// transitions live.
+    private var systemThemeCard: some View {
+        SystemThemeCard(
+            isActive: isSystemThemeActive,
+            onApply: {
+                themeManager.setAppearanceMode(.system, clearActiveTheme: true)
+                showToast(L("Applied \"\(AppearanceMode.system.displayName)\""))
+            }
+        )
+    }
+
+    private var isSystemThemeActive: Bool {
+        themeManager.activeCustomTheme == nil && themeManager.appearanceMode == .system
+    }
+
+    // MARK: - Empty / No-result States
+
+    /// Compact first-run call to action shown beneath the built-in grid when
+    /// the user has no custom themes yet. Built-ins stay visible above so a
+    /// fresh user can apply one immediately while being nudged to create.
+    private var firstThemeCTA: some View {
+        SettingsEmptyState(
+            icon: "paintbrush.pointed.fill",
+            title: L("Create Your First Theme"),
+            subtitle: L("Design a unique look for your chat with custom colors, fonts, and backgrounds."),
+            examples: [
+                .init(
+                    icon: "paintpalette.fill",
+                    title: L("Pick a Palette"),
+                    description: L("Colors and accents")
+                ),
+                .init(
+                    icon: "photo.fill",
+                    title: L("Set a Backdrop"),
+                    description: L("Solid, gradient, or image")
+                ),
+                .init(
+                    icon: "sparkles",
+                    title: L("Share It"),
+                    description: L("Publish to the community")
+                ),
+            ],
+            primaryAction: .init(
+                title: L("Create Theme"),
+                icon: "plus",
+                handler: { createNewTheme() }
+            ),
+            secondaryAction: .init(
+                title: L("Import"),
+                icon: "square.and.arrow.down",
+                handler: { showingImporter = true }
+            ),
+            hasAppeared: hasAppeared
+        )
+        .frame(minHeight: 440)
+        .frame(maxWidth: .infinity)
+        .background(
+            RoundedRectangle(cornerRadius: 16)
+                .fill(theme.secondaryBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 16)
+                        .stroke(theme.primaryBorder.opacity(0.6), lineWidth: 1)
+                )
+        )
+    }
+
+    private var noResultsView: some View {
+        VStack(spacing: 14) {
+            Image(systemName: searchActive ? "magnifyingglass" : "line.3.horizontal.decrease.circle")
+                .font(.system(size: 34, weight: .light))
+                .foregroundColor(theme.tertiaryText)
+
+            VStack(spacing: 6) {
+                Text(searchActive ? "No themes found" : "No themes match this filter", bundle: .module)
+                    .font(.system(size: 16, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+
+                Text(verbatim: noResultsSubtitle)
+                    .font(.system(size: 13))
+                    .foregroundColor(theme.secondaryText)
+                    .multilineTextAlignment(.center)
+                    .frame(maxWidth: 360)
+            }
+
+            Button {
+                clearFiltersAndSearch()
+            } label: {
+                Text(searchActive ? "Clear Search" : "Show All Themes", bundle: .module)
+                    .font(.system(size: 12, weight: .medium))
+            }
+            .buttonStyle(ThemedBorderedButtonStyle())
+        }
+        .frame(maxWidth: .infinity)
+        .padding(.vertical, 48)
+    }
+
+    private var noResultsSubtitle: String {
+        if searchActive {
+            return L("No themes match \"\(searchText)\". Try a different search.")
+        }
+        return L("Nothing here yet for this category.")
+    }
+
+    private func clearFiltersAndSearch() {
+        withAnimation(theme.animationQuick()) {
+            searchText = ""
+            selectedFilter = .all
+            recomputeVisible()
+        }
+    }
+
+    // MARK: - Community Themes Banner
+
+    /// Footer call-to-action linking out to the community theme gallery.
+    /// Placed at the end of the list so it reads as "get more" rather than
+    /// competing with the header's primary Import / Create actions.
+    private var communityThemesBanner: some View {
+        Button(action: openCommunityThemes) {
+            HStack(spacing: 14) {
+                ZStack {
+                    Circle()
+                        .fill(
+                            LinearGradient(
+                                colors: [theme.accentColor.opacity(0.18), theme.accentColor.opacity(0.06)],
+                                startPoint: .topLeading,
+                                endPoint: .bottomTrailing
+                            )
+                        )
+                        .frame(width: 44, height: 44)
+
+                    Image(systemName: "sparkles")
+                        .font(.system(size: 18, weight: .medium))
+                        .foregroundColor(theme.accentColor)
+                }
+
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Browse Community Themes", bundle: .module)
+                        .font(.system(size: 14, weight: .semibold))
+                        .foregroundColor(theme.primaryText)
+
+                    Text("Discover and install more themes shared by the Osaurus community", bundle: .module)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.secondaryText)
+                        .lineLimit(2)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
+                Spacer(minLength: 12)
+
+                Image(systemName: "arrow.up.right")
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(16)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .background(
+                RoundedRectangle(cornerRadius: 12)
+                    .fill(theme.secondaryBackground)
+                    .overlay(
+                        RoundedRectangle(cornerRadius: 12)
+                            .stroke(theme.primaryBorder.opacity(0.6), lineWidth: 1)
+                    )
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 12))
+        }
+        .buttonStyle(PlainButtonStyle())
+        .help(Text("Open osaurus.ai/themes", bundle: .module))
+    }
+
+    private func openCommunityThemes() {
+        if let url = URL(string: "https://osaurus.ai/themes") {
+            NSWorkspace.shared.open(url)
+        }
+    }
+
+    // MARK: - Data: partitions + filtering
+
+    /// Sort once, validate once, partition once, and precompute every set the
+    /// filter predicate needs. Called on initial load and whenever
+    /// `ThemeManager` republishes its installed list. Everything is computed
+    /// into locals first, then assigned to `@State` in one pass so the active
+    /// filter + visible list never read stale derived state.
+    ///
+    /// The two CPU-bound steps — validation and duplicate fingerprinting — run
+    /// concurrently on background threads via detached tasks so they never
+    /// block the main run loop. State is written back on the main actor once
+    /// both complete.
+    private func refreshPartitions(from themes: [CustomTheme]) {
+        let sorted = themes.sorted {
+            $0.metadata.name.localizedCaseInsensitiveCompare($1.metadata.name) == .orderedAscending
+        }
+        let built = sorted.filter { $0.isBuiltIn }
+        let custom = sorted.filter { !$0.isBuiltIn }
+
+        Task {
+            // Run the two CPU-intensive operations concurrently on background threads.
+            // validationReports performs hex-color parsing and range checks for every
+            // theme; duplicateGroups JSON-encodes each theme and computes a SHA256
+            // digest. Both are O(n) in the installed theme count and too slow to run
+            // on the main thread when the library is large.
+            async let reports = Task.detached(priority: .userInitiated) {
+                ThemeLibraryManagementService.validationReports(for: sorted)
+            }.value
+            async let groups = Task.detached(priority: .userInitiated) {
+                ThemeLibraryManagementService.duplicateGroups(in: sorted)
+            }.value
+            let (resolvedReports, resolvedGroups) = await (reports, groups)
+
+            // Remaining lightweight derivations and all @State writes happen on
+            // the main actor, matching the pattern used in refreshPreviewCacheHealth.
+            // Two installed theme files can share an ID (e.g. a manually copied
+            // built-in), so tolerate duplicate keys — uniqueKeysWithValues traps.
+            let reportMap = Dictionary(
+                resolvedReports.map { ($0.themeID, $0) },
+                uniquingKeysWith: { first, _ in first }
+            )
+            let reviewIDs = Set(resolvedReports.filter { $0.needsReview }.map { $0.themeID })
+            let dupIDs = Set(resolvedGroups.flatMap { $0.members.map(\.id) })
+            let summary = ThemeLibraryManagementService.summary(
+                for: sorted,
+                reports: resolvedReports,
+                duplicateGroups: resolvedGroups
+            )
+
+            await MainActor.run {
+                let counts = computeFilterCounts(sorted, reviewIDs: reviewIDs, duplicateIDs: dupIDs)
+                var nextFilter = selectedFilter
+                if !availableFilters(from: counts).contains(nextFilter) {
+                    nextFilter = .all
+                }
+                let context = ThemeFilterContext(needsReviewIDs: reviewIDs, duplicateIDs: dupIDs)
+                let visible = sorted.filter {
+                    themeMatches($0, filter: nextFilter, search: searchText, context: context)
+                }
+
+                installedThemes = sorted
+                builtInThemes = built
+                customThemes = custom
+                validationByID = reportMap
+                needsReviewIDs = reviewIDs
+                duplicateIDs = dupIDs
+                librarySummary = summary
+                filterCounts = counts
+                selectedFilter = nextFilter
+                visibleThemes = visible
+            }
+
+            refreshPreviewCacheHealth()
+        }
+    }
+
+    private func computeFilterCounts(
+        _ themes: [CustomTheme],
+        reviewIDs: Set<UUID>,
+        duplicateIDs: Set<UUID>
+    ) -> [ThemeFilter: Int] {
+        var counts: [ThemeFilter: Int] = [
+            .all: themes.count,
+            .needsReview: reviewIDs.count,
+            .duplicates: duplicateIDs.count,
+        ]
+        for theme in themes {
+            switch ThemeLibraryManagementService.source(for: theme) {
+            case .builtIn: counts[.builtIn, default: 0] += 1
+            case .local: counts[.local, default: 0] += 1
+            case .imported: counts[.imported, default: 0] += 1
+            case .shared: counts[.shared, default: 0] += 1
+            }
+        }
+        return counts
+    }
+
+    /// Recompute the visible list from already-published caches. Used by the
+    /// filter/search `onChange` handlers (the data set itself is unchanged).
+    private func recomputeVisible() {
+        let context = ThemeFilterContext(needsReviewIDs: needsReviewIDs, duplicateIDs: duplicateIDs)
+        visibleThemes = installedThemes.filter {
+            themeMatches($0, filter: selectedFilter, search: searchText, context: context)
+        }
+    }
+
+    // MARK: - Cache / maintenance
+
+    private func refreshPreviewCacheHealth() {
+        Task {
+            let snapshot = await ThemePreviewImageCache.shared.healthSnapshot()
+            await MainActor.run {
+                previewCacheHealth = snapshot
+            }
+        }
+    }
+
+    private func clearPreviewCache() {
+        Task {
+            await ThemePreviewImageCache.shared.removeAll()
+            let snapshot = await ThemePreviewImageCache.shared.healthSnapshot()
+            await MainActor.run {
+                previewCacheHealth = snapshot
+                showToast(String(localized: "Preview cache cleared", bundle: .module))
+            }
+        }
+    }
+
+    private func rollbackToDefaultTheme() {
+        ThemeConfigurationStore.rollbackActiveThemeToDefault()
+        themeManager.clearCustomTheme()
+        themeManager.refreshInstalledThemes()
+        refreshPartitions(from: themeManager.installedThemes)
+        showToast(String(localized: "Rolled back to the default theme", bundle: .module))
+    }
+
+    private func markThemeShared(_ themeItem: CustomTheme, outcome: ThemeShareOutcome) {
+        guard !themeItem.isBuiltIn else { return }
+        _ = ThemeConfigurationStore.markThemeShared(
+            id: themeItem.metadata.id,
+            hash: outcome.hash,
+            serverURL: outcome.serverURL
+        )
+        themeManager.refreshInstalledThemes()
     }
 
     private func loadThemes() {
@@ -415,229 +1331,32 @@ struct ThemesView: View {
         }
     }
 
-    /// Sort once, partition once. Called on initial load and whenever
-    /// `ThemeManager` republishes its installed list.
-    private func refreshPartitions(from themes: [CustomTheme]) {
-        let sorted = themes.sorted { $0.metadata.name < $1.metadata.name }
-        installedThemes = sorted
-        builtInThemes = sorted.filter { $0.isBuiltIn }
-        customThemes = sorted.filter { !$0.isBuiltIn }
-    }
-
-    // MARK: - Active Theme Section
-
-    private func activeThemeSection(_ activeTheme: CustomTheme) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            HStack {
-                HStack(spacing: 8) {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 14))
-                        .foregroundColor(theme.successColor)
-
-                    Text("Currently Active", bundle: .module)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
-
-                    Text(activeTheme.metadata.name)
-                        .font(.system(size: 13, weight: .medium))
-                        .foregroundColor(theme.secondaryText)
-                        .padding(.horizontal, 8)
-                        .padding(.vertical, 3)
-                        .background(
-                            Capsule()
-                                .fill(theme.successColor.opacity(0.15))
-                        )
-                }
-
-                Spacer()
-
-                Button(action: {
-                    // "Default" is the System theme: follow the OS appearance
-                    // rather than whatever fixed mode was last pinned
-                    // (upstream #1931).
-                    themeManager.setAppearanceMode(.system, clearActiveTheme: true)
-                    showToast(L("Reset to default theme"))
-                }) {
-                    HStack(spacing: 4) {
-                        Image(systemName: "arrow.uturn.backward")
-                            .font(.system(size: 10, weight: .semibold))
-                        Text("Reset to Default", bundle: .module)
-                            .font(.system(size: 12, weight: .medium))
-                    }
-                    .foregroundColor(theme.secondaryText)
-                    .padding(.horizontal, 10)
-                    .padding(.vertical, 6)
-                    .background(
-                        Capsule()
-                            .fill(theme.tertiaryBackground)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-            .padding(14)
-            .background(
-                RoundedRectangle(cornerRadius: 10)
-                    .fill(theme.successColor.opacity(0.08))
-                    .overlay(
-                        RoundedRectangle(cornerRadius: 10)
-                            .stroke(theme.successColor.opacity(0.2), lineWidth: 1)
-                    )
-            )
-        }
-    }
-
-    // MARK: - Themes Section
-
-    private func themesSection(title: String, count: Int, themes: [CustomTheme]) -> some View {
-        VStack(alignment: .leading, spacing: 14) {
-            HStack(spacing: 8) {
-                Text(title)
-                    .font(.system(size: 15, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-
-                Text("\(count)", bundle: .module)
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundColor(theme.secondaryText)
-                    .padding(.horizontal, 6)
-                    .padding(.vertical, 2)
-                    .background(
-                        Capsule()
-                            .fill(theme.tertiaryBackground)
-                    )
-
-                Spacer()
-            }
-
-            LazyVGrid(
-                columns: [
-                    GridItem(.adaptive(minimum: 280, maximum: 350), spacing: 16)
-                ],
-                spacing: 16
-            ) {
-                ForEach(themes, id: \.metadata.id) { themeItem in
-                    let isActive = isThemeActive(themeItem)
-
-                    ThemePreviewCard(
-                        theme: themeItem,
-                        isActive: isActive,
-                        onApply: {
-                            // Built-in Dark / Light are appearance modes, not
-                            // pinned custom themes (upstream #1931).
-                            if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
-                                themeManager.setAppearanceMode(mode, clearActiveTheme: true)
-                            } else {
-                                themeManager.applyCustomTheme(themeItem)
-                            }
-                            showToast(L("Applied \"\(themeItem.metadata.name)\""))
-                        },
-                        onEdit: { openEditor(for: themeItem) },
-                        onExport: { exportTheme(themeItem) },
-                        onShare: { shareTheme(themeItem) },
-                        onDuplicate: { duplicateTheme(themeItem) },
-                        onDelete: themeItem.isBuiltIn ? nil : { confirmDelete(themeItem) }
-                    )
-                }
-            }
-        }
-    }
-
-    private func isThemeActive(_ themeItem: CustomTheme) -> Bool {
-        if let mode = ThemeManager.appearanceMode(forBuiltInTheme: themeItem) {
-            return themeManager.activeCustomTheme == nil && themeManager.appearanceMode == mode
-        }
-        return themeManager.activeCustomTheme?.metadata.id == themeItem.metadata.id
-    }
-
-    // MARK: - Empty State
-
-    private var emptyCustomThemesView: some View {
-        VStack(spacing: 20) {
-            // Icon with gradient background
-            ZStack {
-                Circle()
-                    .fill(
-                        LinearGradient(
-                            colors: [theme.accentColor.opacity(0.15), theme.accentColor.opacity(0.05)],
-                            startPoint: .topLeading,
-                            endPoint: .bottomTrailing
-                        )
-                    )
-                    .frame(width: 80, height: 80)
-
-                Image(systemName: "paintbrush.pointed.fill")
-                    .font(.system(size: 32))
-                    .foregroundColor(theme.accentColor)
-            }
-
-            VStack(spacing: 6) {
-                Text("Create Your First Custom Theme", bundle: .module)
-                    .font(.system(size: 17, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-
-                Text(
-                    "Design a unique look for your chat interface with custom colors, fonts, and effects",
-                    bundle: .module
-                )
-                .font(.system(size: 13))
-                .foregroundColor(theme.secondaryText)
-                .multilineTextAlignment(.center)
-                .frame(maxWidth: 400)
-            }
-
-            HStack(spacing: 14) {
-                Button(action: { showingImporter = true }) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "square.and.arrow.down")
-                            .font(.system(size: 12, weight: .medium))
-                        Text("Import", bundle: .module)
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(theme.primaryText)
-                    .padding(.horizontal, 16)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(theme.tertiaryBackground)
-                            .overlay(
-                                RoundedRectangle(cornerRadius: 8)
-                                    .stroke(theme.inputBorder, lineWidth: 1)
-                            )
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-
-                Button(action: createNewTheme) {
-                    HStack(spacing: 6) {
-                        Image(systemName: "plus")
-                            .font(.system(size: 12, weight: .semibold))
-                        Text("Create Theme", bundle: .module)
-                            .font(.system(size: 13, weight: .medium))
-                    }
-                    .foregroundColor(.white)
-                    .padding(.horizontal, 18)
-                    .padding(.vertical, 10)
-                    .background(
-                        RoundedRectangle(cornerRadius: 8)
-                            .fill(theme.accentColor)
-                    )
-                }
-                .buttonStyle(PlainButtonStyle())
-            }
-        }
-        .frame(maxWidth: .infinity)
-        .padding(.vertical, 48)
-        .padding(.horizontal, 24)
-        .background(
-            RoundedRectangle(cornerRadius: 16)
-                .fill(theme.secondaryBackground)
-                .overlay(
-                    RoundedRectangle(cornerRadius: 16)
-                        .stroke(theme.primaryBorder.opacity(0.6), lineWidth: 1)
-                )
-        )
-    }
-
     // MARK: - Actions
+
+    private func performDelete(_ theme: CustomTheme) {
+        let themeName = theme.metadata.name
+        let success = themeManager.deleteTheme(id: theme.metadata.id)
+        if success {
+            print("[Osaurus] Successfully deleted theme: \(themeName)")
+            showToast(L("Deleted \"\(themeName)\""))
+        } else {
+            print("[Osaurus] Failed to delete theme: \(themeName)")
+        }
+        themeToDelete = nil
+    }
+
+    private func showToast(_ message: String, type: SimpleToastType = .success) {
+        withAnimation(theme.springAnimation()) {
+            toastType = type
+            toastMessage = message
+        }
+        let duration: Double = type == .error ? 4.0 : 2.5
+        DispatchQueue.main.asyncAfter(deadline: .now() + duration) {
+            withAnimation(theme.animationQuick()) {
+                toastMessage = nil
+            }
+        }
+    }
 
     private func createNewTheme() {
         var newTheme = CustomTheme.darkDefault
@@ -647,6 +1366,7 @@ struct ThemesView: View {
             author: "User"
         )
         newTheme.isBuiltIn = false
+        newTheme.library = ThemeLibraryInfo(source: .local)
         openEditor(for: newTheme)
     }
 
@@ -673,9 +1393,7 @@ struct ThemesView: View {
         else { return }
         guard editingTheme == nil else { return }
         let builtIn = themeManager.installedThemes.first(where: {
-            // Intel: no appearance-mode built-in ids; match the built-in
-            // theme with the current light/dark side.
-            $0.isBuiltIn && $0.isDark == theme.isDark
+            ThemeManager.appearanceMode(forBuiltInTheme: $0) == (theme.isDark ? .dark : .light)
         })
         let fallback = theme.isDark ? CustomTheme.darkDefault : CustomTheme.lightDefault
         let target: CustomTheme = themeManager.activeCustomTheme ?? builtIn ?? fallback
@@ -697,6 +1415,7 @@ struct ThemesView: View {
     private func applyPendingThemeInstall() {
         guard let hash = managementState.pendingThemeInstallHash, !hash.isEmpty else { return }
         importByIdInitialHash = hash
+        applyAfterImportById = true
         showingImportByIdSheet = true
         managementState.pendingThemeInstallHash = nil
     }
@@ -764,6 +1483,9 @@ struct ThemesView: View {
 struct ThemePreviewCard: View {
     let theme: CustomTheme
     let isActive: Bool
+    let source: ThemeLibrarySource
+    let validationReport: ThemeValidationReport?
+    let isDuplicate: Bool
     let onApply: () -> Void
     let onEdit: () -> Void
     let onExport: () -> Void
@@ -784,6 +1506,9 @@ struct ThemePreviewCard: View {
     init(
         theme: CustomTheme,
         isActive: Bool,
+        source: ThemeLibrarySource,
+        validationReport: ThemeValidationReport?,
+        isDuplicate: Bool,
         onApply: @escaping () -> Void,
         onEdit: @escaping () -> Void,
         onExport: @escaping () -> Void,
@@ -793,6 +1518,9 @@ struct ThemePreviewCard: View {
     ) {
         self.theme = theme
         self.isActive = isActive
+        self.source = source
+        self.validationReport = validationReport
+        self.isDuplicate = isDuplicate
         self.onApply = onApply
         self.onEdit = onEdit
         self.onExport = onExport
@@ -809,16 +1537,21 @@ struct ThemePreviewCard: View {
             cardInfo
         }
         .background(currentTheme.cardBackground)
-        .clipShape(RoundedRectangle(cornerRadius: 12))
+        .clipShape(RoundedRectangle(cornerRadius: 14))
         .overlay(
-            RoundedRectangle(cornerRadius: 12)
+            RoundedRectangle(cornerRadius: 14)
                 .stroke(borderColor, lineWidth: isActive ? 2 : 1)
         )
         // Static shadow (no hover-driven radius/offset). Dynamic shadow
         // forces an offscreen render pass per state change and was a
         // significant scroll cost when `onHover` fires while the cursor
         // crosses cells.
-        .shadow(color: Color.black.opacity(0.08), radius: 6, x: 0, y: 2)
+        .shadow(
+            color: Color.black.opacity(isActive ? 0.12 : 0.07),
+            radius: isActive ? 10 : 6,
+            x: 0,
+            y: isActive ? 4 : 2
+        )
         .onHover { isHovered = $0 }
         .task(id: theme.metadata.id) {
             cachedImage = await ThemePreviewImageCache.shared.image(for: theme)
@@ -835,21 +1568,42 @@ struct ThemePreviewCard: View {
             cachedImage: cachedImage
         )
         .equatable()
-        .frame(height: 120)
+        .frame(height: 124)
+        .overlay(alignment: .topTrailing) {
+            if isActive {
+                activePill
+            }
+        }
         .contentShape(Rectangle())
         .onTapGesture {
             if !isActive { onApply() }
         }
     }
 
+    private var activePill: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .bold))
+            Text("Active", bundle: .module)
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(currentTheme.accentColor))
+        .padding(8)
+    }
+
     private var cardInfo: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 10) {
+            HStack(alignment: .firstTextBaseline, spacing: 8) {
                 titleBlock
                 Spacer(minLength: 8)
                 cardActionMenu
             }
+            badgeRow
             swatchRow
+            applyButton
         }
         .padding(12)
         .background(currentTheme.cardBackground)
@@ -857,36 +1611,57 @@ struct ThemePreviewCard: View {
 
     private var titleBlock: some View {
         VStack(alignment: .leading, spacing: 2) {
-            HStack(spacing: 6) {
-                Text(theme.metadata.name)
-                    .font(.system(size: 14, weight: .semibold))
-                    .foregroundColor(currentTheme.primaryText)
-                    .lineLimit(1)
-
-                if isActive {
-                    Image(systemName: "checkmark.circle.fill")
-                        .font(.system(size: 12))
-                        .foregroundColor(currentTheme.successColor)
-                }
-
-                if theme.isBuiltIn {
-                    Text("Built-in", bundle: .module)
-                        .font(.system(size: 10, weight: .medium))
-                        .foregroundColor(currentTheme.secondaryText)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(
-                            Capsule()
-                                .fill(currentTheme.tertiaryBackground)
-                        )
-                }
-            }
+            Text(theme.metadata.name)
+                .font(.system(size: 14, weight: .semibold))
+                .foregroundColor(currentTheme.primaryText)
+                .lineLimit(1)
 
             Text("by \(theme.metadata.author)", bundle: .module)
                 .font(.system(size: 11))
                 .foregroundColor(currentTheme.tertiaryText)
                 .lineLimit(1)
         }
+    }
+
+    private var badgeRow: some View {
+        HStack(spacing: 6) {
+            if theme.isBuiltIn {
+                sourceBadge("Built-in", color: currentTheme.secondaryText)
+            } else {
+                sourceBadge(sourceLabel(source), color: sourceColor(source))
+            }
+
+            if let validationReport, validationReport.needsReview {
+                validationBadge(validationReport)
+            }
+
+            if isDuplicate {
+                sourceBadge("Duplicate", color: currentTheme.warningColor)
+            }
+
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var applyButton: some View {
+        Button(action: { if !isActive { onApply() } }) {
+            HStack(spacing: 6) {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "paintbrush.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(isActive ? "Active" : "Apply Theme", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(isActive ? currentTheme.successColor : Color.white)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? currentTheme.successColor.opacity(0.14) : currentTheme.accentColor)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isActive)
     }
 
     private var cardActionMenu: some View {
@@ -974,6 +1749,60 @@ struct ThemePreviewCard: View {
                     .stroke(currentTheme.primaryBorder, lineWidth: 1)
             )
     }
+
+    private func sourceBadge(_ label: String, color: Color) -> some View {
+        Text(LocalizedStringKey(label), bundle: .module)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.14))
+            )
+    }
+
+    private func validationBadge(_ report: ThemeValidationReport) -> some View {
+        HStack(spacing: 3) {
+            Image(systemName: report.errorCount > 0 ? "xmark.octagon.fill" : "exclamationmark.triangle.fill")
+                .font(.system(size: 8, weight: .bold))
+            Text(LocalizedStringKey(report.errorCount > 0 ? "Invalid" : "Review"), bundle: .module)
+                .font(.system(size: 10, weight: .medium))
+        }
+        .foregroundColor(report.errorCount > 0 ? currentTheme.errorColor : currentTheme.warningColor)
+        .padding(.horizontal, 6)
+        .padding(.vertical, 2)
+        .background(
+            Capsule()
+                .fill((report.errorCount > 0 ? currentTheme.errorColor : currentTheme.warningColor).opacity(0.14))
+        )
+        .help(Text(verbatim: validationHelp(report)))
+    }
+
+    private func sourceLabel(_ source: ThemeLibrarySource) -> String {
+        switch source {
+        case .builtIn: return "Built-in"
+        case .local: return "Local"
+        case .imported: return "Imported"
+        case .shared: return "Shared"
+        }
+    }
+
+    private func sourceColor(_ source: ThemeLibrarySource) -> Color {
+        switch source {
+        case .builtIn: return currentTheme.secondaryText
+        case .local: return currentTheme.accentColor
+        case .imported: return currentTheme.infoColor
+        case .shared: return currentTheme.successColor
+        }
+    }
+
+    private func validationHelp(_ report: ThemeValidationReport) -> String {
+        if let first = report.issues.first {
+            return "\(first.field): \(first.message)"
+        }
+        return "Theme validation passed"
+    }
 }
 
 // MARK: - Resolved Preview Colors
@@ -1050,10 +1879,10 @@ private struct ThemePreviewArt: View, Equatable {
         }
         .clipShape(
             UnevenRoundedRectangle(
-                topLeadingRadius: 12,
+                topLeadingRadius: 14,
                 bottomLeadingRadius: 0,
                 bottomTrailingRadius: 0,
-                topTrailingRadius: 12
+                topTrailingRadius: 14
             )
         )
     }
@@ -1207,6 +2036,212 @@ private struct ThemePreviewArt: View, Equatable {
                 self.kind = .image
             }
         }
+    }
+}
+
+// MARK: - System Theme Card
+
+/// Bottom-right triangular half used to composite the dark half of the
+/// System card's split preview over the light half.
+private struct DiagonalSplitShape: Shape {
+    func path(in rect: CGRect) -> Path {
+        var path = Path()
+        path.move(to: CGPoint(x: rect.maxX, y: rect.minY))
+        path.addLine(to: CGPoint(x: rect.maxX, y: rect.maxY))
+        path.addLine(to: CGPoint(x: rect.minX, y: rect.maxY))
+        path.closeSubpath()
+        return path
+    }
+}
+
+/// Gallery card for the default "System" theme. Unlike `ThemePreviewCard`
+/// there is no backing `CustomTheme` on disk — applying it switches the app
+/// to `AppearanceMode.system`, which resolves to the built-in Dark or Light
+/// theme and follows macOS appearance transitions live. The split preview
+/// mirrors the macOS "Auto" appearance picker (light top-left, dark
+/// bottom-right), so no edit/export/share/delete actions apply.
+private struct SystemThemeCard: View {
+    let isActive: Bool
+    let onApply: () -> Void
+
+    @Environment(\.theme) private var currentTheme
+    @State private var isHovered = false
+
+    private let lightResolved: ResolvedThemePreviewColors
+    private let darkResolved: ResolvedThemePreviewColors
+    private let lightBackground: ThemePreviewArt.BackgroundDescriptor
+    private let darkBackground: ThemePreviewArt.BackgroundDescriptor
+    private let lightThemeID: UUID
+    private let darkThemeID: UUID
+
+    init(isActive: Bool, onApply: @escaping () -> Void) {
+        self.isActive = isActive
+        self.onApply = onApply
+        let light = CustomTheme.lightDefault
+        let dark = CustomTheme.darkDefault
+        self.lightResolved = ResolvedThemePreviewColors(light)
+        self.darkResolved = ResolvedThemePreviewColors(dark)
+        self.lightBackground = ThemePreviewArt.BackgroundDescriptor(theme: light)
+        self.darkBackground = ThemePreviewArt.BackgroundDescriptor(theme: dark)
+        self.lightThemeID = light.metadata.id
+        self.darkThemeID = dark.metadata.id
+    }
+
+    var body: some View {
+        VStack(spacing: 0) {
+            previewArt
+            cardInfo
+        }
+        .background(currentTheme.cardBackground)
+        .clipShape(RoundedRectangle(cornerRadius: 14))
+        .overlay(
+            RoundedRectangle(cornerRadius: 14)
+                .stroke(borderColor, lineWidth: isActive ? 2 : 1)
+        )
+        .shadow(
+            color: Color.black.opacity(isActive ? 0.12 : 0.07),
+            radius: isActive ? 10 : 6,
+            x: 0,
+            y: isActive ? 4 : 2
+        )
+        .onHover { isHovered = $0 }
+    }
+
+    /// Light preview with the dark preview composited over its bottom-right
+    /// half. Both mockups share the same layout, so the diagonal reads as one
+    /// interface split between the two appearances.
+    private var previewArt: some View {
+        ZStack {
+            ThemePreviewArt(
+                themeID: lightThemeID,
+                resolved: lightResolved,
+                background: lightBackground,
+                cachedImage: nil
+            )
+            .equatable()
+
+            ThemePreviewArt(
+                themeID: darkThemeID,
+                resolved: darkResolved,
+                background: darkBackground,
+                cachedImage: nil
+            )
+            .equatable()
+            .clipShape(DiagonalSplitShape())
+        }
+        .frame(height: 124)
+        .overlay(alignment: .topTrailing) {
+            if isActive {
+                activePill
+            }
+        }
+        .contentShape(Rectangle())
+        .onTapGesture {
+            if !isActive { onApply() }
+        }
+    }
+
+    private var activePill: some View {
+        HStack(spacing: 3) {
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 9, weight: .bold))
+            Text("Active", bundle: .module)
+                .font(.system(size: 9, weight: .bold))
+        }
+        .foregroundColor(.white)
+        .padding(.horizontal, 7)
+        .padding(.vertical, 3)
+        .background(Capsule().fill(currentTheme.accentColor))
+        .padding(8)
+    }
+
+    private var cardInfo: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            VStack(alignment: .leading, spacing: 2) {
+                Text("System", bundle: .module)
+                    .font(.system(size: 14, weight: .semibold))
+                    .foregroundColor(currentTheme.primaryText)
+                    .lineLimit(1)
+
+                Text("Matches macOS appearance", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(currentTheme.tertiaryText)
+                    .lineLimit(1)
+            }
+
+            HStack(spacing: 6) {
+                badge("Built-in", color: currentTheme.secondaryText)
+                badge("Auto Dark/Light", color: currentTheme.accentColor)
+                Spacer(minLength: 0)
+            }
+
+            swatchRow
+            applyButton
+        }
+        .padding(12)
+        .background(currentTheme.cardBackground)
+    }
+
+    private var swatchRow: some View {
+        HStack(spacing: 4) {
+            splitSwatch(lightResolved.primaryBackground, darkResolved.primaryBackground)
+            splitSwatch(lightResolved.accent, darkResolved.accent)
+            splitSwatch(lightResolved.success, darkResolved.success)
+            splitSwatch(lightResolved.warning, darkResolved.warning)
+            splitSwatch(lightResolved.error, darkResolved.error)
+        }
+    }
+
+    private var applyButton: some View {
+        Button(action: { if !isActive { onApply() } }) {
+            HStack(spacing: 6) {
+                Image(systemName: isActive ? "checkmark.circle.fill" : "paintbrush.fill")
+                    .font(.system(size: 11, weight: .semibold))
+                Text(isActive ? "Active" : "Apply Theme", bundle: .module)
+                    .font(.system(size: 12, weight: .semibold))
+            }
+            .frame(maxWidth: .infinity)
+            .foregroundColor(isActive ? currentTheme.successColor : Color.white)
+            .padding(.vertical, 8)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(isActive ? currentTheme.successColor.opacity(0.14) : currentTheme.accentColor)
+            )
+            .contentShape(RoundedRectangle(cornerRadius: 8))
+        }
+        .buttonStyle(.plain)
+        .disabled(isActive)
+    }
+
+    private var borderColor: Color {
+        if isActive { return currentTheme.accentColor }
+        if isHovered { return currentTheme.accentColor.opacity(0.5) }
+        return currentTheme.cardBorder
+    }
+
+    private func splitSwatch(_ light: Color, _ dark: Color) -> some View {
+        ZStack {
+            Circle().fill(light)
+            DiagonalSplitShape().fill(dark)
+        }
+        .frame(width: 16, height: 16)
+        .clipShape(Circle())
+        .overlay(
+            Circle()
+                .stroke(currentTheme.primaryBorder, lineWidth: 1)
+        )
+    }
+
+    private func badge(_ label: String, color: Color) -> some View {
+        Text(LocalizedStringKey(label), bundle: .module)
+            .font(.system(size: 10, weight: .medium))
+            .foregroundColor(color)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(
+                Capsule()
+                    .fill(color.opacity(0.14))
+            )
     }
 }
 

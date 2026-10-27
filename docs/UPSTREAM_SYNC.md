@@ -4090,3 +4090,54 @@ nothing and Dark/Light always showed blue. Now as upstream:
 Tests: upstream's `ThemeSystemAccentTests`. Package gate: 3,303 tests in 412
 suites (6 known issues). Rosy: "System accent colour" in
 `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Theme library and sharing (`W-ui-misc`) — 2026-10-27
+
+Upstream's theme stack, which Intel had compiled only in part: #1587's
+library management centre, theme sharing and import by link or ID, the
+`osaurus://themes-install` link, #1776's deferred theme loading and #3060's
+off-main fingerprinting. Most of the files were already identical to
+upstream (`CustomTheme`, `ThemesAPIClient`, `ThemesDeepLinkRouter`,
+`ThemePreviewImageCache`, `FittedSheetFrame`); the rest were older copies.
+
+- **Taken from upstream as is:** `ThemeLibraryManagementService` (new:
+  validation reports, duplicate groups by visual fingerprint, library
+  summary, import-input diagnostics), `ThemeConfigurationStore` (import and
+  duplicate record `library` provenance, `markThemeShared`,
+  `rollbackActiveThemeToDefault`, provenance normalised on save), and
+  `Theme.swift`. The latter brings #1776: built-in install and the theme
+  directory decode no longer run while `ThemeManager.shared` is constructed;
+  the compiled-in Dark/Light seeds the first frame and the disk built-in
+  swaps in when the deferred load finishes. It also brings upstream's
+  main-actor hop in `systemAppearanceChanged` (Intel mutated `@Published`
+  theme state on the distributed-notification thread).
+- **Sharing is live.** `ThemeShareService` and `ThemesDeepLinkRouter` are no
+  longer excluded. Sharing signs with the identity master key, which Intel
+  compiles (`MasterKey`, `OsaurusIdentityContext`); the old reason for the
+  "Apple Silicon only" placeholder sheets no longer held. Intel's duplicate
+  `ThemeShareOutcome` in `IntelDataConformers` is gone.
+- **`ThemesView`:** upstream's page (filters with counts, search, Library
+  Health panel with preview-cache health and rollback, System card,
+  first-theme prompt, community banner, source and validation badges), with
+  Intel's macOS 13 conventions: single-value `onChange`, themed bordered
+  buttons, and the share and import sheets given the theme and
+  `intelControlRendering` where they are presented. The Library Health
+  switch sits in a menu, where it renders as a native checkmark item.
+- **Shared UI:** `AnimatedTabSelector` and `HeaderTabsRow` gained upstream's
+  `tabs:` subset. Upstream's width-measured stacked header layout is not
+  ported.
+- **Deep links (new on Intel):** `AppDelegate.application(_:open:)` handles
+  `osaurus://themes-install?hash=` (opens Themes and the import sheet) and
+  `osaurus://settings?tab=` (`ManagementTab.resolved(from:)`). Intel had
+  registered the `osaurus` scheme in `Info.plist` with no handler, so every
+  link was dropped. Still unhandled, each with its feature:
+  `plugins-install`, pairing invites (`W-identity-mobile`),
+  `workspaces/*` (deferred) and `open_from_hf` (MLX). Intel's announcements
+  still drop deep-link buttons (`AnnouncementsService.intelCTAs`); they can
+  follow these hosts if wanted.
+- `docs/THEMES.md` is upstream's (accent flag and `library` section).
+
+Tests: upstream's `ThemeLibraryManagementServiceTests`, `ThemeFilterTests`,
+`ThemeShareServiceTests` and `ThemePreviewImageCacheTests`. Package gate:
+3,323 tests in 416 suites (6 known issues). Rosy: "Theme library and
+sharing" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

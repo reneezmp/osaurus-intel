@@ -1546,25 +1546,8 @@ final class SlashCommandRegistry: ObservableObject, @unchecked Sendable {
 
 // MARK: - Theme Sharing
 //
-// `ThemeShareOutcome` is defined in the excluded
-// `Services/Themes/ThemeShareService.swift` upstream. `ShareThemeSheet`'s
-// Intel stub (un-body-swap in M11 Phase 11.A.1's bundle) declares
-// `onSuccess: (ThemeShareOutcome) -> Void` in its init signature, so
-// the type has to be in scope. Mirror the upstream public surface
-// byte-for-byte — the closure is never actually invoked on Intel
-// because the share UI immediately routes to `AppleSiliconOnlyTab`,
-// but the type is still required at compile time.
-public struct ThemeShareOutcome: Sendable {
-    public let hash: String
-    public let serverURL: URL
-    public let deepLinkURL: URL
-
-    public init(hash: String, serverURL: URL, deepLinkURL: URL) {
-        self.hash = hash
-        self.serverURL = serverURL
-        self.deepLinkURL = deepLinkURL
-    }
-}
+// `ThemeShareOutcome` now comes from upstream's `ThemeShareService.swift`,
+// which Intel compiles since the 2026-10-27 theme library port.
 
 // `SlashCommand` is provided by upstream
 // `Models/SlashCommand/SlashCommand.swift` (not excluded). The

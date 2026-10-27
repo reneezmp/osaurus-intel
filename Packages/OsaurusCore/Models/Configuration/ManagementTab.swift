@@ -87,6 +87,15 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
 
     public var id: String { rawValue }
 
+    /// A tab from an `osaurus://settings?tab=` link (upstream), including the
+    /// renamed id upstream still accepts that Intel has a screen for.
+    public static func resolved(from rawValue: String) -> ManagementTab? {
+        switch rawValue {
+        case "dashboard": .credits
+        default: ManagementTab(rawValue: rawValue)
+        }
+    }
+
     public var icon: String {
         switch self {
         case .models: "cube.box.fill"

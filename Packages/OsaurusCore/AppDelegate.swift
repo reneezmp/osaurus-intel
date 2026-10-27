@@ -438,6 +438,45 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     // MARK: - Reopen
 
+    // MARK: - Deep links (upstream `application(_:open:)`)
+
+    /// `osaurus://` links. Intel serves the subset whose screens it has:
+    ///
+    /// * `osaurus://themes-install?hash=<sha256>`: open Themes and install a
+    ///   shared theme (`ThemesDeepLinkRouter`, "Open in Osaurus" on
+    ///   themes.osaurus.ai);
+    /// * `osaurus://settings?tab=<tab>`: open the management window on a tab.
+    ///
+    /// Upstream's other hosts land with their features: `plugins-install`
+    /// (Tools › Native Plugins), pairing invites (`W-identity-mobile`),
+    /// `workspaces/*` (`W-workspaces-sharing`, deferred) and
+    /// `open_from_hf` / `huggingface://` (MLX model downloads, Apple Silicon).
+    public func application(_ application: NSApplication, open urls: [URL]) {
+        for url in urls where url.scheme?.lowercased() == "osaurus" {
+            handleOsaurusDeepLink(url)
+        }
+    }
+
+    func handleOsaurusDeepLink(_ url: URL) {
+        Task { @MainActor in
+            switch url.host?.lowercased() {
+            case "settings":
+                NSApp.activate(ignoringOtherApps: true)
+                let raw =
+                    URLComponents(url: url, resolvingAgainstBaseURL: false)?
+                    .queryItems?
+                    .first(where: { $0.name.lowercased() == "tab" })?.value ?? ""
+                showManagementWindow(initialTab: ManagementTab.resolved(from: raw))
+            case ThemeShareService.deepLinkHost:
+                NSApp.activate(ignoringOtherApps: true)
+                showManagementWindow(initialTab: .themes)
+                _ = ThemesDeepLinkRouter.handle(url)
+            default:
+                NSLog("[Osaurus] Unhandled deep link host: \(url.host ?? "(none)")")
+            }
+        }
+    }
+
     public func applicationShouldHandleReopen(_ sender: NSApplication, hasVisibleWindows flag: Bool) -> Bool {
         Task { @MainActor in
             // `flag` is true when AppKit already sees a visible window;

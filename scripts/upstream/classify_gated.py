@@ -78,8 +78,6 @@ GATED = {
     "Views/Plugin/ClaudePluginDetailView.swift": ("W-skills-plugins-import", "W", "Claude plugins"),
     "Views/Skill/GitHubImportSheet.swift": ("W-skills-plugins-import", "W", "GitHub import (upstream moved it to Views/Plugin/)"),
     "Views/Agent/NextRunPanelView.swift": ("W-agent-detail-redesign", "W", "Next Run panel"),
-    "Views/Theme/ShareThemeSheet.swift": ("W-ui-misc", "W", "theme sharing (themes.osaurus.ai, identity-signed)"),
-    "Views/Theme/ImportThemeByIdSheet.swift": ("W-ui-misc", "W", "theme import by id"),
     "Views/Agent/IncomingPairSheet.swift": ("W-identity-mobile", "W", ""),
     "Views/Agent/RemoteAgentViews.swift": ("W-workspaces-sharing", "D", "invite-link agent sharing"),
     "Views/Agent/ShareAgentSheet.swift": ("W-workspaces-sharing", "D", "invite-link agent sharing"),

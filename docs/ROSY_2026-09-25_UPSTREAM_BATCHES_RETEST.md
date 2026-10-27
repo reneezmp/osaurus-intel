@@ -1881,3 +1881,29 @@ Gemini API key (native Gemini provider) and, if available, OpenRouter.
 - [ ] **After updating:** on Rosy's existing install, Dark and Light are the
       macOS-style palettes (`#1c1c1e` / `#f5f5f7` backgrounds) after the
       first launch of this build; your own themes are unchanged.
+
+## Theme library and sharing (2026-10-27)
+
+Details: `UPSTREAM_SYNC.md`, "Theme library and sharing".
+
+- [ ] **Launch:** Osaurus opens with your theme and no flash of another
+      palette; Themes lists every installed theme a moment later.
+- [ ] **Filters and search:** Themes shows filter tabs with counts (All,
+      Built-in, Custom, and Imported or Shared when present) and a search
+      field; searching narrows the cards; an empty search shows a "no
+      results" state with a way to clear it.
+- [ ] **Library Health:** the ⋯ menu's Library Health shows theme counts,
+      issues and duplicates, and the preview cache; Clear preview cache and
+      Roll back to default theme both work.
+- [ ] **System card:** the System card follows macOS light/dark and shows as
+      active when no theme is pinned.
+- [ ] **Import from file:** an imported `.json` theme shows an Imported badge.
+- [ ] **Share:** share a custom theme (needs an Osaurus identity and Touch ID
+      or the password). The sheet shows the link, ID and QR code, and the
+      card gets a Shared badge. Controls and text are readable, and the text
+      field shows its caret.
+- [ ] **Import by link:** Import › From Link or ID… with that link installs
+      it; opening `osaurus://themes-install?hash=<id>` from Safari opens
+      Themes with the import sheet filled in.
+- [ ] **Settings link:** `osaurus://settings?tab=themes` opens Settings on
+      Themes.

@@ -23,7 +23,7 @@ overflow) were each first guessed wrong and corrected by reading Intel's code.
 | # | Commit | Verdict | Intel note |
 |---:|---|---|---|
 | 1 | `a40ab57ff` #3065 | **Port** | `AppleURLOpener`: the Apple-app `*_open_*` tools open URLs with the completion-handler `NSWorkspace` call instead of a synchronous one on the main actor (Sentry hang). All four tools and the test are on Intel; applies cleanly. |
-| 2 | `b56d9892d` #3060 | **Needs work (`W-ui-misc`, theme library)** | Themes tab: validation and duplicate fingerprinting move off the main thread. Both come from `ThemeLibraryManagementService`, which Intel doesn't have yet (theme library management, `W-ui-misc`), so the hang can't happen here; the fix lands with the library. |
+| 2 | `b56d9892d` #3060 | **Needs work (`W-ui-misc`, theme library)**; **done 2026-10-27** with the theme library | Themes tab: validation and duplicate fingerprinting move off the main thread. Both come from `ThemeLibraryManagementService`, which Intel doesn't have yet (theme library management, `W-ui-misc`), so the hang can't happen here; the fix lands with the library. |
 | 3 | `c0dc38588` #3058 | **Deferred (`W-channels`)** | WhatsApp config loading off the main thread; WhatsApp is part of the deferred channels. |
 | 4 | `234e3bc20` #3067 | **Port** | The reply's copy button copies only the response, not the thinking (`copyTurnContent`; Intel's older body lacks the image-only and dispatch-envelope branches, hand-apply the thinking removal). |
 | 5 | `5601f0cfa` #3053 | **Port** | Menu titles use `LCached` (on Intel since #2757) instead of `L` (Sentry hang). Hand-apply to Intel's menus. |

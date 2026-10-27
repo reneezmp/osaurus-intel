@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ShareThemeSheet.swift
 //  osaurus
@@ -52,7 +51,7 @@ struct ShareThemeSheet: View {
             Divider().opacity(0.5)
             footer
         }
-        .frame(width: 520, height: 560)
+        .fittedSheetFrame(width: 520, height: 560)
         .background(theme.cardBackground)
         .task { await runUpload() }
     }
@@ -458,7 +457,7 @@ private struct ThemeQRCardView: View {
             }
         }
         .onAppear { qrImage = Self.renderQR(text) }
-        .onChange(of: text) { newValue in
+        .onChange(of: text) { newValue in  // Intel: single-value onChange (macOS 13)
             qrImage = Self.renderQR(newValue)
         }
     }
@@ -557,25 +556,3 @@ private func setPasteboardString(_ string: String) {
     pb.clearContents()
     pb.setString(string, forType: .string)
 }
-#else
-import SwiftUI
-
-/// Intel stub. Theme sharing depends on `ThemeShareService` cloud calls
-/// that are excluded on Intel; the sheet renders the standard
-/// "Apple Silicon only" placeholder. Init signature mirrors the
-/// upstream call site in `ThemesView` (un-body-swapped in M11 Phase
-/// 11.A.1) so the type-check passes.
-struct ShareThemeSheet: View {
-    let themeToShare: CustomTheme
-    let onSuccess: (ThemeShareOutcome) -> Void
-
-    init(themeToShare: CustomTheme, onSuccess: @escaping (ThemeShareOutcome) -> Void) {
-        self.themeToShare = themeToShare
-        self.onSuccess = onSuccess
-    }
-
-    var body: some View {
-        AppleSiliconOnlyTab(tabName: "Share Theme", symbol: "apple.logo")
-    }
-}
-#endif
