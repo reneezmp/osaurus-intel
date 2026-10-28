@@ -156,6 +156,71 @@ Package gate: 3,526 tests in 443 suites (6 known issues). The postflight
 showed three live-file hits inside the test window; `lsof` attributed them
 to the running app (`TEST_STORAGE_SAFETY.md`, 2026-10-28 entry).
 
+## Layer 3: AppleScript (2026-10-28, `W-applescript-agent` complete)
+
+Taken from upstream: `AppleScript/` (literals, app knowledge, dictionary
+service, recipes, the loop, its trace log, `AppleScriptAction`, the effect
+classifier, `AppleScriptTool` / `MacQueryTool` and their dispatch),
+`Subagent/Kinds/AppleScriptKind`, `ComputerUse/Perception/FrontmostAppTracker`
+(started in `AppDelegate`), and `MockAppleScriptWorld` for the tests.
+Intel's earlier `AppleScriptLanguage.swift` extract is gone (the enum is
+back in `AppleScriptAction.swift`). `EffectClassifier` is back with only its
+`AgentAction` classifier fenced: the AppleScript classifier reuses its word
+lists.
+
+Intel edits:
+
+- **Model:** upstream runs AppleScript on a dedicated on-device model
+  (`AppleScriptModelCatalog`), with resident-model swaps and keep-warm.
+  Intel's `AppleScriptKind.resolveModel` picks a cloud model: the agent's
+  `appleScriptModelId` when the picker lists it, else the chat's current
+  model (`ChatExecutionContext.currentModelName`), else the agent's default.
+  An assignment that can't run here (for example an on-device id an Apple
+  Silicon build wrote into the shared `~/.osaurus`) is reported with the
+  fix, never replaced (upstream's rule). The global config default is not
+  used for the same reason. Admission is remote; no residency, keep-warm or
+  resident-model reuse for `mac_query`.
+- **Loop engine:** `ChatEngine(source: .agent)` (Intel's initializer; no
+  Privacy Filter to auto-scrub). Each script step goes through layer 2's
+  model step.
+- **Scope:** the engine binds `currentModelName` and `currentUserRequest`
+  around every tool call (`ChatEngine.withSubagentScope`); the chat send
+  binds the exact visible user text first, which the dispatch uses to keep
+  the user's own wording authoritative.
+- **Gating:** `applescript` and `mac_query` are registered built-ins; the
+  agent's switch is the grant (`AgentManager.effectiveAppleScriptEnabled`,
+  custom agents only) in tool resolution and `runtimeCapabilityDenial`. The
+  per-script consent is the loop's own execution-mode gate (confirm each
+  changing script in the overlay, or auto-run with a warning), as upstream.
+- **Prompt:** when either tool is in the schema, the composer adds
+  `SystemPromptTemplates.intelAppleScriptGuidance` (upstream's text with the
+  on-device sentence replaced) as an "AppleScript" section.
+- **UI:** Agents → (agent) → Abilities → Overview → **AppleScript**
+  (`IntelAppleScriptAbilitySection`): the Mac Automation switch, the
+  execution mode and the model ("Use the chat's model" or a chat model).
+- The tool-resolution filter chain in `IntelDataConformers` hit the type
+  checker's limit; the media/AppleScript switches are now a separate filter.
+
+Tests: upstream's `AppleScriptTests` (minus the warm-residency,
+capability-gating and on-device model-routing suites: MLX residency,
+`AgentConfigSnapshot`, `AppleScriptModelCatalog`) and
+`AppleScriptStringContentsPromotionTests`, plus `IntelAppleScriptTests`.
+Upstream's `AppleScriptEvaluatorProbeTests` and `AppleScriptModelAssignmentTests`
+test MLX-only pieces.
+
+**Found here:** `AgentLoopBudget.resolveContextWindow` first hopped to the
+main actor (`IntelContextBudget.resolveWindow` is `@MainActor`). In a full
+test run the main actor was busy and one model-free loop test waited 272 s
+(alone it took 0.03 s). Both sources it reads (`ModelInfo.load`,
+`ChatConfiguration.shared`) are thread-safe, so it now reads them directly
+in the same order. A desktop loop must not wait on the main actor for a
+number.
+
+Package gate: 3,702 tests in 458 suites (6 known issues), 61 s.
+
 ## Status
 
-Layers 1 and 2 shipped 2026-10-28. Next: layer 3, the AppleScript kind.
+Layers 1–3 shipped 2026-10-28; `W-applescript-agent` is complete. Still to
+come on this base: Intel's `image` / `video` tools onto the host
+(upstream's kinds), and the kinds of `W-subagents` (spawn), `W-computer-use`
+and `W-browser-use`.

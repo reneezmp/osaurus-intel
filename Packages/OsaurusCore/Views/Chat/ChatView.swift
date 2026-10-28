@@ -3691,7 +3691,13 @@ final class ChatSession: ObservableObject {
                                                                     try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
                                                                             try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
-                                                                                try await engine.streamChat(request: req)
+                                                                                // Upstream: the exact visible user text owns the
+                                                                                // turn's scope for desktop subagents (AppleScript).
+                                                                                try await ChatExecutionContext.$currentUserRequest.withValue(
+                                                                                    trimmed.isEmpty ? nil : trimmed
+                                                                                ) {
+                                                                                    try await engine.streamChat(request: req)
+                                                                                }
                                                                             }
                                                                         }
                                                                 }
@@ -4100,7 +4106,11 @@ final class ChatSession: ObservableObject {
                                                                     try await ChatExecutionContext.$interactiveChatRun
                                                                         .withValue(true) {
                                                                             try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
-                                                                                try await engine.streamChat(request: finalReq)
+                                                                                try await ChatExecutionContext.$currentUserRequest.withValue(
+                                                                                    trimmed.isEmpty ? nil : trimmed
+                                                                                ) {
+                                                                                    try await engine.streamChat(request: finalReq)
+                                                                                }
                                                                             }
                                                                         }
                                                                 }

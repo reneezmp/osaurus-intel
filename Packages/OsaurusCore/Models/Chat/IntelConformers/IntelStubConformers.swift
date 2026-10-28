@@ -1297,6 +1297,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// `effectiveVideoEnabled`), bypassing the Tools-tab allowlist.
     static let imageToolName = "image"
     static let videoToolName = "video"
+    static let appleScriptToolNames: Set<String> = [AppleScriptTool.toolName, MacQueryTool.toolName]
 
     init() {
         loadPersistedPolicies()
@@ -1356,6 +1357,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             // Cloud media (`W-media-generation`); each agent's own switch is
             // the grant, like `speak`.
             ImageTool(), VideoTool(),
+            // AppleScript automation (`W-applescript-agent`); the agent's
+            // AppleScript switch is the grant.
+            AppleScriptTool(), MacQueryTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -1928,6 +1932,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     message: name == Self.imageToolName
                         ? "Image generation is off for this agent (Agents → Abilities → Images & Video)."
                         : "Video generation is off for this agent (Agents → Abilities → Images & Video).",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if Self.appleScriptToolNames.contains(name) {
+            // The agent's AppleScript switch is the grant (not the allowlist).
+            guard AgentManager.shared.effectiveAppleScriptEnabled(for: agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "AppleScript is off for this agent (Agents → Abilities → AppleScript).",
                     tool: name
                 )
             }

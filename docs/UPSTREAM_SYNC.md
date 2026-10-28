@@ -4395,3 +4395,16 @@ them back (`StreamingToolHint.encodeProposed`) instead of running them, on
 both engine paths. Computer Use's action model, gate and classifier wait
 for `W-computer-use`. Details: `docs/SUBAGENTS_INTEL.md`.
 
+### Mac Automation with AppleScript (`W-applescript-agent` complete) — 2026-10-28
+
+Layer 3 of the subagent base (`docs/SUBAGENTS_INTEL.md`): upstream's
+AppleScript loop, app knowledge, `applescript` / `mac_query` tools and
+`AppleScriptKind`, on Intel's host, confirmation queue and model step. The
+kind runs on a cloud model (the agent's AppleScript model when listed, else
+the chat's model, else the agent's default) instead of upstream's on-device
+model; an assignment that can't run here is reported, never replaced. The
+engine binds the parent model and the user's visible request around tool
+calls. Per-agent Mac Automation switch, execution mode and model under
+Abilities; guidance rendered when the tools are in the schema; guide topics
+updated.
+

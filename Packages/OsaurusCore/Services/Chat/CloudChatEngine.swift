@@ -419,6 +419,25 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return processed
     }
 
+    /// Upstream binds the parent turn's model and user text for nested
+    /// subagents (`SubagentScope`); Intel binds them around each tool call
+    /// (docs/SUBAGENTS_INTEL.md). The user text is the request's last user
+    /// message.
+    static func withSubagentScope<T>(
+        model: String,
+        request: ChatCompletionRequest,
+        _ body: () async throws -> T
+    ) async throws -> T {
+        let userRequest = request.messages.last(where: { $0.role == "user" })?.content
+        return try await ChatExecutionContext.$currentModelName.withValue(model) {
+            try await ChatExecutionContext.$currentUserRequest.withValue(
+                ChatExecutionContext.currentUserRequest ?? userRequest
+            ) {
+                try await body()
+            }
+        }
+    }
+
     /// Upstream `stageBiasNotice`: the next-step bias rides first.
     static func stageBiasNotice(_ bias: String, into notices: inout [String]) {
         let notice = "[System Notice] " + bias
@@ -1404,14 +1423,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         do {
                                             // Tools that bind UI to their call (`speak`)
                                             // read the call id from the task-local.
-                                            result = try await ChatExecutionContext.$currentToolCallId.withValue(
-                                                call.callID
+                                            result = try await Self.withSubagentScope(
+                                                model: resolvedModel, request: request
                                             ) {
-                                                try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                    try await ToolRegistry.shared.execute(
-                                                        name: call.name,
-                                                        argumentsJSON: call.arguments
-                                                    )
+                                                try await ChatExecutionContext.$currentToolCallId.withValue(
+                                                    call.callID
+                                                ) {
+                                                    try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                                        try await ToolRegistry.shared.execute(
+                                                            name: call.name,
+                                                            argumentsJSON: call.arguments
+                                                        )
+                                                    }
                                                 }
                                             }
                                         } catch {
@@ -1772,12 +1795,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 } else {
                                     NSLog("[CloudChatEngine] executing tool '\(call.name)' args=\(call.arguments.prefix(200))")
                                     do {
-                                        result = try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
-                                            try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
-                                                try await ToolRegistry.shared.execute(
-                                                    name: call.name,
-                                                    argumentsJSON: call.arguments
-                                                )
+                                        result = try await Self.withSubagentScope(
+                                            model: resolvedModel, request: request
+                                        ) {
+                                            try await ChatExecutionContext.$currentToolCallId.withValue(callId) {
+                                                try await CapabilityLoadBuffer.$current.withValue(loadBuffer) {
+                                                    try await ToolRegistry.shared.execute(
+                                                        name: call.name,
+                                                        argumentsJSON: call.arguments
+                                                    )
+                                                }
                                             }
                                         }
                                         NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")

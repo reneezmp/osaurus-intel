@@ -844,4 +844,13 @@ public enum SystemPromptTemplates {
         - Existing-document edits name the app/path from the request or conversation. Preserve explicit `the file`/`the document` working-app wording in `applescript(task)` so tracked-frontmost resolution can handle it; do not ask for a path first. Never invent a picker/new file/output/save step. Editing does not imply saving.
         - Both return `status` + `values` + `errors` (with AppleScript error numbers) — read `values` to confirm, use `errors` to retry/fix. Use AppleScript for documents open in Mac apps; file tools are only for path-addressed files in a selected folder/sandbox. Not for shell or web.
         """
+
+    /// Intel's AppleScript guidance: upstream's text with its one Apple
+    /// Silicon fact replaced. On Intel a helper on a cloud model writes and
+    /// runs the script, not an on-device AppleScript model
+    /// (docs/SUBAGENTS_INTEL.md, layer 3).
+    public static let intelAppleScriptGuidance = appleScriptGuidance.replacingOccurrences(
+        of: "Two tools drive this Mac with an on-device AppleScript model",
+        with: "Two tools drive this Mac through an AppleScript helper (it runs on this chat's model, or the agent's chosen AppleScript model)"
+    )
 }

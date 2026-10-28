@@ -136,6 +136,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         DocumentAdaptersBootstrap.registerBuiltIns()
 
         #if OSAURUS_INTEL
+            // Upstream: remembers the last non-Osaurus frontmost app, so an
+            // AppleScript task about "the document" resolves to the app the
+            // user was working in, not Osaurus (`W-applescript-agent`).
+            FrontmostAppTracker.shared.start()
             // Register and refresh the managed Osaurus Router on every launch.
             // `RemoteProviderManager.refreshAllModels()` can only refresh an
             // already-present provider, so fresh/restored identities otherwise

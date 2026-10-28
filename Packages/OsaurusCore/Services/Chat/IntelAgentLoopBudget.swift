@@ -22,11 +22,14 @@ struct AgentLoopIterationInput {
 enum AgentLoopBudget {
     static let fallbackContextWindow = IntelWireHistoryTrim.fallbackContextWindow
 
-    /// The model catalog, else Settings' Context Length, else 128k (Intel's
-    /// resolution order, as the chat engine uses).
+    /// The model catalog, else Settings' Context Length, else 128k (the
+    /// order of `IntelContextBudget.resolveWindow`). Read without hopping to
+    /// the main actor: both sources are thread-safe, and a desktop loop must
+    /// not wait behind main-actor work (a full test run showed a 272 s stall).
     static func resolveContextWindow(modelId: String) async -> Int {
-        await MainActor.run { IntelContextBudget.resolveWindow(modelId: modelId)?.tokens }
-            ?? fallbackContextWindow
+        if let ctx = ModelInfo.load(modelId: modelId)?.model.contextLength, ctx > 0 { return ctx }
+        if let setting = ChatConfiguration.shared.contextLength, setting > 0 { return setting }
+        return fallbackContextWindow
     }
 
     static func makeBudgetManager(

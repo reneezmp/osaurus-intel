@@ -853,6 +853,13 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.videoEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// `applescript` / `mac_query` (upstream `appleScriptAvailable`): only a
+    /// custom agent's own switch, and only while its tools are on.
+    func effectiveAppleScriptEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.appleScriptEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a
     /// deliberate divergence from upstream, not to be "corrected" toward it):
     /// cloud **distillation** — the `MemoryService.performDistillSession`

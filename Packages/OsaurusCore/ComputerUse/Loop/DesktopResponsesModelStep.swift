@@ -163,10 +163,16 @@ extension ChatEngine: ResponsesEngineProtocol {
     }
 }
 
-/// Upstream: the one action call a desktop step executes.
-struct ModelActionCall: Sendable, Equatable {
-    let id: String
-    let arguments: String
+/// Upstream: the one action call a desktop step executes (public upstream:
+/// the AppleScript loop's public seams use it).
+public struct ModelActionCall: Sendable, Equatable {
+    public let id: String
+    public let arguments: String
+
+    public init(id: String, arguments: String) {
+        self.id = id
+        self.arguments = arguments
+    }
 }
 
 // MARK: - Model step (upstream API)

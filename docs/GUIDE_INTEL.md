@@ -32,6 +32,10 @@ Intel's code and docs:
   "Images and Video", written from Intel facts (Osaurus Cloud and Venice,
   the chat picker, the agent switches, video recovery); Agents, Insights and
   What runs on this Intel Mac now mention it.
+- **AppleScript** (2026-10-28, `W-applescript-agent`): the Agents topic
+  lists Mac Automation among the abilities, and What runs on this Intel Mac
+  lists it as working (on the chat's cloud model). Upstream's Automation
+  topic stays left out (Computer Use, Browser Use, Sandbox).
 - **New:** `guide-intel-mac.md`, "What runs on this Intel Mac": what needs
   Apple Silicon, what isn't in this build yet, and what works the same. Other
   topics point to it.

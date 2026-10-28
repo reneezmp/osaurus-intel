@@ -2588,6 +2588,11 @@ struct AgentDetailView: View {
             theme: theme
         )
 
+        IntelAppleScriptAbilitySection(
+            agentId: agent.id,
+            theme: theme
+        )
+
         // Upstream's "Memory & Recall" group.
         if agent.id != Agent.defaultId {
             AgentDetailSection(title: L("Memory & Recall"), icon: "magnifyingglass") {
@@ -7746,5 +7751,144 @@ private struct IntelMediaAbilitySection: View {
             parts.append("from \(OsaurusRouter.formatUSDAsCredits(minimum))")
         }
         return parts.joined(separator: " · ")
+    }
+}
+
+// MARK: - AppleScript (`W-applescript-agent`)
+
+/// Per-agent switch, execution mode and model for `applescript` /
+/// `mac_query`. Upstream keeps these in the agent's Subagents tab with an
+/// on-device model picker; on Intel the helper runs on a cloud chat model
+/// (docs/SUBAGENTS_INTEL.md, layer 3). Custom agents only, as upstream.
+private struct IntelAppleScriptAbilitySection: View {
+    @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var pickerCache = ModelPickerItemCache.shared
+
+    let agentId: UUID
+    let theme: ThemeProtocol
+
+    private var settings: AgentSettings? { agentManager.agent(for: agentId)?.settings }
+
+    var body: some View {
+        AgentDetailSection(title: L("AppleScript"), icon: "applescript") {
+            VStack(alignment: .leading, spacing: 10) {
+                if agentId == Agent.defaultId {
+                    note("The built-in agent doesn't automate Mac apps. Create an agent to use AppleScript.")
+                } else {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "applescript")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(theme.accentColor)
+                            .frame(width: 34, height: 34)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(theme.accentColor.opacity(0.10)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("Mac Automation"))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(theme.primaryText)
+                            Text(
+                                L(
+                                    "Let the agent control Mac apps (Finder, Safari, Mail, Notes, Music, System Events…) by writing and running AppleScript. Reading runs on its own; changes follow the setting below."
+                                )
+                            )
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.tertiaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { settings?.appleScriptEnabled ?? false },
+                                set: { value in update { $0.appleScriptEnabled = value } }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(ThemedSwitchToggleStyle())
+                        .accessibilityLabel(Text(L("Mac Automation")))
+                    }
+                    if settings?.appleScriptEnabled == true {
+                        controlRow(L("Scripts that change things")) {
+                            menu(label: (settings?.appleScriptExecutionMode ?? .default).displayName) {
+                                ForEach(AppleScriptExecutionMode.allCases, id: \.self) { mode in
+                                    Button(mode.displayName) { update { $0.appleScriptExecutionMode = mode } }
+                                }
+                            }
+                        }
+                        note((settings?.appleScriptExecutionMode ?? .default).caption)
+                        controlRow(L("Model")) {
+                            menu(label: modelLabel) {
+                                Button(L("Use the chat's model")) { update { $0.appleScriptModelId = nil } }
+                                ForEach(pickerCache.items.filter(\.isLikelyChatCapable), id: \.id) { item in
+                                    Button("\(item.displayName) · \(item.source.displayName)") {
+                                        update { $0.appleScriptModelId = item.id }
+                                    }
+                                }
+                            }
+                        }
+                        note(
+                            "What the scripts read (app data, file names, page text) goes to the chosen model's provider. macOS asks once per app before Osaurus can control it."
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    private var modelLabel: String {
+        guard let id = settings?.appleScriptModelId, !id.isEmpty else { return L("Use the chat's model") }
+        if let item = pickerCache.items.first(where: { $0.id == id }) { return item.displayName }
+        return "\(id) (\(L("unavailable")))"
+    }
+
+    private func update(_ change: (inout AgentSettings) -> Void) {
+        guard var agent = agentManager.agent(for: agentId), !agent.isBuiltIn else { return }
+        change(&agent.settings)
+        agent.updatedAt = Date()
+        agentManager.update(agent)
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(LocalizedStringKey(text), bundle: .module)
+            .font(.system(size: 11))
+            .foregroundColor(theme.tertiaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func controlRow<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(theme.secondaryText)
+            Spacer(minLength: 12)
+            control()
+        }
+        .padding(.leading, 46)
+    }
+
+    private func menu<Items: View>(label: String, @ViewBuilder items: () -> Items) -> some View {
+        Menu {
+            items()
+        } label: {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.tertiaryBackground)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.inputBorder, lineWidth: 1))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
     }
 }

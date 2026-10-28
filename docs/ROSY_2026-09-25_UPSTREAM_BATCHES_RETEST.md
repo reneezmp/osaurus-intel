@@ -2041,3 +2041,25 @@ the chat section above. Use a test agent, not a real one.
 - [ ] **Guide:** ask the Orchestrator "how do I make images?"; it describes
       Osaurus Cloud / Venice and the agent switches.
 
+## Mac Automation with AppleScript (2026-10-28)
+
+Details: `SUBAGENTS_INTEL.md`, layer 3. Use a test agent. macOS asks once
+per app ("Osaurus wants to control …"): allow it for the apps you test.
+
+- [ ] **Section:** Agents → (a custom agent) → Abilities shows an
+      **AppleScript** section; turning Mac Automation on shows "Scripts that
+      change things" and "Model" menus, readable on Ventura. The Orchestrator
+      says it doesn't automate Mac apps.
+- [ ] **Read:** ask the agent "what's the front Safari tab's URL?" (open
+      Safari first). The tool row expands to a live step feed; the answer
+      comes back without any confirmation.
+- [ ] **Change, confirm:** ask "make a new note titled Osaurus test in
+      Notes". A confirmation card shows the script above the input; approve
+      it and the note appears. Deny a second time: nothing is created.
+- [ ] **Stop:** start a longer task and press Stop in the feed; the run
+      ends and any pending card disappears.
+- [ ] **Auto-run:** switch to "Auto-run with warning": a changing script
+      runs without a card, and the feed shows a warning with the script.
+- [ ] **Off:** turn Mac Automation off; the agent no longer offers it.
+- [ ] Delete the test note afterwards.
+

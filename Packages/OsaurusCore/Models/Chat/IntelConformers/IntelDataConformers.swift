@@ -2405,6 +2405,10 @@ final class SystemPromptComposer: @unchecked Sendable {
         let (imageEnabled, videoEnabled) = await MainActor.run {
             (AgentManager.shared.effectiveImageEnabled(for: id), AgentManager.shared.effectiveVideoEnabled(for: id))
         }
+        // `W-applescript-agent`: the agent's AppleScript switch.
+        let appleScriptEnabled = await MainActor.run {
+            AgentManager.shared.effectiveAppleScriptEnabled(for: id)
+        }
         // Upstream per-agent opt-ins for `render_chart` / `search_memory`.
         let (renderChartEnabled, searchMemoryEnabled) = await MainActor.run {
             let settings = AgentManager.shared.agent(for: id)?.settings
@@ -2509,7 +2513,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         if toolsDisabled || agentToolsDisabled {
             tools = []
         } else {
-            let allSpecs = filteringWebSearchTools(
+            let chainedSpecs = filteringWebSearchTools(
                 ToolRegistry.shared.openAISpecs(for: id),
                 enabled: webSearchEnabled
             )
@@ -2544,13 +2548,18 @@ final class SystemPromptComposer: @unchecked Sendable {
                     speakEnabled || spec.function.name != ToolRegistry.speakToolName
                 }
                 .filter { spec in
-                    (imageEnabled || spec.function.name != ToolRegistry.imageToolName)
-                        && (videoEnabled || spec.function.name != ToolRegistry.videoToolName)
-                }
-                .filter { spec in
                     (renderChartEnabled || spec.function.name != "render_chart")
                         && (searchMemoryEnabled || spec.function.name != "search_memory")
                 }
+            // Per-agent switches: image / video / AppleScript (kept out of the
+            // chain above, which is at the type checker's limit).
+            let allSpecs = chainedSpecs.filter { (spec: Tool) -> Bool in
+                let name = spec.function.name
+                if name == ToolRegistry.imageToolName { return imageEnabled }
+                if name == ToolRegistry.videoToolName { return videoEnabled }
+                if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }
+                return true
+            }
             if let enabled = enabledToolNames {
                 // Folder/runtime tools (file_read, file_write, file_edit,
                 // file_search, file_tree, shell_run, git_*) are auto-mounted with
@@ -2590,6 +2599,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 // Image / Video: the agent's switches are the grants.
                 if imageEnabled { allowed.insert(ToolRegistry.imageToolName) }
                 if videoEnabled { allowed.insert(ToolRegistry.videoToolName) }
+                if appleScriptEnabled { allowed.formUnion(ToolRegistry.appleScriptToolNames) }
                 // Upstream: `share_artifact` is baseline; Charts and Memory
                 // Recall switches are their own grants.
                 allowed.insert("share_artifact")
@@ -2663,6 +2673,13 @@ final class SystemPromptComposer: @unchecked Sendable {
             let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
             prompt += block
             sections.append(PromptSection(id: "appleApps", label: "Apple Apps", text: block, tint: .green))
+        }
+        // AppleScript (`W-applescript-agent`): upstream renders its guidance
+        // only when `applescript` / `mac_query` resolved into the schema.
+        if tools.contains(where: { ToolRegistry.appleScriptToolNames.contains($0.function.name) }) {
+            let block = "\n\n" + SystemPromptTemplates.intelAppleScriptGuidance
+            prompt += block
+            sections.append(PromptSection(id: "appleScript", label: "AppleScript", text: block, tint: .green))
         }
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.
