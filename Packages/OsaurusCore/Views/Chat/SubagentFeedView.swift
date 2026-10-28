@@ -124,11 +124,7 @@ final class SubagentFeedObserver: ObservableObject {
         // boundaries; resolving prompts lets a suspended computer-use loop
         // advance one step and then see the token.
         SubagentInterruptCenter.shared.interrupt(toolCallId)
-        // Intel: the Computer Use prompt queue comes with layer 2 of
-        // docs/SUBAGENTS_INTEL.md.
-        #if !OSAURUS_INTEL
         ComputerUsePromptQueue.shared.cancelAll(forToolCallId: toolCallId)
-        #endif
     }
 }
 

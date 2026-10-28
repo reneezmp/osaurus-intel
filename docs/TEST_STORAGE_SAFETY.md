@@ -201,6 +201,17 @@ After the run:
   that tries to resolve `~/.osaurus`. Intel's own `StorageMaintenance`
   starts only from `AppDelegate`, which tests never run.
 
+  **Inside the window, without maintenance (2026-10-28):** during the
+  subagent layer 2 gate (tests 15:26:40–15:27:32) `activity/activity.head`,
+  `activity/activity.sqlite-wal` and `knowledge/knowledge.sqlite-wal`
+  changed at 15:27:18 while the installed app was running; maintenance had
+  last run at 11:52. Attribution: `lsof <file>` right after the run listed
+  only the app (`osaurus`, the `/Applications` pid) holding each file, the
+  full test log never mentions `/Users/renee/.osaurus`, and the identity
+  key's `mdat` was unchanged. These are the app's Insights activity log and
+  Knowledge index. Use `lsof` on any in-window hit before concluding; if the
+  test helper (or nothing) holds the file, treat it as a failed run.
+
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`
 and, while it runs, re-downloads its plugin catalog into

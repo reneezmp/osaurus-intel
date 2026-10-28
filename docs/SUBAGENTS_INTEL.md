@@ -106,7 +106,56 @@ Package gate: 3,521 tests in 442 suites (6 known issues).
 
 Nothing user-visible changes yet: no Intel tool runs through the host.
 
+## Layer 2: Computer Use pieces and the model step (2026-10-28)
+
+What the desktop subagents share, minus Computer Use's own action model:
+
+- **Taken from upstream:** `ComputerUse/Feed/ComputerUsePromptQueue` (the
+  process-wide confirmation queue), `Views/Chat/ComputerUseConfirmOverlay`
+  (now mounted in `ChatView`'s prompt overlay layer, as upstream's chat
+  overlay), `ComputerUse/Policy/AutonomyPolicy`, `EffectClass`,
+  `ComputerUse/Recipes/AppRecipe`, `ComputerUse/Loop/ComputerUseTraceLog`.
+  The feed view's Stop now also cancels the run's pending prompts.
+- **`Gate.swift`:** `ActionPreview` and `GateDecision` taken; the gate
+  itself judges Computer Use's `AgentAction`, so it is fenced until
+  `W-computer-use` (as are `AgentAction` and `EffectClassifier`). The trace
+  log names the Computer Use tool by its string.
+- **`RunLimits`:** extracted from upstream's `ComputerUseLoop.swift` into
+  `ComputerUse/Loop/RunLimits.swift`.
+- **`AgentLoopBudget`:** `Services/Chat/IntelAgentLoopBudget.swift` carries
+  upstream's context window, budget manager and per-iteration assembly
+  (trim, then transient notices) on Intel's `ContextBudgetManager`
+  (upstream's `AgentToolLoop.swift` is the chat loop Intel's engine
+  replaces). Upstream's native-image notice exception is MLX-only and left
+  out.
+- **Model step:** upstream's desktop loops call
+  `DesktopResponsesModelStep` on its Responses-style engine interface, which
+  is built on upstream's newer request model and the OpenResponses types
+  (Intel's request predates it; `OpenResponsesAPI.swift` is excluded). Intel's
+  `ComputerUse/Loop/DesktopResponsesModelStep.swift` keeps upstream's API
+  (`completeResponse`, `actionCall` with upstream's validation unchanged,
+  `DesktopResponsesAttempt`, and `ResponsesInferenceRequest` /
+  `ResponsesGenerationResult` / `ResponsesEngineProtocol` / `ModelActionCall`
+  reduced to what the loops read) on `ChatEngine.streamChat` with a new
+  request flag, `stopAtToolCalls`: the engine ends the stream at the round
+  that proposes tool calls and yields them in one sentinel
+  (`StreamingToolHint.encodeProposed`) instead of running them. Both engine
+  paths honour it (the chat-completions path, which the Anthropic and Gemini
+  adapters use, and the Codex Responses path). Usage counts and reasoning
+  are not reported back (nil / empty); the diagnostics fields exist for the
+  trace log.
+
+Tests: upstream's `ComputerUsePromptQueueTests`, and
+`IntelDesktopModelStepTests` (a proposed call returns without running or a
+second request; text is a final answer; another tool is rejected before any
+action; retry stops after output; the sentinel round-trips and is never
+text). Upstream's `AppRecipeTests` exercises the Computer Use classifier and
+waits for `W-computer-use`.
+
+Package gate: 3,526 tests in 443 suites (6 known issues). The postflight
+showed three live-file hits inside the test window; `lsof` attributed them
+to the running app (`TEST_STORAGE_SAFETY.md`, 2026-10-28 entry).
+
 ## Status
 
-Layer 1 shipped 2026-10-28. Next: layer 2 (Computer Use pieces and the
-Responses engine interface over `CloudChatEngine`), then AppleScript.
+Layers 1 and 2 shipped 2026-10-28. Next: layer 3, the AppleScript kind.

@@ -1296,6 +1296,22 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 return
                             }
 
+                            // Intel desktop subagent step: hand the proposed
+                            // calls back instead of running them.
+                            if request.stopAtToolCalls {
+                                continuation.yield(
+                                    StreamingToolHint.encodeProposed(
+                                        finalized.completion.toolCalls.map {
+                                            .init(
+                                                callId: $0.callID,
+                                                name: Self.resolvedOfferedToolName($0.name, offered: activeTools),
+                                                arguments: $0.arguments)
+                                        }))
+                                logInference()
+                                continuation.finish()
+                                return
+                            }
+
                             var results: [IntelCodexResponsesToolResult] = []
                             var resultImages: [Data] = []
                             var runEndedByTool = false
@@ -1619,6 +1635,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var call = entry.value
                             call.name = Self.resolvedOfferedToolName(call.name, offered: activeTools)
                             return call
+                        }
+                        // Intel desktop subagent step: hand the proposed calls
+                        // back instead of running them.
+                        if request.stopAtToolCalls {
+                            continuation.yield(
+                                StreamingToolHint.encodeProposed(
+                                    orderedCalls.map {
+                                        .init(callId: $0.id, name: $0.name, arguments: $0.arguments)
+                                    }))
+                            logInference()
+                            continuation.finish()
+                            return
                         }
                         wireMessages.append([
                             "role": "assistant",

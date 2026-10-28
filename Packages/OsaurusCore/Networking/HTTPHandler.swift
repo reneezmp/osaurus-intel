@@ -142,6 +142,11 @@ struct ChatCompletionRequest: Codable, Sendable {
     var session_id: String?
     var samplingParametersAreImplicit: Bool = false
     var modelOptions: [String: ModelOptionValue]? = nil
+    /// Intel (docs/SUBAGENTS_INTEL.md): a desktop subagent's model step. The
+    /// engine ends the stream at the first round that proposes tool calls,
+    /// yielding them as one `StreamingToolHint.encodeProposed` sentinel,
+    /// instead of running them. Not encoded.
+    var stopAtToolCalls: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case model, messages, stream, temperature, max_tokens, top_p

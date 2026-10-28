@@ -2218,6 +2218,25 @@ struct StreamingToolHint: Sendable {
     private static let donePrefix = "\u{1B}[[OSX_TOOL_DONE]]"
     private static let namePrefix = "\u{1B}[[OSX_TOOL_NAME]]"
     private static let argsPrefix = "\u{1B}[[OSX_TOOL_ARGS]]"
+    /// Intel: tool calls a `stopAtToolCalls` round proposed (not run).
+    private static let proposedPrefix = "\u{1B}[[OSX_TOOL_PROPOSED]]"
+
+    struct ProposedCall: Sendable, Equatable, Codable {
+        let callId: String
+        let name: String
+        let arguments: String
+    }
+
+    static func encodeProposed(_ calls: [ProposedCall]) -> String {
+        let data = (try? JSONEncoder().encode(calls)) ?? Data("[]".utf8)
+        return proposedPrefix + (String(data: data, encoding: .utf8) ?? "[]")
+    }
+
+    static func decodeProposed(_ delta: String) -> [ProposedCall]? {
+        guard delta.hasPrefix(proposedPrefix) else { return nil }
+        return try? JSONDecoder().decode(
+            [ProposedCall].self, from: Data(delta.dropFirst(proposedPrefix.count).utf8))
+    }
 
     static func encode(_ toolName: String) -> String { namePrefix + toolName }
     static func encodeArgs(_ fragment: String) -> String { argsPrefix + fragment }
@@ -2247,6 +2266,7 @@ struct StreamingToolHint: Sendable {
     static func isSentinel(_ delta: String) -> Bool {
         delta.first == "\u{FFFE}"
             || delta.hasPrefix(donePrefix) || delta.hasPrefix(namePrefix) || delta.hasPrefix(argsPrefix)
+            || delta.hasPrefix(proposedPrefix)
     }
     static func decode(_ delta: String) -> String? {
         delta.hasPrefix(namePrefix) ? String(delta.dropFirst(namePrefix.count)) : nil

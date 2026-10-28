@@ -4427,6 +4427,11 @@ struct ChatView: View {
             }
             .id(current?.id)
             .transition(.opacity)
+
+            // Upstream: desktop-subagent confirmations (AppleScript scripts,
+            // later Computer Use actions). Process-wide queue, so a loop with
+            // no ChatSession handle can park a request here.
+            ComputerUseConfirmOverlay()
         }
         .animation(theme.springAnimation(), value: current?.id)
     }

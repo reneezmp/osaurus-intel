@@ -4383,3 +4383,15 @@ residency files, spawn-only code fenced, upstream's subagent fields on
 `AgentSettings`, and the live feed pane back in `NativeToolCallGroupView`.
 No tool uses it yet. Details and the left-out pieces are in the manual.
 
+### Subagent base, layer 2: confirmations and the model step — 2026-10-28
+
+The desktop-subagent pieces AppleScript needs: upstream's confirmation
+queue and overlay (mounted in the chat's prompt layer), autonomy policy,
+app recipes, trace log, `ActionPreview`, `RunLimits`, and Intel's
+`AgentLoopBudget` on its own budget manager. The model step keeps
+upstream's `DesktopResponsesModelStep` API on Intel's engine through a new
+`stopAtToolCalls` request flag: the round that proposes tool calls hands
+them back (`StreamingToolHint.encodeProposed`) instead of running them, on
+both engine paths. Computer Use's action model, gate and classifier wait
+for `W-computer-use`. Details: `docs/SUBAGENTS_INTEL.md`.
+
