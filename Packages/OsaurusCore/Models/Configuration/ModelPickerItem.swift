@@ -80,6 +80,11 @@ struct ModelPickerItem: Identifiable, Hashable {
     /// Context window in tokens, from the Osaurus router metadata. `nil` when unknown.
     let contextLength: Int?
 
+    /// A billable image/video model (Osaurus Cloud or Venice, upstream
+    /// `W-media-generation`). Chat sends to it generate media instead of
+    /// calling the chat engine.
+    let mediaModel: MediaModelInfo?
+
     init(
         id: String,
         displayName: String,
@@ -90,7 +95,8 @@ struct ModelPickerItem: Identifiable, Hashable {
         description: String? = nil,
         inputPriceMicroPerMTok: Int64? = nil,
         outputPriceMicroPerMTok: Int64? = nil,
-        contextLength: Int? = nil
+        contextLength: Int? = nil,
+        mediaModel: MediaModelInfo? = nil
     ) {
         self.id = id
         self.displayName = displayName
@@ -102,6 +108,7 @@ struct ModelPickerItem: Identifiable, Hashable {
         self.inputPriceMicroPerMTok = inputPriceMicroPerMTok
         self.outputPriceMicroPerMTok = outputPriceMicroPerMTok
         self.contextLength = contextLength
+        self.mediaModel = mediaModel
     }
 
     /// Cross-provider favourite key (upstream #1811): source unique key +
@@ -220,6 +227,7 @@ extension ModelPickerItem {
     /// heuristic, the array helper below falls back to the first item so the
     /// picker is never left empty when models exist.
     var isLikelyChatCapable: Bool {
+        if mediaModel != nil { return false }
         switch source {
         case .foundation, .local:
             // Foundation is Apple's on-device chat model; `.local` items come
@@ -229,6 +237,35 @@ extension ModelPickerItem {
             return !Self.isLikelyEmbeddingOrRerankerID(id)
         }
     }
+
+    // MARK: - Media models (upstream `W-media-generation`)
+
+    /// Upstream's media row: catalog name, privacy and starting price.
+    static func fromMediaModel(_ model: MediaModelInfo, providerId: UUID) -> ModelPickerItem {
+        let details = [
+            model.privacy,
+            model.pricing?.minimumUSD.map { "From \(OsaurusRouter.formatUSDAsCredits($0))" },
+        ]
+        .compactMap { $0 }
+        .joined(separator: " · ")
+        return ModelPickerItem(
+            id: model.id,
+            displayName: model.displayName,
+            source: .remote(providerName: model.providerName, providerId: providerId),
+            description: details.isEmpty ? nil : details,
+            mediaModel: model
+        )
+    }
+
+    var isImageGenerationDelegateCandidate: Bool {
+        mediaModel?.kind == .image && mediaModel?.isAvailable == true
+    }
+
+    var isVideoGenerationDelegateCandidate: Bool {
+        mediaModel?.kind.isVideo == true && mediaModel?.isAvailable == true
+    }
+
+    var isMediaGeneration: Bool { mediaModel != nil }
 
     /// Token- and prefix-based classifier that returns `true` when the model
     /// ID almost certainly belongs to an embedding or reranker family.
@@ -278,6 +315,14 @@ extension Array where Element == ModelPickerItem {
     /// just not preferentially.
     var firstChatCapable: ModelPickerItem? {
         first(where: { $0.isLikelyChatCapable }) ?? first
+    }
+
+    var imageGenerationDelegateCandidates: [ModelPickerItem] {
+        filter(\.isImageGenerationDelegateCandidate)
+    }
+
+    var videoGenerationDelegateCandidates: [ModelPickerItem] {
+        filter(\.isVideoGenerationDelegateCandidate)
     }
 
     /// Group models by source for display in sections

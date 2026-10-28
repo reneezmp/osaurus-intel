@@ -257,6 +257,10 @@ final class ChatSession: ObservableObject {
     private var composerDraftIsAuthoritative = false
     @Published var pendingAttachments: [Attachment] = []
     @Published var selectedModel: String? = nil
+    /// Options for a selected image/video model (aspect, resolution,
+    /// duration, …), reset to the model's defaults on selection
+    /// (upstream, `W-media-generation`).
+    @Published var imageComposerSettings = ImageComposerSettings()
     /// The model the user picked in this chat. A manual pick outranks the
     /// agent default for as long as it remains a valid option, so model
     /// discovery finishing later can't swap it out (upstream ChatSession).
@@ -438,6 +442,9 @@ final class ChatSession: ObservableObject {
     }
     // nonisolated(unsafe) allows deinit to access these for cleanup
     nonisolated(unsafe) private var remoteModelsObserver: NSObjectProtocol?
+    /// Osaurus Cloud media catalog loads (or empties) after launch;
+    /// re-list the picker when it does (`W-media-generation`).
+    nonisolated(unsafe) private var cloudMediaObserver: NSObjectProtocol?
     nonisolated(unsafe) private var modelSelectionCancellable: AnyCancellable?
     nonisolated(unsafe) private var agentAutoSpeakCancellable: AnyCancellable?
     /// Flag to prevent auto-persist during initial load or programmatic resets
@@ -512,6 +519,14 @@ final class ChatSession: ObservableObject {
 
         remoteModelsObserver = NotificationCenter.default.addObserver(
             forName: .remoteProviderModelsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] _ in
+            Task { @MainActor in await self?.refreshPickerItems() }
+        }
+
+        cloudMediaObserver = NotificationCenter.default.addObserver(
+            forName: .cloudMediaCatalogChanged,
             object: nil,
             queue: .main
         ) { [weak self] _ in
@@ -595,6 +610,7 @@ final class ChatSession: ObservableObject {
                 self.lastManualModelSelection = model
                 self.restoredWindowModelSelection = nil
                 self.loadActiveModelOptions(for: model)
+                self.applyImageModelDefaults(for: model)
 
                 // Clear pending image attachments when switching to a non-VLM model
                 let newModelSupportsImages: Bool = {
@@ -636,6 +652,9 @@ final class ChatSession: ObservableObject {
         currentTask?.cancel()
         generativeGreetingTask?.cancel()
         if let observer = remoteModelsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = cloudMediaObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = localModelsObserver {
@@ -775,6 +794,7 @@ final class ChatSession: ObservableObject {
             selectedModel = pickerItems.firstChatCapable?.id
         }
         loadActiveModelOptions(for: selectedModel)
+        applyImageModelDefaults(for: selectedModel)
         isLoadingModel = false
     }
 
@@ -802,6 +822,7 @@ final class ChatSession: ObservableObject {
         isLoadingModel = true
         selectedModel = newSelected
         loadActiveModelOptions(for: selectedModel)
+        applyImageModelDefaults(for: selectedModel)
         isLoadingModel = false
         hasAnyModel = !newOptions.isEmpty
     }
@@ -857,6 +878,35 @@ final class ChatSession: ObservableObject {
     }
 
     /// Get the currently selected ModelPickerItem
+    // MARK: - Media models (upstream `W-media-generation`)
+
+    var selectedImagePickerItem: ModelPickerItem? {
+        guard let model = selectedModel else { return nil }
+        return pickerItems.first { $0.id == model && $0.mediaModel?.kind == .image }
+    }
+
+    var selectedVideoPickerItem: ModelPickerItem? {
+        guard let model = selectedModel else { return nil }
+        return pickerItems.first { $0.id == model && $0.mediaModel?.kind.isVideo == true }
+    }
+
+    /// The selected model when it is a chat model, else nil. Titles,
+    /// follow-up suggestions and the greeting use it, so a selected image or
+    /// video model is never sent to the chat engine.
+    var auxiliaryChatModel: String? {
+        guard let model = selectedModel else { return nil }
+        return pickerItems.first(where: { $0.id == model })?.isMediaGeneration == true ? nil : model
+    }
+
+    private func applyImageModelDefaults(for model: String?) {
+        guard let model,
+            let media = pickerItems.first(where: { $0.id == model })?.mediaModel
+        else { return }
+        var settings = imageComposerSettings
+        settings.applyMediaDefaults(media.constraints)
+        imageComposerSettings = settings
+    }
+
     var selectedPickerItem: ModelPickerItem? {
         guard let model = selectedModel else { return nil }
         return pickerItems.first { $0.id == model }
@@ -1084,7 +1134,7 @@ final class ChatSession: ObservableObject {
         let userText = userTurn.content
         let assistantText = assistantTurn.content
         let liveAssistantId = assistantTurn.id
-        let fallbackModel = selectedModel
+        let fallbackModel = auxiliaryChatModel
         Task { [weak self] in
             let suggestions = await FollowUpSuggestionService.shared.generateSuggestions(
                 userMessage: userText,
@@ -1351,7 +1401,7 @@ final class ChatSession: ObservableObject {
     /// off the send path; any failure leaves the first-line fallback title.
     private func generateLLMTitle(userText: String, assistantText: String, sessionId: UUID) {
         let titleModel =
-            ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-flash"
+            ChatConfiguration.shared.coreModelName ?? auxiliaryChatModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
         let sys = ChatMessage(
             role: "system",
@@ -1428,7 +1478,7 @@ final class ChatSession: ObservableObject {
         // name the user just asked for.
         llmTitleAttempted = true
 
-        let titleModel = ChatConfiguration.shared.coreModelName ?? selectedModel ?? "deepseek-flash"
+        let titleModel = ChatConfiguration.shared.coreModelName ?? auxiliaryChatModel ?? "deepseek-flash"
         let engine = chatEngineFactory()
         let sys = ChatMessage(
             role: "system",
@@ -1998,7 +2048,7 @@ final class ChatSession: ObservableObject {
         }
 
         guard hasAnyModel else { return }
-        guard let model = selectedModel, !model.isEmpty else { return }
+        guard let model = auxiliaryChatModel, !model.isEmpty else { return }
 
         let sessionPart = sessionId?.uuidString ?? "draft"
         let key = "\(sessionPart):\(agent.id.uuidString):\(model)"
@@ -2207,6 +2257,7 @@ final class ChatSession: ObservableObject {
             isLoadingModel = true
             selectedModel = savedModel
             loadActiveModelOptions(for: selectedModel)
+            applyImageModelDefaults(for: selectedModel)
             isLoadingModel = false
         } else {
             applyEffectiveModel(for: data.agentId)
@@ -3251,6 +3302,15 @@ final class ChatSession: ObservableObject {
         let memoryAgentId = (agentId ?? Agent.defaultId).uuidString
         let memoryConversationId = (sessionId ?? UUID()).uuidString
 
+        // Upstream (`W-media-generation`): an image or video model generates
+        // media instead of chatting. Capture the choice and its options now;
+        // regenerate re-sends the last user turn's prompt.
+        let turnMediaItem = selectedPickerItem?.mediaModel != nil ? selectedPickerItem : nil
+        let mediaSettings = imageComposerSettings
+        let mediaInput =
+            turns.last(where: { $0.role == .user }).map { (prompt: $0.content, attachments: $0.attachments) }
+            ?? (prompt: trimmed, attachments: attachments)
+
         let runId = UUID()
         beginRun(
             runId,
@@ -3288,6 +3348,19 @@ final class ChatSession: ObservableObject {
             // Must refresh block memoizer before first delta — otherwise visibleBlocks stays
             // user-only while isStreaming is true and the table early-returns without assistant rows.
             rebuildVisibleBlocks()
+
+            if let media = turnMediaItem?.mediaModel {
+                if media.kind.isVideo {
+                    await self.runVideoGeneration(
+                        prompt: mediaInput.prompt, attachments: mediaInput.attachments,
+                        settings: mediaSettings, model: media, into: assistantTurn, runId: runId)
+                } else {
+                    await self.runRemoteImageGeneration(
+                        prompt: mediaInput.prompt, attachments: mediaInput.attachments,
+                        settings: mediaSettings, model: media, into: assistantTurn, runId: runId)
+                }
+                return
+            }
             #if DEBUG
                 let ttftTrace: TTFTTrace? = TTFTTrace()
             #else
@@ -5463,3 +5536,304 @@ private enum PairingClient {
 
 // MARK: - Shared Header Components
 // HeaderActionButton, SettingsButton, CloseButton, PinButton are now in SharedHeaderComponents.swift
+
+// MARK: - Media generation (upstream `W-media-generation`)
+
+/// Upstream's chat path for a selected image or video model (Osaurus Cloud or
+/// Venice): approval with the provider, privacy and price, then the
+/// coordinator, then the result attached to the assistant turn. Upstream's
+/// local (MLX) image branch is not here; Intel never lists local media models.
+extension ChatSession {
+    /// Upstream `ImageComposerRequestBuilder.prompt`: the typed text plus any
+    /// large paste the composer stored as a document attachment.
+    static func mediaPrompt(text: String, attachments: [Attachment]) throws -> String {
+        var parts = [text]
+        for attachment in attachments where attachment.isPastedContent {
+            guard let content = attachment.loadDocumentContent() else {
+                throw CocoaError(.fileReadUnknown, userInfo: [NSFilePathErrorKey: Attachment.pastedContentFilename])
+            }
+            parts.append(content)
+        }
+        return parts.filter { !$0.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty }
+            .joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+
+    /// Upstream's `VideoTool.toolDescription`, minus local generation.
+    static let videoApprovalDescription =
+        "Generate a video with a configured cloud provider, from text or one source image. A current price quote is included "
+        + "in the approval request before the job is queued. The completed video is shown automatically."
+
+    static func mediaBackendDescription(_ model: MediaModelInfo) -> String {
+        switch model.target.backend {
+        case .local: return "Local"
+        case .remoteProvider: return model.providerName
+        case .osaurusCloud: return "Osaurus Cloud"
+        }
+    }
+
+    func runRemoteImageGeneration(
+        prompt promptText: String,
+        attachments: [Attachment],
+        settings: ImageComposerSettings,
+        model: MediaModelInfo,
+        into turn: ChatTurn,
+        runId: UUID
+    ) async {
+        let prompt: String
+        do {
+            prompt = try Self.mediaPrompt(text: promptText, attachments: attachments)
+        } catch {
+            turn.content = "\(L("Image generation failed:")) \(error.localizedDescription)"
+            rebuildVisibleBlocks()
+            return
+        }
+        guard !prompt.isEmpty else {
+            turn.content = L("Enter a prompt to generate an image.")
+            rebuildVisibleBlocks()
+            return
+        }
+        guard attachments.loadImages().isEmpty else {
+            turn.content = L("Remote image editing is not supported yet. Remove the source image.")
+            rebuildVisibleBlocks()
+            return
+        }
+        if let limit = model.constraints.promptCharacterLimit, prompt.count > limit {
+            turn.content = String(format: L("The image prompt exceeds this model's %d character limit."), limit)
+            rebuildVisibleBlocks()
+            return
+        }
+
+        turn.content = L("Generating image…")
+        rebuildVisibleBlocks()
+        let usesCatalogSize =
+            !model.constraints.aspectRatios.isEmpty || !model.constraints.resolutions.isEmpty
+        let request = MediaImageGenerationRequest(
+            target: model.target,
+            prompt: prompt,
+            negativePrompt: settings.normalizedNegativePrompt,
+            width: usesCatalogSize ? nil : settings.clampedWidth,
+            height: usesCatalogSize ? nil : settings.clampedHeight,
+            aspectRatio: settings.aspectRatio,
+            resolution: settings.resolution,
+            quality: settings.quality,
+            steps: model.constraints.defaultSteps == nil ? nil : settings.clampedSteps,
+            guidance: Double(settings.clampedGuidance),
+            seed: settings.normalizedSeed.flatMap(Int.init(exactly:)),
+            count: settings.clampedImageCount,
+            format: settings.effectiveOutputFormat
+        )
+        do {
+            var approvalValues: [String: Any] = [
+                "prompt": prompt,
+                "resolved_model": model.displayName,
+                "backend": Self.mediaBackendDescription(model),
+                "billing_notice": "Approving starts a billable remote image generation.",
+            ]
+            if let privacy = model.privacy {
+                approvalValues["privacy"] = privacy
+            }
+            if let minimum = model.pricing?.minimumUSD {
+                approvalValues["estimated_minimum_usd"] = minimum
+            }
+            approvalValues["aspect_ratio"] = settings.aspectRatio
+            approvalValues["resolution"] = settings.resolution
+            approvalValues["quality"] = settings.quality
+            let approved = await ToolPermissionPromptService.requestApproval(
+                toolName: "image",
+                description:
+                    "Generate a billable remote image. Review the provider, privacy policy, "
+                    + "estimated minimum price, and selected options.",
+                argumentsJSON: SubagentApprovalArguments.enrichedJSON(from: "{}", values: approvalValues)
+            )
+            guard approved else {
+                turn.content = L("Remote image generation cancelled before billing.")
+                rebuildVisibleBlocks()
+                return
+            }
+            noteRunProgress(.discrete)
+            let generated = try await MediaGenerationCoordinator.shared.generateImage(request)
+            guard !generated.isEmpty else {
+                throw MediaGenerationError.invalidResponse
+            }
+            guard isRunActive(runId) else { return }
+            for media in generated {
+                attachGeneratedMedia(media, prompt: prompt, to: turn)
+            }
+            if generated.count > 1 {
+                let cost = generated.compactMap(\.settledCostUSD).first
+                turn.content = "\(L("Generated images")): \(generated.count)"
+                if let cost {
+                    turn.content += " · \(OsaurusRouter.formatUSDAsCredits(cost))"
+                }
+            }
+        } catch is CancellationError {
+            turn.content = L("Image generation cancelled.")
+        } catch {
+            debugLog(
+                "[MediaGeneration] image generation failed "
+                    + "backend=\(model.target.backend) model=\(model.target.modelID) "
+                    + "error=\(String(reflecting: error))"
+            )
+            turn.content = "\(L("Image generation failed:")) \(error.localizedDescription)"
+        }
+        isDirty = true
+        rebuildVisibleBlocks()
+    }
+
+    func runVideoGeneration(
+        prompt promptText: String,
+        attachments: [Attachment],
+        settings: ImageComposerSettings,
+        model: MediaModelInfo,
+        into turn: ChatTurn,
+        runId: UUID
+    ) async {
+        let prompt: String
+        do {
+            prompt = try Self.mediaPrompt(text: promptText, attachments: attachments)
+        } catch {
+            turn.content = "\(L("Video generation failed:")) \(error.localizedDescription)"
+            rebuildVisibleBlocks()
+            return
+        }
+        let sourceAttachments = attachments.filter { !$0.isPastedContent }
+        let sourceImages = sourceAttachments.loadImages()
+        switch model.kind {
+        case .imageToVideo:
+            guard sourceImages.count == 1, sourceImages.count == sourceAttachments.count else {
+                turn.content = L("Attach exactly one source image for image-to-video generation.")
+                rebuildVisibleBlocks()
+                return
+            }
+        case .textToVideo:
+            guard sourceAttachments.isEmpty else {
+                turn.content = L("This text-to-video model does not accept attachments.")
+                rebuildVisibleBlocks()
+                return
+            }
+        case .image:
+            turn.content = L("The selected model is not a video model.")
+            rebuildVisibleBlocks()
+            return
+        }
+        guard let duration = settings.duration ?? model.constraints.durations.first else {
+            turn.content = L("The selected video model does not advertise a duration.")
+            rebuildVisibleBlocks()
+            return
+        }
+        if let limit = model.constraints.promptCharacterLimit, prompt.count > limit {
+            turn.content = String(format: L("The video prompt exceeds this model's %d character limit."), limit)
+            rebuildVisibleBlocks()
+            return
+        }
+
+        let request = MediaVideoGenerationRequest(
+            target: model.target,
+            prompt: prompt,
+            negativePrompt: settings.normalizedNegativePrompt,
+            sourceImage: sourceImages.first,
+            sourceImageMIMEType: sourceImages.isEmpty ? nil : "image/png",
+            duration: duration,
+            aspectRatio: settings.aspectRatio,
+            resolution: settings.resolution,
+            audio: model.constraints.audioConfigurable ? settings.audio : nil
+        )
+
+        do {
+            turn.content = L("Getting video quote…")
+            rebuildVisibleBlocks()
+            let quote = try await MediaGenerationCoordinator.shared.quoteVideo(request)
+            var approvalValues: [String: Any] = [
+                "prompt": prompt,
+                "resolved_model": model.displayName,
+                "duration": duration,
+                "quote_usd": quote.usd,
+                "billing_notice": "Approving queues a billable remote job that cannot be cancelled upstream.",
+            ]
+            approvalValues["resolution"] = settings.resolution
+            approvalValues["aspect_ratio"] = settings.aspectRatio
+            approvalValues["audio"] = settings.audio
+            let approved = await ToolPermissionPromptService.requestApproval(
+                toolName: "video",
+                description: Self.videoApprovalDescription,
+                argumentsJSON: SubagentApprovalArguments.enrichedJSON(from: "{}", values: approvalValues)
+            )
+            guard approved else {
+                turn.content = L("Video generation cancelled before queueing.")
+                rebuildVisibleBlocks()
+                return
+            }
+
+            turn.content = String(
+                format: L("Queueing video (quoted %@)…"),
+                OsaurusRouter.formatUSDAsCredits(quote.usd)
+            )
+            rebuildVisibleBlocks()
+            let turnID = turn.id
+            let media = try await MediaGenerationCoordinator.shared.generateVideo(
+                request,
+                approvedQuote: quote
+            ) { [weak self] event in
+                Task { @MainActor in
+                    guard
+                        let self,
+                        let turn = self.turns.first(where: { $0.id == turnID }),
+                        self.isRunActive(runId)
+                    else { return }
+                    switch event {
+                    case .queued(let jobID):
+                        turn.content = jobID.map { "Video queued (\($0))…" } ?? L("Video queued…")
+                    case .running(let progress, let eta):
+                        let percent = progress.map { " \(Int($0 * 100))%" } ?? ""
+                        let estimate = eta.map { " · ~\(Int($0))s remaining" } ?? ""
+                        turn.content = "Generating video…\(percent)\(estimate)"
+                    case .completed:
+                        break
+                    case .failed(let message):
+                        turn.content = "\(L("Video generation failed:")) \(message)"
+                    case .cancelled:
+                        turn.content = L("Video generation cancelled.")
+                    }
+                    self.noteRunProgress(.discrete)
+                    self.rebuildVisibleBlocks()
+                }
+            }
+            guard isRunActive(runId) else { return }
+            attachGeneratedMedia(media, prompt: prompt, to: turn)
+        } catch let error as MediaGenerationError {
+            turn.content = error.errorDescription ?? L("Video generation failed.")
+        } catch is CancellationError {
+            turn.content = L("Video generation cancelled.")
+        } catch {
+            turn.content = "\(L("Video generation failed:")) \(error.localizedDescription)"
+        }
+        isDirty = true
+        rebuildVisibleBlocks()
+    }
+
+    private func attachGeneratedMedia(_ media: GeneratedMedia, prompt: String, to turn: ChatTurn) {
+        guard let contextID = sessionId?.uuidString else {
+            turn.content = media.url.absoluteString
+            return
+        }
+        switch SharedArtifact.processTrustedLocalFileResult(
+            fileURL: media.url,
+            filename: media.url.lastPathComponent,
+            mimeType: media.mimeType,
+            description: prompt,
+            contextId: contextID,
+            contextType: .chat
+        ) {
+        case .success(let processed):
+            turn.sharedArtifacts.append(processed.artifact)
+            let label = media.kind.isVideo ? L("Generated video") : L("Generated image")
+            if let cost = media.settledCostUSD {
+                turn.content = "\(label) · \(OsaurusRouter.formatUSDAsCredits(cost))"
+            } else {
+                turn.content = label
+            }
+        case .failure(let failure):
+            turn.content = "\(L("Generated media could not be displayed:")) \(failure)"
+        }
+    }
+}

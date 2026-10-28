@@ -21,6 +21,8 @@ struct FloatingInputCard: View {
     @Binding var showVoiceOverlay: Bool
     let pickerItems: [ModelPickerItem]
     @Binding var activeModelOptions: [String: ModelOptionValue]
+    /// Options for a selected image/video model (upstream, `W-media-generation`).
+    @Binding var imageComposerSettings: ImageComposerSettings
     let isStreaming: Bool
     let supportsImages: Bool
     /// Current estimated context token count for the session
@@ -107,6 +109,7 @@ struct FloatingInputCard: View {
         showVoiceOverlay: Binding<Bool>,
         pickerItems: [ModelPickerItem],
         activeModelOptions: Binding<[String: ModelOptionValue]>,
+        imageComposerSettings: Binding<ImageComposerSettings> = .constant(ImageComposerSettings()),
         isStreaming: Bool,
         supportsImages: Bool,
         estimatedContextTokens: Int,
@@ -157,6 +160,7 @@ struct FloatingInputCard: View {
         self._showVoiceOverlay = showVoiceOverlay
         self.pickerItems = pickerItems
         self._activeModelOptions = activeModelOptions
+        self._imageComposerSettings = imageComposerSettings
         self.isStreaming = isStreaming
         self.supportsImages = supportsImages
         self.estimatedContextTokens = estimatedContextTokens
@@ -1916,35 +1920,50 @@ extension FloatingInputCard {
                 modelSelectorChip
             }
 
-            // Thinking and every other model option live in the picker's
-            // third column now (upstream #2958); no separate chips.
-
-            if autoSpeakAssistant {
-                autoSpeakToggleChip
+            // Upstream: an image/video model has no thinking, folder or
+            // sandbox semantics, so its options replace the row's chips.
+            if let media = selectedPickerItem?.mediaModel {
+                MediaComposerChips(
+                    media: media,
+                    settings: $imageComposerSettings,
+                    sourceImageCount: pendingAttachments.filter(\.isImage).count
+                )
+            } else {
+                chatSelectorChips
             }
-
-            // Sandbox toggle: visible whenever the sandbox is available on
-            // this system. Mutual exclusion with the folder backend is
-            // enforced inside `toggleSandbox()` (it clears the active
-            // folder before enabling sandbox), not by hiding the chip —
-            // that way the user can always see and switch backends.
-            if isSandboxAvailable {
-                sandboxToggleChip
-            }
-
-            // Clipboard chip (visible when there's something new on the clipboard and monitoring is enabled)
-            if AppConfiguration.shared.chatConfig.enableClipboardMonitoring && clipboardService.hasNewContent {
-                clipboardToggleChip
-            }
-
-            // Folder context selector: always available so the user can
-            // point any chat at a working directory. Mutual exclusion with
-            // sandbox is enforced inside the selection handlers (they
-            // disable autonomous exec before opening the picker).
-            folderContextChip
-
-            Spacer()
         }
+    }
+
+    @ViewBuilder
+    private var chatSelectorChips: some View {
+        // Thinking and every other model option live in the picker's
+        // third column now (upstream #2958); no separate chips.
+
+        if autoSpeakAssistant {
+            autoSpeakToggleChip
+        }
+
+        // Sandbox toggle: visible whenever the sandbox is available on
+        // this system. Mutual exclusion with the folder backend is
+        // enforced inside `toggleSandbox()` (it clears the active
+        // folder before enabling sandbox), not by hiding the chip —
+        // that way the user can always see and switch backends.
+        if isSandboxAvailable {
+            sandboxToggleChip
+        }
+
+        // Clipboard chip (visible when there's something new on the clipboard and monitoring is enabled)
+        if AppConfiguration.shared.chatConfig.enableClipboardMonitoring && clipboardService.hasNewContent {
+            clipboardToggleChip
+        }
+
+        // Folder context selector: always available so the user can
+        // point any chat at a working directory. Mutual exclusion with
+        // sandbox is enforced inside the selection handlers (they
+        // disable autonomous exec before opening the picker).
+        folderContextChip
+
+        Spacer()
     }
 
     // MARK: - Credits chip (upstream)
@@ -3178,7 +3197,11 @@ extension FloatingInputCard {
     /// substring/regex matcher; tests pin the boundary at
     /// `ModelMediaCapabilitiesMCDCTests`.
     private var mediaCapabilities: ModelMediaCapabilities.Capabilities {
-        ModelMediaCapabilities.composerCapabilities(
+        // An image-to-video model takes one source image (upstream).
+        if selectedPickerItem?.mediaModel?.kind == .imageToVideo {
+            return .imageOnly
+        }
+        return ModelMediaCapabilities.composerCapabilities(
             modelId: selectedModel,
             fallbackSupportsImages: supportsImages
         )
@@ -3455,7 +3478,22 @@ extension FloatingInputCard {
     }
 
     /// Placeholder text for the input field.
-    private var placeholderText: String { L("Message or attach files...") }
+    private var placeholderText: String {
+        // Upstream (`W-media-generation`).
+        if let media = selectedPickerItem?.mediaModel {
+            switch media.kind {
+            case .image:
+                return L("Describe the image...")
+            case .textToVideo:
+                return L("Describe the video...")
+            case .imageToVideo:
+                return pendingAttachments.contains(where: \.isImage)
+                    ? L("Describe how the image should move...")
+                    : L("Attach one image, then describe the video...")
+            }
+        }
+        return L("Message or attach files...")
+    }
 
     private var textInputArea: some View {
         EditableTextView(

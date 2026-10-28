@@ -4318,3 +4318,31 @@ Tests: upstream's `MediaGenerationContractTests` (minus the
 `SubagentConfiguration` and two HTTP cases) and `IntelMediaGenerationTests`.
 Package gate: 3,432 tests in 430 suites (6 known issues).
 
+### Images and video in chat (`W-media-generation`, part) — 2026-10-28
+
+Media models in the chat picker and composer, on Intel's own picker, cache
+and `ChatSession`:
+
+- `ModelPickerItem` gained upstream's `mediaModel`, `fromMediaModel` and
+  the image/video candidate filters; media rows are never chat-capable.
+  Intel's `ModelPickerItemCache` lists Venice media (per connected provider)
+  and the Osaurus Cloud media catalog; `ChatSession` re-lists on
+  `.cloudMediaCatalogChanged`. `CloudModelCategory` is upstream's again.
+- Composer: `MediaComposerChips` (upstream's catalog chips as one view;
+  negative prompt in a popover) replaces the selector row's chips for a
+  media model; media placeholders; an image-to-video model accepts one
+  image. `ImageComposerSettings` resets to the model's defaults on every
+  selection.
+- Send: upstream's `runRemoteImageGeneration` / `runVideoGeneration` /
+  `attachGeneratedMedia` (Intel `ChatSession` extension) replace the chat
+  engine for a media model. Intel guard: `auxiliaryChatModel` keeps media ids
+  out of title, follow-up and greeting calls.
+- Found and fixed: Intel's picker cache wrote `items` off the main actor;
+  the list is now built and published in one main-actor block (a concurrent
+  rebuild test crashed with signal 11 when run alone).
+
+Tests: upstream's `CloudModelCategoryTests` (Intel's media-less rewrite
+retired) and `IntelMediaChatTests`. Package gate: 3,438 tests in 431 suites
+(6 known issues), including the Ventura control guards. Rosy: "Images and
+video in chat" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+

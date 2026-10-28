@@ -1997,3 +1997,28 @@ one MCP service (e.g. GitHub or a local stdio server).
 - [ ] **Editor:** the Transport, Run in and Authentication pickers are
       visible on Ventura; choosing Sandbox shows the "not available on this
       Mac" warning.
+
+## Images and video in chat (2026-10-28)
+
+Details: `MEDIA_GENERATION_INTEL.md`. **Costs money:** every image or video
+here is billed by Osaurus Cloud (credits) or Venice. Use the cheapest model
+and count 1. Needs a signed-in Osaurus identity for Cloud, or a Venice
+provider with an API key.
+
+- [ ] **Chat unchanged:** existing chats and providers behave as before; a
+      new chat picks a chat model, never an image or video model.
+- [ ] **Picker:** the model picker lists image and video models (Venice under
+      Venice, Cloud under Osaurus) with "From N credits"; the Cloud browser
+      shows Image / Text-to-video categories.
+- [ ] **Image:** pick an image model. The row shows Aspect / Resolution /
+      Quality / Count chips (readable on Ventura) and the placeholder says
+      "Describe the image...". Send a short prompt: an approval card names the
+      provider and price; approve, and the image appears in the reply.
+- [ ] **Deny:** deny the approval card: the reply says it was cancelled
+      before billing and nothing is charged.
+- [ ] **Video (optional, pricier):** pick a text-to-video model; the approval
+      shows a quote; the video appears when done. Quitting while it runs and
+      relaunching still delivers it (check `~/.osaurus/generated-videos/`).
+- [ ] **Switch back:** picking a chat model restores the normal chips, and
+      the chat answers normally. The chat's title is a normal title.
+

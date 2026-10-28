@@ -26,9 +26,11 @@ ports upstream/main's current files, not the commits one by one. Plan:
   order, inactive built-ins last; Cloud by provider id, never by title;
   nil vs empty shortlist). The source switch covers Intel's three sources
   (Foundation, local, remote; Claude Code is a remote source).
-- `Models/Configuration/CloudModelCategory.swift`: image and video categories
-  never match on Intel (no media models, `W-media-generation`), so the Cloud
-  browser shows only All / Text-to-text / Image-to-text.
+- `Models/Configuration/CloudModelCategory.swift`: upstream's. Since
+  2026-10-28 (`W-media-generation`, `MEDIA_GENERATION_INTEL.md`) Venice and
+  Osaurus Cloud media models are picker rows (`ModelPickerItem.mediaModel`),
+  so the Image / Text-to-video / Image-to-video categories appear when such
+  a model is connected.
 - `ModelPickerItem.favoriteKey` (upstream). Intel's `ModelPickerItem` is
   still much older than upstream's; only what the picker needs is added.
 - Starter favourites: `RemoteProviderManager.firstRunOsaurusModelSlug` and
@@ -149,6 +151,7 @@ ports upstream/main's current files, not the commits one by one. Plan:
 ## Status
 
 Stages A–E shipped 2026-10-06. Staged: the composer credits chip and its
-wallet card (Intel never had the chip), media-model categories and
-prices (`W-media-generation`), live reasoning catalog capabilities.
+wallet card (Intel never had the chip), live reasoning catalog
+capabilities. Media-model categories and prices arrived with
+`W-media-generation` (2026-10-28).
 

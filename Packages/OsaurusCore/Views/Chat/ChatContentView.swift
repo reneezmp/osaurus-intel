@@ -432,6 +432,7 @@ struct ChatContentView: View {
                             showVoiceOverlay: $observedSession.showVoiceOverlay,
                             pickerItems: filteredPickerItems,
                             activeModelOptions: $observedSession.activeModelOptions,
+                            imageComposerSettings: $observedSession.imageComposerSettings,
                             isStreaming: observedSession.isStreaming,
                             supportsImages: false,
                             estimatedContextTokens: observedSession.estimatedContextTokens,

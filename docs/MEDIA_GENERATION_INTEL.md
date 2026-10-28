@@ -47,6 +47,44 @@ Files on disk: generated images in `~/.osaurus/generated-images/`, videos in
 `~/.osaurus/runtime/media-jobs.json` (pruned after 30 days; a job is
 recovered for up to 26 h because providers offer no upstream cancel).
 
+## Chat composer (part B, 2026-10-28)
+
+Media models appear in the chat model picker: Venice's under the Venice
+provider, Osaurus Cloud's under Osaurus (`ModelPickerItem.fromMediaModel`:
+catalog name, privacy, "From N credits"). They are never chat models
+(`isLikelyChatCapable` is false), so the default pick and discovery
+fallbacks skip them, and the Cloud browser's Image / Text-to-video /
+Image-to-video categories now fill (`CloudModelCategory` is upstream's
+again).
+
+Picking one swaps the selector row's chips for the model's options
+(`Views/Chat/MediaComposerChips.swift`, upstream's catalog branch of
+`catalogMediaComposerChips`): aspect ratio, resolution, quality, duration,
+audio, and for images size, steps, CFG, seed, format and count, plus the
+starting price and a negative prompt (a popover on Intel; upstream uses an
+alert accessory). `ImageComposerSettings` resets to the model's defaults on
+every selection (`applyImageModelDefaults`). The placeholder changes to
+"Describe the image..." / "Describe the video..."; an image-to-video model
+accepts one image attachment.
+
+Sending runs upstream's `runRemoteImageGeneration` / `runVideoGeneration`
+(Intel `ChatSession` extension at the end of `ChatView.swift`) instead of
+the chat engine: approval card, the coordinator, then the file attached to
+the assistant turn as an artifact ("Generated image · N credits").
+Regenerate re-sends the last user prompt. Upstream's local image branch is
+not there.
+
+Intel-only guard: `ChatSession.auxiliaryChatModel` is nil while a media
+model is selected, so title generation, follow-up suggestions and the empty
+chat greeting never send a media id to the chat engine (they use the core
+model or skip).
+
+**Picker cache race (found here):** Intel's `ModelPickerItemCache` wrote
+`items` off the main actor; the extra `await` for the Cloud list made
+`ModelPickerItemCacheTests.concurrentCallers_returnIdenticalResults` crash
+(signal 11, only when the suite runs alone). The list is now built and
+published inside one main-actor block.
+
 ## Cost and approval rules (upstream, kept)
 
 - Images: Cloud and Venice are billable. Upstream asks before every remote
@@ -63,11 +101,13 @@ recovered for up to 26 h because providers offer no upstream cancel).
 the `SubagentConfiguration` migration case and the two HTTP cases that come
 with the server routes) and `IntelMediaGenerationTests.swift` (Venice host
 check and discovery split, local targets refused, Cloud fails closed without
-its catalog). Stub transports only; nothing reaches the network.
+its catalog). Stub transports only; nothing reaches the network. Part B:
+upstream's `CloudModelCategoryTests` (media cases back) and
+`IntelMediaChatTests` (media rows never chat models, candidates, defaults on
+selection, `auxiliaryChatModel`).
 
 ## Status
 
-Part A (core) shipped 2026-10-28. Still to come in this item: the chat
-composer path (media models in the picker), the `image` / `video` agent
-tools with an Images settings panel, and the `/v1/images` and `/v1/videos`
-server routes.
+Part A (core) and part B (chat composer) shipped 2026-10-28. Still to come
+in this item: the `image` / `video` agent tools with an Images settings
+panel, and the `/v1/images` and `/v1/videos` server routes.

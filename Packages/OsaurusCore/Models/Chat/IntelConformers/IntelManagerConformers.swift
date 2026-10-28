@@ -1037,6 +1037,11 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
         // Intel users who may run only a local llama.cpp server (Bonsai),
         // Ollama, or some other OpenAI-compatible endpoint. `CloudChatEngine`
         // routes each request to whichever provider owns the selected model.
+        // Osaurus Cloud media (upstream `W-media-generation`), grouped under
+        // the Osaurus provider. Empty until the signed catalog loads (fails
+        // closed without an identity). Read before the main-actor block so
+        // the list is built and published in one step.
+        let cloudModels = await MediaGenerationCoordinator.shared.cachedCloudModels()
         let built: [ModelPickerItem] = await MainActor.run {
             var out: [ModelPickerItem] = []
             var seen = Set<String>()
@@ -1102,11 +1107,26 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                     }
                 }
             }
+            // Upstream (`W-media-generation`): connected Venice image/video
+            // models, never part of a provider's chat list.
+            for provider in manager.cachedMediaModels() {
+                out.append(
+                    contentsOf: provider.models.map {
+                        .fromMediaModel($0, providerId: provider.providerId)
+                    }
+                )
+            }
+            out.append(
+                contentsOf: cloudModels.map {
+                    .fromMediaModel($0, providerId: RemoteProviderManager.osaurusRouterProviderId)
+                }
+            )
+            // Published on the main actor: concurrent rebuilds (notification
+            // observers, prewarm, chat refresh) must not race on `items`.
+            self.items = out
+            self.isLoaded = true
             return out
         }
-
-        items = built
-        isLoaded = true
         return built
     }
 

@@ -1,6 +1,3 @@
-//  Intel: upstream's media-model cases need media generation
-//  (`W-media-generation`) and are left out.
-
 import Foundation
 import Testing
 
@@ -18,6 +15,17 @@ struct CloudModelCategoryTests {
         )
     }
 
+    private func media(_ kind: MediaGenerationKind, name: String = "Media") -> ModelPickerItem {
+        .fromMediaModel(
+            MediaModelInfo(
+                target: MediaModelTarget(backend: .osaurusCloud, modelID: name),
+                displayName: name, providerName: "Osaurus Cloud", kind: kind,
+                constraints: MediaModelConstraints(), offline: false
+            ),
+            providerId: providerID
+        )
+    }
+
     @Test func visionChatSupportsBothTextAndImageInputTasks() {
         let model = chat("Multimodal", vision: true)
         #expect(CloudModelCategory.textToText.includes(model))
@@ -26,18 +34,30 @@ struct CloudModelCategoryTests {
         #expect(!CloudModelCategory.imageToText.includes(chat("Text only")))
     }
 
+    @Test func mediaOperationsRemainDistinctEvenWithMisleadingNames() {
+        let image = media(.image, name: "Text to video")
+        let textVideo = media(.textToVideo, name: "Image to video")
+        let imageVideo = media(.imageToVideo, name: "Image")
+        let items = [image, textVideo, imageVideo]
+        #expect(items.filter(CloudModelCategory.image.includes) == [image])
+        #expect(items.filter(CloudModelCategory.textToVideo.includes) == [textVideo])
+        #expect(items.filter(CloudModelCategory.imageToVideo.includes) == [imageVideo])
+        #expect(items.filter(CloudModelCategory.textToText.includes).isEmpty)
+        #expect(items.filter(CloudModelCategory.imageToText.includes).isEmpty)
+    }
+
     @Test func categoryChoicesReflectTheCatalogAndRetainAllForEmptyCatalogs() {
         #expect(CloudModelCategory.available(in: []) == [.all])
-        // Intel: no media models, so image/video categories never appear.
-        #expect(CloudModelCategory.available(in: [chat("Vision", vision: true)])
-            == [.all, .textToText, .imageToText])
+        #expect(CloudModelCategory.available(in: [media(.image)]) == [.all, .image])
+        #expect(CloudModelCategory.available(in: [chat("Vision", vision: true), media(.imageToVideo)])
+            == [.all, .textToText, .imageToText, .imageToVideo])
     }
 
     @Test func categoryCombinesWithSearchAndContextWithoutChangingOrder() {
         let short = chat("Atlas small", vision: true, context: 32_000)
         let long = chat("Atlas large", vision: true, context: 128_000)
         let other = chat("Other", vision: true, context: 256_000)
-        let items = [short, long, other]
+        let items = [short, long, other, media(.image)]
         let result = items
             .filter { $0.matches(searchQuery: "Atlas") }
             .filteredByContext(.min128K)
