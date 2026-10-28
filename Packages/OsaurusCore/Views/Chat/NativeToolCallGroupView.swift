@@ -485,6 +485,25 @@ final class NativeToolCallRowView: NSView {
     private var terminalHeightConstraint: NSLayoutConstraint?
     private var liveExecSubscription: AnyCancellable?
     private var liveExecBoundCallId: String?
+    // Upstream's unified subagent feed pane (docs/SUBAGENTS_INTEL.md).
+    /// Fixed height for the subagent feed pane (header + a few visible rows;
+    /// the list scrolls internally). Kept constant so the row's
+    /// `measuredHeight` is predictable as events stream in.
+    private static let subagentPaneHeight: CGFloat = 220
+    /// Unified subagent activity feed pane. Mounts for ANY subagent row
+    /// (spawn / image / computer_use) when
+    /// `SubagentFeedRegistry` has a feed for this row's tool-call-id (live run
+    /// or grace tail). A SwiftUI `SubagentFeedView` hosted in AppKit. Mutually
+    /// exclusive with `terminalView` / `resultView` on the `contentContainer`
+    /// bottom pin.
+    private var subagentFeedHostingView: NSView?
+    private var subagentFeedBottomConstraint: NSLayoutConstraint?
+    private var subagentFeedHeightConstraint: NSLayoutConstraint?
+    private var subagentFeedSubscription: AnyCancellable?
+    private var subagentFeedBoundCallId: String?
+    /// Tool-call id the hosted pane was built for; a reused row re-hosts
+    /// when it is configured for a different call.
+    private var subagentFeedHostedCallId: String?
     private let separatorView = NSView()
     /// pins contentContainer height for hit-testing; toggled when result section is shown
     private var contentBottomToArgs: NSLayoutConstraint?
@@ -689,12 +708,16 @@ final class NativeToolCallRowView: NSView {
             // the result vanished entirely — Renée 2026-06-03).
             applyResultOrLiveState(width: width, theme: theme)
             bindLiveOutputIfPresent(toolCallId: item.call.id)
+            // Upstream: every expanded row watches the subagent feed registry
+            // so subagent rows mount the live activity pane.
+            bindSubagentFeedIfPresent(toolCallId: item.call.id)
         }
 
-        // Tear down terminal pane when the row collapses.
+        // Tear down panes when the row collapses.
         if !isExpanded {
             stopRegistryObservation()
             tearDownTerminalView()
+            tearDownSubagentFeedView()
         }
 
         applyHeight()
@@ -728,7 +751,8 @@ final class NativeToolCallRowView: NSView {
         } else {
             terminalH = 0
         }
-        return rowH + 1 + 8 + sectionTitleH + argsH + terminalH + resultH + 8
+        let subagentH: CGFloat = subagentFeedHostingView != nil ? (8 + Self.subagentPaneHeight) : 0
+        return rowH + 1 + 8 + sectionTitleH + argsH + terminalH + subagentH + resultH + 8
     }
 
     // MARK: - Terminal pane bindings
@@ -751,6 +775,18 @@ final class NativeToolCallRowView: NSView {
     /// ends.
     private func applyResultOrLiveState(width: CGFloat, theme: any ThemeProtocol) {
         guard let item = currentItem else { return }
+
+        // 0) Unified subagent feed (upstream): a row whose tool-call-id has a
+        //    live (or grace-tail) `SubagentFeed` renders the activity pane.
+        //    Upstream also replays a finished run's saved log
+        //    (`SubagentRunLogArchive`), which comes with the spawn kind.
+        if let feed = SubagentFeedRegistry.shared.feed(for: item.call.id) {
+            tearDownResultSection()
+            tearDownTerminalView()
+            mountSubagentFeedView(feed: feed, theme: theme)
+            return
+        }
+        tearDownSubagentFeedView()
 
         // 1) Live path takes priority while a tool is actively running.
         if let entry = LiveExecRegistry.shared.currentEntries()[item.call.id],
@@ -828,13 +864,15 @@ final class NativeToolCallRowView: NSView {
     }
 
     /// Observation belongs to the expanded row, including the interval before
-    /// dispatch registers a terminal. Removing a pane must not cancel the
-    /// observer that will discover its replacement (upstream #3210; Intel has
-    /// no subagent feed pane, so only the live-exec subscription is here).
+    /// dispatch registers a terminal or feed. Removing a pane must not cancel
+    /// the observer that will discover its replacement (upstream #3210).
     private func stopRegistryObservation() {
         liveExecSubscription?.cancel()
         liveExecSubscription = nil
         liveExecBoundCallId = nil
+        subagentFeedSubscription?.cancel()
+        subagentFeedSubscription = nil
+        subagentFeedBoundCallId = nil
     }
 
     /// Lazily install (or reuse) a `TerminalDisplayView` and bind it
@@ -903,6 +941,93 @@ final class NativeToolCallRowView: NSView {
         terminalHeightConstraint = nil
         view.removeFromSuperview()
         terminalView = nil
+    }
+
+    // MARK: - Unified subagent feed pane
+
+    /// Subscribe to `SubagentFeedRegistry` and re-run `applyResultOrLiveState`
+    /// on every snapshot so the shared activity pane mounts when the host
+    /// registers a run's feed and falls through to the markdown summary once
+    /// the grace tail drops it. Idempotent on the same id.
+    private func bindSubagentFeedIfPresent(toolCallId: String) {
+        if subagentFeedBoundCallId == toolCallId, subagentFeedSubscription != nil { return }
+        subagentFeedSubscription?.cancel()
+        subagentFeedBoundCallId = toolCallId
+        subagentFeedSubscription = SubagentFeedRegistry.shared.feedsPublisher
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                MainActor.assumeIsolated {
+                    guard let self, self.isExpanded, self.currentItemId == toolCallId,
+                        let theme = self.lastConfiguredTheme else { return }
+                    self.applyResultOrLiveState(width: self.currentWidth, theme: theme)
+                }
+            }
+    }
+
+    /// Mount (or reuse) the SwiftUI feed pane for `feed`. Mirrors
+    /// `mountTerminalView`'s constraint swap so `contentContainer` never has
+    /// two active bottom pins.
+    private func mountSubagentFeedView(feed: SubagentFeed, theme: any ThemeProtocol) {
+        let host: NSView
+        // Rows are reused across tool calls: a pane built for another call
+        // (or for this call's live feed, now replaced by its saved log with
+        // identical content) must not be shown for a different run.
+        if subagentFeedHostingView != nil, subagentFeedHostedCallId != feed.toolCallId {
+            removeSubagentFeedHost()
+        }
+        if let existing = subagentFeedHostingView {
+            host = existing
+        } else {
+            let hosting = NSHostingView(rootView: SubagentFeedView(feed: feed))
+            hosting.translatesAutoresizingMaskIntoConstraints = false
+            contentContainer.addSubview(hosting)
+            let av = ensureArgsView()
+            let heightConst = hosting.heightAnchor.constraint(
+                equalToConstant: Self.subagentPaneHeight
+            )
+            subagentFeedHeightConstraint = heightConst
+            NSLayoutConstraint.activate([
+                hosting.leadingAnchor.constraint(
+                    equalTo: contentContainer.leadingAnchor,
+                    constant: Self.sectionContentInset
+                ),
+                hosting.trailingAnchor.constraint(
+                    equalTo: contentContainer.trailingAnchor,
+                    constant: -Self.sectionContentInset
+                ),
+                hosting.topAnchor.constraint(equalTo: av.bottomAnchor, constant: 8),
+                heightConst,
+            ])
+            let pin = contentContainer.bottomAnchor.constraint(equalTo: hosting.bottomAnchor)
+            subagentFeedBottomConstraint = pin
+            subagentFeedHostingView = hosting
+            subagentFeedHostedCallId = feed.toolCallId
+            host = hosting
+        }
+        // Swap pins atomically (see mountTerminalView for why).
+        contentBottomToArgs?.isActive = false
+        subagentFeedBottomConstraint?.isActive = true
+        _ = host
+        applyHeight()
+    }
+
+    private func tearDownSubagentFeedView() {
+        guard subagentFeedHostingView != nil else { return }
+        removeSubagentFeedHost()
+        contentBottomToArgs?.isActive = true
+        applyHeight()
+    }
+
+    /// Remove the hosted pane and its constraints, leaving the registry
+    /// subscription intact (used when re-hosting for a different call).
+    private func removeSubagentFeedHost() {
+        guard let host = subagentFeedHostingView else { return }
+        subagentFeedBottomConstraint?.isActive = false
+        subagentFeedBottomConstraint = nil
+        subagentFeedHeightConstraint = nil
+        host.removeFromSuperview()
+        subagentFeedHostingView = nil
+        subagentFeedHostedCallId = nil
     }
 
     // MARK: - Private

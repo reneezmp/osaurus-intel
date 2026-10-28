@@ -729,4 +729,119 @@ public enum SystemPromptTemplates {
         return shown.joined(separator: ", ") + ", and \(topLevel.count - 6) other items"
     }
 
+    // MARK: - Subagent guidance (upstream, docs/SUBAGENTS_INTEL.md)
+    //
+    // Upstream's text, kept verbatim for the subagent capability registry.
+    // Intel does not render these yet; each kind adjusts its wording to
+    // Intel facts (cloud models, no local swaps) when it is wired in.
+
+
+    /// Computer Use grounding. Rendered only when the `computer_use` tool
+    /// actually resolves into the schema (custom-agent opt-in via
+    /// `computerUseEnabled`), so the prompt never advertises desktop
+    /// automation the model can't invoke. Mirrors the tool's own contract:
+    /// one whole-task `goal`, AX-first perception, and the read-auto /
+    /// edit-confirm autonomy gate — stated plainly, not coerced.
+    public static let computerUseGuidance = """
+        ## Computer use
+
+        - You can operate macOS apps for the user with `computer_use` — it drives a real app from the on-screen accessibility tree (clicking, typing, reading on-screen text), falling back to a screenshot only when an element can't be resolved.
+        - Describe the WHOLE task in a single `goal`. It runs a self-contained subagent that perceives, acts, and verifies each step on its own and returns a summary — do not try to script individual clicks from here.
+        - Reads and navigation run automatically; edits and anything consequential pause for the user to approve. Write the goal plainly and let that gate handle confirmation — don't ask the user for permission yourself first.
+        - Use it for desktop UI automation (filling a form, navigating an app, extracting on-screen content), NOT for shell, files, or web requests — those have dedicated tools.
+        """
+
+    /// Browser Use grounding. Rendered only when the `browser_use` tool
+    /// actually resolves into the schema (custom-agent opt-in via
+    /// `browserUseEnabled`; the Default agent is hard-off). Mirrors the
+    /// tool's contract: one whole-task `goal`, a
+    /// persistent per-agent signed-in session, and the read-auto /
+    /// edit-confirm autonomy gate — stated plainly, not coerced.
+    public static let browserUseGuidance = """
+        ## Browser use
+
+        - You can browse the web for the user with `browser_use` — it drives a real, persistent browser session that belongs to this agent (cookies and sign-ins survive across chats), navigating, reading pages, clicking, and filling forms.
+        - Describe the WHOLE task in a single `goal`. It runs a self-contained subagent that perceives each page, acts, and verifies on its own and returns a summary — do not try to script individual clicks from here.
+        - Reads and ordinary navigation run automatically; typing into pages and anything consequential (submitting, purchasing, sending, deleting, signing in) pause for the user to approve. Write the goal plainly and let that gate handle confirmation.
+        - If a site needs the user to sign in, the subagent opens a secure sign-in window — NEVER ask the user for passwords or 2FA codes in chat.
+        - Use it for interacting with websites (checking a dashboard, filling a web form, extracting page content behind a login), NOT for simple lookups — `web_search` is faster for those.
+        """
+
+    /// Authoritative image directive (generate + edit). Schema-gated on `image`
+    /// in the composer, so it only renders when the tool is actually callable;
+    /// the composer swaps in the generation-only variant below when no ready
+    /// edit model is installed. Counters the persona-led refusal ("I'm
+    /// text-only / I can't make images") and keeps the edit-continuation
+    /// CONDITIONAL (never a forced "now edit it").
+    public static let imageGenerationGuidance = """
+        ## Image generation
+
+        - You CAN create and edit images with the `image` tool. To create, call `image` with a `prompt`. To edit an existing image, call `image` with a `prompt` PLUS `source_paths` set to the image path(s) — `source_paths` is what switches it into edit mode.
+        - NEVER claim you can't make images or are "text-only", and don't redirect the user to another app or settings — you have this tool, so use it.
+        - The result renders inline in the chat automatically; do not call `share_artifact` for it. If the user asked for a follow-up edit of that image, call `image` again with `source_paths` set to the saved result path; otherwise confirm briefly in one sentence.
+        - The job runs locally and may briefly swap models; that is expected.
+        """
+
+    /// Compact generate + edit directive for small local models: same behavior
+    /// at a fraction of the tokens (anti-refusal, edit-mode switch, inline
+    /// render / no `share_artifact`, conditional edit-continuation).
+    public static let imageGenerationGuidanceCompact = """
+        ## Image generation
+        - You CAN create/edit images with the `image` tool: call it with a `prompt`; add `source_paths` (existing image path[s]) to edit instead of create.
+        - NEVER say you can't make images or are "text-only", and don't redirect to another app or settings — use the tool.
+        - The result renders inline automatically; don't call `share_artifact`. For a requested follow-up edit, call `image` again with `source_paths` set to the saved path; otherwise confirm briefly.
+        """
+
+    /// Generation-only image directive, selected by the composer when NO ready
+    /// edit model is installed (the `image` schema is the edit-free variant
+    /// there too). Omits every edit affordance so the prompt never claims an
+    /// edit the runtime can't perform, while keeping the anti-refusal rule.
+    public static let imageGenerationOnlyGuidance = """
+        ## Image generation
+
+        - You CAN create images with the `image` tool: call `image` with a `prompt`. Editing existing images is not available, so do not offer or attempt it.
+        - NEVER claim you can't make images or are "text-only", and don't redirect the user to another app or settings — you have this tool, so use it.
+        - The result renders inline in the chat automatically; do not call `share_artifact` for it. Confirm briefly in one sentence.
+        - The job runs locally and may briefly swap models; that is expected.
+        """
+
+    /// Compact generation-only directive for small local models.
+    public static let imageGenerationOnlyGuidanceCompact = """
+        ## Image generation
+        - You CAN create images with the `image` tool: call it with a `prompt`. Editing existing images is not available — don't offer or attempt it.
+        - NEVER say you can't make images or are "text-only", and don't redirect to another app or settings — use the tool.
+        - The result renders inline automatically; don't call `share_artifact`. Confirm briefly.
+        """
+
+    /// AppleScript automation grounding. Rendered only when the `applescript`
+    /// tool actually resolves into the schema (per-agent enable + an installed
+    /// AppleScript model), so the prompt never advertises automation the model
+    /// can't invoke. Mirrors the tool's contract: one whole-task `task`, an
+    /// on-device subagent that writes + runs the script, and the user's
+    /// execution-mode gate — stated plainly, not coerced.
+    public static let appleScriptGuidance = """
+        ## Mac automation (AppleScript)
+
+        - Two tools drive this Mac with an on-device AppleScript model (Finder, Safari, Mail, Notes, Music, Calendar, System Events, app + system state). Both write and run the script for you — do NOT write AppleScript yourself from here.
+        - Use `mac_query` ONLY when the current user's requested outcome is read-only (e.g. "the front Safari tab URL", "the selected Finder items", "the current track and volume"). It runs read-only, needs no confirmation, and returns the actual `values` plus a per-step transcript. If the current request asks to change anything, NEVER call `mac_query` first as a preflight; call `applescript` directly because that automation validates its live target before editing. Do not invent a Mac-state question merely to acknowledge feedback or conversation.
+        - To CHANGE something, call `applescript` with the whole task. Depending on the user's setting each script is shown for approval or auto-run with a warning, so write the task plainly and let that gate handle confirmation — don't ask the user for permission yourself first.
+        - When the task must insert EXACT text (a verbatim transcription, quotes, code, or a long note body), pass that text in `applescript`'s `content` argument and keep `task` as the instruction (e.g. task "Set the body of the note 'Quotes' to the provided content", content = the exact text). The subagent inserts it verbatim via a placeholder, so nothing is dropped, reordered, or mis-escaped — never paste large literal text only into `task`.
+        - When the task needs SEVERAL exact blocks (a subject and a body, say), pass them in `applescript`'s `contents` argument as a `{name: text}` map (e.g. contents = {"subject": …, "body": …}); the subagent inserts each verbatim via its own placeholder. This is REQUIRED for text replacement even when both strings are short: use `contents={"oldText": old, "newText": replacement}` and phrase `task` as "replace the provided oldText with the provided newText". Never leave replacement strings only inside `task`. Use `content` for a single block and `contents` for several.
+        - For an existing open document, name the app or exact path already identified by the request or conversation. Explicit `the file` / `the document` wording is working-app anaphora: call `applescript` with that phrase unchanged so its tracked-frontmost context can resolve it; do not ask for a path first. Never invent a file picker, new file, output file, or save step. An edit does not imply saving.
+        - Exact identifiers count as verbatim too: when the task must match an EXISTING thing by its precise name — a note title, file path, mailbox, playlist, contact, or URL — pass that name as a named literal in `contents` alongside any body (e.g. contents = {"target": "Q3 Planning — Notes (v2)", "body": …}) and phrase `task` to use it ("set the body of the provided note to the provided body"). The subagent then references `{{target}}` instead of re-typing the name, so a long or unusual one can't be mistyped into a "not found" error. Names you're only paraphrasing can stay in `task`.
+        - Both return a structured result: `status` (succeeded/partial/failed), the returned `values`, and `steps`/`errors` with the real AppleScript error numbers. Read the `values` to confirm the outcome, and use `errors` to retry or to tell the user exactly what to fix (e.g. grant Automation permission).
+        - Use these for documents open in Mac apps and other AppleScript / Apple Events automation. Use file tools only for path-addressed files in a selected folder/sandbox; use dedicated tools for shell or web requests.
+        """
+
+    /// Compact AppleScript directive for small local models: same behavior at a
+    /// fraction of the tokens (the read-vs-change tool split, the structured
+    /// result, and the not-for-shell/files/web boundary).
+    public static let appleScriptGuidanceCompact = """
+        ## Mac automation (AppleScript)
+        - Use `mac_query(question)` ONLY when the current user's requested outcome is read-only (Finder, Safari, Mail, Music, System Events, volume, …). If the request asks to change anything, NEVER call it first as a preflight; call `applescript` directly because that automation validates its live target before editing. Never invent a state question just to acknowledge feedback/conversation.
+        - To CHANGE something use `applescript(task)`: each script is shown for approval or auto-run per the user's setting. Don't write AppleScript yourself.
+        - To insert EXACT/verbatim text (transcription, quote, code, long body) OR an exact existing identifier that must match precisely (a note title, file path, mailbox, or URL), always include the required instruction as `task` and pass the exact value separately: `applescript(task="Set the document to the provided content", content=…)` or `applescript(task="Use the provided named values", contents={name:text})`. `task` is still required when `content`/`contents` is present. Reference the supplied value by placeholder — it is reproduced verbatim instead of re-typed, so an exact name can't be mistyped. For replacement this is required even for short strings: `contents={oldText:old,newText:new}` and a task referring to the provided old/new values. Use `contents` for several blocks.
+        - Existing-document edits name the app/path from the request or conversation. Preserve explicit `the file`/`the document` working-app wording in `applescript(task)` so tracked-frontmost resolution can handle it; do not ask for a path first. Never invent a picker/new file/output/save step. Editing does not imply saving.
+        - Both return `status` + `values` + `errors` (with AppleScript error numbers) — read `values` to confirm, use `errors` to retry/fix. Use AppleScript for documents open in Mac apps; file tools are only for path-addressed files in a selected folder/sandbox. Not for shell or web.
+        """
 }

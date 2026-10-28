@@ -4372,3 +4372,14 @@ now required). Package gate: 3,446 tests in 432 suites (6 known issues).
 Manual: `docs/MEDIA_GENERATION_INTEL.md`. Rosy: "Image and
 video agent tools" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
+### Subagent base, layer 1: host and feed (`W-applescript-agent` prerequisite) — 2026-10-28
+
+Renée chose to build the shared subagent base before AppleScript
+(`docs/SUBAGENTS_INTEL.md`, new). Layer 1 takes upstream's subagent host,
+feed, capability registry and configuration, with the host cut to its
+remote path (no GPU admission or residency: every Intel subagent is a
+cloud model), `IntelSubagentResidency.swift` in place of upstream's two
+residency files, spawn-only code fenced, upstream's subagent fields on
+`AgentSettings`, and the live feed pane back in `NativeToolCallGroupView`.
+No tool uses it yet. Details and the left-out pieces are in the manual.
+

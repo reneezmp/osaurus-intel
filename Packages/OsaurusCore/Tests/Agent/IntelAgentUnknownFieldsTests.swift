@@ -29,11 +29,13 @@ struct IntelAgentUnknownFieldsTests {
             "avatar": "fox",
             "chatGreeting": "Hi! What should we dig into?",
             "chatSubtitle": "Deep research",
-            // `settings` mixes Intel-known `dbEnabled` with upstream-only keys.
+            // `settings` mixes Intel-known `dbEnabled` with upstream-only keys
+            // (`browserUseEnabled` became Intel-known with the subagent base,
+            // 2026-10-28, so `screenContextEnabled` stands in for it).
             "upstreamOnlyTopLevel": ["kept": true],
             "settings": [
                 "dbEnabled": true,
-                "browserUseEnabled": true,
+                "screenContextEnabled": true,
                 "subagentBudgets": ["maxParallelSpawns": 3],
             ],
         ]
@@ -58,7 +60,7 @@ struct IntelAgentUnknownFieldsTests {
         encoder.outputFormatting = [.prettyPrinted, .sortedKeys]
         let intelOnly = try encoder.encode(agent)
         // Without the merge, Intel's encoder drops the upstream fields.
-        #expect((try object(intelOnly)["settings"] as? [String: Any])?["browserUseEnabled"] == nil)
+        #expect((try object(intelOnly)["settings"] as? [String: Any])?["screenContextEnabled"] == nil)
 
         let merged = try object(AgentManager.preservingUnknownFields(encoded: intelOnly, existing: existing))
         #expect(merged["avatar"] as? String == "fox")
@@ -66,7 +68,7 @@ struct IntelAgentUnknownFieldsTests {
         #expect(merged["chatSubtitle"] as? String == "Deep research")
         #expect((merged["upstreamOnlyTopLevel"] as? [String: Any])?["kept"] as? Bool == true)
         let settings = try #require(merged["settings"] as? [String: Any])
-        #expect(settings["browserUseEnabled"] as? Bool == true)
+        #expect(settings["screenContextEnabled"] as? Bool == true)
         #expect((settings["subagentBudgets"] as? [String: Any])?["maxParallelSpawns"] as? Int == 3)
         // Intel's own edits win.
         #expect(merged["name"] as? String == "Researcher 2")

@@ -730,6 +730,38 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     public var imagePermission: MediaToolPermission
     public var videoPermission: MediaToolPermission
 
+    // MARK: Subagents (upstream fields, docs/SUBAGENTS_INTEL.md)
+
+    /// Computer Use / Browser Use / AppleScript / spawn switches (custom
+    /// agents only). Stored now so the subagent base can read them; each
+    /// takes effect when its kind is ported.
+    public var computerUseEnabled: Bool
+    public var browserUseEnabled: Bool
+    public var spawnDelegationEnabled: Bool
+    public var appleScriptEnabled: Bool
+    /// The model the AppleScript kind runs on (nil: the agent's own model).
+    public var appleScriptModelId: String?
+    public var appleScriptExecutionMode: AppleScriptExecutionMode
+    public var spawnableAgentIDs: [UUID]
+    public var spawnableWorkspaceAgents: [WorkspaceAgentRef]
+    public var imageEditModelId: String?
+    /// Per-agent permission policies keyed by capability id.
+    public var subagentPermissions: SubagentPermissionDefaults
+    public var subagentBudgets: SubagentBudgets
+    /// Per-capability model overrides keyed by capability id.
+    public var subagentModelOverrides: [String: String]
+
+    /// Upstream: the image model id view of `imageGenerationTarget`.
+    public var imageGenerationModelId: String? {
+        get { imageGenerationTarget?.modelID }
+        set {
+            let trimmed = newValue?.trimmingCharacters(in: .whitespacesAndNewlines)
+            imageGenerationTarget = trimmed.flatMap { $0.isEmpty ? nil : $0 }.map {
+                MediaModelTarget(backend: .local, modelID: $0)
+            }
+        }
+    }
+
     public init(
         dbEnabled: Bool,
         schedule: AgentScheduleSettings,
@@ -748,8 +780,32 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         textToVideoTarget: MediaModelTarget? = nil,
         imageToVideoTarget: MediaModelTarget? = nil,
         imagePermission: MediaToolPermission = .ask,
-        videoPermission: MediaToolPermission = .ask
+        videoPermission: MediaToolPermission = .ask,
+        computerUseEnabled: Bool = false,
+        browserUseEnabled: Bool = false,
+        spawnDelegationEnabled: Bool = false,
+        appleScriptEnabled: Bool = false,
+        appleScriptModelId: String? = nil,
+        appleScriptExecutionMode: AppleScriptExecutionMode = .default,
+        spawnableAgentIDs: [UUID] = [],
+        spawnableWorkspaceAgents: [WorkspaceAgentRef] = [],
+        imageEditModelId: String? = nil,
+        subagentPermissions: SubagentPermissionDefaults = SubagentPermissionDefaults(),
+        subagentBudgets: SubagentBudgets = SubagentBudgets(),
+        subagentModelOverrides: [String: String] = [:]
     ) {
+        self.computerUseEnabled = computerUseEnabled
+        self.browserUseEnabled = browserUseEnabled
+        self.spawnDelegationEnabled = spawnDelegationEnabled
+        self.appleScriptEnabled = appleScriptEnabled
+        self.appleScriptModelId = appleScriptModelId
+        self.appleScriptExecutionMode = appleScriptExecutionMode
+        self.spawnableAgentIDs = spawnableAgentIDs
+        self.spawnableWorkspaceAgents = spawnableWorkspaceAgents
+        self.imageEditModelId = imageEditModelId
+        self.subagentPermissions = subagentPermissions
+        self.subagentBudgets = subagentBudgets
+        self.subagentModelOverrides = subagentModelOverrides
         self.imageEnabled = imageEnabled
         self.videoEnabled = videoEnabled
         self.imageGenerationTarget = imageGenerationTarget
@@ -789,6 +845,23 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         imageToVideoTarget = try? c.decodeIfPresent(MediaModelTarget.self, forKey: .imageToVideoTarget)
         imagePermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .imagePermission)) ?? .ask
         videoPermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .videoPermission)) ?? .ask
+        computerUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .computerUseEnabled)) ?? false
+        browserUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .browserUseEnabled)) ?? false
+        spawnDelegationEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .spawnDelegationEnabled)) ?? false
+        appleScriptEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .appleScriptEnabled)) ?? false
+        appleScriptModelId = try? c.decodeIfPresent(String.self, forKey: .appleScriptModelId)
+        appleScriptExecutionMode =
+            (try? c.decodeIfPresent(AppleScriptExecutionMode.self, forKey: .appleScriptExecutionMode)) ?? .default
+        spawnableAgentIDs = (try? c.decodeIfPresent([UUID].self, forKey: .spawnableAgentIDs)) ?? []
+        spawnableWorkspaceAgents =
+            (try? c.decodeIfPresent([WorkspaceAgentRef].self, forKey: .spawnableWorkspaceAgents)) ?? []
+        imageEditModelId = try? c.decodeIfPresent(String.self, forKey: .imageEditModelId)
+        subagentPermissions =
+            (try? c.decodeIfPresent(SubagentPermissionDefaults.self, forKey: .subagentPermissions))
+            ?? SubagentPermissionDefaults()
+        subagentBudgets = (try? c.decodeIfPresent(SubagentBudgets.self, forKey: .subagentBudgets)) ?? SubagentBudgets()
+        subagentModelOverrides =
+            (try? c.decodeIfPresent([String: String].self, forKey: .subagentModelOverrides)) ?? [:]
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
@@ -831,6 +904,18 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case imageToVideoTarget
         case imagePermission
         case videoPermission
+        case computerUseEnabled
+        case browserUseEnabled
+        case spawnDelegationEnabled
+        case appleScriptEnabled
+        case appleScriptModelId
+        case appleScriptExecutionMode
+        case spawnableAgentIDs
+        case spawnableWorkspaceAgents
+        case imageEditModelId
+        case subagentPermissions
+        case subagentBudgets
+        case subagentModelOverrides
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -855,6 +940,22 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encodeIfPresent(imageToVideoTarget, forKey: .imageToVideoTarget)
         try c.encode(imagePermission, forKey: .imagePermission)
         try c.encode(videoPermission, forKey: .videoPermission)
+        try c.encode(computerUseEnabled, forKey: .computerUseEnabled)
+        try c.encode(browserUseEnabled, forKey: .browserUseEnabled)
+        try c.encode(spawnDelegationEnabled, forKey: .spawnDelegationEnabled)
+        try c.encode(appleScriptEnabled, forKey: .appleScriptEnabled)
+        try c.encodeIfPresent(appleScriptModelId, forKey: .appleScriptModelId)
+        try c.encode(appleScriptExecutionMode, forKey: .appleScriptExecutionMode)
+        if !spawnableAgentIDs.isEmpty { try c.encode(spawnableAgentIDs, forKey: .spawnableAgentIDs) }
+        if !spawnableWorkspaceAgents.isEmpty {
+            try c.encode(spawnableWorkspaceAgents, forKey: .spawnableWorkspaceAgents)
+        }
+        try c.encodeIfPresent(imageEditModelId, forKey: .imageEditModelId)
+        try c.encode(subagentPermissions, forKey: .subagentPermissions)
+        try c.encode(subagentBudgets, forKey: .subagentBudgets)
+        if !subagentModelOverrides.isEmpty {
+            try c.encode(subagentModelOverrides, forKey: .subagentModelOverrides)
+        }
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)

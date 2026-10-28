@@ -197,6 +197,27 @@ public enum ChatExecutionContext {
     /// background dispatches, delegated children and every other surface.
     @TaskLocal static var currentChatSessionBox: WeakChatSessionBox?
 
+    // MARK: - Subagent scope (upstream, docs/SUBAGENTS_INTEL.md)
+
+    /// Exact model selected for the parent turn that dispatched the current
+    /// tool (upstream). Subagent kinds read it through `SubagentScope`.
+    @TaskLocal public static var currentModelName: String?
+
+    /// Explicit Thinking choice frozen for the logical parent turn (upstream).
+    /// `nil` means the user made no explicit choice.
+    @TaskLocal public static var currentEnableThinking: Bool?
+
+    /// Explicit effort frozen alongside the toggle; nil keeps defaults.
+    @TaskLocal public static var currentReasoningEffort: String?
+
+    /// Exact user text that owns the scope of the current logical turn
+    /// (upstream). Desktop subagents use it as their task when available.
+    @TaskLocal public static var currentUserRequest: String?
+
+    /// Which surface started this turn (upstream). `nil` means none published
+    /// a source; source-gated capabilities treat that as not authorized.
+    @TaskLocal static var currentSessionSource: SessionSource?
+
     /// Per-run todo bookkeeping (upstream): lets `todo` tell real progress
     /// from assertion and scopes `complete`'s unchecked-item check to the run.
     @TaskLocal static var agentTodoRunScope: AgentTodoRunScope?
