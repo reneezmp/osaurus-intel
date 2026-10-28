@@ -1,0 +1,505 @@
+//
+//  ImageGenerationTypes.swift
+//  osaurus
+//
+//  Osaurus-native request / event / catalog types for on-device image
+//  generation. These deliberately do NOT expose any vMLXFlux symbols so the
+//  HTTP layer and the chat UI can consume them without importing the engine
+//  (only `ImageGenerationService` links vMLXFlux). The service translates
+//  between these and the engine's `ImageGenRequest` / `ImageGenEvent`.
+//
+
+import Foundation
+
+/// Output container format. PNG is the only fully-wired writer in the engine
+/// today; jpeg/webp are accepted for forward compatibility.
+public enum ImageOutputFormat: String, Sendable, Codable, CaseIterable {
+    case png
+    case jpeg
+    case webp
+}
+
+/// A local safetensor adapter. Kept independent of the engine module so API,
+/// tools and delegation carry exactly the same request contract.
+public struct ImageAdapterParameters: Sendable, Codable, Hashable {
+    public enum Target: String, Sendable, Codable { case transformer, textEncoder, both }
+    public var url: URL
+    public var scale: Float
+    public var target: Target
+    public init(url: URL, scale: Float = 1, target: Target = .transformer) {
+        self.url = url; self.scale = scale; self.target = target
+    }
+    enum CodingKeys: String, CodingKey { case url, scale, target }
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        url = try c.decode(URL.self, forKey: .url)
+        scale = try c.decodeIfPresent(Float.self, forKey: .scale) ?? 1
+        target = try c.decodeIfPresent(Target.self, forKey: .target) ?? .transformer
+        guard url.isFileURL, scale.isFinite else {
+            throw DecodingError.dataCorruptedError(forKey: .url, in: c,
+                debugDescription: "Adapters require a local file URL and finite scale")
+        }
+    }
+}
+
+/// Capability flags the UI uses to show/hide controls for a given model.
+public struct ImageModelCapabilities: Sendable, Equatable, Hashable {
+    public var textToImage: Bool
+    public var imageEdit: Bool
+    public var upscale: Bool
+    public var negativePrompt: Bool
+    public var editNegativePrompt: Bool
+    public var editStrength: Bool
+    public var dimensionMultiple: Int
+    public var mask: Bool
+    public var multipleSourceImages: Bool
+    public var lora: Bool
+
+    public init(
+        textToImage: Bool = false,
+        imageEdit: Bool = false,
+        upscale: Bool = false,
+        negativePrompt: Bool = false,
+        editNegativePrompt: Bool? = nil,
+        editStrength: Bool = true,
+        dimensionMultiple: Int = 16,
+        mask: Bool = false,
+        multipleSourceImages: Bool = false,
+        lora: Bool = false
+    ) {
+        self.textToImage = textToImage
+        self.imageEdit = imageEdit
+        self.upscale = upscale
+        self.negativePrompt = negativePrompt
+        self.editNegativePrompt = editNegativePrompt ?? negativePrompt
+        self.editStrength = editStrength
+        self.dimensionMultiple = dimensionMultiple
+        self.mask = mask
+        self.multipleSourceImages = multipleSourceImages
+        self.lora = lora
+    }
+}
+
+/// A locally installed image model as surfaced to the catalog / API. `id` is
+/// the exact bundle directory name and is what callers must send back in a
+/// request (exact-name resolution preserves the `-4bit`/`-8bit`/`-qN` quant
+/// suffix so co-installed quants never collapse onto each other).
+public struct ImageRequestLimits: Sendable, Hashable {
+    public let minimumSteps: Int
+    public let maximumSteps: Int?
+    public let fixedSteps: Int?
+    public let dimensionMultiple: Int
+    public let minimumDimension: Int
+    public let maximumDimension: Int?
+    public let maximumPixels: Int?
+    public let maximumImages: Int
+    public let maximumSourceImages: Int
+    public let formats: [String]
+    public let samplers: [String]
+    public let schedulers: [String]
+}
+
+public struct ImageModelInfo: Sendable, Equatable {
+    public let id: String
+    public let canonicalName: String?
+    public let displayName: String
+    /// Engine `ModelKind.rawValue`: "imageGen" | "imageEdit" | "imageUpscale" | "videoGen".
+    public let kind: String
+    /// `true` when the bundle is a complete, loadable scaffold.
+    public let ready: Bool
+    public let quantizationBits: Int?
+    public let defaultSteps: Int?
+    public let defaultGuidance: Float?
+    public let defaultWidth: Int?
+    public let defaultHeight: Int?
+    public let capabilities: ImageModelCapabilities
+    /// Human-readable reasons the bundle is not ready (missing components,
+    /// missing indexed shards). Surfaced to the UI as a "Download required" /
+    /// "incomplete" hint.
+    public let blockedReasons: [String]
+    public let totalBytes: UInt64
+    public let requestLimits: ImageRequestLimits?
+
+    public init(
+        id: String,
+        canonicalName: String?,
+        displayName: String,
+        kind: String,
+        ready: Bool,
+        quantizationBits: Int?,
+        defaultSteps: Int?,
+        defaultGuidance: Float?,
+        capabilities: ImageModelCapabilities,
+        blockedReasons: [String],
+        totalBytes: UInt64,
+        requestLimits: ImageRequestLimits? = nil,
+        defaultWidth: Int? = nil,
+        defaultHeight: Int? = nil
+    ) {
+        self.id = id
+        self.canonicalName = canonicalName
+        self.displayName = displayName
+        self.kind = kind
+        self.ready = ready
+        self.quantizationBits = quantizationBits
+        self.defaultSteps = defaultSteps
+        self.defaultGuidance = defaultGuidance
+        self.defaultWidth = defaultWidth
+        self.defaultHeight = defaultHeight
+        self.capabilities = capabilities
+        self.blockedReasons = blockedReasons
+        self.totalBytes = totalBytes
+        self.requestLimits = requestLimits
+    }
+}
+
+/// Parameters for a text→image generation. `nil` `steps`/`guidance` fall back
+/// to the model's registry defaults; `nil` `width`/`height` default to 1024.
+public struct ImageGenerationParameters: Sendable {
+    public var model: String
+    public var prompt: String
+    public var negativePrompt: String?
+    public var width: Int?
+    public var height: Int?
+    public var steps: Int?
+    public var guidance: Float?
+    public var seed: UInt64?
+    public var numImages: Int
+    public var seeds: [UInt64]?
+    public var batchSize: Int
+    public var outputFormat: ImageOutputFormat
+    public var sampler: String?
+    public var scheduler: String?
+    public var shift: Float?
+    public var previewInterval: Int?
+    public var previewMaxPixel: Int
+    public var adapters: [ImageAdapterParameters]
+
+    public init(
+        model: String,
+        prompt: String,
+        negativePrompt: String? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
+        steps: Int? = nil,
+        guidance: Float? = nil,
+        seed: UInt64? = nil,
+        numImages: Int = 1,
+        seeds: [UInt64]? = nil,
+        batchSize: Int = 1,
+        outputFormat: ImageOutputFormat = .png,
+        sampler: String? = nil, scheduler: String? = nil, shift: Float? = nil,
+        previewInterval: Int? = nil, previewMaxPixel: Int = 256, adapters: [ImageAdapterParameters] = []
+    ) {
+        self.model = model
+        self.prompt = prompt
+        self.negativePrompt = negativePrompt
+        self.width = width
+        self.height = height
+        self.steps = steps
+        self.guidance = guidance
+        self.seed = seed
+        self.numImages = numImages
+        self.seeds = seeds
+        self.batchSize = batchSize
+        self.outputFormat = outputFormat
+        self.sampler = sampler
+        self.scheduler = scheduler
+        self.shift = shift
+        self.previewInterval = previewInterval
+        self.previewMaxPixel = previewMaxPixel
+        self.adapters = adapters
+    }
+}
+
+/// Parameters for an image edit. Source/mask images are passed as raw bytes;
+/// the service stages them to temp files for the engine's URL-based API.
+/// `sourceImages` is the ordered multi-reference list (qwen-image-edit); a
+/// single-image edit is just a one-element array.
+public struct ImageEditParameters: Sendable {
+    public var model: String
+    public var prompt: String
+    public var sourceImages: [Data]
+    public var maskImage: Data?
+    public var negativePrompt: String?
+    public var strength: Float?
+    public var width: Int?
+    public var height: Int?
+    public var steps: Int?
+    public var guidance: Float?
+    public var seed: UInt64?
+    public var outputFormat: ImageOutputFormat
+    public var sampler: String?
+    public var scheduler: String?
+    public var shift: Float?
+    public var previewInterval: Int?
+    public var previewMaxPixel: Int
+    public var adapters: [ImageAdapterParameters]
+
+    public init(
+        model: String,
+        prompt: String,
+        sourceImages: [Data],
+        maskImage: Data? = nil,
+        negativePrompt: String? = nil,
+        strength: Float? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
+        steps: Int? = nil,
+        guidance: Float? = nil,
+        seed: UInt64? = nil,
+        outputFormat: ImageOutputFormat = .png,
+        sampler: String? = nil, scheduler: String? = nil, shift: Float? = nil,
+        previewInterval: Int? = nil, previewMaxPixel: Int = 256, adapters: [ImageAdapterParameters] = []
+    ) {
+        self.model = model
+        self.prompt = prompt
+        self.sourceImages = sourceImages
+        self.maskImage = maskImage
+        self.negativePrompt = negativePrompt
+        self.strength = strength
+        self.width = width
+        self.height = height
+        self.steps = steps
+        self.guidance = guidance
+        self.seed = seed
+        self.outputFormat = outputFormat
+        self.sampler = sampler
+        self.scheduler = scheduler
+        self.shift = shift
+        self.previewInterval = previewInterval
+        self.previewMaxPixel = previewMaxPixel
+        self.adapters = adapters
+    }
+}
+
+/// User-adjustable image generation/edit settings owned by the chat composer.
+/// These values are UI-native but map one-to-one to `ImageGenerationParameters`
+/// and `ImageEditParameters`.
+public struct ImageComposerSettings: Sendable, Codable, Equatable {
+    public var negativePrompt: String
+    public var steps: Int { didSet { stepsWereExplicitlySet = true } }
+    public var guidance: Double { didSet { guidanceWasExplicitlySet = true } }
+    public var width: Int { didSet { imageSizeWasExplicitlySet = true } }
+    public var height: Int { didSet { imageSizeWasExplicitlySet = true } }
+    public var seed: String
+    public var strength: Double { didSet { strengthWasExplicitlySet = true } }
+    /// Missing markers in legacy JSON preserve the stored values as explicit.
+    /// New initializer omissions are false; UI/programmatic assignments are true.
+    public var stepsWereExplicitlySet: Bool?
+    public var guidanceWasExplicitlySet: Bool?
+    public var imageSizeWasExplicitlySet: Bool?
+    public var strengthWasExplicitlySet: Bool?
+    public var aspectRatio: String?
+    public var resolution: String?
+    public var quality: String?
+    public var duration: String?
+    public var audio: Bool?
+    public var outputFormat: ImageOutputFormat?
+    public var imageCount: Int?
+
+    public init(
+        negativePrompt: String = "",
+        steps: Int? = nil,
+        guidance: Double? = nil,
+        width: Int? = nil,
+        height: Int? = nil,
+        seed: String = "",
+        strength: Double? = nil,
+        aspectRatio: String? = nil,
+        resolution: String? = nil,
+        quality: String? = nil,
+        duration: String? = nil,
+        audio: Bool? = nil,
+        outputFormat: ImageOutputFormat? = .png,
+        imageCount: Int? = 1
+    ) {
+        self.negativePrompt = negativePrompt
+        self.steps = steps ?? 20
+        self.guidance = guidance ?? 3.5
+        self.width = width ?? 512
+        self.height = height ?? 512
+        self.seed = seed
+        self.strength = strength ?? 0.75
+        self.stepsWereExplicitlySet = steps != nil
+        self.guidanceWasExplicitlySet = guidance != nil
+        self.imageSizeWasExplicitlySet = width != nil || height != nil
+        self.strengthWasExplicitlySet = strength != nil
+        self.aspectRatio = aspectRatio
+        self.resolution = resolution
+        self.quality = quality
+        self.duration = duration
+        self.audio = audio
+        self.outputFormat = outputFormat
+        self.imageCount = imageCount
+    }
+
+    public var normalizedNegativePrompt: String? {
+        let trimmed = negativePrompt.trimmingCharacters(in: .whitespacesAndNewlines)
+        return trimmed.isEmpty ? nil : trimmed
+    }
+
+    public var normalizedSeed: UInt64? {
+        let trimmed = seed.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        return UInt64(trimmed)
+    }
+
+    public var clampedSteps: Int {
+        min(50, max(1, steps))
+    }
+
+    public var clampedWidth: Int {
+        Self.clampDimension(width)
+    }
+
+    public var clampedHeight: Int {
+        Self.clampDimension(height)
+    }
+
+    public var clampedGuidance: Float {
+        Float(min(20, max(0, guidance)))
+    }
+
+    public var clampedStrength: Float {
+        Float(min(1, max(0, strength)))
+    }
+
+    public var effectiveOutputFormat: ImageOutputFormat {
+        outputFormat ?? .png
+    }
+
+    public var clampedImageCount: Int {
+        min(4, max(1, imageCount ?? 1))
+    }
+
+    var hasExplicitSteps: Bool { stepsWereExplicitlySet != false }
+    var hasExplicitGuidance: Bool { guidanceWasExplicitlySet != false }
+    var hasExplicitImageSize: Bool { imageSizeWasExplicitlySet != false }
+    var hasExplicitStrength: Bool { strengthWasExplicitlySet != false }
+
+    public mutating func applyModelDefaults(steps: Int?, guidance: Float?) {
+        if !hasExplicitSteps, let steps {
+            self.steps = min(50, max(1, steps))
+            stepsWereExplicitlySet = false
+        }
+        if !hasExplicitGuidance, let guidance {
+            self.guidance = Double(guidance)
+            guidanceWasExplicitlySet = false
+        }
+    }
+
+    mutating func applyMediaDefaults(_ constraints: MediaModelConstraints) {
+        aspectRatio = constraints.defaultAspectRatio ?? constraints.aspectRatios.first
+        resolution = constraints.defaultResolution ?? constraints.resolutions.first
+        quality = constraints.defaultQuality ?? constraints.qualities.first
+        duration = constraints.durations.first
+        audio = constraints.audioConfigurable ? constraints.supportsAudio : nil
+    }
+
+    private static func clampDimension(_ value: Int) -> Int {
+        let bounded = min(4096, max(256, value))
+        let rounded = (bounded / 16) * 16
+        return max(256, rounded)
+    }
+}
+
+/// Parameters for an upscale (SeedVR2).
+public struct ImageUpscaleParameters: Sendable {
+    public var model: String
+    public var sourceImage: Data
+    public var scale: Int
+    public var steps: Int?
+    public var seed: UInt64?
+    public var outputFormat: ImageOutputFormat
+
+    public init(
+        model: String,
+        sourceImage: Data,
+        scale: Int = 4,
+        steps: Int? = nil,
+        seed: UInt64? = nil,
+        outputFormat: ImageOutputFormat = .png
+    ) {
+        self.model = model
+        self.sourceImage = sourceImage
+        self.scale = scale
+        self.steps = steps
+        self.seed = seed
+        self.outputFormat = outputFormat
+    }
+}
+
+/// A single produced image: the saved file on disk plus the seed used.
+public struct GeneratedImage: Sendable, Equatable {
+    public let url: URL
+    public let seed: UInt64
+    public let effectiveParameters: ImageEffectiveParameters?
+
+    public init(url: URL, seed: UInt64, effectiveParameters: ImageEffectiveParameters? = nil) {
+        self.url = url
+        self.seed = seed
+        self.effectiveParameters = effectiveParameters
+    }
+}
+
+/// Progress event streamed from `ImageGenerationService`. Mirrors the engine's
+/// `ImageGenEvent` plus a server-side `loadingModel` lifecycle phase the UI
+/// shows before the first denoise step (first run pages weights from disk).
+public enum ImageGenerationEvent: Sendable {
+    /// Emitted once before generation when a model load/switch is in progress.
+    case loadingModel(model: String)
+    /// 1-indexed step counter for a determinate progress bar.
+    case step(step: Int, total: Int, etaSeconds: Double?)
+    /// Optional partial decode (not all models emit previews).
+    case preview(pngData: Data, step: Int)
+    /// A durable image within a still-running batch. Does not release the GPU lane.
+    case imageCompleted(image: GeneratedImage, index: Int)
+    /// Terminal success — all requested images saved to disk.
+    case completed(images: [GeneratedImage])
+    /// Terminal failure. `hfAuth == true` ⇒ a 401/403 → show "Add HF token".
+    case failed(message: String, hfAuth: Bool)
+    /// Terminal cancellation (user/system stopped the job).
+    case cancelled
+}
+
+/// Errors the bridge raises before/around the engine call. Maps cleanly to
+/// HTTP status codes in the `/v1/images/*` layer.
+public enum ImageGenerationError: Error, CustomStringConvertible, LocalizedError {
+    /// No bundle with the requested id exists under the image models root.
+    case modelNotFound(String)
+    /// The bundle exists but is missing required components/shards.
+    case modelIncomplete(model: String, reasons: [String])
+    /// The bundle resolved but has no recognized canonical family.
+    case unknownModel(String)
+    /// The requested operation doesn't match the model's kind.
+    case wrongModelKind(expected: String, actual: String)
+    case invalidRequest(String)
+    case engine(String)
+    case memoryAdmission(field: String, estimatedBytes: Int64, message: String)
+
+    public var errorDescription: String? { description }
+
+    public var description: String {
+        switch self {
+        case .modelNotFound(let m): return "image model not found: \(m)"
+        case .modelIncomplete(let m, let r):
+            return "image model incomplete: \(m) — \(r.joined(separator: ", "))"
+        case .unknownModel(let m): return "unknown image model: \(m)"
+        case .wrongModelKind(let e, let a):
+            return "wrong model kind: expected \(e), got \(a)"
+        case .invalidRequest(let s): return "invalid request: \(s)"
+        case .engine(let s): return s
+        case .memoryAdmission(let field, let bytes, let message):
+            return "Image memory admission refused by \(field) (estimated peak \(bytes) bytes): \(message)"
+        }
+    }
+}
+
+/// Sampling controls advertised by the installed bundle, without loading weights.
+struct ImageSamplingCapabilities: Sendable, Equatable {
+    var samplers: [String] = []
+    var schedulers: [String] = []
+    var supportsShift = false
+    var maxSourceImages = 1
+}

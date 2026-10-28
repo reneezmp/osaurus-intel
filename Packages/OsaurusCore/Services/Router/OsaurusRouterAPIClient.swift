@@ -537,8 +537,6 @@ actor OsaurusRouterAPIClient {
         )
     }
 
-    // Intel: cloud image/video generation comes with `W-media-generation`.
-    #if !OSAURUS_INTEL
     // MARK: - Cloud media
 
     func cloudMediaCatalog() async throws -> CloudMediaCatalogResponse {
@@ -606,8 +604,6 @@ actor OsaurusRouterAPIClient {
         let (data, response) = try await perform(request)
         try ensureOK(data: data, response: response)
     }
-
-    #endif
 
     func estimate(model: String, inputTokens: Int, maxTokens: Int) async throws -> OsaurusRouterEstimateResponse {
         struct Body: Encodable {

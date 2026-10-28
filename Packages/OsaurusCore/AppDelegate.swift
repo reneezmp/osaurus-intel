@@ -142,6 +142,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // showed every custom provider while silently omitting Osaurus.
             Task { @MainActor in
                 await RemoteProviderManager.shared.connectOsaurusRouterIfPossible()
+                // Upstream (`W-media-generation`): the Osaurus Cloud media
+                // catalog (signed, fails closed without an identity), then
+                // any paid video job that was still running at quit.
+                await MediaGenerationCoordinator.shared.refreshCloudCatalog()
+                await MediaGenerationCoordinator.shared.resumePendingJobs()
             }
         #endif
 

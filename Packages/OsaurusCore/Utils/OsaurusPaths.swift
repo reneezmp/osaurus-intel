@@ -164,6 +164,22 @@ public enum OsaurusPaths {
         knowledge().appendingPathComponent("write_log.sqlite")
     }
 
+    /// Output directory for generated images (upstream). On Intel only cloud
+    /// providers write here (Osaurus Cloud, Venice); the chat layer copies
+    /// the bytes into its artifact store.
+    public static func generatedImages() -> URL {
+        root().appendingPathComponent("generated-images", isDirectory: true)
+    }
+
+    public static func generatedVideos() -> URL {
+        root().appendingPathComponent("generated-videos", isDirectory: true)
+    }
+
+    /// Durable paid-video jobs, recovered after Stop or relaunch.
+    static func mediaJobsFile() -> URL {
+        runtime().appendingPathComponent("media-jobs.json", isDirectory: false)
+    }
+
     /// Archive directory used by the chat-history SQLite migration to retain
     /// the original per-session JSON files (never deleted).
     public static func sessionsArchive() -> URL {

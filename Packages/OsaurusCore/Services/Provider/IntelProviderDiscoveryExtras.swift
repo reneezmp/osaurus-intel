@@ -13,8 +13,10 @@
 //    on an OpenAI-compatible provider, an MCP `initialize` handshake at the
 //    base URL decides whether to replace the error with guidance pointing at
 //    Tools & MCP (`RemoteProviderMCPDetection`).
+//  - Venice (2026-10-28, `W-media-generation`): `/models?type=all` splits
+//    chat ids from the billable image/video catalog (`VeniceModelDiscovery`).
 //
-//  Both take a `transport` so tests never reach the network.
+//  All take a `transport` so tests never reach the network.
 //
 
 import Foundation
@@ -106,6 +108,41 @@ enum IntelProviderDiscoveryExtras {
         } catch {
             NSLog("[RemoteProviderManager] Fireworks catalog discovery failed, using /models only: \(error.localizedDescription)")
             return discovered
+        }
+    }
+
+    // MARK: - Venice (`W-media-generation`)
+
+    /// Upstream `RemoteProviderService.isVeniceProvider`: by exact host.
+    static func isVeniceProvider(_ provider: RemoteProvider) -> Bool {
+        provider.host.lowercased() == "api.venice.ai"
+    }
+
+    /// Upstream `fetchVeniceModelsDiscovery`: Venice's `/models?type=all`
+    /// also lists billable image/video models. Text ids go to chat; the
+    /// rest becomes the provider's media catalog. nil on any failure, so
+    /// the caller falls back to the plain `/models` probe (chat only).
+    static func fetchVeniceModelsDiscovery(
+        provider: RemoteProvider,
+        headers: [String: String],
+        transport: Transport = defaultTransport
+    ) async -> VeniceModelDiscovery? {
+        guard let url = provider.url(for: "/models?type=all") else { return nil }
+        var request = URLRequest(url: url)
+        request.httpMethod = "GET"
+        request.timeoutInterval = 20
+        for (name, value) in headers where isSafeHeader(name: name, value: value) {
+            request.setValue(value, forHTTPHeaderField: name)
+        }
+        do {
+            let (data, response) = try await transport(request)
+            guard let http = response as? HTTPURLResponse, (200...299).contains(http.statusCode) else {
+                return nil
+            }
+            return try VeniceModelDiscovery.decode(data, providerID: provider.id, providerName: provider.name)
+        } catch {
+            NSLog("[RemoteProviderManager] Venice media discovery failed, using /models only: \(error.localizedDescription)")
+            return nil
         }
     }
 

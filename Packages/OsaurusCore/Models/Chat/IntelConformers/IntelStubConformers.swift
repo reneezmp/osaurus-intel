@@ -179,6 +179,41 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         customProviderContextLengths[providerId]?[modelId]
     }
 
+    /// Billable image/video catalogs (upstream), kept apart from
+    /// `discoveredModels`, which stays chat-only. Filled by Venice discovery
+    /// (`IntelProviderDiscoveryExtras.fetchVeniceModelsDiscovery`).
+    @Published private(set) var mediaModelCatalogs: [UUID: [MediaModelInfo]] = [:]
+
+    struct CachedProviderMediaModels: Sendable {
+        let providerId: UUID
+        let providerName: String
+        let models: [MediaModelInfo]
+    }
+
+    /// Connected billable media models (upstream). They never enter chat
+    /// model lists; the media pickers and the `image`/`video` tools read them.
+    func cachedMediaModels() -> [CachedProviderMediaModels] {
+        configuration.providers.compactMap { provider in
+            guard
+                provider.enabled,
+                providerStates[provider.id]?.isConnected == true,
+                let models = mediaModelCatalogs[provider.id],
+                !models.isEmpty
+            else { return nil }
+            return CachedProviderMediaModels(
+                providerId: provider.id, providerName: provider.name, models: models)
+        }
+    }
+
+    func mediaModel(for target: MediaModelTarget) -> MediaModelInfo? {
+        guard case .remoteProvider(let providerID) = target.backend else { return nil }
+        return mediaModelCatalogs[providerID]?.first { $0.target.modelID == target.modelID }
+    }
+
+    func configuredProvider(id: UUID) -> RemoteProvider? {
+        configuration.providers.first { $0.id == id }
+    }
+
     private init() {
         self.configuration = RemoteProviderConfigurationStore.load()
         Self.refreshProviderNameCache(configuration.providers)
@@ -263,6 +298,18 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             default:
                 headers["Authorization"] = "Bearer \(key)"
             }
+        }
+        // Upstream: Venice lists image/video models next to chat models;
+        // they go to the media catalog, never into the chat list.
+        if IntelProviderDiscoveryExtras.isVeniceProvider(provider) {
+            if let discovery = await IntelProviderDiscoveryExtras.fetchVeniceModelsDiscovery(
+                provider: provider, headers: headers)
+            {
+                mediaModelCatalogs[provider.id] = discovery.mediaModels
+                return (discovery.chatModelIDs, [:])
+            }
+        } else if mediaModelCatalogs[provider.id] != nil {
+            mediaModelCatalogs.removeValue(forKey: provider.id)
         }
         guard let url = provider.url(for: "/models") else { return ([], [:]) }
         var req = URLRequest(url: url)
@@ -543,6 +590,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
     func removeProvider(id: UUID) {
         configuration.remove(id: id)
         providerStates.removeValue(forKey: id)
+        mediaModelCatalogs.removeValue(forKey: id)
         RemoteProviderConfigurationStore.save(configuration)
         RemoteProviderKeychain.deleteAPIKey(for: id)
         RemoteProviderKeychain.deleteOAuthTokens(for: id)

@@ -4294,3 +4294,27 @@ with `W-server-api`.
 Tests: upstream's `MCPProviderProbeServiceTests` and `MCPServerHubTests`.
 Package gate: 3,415 tests in 428 suites (6 known issues). Rosy: "MCP
 Services probe and health" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+
+### Media generation core (`W-media-generation`, part) — 2026-10-28
+
+Upstream's cloud media layer on Intel: `Services/MediaGeneration/` (types,
+coordinator, durable video jobs, quote receipts, file validation, the
+Osaurus Cloud and Venice clients), the Foundation-only image request types
+(`ImageGenerationTypes`, `ImageEffectiveParameters`), `InterruptToken` and
+`SubagentApprovalArguments`. The Router client's cloud media endpoints are
+no longer gated.
+
+Intel edits: the coordinator's local (MLX) branches throw "needs an Apple
+Silicon Mac"; the Venice client uses `IntelProviderDiscoveryExtras` for the
+host check and header filter; Intel's provider discovery asks Venice for
+`/models?type=all` and files image/video models in a separate media catalog
+(chat lists unchanged; any failure falls back to plain `/models`); launch
+refreshes the Cloud media catalog and resumes paid video jobs.
+`LocalVideoRequestPolicy` is re-scoped to `INC-mlx`. No UI yet: the chat
+composer, agent tools and Images panel follow. Manual:
+`docs/MEDIA_GENERATION_INTEL.md`.
+
+Tests: upstream's `MediaGenerationContractTests` (minus the
+`SubagentConfiguration` and two HTTP cases) and `IntelMediaGenerationTests`.
+Package gate: 3,432 tests in 430 suites (6 known issues).
+
