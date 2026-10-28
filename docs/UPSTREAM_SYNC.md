@@ -2170,6 +2170,8 @@ calling a sync complete.
 - The scheduler side already ran on Intel (`NextRunScheduler` started at
   launch, `LocalAgentBridge.scheduleNextRun`, the next-run table and
   `NextRunPanelView`); only the tools, the switch and the UI were missing.
+  (Correction 2026-10-28: `NextRunPanelView` was still an empty Intel stub;
+  it was un-stubbed with `W-agent-detail-redesign`.)
   `effectiveSelfSchedulingEnabled` had been hard-coded to `false`.
 - Ported upstream `Tools/Database/SchedulerTools.swift` unchanged and
   `AgentSettings.selfSchedulingEnabled` (default off). Enabled only for custom
@@ -4420,3 +4422,57 @@ WebKit profiles on macOS 14+, one shared profile on Ventura
 reset confirmations and the agent section; deleting an agent on Ventura
 does not wipe the shared data. Details: `docs/SUBAGENTS_INTEL.md`.
 
+
+### Agent detail redesign (`W-agent-detail-redesign` complete) — 2026-10-28
+
+Audit of the three upstream commits against Intel's agent page:
+
+- **#2052 (Database workspace, grouped tabs):** already on Intel
+  (`DatabaseWorkspaceView`, `AgentDetailTabRoute`, `DetailTabGroup`).
+- **#1656 (shared chrome):** ported. `Views/Agent/AgentDetailChrome.swift` is
+  upstream's file. Intel's agent page now uses it: the header bar, identity
+  label, header buttons, agent switcher, section card (replacing Intel's
+  private copy) and the grouped tab strip.
+  - Intel keeps the custom avatar in the header and has no template status.
+  - The switcher lists no remote agents, and the remote detail view stays
+    with `W-workspaces-sharing`; Intel's `RemoteAgent` has no `avatar`.
+- **#2072 (folder tabs, Tools tab restyle):** ported.
+  - The tab strip has folder-style group tabs over a tinted bar of sub-tab
+    pills, and remembers the last tab in each group.
+  - The Tools tab has a helper line instead of its title, "X of N assigned"
+    counts on the summary and filter chips, and context-aware empty states.
+  - Group badges count the whole group, matching what the master checkbox
+    toggles; there is a new test for this.
+- **Ventura fallbacks in the chrome:**
+  - The folder tab shape is `UnevenRoundedRectangle` on macOS 14+ and an
+    equivalent path on macOS 13.
+  - The scroll offset uses `onScrollGeometryChange` on macOS 15+ and a
+    named-coordinate preference on macOS 13–14.
+  - `onChange` uses the single-value form.
+- **Tools tab merge base:** Intel's picker was upstream #1406
+  (`0c4942294`) plus header comments, so only #2072 was applied on top,
+  three-way. Taking upstream's current file would have dropped per-agent
+  skills (see below).
+  - Also applied: #1878 (shape-drawn switches; native ones rendered blank
+    before the first table layout) and #1358 (per-tool availability badge
+    and tooltip).
+- **Skills stay per-agent on Intel.** Upstream #2050 (2026-07-16) made skills
+  a shared library and the Tools tab tools-only. The 0.24.3 triage skipped
+  it when Intel had no skills or agents; that reason no longer holds.
+  - Intel's picker keeps skill rows; its counts, chips and empty states
+    include them.
+  - #2050 and the later picker changes that build on it are tracked as
+    `W-tools-tab-sync`: #2089's wording, #2306's selection callback, #2835's
+    Apple app groups and #3174's skill allow-list card.
+- **Next Run panel:** `NextRunPanelView` was still an empty Intel stub from
+  before Intel had a scheduler. It is now upstream's panel, with Ventura's
+  symbol and `onChange` fixes.
+  - It is shown only when the agent's self-scheduling is on (upstream #1318).
+  - Upstream's "Scheduler inactive" warning is back, via
+    `NextRunScheduler.isRunning` (from #1855). Intel starts the loop at
+    launch unconditionally, so upstream's start-after-storage-unlock is not
+    needed.
+- **Not ported:** upstream's abilities context readout, which upstream shows
+  at the trailing edge of the Abilities sub-tab bar
+  (`AgentAbilityContextPreviewBar`, #2306). Intel's Abilities overview is
+  its own (`COV-intel-own`); this is noted on `W-cov-reaudit`.

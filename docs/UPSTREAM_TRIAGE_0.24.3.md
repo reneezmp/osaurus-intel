@@ -252,7 +252,7 @@ Range: `9124d696..4528b56f` (783 commits). 307 auto-eliminated (docs/CI/appcast/
 | f3fce103 | Enforce selected memory safety limits | SKIP | Memory safety limits for local model loading |
 | 504d174a | Improved AppleScript model search UX | SKIP | ModelDownloadView is local model management ui |
 | 12ff17c7 | MCP bearer 401 classification | PORT | MCP authentication handling; applies to intel |
-| 37bd1f03 | Universal skills library and tools-only agent UX | SKIP | Skills and agent subsystems entirely excluded |
+| 37bd1f03 | Universal skills library and tools-only agent UX | SKIP | Skills and agent subsystems entirely excluded. **Reopened 2026-10-28:** Intel has both now; tracked as `W-tools-tab-sync`. |
 | 61dad2f3 | Reduce redundant agent prompt context | DEFER | Agent prompts excluded; server context might benefit |
 | 5aafd739 | Handle empty voice transcriptions | SKIP | Voice/TTS system amputated from intel fork |
 | e99a2004 | Harden manual plugin receipt metadata | SKIP | Plugin CLI tool excluded from intel fork |

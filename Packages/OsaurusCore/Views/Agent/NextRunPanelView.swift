@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  NextRunPanelView.swift
 //  osaurus
@@ -7,6 +6,11 @@
 //  §9.4). Shows the agent's upcoming run, paused state, or idle state.
 //  The mode picker lives in the Configure tab's Scheduling section; a
 //  read-only chip here deep-links to it.
+//
+//  Intel (`W-agent-detail-redesign`): no longer gated. Until 2026-10-28 an
+//  empty stub stood here from the time Intel had no scheduler; the
+//  scheduler has run on Intel since M13 and self-scheduling since
+//  2026-09-29. Ventura edits: single-value `onChange`, `list.clipboard`.
 //
 
 import Foundation
@@ -127,6 +131,19 @@ public struct NextRunPanelView: View {
                             .font(.system(size: 11))
                             .foregroundColor(theme.secondaryText.opacity(0.85))
                             .lineLimit(1)
+                    }
+                    // A due row with a dead dispatch loop would otherwise
+                    // look like a working "Now" state forever (e.g. the
+                    // storage key wasn't unlocked at launch). Tell the user
+                    // why nothing fired and that Run now is the escape hatch.
+                    if entry.scheduledAt <= nowTick, !NextRunScheduler.shared.isRunning {
+                        Label(
+                            "Scheduler inactive — waiting for storage unlock. Use Run now to start manually.",
+                            systemImage: "exclamationmark.triangle.fill"
+                        )
+                        .font(.system(size: 11, weight: .medium))
+                        .foregroundColor(theme.warningColor)
+                        .lineLimit(2)
                     }
                 }
                 Spacer(minLength: 8)
@@ -613,18 +630,3 @@ public struct NextRunPanelView: View {
         absoluteFormatter.string(from: when)
     }
 }
-#else
-import SwiftUI
-
-/// Intel stub. The scheduler "next run" banner sits ABOVE the agent
-/// detail tab bar; rendering the full `AppleSiliconOnlyTab` here
-/// (with its expanding Spacers) swallowed half the detail view on
-/// Intel (Renée's 11.A.4 click-through, 2026-06-02). Since scheduling
-/// is amputated there's never a "next run" to show — render nothing so
-/// the tab bar + tab content sit at the top where they belong.
-struct NextRunPanelView: View {
-    let agentId: UUID
-    init(agentId: UUID) { self.agentId = agentId }
-    var body: some View { EmptyView() }
-}
-#endif

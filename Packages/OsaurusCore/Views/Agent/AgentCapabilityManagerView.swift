@@ -120,6 +120,7 @@ enum CapabilityRowBuilder {
         let plugins: [PluginManager.LoadedPlugin]
         let enabledToolNames: Set<String>
         let enabledSkillNames: Set<String>
+        let toolMode: ToolSelectionMode
         let searchQuery: String
         let filter: CapabilityFilter
         let expandedGroups: Set<String>
@@ -242,13 +243,17 @@ enum CapabilityRowBuilder {
                 continue
             }
 
-            // Informational groups were already dropped above, so every
-            // remaining group has real per-row toggles and the count
-            // reflects the agent's actual allowlist intersection.
+            // Counts reflect the FULL group, not the search/filter-reduced
+            // subset, so the badge always agrees with what the master
+            // checkbox toggles — `childrenOf` resolves bulk targets off the
+            // registry, and a badge computed from the rendered subset would
+            // claim "0/3" while the checkbox flips 21 tools. Intel still
+            // assigns skills per agent (upstream #2050 not ported), so a
+            // group's skills count too.
             let enabledCount =
-                toolsForRows.reduce(0) { $0 + (input.enabledToolNames.contains($1.name) ? 1 : 0) }
-                + skillsForRows.reduce(0) { $0 + (input.enabledSkillNames.contains($1.name) ? 1 : 0) }
-            let totalCount = toolsForRows.count + skillsForRows.count
+                tools.reduce(0) { $0 + (input.enabledToolNames.contains($1.name) ? 1 : 0) }
+                + skills.reduce(0) { $0 + (input.enabledSkillNames.contains($1.name) ? 1 : 0) }
+            let totalCount = tools.count + skills.count
 
             // Auto-expand groups when actively searching so matches are visible at a glance.
             let isExpanded = hasSearch || input.expandedGroups.contains(groupId)
@@ -270,12 +275,14 @@ enum CapabilityRowBuilder {
             guard isExpanded else { continue }
 
             for tool in toolsForRows {
+                let availability = availability(forTool: tool, input: input)
                 rows.append(
                     .tool(
                         id: "\(groupId)::tool::\(tool.name)",
                         name: tool.name,
                         description: tool.description,
                         enabled: input.enabledToolNames.contains(tool.name),
+                        availability: availability,
                         // Informational sources were filtered above; every
                         // tool that reaches this point is freely toggleable.
                         isAgentRestricted: false,
@@ -299,6 +306,25 @@ enum CapabilityRowBuilder {
             }
         }
         return rows
+    }
+
+    private static func availability(forTool tool: ToolRegistry.ToolEntry, input: Input) -> ToolAvailability {
+        let base = ToolRegistry.shared.availability(
+            forTool: tool.name,
+            agentAllowedNames: input.enabledToolNames
+        )
+        guard input.toolMode == .manual,
+            input.enabledToolNames.contains(tool.name),
+            base.reasonCodes == [.loadableViaCapabilitiesLoad]
+        else { return base }
+
+        return ToolAvailability(
+            toolName: tool.name,
+            runtime: base.runtime,
+            groupName: base.groupName,
+            reasonCodes: [.available],
+            detail: "enabled for this agent; sent every turn in manual mode"
+        )
     }
 
     private static func sortRank(_ source: CapabilitySource) -> Int {
@@ -446,7 +472,7 @@ struct AgentCapabilityManagerView: View {
     var body: some View {
         VStack(spacing: 0) {
             stickyHeader
-                .background(theme.secondaryBackground)
+                .background(theme.primaryBackground)
                 .overlay(
                     Rectangle()
                         .fill(theme.primaryBorder)
@@ -459,16 +485,24 @@ struct AgentCapabilityManagerView: View {
             // the underlying NSScrollView on every state change and snap the
             // scroll position to the top. The coordinator already diffs rows
             // in place via NSDiffableDataSource, so identity stays stable.
-            CapabilitiesTableRepresentable(
-                rows: rows,
-                theme: theme,
-                onToggleGroup: handleToggleGroup,
-                onEnableAllInGroup: { handleBulkToggle(in: $0, enable: true) },
-                onDisableAllInGroup: { handleBulkToggle(in: $0, enable: false) },
-                onToggleTool: handleToggleTool,
-                onToggleSkill: handleToggleSkill
-            )
-            .frame(maxWidth: .infinity, maxHeight: .infinity)
+            // The empty state overlays the (empty) table instead of replacing
+            // it for the same reason.
+            ZStack {
+                CapabilitiesTableRepresentable(
+                    rows: rows,
+                    theme: theme,
+                    onToggleGroup: handleToggleGroup,
+                    onEnableAllInGroup: { handleBulkToggle(in: $0, enable: true) },
+                    onDisableAllInGroup: { handleBulkToggle(in: $0, enable: false) },
+                    onToggleTool: handleToggleTool,
+                    onToggleSkill: handleToggleSkill
+                )
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+
+                if rows.isEmpty {
+                    emptyState
+                }
+            }
             .background(theme.primaryBackground)
         }
         .onAppear {
@@ -492,18 +526,20 @@ struct AgentCapabilityManagerView: View {
 
     private var stickyHeader: some View {
         VStack(alignment: .leading, spacing: 12) {
-            // Title row only renders in standalone (tab-host) mode. In compact
-            // mode the host sheet's header already supplies the title context.
+            // Helper-text row (standalone mode only) — mirrors the info line
+            // every other detail tab leads with; the tab strip already names
+            // the tab, so repeating a "Tools" title here was noise. In
+            // compact mode the host sheet's header supplies the context.
             if !compact {
                 HStack(spacing: 10) {
                     if onDismiss != nil { doneButton }
 
-                    Image(systemName: "wrench.and.screwdriver.fill")
-                        .font(.system(size: 12, weight: .semibold))
-                        .foregroundColor(theme.secondaryText)
-                    Text("Capabilities", bundle: .module)
-                        .font(.system(size: 14, weight: .semibold))
-                        .foregroundColor(theme.primaryText)
+                    Image(systemName: "info.circle")
+                        .font(.system(size: 10))
+                        .foregroundColor(theme.tertiaryText)
+                    Text("Pick which tools and skills this agent can use.", bundle: .module)
+                        .font(.system(size: 12))
+                        .foregroundColor(theme.tertiaryText)
 
                     Spacer()
                     summaryPill
@@ -517,12 +553,12 @@ struct AgentCapabilityManagerView: View {
                 if compact, onDismiss != nil { doneButton }
                 searchField
                 if compact { summaryPill }
+                filterChips
             }
 
             autoDiscoverCard
-            filterChips
         }
-        .padding(.horizontal, 20)
+        .padding(.horizontal, compact ? 20 : 24)
         .padding(.vertical, 14)
     }
 
@@ -542,14 +578,51 @@ struct AgentCapabilityManagerView: View {
         }
     }
 
+    /// Names of every tool the picker can actually toggle (informational /
+    /// built-in sources excluded). Drives the summary pill and chip counts
+    /// so "X of N" always refers to the same universe the list shows.
+    private var actionableToolNames: Set<String> {
+        var names: Set<String> = []
+        for tool in visibleTools {
+            let source = CapabilityRowBuilder.source(forTool: tool, pluginNameById: [:])
+            if !source.isInformational { names.insert(tool.name) }
+        }
+        return names
+    }
+
+    /// Assigned tools that still exist in the registry — stale allowlist
+    /// entries (e.g. from an uninstalled plugin) shouldn't inflate counts.
+    private var assignedActionableCount: Int {
+        actionableToolNames.intersection(enabledToolNames).count
+    }
+
+    /// Intel: skills are still assigned per agent, so the "X of N" counts
+    /// cover them alongside the tools (upstream #2050 made them a shared
+    /// library and dropped them from this picker).
+    private var actionableSkillNames: Set<String> { Set(visibleSkills.map(\.name)) }
+
+    private var assignedSkillCount: Int {
+        actionableSkillNames.intersection(enabledSkillNames).count
+    }
+
+    private func chipCount(for option: CapabilityFilter) -> Int {
+        switch option {
+        case .all: return actionableToolNames.count + actionableSkillNames.count
+        case .enabled: return assignedActionableCount + assignedSkillCount
+        case .toolsOnly: return actionableToolNames.count
+        case .skillsOnly: return actionableSkillNames.count
+        }
+    }
+
     private var summaryPill: some View {
-        let toolCount = enabledToolNames.count
-        let skillCount = enabledSkillNames.count
-        return HStack(spacing: 6) {
+        HStack(spacing: 6) {
             Image(systemName: "checkmark.seal.fill")
                 .font(.system(size: 9))
-            Text("\(toolCount) tool\(toolCount == 1 ? "" : "s") · \(skillCount) skill\(skillCount == 1 ? "" : "s")")
-                .font(.system(size: 10, weight: .medium))
+            Text(
+                "\(chipCount(for: .enabled)) of \(chipCount(for: .all)) assigned",
+                bundle: .module
+            )
+            .font(.system(size: 10, weight: .medium))
         }
         .foregroundColor(theme.accentColor)
         .padding(.horizontal, 8)
@@ -618,11 +691,11 @@ struct AgentCapabilityManagerView: View {
     private var autoDiscoverCard: some View {
         HStack(spacing: 12) {
             Image(systemName: toolMode == .auto ? "sparkles" : "list.bullet.rectangle")
-                .font(.system(size: 14, weight: .semibold))
+                .font(.system(size: 13, weight: .semibold))
                 .foregroundColor(toolMode == .auto ? theme.accentColor : theme.secondaryText)
-                .frame(width: 22, height: 22)
+                .frame(width: 26, height: 26)
                 .background(
-                    Circle().fill(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous).fill(
                         toolMode == .auto ? theme.accentColor.opacity(0.12) : theme.inputBackground
                     )
                 )
@@ -657,11 +730,11 @@ struct AgentCapabilityManagerView: View {
         }
         .padding(12)
         .background(
-            RoundedRectangle(cornerRadius: 10)
-                .fill(theme.inputBackground.opacity(0.7))
+            RoundedRectangle(cornerRadius: 10, style: .continuous)
+                .fill(theme.cardBackground)
                 .overlay(
-                    RoundedRectangle(cornerRadius: 10)
-                        .stroke(theme.inputBorder, lineWidth: 1)
+                    RoundedRectangle(cornerRadius: 10, style: .continuous)
+                        .stroke(theme.cardBorder, lineWidth: 1)
                 )
         )
     }
@@ -670,29 +743,111 @@ struct AgentCapabilityManagerView: View {
         HStack(spacing: 6) {
             ForEach(CapabilityFilter.allCases) { option in
                 let isSelected = option == filter
+                let count = chipCount(for: option)
                 Button {
                     filter = option
                 } label: {
-                    Text(LocalizedStringKey(option.label), bundle: .module)
-                        .font(.system(size: 11, weight: isSelected ? .semibold : .medium))
-                        .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText)
-                        .padding(.horizontal, 10)
-                        .padding(.vertical, 5)
-                        .background(
-                            Capsule()
-                                .fill(isSelected ? theme.accentColor.opacity(0.14) : theme.inputBackground)
-                                .overlay(
-                                    Capsule().strokeBorder(
-                                        isSelected ? theme.accentColor.opacity(0.25) : theme.inputBorder,
-                                        lineWidth: 1
-                                    )
+                    HStack(spacing: 4) {
+                        // Constant weight so chips don't change width (and
+                        // shift their neighbor) when the selection moves.
+                        Text(LocalizedStringKey(option.label), bundle: .module)
+                            .font(.system(size: 11, weight: .medium))
+                        Text("\(count)", bundle: .module)
+                            .font(.system(size: 10, weight: .medium, design: .rounded))
+                            .foregroundColor(isSelected ? theme.accentColor : theme.tertiaryText)
+                            .opacity(0.85)
+                    }
+                    .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText)
+                    .padding(.horizontal, 10)
+                    .padding(.vertical, 6)
+                    .background(
+                        Capsule(style: .continuous)
+                            .fill(isSelected ? theme.accentColor.opacity(0.14) : theme.inputBackground)
+                            .overlay(
+                                Capsule(style: .continuous).strokeBorder(
+                                    isSelected ? theme.accentColor.opacity(0.25) : theme.inputBorder,
+                                    lineWidth: 1
                                 )
-                        )
+                            )
+                    )
+                    .contentShape(Capsule(style: .continuous))
                 }
                 .buttonStyle(.plain)
+                .accessibilityLabel(option.label)
+                .accessibilityAddTraits(isSelected ? [.isSelected] : [])
             }
-            Spacer()
         }
+    }
+
+    // MARK: - Empty state
+
+    /// Overlay shown when the row builder yields nothing. The copy and
+    /// recovery action are contextual to WHY the list is empty — an active
+    /// search, the Assigned filter with nothing assigned, or a genuinely
+    /// empty tool registry.
+    private var emptyState: some View {
+        let trimmedSearch = searchText.trimmingCharacters(in: .whitespacesAndNewlines)
+        return VStack(spacing: 8) {
+            Image(systemName: trimmedSearch.isEmpty ? "wrench.and.screwdriver" : "magnifyingglass")
+                .font(.system(size: 24, weight: .regular))
+                .foregroundColor(theme.tertiaryText)
+                .padding(.bottom, 4)
+
+            if !trimmedSearch.isEmpty {
+                Text("Nothing matches \u{201C}\(trimmedSearch)\u{201D}", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text("Try a different name or description.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                emptyStateAction(label: L("Clear Search")) {
+                    searchText = ""
+                }
+            } else if filter == .enabled {
+                Text("Nothing assigned yet", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text("Switch to All and turn on the tools and skills this agent should use.", bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                emptyStateAction(label: L("Show All")) {
+                    filter = .all
+                }
+            } else {
+                Text(filter == .skillsOnly ? "No skills available" : "No tools available", bundle: .module)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(
+                    filter == .skillsOnly
+                        ? "Add skills in the Skills section of the main window."
+                        : "Install plugins or connect MCP servers to add tools.",
+                    bundle: .module)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
+        }
+        .multilineTextAlignment(.center)
+        .padding(24)
+    }
+
+    private func emptyStateAction(label: String, action: @escaping () -> Void) -> some View {
+        Button(action: action) {
+            Text(label)
+                .font(.system(size: 11, weight: .medium))
+                .foregroundColor(theme.accentColor)
+                .padding(.horizontal, 12)
+                .padding(.vertical, 6)
+                .background(
+                    Capsule(style: .continuous)
+                        .fill(theme.accentColor.opacity(0.12))
+                        .overlay(
+                            Capsule(style: .continuous)
+                                .strokeBorder(theme.accentColor.opacity(0.25), lineWidth: 1)
+                        )
+                )
+        }
+        .buttonStyle(.plain)
+        .padding(.top, 6)
     }
 
     // MARK: - Rows
@@ -705,6 +860,7 @@ struct AgentCapabilityManagerView: View {
                 plugins: plugins,
                 enabledToolNames: enabledToolNames,
                 enabledSkillNames: enabledSkillNames,
+                toolMode: toolMode,
                 searchQuery: searchText,
                 filter: filter,
                 expandedGroups: expandedGroups

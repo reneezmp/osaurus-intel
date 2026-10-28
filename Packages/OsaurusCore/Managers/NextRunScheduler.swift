@@ -102,6 +102,11 @@ public final class NextRunScheduler {
         fireEarlyWake()
     }
 
+    /// True while the dispatch loop is alive (upstream #1855). The Next Run
+    /// panel uses this to warn when a due row can't fire because the loop
+    /// never started. Intel starts the loop unconditionally at launch.
+    public var isRunning: Bool { tickerTask != nil }
+
     /// Wake the loop early — call this from `LocalAgentBridge`
     /// `scheduleNextRun` / `cancelNextRun` so the next sleep cycle picks
     /// up the new row immediately rather than waiting for the 60s

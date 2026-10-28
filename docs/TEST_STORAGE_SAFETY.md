@@ -211,6 +211,14 @@ After the run:
   key's `mdat` was unchanged. These are the app's Insights activity log and
   Knowledge index. Use `lsof` on any in-window hit before concluding; if the
   test helper (or nothing) holds the file, treat it as a failed run.
+  **2026-10-28 (agent detail gate):** the app relaunched at 17:26:59 (new
+  pid; `ps -o lstart= -p $(pgrep -f /Applications/osaurus.app)`) during
+  the build, and its launch wrote ~20 files (`last-exit-verdict.json`,
+  `.termination-forensics-active`, chat history, memory, activity, sandbox
+  config, `cache/model-sizes.json`) between 17:27:02 and 17:27:45. Tests
+  started at 17:28:28 and nothing changed in the test window. The gate
+  script prints the "tests started" time: compare each hit's time against
+  it before attributing it.
 
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`

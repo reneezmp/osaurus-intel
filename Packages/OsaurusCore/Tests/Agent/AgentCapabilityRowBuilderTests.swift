@@ -111,6 +111,7 @@ struct AgentCapabilityRowBuilderTests {
             plugins: [],
             enabledToolNames: [],
             enabledSkillNames: [],
+            toolMode: .auto,
             searchQuery: "",
             filter: .all,
             // Force every group to expand so build emits child rows we can
@@ -165,6 +166,7 @@ struct AgentCapabilityRowBuilderTests {
             plugins: [],
             enabledToolNames: [],
             enabledSkillNames: [],
+            toolMode: .auto,
             searchQuery: "",
             filter: .all,
             expandedGroups: []
@@ -204,6 +206,7 @@ struct AgentCapabilityRowBuilderTests {
             plugins: [],
             enabledToolNames: [],
             enabledSkillNames: [],
+            toolMode: .auto,
             searchQuery: "",
             filter: .all,
             // Even with the group force-expanded, the row builder must
@@ -218,7 +221,7 @@ struct AgentCapabilityRowBuilderTests {
             switch row {
             case .groupHeader(let id, _, _, _, _, _, _, _, _):
                 #expect(id != "src:builtin", "Informational built-in group leaked into rows")
-            case .tool(let id, _, _, _, _, _, _):
+            case .tool(let id, _, _, _, _, _, _, _):
                 #expect(
                     !id.hasPrefix("src:builtin::"),
                     "Tool \(id) under the hidden built-in group leaked into rows"
@@ -227,6 +230,67 @@ struct AgentCapabilityRowBuilderTests {
                 continue
             }
         }
+    }
+
+    // MARK: - Count semantics
+
+    /// Group header counts must reflect the FULL group, not the
+    /// search/filter-reduced subset — the master checkbox acts on the whole
+    /// group via `childrenOf` (registry-based), so a badge computed from the
+    /// rendered subset would disagree with what the checkbox toggles.
+    ///
+    /// Intel: upstream's version registers two MCP tools in the shared
+    /// registry; Intel has no `registerDiscoveredTools`, and skills are still
+    /// assigned per agent here (upstream #2050 not ported), so the same rule
+    /// is pinned on a standalone-skills group, which needs no registry.
+    @Test func groupCountsIgnoreSearchAndAssignedFilter() {
+        let alpha = makeSkill(name: "alpha", pluginId: nil)
+        let beta = makeSkill(name: "beta", pluginId: nil)
+
+        func build(search: String, filter: CapabilityFilter) -> [CapabilityRow] {
+            CapabilityRowBuilder.build(
+                CapabilityRowBuilder.Input(
+                    visibleTools: [],
+                    visibleSkills: [alpha, beta],
+                    plugins: [],
+                    enabledToolNames: [],
+                    enabledSkillNames: [beta.name],
+                    toolMode: .auto,
+                    searchQuery: search,
+                    filter: filter,
+                    // Expanded so the filtered child rows are emitted too.
+                    expandedGroups: ["src:standalone-skills"]
+                )
+            )
+        }
+        func header(_ rows: [CapabilityRow]) -> (enabled: Int, total: Int)? {
+            rows.compactMap { row -> (enabled: Int, total: Int)? in
+                guard case .groupHeader(_, _, _, let enabledCount, let totalCount, _, _, _, _) = row else {
+                    return nil
+                }
+                return (enabledCount, totalCount)
+            }.first
+        }
+        func skillRowIds(_ rows: [CapabilityRow]) -> [String] {
+            rows.compactMap { row -> String? in
+                guard case .skill(let id, _, _, _, _, _, _) = row else { return nil }
+                return id
+            }
+        }
+
+        // Search matches only `alpha`; only `beta` is assigned. The header
+        // must still report 1 of 2 — the full group.
+        let searched = build(search: "alpha", filter: .all)
+        #expect(header(searched)?.enabled == 1, "Enabled count should cover the full group")
+        #expect(header(searched)?.total == 2, "Total count should cover the full group")
+        // Only the matching row is emitted, though.
+        #expect(skillRowIds(searched) == ["src:standalone-skills::skill::\(alpha.id.uuidString)"])
+
+        // Assigned filter: same full-group counts, only `beta` emitted.
+        let assigned = build(search: "", filter: .enabled)
+        #expect(header(assigned)?.enabled == 1)
+        #expect(header(assigned)?.total == 2)
+        #expect(skillRowIds(assigned) == ["src:standalone-skills::skill::\(beta.id.uuidString)"])
     }
 
     // MARK: - Fixtures

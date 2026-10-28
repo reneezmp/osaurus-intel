@@ -47,6 +47,7 @@ enum CapabilityRow: Equatable, Identifiable {
         name: String,
         description: String,
         enabled: Bool,
+        availability: ToolAvailability,
         isAgentRestricted: Bool,
         catalogTokens: Int,
         estimatedTokens: Int
@@ -64,7 +65,7 @@ enum CapabilityRow: Equatable, Identifiable {
     var id: String {
         switch self {
         case .groupHeader(let id, _, _, _, _, _, _, _, _): return "gh-\(id)"
-        case .tool(let id, _, _, _, _, _, _): return "tool-\(id)"
+        case .tool(let id, _, _, _, _, _, _, _): return "tool-\(id)"
         case .skill(let id, _, _, _, _, _, _): return "skill-\(id)"
         }
     }
@@ -263,14 +264,33 @@ extension CapabilitiesTableRepresentable {
         // MARK: - Update Paths (Private)
 
         private func hasContentChanges(newLookup: [String: CapabilityRow]) -> Bool {
-            for id in rowIds {
-                if newLookup[id] != rowLookup[id] { return true }
+            for id in rowIds where newLookup[id] != rowLookup[id] {
+                return true
             }
             return false
         }
 
+        /// Bounded retry for reconfigures that land before the table's first
+        /// in-window layout. The Capabilities tab hydrates its enabled-state
+        /// sets synchronously in `onAppear`, which fires before AppKit lays
+        /// the table out — at that instant `visibleRowIndices()` is empty, so
+        /// without a retry the correction is silently dropped and cells keep
+        /// their stale all-off payload until scrolling re-dequeues them.
+        private var pendingReconfigureRetries = 0
+
         private func reconfigureVisibleCells() {
-            for row in visibleRowIndices() {
+            let visible = visibleRowIndices()
+            guard !visible.isEmpty else {
+                if pendingReconfigureRetries < 5 {
+                    pendingReconfigureRetries += 1
+                    DispatchQueue.main.async { [weak self] in
+                        self?.reconfigureVisibleCells()
+                    }
+                }
+                return
+            }
+            pendingReconfigureRetries = 0
+            for row in visible {
                 reconfigureCell(at: row)
             }
         }
@@ -383,9 +403,9 @@ extension CapabilitiesTableRepresentable {
                     let enabledCount,
                     let totalCount,
                     let isExpanded,
-                    let toolCount,
-                    let skillCount,
-                    let hasRoutes
+                    _,
+                    _,
+                    _
                 ) = row, let theme = ctx?.theme
             else { return nil }
             return ThemedContent(
@@ -396,9 +416,6 @@ extension CapabilitiesTableRepresentable {
                     enabledCount: enabledCount,
                     totalCount: totalCount,
                     isExpanded: isExpanded,
-                    toolCount: toolCount,
-                    skillCount: skillCount,
-                    hasRoutes: hasRoutes,
                     isHovered: isHovered,
                     onToggle: { [weak self] in self?.ctx?.onToggleGroup?(id) },
                     onEnableAll: { [weak self] in self?.ctx?.onEnableAllInGroup?(id) },
@@ -417,6 +434,7 @@ extension CapabilitiesTableRepresentable {
                     let name,
                     let description,
                     let enabled,
+                    let availability,
                     let isAgentRestricted,
                     let catalogTokens,
                     let estimatedTokens
@@ -428,6 +446,7 @@ extension CapabilitiesTableRepresentable {
                     name: name,
                     description: description,
                     enabled: enabled,
+                    availability: availability,
                     isAgentRestricted: isAgentRestricted,
                     catalogTokens: catalogTokens,
                     estimatedTokens: estimatedTokens,
@@ -541,8 +560,11 @@ extension CapabilitiesTableRepresentable {
         private static func estimatedHeight(for row: CapabilityRow) -> CGFloat {
             switch row {
             case .groupHeader: return 44
-            case .tool: return 56
-            case .skill: return 56
+            // name row (~15) + spacing + 2-line description (~24) + 20pt
+            // vertical padding. The former third line (availability detail)
+            // moved into the tooltip (#2072).
+            case .tool: return 62
+            case .skill: return 62
             }
         }
     }
@@ -563,16 +585,14 @@ struct ThemedContent<C: View>: View {
 
 // MARK: - Cell SwiftUI Views
 
-/// Group header cell with tool+skill breakdown, expand/collapse, and All/None controls.
+/// Group header cell: chevron + icon tile + name, with the assignment
+/// cluster (count badge + tri-state master checkbox) on the trailing edge.
 struct GroupHeaderCell: View {
     let name: String
     let icon: String
     let enabledCount: Int
     let totalCount: Int
     let isExpanded: Bool
-    let toolCount: Int
-    let skillCount: Int
-    let hasRoutes: Bool
     let isHovered: Bool
     let onToggle: () -> Void
     let onEnableAll: () -> Void
@@ -605,9 +625,35 @@ struct GroupHeaderCell: View {
                 .frame(width: 12)
                 .rotationEffect(.degrees(isExpanded ? 90 : 0))
 
+            // Rounded-square icon tile — same tile language as the Tools
+            // manager's plugin cards and the Abilities overview cards.
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(isHovered || enabledCount > 0 ? theme.accentColor : theme.secondaryText)
+                .frame(width: 26, height: 26)
+                .background(
+                    RoundedRectangle(cornerRadius: 6, style: .continuous)
+                        .fill(
+                            enabledCount > 0
+                                ? theme.accentColor.opacity(0.12) : theme.inputBackground
+                        )
+                )
+
+            Text(name)
+                .font(.system(size: 12, weight: .semibold))
+                .foregroundColor(theme.primaryText)
+                .lineLimit(1)
+
+            Spacer()
+
+            // Assignment cluster: the badge says how many are on, the
+            // checkbox right next to it acts on exactly that set — trailing
+            // placement keeps the two visually paired.
+            CountBadge(enabled: enabledCount, total: totalCount)
+
             // Tri-state master toggle. Tap = enable-all when none/some are on,
-            // disable-all when all are on. Larger hit target via padding so users
-            // can hit it without precision.
+            // disable-all when all are on. Acts on the FULL group (registry),
+            // matching the badge, even while search or filters hide rows.
             Button {
                 if allEnabled {
                     onDisableAll()
@@ -618,77 +664,61 @@ struct GroupHeaderCell: View {
                 Image(systemName: masterIcon)
                     .font(.system(size: 14, weight: .medium))
                     .foregroundColor(masterIconColor)
-                    .frame(width: 18, height: 18)
+                    .frame(width: 22, height: 22)
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
             .help(allEnabled ? Text(localized: "Disable all") : Text(localized: "Enable all"))
-
-            Image(systemName: icon)
-                .font(.system(size: 11))
-                .foregroundColor(isHovered ? theme.accentColor : theme.secondaryText)
-
-            VStack(alignment: .leading, spacing: 2) {
-                Text(name)
-                    .font(.system(size: 12, weight: .semibold))
-                    .foregroundColor(theme.primaryText)
-                    .lineLimit(1)
-
-                HStack(spacing: 4) {
-                    if toolCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "wrench.and.screwdriver")
-                                .font(.system(size: 8))
-                            Text("\(toolCount)", bundle: .module)
-                                .font(.system(size: 9, weight: .medium))
-                        }
-                        .foregroundColor(theme.tertiaryText)
-                    }
-
-                    if toolCount > 0 && (skillCount > 0 || hasRoutes) {
-                        Text("+")
-                            .font(.system(size: 8))
-                            .foregroundColor(theme.tertiaryText)
-                    }
-
-                    if skillCount > 0 {
-                        HStack(spacing: 2) {
-                            Image(systemName: "lightbulb")
-                                .font(.system(size: 8))
-                            Text("\(skillCount)", bundle: .module)
-                                .font(.system(size: 9, weight: .medium))
-                        }
-                        .foregroundColor(theme.tertiaryText)
-                    }
-
-                    if hasRoutes {
-                        if skillCount > 0 || toolCount > 0 {
-                            Text("+")
-                                .font(.system(size: 8))
-                                .foregroundColor(theme.tertiaryText)
-                        }
-                        HStack(spacing: 2) {
-                            Image(systemName: "network")
-                                .font(.system(size: 8))
-                            Text("Routes", bundle: .module)
-                                .font(.system(size: 9, weight: .medium))
-                        }
-                        .foregroundColor(theme.tertiaryText)
-                    }
-                }
-            }
-
-            Spacer()
-
-            CountBadge(enabled: enabledCount, total: totalCount)
+            .accessibilityLabel(
+                allEnabled
+                    ? Text(localized: "Disable all") : Text(localized: "Enable all")
+            )
+            .accessibilityAddTraits(allEnabled ? [.isSelected] : [])
         }
         .padding(.horizontal, 12)
-        .padding(.vertical, 12)
+        .padding(.vertical, 9)
         .contentShape(Rectangle())
         // Tap on the row body (outside the master button) toggles expansion only;
         // the master button has its own hit area for select-all-or-none.
         .onTapGesture { onToggle() }
         .modifier(HoverRowStyle(isHovered: isHovered, showAccent: true))
+        // Outer gutter: insets the hover wash from the table edges so the
+        // row content aligns with the header's 24pt gutter.
+        .padding(.horizontal, 12)
+    }
+}
+
+/// Pure-SwiftUI switch for rows hosted inside the capabilities NSTableView.
+/// The stock `SwitchToggleStyle` is backed by an AppKit `NSSwitch`, which
+/// renders as a knobless solid capsule whenever its hosting view is created
+/// before the table's first layout or re-attached by a row diff (group
+/// expand/collapse), and only heals when different content is dequeued into
+/// the cell. Drawing the switch with shapes sidesteps the AppKit control
+/// entirely, so it renders correctly at any point in the cell lifecycle.
+struct CapabilitySwitch: View {
+    let isOn: Bool
+    let tint: Color
+    var disabled: Bool = false
+    let onToggle: () -> Void
+
+    var body: some View {
+        Button(action: { if !disabled { onToggle() } }) {
+            Capsule()
+                .fill(isOn ? tint : Color.primary.opacity(0.2))
+                .frame(width: 26, height: 15)
+                .overlay(alignment: isOn ? .trailing : .leading) {
+                    Circle()
+                        .fill(Color.white)
+                        .frame(width: 11, height: 11)
+                        .padding(2)
+                        .shadow(color: .black.opacity(0.25), radius: 0.5, y: 0.5)
+                }
+                .animation(.easeInOut(duration: 0.15), value: isOn)
+        }
+        .buttonStyle(.plain)
+        .disabled(disabled)
+        .opacity(disabled ? 0.4 : 1.0)
+        .frame(width: 36)
     }
 }
 
@@ -697,6 +727,7 @@ struct ToolRowCell: View {
     let name: String
     let description: String
     let enabled: Bool
+    let availability: ToolAvailability
     let isAgentRestricted: Bool
     let catalogTokens: Int
     let estimatedTokens: Int
@@ -712,12 +743,12 @@ struct ToolRowCell: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Toggle("", isOn: Binding(get: { enabled }, set: { _ in onToggle() }))
-                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
-                .scaleEffect(0.7)
-                .frame(width: 36)
-                .disabled(isAgentRestricted)
-                .opacity(isAgentRestricted ? 0.4 : 1.0)
+            CapabilitySwitch(
+                isOn: enabled,
+                tint: theme.accentColor,
+                disabled: isAgentRestricted,
+                onToggle: onToggle
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -729,6 +760,8 @@ struct ToolRowCell: View {
                     if isAgentRestricted {
                         SmallCapsuleBadge(text: "Chat Mode only")
                     }
+
+                    ToolAvailabilityBadge(availability: availability)
                 }
                 Text(description)
                     .font(.system(size: 10))
@@ -755,10 +788,15 @@ struct ToolRowCell: View {
             if !isAgentRestricted { onToggle() }
         }
         .modifier(HoverRowStyle(isHovered: isHovered, showAccent: enabled && !isAgentRestricted))
+        // Outer gutter: matches the group header inset so hover washes and
+        // content share one gutter with the sticky header above.
+        .padding(.horizontal, 12)
+        // The availability detail used to be a third text line on every row;
+        // it's tooltip-only now, keeping the row to name + description.
         .help(
             isAgentRestricted
                 ? "Restricted for this agent."
-                : ""
+                : availability.displayDetail
         )
     }
 }
@@ -778,10 +816,11 @@ struct SkillRowCell: View {
 
     var body: some View {
         HStack(spacing: 12) {
-            Toggle("", isOn: Binding(get: { enabled }, set: { _ in onToggle() }))
-                .toggleStyle(SwitchToggleStyle(tint: theme.accentColor))
-                .scaleEffect(0.7)
-                .frame(width: 36)
+            CapabilitySwitch(
+                isOn: enabled,
+                tint: theme.accentColor,
+                onToggle: onToggle
+            )
 
             VStack(alignment: .leading, spacing: 3) {
                 HStack(spacing: 6) {
@@ -817,6 +856,8 @@ struct SkillRowCell: View {
         .contentShape(Rectangle())
         .onTapGesture { onToggle() }
         .modifier(HoverRowStyle(isHovered: isHovered, showAccent: enabled))
+        // Same outer gutter as the tool rows (#2072).
+        .padding(.horizontal, 12)
     }
 }
 

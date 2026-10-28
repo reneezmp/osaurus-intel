@@ -2086,3 +2086,40 @@ don't mind signing in to (or none).
       agent (shared profile); confirm, and the session disappears.
 - [ ] **Off:** turn Browser Use off; the agent no longer offers it.
 
+
+## Agent page redesign (2026-10-28)
+
+Details: `UPSTREAM_SYNC.md`, "Agent detail redesign". Use a test agent.
+
+- [ ] **Header:** Agents → (a custom agent). The top bar shows "‹ Agents",
+      the avatar (your custom image if it has one), name and description,
+      and round Share and Delete buttons. Share opens the share sheet;
+      Delete asks first (cancel it).
+- [ ] **Switcher:** click the name: a "Switch Agent" list of your agents
+      opens with a checkmark on this one; pick another and its page opens.
+- [ ] **Tabs:** the top row is General / Abilities / Connections /
+      Automation / Memory as folder tabs; the selected one opens into a
+      tinted bar of smaller pills (Configure / Appearance, …). Automation
+      shows no bar (one tab). Hover a pill: a tooltip says what it holds.
+- [ ] **Remembers:** in Abilities pick Tools, switch to Memory, then back
+      to Abilities: Tools is still selected.
+- [ ] **Narrow window:** shrink the window until the tabs don't fit: an
+      arrow and a fade appear at the edge; scroll and the other side gets
+      one. Nothing draws blank on Ventura (tab corners are rounded on top).
+- [ ] **Tools tab:** an info line instead of a "Capabilities" title; the
+      pill says "X of N assigned"; the All / Enabled / Tools / Skills chips
+      show counts; switches in the table draw with a knob right away
+      (before scrolling); hovering a tool shows where it comes from.
+- [ ] **Group counts:** search for one tool of a group with several: the
+      group's badge still counts the whole group, and its checkbox turns the
+      whole group on or off.
+- [ ] **Empty states:** search for "zzzz": "Nothing matches" with Clear
+      Search. Choose Enabled on an agent with nothing on: "Nothing assigned
+      yet" with Show All.
+- [ ] **Skills still per agent:** turn a skill off in Tools, ask the agent
+      about it: it no longer has it. Turn it back on.
+- [ ] **Next Run:** turn self-scheduling on for the agent (Configure). A
+      Next Run banner appears above the tabs (idle at first). Ask the agent
+      to schedule its next run in 10 minutes: the banner shows the time;
+      Run now starts it in a fresh chat. Turn self-scheduling off: the
+      banner disappears.

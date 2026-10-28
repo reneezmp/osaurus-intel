@@ -16,12 +16,12 @@ Agents are the core of Osaurus. Each agent has its own system prompt, default mo
 
 ## An agent's settings
 
-An agent's page has five groups:
+An agent's page opens with a header: **‹ Agents** goes back, clicking the agent's name lists your other agents to switch to, and the round buttons share or delete it. Below it are five group tabs; the selected group opens into a row of its pages and remembers the last one you used:
 
 - **General** — Configure (name, description, instructions, default model, temperature, max tokens) and Appearance (avatar, greeting, quick actions, theme).
-- **Abilities** — Overview (what the agent may do), Tools (which tools it can use, Auto or Manual selection).
+- **Abilities** — Overview (what the agent may do), Tools (which tools and skills it can use, Auto or Manual selection; counts show how many are assigned, and hovering a tool shows where it comes from).
 - **Connections** — Network (Bonjour discovery on your local network); Remote Connections and Channels belong to features not in this build.
-- **Automation** — the agent's schedules and watchers.
+- **Automation** — the agent's schedules and watchers. With Self-scheduling on, a **Next Run** banner above the tabs shows the agent's next wake-up, with Run now, Pause and editing its instructions.
 - **Memory** — the agent's memory and its private Database.
 
 ## Per-agent abilities (Abilities → Overview)

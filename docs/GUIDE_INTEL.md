@@ -39,6 +39,11 @@ Intel's code and docs:
 - **Browser Use** (2026-10-28, `W-browser-use`): listed among the Agents
   abilities and as working in What runs on this Intel Mac (with the shared
   profile on macOS 13); Computer Use stays under "not in this build yet".
+- **Agent page** (2026-10-28, `W-agent-detail-redesign`): the Agents topic
+  describes the header (back, switcher, Share, Delete), the folder-style
+  group tabs that remember their last page, the Tools counts, and the Next
+  Run banner shown when Self-scheduling is on. Skills stay per agent here
+  (upstream's shared skills library is `W-tools-tab-sync`).
 - **New:** `guide-intel-mac.md`, "What runs on this Intel Mac": what needs
   Apple Silicon, what isn't in this build yet, and what works the same. Other
   topics point to it.
