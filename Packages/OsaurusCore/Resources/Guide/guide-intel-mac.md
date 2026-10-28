@@ -12,7 +12,7 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 - **Local models** (MLX downloads, on-device inference, speculative decoding, the Local Models tab). Use Osaurus Cloud, a cloud provider, or Claude Code instead.
 - **Sandbox** (the Linux container for running code). Agents with a working folder run shell commands on the Mac itself, with approval.
-- **Local image and video generation.**
+- **Local image and video generation.** Cloud images and video work (Osaurus Cloud or Venice); see the Images and Video topic.
 
 ## Not in this build yet
 
@@ -29,4 +29,4 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 ## What works the same
 
-Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), themes, credits, identity, Insights, Shortcuts and Siri.
+Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), cloud images and video, themes, credits, identity, Insights, Shortcuts and Siri.

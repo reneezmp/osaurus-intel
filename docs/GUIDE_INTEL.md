@@ -24,10 +24,14 @@ The guide is what the Orchestrator says about the app, so every topic must be
 true of this build. Upstream's 28 topics were checked one by one against
 Intel's code and docs:
 
-- **Left out** (feature not on Intel): Local Models, Images, Channels,
+- **Left out** (feature not on Intel): Local Models, Channels,
   Automation (Computer Use / Browser / Sandbox), Workspaces, Declarative
   Configuration, and the 4,500-word Settings catalog (`find` searches Intel's
   live `SettingsSearchIndex` instead).
+- **Images** (2026-10-28, `W-media-generation`): `guide-images.md`,
+  "Images and Video", written from Intel facts (Osaurus Cloud and Venice,
+  the chat picker, the agent switches, video recovery); Agents, Insights and
+  What runs on this Intel Mac now mention it.
 - **New:** `guide-intel-mac.md`, "What runs on this Intel Mac": what needs
   Apple Silicon, what isn't in this build yet, and what works the same. Other
   topics point to it.

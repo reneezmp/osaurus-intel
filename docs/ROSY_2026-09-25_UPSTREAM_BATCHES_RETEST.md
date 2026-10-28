@@ -2022,3 +2022,22 @@ provider with an API key.
 - [ ] **Switch back:** picking a chat model restores the normal chips, and
       the chat answers normally. The chat's title is a normal title.
 
+## Image and video agent tools (2026-10-28)
+
+Details: `MEDIA_GENERATION_INTEL.md`, "Agent tools". **Costs money** like
+the chat section above. Use a test agent, not a real one.
+
+- [ ] **Switches:** Agents → (a custom agent) → Abilities → Overview shows an
+      **Images & Video** section with Image Generation and Video Generation
+      switches; turning one on shows the model and permission menus (readable
+      on Ventura). The Orchestrator's page says it doesn't have them.
+- [ ] **Image:** with Image Generation on, ask the agent "make a small
+      picture of a lighthouse". An approval card names the provider and price;
+      approve; the reply shows the image as a file card.
+- [ ] **Deny:** set the image permission to Deny and ask again: the agent
+      says it isn't allowed, nothing is generated.
+- [ ] **Off:** turn the switch off; the agent no longer offers to make
+      images (or says the tool is off).
+- [ ] **Guide:** ask the Orchestrator "how do I make images?"; it describes
+      Osaurus Cloud / Venice and the agent switches.
+

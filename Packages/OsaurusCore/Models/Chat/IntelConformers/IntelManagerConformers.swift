@@ -840,6 +840,19 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         return agent.settings.speakEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
+    /// `image` / `video` tools (upstream `SubagentToolVisibility`): only a
+    /// custom agent's own switch enables them; the Orchestrator never has
+    /// them. Also off while the agent's tools are off.
+    func effectiveImageEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.imageEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
+    func effectiveVideoEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.videoEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
     /// Phase 3 (2026-09-05 owner decision, docs/MEMORY_PLAN.md §2/§2b — a
     /// deliberate divergence from upstream, not to be "corrected" toward it):
     /// cloud **distillation** — the `MemoryService.performDistillSession`

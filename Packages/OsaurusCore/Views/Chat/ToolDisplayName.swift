@@ -309,6 +309,9 @@ enum ToolDisplayName {
         // `image` is handled by `imageLabel` (mode-aware: generate vs edit).
         "share_artifact": ToolLabel(L("Sharing a file"), L("Shared a file")),
         "speak": ToolLabel(L("Speaking"), L("Spoke")),
+        // `video` (`W-media-generation`); upstream labels it through its
+        // subagent registry, which Intel does not have. `image` is above.
+        "video": ToolLabel(L("Generating a video"), L("Generated a video")),
         "notify": ToolLabel(L("Sending a notification"), L("Sent a notification")),
         "schedule_next_run": ToolLabel(L("Scheduling the next run"), L("Scheduled the next run")),
         "cancel_next_run": ToolLabel(L("Canceling the scheduled run"), L("Canceled the scheduled run")),

@@ -55,7 +55,7 @@ overflow) were each first guessed wrong and corrected by reading Intel's code.
 | 31 | `e82893b00` #3114 | Incompatible | Nemotron Super-VL local runtime and local vision evidence. |
 | 32 | `657220cd8` #3118 | Incompatible | Image bundles kept out of the language-model download path (local models). |
 | 33 | `2f777b30c` #3119 | Incompatible | vMLX pin and declared reasoning modes for local bundles (`DeclaredReasoningEffort` is local-model only). |
-| 34 | `f4a877ff8` #3104 | **Split:** Incompatible (local) + Needs work (`W-media-generation`) | Local image/video workflow controls are MLX. The shared parts (`MediaGenerationCoordinator`, `video` tool, the grounded-write check accepting a completed `image`/`video` result) come with `W-media-generation`. |
+| 34 | `f4a877ff8` #3104 | **Split:** Incompatible (local) + Needs work (`W-media-generation`) | Local image/video workflow controls are MLX. The shared parts (`MediaGenerationCoordinator`, `video` tool, the grounded-write check accepting a completed `image`/`video` result) come with `W-media-generation`. **Ported 2026-10-28** (coordinator, Intel `video` tool, grounded-write rule also accepting Intel's cloud image kind). |
 | 35 | `e614fc0ac` | Incompatible | Upstream appcast 0.25.23. |
 | 36 | `1e5bfab23` #3125 | Incompatible | Allosaurus local runtime, residency settings, SSD cache. |
 | 37 | `7f392f329` #3129 | Incompatible | vMLX pin (48 GB adaptive MTP). |

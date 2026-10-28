@@ -1292,6 +1292,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// (`effectiveSpeakEnabled`), bypassing the Tools-tab allowlist.
     static let speakToolName = "speak"
 
+    /// `image` / `video` (upstream names): the agent's Images / Video
+    /// switches are the grants (`effectiveImageEnabled` /
+    /// `effectiveVideoEnabled`), bypassing the Tools-tab allowlist.
+    static let imageToolName = "image"
+    static let videoToolName = "video"
+
     init() {
         loadPersistedPolicies()
         registerKnowledgeTools()
@@ -1345,7 +1351,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// (W-tools-misc): `share_artifact` (baseline), `render_chart` and
     /// `search_memory` (per-agent switches, filtered at composition).
     private func registerOutputTools() {
-        let tools: [OsaurusTool] = [ShareArtifactTool(), RenderChartTool(), SearchMemoryTool()]
+        let tools: [OsaurusTool] = [
+            ShareArtifactTool(), RenderChartTool(), SearchMemoryTool(),
+            // Cloud media (`W-media-generation`); each agent's own switch is
+            // the grant, like `speak`.
+            ImageTool(), VideoTool(),
+        ]
         for tool in tools {
             toolsByName[tool.name] = tool
             builtInToolNames.insert(tool.name)
@@ -1900,6 +1911,23 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                 return ToolEnvelope.failure(
                     kind: .unavailable,
                     message: "The Speak Tool is off for this agent (Agents → Abilities → Output).",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if name == Self.imageToolName || name == Self.videoToolName {
+            // The agent's Image / Video switch is the grant (not the allowlist).
+            let enabled =
+                name == Self.imageToolName
+                ? AgentManager.shared.effectiveImageEnabled(for: agentId)
+                : AgentManager.shared.effectiveVideoEnabled(for: agentId)
+            guard enabled else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: name == Self.imageToolName
+                        ? "Image generation is off for this agent (Agents → Abilities → Images & Video)."
+                        : "Video generation is off for this agent (Agents → Abilities → Images & Video).",
                     tool: name
                 )
             }

@@ -715,6 +715,20 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// `ChatConfiguration.greetingPersona`; both empty falls back to the
     /// built-in playful default in `GenerativeGreetingService`.
     public var greetingPersona: String?
+    /// `image` tool (upstream `imageEnabled`, `W-media-generation`): custom
+    /// agents only, default off. On Intel it generates through Osaurus Cloud
+    /// or Venice (billable; asks before every image).
+    public var imageEnabled: Bool
+    /// `video` tool (upstream `videoEnabled`): custom agents only, default off.
+    public var videoEnabled: Bool
+    /// Model the `image` tool uses; nil picks the first available one.
+    public var imageGenerationTarget: MediaModelTarget?
+    public var textToVideoTarget: MediaModelTarget?
+    public var imageToVideoTarget: MediaModelTarget?
+    /// Intel's form of upstream's per-agent `subagentPermissions` for the two
+    /// media tools (ask by default).
+    public var imagePermission: MediaToolPermission
+    public var videoPermission: MediaToolPermission
 
     public init(
         dbEnabled: Bool,
@@ -727,8 +741,22 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         selfSchedulingEnabled: Bool = false,
         speakEnabled: Bool = false,
         renderChartEnabled: Bool = false,
-        searchMemoryEnabled: Bool = false
+        searchMemoryEnabled: Bool = false,
+        imageEnabled: Bool = false,
+        videoEnabled: Bool = false,
+        imageGenerationTarget: MediaModelTarget? = nil,
+        textToVideoTarget: MediaModelTarget? = nil,
+        imageToVideoTarget: MediaModelTarget? = nil,
+        imagePermission: MediaToolPermission = .ask,
+        videoPermission: MediaToolPermission = .ask
     ) {
+        self.imageEnabled = imageEnabled
+        self.videoEnabled = videoEnabled
+        self.imageGenerationTarget = imageGenerationTarget
+        self.textToVideoTarget = textToVideoTarget
+        self.imageToVideoTarget = imageToVideoTarget
+        self.imagePermission = imagePermission
+        self.videoPermission = videoPermission
         self.renderChartEnabled = renderChartEnabled
         self.searchMemoryEnabled = searchMemoryEnabled
         self.dbEnabled = dbEnabled
@@ -753,6 +781,14 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         speakEnabled = try c.decodeIfPresent(Bool.self, forKey: .speakEnabled) ?? false
         renderChartEnabled = try c.decodeIfPresent(Bool.self, forKey: .renderChartEnabled) ?? false
         searchMemoryEnabled = try c.decodeIfPresent(Bool.self, forKey: .searchMemoryEnabled) ?? false
+        imageEnabled = try c.decodeIfPresent(Bool.self, forKey: .imageEnabled) ?? false
+        videoEnabled = try c.decodeIfPresent(Bool.self, forKey: .videoEnabled) ?? false
+        // Tolerant: a malformed target means "choose automatically".
+        imageGenerationTarget = try? c.decodeIfPresent(MediaModelTarget.self, forKey: .imageGenerationTarget)
+        textToVideoTarget = try? c.decodeIfPresent(MediaModelTarget.self, forKey: .textToVideoTarget)
+        imageToVideoTarget = try? c.decodeIfPresent(MediaModelTarget.self, forKey: .imageToVideoTarget)
+        imagePermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .imagePermission)) ?? .ask
+        videoPermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .videoPermission)) ?? .ask
         schedule =
             try c.decodeIfPresent(AgentScheduleSettings.self, forKey: .schedule)
             ?? AgentScheduleSettings.defaults(for: .manual)
@@ -788,6 +824,13 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case speakEnabled
         case renderChartEnabled
         case searchMemoryEnabled
+        case imageEnabled
+        case videoEnabled
+        case imageGenerationTarget
+        case textToVideoTarget
+        case imageToVideoTarget
+        case imagePermission
+        case videoPermission
         case schedule
         case limits
         case generativeGreetingsEnabled
@@ -805,6 +848,13 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(speakEnabled, forKey: .speakEnabled)
         try c.encode(renderChartEnabled, forKey: .renderChartEnabled)
         try c.encode(searchMemoryEnabled, forKey: .searchMemoryEnabled)
+        try c.encode(imageEnabled, forKey: .imageEnabled)
+        try c.encode(videoEnabled, forKey: .videoEnabled)
+        try c.encodeIfPresent(imageGenerationTarget, forKey: .imageGenerationTarget)
+        try c.encodeIfPresent(textToVideoTarget, forKey: .textToVideoTarget)
+        try c.encodeIfPresent(imageToVideoTarget, forKey: .imageToVideoTarget)
+        try c.encode(imagePermission, forKey: .imagePermission)
+        try c.encode(videoPermission, forKey: .videoPermission)
         try c.encode(schedule, forKey: .schedule)
         try c.encode(limits, forKey: .limits)
         try c.encodeIfPresent(generativeGreetingsEnabled, forKey: .generativeGreetingsEnabled)
@@ -821,6 +871,23 @@ public struct AgentSettings: Codable, Sendable, Equatable {
             generativeGreetingsEnabled: nil,
             greetingPersona: nil
         )
+    }
+}
+
+/// Per-agent policy for the `image` / `video` tools: upstream's
+/// `SubagentPermissionPolicy` values (Intel has no subagent configuration).
+/// A remote image always asks unless the policy is Deny (upstream: billable).
+public enum MediaToolPermission: String, Codable, Sendable, CaseIterable {
+    case ask
+    case deny
+    case alwaysAllow = "always_allow"
+
+    public var displayName: String {
+        switch self {
+        case .ask: return L("Ask")
+        case .deny: return L("Deny")
+        case .alwaysAllow: return L("Always Allow")
+        }
     }
 }
 

@@ -27,7 +27,7 @@ An agent's page has five groups:
 ## Per-agent abilities (Abilities → Overview)
 
 - Tools and Memory.
-- Off by default, opt in per agent: Web Search, Charts, the Speak tool (voice output), Memory Recall (`search_memory`), Self-scheduling, Database (a private, encrypted SQLite database with `db_*` tools), and Knowledge collections.
+- Off by default, opt in per agent: Web Search, Charts, the Speak tool (voice output), Image and Video Generation (cloud, billed; see the Images and Video topic), Memory Recall (`search_memory`), Self-scheduling, Database (a private, encrypted SQLite database with `db_*` tools), and Knowledge collections.
 - Autonomous Execution, Subagents, and Sandbox are shown as unavailable on this Mac. Claude Code agents can work in the chat's selected folder instead.
 
 ## Working folder

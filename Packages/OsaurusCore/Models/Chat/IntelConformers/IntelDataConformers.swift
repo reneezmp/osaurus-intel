@@ -2381,6 +2381,10 @@ final class SystemPromptComposer: @unchecked Sendable {
         let speakEnabled = await MainActor.run {
             AgentManager.shared.effectiveSpeakEnabled(for: id)
         }
+        // `W-media-generation`: the agent's Image / Video switches.
+        let (imageEnabled, videoEnabled) = await MainActor.run {
+            (AgentManager.shared.effectiveImageEnabled(for: id), AgentManager.shared.effectiveVideoEnabled(for: id))
+        }
         // Upstream per-agent opt-ins for `render_chart` / `search_memory`.
         let (renderChartEnabled, searchMemoryEnabled) = await MainActor.run {
             let settings = AgentManager.shared.agent(for: id)?.settings
@@ -2520,6 +2524,10 @@ final class SystemPromptComposer: @unchecked Sendable {
                     speakEnabled || spec.function.name != ToolRegistry.speakToolName
                 }
                 .filter { spec in
+                    (imageEnabled || spec.function.name != ToolRegistry.imageToolName)
+                        && (videoEnabled || spec.function.name != ToolRegistry.videoToolName)
+                }
+                .filter { spec in
                     (renderChartEnabled || spec.function.name != "render_chart")
                         && (searchMemoryEnabled || spec.function.name != "search_memory")
                 }
@@ -2559,6 +2567,9 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if speakEnabled {
                     allowed.insert(ToolRegistry.speakToolName)
                 }
+                // Image / Video: the agent's switches are the grants.
+                if imageEnabled { allowed.insert(ToolRegistry.imageToolName) }
+                if videoEnabled { allowed.insert(ToolRegistry.videoToolName) }
                 // Upstream: `share_artifact` is baseline; Charts and Memory
                 // Recall switches are their own grants.
                 allowed.insert("share_artifact")

@@ -5558,11 +5558,6 @@ extension ChatSession {
             .joined(separator: "\n\n").trimmingCharacters(in: .whitespacesAndNewlines)
     }
 
-    /// Upstream's `VideoTool.toolDescription`, minus local generation.
-    static let videoApprovalDescription =
-        "Generate a video with a configured cloud provider, from text or one source image. A current price quote is included "
-        + "in the approval request before the job is queued. The completed video is shown automatically."
-
     static func mediaBackendDescription(_ model: MediaModelInfo) -> String {
         switch model.target.backend {
         case .local: return "Local"
@@ -5755,7 +5750,7 @@ extension ChatSession {
             approvalValues["audio"] = settings.audio
             let approved = await ToolPermissionPromptService.requestApproval(
                 toolName: "video",
-                description: Self.videoApprovalDescription,
+                description: VideoTool.toolDescription,
                 argumentsJSON: SubagentApprovalArguments.enrichedJSON(from: "{}", values: approvalValues)
             )
             guard approved else {

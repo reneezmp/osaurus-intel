@@ -448,7 +448,7 @@ extension ContentBlock {
                     }
 
                     let result = turn.toolResults[call.id]
-                    if call.function.name == "share_artifact",
+                    if Self.isArtifactRenderingToolName(call.function.name),
                         let result,
                         let artifact = Self.parseSharedArtifactFromResult(result)
                     {
@@ -509,6 +509,13 @@ extension ContentBlock {
         }
 
         return blocks
+    }
+
+    /// Upstream: `share_artifact` and the generated-media tools render their
+    /// file as a card. Intel's `image` / `video` put the enriched artifact
+    /// text in their result (`W-media-generation`).
+    private static func isArtifactRenderingToolName(_ name: String) -> Bool {
+        name == "share_artifact" || name == "image" || name == "video"
     }
 
     /// Reconstructs a SharedArtifact from an enriched share_artifact tool result.

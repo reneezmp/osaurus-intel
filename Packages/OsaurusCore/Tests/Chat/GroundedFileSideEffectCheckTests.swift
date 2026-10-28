@@ -155,6 +155,37 @@ struct GroundedFileSideEffectCheckTests {
 
     // MARK: isGroundedFileWriteOutcome
 
+    // Upstream #3104 (`W-media-generation`). The third argument is Intel's:
+    // a cloud image is a `generated_media_job`, not upstream's local kind.
+    @Test(arguments: [
+        ("image", "native_image_generation_job"), ("video", "generated_media_job"),
+        ("image", "generated_media_job"),
+    ])
+    func completedMediaArtifact_groundsButQueuedOrEmptyDoesNot(tool: String, kind: String) {
+        var payload: [String: Any] = [
+            "kind": kind,
+            "status": "completed",
+            "images": [["path": "/tmp/generated.png"]],
+            "media": ["path": "/tmp/generated.mp4"],
+        ]
+        func grounded() -> Bool {
+            GroundedFileSideEffectCheck.isGroundedFileWriteOutcome(
+                toolName: tool, result: ToolEnvelope.success(tool: tool, result: payload))
+        }
+        #expect(grounded())
+        payload["status"] = "queued"
+        #expect(!grounded())
+        payload["status"] = "failed"
+        #expect(!grounded())
+        payload["status"] = "completed"
+        payload["images"] = [["path": ""]]
+        payload["media"] = ["path": ""]
+        #expect(!grounded())
+        #expect(!GroundedFileSideEffectCheck.isGroundedFileWriteOutcome(
+            toolName: tool,
+            result: ToolEnvelope.failure(kind: .invalidArgs, message: "invalid size", tool: tool)))
+    }
+
     @Test
     func successfulFileWrite_grounds() {
         #expect(

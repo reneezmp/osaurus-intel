@@ -4346,3 +4346,29 @@ retired) and `IntelMediaChatTests`. Package gate: 3,438 tests in 431 suites
 (6 known issues), including the Ventura control guards. Rosy: "Images and
 video in chat" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
 
+### Image and video agent tools (`W-media-generation` complete) — 2026-10-28
+
+Upstream's `image` and `video` tools without its subagent framework:
+`ImageTool` (`Tools/IntelImageTool.swift`, cloud generation only) and
+`VideoTool` (`Tools/VideoTool.swift`), with `IntelMediaToolSupport` for the
+agent's switch, model and policy. `AgentSettings` gained upstream's
+`imageEnabled` / `videoEnabled` / targets and Intel's per-tool
+`MediaToolPermission`; custom agents only, switched on under Abilities →
+Overview → Images & Video. The switches are the grants in tool resolution
+and `runtimeCapabilityDenial`. Results promote the file into the chat's
+artifacts and carry the card text, so `ContentBlock` shows `image` /
+`video` like `share_artifact`. #3104's grounded-write rule is in, also
+accepting Intel's cloud image kind. Upstream's Images panel is not ported
+(its defaults only reach the Orchestrator, which never has the tools; the
+rest is MLX). New guide topic: "Images and Video" (`guide-images.md`).
+
+The item is complete: the `/v1/images` and `/v1/videos` routes moved to
+`W-server-api` (billable, and Intel's server never checks its
+`APIKeyValidator`), with `Models/API/ImageAPI.swift` classified there.
+
+Tests: `IntelMediaToolsTests`, upstream's media case in
+`GroundedFileSideEffectCheckTests`, `OsaurusHelpToolTests` (images topic
+now required). Package gate: 3,446 tests in 432 suites (6 known issues).
+Manual: `docs/MEDIA_GENERATION_INTEL.md`. Rosy: "Image and
+video agent tools" in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+

@@ -37,7 +37,7 @@ struct OsaurusGuideTests {
             "getting-started", "intel-mac", "cloud-providers", "agents", "orchestrator",
             "chat", "commands", "skills", "plugins", "mcp", "schedules", "watchers",
             "agent-db", "memory", "knowledge", "server-api", "voice", "themes",
-            "privacy-storage", "identity", "insights", "troubleshooting",
+            "privacy-storage", "identity", "insights", "troubleshooting", "images",
         ] {
             #expect(ids.contains(required), "guide topic `\(required)` missing")
         }
@@ -46,7 +46,7 @@ struct OsaurusGuideTests {
     @Test
     func topicsForFeaturesThisBuildLacksAreLeftOut() {
         let ids = Set(OsaurusGuide.topics.map { $0.id })
-        for absent in ["local-models", "images", "channels", "automation", "workspaces", "config", "settings"] {
+        for absent in ["local-models", "channels", "automation", "workspaces", "config", "settings"] {
             #expect(!ids.contains(absent), "`\(absent)` describes a feature this Intel build doesn't have")
         }
     }

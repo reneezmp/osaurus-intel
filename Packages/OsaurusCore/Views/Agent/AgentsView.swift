@@ -2583,6 +2583,11 @@ struct AgentDetailView: View {
             }
         }
 
+        IntelMediaAbilitySection(
+            agentId: agent.id,
+            theme: theme
+        )
+
         // Upstream's "Memory & Recall" group.
         if agent.id != Agent.defaultId {
             AgentDetailSection(title: L("Memory & Recall"), icon: "magnifyingglass") {
@@ -7536,5 +7541,210 @@ private extension View {
         background(theme.primaryBackground)
             .environment(\.theme, theme)
             .intelControlRendering(theme: theme)
+    }
+}
+
+// MARK: - Images & Video (`W-media-generation`)
+
+/// Per-agent switches, models and policies for the `image` / `video` tools.
+/// Upstream keeps these in each agent's Subagents tab (Intel has no
+/// subagents); custom agents only, as upstream. Models come from connected
+/// Venice providers and the Osaurus Cloud media catalog.
+private struct IntelMediaAbilitySection: View {
+    @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var pickerCache = ModelPickerItemCache.shared
+
+    let agentId: UUID
+    let theme: ThemeProtocol
+
+    private var settings: AgentSettings? { agentManager.agent(for: agentId)?.settings }
+
+    private var imageModels: [MediaModelInfo] {
+        pickerCache.items.imageGenerationDelegateCandidates.compactMap(\.mediaModel)
+    }
+
+    private func videoModels(_ kind: MediaGenerationKind) -> [MediaModelInfo] {
+        pickerCache.items.videoGenerationDelegateCandidates.compactMap(\.mediaModel).filter { $0.kind == kind }
+    }
+
+    var body: some View {
+        AgentDetailSection(title: L("Images & Video"), icon: "photo.on.rectangle") {
+            VStack(alignment: .leading, spacing: 10) {
+                if agentId == Agent.defaultId {
+                    note(
+                        "The built-in agent doesn't generate images or video. Create an agent to use them, or pick an image or video model in a chat's model picker."
+                    )
+                } else {
+                    toggleRow(
+                        title: L("Image Generation"),
+                        description: L(
+                            "Let the agent create images with an Osaurus Cloud or Venice image model. Each image is billed and asks you first."
+                        ),
+                        icon: "photo",
+                        isOn: settings?.imageEnabled ?? false,
+                        set: { update { $0.imageEnabled = $1 }($0) }
+                    )
+                    if settings?.imageEnabled == true {
+                        controlRow(L("Model")) {
+                            targetMenu(
+                                current: settings?.imageGenerationTarget, candidates: imageModels,
+                                set: { target in update { s, _ in s.imageGenerationTarget = target }(true) })
+                        }
+                        controlRow(L("Permission")) {
+                            permissionMenu(
+                                current: settings?.imagePermission ?? .ask, options: [.ask, .deny],
+                                set: { policy in update { s, _ in s.imagePermission = policy }(true) })
+                        }
+                    }
+                    toggleRow(
+                        title: L("Video Generation"),
+                        description: L(
+                            "Let the agent create short videos from text or one image. The price is quoted before each job is queued."
+                        ),
+                        icon: "video",
+                        isOn: settings?.videoEnabled ?? false,
+                        set: { update { $0.videoEnabled = $1 }($0) }
+                    )
+                    if settings?.videoEnabled == true {
+                        controlRow(L("Text-to-video model")) {
+                            targetMenu(
+                                current: settings?.textToVideoTarget, candidates: videoModels(.textToVideo),
+                                set: { target in update { s, _ in s.textToVideoTarget = target }(true) })
+                        }
+                        controlRow(L("Image-to-video model")) {
+                            targetMenu(
+                                current: settings?.imageToVideoTarget, candidates: videoModels(.imageToVideo),
+                                set: { target in update { s, _ in s.imageToVideoTarget = target }(true) })
+                        }
+                        controlRow(L("Permission")) {
+                            permissionMenu(
+                                current: settings?.videoPermission ?? .ask, options: MediaToolPermission.allCases,
+                                set: { policy in update { s, _ in s.videoPermission = policy }(true) })
+                        }
+                    }
+                    if imageModels.isEmpty, videoModels(.textToVideo).isEmpty, videoModels(.imageToVideo).isEmpty {
+                        note(
+                            "No image or video models yet. Add a Venice provider under Cloud Models, or sign in to Osaurus Cloud."
+                        )
+                    }
+                }
+            }
+        }
+    }
+
+    /// Returns a setter that applies `change` to this agent's settings and saves.
+    private func update(_ change: @escaping (inout AgentSettings, Bool) -> Void) -> (Bool) -> Void {
+        { value in
+            guard var agent = agentManager.agent(for: agentId), !agent.isBuiltIn else { return }
+            change(&agent.settings, value)
+            agent.updatedAt = Date()
+            agentManager.update(agent)
+        }
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(LocalizedStringKey(text), bundle: .module)
+            .font(.system(size: 11))
+            .foregroundColor(theme.tertiaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
+    }
+
+    private func toggleRow(
+        title: String, description: String, icon: String, isOn: Bool, set: @escaping (Bool) -> Void
+    ) -> some View {
+        HStack(alignment: .center, spacing: 12) {
+            Image(systemName: icon)
+                .font(.system(size: 13, weight: .semibold))
+                .foregroundColor(theme.accentColor)
+                .frame(width: 34, height: 34)
+                .background(RoundedRectangle(cornerRadius: 9).fill(theme.accentColor.opacity(0.10)))
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.system(size: 13, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(description)
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            Spacer(minLength: 8)
+            Toggle("", isOn: Binding(get: { isOn }, set: set))
+                .labelsHidden()
+                .toggleStyle(ThemedSwitchToggleStyle())
+                .accessibilityLabel(Text(title))
+        }
+    }
+
+    private func controlRow<Control: View>(_ label: String, @ViewBuilder control: () -> Control) -> some View {
+        HStack(spacing: 12) {
+            Text(label)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(theme.secondaryText)
+            Spacer(minLength: 12)
+            control()
+        }
+        .padding(.leading, 46)
+    }
+
+    private func targetMenu(
+        current: MediaModelTarget?, candidates: [MediaModelInfo], set: @escaping (MediaModelTarget?) -> Void
+    ) -> some View {
+        let currentModel = current.flatMap { target in candidates.first { $0.target == target } }
+        let label: String = {
+            guard let current else { return L("Choose automatically") }
+            return currentModel.map(Self.label) ?? "\(current.modelID) (\(L("unavailable")))"
+        }()
+        return menu(label: label) {
+            Button(L("Choose automatically")) { set(nil) }
+            ForEach(candidates, id: \.id) { model in
+                Button(Self.label(model)) { set(model.target) }
+            }
+        }
+    }
+
+    private func permissionMenu(
+        current: MediaToolPermission, options: [MediaToolPermission], set: @escaping (MediaToolPermission) -> Void
+    ) -> some View {
+        menu(label: current.displayName) {
+            ForEach(options, id: \.self) { policy in
+                Button(policy.displayName) { set(policy) }
+            }
+        }
+    }
+
+    private func menu<Items: View>(label: String, @ViewBuilder items: () -> Items) -> some View {
+        Menu {
+            items()
+        } label: {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.tertiaryBackground)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.inputBorder, lineWidth: 1))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    /// Upstream's row label: name · provider · from price.
+    private static func label(_ model: MediaModelInfo) -> String {
+        var parts = [model.displayName, model.providerName]
+        if let minimum = model.pricing?.minimumUSD {
+            parts.append("from \(OsaurusRouter.formatUSDAsCredits(minimum))")
+        }
+        return parts.joined(separator: " · ")
     }
 }

@@ -85,11 +85,62 @@ model or skip).
 (signal 11, only when the suite runs alone). The list is now built and
 published inside one main-actor block.
 
+## Agent tools (part C, 2026-10-28)
+
+Upstream's `image` and `video` tools run through its subagent framework
+(`ImageSubagentKind`, `VideoSubagentKind`, `SubagentSession`), which Intel
+does not have (`W-subagents`). Intel's tools carry the cloud parts of those
+kinds directly:
+
+- `Tools/IntelImageTool.swift` (`ImageTool`, name `image`): generation only
+  (cloud editing isn't supported upstream either), upstream's
+  generation-only schema minus the local controls (sampler, adapters,
+  batches, previews), one image per call. Always asks (billable) unless the
+  agent's policy is Deny.
+- `Tools/VideoTool.swift` (`VideoTool`, name `video`): upstream's schema
+  minus the local controls; catalog checks (`VideoTool.validate`), a quote,
+  then the policy (Ask shows the quote, Always Allow skips the card, Deny
+  refuses). `source_path` must be inside the Osaurus root, PNG/JPEG/WebP,
+  ≤ 25 MB, with matching magic bytes (upstream decodes through
+  `HTTPHandler`, which Intel lacks).
+- `Tools/IntelMediaToolSupport.swift`: the agent's switch, target and
+  policy; model resolution (explicit `model` matched uniquely, else the
+  configured target, else the first candidate; an unknown request or a
+  configured model that is gone never falls back to another billable
+  model); the artifact; error envelopes.
+- **Settings:** `AgentSettings` gained upstream's `imageEnabled`,
+  `videoEnabled`, `imageGenerationTarget`, `textToVideoTarget`,
+  `imageToVideoTarget`, plus Intel's `imagePermission` / `videoPermission`
+  (`MediaToolPermission`: upstream's `SubagentPermissionPolicy` values).
+  Custom agents only (`AgentManager.effectiveImageEnabled` /
+  `effectiveVideoEnabled`), as upstream; the Orchestrator never has them.
+  UI: Agents → (agent) → Abilities → Overview → **Images & Video**
+  (`IntelMediaAbilitySection` in `AgentsView.swift`).
+- **Gates:** the switches are the grants (like `speak`): the tool
+  resolution in `IntelDataConformers` strips the specs unless the switch is
+  on, `runtimeCapabilityDenial` refuses a call otherwise, and each tool
+  re-checks.
+- **Display:** the tool promotes the file into the chat's artifact store and
+  puts the enriched artifact text in its result (`payload["text"]`), so
+  `ContentBlock` renders a file card for `image` / `video` like
+  `share_artifact` (upstream: `GeneratedMediaToolArtifactBridge` in the
+  chat loop, which Intel's engine does not run). The rest of the payload is
+  upstream's `generated_media_job`.
+- **Grounded-write check (#3104):** a completed `image` / `video` result
+  counts as the file write. Upstream accepts only the local
+  `native_image_generation_job` kind for images; Intel also accepts the
+  cloud `generated_media_job`.
+- **Not ported:** upstream's Images settings panel (`ImageGenerationView`).
+  Its default models and permissions apply only to the Orchestrator, which
+  never gets the tools, and the rest is local model management (MLX). Its
+  recent video jobs list is not shown anywhere on Intel yet.
+
 ## Cost and approval rules (upstream, kept)
 
 - Images: Cloud and Venice are billable. Upstream asks before every remote
   image (provider, privacy, estimated minimum price) whatever the agent's
-  permission setting, unless that setting is Deny.
+  permission setting, unless that setting is Deny. So the agent's image
+  permission offers only Ask and Deny on Intel.
 - Videos: a quote is fetched first and shown in the approval; queueing
   re-quotes and refuses if the price rose (`requireApprovedQuote`). Once
   queued, a paid job cannot be cancelled upstream; Stop detaches the UI and
@@ -104,10 +155,17 @@ check and discovery split, local targets refused, Cloud fails closed without
 its catalog). Stub transports only; nothing reaches the network. Part B:
 upstream's `CloudModelCategoryTests` (media cases back) and
 `IntelMediaChatTests` (media rows never chat models, candidates, defaults on
-selection, `auxiliaryChatModel`).
+selection, `auxiliaryChatModel`). Part C: `IntelMediaToolsTests` (settings round
+trip, resolution order, switch gate, registration, video checks, source
+image rule), upstream's media case in `GroundedFileSideEffectCheckTests`
+(plus Intel's cloud image kind), `OsaurusHelpToolTests` (the Images and
+Video topic).
 
 ## Status
 
-Part A (core) and part B (chat composer) shipped 2026-10-28. Still to come
-in this item: the `image` / `video` agent tools with an Images settings
-panel, and the `/v1/images` and `/v1/videos` server routes.
+Complete 2026-10-28: parts A (core), B (chat composer) and C (agent
+tools). The `/v1/images` and `/v1/videos` server routes moved to
+`W-server-api`: they spend credits or Venice money, and Intel's server holds
+an `APIKeyValidator` but never checks it, so they wait for that check
+(`Models/API/ImageAPI.swift` is classified there). Follow-ups: a place to
+see recent video jobs (upstream shows them in its Images panel).
