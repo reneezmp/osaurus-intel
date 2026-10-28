@@ -18,7 +18,7 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 - **Agent Channels** (Slack, Discord, Telegram, WhatsApp, iMessage, webhooks).
 - **Workspaces and shared agents**, peer devices, and pairing a phone or another Mac.
-- **Computer Use and Browser Use.**
+- **Computer Use.**
 - **Subagents** (`spawn_agent`). The Orchestrator can delegate one bounded, tool-free task at a time to an allowed custom agent instead (see The Orchestrator topic).
 - **Agent templates, harness runtimes, and `osaurus import` bundles.**
 - **Full declarative configuration.** The Orchestrator's `orchestrator_config` covers only its own settings, delegation, and which agent new chats open with.
@@ -29,4 +29,4 @@ This build of Osaurus is for Intel Macs. Most of Osaurus works the same; the fea
 
 ## What works the same
 
-Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), cloud images and video, Mac Automation with AppleScript (on the chat's cloud model), themes, credits, identity, Insights, Shortcuts and Siri.
+Chat with folder tools and file history, the Orchestrator, custom agents, memory, knowledge collections, web search, MCP connectors, skills, slash commands, native plugins built for Intel, schedules, watchers, the agent database and self-scheduling, voice (Apple Speech and macOS voices), cloud images and video, Mac Automation with AppleScript (on the chat's cloud model), Browser Use (on macOS 13 all agents share one browser profile), themes, credits, identity, Insights, Shortcuts and Siri.

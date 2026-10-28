@@ -2593,6 +2593,11 @@ struct AgentDetailView: View {
             theme: theme
         )
 
+        IntelBrowserUseAbilitySection(
+            agentId: agent.id,
+            theme: theme
+        )
+
         // Upstream's "Memory & Recall" group.
         if agent.id != Agent.defaultId {
             AgentDetailSection(title: L("Memory & Recall"), icon: "magnifyingglass") {
@@ -7890,5 +7895,131 @@ private struct IntelAppleScriptAbilitySection: View {
         .menuStyle(.borderlessButton)
         .menuIndicator(.hidden)
         .fixedSize()
+    }
+}
+
+// MARK: - Browser Use (`W-browser-use`)
+
+/// Per-agent switch and model for `browser_use`. Upstream keeps these in the
+/// agent's Subagents tab; custom agents only. The model is upstream's
+/// per-capability override (`subagentModelOverrides["browser_use"]`), so the
+/// shared resolver reads it; unset means the chat's model.
+private struct IntelBrowserUseAbilitySection: View {
+    @ObservedObject private var agentManager = AgentManager.shared
+    @ObservedObject private var pickerCache = ModelPickerItemCache.shared
+
+    let agentId: UUID
+    let theme: ThemeProtocol
+
+    private static let capabilityId = SubagentCapabilityRegistry.browserUse.id
+    private var settings: AgentSettings? { agentManager.agent(for: agentId)?.settings }
+
+    var body: some View {
+        AgentDetailSection(title: L("Browser Use"), icon: "globe") {
+            VStack(alignment: .leading, spacing: 10) {
+                if agentId == Agent.defaultId {
+                    note("The built-in agent never gets browser access. Create an agent to use Browser Use.")
+                } else {
+                    HStack(alignment: .center, spacing: 12) {
+                        Image(systemName: "globe")
+                            .font(.system(size: 13, weight: .semibold))
+                            .foregroundColor(theme.accentColor)
+                            .frame(width: 34, height: 34)
+                            .background(RoundedRectangle(cornerRadius: 9).fill(theme.accentColor.opacity(0.10)))
+                        VStack(alignment: .leading, spacing: 2) {
+                            Text(L("Browser Use"))
+                                .font(.system(size: 13, weight: .semibold))
+                                .foregroundColor(theme.primaryText)
+                            Text(
+                                L(
+                                    "Let the agent browse the web in its own browser session: open pages, read them, fill forms. Typing and anything consequential ask you first."
+                                )
+                            )
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.tertiaryText)
+                            .fixedSize(horizontal: false, vertical: true)
+                        }
+                        Spacer(minLength: 8)
+                        Toggle(
+                            "",
+                            isOn: Binding(
+                                get: { settings?.browserUseEnabled ?? false },
+                                set: { value in update { $0.browserUseEnabled = value } }
+                            )
+                        )
+                        .labelsHidden()
+                        .toggleStyle(ThemedSwitchToggleStyle())
+                        .accessibilityLabel(Text(L("Browser Use")))
+                    }
+                    if settings?.browserUseEnabled == true {
+                        HStack(spacing: 12) {
+                            Text(L("Model"))
+                                .font(.system(size: 12, weight: .medium))
+                                .foregroundColor(theme.secondaryText)
+                            Spacer(minLength: 12)
+                            modelMenu
+                        }
+                        .padding(.leading, 46)
+                        if !BrowserProfileStore.isolatesAgents {
+                            note(
+                                "On this Mac (macOS 13) every agent shares one browser profile, so sign-ins made by one agent are visible to the others."
+                            )
+                        }
+                        note("Page content goes to the chosen model's provider. Sessions are listed in Settings → Browser Use.")
+                    }
+                }
+            }
+        }
+    }
+
+    private var modelMenu: some View {
+        let current = settings?.subagentModelOverrides[Self.capabilityId]
+        let label: String = {
+            guard let current, !current.isEmpty else { return L("Use the chat's model") }
+            return pickerCache.items.first(where: { $0.id == current })?.displayName ?? "\(current) (\(L("unavailable")))"
+        }()
+        return Menu {
+            Button(L("Use the chat's model")) { update { $0.subagentModelOverrides[Self.capabilityId] = nil } }
+            ForEach(pickerCache.items.filter(\.isLikelyChatCapable), id: \.id) { item in
+                Button("\(item.displayName) · \(item.source.displayName)") {
+                    update { $0.subagentModelOverrides[Self.capabilityId] = item.id }
+                }
+            }
+        } label: {
+            HStack(spacing: 6) {
+                Text(label)
+                    .font(.system(size: 12, weight: .medium))
+                    .foregroundColor(theme.primaryText)
+                    .lineLimit(1)
+                Image(systemName: "chevron.up.chevron.down")
+                    .font(.system(size: 9, weight: .medium))
+                    .foregroundColor(theme.secondaryText)
+            }
+            .padding(.horizontal, 10)
+            .padding(.vertical, 6)
+            .background(
+                RoundedRectangle(cornerRadius: 8)
+                    .fill(theme.tertiaryBackground)
+                    .overlay(RoundedRectangle(cornerRadius: 8).stroke(theme.inputBorder, lineWidth: 1))
+            )
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+    }
+
+    private func update(_ change: (inout AgentSettings) -> Void) {
+        guard var agent = agentManager.agent(for: agentId), !agent.isBuiltIn else { return }
+        change(&agent.settings)
+        agent.updatedAt = Date()
+        agentManager.update(agent)
+    }
+
+    private func note(_ text: String) -> some View {
+        Text(LocalizedStringKey(text), bundle: .module)
+            .font(.system(size: 11))
+            .foregroundColor(theme.tertiaryText)
+            .fixedSize(horizontal: false, vertical: true)
+            .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

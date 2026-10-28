@@ -523,6 +523,13 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // Intel's plugin host serves no routes, so there is nothing to tear
         // down before the sweep.
         ToolSecretsKeychain.deleteAllSecrets(forAgent: id)
+        // Upstream wipes the agent's own browser profile. On Ventura the
+        // profile is shared by every agent, so only its record goes.
+        if BrowserProfileStore.isolatesAgents {
+            await BrowserSessionManager.shared.resetSession(for: id)
+        } else {
+            await BrowserSessionManager.shared.forgetSession(for: id)
+        }
         let url = OsaurusPaths.agents().appendingPathComponent("\(id.uuidString).json")
         try? FileManager.default.removeItem(at: url)
         knowledgeGrants.removeValue(forKey: id)
@@ -851,6 +858,13 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     func effectiveVideoEnabled(for agentId: UUID) -> Bool {
         guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
         return agent.settings.videoEnabled && !effectiveToolsDisabled(for: agentId)
+    }
+
+    /// `browser_use` (upstream `browserUseAvailable`): only a custom agent's
+    /// own switch, and only while its tools are on.
+    func effectiveBrowserUseEnabled(for agentId: UUID) -> Bool {
+        guard let agent = agent(for: agentId), !agent.isBuiltIn else { return false }
+        return agent.settings.browserUseEnabled && !effectiveToolsDisabled(for: agentId)
     }
 
     /// `applescript` / `mac_query` (upstream `appleScriptAvailable`): only a

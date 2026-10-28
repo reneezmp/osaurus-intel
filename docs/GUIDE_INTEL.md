@@ -36,6 +36,9 @@ Intel's code and docs:
   lists Mac Automation among the abilities, and What runs on this Intel Mac
   lists it as working (on the chat's cloud model). Upstream's Automation
   topic stays left out (Computer Use, Browser Use, Sandbox).
+- **Browser Use** (2026-10-28, `W-browser-use`): listed among the Agents
+  abilities and as working in What runs on this Intel Mac (with the shared
+  profile on macOS 13); Computer Use stays under "not in this build yet".
 - **New:** `guide-intel-mac.md`, "What runs on this Intel Mac": what needs
   Apple Silicon, what isn't in this build yet, and what works the same. Other
   topics point to it.

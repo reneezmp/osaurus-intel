@@ -218,9 +218,74 @@ number.
 
 Package gate: 3,702 tests in 458 suites (6 known issues), 61 s.
 
+## Browser Use (2026-10-28, `W-browser-use` complete)
+
+Taken from upstream: `Browser/` (configuration store, plugin migration,
+the WebKit session, catalog, manager, support, window controller, child
+tools, executor, `BrowserUseTool`), `Subagent/Kinds/BrowserUseKind`,
+`Views/Settings/BrowserSettingsView` (a new **Browser Use** settings tab
+under Automation, upstream's `.browser`), and
+`ComputerUse/Policy/ComputerUsePolicyStore`.
+
+New base piece: **`Services/AgentDelegation/AgentSubagentRunner.swift`**,
+Intel's version of upstream's bounded tool loop for subagent kinds (Browser
+Use now, spawn later). Upstream streams it through its typed Responses
+engine; Intel keeps upstream's types and `run` signature and drives it on
+the desktop model step: one model turn, the proposed calls run through the
+private toolset (anything not offered is refused, not run), the results fed
+back, until a text answer. Same exits and cancellation causes as upstream,
+plus a bounded nudge for empty turns and a stop after three identical tool
+rounds; token counts are estimates (Intel's engine reports no usage).
+Intel's `ServiceToolInvocation` was an empty stub; it is upstream's real
+struct now.
+
+Intel edits:
+
+- **Profiles (Ventura, decided by Renée 2026-10-11):**
+  `Browser/Runtime/BrowserProfileStore.swift` returns upstream's per-agent
+  `WKWebsiteDataStore(forIdentifier:)` on macOS 14+, and the app's shared
+  default store on Ventura (no separate persistent store exists before 14).
+  On Ventura every agent's Browser Use shares cookies and sign-ins; the
+  settings tab, the reset confirmations and the agent section say so.
+  Deleting an agent on Ventura closes its session and forgets its record
+  without wiping the shared data (`BrowserSessionManager.forgetSession`);
+  on 14+ it wipes the agent's own profile, as upstream.
+- **Kind:** Intel has no `Agent.toolsEnabled` (uses
+  `effectiveToolsDisabled`); the child prompt's policy line comes from
+  `AutonomyPolicy.summary` (upstream's `ComputerUseTool.policySummary`; the
+  Computer Use tool waits for `W-computer-use`). Model: upstream's
+  per-agent `browser_use` override, else the chat's model, through the
+  shared resolver.
+- **Autonomy:** Intel has no Computer Use settings panel yet, so the
+  autonomy policy is upstream's default (or whatever `computer-use.json`
+  in the shared folder says). The settings tab no longer points at "your
+  Computer Use autonomy level". `AgentSettings.computerUseCeiling` is
+  stored (no editor yet).
+- **Wiring:** `browser_use` is a registered built-in; the agent's switch is
+  the grant (`AgentManager.effectiveBrowserUseEnabled`, custom agents only)
+  in tool resolution and `runtimeCapabilityDenial`; upstream's
+  `browserUseGuidance` is added to the prompt when the tool is offered.
+  Agents → Abilities → **Browser Use** (`IntelBrowserUseAbilitySection`):
+  the switch and model. `AppDelegate` runs `BrowserPluginMigration` at
+  launch and closes every session at quit.
+- `gap_features.py`: the row's pattern was `Browser`, which also caught
+  `Networking/BonjourBrowser.swift` (Bonjour peer discovery); it is now
+  `^Browser/|BrowserSettingsView|BrowserUse`.
+
+Tests: upstream's `BrowserCatalogTests`, `BrowserGatingTests`,
+`BrowserSubagentTests`, `BrowserSupportTests`, `BrowserUseGoalTargetTests`
+and `BrowserWebKitSmokeTests` (the last skips itself under `swift test`;
+WebKit needs a full app context), plus `IntelBrowserUseTests` (the runner
+on a scripted engine: calls through the toolset, refusal of unoffered
+tools, empty-turn nudge, repetition stop, cap and cancellation causes; the
+profile choice; registration and gate).
+
+Package gate: 3,824 tests in 475 suites (6 known issues).
+
 ## Status
 
-Layers 1–3 shipped 2026-10-28; `W-applescript-agent` is complete. Still to
+Layers 1–3 shipped 2026-10-28; `W-applescript-agent` and `W-browser-use`
+are complete. Still to
 come on this base: Intel's `image` / `video` tools onto the host
 (upstream's kinds), and the kinds of `W-subagents` (spawn), `W-computer-use`
 and `W-browser-use`.

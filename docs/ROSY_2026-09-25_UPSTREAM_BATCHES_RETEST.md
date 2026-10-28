@@ -2063,3 +2063,26 @@ per app ("Osaurus wants to control …"): allow it for the apps you test.
 - [ ] **Off:** turn Mac Automation off; the agent no longer offers it.
 - [ ] Delete the test note afterwards.
 
+## Browser Use (2026-10-28)
+
+Details: `SUBAGENTS_INTEL.md`, "Browser Use". **Rosy is Ventura:** all
+agents share one browser profile there. Use a test agent and a site you
+don't mind signing in to (or none).
+
+- [ ] **Settings:** Settings → Automation → **Browser Use** opens; it says
+      all agents share one profile on this Mac, and lists no sessions yet.
+- [ ] **Agent:** Agents → (a custom agent) → Abilities → **Browser Use**:
+      the switch, the Model menu, and the shared-profile note.
+- [ ] **Read:** ask the agent "open example.com and tell me the page
+      title". The tool row shows the live step feed; the answer is
+      "Example Domain" without any confirmation.
+- [ ] **Type:** ask it to search for something in a site's search box; a
+      confirmation card appears before it types. Deny once: nothing is
+      typed.
+- [ ] **Session:** the Browser Use tab now lists the agent's session; Open
+      shows the page in a window; Close closes it.
+- [ ] **Stop:** start a longer browse and press Stop in the feed.
+- [ ] **Reset:** Reset on the session warns that it clears data for every
+      agent (shared profile); confirm, and the session disappears.
+- [ ] **Off:** turn Browser Use off; the agent no longer offers it.
+

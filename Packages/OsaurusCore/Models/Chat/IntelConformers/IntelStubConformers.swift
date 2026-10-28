@@ -1298,6 +1298,7 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     static let imageToolName = "image"
     static let videoToolName = "video"
     static let appleScriptToolNames: Set<String> = [AppleScriptTool.toolName, MacQueryTool.toolName]
+    static let browserUseToolName = BrowserUseTool.toolName
 
     init() {
         loadPersistedPolicies()
@@ -1360,6 +1361,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
             // AppleScript automation (`W-applescript-agent`); the agent's
             // AppleScript switch is the grant.
             AppleScriptTool(), MacQueryTool(),
+            // Browser Use (`W-browser-use`); the agent's switch is the grant.
+            BrowserUseTool(),
         ]
         for tool in tools {
             toolsByName[tool.name] = tool
@@ -1932,6 +1935,17 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     message: name == Self.imageToolName
                         ? "Image generation is off for this agent (Agents → Abilities → Images & Video)."
                         : "Video generation is off for this agent (Agents → Abilities → Images & Video).",
+                    tool: name
+                )
+            }
+            return nil
+        }
+        if name == Self.browserUseToolName {
+            // The agent's Browser Use switch is the grant (not the allowlist).
+            guard AgentManager.shared.effectiveBrowserUseEnabled(for: agentId) else {
+                return ToolEnvelope.failure(
+                    kind: .unavailable,
+                    message: "Browser Use is off for this agent (Agents → Abilities → Browser Use).",
                     tool: name
                 )
             }

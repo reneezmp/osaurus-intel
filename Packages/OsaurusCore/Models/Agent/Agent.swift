@@ -736,6 +736,8 @@ public struct AgentSettings: Codable, Sendable, Equatable {
     /// agents only). Stored now so the subagent base can read them; each
     /// takes effect when its kind is ported.
     public var computerUseEnabled: Bool
+    /// Per-agent autonomy ceiling for Computer Use and Browser Use (upstream).
+    public var computerUseCeiling: AutonomyCeiling?
     public var browserUseEnabled: Bool
     public var spawnDelegationEnabled: Bool
     public var appleScriptEnabled: Bool
@@ -795,6 +797,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         subagentModelOverrides: [String: String] = [:]
     ) {
         self.computerUseEnabled = computerUseEnabled
+        self.computerUseCeiling = nil
         self.browserUseEnabled = browserUseEnabled
         self.spawnDelegationEnabled = spawnDelegationEnabled
         self.appleScriptEnabled = appleScriptEnabled
@@ -846,6 +849,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         imagePermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .imagePermission)) ?? .ask
         videoPermission = (try? c.decodeIfPresent(MediaToolPermission.self, forKey: .videoPermission)) ?? .ask
         computerUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .computerUseEnabled)) ?? false
+        computerUseCeiling = try? c.decodeIfPresent(AutonomyCeiling.self, forKey: .computerUseCeiling)
         browserUseEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .browserUseEnabled)) ?? false
         spawnDelegationEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .spawnDelegationEnabled)) ?? false
         appleScriptEnabled = (try? c.decodeIfPresent(Bool.self, forKey: .appleScriptEnabled)) ?? false
@@ -905,6 +909,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         case imagePermission
         case videoPermission
         case computerUseEnabled
+        case computerUseCeiling
         case browserUseEnabled
         case spawnDelegationEnabled
         case appleScriptEnabled
@@ -941,6 +946,7 @@ public struct AgentSettings: Codable, Sendable, Equatable {
         try c.encode(imagePermission, forKey: .imagePermission)
         try c.encode(videoPermission, forKey: .videoPermission)
         try c.encode(computerUseEnabled, forKey: .computerUseEnabled)
+        try c.encodeIfPresent(computerUseCeiling, forKey: .computerUseCeiling)
         try c.encode(browserUseEnabled, forKey: .browserUseEnabled)
         try c.encode(spawnDelegationEnabled, forKey: .spawnDelegationEnabled)
         try c.encode(appleScriptEnabled, forKey: .appleScriptEnabled)

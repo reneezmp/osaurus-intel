@@ -140,6 +140,10 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // AppleScript task about "the document" resolves to the app the
             // user was working in, not Osaurus (`W-applescript-agent`).
             FrontmostAppTracker.shared.start()
+            // Upstream: carry the superseded `osaurus.browser` plugin's per-agent
+            // profile ids into the native Browser Use catalog, once
+            // (`W-browser-use`).
+            BrowserPluginMigration.migrateIfNeeded()
             // Register and refresh the managed Osaurus Router on every launch.
             // `RemoteProviderManager.refreshAllModels()` can only refresh an
             // already-present provider, so fresh/restored identities otherwise
@@ -558,6 +562,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     public func applicationWillTerminate(_ notification: Notification) {
         NSLog("Osaurus (Intel) terminating")
         SharedConfigurationService.shared.remove()
+        // Upstream: close every Browser Use session (`W-browser-use`).
+        BrowserSessionManager.shared.shutdownAll()
         // Upstream: land pending off-main writes before the process exits, so
         // a setting or secret saved right before quit isn't dropped.
         ToolConfigurationStore.flushPendingWrites()

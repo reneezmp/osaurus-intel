@@ -1850,12 +1850,21 @@ struct MockChatData: Sendable {
     static func mockTurnsForPerformanceTest(count: Int = 10) -> [ChatTurn] { [] }
 }
 
-struct ServiceToolInvocation: Sendable {
-    init() {}
-    var toolCallId: String? { nil }
-    var toolName: String { "" }
-    var jsonArguments: String { "" }
-    var geminiThoughtSignature: String? { nil }
+/// Upstream's tool invocation (`ModelService.swift`, excluded). Intel's was
+/// an empty stub until the subagent runner needed real values
+/// (docs/SUBAGENTS_INTEL.md).
+struct ServiceToolInvocation: Error, Sendable {
+    let toolName: String
+    let jsonArguments: String
+    let toolCallId: String?
+    let geminiThoughtSignature: String?
+
+    init(toolName: String, jsonArguments: String, toolCallId: String? = nil, geminiThoughtSignature: String? = nil) {
+        self.toolName = toolName
+        self.jsonArguments = jsonArguments
+        self.toolCallId = toolCallId
+        self.geminiThoughtSignature = geminiThoughtSignature
+    }
 }
 
 struct ServiceToolInvocations: Error, Sendable {
@@ -2409,6 +2418,10 @@ final class SystemPromptComposer: @unchecked Sendable {
         let appleScriptEnabled = await MainActor.run {
             AgentManager.shared.effectiveAppleScriptEnabled(for: id)
         }
+        // `W-browser-use`: the agent's Browser Use switch.
+        let browserUseEnabled = await MainActor.run {
+            AgentManager.shared.effectiveBrowserUseEnabled(for: id)
+        }
         // Upstream per-agent opt-ins for `render_chart` / `search_memory`.
         let (renderChartEnabled, searchMemoryEnabled) = await MainActor.run {
             let settings = AgentManager.shared.agent(for: id)?.settings
@@ -2558,6 +2571,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if name == ToolRegistry.imageToolName { return imageEnabled }
                 if name == ToolRegistry.videoToolName { return videoEnabled }
                 if ToolRegistry.appleScriptToolNames.contains(name) { return appleScriptEnabled }
+                if name == ToolRegistry.browserUseToolName { return browserUseEnabled }
                 return true
             }
             if let enabled = enabledToolNames {
@@ -2600,6 +2614,7 @@ final class SystemPromptComposer: @unchecked Sendable {
                 if imageEnabled { allowed.insert(ToolRegistry.imageToolName) }
                 if videoEnabled { allowed.insert(ToolRegistry.videoToolName) }
                 if appleScriptEnabled { allowed.formUnion(ToolRegistry.appleScriptToolNames) }
+                if browserUseEnabled { allowed.insert(ToolRegistry.browserUseToolName) }
                 // Upstream: `share_artifact` is baseline; Charts and Memory
                 // Recall switches are their own grants.
                 allowed.insert("share_artifact")
@@ -2680,6 +2695,13 @@ final class SystemPromptComposer: @unchecked Sendable {
             let block = "\n\n" + SystemPromptTemplates.intelAppleScriptGuidance
             prompt += block
             sections.append(PromptSection(id: "appleScript", label: "AppleScript", text: block, tint: .green))
+        }
+        // Browser Use (`W-browser-use`): upstream's guidance when the tool
+        // resolved into the schema.
+        if tools.contains(where: { $0.function.name == ToolRegistry.browserUseToolName }) {
+            let block = "\n\n" + SystemPromptTemplates.browserUseGuidance
+            prompt += block
+            sections.append(PromptSection(id: "browserUse", label: "Browser Use", text: block, tint: .green))
         }
         // Estimate the tool-schema token cost so the budget popover shows a real
         // "Tools" rail instead of 0.

@@ -175,6 +175,22 @@ public enum OsaurusPaths {
         root().appendingPathComponent("generated-videos", isDirectory: true)
     }
 
+    /// Computer Use / Browser Use autonomy policy (upstream).
+    public static func computerUseConfigFile() -> URL {
+        config().appendingPathComponent("computer-use.json")
+    }
+
+    /// Native Browser Use config (upstream, `W-browser-use`).
+    public static func browserConfigFile() -> URL {
+        config().appendingPathComponent("browser.json")
+    }
+
+    /// Persistent catalog of native browser sessions (agent id → WebKit
+    /// profile UUID + last-known page + observed auth status). Upstream.
+    public static func browserSessionsFile() -> URL {
+        config().appendingPathComponent("browser-sessions.json")
+    }
+
     /// Durable paid-video jobs, recovered after Stop or relaunch.
     static func mediaJobsFile() -> URL {
         runtime().appendingPathComponent("media-jobs.json", isDirectory: false)

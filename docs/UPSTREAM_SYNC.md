@@ -4408,3 +4408,15 @@ calls. Per-agent Mac Automation switch, execution mode and model under
 Abilities; guidance rendered when the tools are in the schema; guide topics
 updated.
 
+### Browser Use (`W-browser-use` complete) — 2026-10-28
+
+Upstream's native Browser Use on the subagent base: the WebKit session,
+catalog, manager, child tools and executor, `BrowserUseTool` and
+`BrowserUseKind`, the Browser Use settings tab, and the one-time plugin
+migration. New base piece: Intel's `AgentSubagentRunner` (bounded tool loop
+on the desktop model step, upstream's types and signature). Per-agent
+WebKit profiles on macOS 14+, one shared profile on Ventura
+(`BrowserProfileStore`, Renée's 2026-10-11 decision), said in the settings,
+reset confirmations and the agent section; deleting an agent on Ventura
+does not wipe the shared data. Details: `docs/SUBAGENTS_INTEL.md`.
+

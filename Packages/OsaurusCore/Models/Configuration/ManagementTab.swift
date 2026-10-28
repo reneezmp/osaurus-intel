@@ -50,7 +50,7 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         case .models: [.providers]
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
-        case .automation: [.schedules, .watchers]
+        case .automation: [.schedules, .watchers, .browser]
         case .unavailable: [.models, .sandbox]
         case .developerTools: [.server, .insights]
         }
@@ -84,6 +84,8 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case settings
     /// Upstream #2950 "Conversation": how chats look and behave.
     case chat
+    /// Upstream's Browser Use settings (`W-browser-use`).
+    case browser
 
     public var id: String { rawValue }
 
@@ -122,6 +124,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .storage: "externaldrive.fill.badge.checkmark"
         case .settings: "gearshape.fill"
         case .chat: "text.bubble.fill"
+        case .browser: "globe"
         }
     }
 
@@ -151,6 +154,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .storage: L("Storage")
         case .settings: L("General")
         case .chat: L("Conversation")
+        case .browser: L("Browser Use")
         }
     }
 
