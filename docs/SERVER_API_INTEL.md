@@ -202,4 +202,16 @@ Each stage: gate run, Rosy section, row note in the backlog.
       regression: nothing in that path changed.
     - Live-file hits in the passing run were the running app's (`lsof`:
       pid 64163) chat history, memory and activity log.
+- **Stage 2c, part 1 (2026-10-29): Ollama `/api/chat` and `/api/generate`**
+  (`IntelHTTPOllama.swift`).
+  - **Requests:** upstream's decoding. `options` map to sampling,
+    earlier `thinking` stays reasoning, `images` become image parts, and
+    `think` is validated. Intel's request has no thinking / effort fields,
+    so `think` is not passed on.
+  - **Responses:** NDJSON by default, with `thinking` frames, and arguments
+    as JSON objects. The closing frame carries `done_reason` and, on
+    `/api/chat`, the proposed `tool_calls`. `stream: false` returns
+    upstream's single body.
+  - **Same path as `/chat/completions`:** one model round, the same error
+    statuses. `prompt_eval_count` / `eval_count` are absent (not measured).
 

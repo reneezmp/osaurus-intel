@@ -2148,4 +2148,8 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] Same with `"stream":true` added: a stream of `data:` lines ending in
       `data: [DONE]`.
 - [ ] A model id that doesn't exist answers 404.
+- [ ] Ollama form: `curl -s http://127.0.0.1:1337/api/chat -d '{"model":"<id>","messages":[{"role":"user","content":"Say hi"}]}'`
+      prints one JSON line per piece, the last with `"done":true`; an
+      Ollama client (e.g. an Obsidian plugin pointed at
+      `http://127.0.0.1:1337`) can chat.
 - [ ] Insights shows the API request and the model call (to the provider).

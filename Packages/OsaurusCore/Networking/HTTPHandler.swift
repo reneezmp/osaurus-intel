@@ -518,7 +518,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// `HTTPCallerContext` (upstream `runRequestTask`, minus its task
     /// registry, which arrives with the routes that need it).
     @discardableResult
-    private func runRequestTask(_ operation: @escaping () async -> Void) -> Task<Void, Never> {
+    func runRequestTask(_ operation: @escaping () async -> Void) -> Task<Void, Never> {
         let callerContext = HTTPCallerContext(
             hasVerifiedAccessKey: stateRef.value.callerHasVerifiedAccessKey,
             isSecureChannel: false
@@ -838,6 +838,10 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveShow(context: context)
         case (.POST, "/chat/completions"):
             serveChatCompletions(context: context, head: head)
+        case (.POST, "/chat"):
+            serveOllama(.chat, context: context, head: head)
+        case (.POST, "/generate"):
+            serveOllama(.generate, context: context, head: head)
         case (.POST, "/mcp"):
             serveMCP(context: context)
         default:
@@ -1296,7 +1300,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// Log a request the gate (or a gate-shaped reply) answered. Intel's
     /// routes log through `sendResponse`; both stamp the access-key
     /// attribution the gate recorded.
-    private func logRequest(
+    func logRequest(
         method: String,
         path: String,
         userAgent: String?,
@@ -1348,7 +1352,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     /// Answer from a request task: hop to the event loop and write through
     /// the connection's context (Intel's counterpart of upstream's `hop`).
-    private func respondOnLoop(
+    func respondOnLoop(
         _ eventLoop: EventLoop,
         status: HTTPResponseStatus,
         headers: [(String, String)],
@@ -1361,7 +1365,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    private func requestBodyData() -> Data {
+    func requestBodyData() -> Data {
         guard let body = stateRef.value.requestBodyBuffer else { return Data() }
         return Data(body.readableBytesView)
     }
@@ -1369,7 +1373,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// Whether the catalog is hidden from this caller: a paired peer
     /// (agent-scoped key) sees nothing until the owner shares inference
     /// (upstream `peerModelCatalogIsHidden`).
-    private var hideCatalogFromPeer: Bool {
+    var hideCatalogFromPeer: Bool {
         Self.peerModelCatalogIsHidden(
             authedAudience: stateRef.value.authedAudience,
             authedScopeIsMaster: stateRef.value.authedScopeIsMaster,
@@ -1492,7 +1496,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     // MARK: - Chat Completions (upstream, on Intel's engine)
 
     /// The engine API requests run on (`InferenceSource.httpAPI`).
-    private func makeInferenceEngine() -> any ChatEngineProtocol {
+    func makeInferenceEngine() -> any ChatEngineProtocol {
         injectedChatEngine ?? ChatEngine(source: .httpAPI)
     }
 
@@ -1719,7 +1723,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     // MARK: - Response Helpers
 
-    private func sendResponse(
+    func sendResponse(
         context: ChannelHandlerContext,
         status: HTTPResponseStatus,
         headers: [(String, String)],
@@ -1777,11 +1781,11 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         sendResponse(context: context, status: status, headers: hs, body: body)
     }
 
-    private func jsonHeaders() -> [(String, String)] {
+    func jsonHeaders() -> [(String, String)] {
         [("Content-Type", "application/json; charset=utf-8")]
     }
 
-    private func textHeaders() -> [(String, String)] {
+    func textHeaders() -> [(String, String)] {
         [("Content-Type", "text/plain; charset=utf-8")]
     }
 }

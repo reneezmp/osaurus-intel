@@ -183,6 +183,75 @@ struct IntelHTTPChatCompletionsTests {
     }
 }
 
+extension IntelHTTPChatCompletionsTests {
+    private func postPath(_ server: ChatTestServer, _ path: String, _ json: String) async throws -> (Int, String) {
+        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)\(path)")!)
+        request.httpMethod = "POST"
+        request.httpBody = Data(json.utf8)
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        let (data, resp) = try await URLSession.shared.data(for: request)
+        return ((resp as? HTTPURLResponse)?.statusCode ?? -1, String(decoding: data, as: UTF8.self))
+    }
+
+    @Test func ollamaChatStreamsNDJSONAndClosesWithToolCalls() async throws {
+        let call = StreamingToolHint.ProposedCall(callId: "c", name: "get_weather", arguments: #"{"city":"Rome"}"#)
+        let engine = ScriptedChatEngine([StreamingReasoningHint.encode("hm"), "Hi", StreamingToolHint.encodeProposed([call])])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+
+        let (status, body) = try await postPath(server, "/api/chat",
+            #"{"model":"venice/llama","messages":[{"role":"user","content":"hi"}],"options":{"num_predict":64,"temperature":0.2}}"#)
+        #expect(status == 200)
+        let frames = body.split(separator: "\n").compactMap {
+            try? JSONSerialization.jsonObject(with: Data($0.utf8)) as? [String: Any]
+        }
+        let messages = frames.compactMap { $0["message"] as? [String: Any] }
+        #expect(messages.compactMap { $0["thinking"] as? String }.joined() == "hm")
+        #expect(messages.compactMap { $0["content"] as? String }.joined() == "Hi")
+        let last = try #require(frames.last)
+        #expect(last["done"] as? Bool == true)
+        #expect(last["done_reason"] as? String == "stop")
+        let calls = try #require((last["message"] as? [String: Any])?["tool_calls"] as? [[String: Any]])
+        let function = try #require(calls.first?["function"] as? [String: Any])
+        #expect(function["name"] as? String == "get_weather")
+        #expect((function["arguments"] as? [String: Any])?["city"] as? String == "Rome", "Ollama sends arguments as an object")
+        // Ollama options became the request's sampling fields.
+        let sent = try #require(engine.requests.first)
+        #expect(sent.max_tokens == 64)
+        #expect(sent.temperature == 0.2)
+        #expect(sent.stopAtToolCalls)
+    }
+
+    @Test func ollamaGenerateNonStreamingAnswersOneBody() async throws {
+        let engine = ScriptedChatEngine(["Paris"])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+
+        let (status, body) = try await postPath(server, "/api/generate",
+            #"{"model":"venice/llama","prompt":"Capital of France?","system":"Be brief.","stream":false}"#)
+        #expect(status == 200, "\(body)")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        #expect(object["response"] as? String == "Paris")
+        #expect(object["done"] as? Bool == true)
+        #expect(object["done_reason"] as? String == "stop")
+        let sent = try #require(engine.requests.first)
+        #expect(sent.messages.map(\.role) == ["system", "user"])
+        #expect(sent.messages.last?.content == "Capital of France?")
+    }
+
+    @Test func ollamaRejectsBadRequests() async throws {
+        let engine = ScriptedChatEngine([])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let (status, _) = try await postPath(server, "/api/generate", #"{"prompt":"no model"}"#)
+        #expect(status == 400)
+        let (think, _) = try await postPath(server, "/api/chat",
+            #"{"model":"m","messages":[{"role":"user","content":"x"}],"think":42}"#)
+        #expect(think == 400)
+        #expect(engine.requests.isEmpty)
+    }
+}
+
 // MARK: - Test server
 
 private struct ChatTestServer {
