@@ -842,6 +842,12 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveShow(context: context)
         case (.POST, "/chat/completions"):
             serveChatCompletions(context: context, head: head)
+        case (.POST, "/completions"):
+            serveLegacyCompletions(context: context)
+        case (.POST, "/embeddings"):
+            serveEmbeddings(context: context, head: head, ollamaFormat: false)
+        case (.POST, "/embed"):
+            serveEmbeddings(context: context, head: head, ollamaFormat: true)
         case (.POST, "/messages"):
             serveAnthropicMessages(context: context, head: head)
         case (.POST, "/chat"):
@@ -1316,7 +1322,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         startTime: Date,
         model: String? = nil,
         finishReason: RequestLog.FinishReason? = nil,
-        errorMessage: String? = nil
+        errorMessage: String? = nil,
+        details: [String: String]? = nil
     ) {
         let durationMs = Date().timeIntervalSince(startTime) * 1000
         InsightsService.logAsync(
@@ -1331,7 +1338,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             model: model,
             finishReason: finishReason,
             errorMessage: errorMessage,
-            connection: inboundConnectionInfo()
+            connection: inboundConnectionInfo(),
+            details: details
         )
     }
 
@@ -1679,6 +1687,36 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         }
         return String(
             decoding: try JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical), as: UTF8.self)
+    }
+
+    // MARK: - Legacy completions (upstream validation; local-only route)
+
+    /// `POST /completions`: upstream runs the raw prompt through the local
+    /// MLX runtime, bypassing the chat template (fill-in-the-middle). Intel
+    /// has no local models, so after upstream's validation it answers 404
+    /// saying so; a remote model was never served here upstream either.
+    private func serveLegacyCompletions(context: ChannelHandlerContext) {
+        func fail(_ status: HTTPResponseStatus, _ type: String, _ message: String) {
+            sendResponse(
+                context: context, status: status, headers: jsonHeaders(),
+                body: Self.errorBody(.openai(type: type), message: message))
+        }
+        guard let req = try? JSONDecoder().decode(CompletionRequest.self, from: requestBodyData()) else {
+            fail(.badRequest, "invalid_request_error", "Invalid request format: 'prompt' is required")
+            return
+        }
+        if let unsupported = req.unsupportedFIMReason {
+            fail(.badRequest, "invalid_request_error", unsupported)
+            return
+        }
+        guard !req.prompt.isEmpty else {
+            fail(.badRequest, "invalid_request_error", "Invalid request format: 'prompt' is required")
+            return
+        }
+        fail(
+            .notFound, "invalid_request_error",
+            "Raw completions run on local models, which need a Mac with Apple silicon. Use /v1/chat/completions with a cloud model."
+        )
     }
 
     // MARK: - MCP

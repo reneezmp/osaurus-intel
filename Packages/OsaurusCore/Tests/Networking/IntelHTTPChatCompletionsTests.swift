@@ -326,6 +326,38 @@ extension IntelHTTPChatCompletionsTests {
     }
 }
 
+extension IntelHTTPChatCompletionsTests {
+    /// Validation only: a valid request would download the embedding model.
+    @Test func embeddingsValidateTheModelLikeUpstream() async throws {
+        let server = try await startChatTestServer(engine: ScriptedChatEngine([]))
+        defer { Task { await server.shutdown() } }
+
+        let (status, body) = try await postPath(server, "/v1/embeddings", #"{"model":"potion-base-4M","input":"hi"}"#)
+        #expect(status == 400)
+        #expect(body.contains("unsupported_embedding_model"))
+        #expect(body.contains(IntelAPIEmbedder.modelName))
+        let (ollama, ollamaBody) = try await postPath(server, "/api/embed", #"{"model":"nope","input":["a"]}"#)
+        #expect(ollama == 400)
+        #expect(ollamaBody.hasPrefix(#"{"error":"Embedding model"#))
+        let (bad, _) = try await postPath(server, "/v1/embeddings", "not json")
+        #expect(bad == 400)
+        #expect(throws: Never.self) { try IntelAPIEmbedder.validateAPIModel(StaticEmbeddingModel.modelId) }
+    }
+
+    @Test func legacyCompletionsValidateThenExplainLocalOnly() async throws {
+        let server = try await startChatTestServer(engine: ScriptedChatEngine([]))
+        defer { Task { await server.shutdown() } }
+        let (fim, fimBody) = try await postPath(server, "/v1/completions", #"{"model":"m","prompt":"a","suffix":"b"}"#)
+        #expect(fim == 400)
+        #expect(fimBody.contains("'suffix'"))
+        let (missing, _) = try await postPath(server, "/v1/completions", #"{"model":"m"}"#)
+        #expect(missing == 400)
+        let (local, localBody) = try await postPath(server, "/v1/completions", #"{"model":"m","prompt":"def f("}"#)
+        #expect(local == 404)
+        #expect(localBody.contains("Apple silicon"))
+    }
+}
+
 // MARK: - Test server
 
 private struct ChatTestServer {

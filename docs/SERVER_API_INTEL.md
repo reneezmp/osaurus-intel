@@ -237,4 +237,19 @@ Each stage: gate run, Rosy section, row note in the backlog.
       so streamed events are written together when the round finishes.
     - **Tests:** upstream's `AnthropicAPITests` is enabled, minus three
       cases for pieces Intel lacks (listed in the file).
+- **Stage 2c, part 3, and 2d embeddings (2026-10-29):**
+  - **`/completions` (legacy):** upstream's `CompletionRequest` and its
+    validation (prompt required, FIM `suffix` / `middle` refused).
+    Upstream only ever ran it on the local MLX runtime, as a raw prompt
+    outside the chat template. Intel has no local models, so it answers
+    404 saying so and pointing to `/chat/completions`.
+  - **`/embeddings` and Ollama `/embed`** (`IntelHTTPEmbeddings.swift`):
+    upstream's contract, error bodies and Insights details, on Intel's CPU
+    `StaticEmbedder`.
+    - The model is `potion-base-8M` (256 dimensions), the one Intel's
+      memory uses; upstream serves `potion-base-4M` (128) on MLX.
+    - Model validation names Intel's ids, so a client asking for
+      upstream's gets the "unsupported model" error rather than vectors
+      of an unexpected size.
+    - The model downloads on first use, as upstream's does.
 
