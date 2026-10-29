@@ -240,7 +240,6 @@ let package = Package(
                 // signal rather than permanently red.
                 "Service/RuntimePolicySourceTests.swift",
                 "Service/StreamingHintTests.swift",
-                "Networking/CORSHandlerTests.swift",
                 "Sandbox/DiagnosticWarningsTests.swift",
                 "Model/ModelProfileRegistryTests.swift",
                 "Chat/MemoryUserPrefixTests.swift",

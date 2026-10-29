@@ -337,7 +337,7 @@ struct HTTPAuthGateTests {
     /// handed an `agent_scope_denied` for them. `/admin/*` is closed, and the
     /// inference routes — including raw `/chat/completions` (Mode 1) — are
     /// closed as `peer_inference_disabled` until the owner shares.
-    @Test(.disabled("W-server-api stage 2: /api/tags and the empty peer catalog")) func legacyPairingKey_keepsItsAgentSurfaceExceptServerAdministration() async throws {
+    @Test func legacyPairingKey_keepsItsAgentSurfaceExceptServerAdministration() async throws {
         let fixture = try Self.agentScopedFixture(workspaceMinted: false)
         let server = try await startAuthTestServer(validator: fixture.validator)
         defer { Task { await server.shutdown() } }
@@ -411,7 +411,7 @@ struct HTTPAuthGateTests {
     /// loopback-trusted read rather than pinned — while the agent-scoped key
     /// gets nothing. (Test servers are serialized by `HTTPServerTestLock`, so
     /// the loopback-trusted reference read runs on its own server first.)
-    @Test(.disabled("W-server-api stage 2: the peer catalog gate on /models")) func masterScopedKey_isNotSubjectToThePeerCatalogGate() async throws {
+    @Test func masterScopedKey_isNotSubjectToThePeerCatalogGate() async throws {
         func catalog(_ body: String) throws -> [String] {
             try JSONDecoder().decode(ModelsResponse.self, from: Data(body.utf8)).data.map(\.id)
         }
@@ -572,7 +572,7 @@ struct HTTPAuthGateTests {
         #expect(browser.allowOrigin == "*")
     }
 
-    @Test(.disabled("W-server-api stage 2: /api/tags")) func localKeyPolicyOn_keylessLoopbackGets401OnProtectedRoutesOnly() async throws {
+    @Test func localKeyPolicyOn_keylessLoopbackGets401OnProtectedRoutesOnly() async throws {
         let server = try await startAuthTestServer(
             validator: .forAlice(), trustLoopback: true, localKeyRequired: true
         )

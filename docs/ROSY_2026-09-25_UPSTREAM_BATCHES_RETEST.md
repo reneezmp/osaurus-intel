@@ -2130,8 +2130,12 @@ Details: `SERVER_API_INTEL.md`, stages 0–1. Nothing visible changes in the
 app; this checks the server still answers locally. Use Terminal on Rosy.
 
 - [ ] `curl -s http://127.0.0.1:1337/health` answers `"healthy"`.
-- [ ] `curl -s http://127.0.0.1:1337/v1/models` lists models (no key
-      needed on this Mac).
+- [ ] `curl -s http://127.0.0.1:1337/v1/models` answers an empty list at
+      first (no key needed on this Mac). Then Server › **Models**: the Local
+      Models card says local models need Apple silicon; each connected
+      provider has a card of models, all off. Turn two on (or "Expose all"
+      on one provider): `/v1/models` and `/api/tags` now list exactly those.
+      Search filters the list.
 - [ ] `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:1337/nope`
       prints `404` (it used to print 200).
 - [ ] `curl -s -H "X-Osaurus-Relay-Origin: 1" http://127.0.0.1:1337/v1/models`

@@ -134,4 +134,23 @@ Each stage: gate run, Rosy section, row note in the backlog.
     `CORSHandlerTests` waits for stage 2 (`/api/tags`).
   - **Server still loopback-only:** `AppDelegate` binds `127.0.0.1` until
     stage 7.
+- **Stage 2a (2026-10-29): model routes.**
+  - **Routes:** `/models`, `/tags` (Ollama) and `/show` (Ollama), at upstream.
+  - **Model types:** `OpenAIModel`, `ModelsResponse`, `ModelPermission`
+    and the API `ModelDetails` replace Intel's two-field stub.
+  - **What's listed:** the remote models the owner exposed in the new
+    Server › Models tab. That is upstream's `ServerModelsTabContent` and
+    `ModelExposureStore`, with remote models hidden by default. Intel has
+    no local models, so the Local Models card says they need Apple silicon.
+    `/models` no longer lists Intel's two hard-coded DeepSeek ids.
+  - **Peers:** they get an empty catalog while inference sharing is off.
+  - **`/show`:** answers 404 for `foundation`, else answers from
+    `ModelInfo`.
+  - **Intel's `RemoteProviderManager`:** gained upstream's
+    `getOpenAIModels`, a `cachedAvailableModels` and the
+    `_testInstallConnectedProvider` / `_testRemoveProviders` hooks
+    (in memory only).
+  - **Tests:** `CORSHandlerTests` and `ModelExposureStoreTests` are
+    enabled, plus three gate tests that waited for `/api/tags` and the
+    peer catalog.
 

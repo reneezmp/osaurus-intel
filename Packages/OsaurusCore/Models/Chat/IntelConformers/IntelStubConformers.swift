@@ -541,6 +541,66 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         )
     }
 
+    /// Test hooks (upstream names): install a connected provider in memory
+    /// only (nothing is saved), and remove it again.
+    func _testInstallConnectedProvider(_ provider: RemoteProvider, discoveredModels: [String]) {
+        configuration.add(provider)
+        var state = RemoteProviderState(providerId: provider.id)
+        state.isConnected = true
+        state.discoveredModels = discoveredModels
+        state.lastConnectedAt = Date()
+        providerStates[provider.id] = state
+    }
+
+    func _testRemoveProviders(ids: [UUID]) {
+        for id in ids {
+            configuration.remove(id: id)
+            providerStates.removeValue(forKey: id)
+        }
+    }
+
+    /// Connected providers and their prefixed model ids (upstream
+    /// `cachedAvailableModels`, without the provider type and host the
+    /// Intel callers don't read). Server › Models lists these.
+    func cachedAvailableModels() -> [(providerId: UUID, providerName: String, models: [String])] {
+        return configuration.providers.compactMap { provider in
+            guard exposesModelsForInference(provider) else { return nil }
+            let models = pickerModelIds(forProviderId: provider.id)
+            guard providerStates[provider.id]?.isConnected == true else { return nil }
+            return (provider.id, provider.name, models)
+        }
+    }
+
+    /// OpenAI-compatible model objects for all connected providers
+    /// (upstream, `W-server-api`). Remote models are hidden from API listings
+    /// by default; only models the user exposed in Server › Models are
+    /// returned.
+    func getOpenAIModels() -> [OpenAIModel] {
+        var models: [OpenAIModel] = []
+        let exposure = ModelExposureStore.shared
+
+        for provider in configuration.providers where exposesModelsForInference(provider) {
+            guard let state = providerStates[provider.id], state.isConnected else {
+                continue
+            }
+
+            let prefix = provider.name
+                .lowercased()
+                .replacingOccurrences(of: " ", with: "-")
+                .replacingOccurrences(of: "/", with: "-")
+
+            for modelId in state.discoveredModels {
+                let prefixedId = "\(prefix)/\(modelId)"
+                guard exposure.isExposed(id: prefixedId, kind: .remote) else { continue }
+                var model = OpenAIModel(modelName: prefixedId)
+                model.owned_by = provider.name
+                models.append(model)
+            }
+        }
+
+        return models
+    }
+
     func setOsaurusRouterEnabled(_ enabled: Bool) {
         guard enabled != isOsaurusRouterEnabled else { return }
         OsaurusRouter.setEnabled(enabled)

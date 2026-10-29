@@ -189,23 +189,145 @@ struct UsageInfo: Codable, Sendable {
     let total_tokens: Int?
 }
 
+/// OpenAI-compatible model object
 struct OpenAIModel: Codable, Sendable {
     let id: String
-    let object: String
-    let created: Int
-    let owned_by: String
+    var object: String = "model"
+    var created: Int = 0
+    var owned_by: String = "osaurus"
+    var permission: [ModelPermission]? = nil
+    var root: String? = nil
+    var parent: String? = nil
+    var name: String? = nil
+    var model: String? = nil
+    var modified_at: String? = nil
+    var size: Int? = nil
+    var digest: String? = nil
+    var details: ModelDetails? = nil
 
-    init(id: String) {
-        self.id = id
+    /// Initialize from a model name (for local models)
+    init(modelName: String) {
+        self.id = modelName
         self.object = "model"
         self.created = Int(Date().timeIntervalSince1970)
-        self.owned_by = "deepseek"
+        self.owned_by = "osaurus"
+        self.root = modelName
+    }
+
+    /// Full initializer
+    init(
+        id: String,
+        object: String = "model",
+        created: Int = 0,
+        owned_by: String = "osaurus",
+        permission: [ModelPermission]? = nil,
+        root: String? = nil,
+        parent: String? = nil,
+        name: String? = nil,
+        model: String? = nil,
+        modified_at: String? = nil,
+        size: Int? = nil,
+        digest: String? = nil,
+        details: ModelDetails? = nil
+    ) {
+        self.id = id
+        self.object = object
+        self.created = created
+        self.owned_by = owned_by
+        self.permission = permission
+        self.root = root
+        self.parent = parent
+        self.name = name
+        self.model = model
+        self.modified_at = modified_at
+        self.size = size
+        self.digest = digest
+        self.details = details
+    }
+
+    // Explicit Codable implementation to avoid ambiguity
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        id = try container.decode(String.self, forKey: .id)
+        object = try container.decodeIfPresent(String.self, forKey: .object) ?? "model"
+        created = try container.decodeIfPresent(Int.self, forKey: .created) ?? 0
+        owned_by = try container.decodeIfPresent(String.self, forKey: .owned_by) ?? "unknown"
+        permission = try container.decodeIfPresent([ModelPermission].self, forKey: .permission)
+        root = try container.decodeIfPresent(String.self, forKey: .root)
+        parent = try container.decodeIfPresent(String.self, forKey: .parent)
+        name = try container.decodeIfPresent(String.self, forKey: .name)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        modified_at = try container.decodeIfPresent(String.self, forKey: .modified_at)
+        // Some OpenAI-compatible servers expose provider-local metadata in
+        // `size` as a fractional value. That field is informational for
+        // Osaurus model discovery, so preserve the model row instead of
+        // rejecting the whole `/models` response.
+        size = try? container.decodeIfPresent(Int.self, forKey: .size)
+        digest = try container.decodeIfPresent(String.self, forKey: .digest)
+        details = try container.decodeIfPresent(ModelDetails.self, forKey: .details)
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case id, object, created, owned_by, permission, root, parent
+        case name, model, modified_at, size, digest, details
     }
 }
 
+/// Model permission object (OpenAI format)
+struct ModelPermission: Codable, Sendable {
+    var id: String?
+    var object: String?
+    var created: Int?
+    var allow_create_engine: Bool?
+    var allow_sampling: Bool?
+    var allow_logprobs: Bool?
+    var allow_search_indices: Bool?
+    var allow_view: Bool?
+    var allow_fine_tuning: Bool?
+    var organization: String?
+    var group: String?
+    var is_blocking: Bool?
+}
+
+struct ModelDetails: Codable, Sendable {
+    let parent_model: String?
+    let format: String?
+    let family: String?
+    let families: [String]?
+    let parameter_size: String?
+    let quantization_level: String?
+}
+
+// Upstream's `ModelDetails.localMLXModelDetails` is MLX-only (no local
+// models on Intel), so it is left out.
+
+/// Response for /models endpoint
 struct ModelsResponse: Codable, Sendable {
-    let object: String
+    var object: String = "list"
     let data: [OpenAIModel]
+
+    private enum CodingKeys: String, CodingKey {
+        case object, data
+    }
+
+    /// Memberwise initializer
+    init(object: String = "list", data: [OpenAIModel]) {
+        self.object = object
+        self.data = data
+    }
+
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        // Make object optional for providers like OpenRouter that don't include it
+        self.object = try container.decodeIfPresent(String.self, forKey: .object) ?? "list"
+        self.data = try container.decode([OpenAIModel].self, forKey: .data)
+    }
+
+    func encode(to encoder: Encoder) throws {
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(object, forKey: .object)
+        try container.encode(data, forKey: .data)
+    }
 }
 
 // MARK: - HTTP Handler
@@ -240,6 +362,23 @@ private final class SendableClientIPBox: @unchecked Sendable {
     var value: String {
         get { _lock.withLock { _value } }
         set { _lock.withLock { _value = newValue } }
+    }
+}
+
+private final class OneShotContinuation<Value: Sendable>: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+
+    func resume(_ continuation: CheckedContinuation<Value, Never>, returning value: Value) -> Bool {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return false
+        }
+        didResume = true
+        lock.unlock()
+        continuation.resume(returning: value)
+        return true
     }
 }
 
@@ -752,6 +891,10 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveRoot(context: context)
         case (.GET, "/models"):
             serveModels(context: context)
+        case (.GET, "/tags"):
+            serveTags(context: context)
+        case (.POST, "/show"):
+            serveShow(context: context)
         case (.POST, "/chat/completions"):
             serveChatCompletions(context: context)
         case (.POST, "/mcp"):
@@ -1262,16 +1405,146 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     // MARK: - Models
 
+    /// Answer from a request task: hop to the event loop and write through
+    /// the connection's context (Intel's counterpart of upstream's `hop`).
+    private func respondOnLoop(
+        _ eventLoop: EventLoop,
+        status: HTTPResponseStatus,
+        headers: [(String, String)],
+        body: String
+    ) {
+        let stateRef = self.stateRef
+        eventLoop.execute {
+            guard let ctx = stateRef.value.contextBox else { return }
+            self.sendResponse(context: ctx, status: status, headers: headers, body: body)
+        }
+    }
+
+    private func requestBodyData() -> Data {
+        guard let body = stateRef.value.requestBodyBuffer else { return Data() }
+        return Data(body.readableBytesView)
+    }
+
+    /// Whether the catalog is hidden from this caller: a paired peer
+    /// (agent-scoped key) sees nothing until the owner shares inference
+    /// (upstream `peerModelCatalogIsHidden`).
+    private var hideCatalogFromPeer: Bool {
+        Self.peerModelCatalogIsHidden(
+            authedAudience: stateRef.value.authedAudience,
+            authedScopeIsMaster: stateRef.value.authedScopeIsMaster,
+            peerInferenceEnabled: peerInferenceEnabled
+        )
+    }
+
+    /// `GET /models` (upstream). Intel has no local models (MLX and Apple's
+    /// Foundation model need Apple Silicon), so the list is the remote
+    /// models the owner exposed in Server › Models.
     private func serveModels(context: ChannelHandlerContext) {
-        let models = [
-            "deepseek-flash",
-            "deepseek-v4-pro",
-        ].map { OpenAIModel(id: $0) }
-        let resp = ModelsResponse(object: "list", data: models)
-        if let data = try? jsonEncoder.encode(resp), let json = String(data: data, encoding: .utf8) {
-            sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: json)
-        } else {
-            sendEmptyResponse(context: context, status: .internalServerError)
+        let eventLoop = context.eventLoop
+        let hide = hideCatalogFromPeer
+        runRequestTask {
+            let models = hide ? [] : await Self.remoteOpenAIModelsSnapshot()
+            let response = ModelsResponse(data: models)
+            let json =
+                (try? JSONEncoder.osaurusCanonical().encode(response)).map { String(decoding: $0, as: UTF8.self) }
+                ?? "{}"
+            self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: json)
+        }
+    }
+
+    /// `GET /tags` (Ollama, upstream): the same catalog with Ollama fields.
+    private func serveTags(context: ChannelHandlerContext) {
+        let eventLoop = context.eventLoop
+        let hide = hideCatalogFromPeer
+        runRequestTask {
+            let now = Date().ISO8601Format()
+            var models: [OpenAIModel] = []
+            let remoteModels = hide ? [] : await Self.remoteOpenAIModelsSnapshot()
+            for var remoteModel in remoteModels {
+                remoteModel.modified_at = now
+                remoteModel.size = 0
+                remoteModel.digest = ""
+                remoteModel.name = remoteModel.id
+                remoteModel.model = remoteModel.id
+                remoteModel.details = ModelDetails(
+                    parent_model: "",
+                    format: "remote",
+                    family: remoteModel.owned_by,
+                    families: [remoteModel.owned_by],
+                    parameter_size: "",
+                    quantization_level: ""
+                )
+                models.append(remoteModel)
+            }
+            let payload = ["models": models]
+            let json =
+                (try? JSONEncoder.osaurusCanonical().encode(payload)).map { String(decoding: $0, as: UTF8.self) }
+                ?? "{}"
+            self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: json)
+        }
+    }
+
+    /// `POST /show` (Ollama, upstream). The Foundation model is never
+    /// available on Intel; other ids answer from `ModelInfo` when known.
+    private func serveShow(context: ChannelHandlerContext) {
+        struct ShowRequest: Decodable {
+            let model: String
+
+            init(from decoder: any Decoder) throws {
+                let container = try decoder.container(keyedBy: CodingKeys.self)
+                if let model = try container.decodeIfPresent(String.self, forKey: .model) {
+                    self.model = model
+                } else {
+                    self.model = try container.decode(String.self, forKey: .name)
+                }
+            }
+
+            private enum CodingKeys: String, CodingKey {
+                case model, name
+            }
+        }
+
+        guard let req = try? JSONDecoder().decode(ShowRequest.self, from: requestBodyData()) else {
+            let errorBody =
+                #"{"error":{"message":"Invalid request: expected {\"model\": \"<model_id>\"}","type":"invalid_request_error"}}"#
+            sendResponse(context: context, status: .badRequest, headers: jsonHeaders(), body: errorBody)
+            return
+        }
+        let modelName = req.model
+        if modelName.lowercased() == "foundation" || modelName.lowercased() == "default" {
+            let errorBody = #"{"error":{"message":"Foundation model not available","type":"invalid_request_error"}}"#
+            sendResponse(context: context, status: .notFound, headers: jsonHeaders(), body: errorBody)
+            return
+        }
+        guard let modelInfo = ModelInfo.load(modelId: modelName) else {
+            let errorBody = #"{"error":{"message":"Model not found: \#(modelName)","type":"invalid_request_error"}}"#
+            sendResponse(context: context, status: .notFound, headers: jsonHeaders(), body: errorBody)
+            return
+        }
+        let jsonData = (try? JSONEncoder.osaurusCanonical().encode(modelInfo.toShowResponse())) ?? Data("{}".utf8)
+        sendResponse(
+            context: context, status: .ok, headers: jsonHeaders(), body: String(decoding: jsonData, as: UTF8.self))
+    }
+
+    /// Remote models without waiting long on the main actor (upstream):
+    /// provider startup may be blocked on Keychain auth.
+    private static func remoteOpenAIModelsSnapshot(timeoutNanoseconds: UInt64 = 250_000_000) async
+        -> [OpenAIModel]
+    {
+        await withCheckedContinuation { continuation in
+            let once = OneShotContinuation<[OpenAIModel]>()
+            let modelsTask = Task {
+                let models = await MainActor.run {
+                    RemoteProviderManager.shared.getOpenAIModels()
+                }
+                _ = once.resume(continuation, returning: models)
+            }
+            Task {
+                try? await Task.sleep(nanoseconds: timeoutNanoseconds)
+                if once.resume(continuation, returning: []) {
+                    modelsTask.cancel()
+                }
+            }
         }
     }
 
