@@ -144,6 +144,19 @@ public enum ChatExecutionContext {
     /// (`W-identity-mobile`), so nothing binds it.
     @TaskLocal static var hasRemoteReviewer: Bool = false
 
+    /// True when the current tool execution was initiated by an EXTERNAL
+    /// surface (the `/mcp/call` bridge, later the HTTP agent-run loop)
+    /// rather than the in-app chat (upstream; `W-server-api` stage 3). The
+    /// registry refuses `ToolRegistry.externallyDeniedToolNames` under this
+    /// flag, and `.ask` tools, whose approval card an external caller can't
+    /// see. Module-internal so out-of-module callers cannot unbind it.
+    @TaskLocal static var isExternalSurface: Bool = false
+
+    /// Headless auto-denial for `.ask`-gated tools (upstream): bound by
+    /// callers with no approval UI (external MCP, eval lanes), so a tool
+    /// that would ask is refused instead of hanging on a card nobody sees.
+    @TaskLocal static var denyUnapprovedToolPrompts: Bool = false
+
     /// Default idle-timeout (seconds) for `shell_run`, applied ONLY when the
     /// model passed no `timeout` argument. Bound by headless drivers
     /// (`AgentLoopEvaluator`) where no user [Terminate] button exists, so a

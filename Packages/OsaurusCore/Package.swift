@@ -243,7 +243,6 @@ let package = Package(
                 "Sandbox/DiagnosticWarningsTests.swift",
                 "Model/ModelProfileRegistryTests.swift",
                 "Chat/MemoryUserPrefixTests.swift",
-                "Networking/MCPHTTPHandlerTests.swift",
                 "Chat/SandboxImportContractTests.swift",
                 "Plugin/PluginDispatchInstructionsInjectionTests.swift",
                 "Chat/FolderContextRenderTests.swift",

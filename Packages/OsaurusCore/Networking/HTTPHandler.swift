@@ -865,8 +865,12 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveOllama(.chat, context: context, head: head)
         case (.POST, "/generate"):
             serveOllama(.generate, context: context, head: head)
-        case (.POST, "/mcp"):
-            serveMCP(context: context)
+        case (.GET, "/mcp/health"):
+            serveMCPHealth(context: context)
+        case (.GET, "/mcp/tools"):
+            serveMCPListTools(context: context)
+        case (.POST, "/mcp/call"):
+            serveMCPCallTool(context: context, head: head)
         default:
             // Upstream answers unknown routes 404 (Intel's old router
             // answered every path 200 "ok").
@@ -1334,6 +1338,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         model: String? = nil,
         finishReason: RequestLog.FinishReason? = nil,
         errorMessage: String? = nil,
+        toolCalls: [ToolCallLog]? = nil,
         details: [String: String]? = nil
     ) {
         let durationMs = Date().timeIntervalSince(startTime) * 1000
@@ -1347,6 +1352,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             responseStatus: responseStatus,
             durationMs: durationMs,
             model: model,
+            toolCalls: toolCalls,
             finishReason: finishReason,
             errorMessage: errorMessage,
             connection: inboundConnectionInfo(),
@@ -1728,66 +1734,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             .notFound, "invalid_request_error",
             "Raw completions run on local models, which need a Mac with Apple silicon. Use /v1/chat/completions with a cloud model."
         )
-    }
-
-    // MARK: - MCP
-
-    private func serveMCP(context: ChannelHandlerContext) {
-        guard let bodyBuffer = stateRef.value.requestBodyBuffer,
-              let bodyData = bodyBuffer.getBytes(at: 0, length: bodyBuffer.readableBytes).map({ Data($0) }) else {
-            sendJSONError(context: context, status: .badRequest, message: "Empty body")
-            return
-        }
-
-        guard let head = stateRef.value.requestHead else {
-            sendEmptyResponse(context: context, status: .badRequest)
-            return
-        }
-
-        var headers: [String: String] = [:]
-        for (name, value) in head.headers {
-            headers[name] = value
-        }
-
-        let mcpRequest = HTTPRequest(
-            method: "POST",
-            headers: headers,
-            body: bodyData,
-            path: "/mcp"
-        )
-
-        let eventLoop = context.eventLoop
-        let stateRef = self.stateRef
-
-        runRequestTask {
-            let response = await MCPBridge.shared.handleMCPRequest(mcpRequest)
-
-            eventLoop.execute {
-                guard let ctx = stateRef.value.contextBox else { return }
-                switch response {
-                case .data(let data, _):
-                    if let json = String(data: data, encoding: .utf8) {
-                        self.sendResponse(context: ctx, status: .ok, headers: self.jsonHeaders(), body: json)
-                    } else {
-                        self.sendEmptyResponse(context: ctx, status: .internalServerError)
-                    }
-                case .error(let code, _, _, _):
-                    if let body = response.bodyData, let json = String(data: body, encoding: .utf8) {
-                        self.sendResponse(context: ctx, status: HTTPResponseStatus(statusCode: code), headers: self.jsonHeaders(), body: json)
-                    } else {
-                        self.sendEmptyResponse(context: ctx, status: HTTPResponseStatus(statusCode: code))
-                    }
-                case .accepted:
-                    self.sendEmptyResponse(context: ctx, status: .accepted)
-                case .ok:
-                    self.sendEmptyResponse(context: ctx, status: .ok)
-                case .stream:
-                    self.sendJSONError(context: ctx, status: .notImplemented, message: "SSE MCP not supported")
-                default:
-                    self.sendEmptyResponse(context: ctx, status: .internalServerError)
-                }
-            }
-        }
     }
 
     // MARK: - Response Helpers

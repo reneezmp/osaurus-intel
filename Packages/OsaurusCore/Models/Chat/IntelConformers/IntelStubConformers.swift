@@ -1320,6 +1320,42 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// Upstream's Agent Channel tool names (verbatim). Intel doesn't ship the
     /// channel tools yet (`W-channels`); the set is here for upstream's
     /// Insights redaction in `ToolCallLog`, which keys off these names.
+    // MARK: - External surface deny list (upstream; `W-server-api` stage 3)
+
+    /// Host-mutation tool classes that must never be invocable from EXTERNAL
+    /// surfaces (upstream's list).
+    nonisolated static let externallyDeniedHostToolNames: Set<String> = [
+        "file_write", "file_edit", "file_copy", "shell_run", "git_commit", "file_undo",
+        "redact_file",
+        "write_knowledge", "delete_knowledge", "edit_knowledge",
+        "update_skill",
+    ]
+
+    /// Tool classes the `/mcp/call` bridge (and later the HTTP agent loop)
+    /// refuses and `/mcp/tools` hides: host mutation, agent channels, the
+    /// built-in Apple app tools (per-agent personal data), and the folder
+    /// picker, which would pop a window on this Mac (upstream).
+    nonisolated public static let externallyDeniedToolNames: Set<String> =
+        externallyDeniedHostToolNames.union(agentChannelToolNames).union(AppleApp.allToolNames)
+        .union([PromptWorkingFolderTool.toolName])
+
+    /// Whether `name` is blocked because an external surface drives the call.
+    /// (Upstream's authenticated folder-bounded exception comes with the
+    /// agent-run routes, stage 4.)
+    nonisolated static func isDeniedForCurrentSurface(_ name: String) -> Bool {
+        ChatExecutionContext.isExternalSurface && externallyDeniedToolNames.contains(name)
+    }
+
+    /// The structured refusal external callers get for denied tool classes.
+    nonisolated static func externalSurfaceDenialEnvelope(tool: String) -> String {
+        ToolEnvelope.failure(
+            kind: .rejected,
+            message:
+                "'\(tool)' is not available to external callers. This tool can only run from the Osaurus app.",
+            tool: tool
+        )
+    }
+
     nonisolated static let agentChannelToolNames: Set<String> = [
         "agent_channel_list_connections",
         "agent_channel_diagnostics",
@@ -1644,6 +1680,31 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     }
 
     func execute(name: String, argumentsJSON: String) async throws -> String {
+        // External-surface deny list (upstream): refuse host-mutating and
+        // app-only tool classes for MCP / HTTP-initiated executions.
+        if Self.isDeniedForCurrentSurface(name) {
+            return Self.externalSurfaceDenialEnvelope(tool: name)
+        }
+        // Intel asks for approval in the chat engine, before `execute`, so an
+        // external caller would bypass the card. Upstream's gate refuses
+        // `.ask` tools for callers with no approval UI; refuse them here.
+        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+            switch effectivePolicy(for: name, argumentsJSON: argumentsJSON) {
+            case .deny:
+                throw NSError(
+                    domain: "ToolRegistry", code: 3,
+                    userInfo: [NSLocalizedDescriptionKey: "Execution denied by policy for tool: \(name)"])
+            case .ask where !handlesOwnApproval(for: name):
+                throw NSError(
+                    domain: "ToolRegistry", code: 3,
+                    userInfo: [
+                        NSLocalizedDescriptionKey:
+                            "Tool '\(name)' needs approval in the Osaurus app, which external callers can't give. Set it to Auto in Tools to allow it here."
+                    ])
+            default:
+                break
+            }
+        }
         if let denial = await runtimeCapabilityDenial(for: name) {
             return denial
         }
@@ -2272,6 +2333,12 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     parameters: $0.parameters
                 )
             }
+    }
+
+    /// Whether a tool is switched on globally (upstream API; Intel keeps the
+    /// switch as `disabledToolNames`).
+    func isGlobalEnabled(_ name: String) -> Bool {
+        !disabledToolNames.contains(name)
     }
 
     /// Toggle a tool on/off globally. Disabled tools are dropped from

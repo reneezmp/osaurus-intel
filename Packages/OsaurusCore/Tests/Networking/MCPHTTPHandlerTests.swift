@@ -5,6 +5,12 @@
 //  Verifies MCP endpoints mounted on the same port: /mcp/health, /mcp/tools, /mcp/call
 //
 
+//  Intel (`W-server-api` stage 3, docs/SERVER_API_INTEL.md): upstream's
+//  suite minus the cases for pieces Intel doesn't have yet: harness agent
+//  tokens (`W-harness-runtimes`), the dispatch layer's external-surface
+//  binding and unattended auto-approval (stage 4, with `/dispatch`), and
+//  `/admin/cache-stats` (stage 7).
+
 import Foundation
 import NIOCore
 import NIOHTTP1
@@ -16,6 +22,71 @@ import Testing
 @Suite(.serialized)
 @MainActor
 struct MCPHTTPHandlerTests {
+    private static let agentChannelToolNames = [
+        "agent_channel_list_connections",
+        "agent_channel_diagnostics",
+        "agent_channel_list_spaces",
+        "agent_channel_list_rooms",
+        "agent_channel_read_messages",
+        "agent_channel_read_thread",
+        "agent_channel_search_messages",
+        "agent_channel_draft_message",
+        "agent_channel_send_message",
+        "agent_channel_reply_thread",
+        "agent_channel_edit_message",
+        "agent_channel_delete_message",
+        "agent_channel_add_reaction",
+        "agent_channel_remove_reaction",
+        "agent_channel_send_typing",
+        "agent_channel_imessage_send_attachment",
+        "agent_channel_imessage_send_effect",
+        "agent_channel_imessage_create_poll",
+        "agent_channel_imessage_manage_group",
+        "agent_channel_whatsapp_send_attachment",
+        "agent_channel_publish",
+    ]
+
+    @Test func mcp_call_rejects_non_object_arguments_without_executing() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let name = "json_shape_invalid_probe"
+            ToolRegistry.shared.register(NamedEchoTool(name: name))
+            ToolRegistry.shared.setEnabled(true, for: name)
+            defer { ToolRegistry.shared.unregister(names: [name]) }
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+            for value in ["5", "true", #""text""#, "[]"] {
+                var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/call")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.authenticate()
+                request.httpBody = Data("{\"name\":\"\(name)\",\"arguments\":\(value)}".utf8)
+                let (_, response) = try await URLSession.shared.data(for: request)
+                #expect((response as? HTTPURLResponse)?.statusCode == 400)
+            }
+        }
+    }
+
+    @Test func mcp_call_accepts_missing_null_and_object_arguments() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let name = "json_shape_no_args_probe"
+            ToolRegistry.shared.register(NamedEchoTool(name: name))
+            ToolRegistry.shared.setEnabled(true, for: name)
+            defer { ToolRegistry.shared.unregister(names: [name]) }
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+            for field in ["", ",\"arguments\":null", ",\"arguments\":{}"] {
+                var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/call")!)
+                request.httpMethod = "POST"
+                request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+                request.authenticate()
+                request.httpBody = Data("{\"name\":\"\(name)\"\(field)}".utf8)
+                let (data, response) = try await URLSession.shared.data(for: request)
+                #expect((response as? HTTPURLResponse)?.statusCode == 200)
+                let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+                #expect(json["isError"] as? Bool == false)
+            }
+        }
+    }
 
     @Test func mcp_health_returns_ok() async throws {
         let server = try await startTestServer()
@@ -30,33 +101,13 @@ struct MCPHTTPHandlerTests {
         #expect(body.contains(#""status":"ok"#))
     }
 
-    @Test func admin_cache_stats_returns_empty_snapshot_without_loading_model() async throws {
-        let server = try await startTestServer()
-        defer { Task { await server.shutdown() } }
-
-        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/admin/cache-stats")!)
-        request.authenticate()
-        let (data, resp) = try await URLSession.shared.data(for: request)
-        let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
-        #expect(status == 200)
-
-        let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
-        #expect(json["status"] as? String == "ok")
-        let models = try #require(json["models"] as? [[String: Any]])
-        #expect(models.isEmpty)
-        let aggregate = try #require(json["aggregate"] as? [String: Any])
-        #expect(aggregate["prefix_hits"] as? Int == 0)
-        #expect(aggregate["paged_hits"] as? Int == 0)
-        #expect(aggregate["disk_l2_hits"] as? Int == 0)
-        #expect(aggregate["ssm_companion_hits"] as? Int == 0)
-    }
 
     @Test func mcp_tools_lists_only_enabled_tools() async throws {
         // `EchoTool` is a dynamic tool registered into the process-wide
-        // `ToolRegistry.shared`. `PluginCreatorInjectionTests` reads
-        // `dynamicCatalogIsEmpty()` and would flake if `EchoTool` were
-        // registered concurrently. Hold the cross-suite lock across the
-        // whole register / assert / unregister window.
+        // `ToolRegistry.shared`. Other suites that assert on the dynamic
+        // catalog contents (e.g. `ToolSearchServiceTests`) would flake if
+        // `EchoTool` were registered concurrently. Hold the cross-suite lock
+        // across the whole register / assert / unregister window.
         try await DynamicCatalogTestLock.shared.run {
             let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
                 "osaurus-tests-\(UUID().uuidString)",
@@ -123,7 +174,214 @@ struct MCPHTTPHandlerTests {
             #expect(isError == false)
             let content = (json?["content"] as? [[String: Any]]) ?? []
             let text = content.first?["text"] as? String
-            #expect(text == #"{"text":"hello"}"#)
+            // The registry boundary normalizes every tool result into a
+            // ToolEnvelope; the raw echo payload rides inside `result.text`.
+            let envelope =
+                try JSONSerialization.jsonObject(
+                    with: Data((text ?? "").utf8)
+                ) as? [String: Any]
+            #expect(envelope?["ok"] as? Bool == true)
+            #expect(envelope?["tool"] as? String == EchoTool.nameStatic)
+            let result = envelope?["result"] as? [String: Any]
+            #expect(result?["text"] as? String == #"{"text":"hello"}"#)
+        }
+    }
+
+
+
+
+
+    @Test func mcp_call_refuses_externally_denied_tools() async throws {
+        let server = try await startTestServer()
+        defer { Task { await server.shutdown() } }
+
+        let externallyDeniedTools = ["file_write", "file_edit", "shell_run", "git_commit"]
+            + Self.agentChannelToolNames
+        for tool in externallyDeniedTools {
+            var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/call")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.authenticate()
+            let bodyObj: [String: Any] = ["name": tool, "arguments": [:]]
+            request.httpBody = try JSONSerialization.data(withJSONObject: bodyObj)
+
+            let (data, resp) = try await URLSession.shared.data(for: request)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            let body = String(decoding: data, as: UTF8.self)
+            #expect(status == 403, "expected 403 for \(tool), got \(status)")
+            #expect(body.contains("tool_not_exposable"))
+        }
+    }
+
+    @Test func externally_denied_tool_names_derive_from_agent_channel_family() {
+        // Independent literal copy: if a new agent_channel_* tool ships
+        // without updating `ToolRegistry.agentChannelToolNames`, this fails.
+        #expect(ToolRegistry.agentChannelToolNames == Set(Self.agentChannelToolNames))
+        // The external deny list is derived, so neither the channel family nor
+        // the per-agent Apple app family can ever drift out of it.
+        #expect(ToolRegistry.agentChannelToolNames.isSubset(of: ToolRegistry.externallyDeniedToolNames))
+        #expect(AppleApp.allToolNames.isSubset(of: ToolRegistry.externallyDeniedToolNames))
+        #expect(
+            ToolRegistry.externallyDeniedToolNames
+                == ToolRegistry.externallyDeniedHostToolNames
+                .union(ToolRegistry.agentChannelToolNames)
+                .union(AppleApp.allToolNames)
+                // Pops an AppKit folder picker on a chat window — never
+                // reachable from a remote surface.
+                .union([PromptWorkingFolderTool.toolName])
+        )
+        // Every REGISTERED agent_channel_* tool must be in the deny family.
+        let registeredChannelNames = Set(
+            ToolRegistry.shared.listTools().map(\.name).filter { $0.hasPrefix("agent_channel_") }
+        )
+        #expect(registeredChannelNames.isSubset(of: ToolRegistry.externallyDeniedToolNames))
+    }
+
+
+
+
+
+    @Test func mcp_call_rejects_malformed_agent_header() async throws {
+        let server = try await startTestServer()
+        defer { Task { await server.shutdown() } }
+
+        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/call")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.setValue("not-a-uuid", forHTTPHeaderField: "X-Osaurus-Agent-Id")
+        request.authenticate()
+        let bodyObj: [String: Any] = ["name": "echo", "arguments": ["text": "hi"]]
+        request.httpBody = try JSONSerialization.data(withJSONObject: bodyObj)
+
+        let (data, resp) = try await URLSession.shared.data(for: request)
+        let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+        let body = String(decoding: data, as: UTF8.self)
+        #expect(status == 403)
+        #expect(body.contains("invalid_agent"))
+    }
+
+    @Test func mcp_tools_hides_externally_denied_tools() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-tests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            ToolConfigurationStore.overrideDirectory = tempDir
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            // Register a tool whose name is on the external deny list; it
+            // must be filtered from the /mcp/tools listing.
+            ToolRegistry.shared.register(NamedEchoTool(name: "shell_run"))
+            ToolRegistry.shared.setEnabled(true, for: "shell_run")
+            defer { ToolRegistry.shared.unregister(names: ["shell_run"]) }
+
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+
+            var toolsRequest = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/tools")!)
+            toolsRequest.authenticate()
+            let (data, resp) = try await URLSession.shared.data(for: toolsRequest)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            #expect(status == 200)
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let tools = (json?["tools"] as? [[String: Any]]) ?? []
+            let names = Set(tools.compactMap { $0["name"] as? String })
+            #expect(!names.contains("shell_run"))
+        }
+    }
+
+    @Test func stdio_mcp_policy_hides_externally_denied_tools() {
+        #expect(ExternalMCPToolPolicy.isToolVisibleToExternalMCP(name: EchoTool.nameStatic, enabled: true))
+        #expect(!ExternalMCPToolPolicy.isToolVisibleToExternalMCP(name: EchoTool.nameStatic, enabled: false))
+
+        for name in ["file_write", "shell_run"] + Self.agentChannelToolNames {
+            #expect(!ExternalMCPToolPolicy.isToolVisibleToExternalMCP(name: name, enabled: true))
+            let denial = ExternalMCPToolPolicy.externalMCPDenialMessage(for: name)
+            #expect(denial?.contains("App-only tools") == true)
+        }
+    }
+
+    @Test func stdio_mcp_execution_binds_external_surface() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-tests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            ToolConfigurationStore.overrideDirectory = tempDir
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            ToolRegistry.shared.register(ExternalSurfaceProbeTool())
+            ToolRegistry.shared.setEnabled(true, for: ExternalSurfaceProbeTool.nameStatic)
+            defer { ToolRegistry.shared.unregister(names: [ExternalSurfaceProbeTool.nameStatic]) }
+
+            let text = try await ExternalMCPToolPolicy.executeToolAsExternalMCP(
+                name: ExternalSurfaceProbeTool.nameStatic,
+                argumentsJSON: "{}"
+            )
+            let envelope =
+                try JSONSerialization.jsonObject(
+                    with: Data(text.utf8)
+                ) as? [String: Any]
+            #expect(envelope?["ok"] as? Bool == true)
+            let result = envelope?["result"] as? [String: Any]
+            #expect(result?["text"] as? String == "external")
+        }
+    }
+
+    @Test func stdio_mcp_execution_denies_agent_channel_tools() async throws {
+        for toolName in Self.agentChannelToolNames {
+            let text = try await ExternalMCPToolPolicy.executeToolAsExternalMCP(
+                name: toolName,
+                argumentsJSON: #"{"connection_id":"telegram","room_id":"-100111222333","content":"must not leak"}"#
+            )
+            let envelope = try JSONSerialization.jsonObject(
+                with: Data(text.utf8)
+            ) as? [String: Any]
+
+            #expect(envelope?["ok"] as? Bool == false, "\(toolName) should be denied")
+            #expect(envelope?["tool"] as? String == toolName)
+            #expect(EnvelopeAssertions.failureKind(text) == "rejected")
+            let message = EnvelopeAssertions.failureMessage(text) ?? ""
+            #expect(message.contains("external callers"))
+            #expect(!text.contains("must not leak"))
+        }
+    }
+
+    @Test func mcp_call_rejects_disabled_tool() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-tests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            ToolConfigurationStore.overrideDirectory = tempDir
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            ToolRegistry.shared.register(EchoTool())
+            ToolRegistry.shared.setEnabled(false, for: EchoTool.nameStatic)
+            defer { ToolRegistry.shared.unregister(names: [EchoTool.nameStatic]) }
+
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+
+            var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/mcp/call")!)
+            request.httpMethod = "POST"
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.authenticate()
+            let bodyObj: [String: Any] = [
+                "name": EchoTool.nameStatic,
+                "arguments": ["text": "hi"],
+            ]
+            request.httpBody = try JSONSerialization.data(withJSONObject: bodyObj)
+
+            let (data, resp) = try await URLSession.shared.data(for: request)
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            #expect(status == 200)
+            let json = try JSONSerialization.jsonObject(with: data) as? [String: Any]
+            let isError = (json?["isError"] as? Bool) ?? false
+            #expect(isError == true)
+            let content = (json?["content"] as? [[String: Any]])?.first
+            let text = content?["text"] as? String ?? ""
+            #expect(text.contains("disabled"))
         }
     }
 
@@ -161,6 +419,98 @@ struct MCPHTTPHandlerTests {
             #expect(isError == true)
         }
     }
+
+    /// Non-throwing `ToolEnvelope.failure` must surface as MCP `isError: true`
+    /// while keeping HTTP 200 transport semantics. Also proves the request log
+    /// reuses the same error flag.
+    @Test func mcp_call_failure_envelope_sets_isError_true_and_logs_it() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-tests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            ToolConfigurationStore.overrideDirectory = tempDir
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            ToolRegistry.shared.register(FailureEnvelopeTool())
+            ToolRegistry.shared.setEnabled(true, for: FailureEnvelopeTool.nameStatic)
+            defer { ToolRegistry.shared.unregister(names: [FailureEnvelopeTool.nameStatic]) }
+
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+
+            let (data, resp) = try await postMCPCall(
+                host: server.host,
+                port: server.port,
+                name: FailureEnvelopeTool.nameStatic,
+                arguments: ["marker": FailureEnvelopeTool.marker]
+            )
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            #expect(status == 200)
+
+            let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(json["isError"] as? Bool == true)
+            let content = try #require(json["content"] as? [[String: Any]])
+            let text = try #require(content.first?["text"] as? String)
+            #expect(ToolEnvelope.isError(text))
+            #expect(text.contains(FailureEnvelopeTool.failureMessage))
+            #expect(text.contains(#""ok":false"#) || text.contains(#""ok": false"#))
+
+            let log = await findMCPCallLog(
+                toolName: FailureEnvelopeTool.nameStatic,
+                marker: FailureEnvelopeTool.marker
+            )
+            let found = try #require(log, "expected Insights log for failure-envelope MCP call")
+            #expect(found.statusCode == 200)
+            let toolCall = try #require(found.toolCalls?.first { $0.name == FailureEnvelopeTool.nameStatic })
+            #expect(toolCall.isError == true)
+            #expect(toolCall.result?.contains(FailureEnvelopeTool.failureMessage) == true)
+        }
+    }
+
+    /// Tool bodies that throw are folded into a failure envelope by the
+    /// registry; MCP must still report `isError: true` at HTTP 200.
+    @Test func mcp_call_thrown_tool_error_sets_isError_true() async throws {
+        try await DynamicCatalogTestLock.shared.run {
+            let tempDir = FileManager.default.temporaryDirectory.appendingPathComponent(
+                "osaurus-tests-\(UUID().uuidString)",
+                isDirectory: true
+            )
+            ToolConfigurationStore.overrideDirectory = tempDir
+            try? FileManager.default.createDirectory(at: tempDir, withIntermediateDirectories: true)
+
+            ToolRegistry.shared.register(ThrowingProbeTool())
+            ToolRegistry.shared.setEnabled(true, for: ThrowingProbeTool.nameStatic)
+            defer { ToolRegistry.shared.unregister(names: [ThrowingProbeTool.nameStatic]) }
+
+            let server = try await startTestServer()
+            defer { Task { await server.shutdown() } }
+
+            let (data, resp) = try await postMCPCall(
+                host: server.host,
+                port: server.port,
+                name: ThrowingProbeTool.nameStatic,
+                arguments: ["marker": ThrowingProbeTool.marker]
+            )
+            let status = (resp as? HTTPURLResponse)?.statusCode ?? -1
+            #expect(status == 200)
+
+            let json = try #require(JSONSerialization.jsonObject(with: data) as? [String: Any])
+            #expect(json["isError"] as? Bool == true)
+            let content = try #require(json["content"] as? [[String: Any]])
+            let text = try #require(content.first?["text"] as? String)
+            #expect(ToolEnvelope.isError(text))
+            #expect(text.contains(ThrowingProbeTool.errorMessage))
+
+            let log = await findMCPCallLog(
+                toolName: ThrowingProbeTool.nameStatic,
+                marker: ThrowingProbeTool.marker
+            )
+            let found = try #require(log, "expected Insights log for thrown-tool MCP call")
+            let toolCall = try #require(found.toolCalls?.first { $0.name == ThrowingProbeTool.nameStatic })
+            #expect(toolCall.isError == true)
+        }
+    }
 }
 
 // MARK: - Test tool
@@ -177,6 +527,100 @@ private struct EchoTool: OsaurusTool {
     func execute(argumentsJSON: String) async throws -> String {
         return argumentsJSON
     }
+}
+
+/// Echo tool with an arbitrary registered name, for deny-list tests.
+private struct NamedEchoTool: OsaurusTool {
+    let name: String
+    let description: String = "Echo back the input JSON arguments"
+    let parameters: JSONValue? = nil
+    func execute(argumentsJSON: String) async throws -> String {
+        return argumentsJSON
+    }
+}
+
+private struct ExternalSurfaceProbeTool: OsaurusTool {
+    static let nameStatic: String = "external_surface_probe"
+    let name: String = ExternalSurfaceProbeTool.nameStatic
+    let description: String = "Reports whether the current execution surface is external"
+    let parameters: JSONValue? = nil
+
+    func execute(argumentsJSON: String) async throws -> String {
+        ChatExecutionContext.isExternalSurface ? "external" : "internal"
+    }
+}
+
+/// Returns a non-throwing `ToolEnvelope.failure` for MCP isError regression.
+private struct FailureEnvelopeTool: OsaurusTool {
+    static let nameStatic = "mcp_envelope_failure_probe"
+    static let marker = "envelope-failure-marker"
+    static let failureMessage = "intentional envelope failure for MCP isError proof"
+    let name: String = FailureEnvelopeTool.nameStatic
+    let description: String = "Returns a non-throwing ToolEnvelope.failure"
+    let parameters: JSONValue? = nil
+
+    func execute(argumentsJSON: String) async throws -> String {
+        ToolEnvelope.failure(
+            kind: .executionError,
+            message: FailureEnvelopeTool.failureMessage,
+            tool: name
+        )
+    }
+}
+
+/// Throws so the registry folds the error into a failure envelope.
+private struct ThrowingProbeTool: OsaurusTool {
+    static let nameStatic = "mcp_envelope_throw_probe"
+    static let marker = "envelope-throw-marker"
+    static let errorMessage = "intentional throw for MCP isError proof"
+    let name: String = ThrowingProbeTool.nameStatic
+    let description: String = "Throws from the tool body"
+    let parameters: JSONValue? = nil
+
+    func execute(argumentsJSON: String) async throws -> String {
+        throw NSError(
+            domain: "MCPHTTPHandlerTests",
+            code: 42,
+            userInfo: [NSLocalizedDescriptionKey: ThrowingProbeTool.errorMessage]
+        )
+    }
+}
+
+// MARK: - MCP call helpers
+
+private func postMCPCall(
+    host: String,
+    port: Int,
+    name: String,
+    arguments: [String: Any]
+) async throws -> (Data, URLResponse) {
+    var request = URLRequest(url: URL(string: "http://\(host):\(port)/mcp/call")!)
+    request.httpMethod = "POST"
+    request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+    request.authenticate()
+    let bodyObj: [String: Any] = [
+        "name": name,
+        "arguments": arguments,
+    ]
+    request.httpBody = try JSONSerialization.data(withJSONObject: bodyObj)
+    return try await URLSession.shared.data(for: request)
+}
+
+/// Polls Insights for the exact `/mcp/call` row created by this test.
+private func findMCPCallLog(toolName: String, marker: String) async -> RequestLog? {
+    for _ in 0 ..< 40 {
+        let match = await MainActor.run {
+            InsightsService.shared.logs.first { log in
+                log.path == "/mcp/call"
+                    && log.toolCalls?.contains(where: {
+                        $0.name == toolName && $0.arguments.contains(marker)
+                    }) == true
+            }
+        }
+        if let match { return match }
+        try? await Task.sleep(nanoseconds: 25_000_000)
+    }
+    return nil
 }
 
 // MARK: - Test server bootstrap

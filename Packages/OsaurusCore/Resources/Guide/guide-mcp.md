@@ -30,4 +30,8 @@ MCP connects Osaurus to external tool servers — issue trackers, docs, code hos
 
 Each MCP tool call is an **MCP tool** row in Settings → Insights with the server, tool, arguments, result preview and transport (stdio servers are Local; HTTP servers are Cloud).
 
-On this Intel Mac, Osaurus is not an MCP server for other apps: the local server's `/mcp` endpoint only offers test tools.
+## Osaurus as an MCP server
+
+- External MCP clients can launch Osaurus with `command: "osaurus"`, `args: ["mcp"]` (install the command-line tool from Settings → Server first).
+- Over HTTP: `GET /mcp/tools` and `POST /mcp/call` on `http://127.0.0.1:1337`.
+- Other apps never see or run the tools that change files, run commands, edit knowledge or skills, or use your Apple apps; tools set to Ask are refused too, because nobody can approve them from outside the app. Set a tool to Auto in Tools & MCP → All Tools to allow it.

@@ -309,3 +309,27 @@ Each stage: gate run, Rosy section, row note in the backlog.
     then `[DONE]`.
   - **Tests:** three new cases in `IntelHTTPChatCompletionsTests`.
 - **Stage 2 complete** apart from the "Not yet" list in 2b.
+- **Stage 3 (2026-10-29): MCP over HTTP** (`IntelHTTPMCP.swift`).
+  - **Routes:** `GET /mcp/health`, `GET /mcp/tools`, `POST /mcp/call`,
+    upstream's minus the harness-token branches (`W-harness-runtimes`).
+    The `osaurus mcp` stdio proxy now has something to talk to.
+  - **Removed:** Intel's `POST /mcp` (`MCPBridge`, three demo tools from
+    milestone M5, not an upstream surface).
+  - **External-caller policy:**
+    - `ChatExecutionContext.isExternalSurface` and
+      `denyUnapprovedToolPrompts`.
+    - The registry's `externallyDeniedToolNames`: host mutation,
+      knowledge / skill writes, agent channels, the Apple app tools, the
+      folder picker.
+    - `isDeniedForCurrentSurface` / `externalSurfaceDenialEnvelope`,
+      `ExternalMCPToolPolicy` (verbatim) and `isGlobalEnabled`.
+  - **Intel difference:** Intel asks for approval in the chat engine, before
+    `ToolRegistry.execute`, so `execute` itself refuses `.ask` (and
+    `.deny`) tools for external callers. That is the outcome of upstream's
+    gate for a caller with no approval UI.
+  - **Tests:** upstream's `MCPHTTPHandlerTests` is enabled, minus the
+    harness-token, dispatch-binding (stage 4) and cache-stats (stage 7)
+    cases.
+  - **Guide:** the Server and MCP topics are rewritten for what the server
+    serves now.
+

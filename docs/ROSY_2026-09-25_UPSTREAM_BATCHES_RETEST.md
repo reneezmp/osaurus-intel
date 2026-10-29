@@ -2161,6 +2161,11 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       answers a `response` with a `message` item. Send a second request
       with `"previous_response_id":"<that id>","input":"Now say bye"`: the
       model sees the earlier turn.
+- [ ] **MCP:** `curl -s http://127.0.0.1:1337/mcp/tools` lists tools, with
+      no `file_write`, `shell_run` or Apple app tools. With the command-line
+      tool installed, an MCP client configured with `osaurus mcp` (e.g. Claude
+      Desktop) lists and calls Osaurus tools; a tool set to Ask is refused
+      with a message saying to set it to Auto.
 - [ ] **Embeddings:** `curl -s http://127.0.0.1:1337/v1/embeddings -H 'Content-Type: application/json' -d '{"model":"potion-base-8M","input":"hello"}'`
       answers 256 numbers (the first call may take a moment to download
       the model). `"model":"potion-base-4M"` answers an error naming

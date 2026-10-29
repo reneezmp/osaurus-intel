@@ -292,13 +292,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                 }
             }
 
-            do {
-                try await MCPBridge.shared.start()
-                NSLog("[Osaurus Intel] MCP server started")
-            } catch {
-                NSLog("[Osaurus Intel] MCP start failed: \(error)")
-            }
-
             // M12 follow-up (Renée 2026-06-03): auto-reconnect enabled remote
             // MCP providers on launch (the real app does this at startup; the
             // wiring was missing on Intel). Without it, a provider stays
@@ -550,7 +543,6 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             await IntelVoiceLaunch.shutdown()
             KnowledgeFolderWatcher.shared.stop()
             await ClaudeCodeProcessRegistry.shared.terminateAll()
-            await MCPBridge.shared.stop()
             // Quit: bounded 1 s drain, as upstream (the default waits 8 s).
             await server.stop(gracefully: false)
             SharedConfigurationService.shared.remove()

@@ -61,10 +61,11 @@ Facts found while checking (all reflected in the guide):
   (`SystemPromptComposer.composeChatContext`). Upstream's restricts it.
 - Autonomous Execution is an unavailable row on Intel (it needs the sandbox).
 - Memory distillation is opt-in per agent: Settings → Memory → Diagnostics.
-- Intel's local server: `/health`, `/models`, `/chat/completions` (DeepSeek
-  proxy reading `DEEPSEEK_API_KEY` from the environment only), and `/mcp`
-  (`MCPBridge`: demo tools `echo`, `get_time`, `os_info`). See the
-  `W-server-api` row for the follow-ups.
+- Intel's local server (2026-10-29, `W-server-api` stages 0–3,
+  `SERVER_API_INTEL.md`): the inference routes on the user's cloud models,
+  the model list from Server › Models, and `/mcp/tools` / `/mcp/call`. The
+  Server and MCP topics say so; agent runs, sessions and media come with
+  later stages.
 - Databases are always SQLCipher-encrypted on Intel (no opt-in toggle); no
   Privacy Filter, analytics or crash reporting.
 

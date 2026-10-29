@@ -6,17 +6,23 @@ order: 110
 
 # Server and API
 
-Osaurus runs a small local HTTP server. On this Intel Mac it is a developer surface, not the full API of the Apple Silicon app: there is no local model to serve, and most upstream routes aren't in this build.
+Osaurus runs a local HTTP server that other apps on this Mac can use. On this Intel Mac it answers with your cloud models; there are no local models to serve.
 
 ## What it serves
 
-- Base URL: `http://127.0.0.1:1337` (the `/v1` prefix is accepted too). Port and network exposure are set in Settings → Server.
+- Base URL: `http://127.0.0.1:1337` (the `/v1` and `/api` prefixes are accepted too). It only listens on this Mac for now.
 - `GET /health` — server status.
-- `GET /models` — the hosted DeepSeek models the proxy below accepts.
-- `POST /chat/completions` — forwarded to DeepSeek's API, and only when Osaurus was started with a `DEEPSEEK_API_KEY` environment variable. It doesn't use your providers, agents, tools, or memory.
-- `POST /mcp` — an MCP endpoint with test tools only; Osaurus doesn't expose its own tools to other apps on this Mac.
+- `GET /models` (and Ollama's `GET /api/tags`) — the models you switched on in Server → **Models**. Remote models start hidden; turn on the ones apps should see.
+- `POST /chat/completions` — OpenAI-style chat with any model you can chat with in the app, streamed or not. If the model wants to use a tool, the call is returned to the caller to run.
+- `POST /responses` — the OpenAI Responses API, including `previous_response_id`.
+- `POST /messages` — Anthropic-style messages (needs a provider that reports token counts).
+- `POST /api/chat` and `POST /api/generate` — Ollama-style chat for apps that speak Ollama.
+- `POST /embeddings` (and `/api/embed`) — vectors from the on-device `potion-base-8M` model.
+- `POST /audio/transcriptions` — speech to text with Apple Speech.
+- `GET /mcp/tools`, `POST /mcp/call` — Osaurus's tools for other apps (see the MCP topic).
+- `POST /completions` answers that raw completions need Apple silicon.
 
-Not in this build: chat with any configured model, `/responses`, Anthropic- and Ollama-style routes, embeddings, audio, `/agents/*` runs, tasks, and `/mcp/tools` / `/mcp/call`. The Server tab's endpoint list still shows some of these; they answer with an error. Shortcuts and Siri run agents inside the app instead.
+Not in this build yet: `/agents/*` runs, tasks, chat sessions, images and video. Shortcuts and Siri run agents inside the app.
 
 ## Access keys
 
