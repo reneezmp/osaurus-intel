@@ -442,7 +442,7 @@ struct HTTPAuthGateTests {
     /// The same routes stay open to a master-scoped key (unchanged contract),
     /// including `PUT /admin/runtime-settings` from a relayed (non-loopback)
     /// origin — remote automation with the owner's key is not disrupted.
-    @Test(.disabled("W-server-api stage 4: /agents and /admin/runtime-settings")) func masterScopedKey_isNotConfinedByRoutePolicy() async throws {
+    @Test(.disabled("W-server-api stage 7: /admin/runtime-settings (the /agents half runs in IntelHTTPAgentRoutesTests)")) func masterScopedKey_isNotConfinedByRoutePolicy() async throws {
         let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
         defer { Task { await server.shutdown() } }
         let token = try TokenBuilder.build(
@@ -559,7 +559,7 @@ struct HTTPAuthGateTests {
 
     /// Setting off (every existing install): a key-less loopback caller and a
     /// local browser page keep today's access and `*` CORS.
-    @Test(.disabled("W-server-api stages 3-4: /agents, /mcp/tools; /admin/config with W-declarative-config")) func localKeyPolicyOff_keepsKeylessLoopbackAccess() async throws {
+    @Test(.disabled("/admin/config with W-declarative-config (the /agents and /mcp/tools half runs in IntelHTTPAgentRoutesTests)")) func localKeyPolicyOff_keepsKeylessLoopbackAccess() async throws {
         let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
         defer { Task { await server.shutdown() } }
 
@@ -639,7 +639,7 @@ struct HTTPAuthGateTests {
         #expect(models.allowOrigin == "*")
     }
 
-    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_listedOriginStillNeedsAKey() async throws {
+    @Test func localKeyPolicyOn_listedOriginStillNeedsAKey() async throws {
         let listed = "https://app.example.com"
         let server = try await startAuthTestServer(
             validator: .forAlice(), trustLoopback: true, localKeyRequired: true, allowedOrigins: [listed]
@@ -657,7 +657,7 @@ struct HTTPAuthGateTests {
         #expect(keyed.allowOrigin == listed)
     }
 
-    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_wildcardAllowedOriginsExemptsNothing() async throws {
+    @Test func localKeyPolicyOn_wildcardAllowedOriginsExemptsNothing() async throws {
         let server = try await startAuthTestServer(
             validator: .forAlice(), trustLoopback: true, localKeyRequired: true, allowedOrigins: ["*"]
         )
@@ -699,7 +699,7 @@ struct HTTPAuthGateTests {
     /// App Intents (`OsaurusLocalClient`) present the in-process app token
     /// instead of a key; a wrong token, or one replayed through the relay,
     /// does not count.
-    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_appSessionTokenStandsInForAKeyOverLoopbackOnly() async throws {
+    @Test func localKeyPolicyOn_appSessionTokenStandsInForAKeyOverLoopbackOnly() async throws {
         let server = try await startAuthTestServer(
             validator: .forAlice(), trustLoopback: true, localKeyRequired: true
         )

@@ -474,6 +474,35 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         )
     }
 
+    /// Creates an agent from the paired phone or the API (`POST /agents`,
+    /// upstream): every capability starts off (tools, memory, web search,
+    /// the sandbox); each is a deliberate switch afterwards.
+    func createFromPhone(
+        name: String,
+        description: String = "",
+        systemPrompt: String = "",
+        defaultModel: String? = nil
+    ) -> Agent {
+        let now = Date()
+        var agent = Agent(
+            id: UUID(),
+            name: name,
+            description: AgentDescriptionPolicy.normalized(description),
+            systemPrompt: systemPrompt,
+            defaultModel: defaultModel,
+            isBuiltIn: false,
+            createdAt: now,
+            updatedAt: now
+        )
+        agent.toolsEnabled = false
+        agent.memoryEnabled = false
+        agent.autonomousExec = AutonomousExecConfig(enabled: false)
+        agent.settings.webSearchEnabled = false
+        // (Upstream also turns off screen context, which Intel doesn't have.)
+        add(agent)
+        return agent
+    }
+
     func add(_ agent: Agent) {
         persist(agent)
         reload()

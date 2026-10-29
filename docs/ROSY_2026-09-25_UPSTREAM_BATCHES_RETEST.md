@@ -2176,3 +2176,20 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       the first time). Insights shows one row for it, not two.
 - [ ] `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:1337/v1/completions -d '{"model":"x","prompt":"hi"}'`
       prints 404 (raw completions need Apple silicon).
+- [ ] **Agents over the API** (`SERVER_API_INTEL.md` stage 4a):
+      `curl -s http://127.0.0.1:1337/agents` lists your agents, the
+      Orchestrator included, each with its model and memory count.
+- [ ] Create one: `curl -s http://127.0.0.1:1337/agents -H 'Content-Type: application/json' -d '{"name":"API Test","description":"Made over the API"}'`
+      answers its `id`; it appears in the Agents list at once, with every
+      capability off.
+- [ ] Rename it: `curl -s -X PATCH http://127.0.0.1:1337/agents/<id> -H 'Content-Type: application/json' -d '{"name":"API Test 2","memory_enabled":true}'`
+      answers `{"ok":true}`; the Agents list shows the new name and Memory on.
+- [ ] Change its model: `curl -s -X PUT http://127.0.0.1:1337/agents/<id>/model -H 'Content-Type: application/json' -d '{"model":"<a model id>"}'`
+      answers that `effective_model`; the agent's chat uses it.
+- [ ] `curl -s http://127.0.0.1:1337/agents/<id>/tools` lists tools with
+      `policy` and `remote_safe`; Apple app tools say `remote_safe: false`.
+- [ ] Trying to rename the Orchestrator
+      (`-X PATCH …/agents/00000000-0000-0000-0000-000000000001`) answers
+      `agent_not_editable`.
+- [ ] Delete the test agent: `curl -s -X DELETE http://127.0.0.1:1337/agents/<id>`
+      answers `{"ok":true}` and it leaves the Agents list.

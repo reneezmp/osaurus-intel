@@ -796,6 +796,16 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                     message: rejection.message
                 )
             }
+
+            // An owner key from a remote caller only travels inside the
+            // Secure Channel on owner routes, reads included (upstream),
+            // except the plain agent list for one release.
+            if stateRef.value.authedScopeIsMaster, Self.isOwnerChannelRoute(path),
+                !Self.legacyPlaintextRead(method: head.method, path: path),
+                sendSecureChannelUpgradeRequiredIfNeeded(context: context)
+            {
+                return false
+            }
         }
 
         // Loopback callers skip the gate, but some downstream gates need
@@ -872,6 +882,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/mcp/call"):
             serveMCPCallTool(context: context, head: head)
         default:
+            if routeAgentRequest(context: context, head: head, path: path) { return }
             // Upstream answers unknown routes 404 (Intel's old router
             // answered every path 200 "ok").
             sendResponse(context: context, status: .notFound, headers: textHeaders(), body: "Not Found")
@@ -1023,16 +1034,75 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// Whether the inbound connection is a trusted local caller. Both the
     /// auth gate and CORS auto-trust use this predicate. Relay traffic and
     /// a local agent-scoped key never count.
-    private func isLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
+    func isLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
         guard !stateRef.value.isRelayOrigin, !stateRef.value.loopbackTrustWithdrawn else { return false }
         return trustLoopback && (context.channel.remoteAddress?.isLoopback ?? false)
     }
 
     /// Whether the connection physically arrived over 127.0.0.1 / ::1,
     /// independent of the `trustLoopback` policy flag.
-    private func isPhysicalLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
+    func isPhysicalLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
         guard !stateRef.value.isRelayOrigin else { return false }
         return context.channel.remoteAddress?.isLoopback ?? false
+    }
+
+    // MARK: - Owner callers and the Secure Channel (upstream)
+
+    /// Whether the request carries Secure Channel encryption. Always false
+    /// on Intel until `W-identity-mobile` ports the channel, so a remote
+    /// owner key can't reach the owner routes yet (they answer 426).
+    var requestIsSecureChannel: Bool { false }
+
+    /// This Mac's owner: a trusted local caller or a master-scoped key.
+    func callerOwnsThisMac(_ context: ChannelHandlerContext) -> Bool {
+        isLoopbackConnection(context) || stateRef.value.authedScopeIsMaster
+    }
+
+    func sendOwnerOnlyForbidden(context: ChannelHandlerContext) {
+        sendResponse(
+            context: context, status: .forbidden, headers: jsonHeaders(),
+            body: #"{"error":"owner_only","message":"Only this Mac's owner can do that."}"#)
+    }
+
+    /// Routes a remote owner key may only reach through the Secure Channel,
+    /// whatever the method (upstream list).
+    static let ownerChannelRoutes = [
+        "/agents", "/models/picker", "/models/favorites", "/models/options", "/privacy", "/config/approvals",
+        "/computer-use", "/secrets", "/approvals", "/workspaces", "/workspace-agents", "/projects", "/sessions",
+        "/runs", "/artifacts", "/pair/unpair", "/images/jobs", "/tasks", "/memory/ingest",
+        "/credits/balance",
+    ]
+
+    static func isOwnerChannelRoute(_ path: String) -> Bool {
+        ownerChannelRoutes.contains { path == $0 || path.hasPrefix($0 + "/") }
+    }
+
+    /// `GET /agents` stays readable in plaintext (upstream, one release).
+    static func legacyPlaintextRead(method: HTTPMethod, path: String) -> Bool {
+        method == .GET && path == "/agents"
+    }
+
+    /// Hard-require gate (upstream): a non-loopback caller must arrive through
+    /// the Secure Channel. Sends 426 and returns true when it must be refused.
+    func sendSecureChannelUpgradeRequiredIfNeeded(context: ChannelHandlerContext) -> Bool {
+        if requestIsSecureChannel { return false }
+        if isLoopbackConnection(context) { return false }
+        if stateRef.value.loopbackTrustWithdrawn, isPhysicalLoopbackConnection(context) { return false }
+        let body =
+            #"{"error":{"code":"secure_channel_required","message":"This peer requires end-to-end encryption for agent requests. Upgrade Osaurus to a version that supports the secure channel.","type":"upgrade_required"}}"#
+        sendResponse(context: context, status: .upgradeRequired, headers: jsonHeaders(), body: body)
+        return true
+    }
+
+    /// Mutations of owner routes need the Secure Channel from a remote owner.
+    func requiresOwnerChannel(head: HTTPRequestHead, context: ChannelHandlerContext) -> Bool {
+        guard head.method != .GET, head.method != .HEAD else { return false }
+        return sendSecureChannelUpgradeRequiredIfNeeded(context: context)
+    }
+
+    static func jsonObjectString(_ object: [String: Any]) -> String {
+        let data = try? JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical)
+        return data.flatMap { String(decoding: $0, as: UTF8.self) } ?? "{}"
     }
 
     // MARK: - Agent-scope policy (upstream)
@@ -1043,7 +1113,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// master-scoped keys, and public routes (no recorded audience) pass
     /// through unrestricted. An unknown agent→address mapping is denied so a
     /// scoped key cannot reach an agent we can't prove it owns.
-    private func agentScopeRejection(forAgentId agentId: UUID) -> (code: String, message: String)? {
+    func agentScopeRejection(forAgentId agentId: UUID) -> (code: String, message: String)? {
         Self.agentScopeRejection(
             forAgentId: agentId,
             authedAudience: stateRef.value.authedAudience,

@@ -20,9 +20,11 @@ Osaurus runs a local HTTP server that other apps on this Mac can use. On this In
 - `POST /embeddings` (and `/api/embed`) — vectors from the on-device `potion-base-8M` model.
 - `POST /audio/transcriptions` — speech to text with Apple Speech.
 - `GET /mcp/tools`, `POST /mcp/call` — Osaurus's tools for other apps (see the MCP topic).
+- `GET /agents`, `GET /agents/{id}` — your agents, with their models and memory counts.
+- `POST /agents`, `PATCH` / `DELETE /agents/{id}`, `PUT /agents/{id}/model` and the `/agents/{id}/tools` routes — create, edit and delete agents and set their tools. Only this Mac's owner can make these changes: a caller on this Mac, or the owner's own key.
 - `POST /completions` answers that raw completions need Apple silicon.
 
-Not in this build yet: `/agents/*` runs, tasks, chat sessions, images and video. Shortcuts and Siri run agents inside the app.
+Not in this build yet: agent runs, tasks, chat sessions, images and video. Shortcuts and Siri run agents inside the app.
 
 ## Access keys
 

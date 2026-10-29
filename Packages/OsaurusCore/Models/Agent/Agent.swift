@@ -1050,3 +1050,21 @@ public final class AvatarExistenceCache: @unchecked Sendable {
         lock.unlock()
     }
 }
+
+// MARK: - Upstream's positive switches (Intel: `W-server-api` stage 4a)
+
+extension Agent {
+    /// Upstream stores `toolsEnabled` / `memoryEnabled`; Intel keeps the
+    /// legacy negative `disableTools` / `disableMemory` keys. These read and
+    /// write those keys so upstream code (`PhoneAgentEditing`) works as is.
+    public var toolsEnabled: Bool {
+        get { disableTools != true }
+        set { disableTools = newValue ? nil : true }
+    }
+
+    public var memoryEnabled: Bool {
+        get { disableMemory != true }
+        set { disableMemory = newValue ? nil : true }
+    }
+}
+

@@ -333,3 +333,55 @@ Each stage: gate run, Rosy section, row note in the backlog.
   - **Guide:** the Server and MCP topics are rewritten for what the server
     serves now.
 
+- **Stage 4a (2026-10-29): agent management** (`IntelHTTPAgents.swift`,
+  `Services/MobileConnect/PhoneAgentEditing.swift`).
+  - **Routes**, upstream's handlers and DTOs, routed in upstream's order:
+    `GET /agents`, `GET /agents/{id}` (UUID or agent address),
+    `POST /agents`, `PATCH|DELETE /agents/{id}`, `PUT /agents/{id}/model`,
+    `GET /agents/{id}/avatar`, `GET /agents/{id}/tools`,
+    `POST /agents/{id}/tools/preset`, `PATCH /agents/{id}/tools/{name}`.
+  - **Owner rules (upstream):**
+    - The owner is a trusted loopback caller or a master-scoped key
+      (`callerOwnsThisMac`). Everything but the two reads is owner-only
+      (403 `owner_only`); built-in agents are listed and readable for the
+      owner only.
+    - A remote owner key needs the Secure Channel for the owner routes
+      (426 `secure_channel_required`), except the plaintext `GET /agents`
+      upstream keeps for one release. Intel has no Secure Channel yet
+      (`W-identity-mobile`), so `requestIsSecureChannel` is always false:
+      over the relay, a phone can list agents and nothing more until then.
+  - **Edits** go through upstream's `PhoneAgentEditing`. Intel edits:
+    - Apple apps come from the agent's own settings; there is no sandbox
+      wait and no workspace check (workspaces are deferred).
+    - A phone-made agent (`AgentManager.createFromPhone`) starts with every
+      capability off, as upstream's does, and its skill list seeded from
+      the installed skills.
+    - `Agent.toolsEnabled` / `memoryEnabled` are upstream's names over
+      Intel's `disableTools` / `disableMemory`.
+  - **Intel differences in the replies:**
+    - The Orchestrator's address is nil (no phone connect identity yet).
+    - `relay_url` follows Intel's relay manager, a stub that is always
+      off, so it stays null until the relay is ported.
+    - `chat_quick_actions` is each agent's own Action Bar. Upstream sends
+      the Orchestrator's configure-oriented defaults, which Intel's chat
+      doesn't have.
+    - `supports_vision` is judged from Intel's picker items: VLMs,
+      image-to-video models, and remote models that aren't embedding
+      models.
+    - `features` is empty: upstream advertises `session_create`, which
+      needs runs that can start a chat (stage 4c).
+  - **Found while testing:** over loopback with the local-key setting off,
+    upstream's gate never reads a presented key, so a local agent-scoped
+    key acts as the owner. That is upstream's behaviour (the
+    `loopbackTrustWithdrawn` rule only applies once a key is validated);
+    tests of non-owner callers must arrive through the relay header or
+    turn the setting on.
+  - **Tests:**
+    - Upstream's `AgentToolPatchTests` and `PhoneAgentEditingTests`, verbatim.
+    - New `IntelHTTPAgentRoutesTests`: upstream's two agent-metadata cases
+      from `HTTPHandlerEndpointTests` (minus its remote-provider parser),
+      the create / edit / retune / delete round trip, built-in refusal,
+      tools, avatar, the 426 and owner-only refusals, and the `/agents`
+      halves of two gate cases whose other halves wait for stage 7 and
+      `W-declarative-config`.
+    - Three `HTTPAuthGateTests` cases waiting for `/agents` are enabled.

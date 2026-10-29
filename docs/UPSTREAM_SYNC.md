@@ -4484,6 +4484,12 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
 - **Stage 1:** upstream's access-key gate sits in front of Intel's routes.
 - **Stage 2a:** the model routes and Server › Models.
 - **Stage 2b:** `/chat/completions` on Intel's engine.
+- **Stages 2c–2e:** `/messages`, Ollama, `/completions`, embeddings,
+  transcription and `/responses`.
+- **Stage 3:** `/mcp/*` with upstream's external-caller tool policy.
+- **Stage 4a:** agent management routes, owner-only, with upstream's
+  `PhoneAgentEditing`. A remote owner key gets 426 until the Secure
+  Channel is ported.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by
