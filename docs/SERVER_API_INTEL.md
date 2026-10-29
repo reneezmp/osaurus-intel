@@ -178,8 +178,7 @@ Each stage: gate run, Rosy section, row note in the backlog.
       `: ping` keepalive, and an in-band error chunk after the 200 head.
       The client disconnecting cancels generation.
     - Non-streaming: upstream's `chat.completion` body.
-    - `usage` is left out in both, as upstream does when nothing was
-      measured.
+    - `usage` only when the provider measured it (see 2c part 2).
     - Upstream's `n` / `logprobs` / `response_format` rejections (400);
       unknown model 404, other engine errors 503.
     - One Insights row for the request, plus the engine's egress row.
@@ -214,4 +213,28 @@ Each stage: gate run, Rosy section, row note in the backlog.
     upstream's single body.
   - **Same path as `/chat/completions`:** one model round, the same error
     statuses. `prompt_eval_count` / `eval_count` are absent (not measured).
+- **Stage 2c, part 2 (2026-10-29): measured usage, and Anthropic `/messages`.**
+  - **Measured usage.** Intel's engine parsed the provider's usage for
+    Insights but never passed it on. API requests now set
+    `ChatCompletionRequest.reportsUsage` (not encoded), and the engine ends
+    their stream with a `StreamingUsageHint` (`\u{FFFE}usage:` marker).
+    App chats never set it.
+    - `/chat/completions` reports `usage` (and the `include_usage` chunk)
+      only then.
+    - Ollama frames carry `prompt_eval_count` / `eval_count`.
+    - This supersedes 2b's "usage left out".
+  - **Anthropic `/messages`** (`IntelHTTPAnthropic.swift`):
+    - **Request conversion:** upstream's `AnthropicAPI.swift` is no
+      longer excluded. It has four documented Intel edits in its
+      conversion helpers: the validation returns Intel's request; no
+      `anthropic_thinking_blocks`, `top_k` or `enable_thinking`; `Double`
+      sampling values.
+    - **Writer:** upstream's `AnthropicSSEResponseWriter`, minus
+      provider-signed thinking blocks and the Privacy Filter error.
+    - **Usage:** like upstream, the route requires measured input and
+      output counts (502 / an in-band error otherwise) and holds the
+      stream until the input count is known. Intel learns it at the end,
+      so streamed events are written together when the round finishes.
+    - **Tests:** upstream's `AnthropicAPITests` is enabled, minus three
+      cases for pieces Intel lacks (listed in the file).
 

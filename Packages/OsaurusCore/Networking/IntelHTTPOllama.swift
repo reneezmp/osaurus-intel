@@ -140,7 +140,8 @@ extension HTTPHandler {
         toolCalls: [StreamingToolHint.ProposedCall] = [],
         done: Bool,
         thinking: String? = nil,
-        doneReason: String = "stop"
+        doneReason: String = "stop",
+        usage: (prompt: Int, completion: Int)? = nil
     ) -> String {
         var message: [String: Any] = ["role": "assistant", "content": content]
         if let thinking, !thinking.isEmpty { message["thinking"] = thinking }
@@ -153,6 +154,10 @@ extension HTTPHandler {
             "model": model, "created_at": Date().ISO8601Format(), "message": message, "done": done,
         ]
         if done { object["done_reason"] = doneReason }
+        if done, let usage {
+            object["prompt_eval_count"] = usage.prompt
+            object["eval_count"] = usage.completion
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: object) else {
             return #"{"message":{"role":"assistant","content":""},"done":true}"#
         }
@@ -160,13 +165,18 @@ extension HTTPHandler {
     }
 
     static func ollamaGenerateJSON(
-        model: String, response: String, done: Bool, thinking: String? = nil, doneReason: String = "stop"
+        model: String, response: String, done: Bool, thinking: String? = nil, doneReason: String = "stop",
+        usage: (prompt: Int, completion: Int)? = nil
     ) -> String {
         var object: [String: Any] = [
             "model": model, "created_at": Date().ISO8601Format(), "response": response, "done": done,
         ]
         if let thinking, !thinking.isEmpty { object["thinking"] = thinking }
         if done { object["done_reason"] = doneReason }
+        if done, let usage {
+            object["prompt_eval_count"] = usage.prompt
+            object["eval_count"] = usage.completion
+        }
         guard let data = try? JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical) else {
             return #"{"done":true}"#
         }
@@ -222,11 +232,11 @@ extension HTTPHandler {
                     case .chat:
                         body = Self.ollamaChatJSON(
                             model: model, content: collected.content, toolCalls: collected.toolCalls, done: true,
-                            thinking: collected.reasoning, doneReason: doneReason)
+                            thinking: collected.reasoning, doneReason: doneReason, usage: collected.usage)
                     case .generate:
                         body = Self.ollamaGenerateJSON(
                             model: model, response: collected.content, done: true,
-                            thinking: collected.reasoning, doneReason: doneReason)
+                            thinking: collected.reasoning, doneReason: doneReason, usage: collected.usage)
                     }
                     self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: body)
                     log(status: 200, body: body, finish: collected.finishReason, error: nil)
@@ -258,7 +268,7 @@ extension HTTPHandler {
                     switch event {
                     case .content(let text): onLoop { writer.writeContent(text, context: $0) }
                     case .reasoning(let text): onLoop { writer.writeThinking(text, context: $0) }
-                    case .toolCalls, .stats: break
+                    case .toolCalls, .stats, .usage: break
                     }
                 }
                 let finished = collected
@@ -272,7 +282,7 @@ extension HTTPHandler {
                 onLoop { ctx in
                     writer.writeDone(
                         reason: finished.finishReason == .length ? "length" : "stop",
-                        toolCalls: finished.toolCalls, context: ctx)
+                        toolCalls: finished.toolCalls, usage: finished.usage, context: ctx)
                     writer.writeEnd(ctx)
                 }
                 log(status: 200, body: nil, finish: finished.finishReason, error: nil)
@@ -340,11 +350,17 @@ final class OllamaNDJSONWriter: @unchecked Sendable {
         write(frame(text: "", thinking: text, done: false), context: context)
     }
 
-    /// The closing frame: `done_reason`, plus the tool calls on `/api/chat`.
-    /// Upstream also reports `prompt_eval_count` / `eval_count` when the
-    /// engine measured them; Intel's does not.
-    func writeDone(reason: String, toolCalls: [StreamingToolHint.ProposedCall], context: ChannelHandlerContext) {
+    /// The closing frame: `done_reason`, the provider's counts when
+    /// measured, and the tool calls on `/api/chat`.
+    func writeDone(
+        reason: String, toolCalls: [StreamingToolHint.ProposedCall], usage: (prompt: Int, completion: Int)?,
+        context: ChannelHandlerContext
+    ) {
         var object = frame(text: "", done: true)
+        if let usage {
+            object["prompt_eval_count"] = usage.prompt
+            object["eval_count"] = usage.completion
+        }
         if route == .chat, !toolCalls.isEmpty, var message = object["message"] as? [String: Any] {
             message["tool_calls"] = toolCalls.map { call in
                 ["function": ["name": call.name, "arguments": HTTPHandler.ollamaArguments(from: call.arguments)]]

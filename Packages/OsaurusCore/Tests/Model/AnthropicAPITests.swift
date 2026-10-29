@@ -5,6 +5,12 @@
 //  Tests for Anthropic Messages API compatibility.
 //
 
+//  Intel (`W-server-api` stage 2c): upstream's suite minus three cases for
+//  pieces Intel doesn't have: the outbound Anthropic provider request
+//  (`RemoteChatRequest`; Intel's adapter is `IntelAnthropicMessagesAdapter`),
+//  `enable_thinking` / `top_k` on the chat request, and the image helper
+//  for the local VL runtime.
+
 import Foundation
 import Testing
 
@@ -32,6 +38,49 @@ struct AnthropicAPITests {
         #expect(request.messages.count == 1)
         #expect(request.messages[0].role == "user")
         #expect(request.messages[0].content.plainText == "Hello, Claude!")
+    }
+
+    // MARK: - Prompt caching (top-level cache_control)
+
+
+    @Test func inboundAnthropicRequestWithoutCacheControlStillDecodes() throws {
+        // Server-side compat path: SDK clients that don't send cache_control
+        // must keep decoding exactly as before.
+        let json = """
+            {
+                "model": "claude-3-5-sonnet-20241022",
+                "max_tokens": 1024,
+                "messages": [
+                    {"role": "user", "content": "Hello"}
+                ]
+            }
+            """
+        let request = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: Data(json.utf8))
+        #expect(request.cache_control == nil)
+    }
+
+    @Test func anthropicUsageDecodesCacheFields() throws {
+        let json = """
+            {
+                "input_tokens": 12,
+                "output_tokens": 34,
+                "cache_creation_input_tokens": 2048,
+                "cache_read_input_tokens": 4096
+            }
+            """
+        let usage = try JSONDecoder().decode(AnthropicUsage.self, from: Data(json.utf8))
+        #expect(usage.input_tokens == 12)
+        #expect(usage.output_tokens == 34)
+        #expect(usage.cache_creation_input_tokens == 2048)
+        #expect(usage.cache_read_input_tokens == 4096)
+
+        // Absent fields stay nil (server-side writer / non-caching providers).
+        let bare = try JSONDecoder().decode(
+            AnthropicUsage.self,
+            from: Data(#"{"input_tokens": 1, "output_tokens": 2}"#.utf8)
+        )
+        #expect(bare.cache_creation_input_tokens == nil)
+        #expect(bare.cache_read_input_tokens == nil)
     }
 
     @Test func parseAnthropicRequestWithSystem() throws {
@@ -248,6 +297,32 @@ struct AnthropicAPITests {
         #expect(delta["text"] as? String == "Hello")
     }
 
+    @Test func decodeToolUseBlockStartPreservesPopulatedInput() throws {
+        let json = """
+            {
+              "type": "content_block_start",
+              "index": 0,
+              "content_block": {
+                "type": "tool_use",
+                "id": "toolu_1",
+                "name": "file_write",
+                "input": {"path": "probe.txt", "content": "hello"}
+              }
+            }
+            """
+
+        let event = try JSONDecoder().decode(
+            ContentBlockStartEvent.self,
+            from: Data(json.utf8)
+        )
+        guard case .toolUse(let tool) = event.content_block else {
+            Issue.record("Expected tool_use content block")
+            return
+        }
+        #expect(tool.input["path"]?.value as? String == "probe.txt")
+        #expect(tool.input["content"]?.value as? String == "hello")
+    }
+
     @Test func encodeMessageDeltaEvent() throws {
         let event = MessageDeltaEvent(stopReason: "end_turn", outputTokens: 50)
 
@@ -261,6 +336,32 @@ struct AnthropicAPITests {
 
         let usage = decoded["usage"] as! [String: Int]
         #expect(usage["output_tokens"] == 50)
+    }
+
+    @Test func localCachedPromptBecomesCacheReadInputTokens() throws {
+        let cached = AnthropicUsage(promptTokens: 6012, outputTokens: 2, cachedPromptTokens: 6000)
+        #expect(cached.input_tokens == 12)
+        #expect(cached.cache_read_input_tokens == 6000)
+        #expect(cached.output_tokens == 2)
+
+        // A cold prompt keeps the full count in input_tokens and omits the cache field.
+        let cold = AnthropicUsage(promptTokens: 12, outputTokens: 2, cachedPromptTokens: nil)
+        #expect(cold.input_tokens == 12)
+        #expect(cold.cache_read_input_tokens == nil)
+        let json = String(decoding: try JSONEncoder().encode(cold), as: UTF8.self)
+        #expect(!json.contains("cache_read_input_tokens"))
+
+        // Over-reported hits clamp to the prompt.
+        let clamped = AnthropicUsage(promptTokens: 10, outputTokens: 1, cachedPromptTokens: 50)
+        #expect(clamped.input_tokens == 0 && clamped.cache_read_input_tokens == 10)
+
+        let delta = MessageDeltaEvent(
+            stopReason: "end_turn", outputTokens: 2, inputTokens: 12, cacheReadInputTokens: 6000)
+        let usage = try #require(
+            (try JSONSerialization.jsonObject(with: JSONEncoder().encode(delta)) as? [String: Any])?["usage"]
+                as? [String: Int])
+        #expect(usage["cache_read_input_tokens"] == 6000)
+        #expect(usage["input_tokens"] == 12)
     }
 
     // MARK: - Conversion Tests
@@ -300,6 +401,7 @@ struct AnthropicAPITests {
         #expect(openAIReq.messages[3].content == "How are you?")
     }
 
+
     @Test func convertAnthropicToolsToOpenAI() throws {
         let json = """
             {
@@ -332,52 +434,6 @@ struct AnthropicAPITests {
         #expect(openAIReq.tools?[0].function.description == "Get weather for a location")
     }
 
-    @Test func convertAnthropicImageBlocksToOpenAIPartsForVLRuntime() throws {
-        let json = """
-            {
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 1024,
-                "messages": [
-                    {
-                        "role": "user",
-                        "content": [
-                            {"type": "text", "text": "What is in this image?"},
-                            {
-                                "type": "image",
-                                "source": {
-                                    "type": "base64",
-                                    "media_type": "image/png",
-                                    "data": "QUJD"
-                                }
-                            }
-                        ]
-                    }
-                ]
-            }
-            """
-        let data = Data(json.utf8)
-        let anthropicReq = try JSONDecoder().decode(AnthropicMessagesRequest.self, from: data)
-
-        let openAIReq = anthropicReq.toChatCompletionRequest()
-
-        #expect(openAIReq.messages.count == 1)
-        #expect(openAIReq.messages[0].role == "user")
-        #expect(openAIReq.messages[0].content == "What is in this image?")
-        #expect(openAIReq.messages[0].imageUrls == ["data:image/png;base64,QUJD"])
-        #expect(openAIReq.messages[0].imageDataFromParts == [Data("ABC".utf8)])
-
-        guard let parts = openAIReq.messages[0].contentParts else {
-            Issue.record("Anthropic image blocks must survive conversion as ChatMessage.contentParts")
-            return
-        }
-        #expect(parts.count == 2)
-        if case .imageUrl(let url, let detail) = parts[1] {
-            #expect(url == "data:image/png;base64,QUJD")
-            #expect(detail == nil)
-        } else {
-            Issue.record("Second converted part should be image_url")
-        }
-    }
 
     @Test func convertAnthropicToolResultKeepsSiblingUserBlocksForRuntime() throws {
         let json = """

@@ -5,6 +5,13 @@
 //  Anthropic Messages API compatible request/response models for SDK-compatible clients.
 //
 
+// Intel (`W-server-api` stage 2c, docs/SERVER_API_INTEL.md): upstream's
+// file with four Intel edits, all in the conversion helpers. The request
+// validation returns Intel's `ChatCompletionRequest` (Intel has no
+// `ResponsesInferenceRequest(chatCompletion:)`); Intel's `ChatMessage` has
+// no `anthropic_thinking_blocks`; sampling values are `Double`; and Intel's
+// request has no `top_k` / `enable_thinking`.
+
 import Foundation
 
 // MARK: - Request Models
@@ -23,6 +30,57 @@ struct AnthropicMessagesRequest: Codable, Sendable {
     let tools: [AnthropicTool]?
     let tool_choice: AnthropicToolChoice?
     let metadata: AnthropicMetadata?
+    /// Top-level automatic prompt caching ("cache_control": {"type": "ephemeral"}).
+    /// Anthropic places the cache breakpoint on the last cacheable block and
+    /// moves it forward as the conversation grows — cache reads bill at 0.1x
+    /// input price. Optional + default nil so the server-side Anthropic-compat
+    /// decode path and existing construction sites are unaffected; the
+    /// synthesized Codable omits the key when nil.
+    var cache_control: AnthropicCacheControl? = nil
+    /// Extended thinking (`{"type": "enabled", "budget_tokens": N}` / `{"type": "disabled"}` /
+    /// `{"type": "adaptive"}`). `enabled` / `disabled` switch the model's thinking rail the same way
+    /// `enable_thinking` does on chat completions; `adaptive` or no field keeps the model default.
+    /// The budget is accepted for wire compatibility; local models do not cap thinking by tokens.
+    var thinking: AnthropicThinkingConfig? = nil
+}
+
+/// `{"type": "ephemeral", "ttl": "1h"?}` cache-control marker. Only
+/// "ephemeral" exists in the API today. `ttl` is omitted for the default
+/// 5-minute cache (write billed 1.25x input) and `"1h"` for the one-hour
+/// cache (write billed 2x input); both are refreshed on every hit and read
+/// at 0.1x. See `AnthropicCacheControl.forConversation(lastMessageRole:)`.
+/// Anthropic `thinking` request field.
+struct AnthropicThinkingConfig: Codable, Sendable, Equatable {
+    let type: String
+    var budget_tokens: Int? = nil
+}
+
+struct AnthropicCacheControl: Codable, Sendable, Equatable {
+    let type: String
+    var ttl: String? = nil
+
+    static let oneHourTTL = "1h"
+
+    init(type: String = "ephemeral", ttl: String? = nil) {
+        self.type = type
+        self.ttl = ttl
+    }
+
+    /// Pick the TTL from the shape of the request. A trailing `user` turn
+    /// means a human is in the loop — the next request may arrive after the
+    /// 5-minute window, so the 1h write premium (2x vs 1.25x) is cheap
+    /// insurance against re-paying the whole prefix at full price. A trailing
+    /// `tool` result is a tight agent loop; the next call lands within
+    /// seconds, so the default 5m cache is the cheaper write. Mirrors the
+    /// Osaurus Router's server-side rule so BYOK and hosted turns behave alike.
+    static func forConversation(lastMessageRole: String?) -> AnthropicCacheControl {
+        switch lastMessageRole {
+        case "tool":
+            return AnthropicCacheControl()
+        default:
+            return AnthropicCacheControl(ttl: oneHourTTL)
+        }
+    }
 }
 
 /// System content can be a string or array of content blocks
@@ -143,6 +201,8 @@ enum AnthropicContentBlock: Codable, Sendable {
     case image(AnthropicImageBlock)
     case toolUse(AnthropicToolUseBlock)
     case toolResult(AnthropicToolResultBlock)
+    case thinking(AnthropicThinkingBlock)
+    case redactedThinking(AnthropicRedactedThinkingBlock)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -161,6 +221,10 @@ enum AnthropicContentBlock: Codable, Sendable {
             self = .toolUse(try AnthropicToolUseBlock(from: decoder))
         case "tool_result":
             self = .toolResult(try AnthropicToolResultBlock(from: decoder))
+        case "thinking":
+            self = .thinking(try AnthropicThinkingBlock(from: decoder))
+        case "redacted_thinking":
+            self = .redactedThinking(try AnthropicRedactedThinkingBlock(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -180,8 +244,52 @@ enum AnthropicContentBlock: Codable, Sendable {
             try block.encode(to: encoder)
         case .toolResult(let block):
             try block.encode(to: encoder)
+        case .thinking(let block):
+            try block.encode(to: encoder)
+        case .redactedThinking(let block):
+            try block.encode(to: encoder)
         }
     }
+}
+
+struct AnthropicThinkingBlock: Codable, Sendable {
+    let type: String
+    let thinking: String
+    let signature: String?
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, thinking, signature }
+    init(thinking: String, signature: String? = nil) {
+        type = "thinking"; self.thinking = thinking; self.signature = signature; originalJSON = nil
+    }
+    init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        thinking = try values.decode(String.self, forKey: .thinking)
+        signature = try values.decodeIfPresent(String.self, forKey: .signature)
+    }
+    var jsonValue: JSONValue {
+        if let originalJSON { return originalJSON }
+        var fields: [String: JSONValue] = ["type": .string(type), "thinking": .string(thinking)]
+        if let signature { fields["signature"] = .string(signature) }
+        return .object(fields)
+    }
+    func encode(to encoder: Encoder) throws { try jsonValue.encode(to: encoder) }
+}
+
+struct AnthropicRedactedThinkingBlock: Codable, Sendable {
+    let type: String
+    let data: String
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, data }
+    init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        data = try values.decode(String.self, forKey: .data)
+    }
+    var jsonValue: JSONValue { originalJSON ?? .object(["type": .string(type), "data": .string(data)]) }
+    func encode(to encoder: Encoder) throws { try jsonValue.encode(to: encoder) }
 }
 
 /// Text content block
@@ -291,6 +399,9 @@ struct AnthropicTool: Codable, Sendable {
     let name: String
     let description: String?
     let input_schema: JSONValue?
+    /// Anthropic's GA per-tool opt-in for streaming argument values as they
+    /// are generated instead of buffering each complete value server-side.
+    let eager_input_streaming: Bool?
 }
 
 /// Tool choice specification
@@ -378,6 +489,8 @@ struct AnthropicMessagesResponse: Codable, Sendable {
 enum AnthropicResponseContentBlock: Codable, Sendable {
     case text(type: String, text: String)
     case toolUse(type: String, id: String, name: String, input: [String: AnyCodableValue])
+    case thinking(AnthropicThinkingBlock)
+    case redactedThinking(AnthropicRedactedThinkingBlock)
 
     private enum CodingKeys: String, CodingKey {
         case type, text, id, name, input
@@ -395,6 +508,10 @@ enum AnthropicResponseContentBlock: Codable, Sendable {
             let name = try container.decode(String.self, forKey: .name)
             let input = try container.decode([String: AnyCodableValue].self, forKey: .input)
             self = .toolUse(type: type, id: id, name: name, input: input)
+        case "thinking":
+            self = .thinking(try AnthropicThinkingBlock(from: decoder))
+        case "redacted_thinking":
+            self = .redactedThinking(try AnthropicRedactedThinkingBlock(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -415,6 +532,10 @@ enum AnthropicResponseContentBlock: Codable, Sendable {
             try container.encode(id, forKey: .id)
             try container.encode(name, forKey: .name)
             try container.encode(input, forKey: .input)
+        case .thinking(let block):
+            try block.encode(to: encoder)
+        case .redactedThinking(let block):
+            try block.encode(to: encoder)
         }
     }
 
@@ -433,10 +554,34 @@ enum AnthropicResponseContentBlock: Codable, Sendable {
 struct AnthropicUsage: Codable, Sendable {
     let input_tokens: Int
     let output_tokens: Int
+    /// Prompt-caching split reported by Anthropic when `cache_control` is in
+    /// play: tokens written to the cache this request (billed 1.25x) and
+    /// tokens read from it (billed 0.1x). Optional — absent on the
+    /// server-side compat writer and on providers that don't cache.
+    var cache_creation_input_tokens: Int? = nil
+    var cache_read_input_tokens: Int? = nil
 
     init(inputTokens: Int, outputTokens: Int) {
         self.input_tokens = inputTokens
         self.output_tokens = outputTokens
+    }
+
+    /// Usage from an OpenAI-style split, where `prompt_tokens` includes the
+    /// prefix-cache hit (`cached_tokens`, e.g. a local model's restored
+    /// prompt prefix). Anthropic reports cache reads separately: total input
+    /// is `input_tokens + cache_creation_input_tokens + cache_read_input_tokens`,
+    /// so the cached part moves out of `input_tokens` into
+    /// `cache_read_input_tokens` (omitted when nothing was cached).
+    init(promptTokens: Int, outputTokens: Int, cachedPromptTokens: Int?) {
+        let split = Self.split(promptTokens: promptTokens, cachedPromptTokens: cachedPromptTokens)
+        self.init(inputTokens: split.input, outputTokens: outputTokens)
+        self.cache_read_input_tokens = split.cacheRead
+    }
+
+    static func split(promptTokens: Int, cachedPromptTokens: Int?) -> (input: Int, cacheRead: Int?) {
+        let prompt = max(0, promptTokens)
+        let cached = min(max(0, cachedPromptTokens ?? 0), prompt)
+        return (prompt - cached, cached > 0 ? cached : nil)
     }
 }
 
@@ -521,11 +666,11 @@ struct ContentBlockStartEvent: Codable, Sendable {
             let name: String
             let input: [String: AnyCodableValue]
 
-            init(id: String, name: String) {
+            init(id: String, name: String, input: [String: AnyCodableValue] = [:]) {
                 self.type = "tool_use"
                 self.id = id
                 self.name = name
-                self.input = [:]
+                self.input = input
             }
         }
 
@@ -554,7 +699,12 @@ struct ContentBlockStartEvent: Codable, Sendable {
             case "tool_use":
                 let id = try container.decode(String.self, forKey: .id)
                 let name = try container.decode(String.self, forKey: .name)
-                self = .toolUse(ToolUseBlockStart(id: id, name: name))
+                let input =
+                    try container.decodeIfPresent(
+                        [String: AnyCodableValue].self,
+                        forKey: .input
+                    ) ?? [:]
+                self = .toolUse(ToolUseBlockStart(id: id, name: name, input: input))
             case "thinking":
                 self = .thinking(ThinkingBlockStart())
             default:
@@ -610,6 +760,8 @@ struct ContentBlockDeltaEvent: Codable, Sendable {
         case textDelta(TextDelta)
         case inputJsonDelta(InputJsonDelta)
         case thinkingDelta(ThinkingDelta)
+        case signatureDelta(SignatureDelta)
+        case opaque(JSONValue)
 
         struct TextDelta: Codable, Sendable {
             let type: String
@@ -643,8 +795,14 @@ struct ContentBlockDeltaEvent: Codable, Sendable {
             }
         }
 
+        struct SignatureDelta: Codable, Sendable {
+            let type: String
+            let signature: String
+            init(signature: String) { type = "signature_delta"; self.signature = signature }
+        }
+
         private enum CodingKeys: String, CodingKey {
-            case type, text, partial_json, thinking
+            case type, text, partial_json, thinking, signature
         }
 
         init(from decoder: Decoder) throws {
@@ -660,8 +818,10 @@ struct ContentBlockDeltaEvent: Codable, Sendable {
             case "thinking_delta":
                 let thinking = try container.decode(String.self, forKey: .thinking)
                 self = .thinkingDelta(ThinkingDelta(thinking: thinking))
+            case "signature_delta":
+                self = .signatureDelta(SignatureDelta(signature: try container.decode(String.self, forKey: .signature)))
             default:
-                self = .textDelta(TextDelta(text: ""))
+                self = .opaque(try JSONValue(from: decoder))
             }
         }
 
@@ -677,6 +837,11 @@ struct ContentBlockDeltaEvent: Codable, Sendable {
             case .thinkingDelta(let delta):
                 try container.encode(delta.type, forKey: .type)
                 try container.encode(delta.thinking, forKey: .thinking)
+            case .signatureDelta(let delta):
+                try container.encode(delta.type, forKey: .type)
+                try container.encode(delta.signature, forKey: .signature)
+            case .opaque(let value):
+                try value.encode(to: encoder)
             }
         }
     }
@@ -700,6 +865,12 @@ struct ContentBlockDeltaEvent: Codable, Sendable {
         self.index = index
         self.delta = .thinkingDelta(ContentBlockDelta.ThinkingDelta(thinking: text))
     }
+    init(signatureAt index: Int, signature: String) {
+        type = "content_block_delta"
+        self.index = index
+        delta = .signatureDelta(.init(signature: signature))
+    }
+
 }
 
 /// content_block_stop event
@@ -726,12 +897,16 @@ struct MessageDeltaEvent: Codable, Sendable {
 
     struct MessageDeltaUsage: Codable, Sendable {
         let output_tokens: Int
+        let input_tokens: Int?
+        var cache_read_input_tokens: Int? = nil
     }
 
-    init(stopReason: String?, outputTokens: Int) {
+    init(stopReason: String?, outputTokens: Int, inputTokens: Int? = nil, cacheReadInputTokens: Int? = nil) {
         self.type = "message_delta"
         self.delta = MessageDelta(stop_reason: stopReason, stop_sequence: nil)
-        self.usage = MessageDeltaUsage(output_tokens: outputTokens)
+        self.usage = MessageDeltaUsage(
+            output_tokens: outputTokens, input_tokens: inputTokens,
+            cache_read_input_tokens: cacheReadInputTokens)
     }
 }
 
@@ -813,6 +988,19 @@ struct AnyCodableValue: Codable, @unchecked Sendable {
 // MARK: - Conversion Helpers
 
 extension AnthropicMessagesRequest {
+    func toValidatedChatCompletionRequest() throws -> ChatCompletionRequest {
+        let systemBlocks: [AnthropicContentBlock]
+        if let system, case .blocks(let blocks) = system { systemBlocks = blocks } else { systemBlocks = [] }
+        let misplaced = systemBlocks + messages.filter { $0.role != "assistant" }.flatMap { $0.content.blocks }
+        guard !misplaced.contains(where: {
+            switch $0 { case .thinking, .redactedThinking: return true; default: return false }
+        }) else {
+            throw NSError(domain: "OsaurusAnthropicRequest", code: 400,
+                userInfo: [NSLocalizedDescriptionKey: "Thinking blocks must belong to an assistant message."])
+        }
+        return toChatCompletionRequest()
+    }
+
     /// Convert Anthropic request to OpenAI-compatible ChatCompletionRequest
     func toChatCompletionRequest() -> ChatCompletionRequest {
         var openAIMessages: [ChatMessage] = []
@@ -857,11 +1045,18 @@ extension AnthropicMessagesRequest {
                 let blocks = msg.content.blocks
                 var toolCalls: [ToolCall] = []
                 var textContent = ""
+                var reasoning = ""
+                var thinkingBlocks: [JSONValue] = []
 
                 for block in blocks {
                     switch block {
                     case .text(let textBlock):
                         textContent += textBlock.text
+                    case .thinking(let value):
+                        reasoning += value.thinking
+                        thinkingBlocks.append(value.jsonValue)
+                    case .redactedThinking(let value):
+                        thinkingBlocks.append(value.jsonValue)
                     case .toolUse(let toolUse):
                         // Sorted keys: replayed into next-turn
                         // `tool_calls[].function.arguments`. See
@@ -884,18 +1079,10 @@ extension AnthropicMessagesRequest {
                     }
                 }
 
-                if !toolCalls.isEmpty {
-                    openAIMessages.append(
-                        ChatMessage(
-                            role: "assistant",
-                            content: textContent.isEmpty ? nil : textContent,
-                            tool_calls: toolCalls,
-                            tool_call_id: nil
-                        )
-                    )
-                } else {
-                    openAIMessages.append(ChatMessage(role: "assistant", content: textContent))
-                }
+                openAIMessages.append(ChatMessage(role: "assistant", content: textContent.isEmpty ? nil : textContent,
+                    tool_calls: toolCalls.isEmpty ? nil : toolCalls, tool_call_id: nil,
+                    reasoning_content: reasoning.isEmpty ? nil : reasoning))
+                _ = thinkingBlocks
             default:
                 openAIMessages.append(ChatMessage(role: msg.role, content: msg.content.plainText))
             }
@@ -925,8 +1112,7 @@ extension AnthropicMessagesRequest {
             case .none:
                 openAIToolChoice = ToolChoiceOption.none
             case .any:
-                // "any" means the model must call a tool - map to auto as closest equivalent
-                openAIToolChoice = .auto
+                openAIToolChoice = .required
             case .tool(let name):
                 openAIToolChoice = .function(
                     ToolChoiceOption.FunctionName(
@@ -937,13 +1123,13 @@ extension AnthropicMessagesRequest {
             }
         }
 
-        return ChatCompletionRequest(
+        var request = ChatCompletionRequest(
             model: model,
             messages: openAIMessages,
-            temperature: temperature.map { Float($0) },
+            temperature: temperature.map { Double($0) },
             max_tokens: max_tokens,
             stream: stream,
-            top_p: top_p.map { Float($0) },
+            top_p: top_p.map { Double($0) },
             frequency_penalty: nil,
             presence_penalty: nil,
             stop: stop_sequences,
@@ -952,6 +1138,8 @@ extension AnthropicMessagesRequest {
             tool_choice: openAIToolChoice,
             session_id: nil
         )
+        _ = (top_k, thinking)
+        return request
     }
 }
 
@@ -967,7 +1155,7 @@ private extension AnthropicMessageContent {
                     return .text(textBlock.text)
                 case .image(let imageBlock):
                     return imageBlock.source.chatImagePart
-                case .toolUse, .toolResult:
+                case .toolUse, .toolResult, .thinking, .redactedThinking:
                     return nil
                 }
             }

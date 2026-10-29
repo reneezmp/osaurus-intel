@@ -30,6 +30,26 @@ enum IntelInferenceEvent: Sendable, Equatable {
     /// The calls the model proposed this round (not run).
     case toolCalls([StreamingToolHint.ProposedCall])
     case stats(tokenCount: Int, tokensPerSecond: Double, stopReason: String?)
+    /// Provider-measured usage (Intel's `StreamingUsageHint`).
+    case usage(promptTokens: Int, completionTokens: Int)
+}
+
+/// Intel: the provider's measured token counts, sent once at the end of an
+/// API request's stream (`ChatCompletionRequest.reportsUsage`). Starts with
+/// `\u{FFFE}` like every in-band hint, so text filters skip it.
+enum StreamingUsageHint {
+    private static let prefix = "\u{FFFE}usage:"
+
+    static func encode(promptTokens: Int, completionTokens: Int) -> String {
+        "\(prefix)\(promptTokens);\(completionTokens)"
+    }
+
+    static func decode(_ delta: String) -> (promptTokens: Int, completionTokens: Int)? {
+        guard delta.hasPrefix(prefix) else { return nil }
+        let parts = delta.dropFirst(prefix.count).split(separator: ";")
+        guard parts.count == 2, let prompt = Int(parts[0]), let completion = Int(parts[1]) else { return nil }
+        return (max(0, prompt), max(0, completion))
+    }
 }
 
 enum IntelHTTPInference {
@@ -39,6 +59,9 @@ enum IntelHTTPInference {
         if let calls = StreamingToolHint.decodeProposed(delta) { return .toolCalls(calls) }
         if let reasoning = StreamingReasoningHint.decode(delta) {
             return reasoning.isEmpty ? nil : .reasoning(reasoning)
+        }
+        if let usage = StreamingUsageHint.decode(delta) {
+            return .usage(promptTokens: usage.promptTokens, completionTokens: usage.completionTokens)
         }
         if let stats = StreamingStatsHint.decode(delta) {
             return .stats(tokenCount: stats.tokenCount, tokensPerSecond: stats.tokensPerSecond, stopReason: stats.stopReason)
@@ -52,6 +75,7 @@ enum IntelHTTPInference {
     static func engineRequest(_ request: ChatCompletionRequest) -> ChatCompletionRequest {
         var request = request
         request.stopAtToolCalls = true
+        request.reportsUsage = true
         return request
     }
 
@@ -84,6 +108,14 @@ enum IntelHTTPInference {
         var toolCalls: [StreamingToolHint.ProposedCall] = []
         var completionTokens: Int?
         var stopReason: String?
+        /// Provider-measured usage; `nil` when the provider reported none.
+        var usage: (prompt: Int, completion: Int)?
+
+        static func == (lhs: Collected, rhs: Collected) -> Bool {
+            lhs.content == rhs.content && lhs.reasoning == rhs.reasoning && lhs.toolCalls == rhs.toolCalls
+                && lhs.completionTokens == rhs.completionTokens && lhs.stopReason == rhs.stopReason
+                && lhs.usage?.prompt == rhs.usage?.prompt && lhs.usage?.completion == rhs.usage?.completion
+        }
 
         /// Upstream's finish reasons: tool calls win, then a length stop.
         var finishReason: RequestLog.FinishReason {
@@ -100,6 +132,8 @@ enum IntelHTTPInference {
             case .stats(let count, _, let stop):
                 completionTokens = count
                 stopReason = stop
+            case .usage(let prompt, let completion):
+                usage = (prompt, completion)
             }
         }
     }

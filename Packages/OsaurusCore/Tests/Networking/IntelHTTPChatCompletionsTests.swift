@@ -252,6 +252,80 @@ extension IntelHTTPChatCompletionsTests {
     }
 }
 
+extension IntelHTTPChatCompletionsTests {
+    @Test func measuredUsageReachesEveryProtocol() async throws {
+        let usage = StreamingUsageHint.encode(promptTokens: 12, completionTokens: 3)
+        #expect(IntelHTTPInference.classify(usage) == .usage(promptTokens: 12, completionTokens: 3))
+        let engine = ScriptedChatEngine(["Hi", usage])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+
+        let (_, chat) = try await postPath(server, "/v1/chat/completions",
+            #"{"model":"m","messages":[{"role":"user","content":"x"}]}"#)
+        let chatObject = try #require(try JSONSerialization.jsonObject(with: Data(chat.utf8)) as? [String: Any])
+        let reported = try #require(chatObject["usage"] as? [String: Int])
+        #expect(reported == ["prompt_tokens": 12, "completion_tokens": 3, "total_tokens": 15])
+        #expect(engine.requests.first?.reportsUsage == true)
+
+        let (_, stream) = try await postPath(server, "/v1/chat/completions",
+            #"{"model":"m","stream":true,"stream_options":{"include_usage":true},"messages":[{"role":"user","content":"x"}]}"#)
+        #expect(stream.contains(#""prompt_tokens":12"#), "include_usage chunk: \(stream)")
+
+        let (_, ollama) = try await postPath(server, "/api/generate", #"{"model":"m","prompt":"x","stream":false}"#)
+        let ollamaObject = try #require(try JSONSerialization.jsonObject(with: Data(ollama.utf8)) as? [String: Any])
+        #expect(ollamaObject["prompt_eval_count"] as? Int == 12)
+        #expect(ollamaObject["eval_count"] as? Int == 3)
+    }
+
+    @Test func anthropicMessagesAnswersWithBlocksAndUsage() async throws {
+        let call = StreamingToolHint.ProposedCall(callId: "toolu_1", name: "get_weather", arguments: #"{"city":"Rome"}"#)
+        let engine = ScriptedChatEngine([
+            StreamingReasoningHint.encode("plan"), "Sure.", StreamingToolHint.encodeProposed([call]),
+            StreamingUsageHint.encode(promptTokens: 20, completionTokens: 5),
+        ])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let request = #"""
+            {"model":"venice/llama","max_tokens":256,"system":"Be brief.",
+             "messages":[{"role":"user","content":"Weather in Rome?"}],
+             "tools":[{"name":"get_weather","input_schema":{"type":"object"}}]}
+            """#
+        let (status, body) = try await postPath(server, "/v1/messages", request)
+        #expect(status == 200, "\(body)")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        #expect(object["type"] as? String == "message")
+        #expect(object["stop_reason"] as? String == "tool_use")
+        let blocks = try #require(object["content"] as? [[String: Any]])
+        #expect(blocks.map { $0["type"] as? String } == ["thinking", "text", "tool_use"])
+        #expect((blocks[2]["input"] as? [String: Any])?["city"] as? String == "Rome")
+        let usage = try #require(object["usage"] as? [String: Any])
+        #expect(usage["input_tokens"] as? Int == 20)
+        #expect(usage["output_tokens"] as? Int == 5)
+        let sent = try #require(engine.requests.first)
+        #expect(sent.messages.first?.role == "system")
+        #expect(sent.tools?.first?.function.name == "get_weather")
+
+        let streamed = request.replacingOccurrences(of: #""max_tokens":256,"#, with: #""max_tokens":256,"stream":true,"#)
+        let (_, events) = try await postPath(server, "/v1/messages", streamed)
+        let names = events.components(separatedBy: "\n").filter { $0.hasPrefix("event: ") }.map { String($0.dropFirst(7)) }
+        #expect(names.first == "message_start")
+        #expect(names.last == "message_stop")
+        #expect(names.contains("message_delta"))
+        #expect(events.contains(#""input_tokens":20"#))
+        #expect(events.contains("input_json_delta"))
+    }
+
+    @Test func anthropicWithoutMeasuredUsageIsRefusedLikeUpstream() async throws {
+        let engine = ScriptedChatEngine(["Hi"])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let (status, body) = try await postPath(server, "/v1/messages",
+            #"{"model":"m","max_tokens":16,"messages":[{"role":"user","content":"x"}]}"#)
+        #expect(status == 502)
+        #expect(body.contains("input and output token counts"))
+    }
+}
+
 // MARK: - Test server
 
 private struct ChatTestServer {

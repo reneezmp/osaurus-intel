@@ -992,6 +992,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 var liveToolSpecs = toolSpecs
                 let loadBuffer = CapabilityLoadBuffer()
 
+                // API requests (`reportsUsage`) get the provider's measured
+                // counts as an in-band marker at the end of the stream
+                // (`W-server-api`); app chats never see it.
+                func yieldUsageIfRequested() {
+                    guard request.reportsUsage, let promptTokens, let completionTokens else { return }
+                    continuation.yield(
+                        StreamingUsageHint.encode(promptTokens: promptTokens, completionTokens: completionTokens))
+                }
+
                 func captureResponseText(_ emission: String) {
                     guard !StreamingToolHint.isSentinel(emission),
                         StreamingReasoningHint.decode(emission) == nil,
@@ -1325,6 +1334,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continue
                                 }
                                 NSLog("[CloudChatEngine] Codex stream finished — \(totalChunks) chunks, \(round) round(s)")
+                                yieldUsageIfRequested()
                                 logInference()
                                 continuation.finish()
                                 return
@@ -1341,6 +1351,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                                 name: Self.resolvedOfferedToolName($0.name, offered: activeTools),
                                                 arguments: $0.arguments)
                                         }))
+                                yieldUsageIfRequested()
                                 logInference()
                                 continuation.finish()
                                 return
@@ -1662,6 +1673,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continue
                             }
                             NSLog("[CloudChatEngine] Stream finished — \(totalChunks) chunks, \(round) round(s), no tool calls")
+                            yieldUsageIfRequested()
                             logInference()
                             continuation.finish()
                             return
@@ -1682,6 +1694,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     orderedCalls.map {
                                         .init(callId: $0.id, name: $0.name, arguments: $0.arguments)
                                     }))
+                            yieldUsageIfRequested()
                             logInference()
                             continuation.finish()
                             return

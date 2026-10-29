@@ -147,6 +147,10 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// yielding them as one `StreamingToolHint.encodeProposed` sentinel,
     /// instead of running them. Not encoded.
     var stopAtToolCalls: Bool = false
+    /// Intel (`W-server-api`): an API request. The engine ends the stream
+    /// with a `StreamingUsageHint` when the provider reported usage. Not
+    /// encoded.
+    var reportsUsage: Bool = false
 
     private enum CodingKeys: String, CodingKey {
         case model, messages, stream, temperature, max_tokens, top_p
@@ -838,6 +842,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveShow(context: context)
         case (.POST, "/chat/completions"):
             serveChatCompletions(context: context, head: head)
+        case (.POST, "/messages"):
+            serveAnthropicMessages(context: context, head: head)
         case (.POST, "/chat"):
             serveOllama(.chat, context: context, head: head)
         case (.POST, "/generate"):
@@ -1570,6 +1576,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         // Streaming: the head goes out now; the task writes chunks on the
         // event loop and stops when the client disconnects.
         stateRef.value.isStreaming = true
+        let includeUsage = request.stream_options?.include_usage == true
         let writer = SSEResponseWriter()
         writer.writeHeaders(context, extraHeaders: cors)
         writer.writeRole("assistant", model: model, responseId: responseId, created: created, context: context)
@@ -1600,7 +1607,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                         onLoop { writer.writeContent(text, model: model, responseId: responseId, created: created, context: $0) }
                     case .reasoning(let text):
                         onLoop { writer.writeReasoning(text, model: model, responseId: responseId, created: created, context: $0) }
-                    case .toolCalls, .stats:
+                    case .toolCalls, .stats, .usage:
                         break
                     }
                 }
@@ -1613,6 +1620,13 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                     writer.writeFinishWithReason(
                         finished.finishReason.rawValue, model: model, responseId: responseId, created: created,
                         context: ctx)
+                    // Upstream: the `include_usage` chunk only when the
+                    // provider measured usage.
+                    if includeUsage, let usage = finished.usage {
+                        writer.writeUsageChunk(
+                            promptTokens: usage.prompt, completionTokens: usage.completion,
+                            model: model, responseId: responseId, created: created, context: ctx)
+                    }
                     writer.writeEnd(ctx)
                 }
                 log(status: 200, responseBody: nil, finish: finished.finishReason, error: nil)
@@ -1629,8 +1643,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     }
 
     /// Upstream's non-streaming body (`chatCompletionsHTTPBody`): the
-    /// assistant message and finish reason; `usage` only when measured,
-    /// which Intel's engine does not report.
+    /// assistant message and finish reason; `usage` only when the provider
+    /// measured it.
     static func chatCompletionBody(
         _ collected: IntelHTTPInference.Collected,
         id: String,
@@ -1653,10 +1667,16 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             reasoning_content: collected.reasoning.isEmpty ? nil : collected.reasoning
         )
         let message = try JSONSerialization.jsonObject(with: JSONEncoder.osaurusCanonical().encode(assistant))
-        let object: [String: Any] = [
+        var object: [String: Any] = [
             "id": id, "object": "chat.completion", "created": created, "model": model,
             "choices": [["index": 0, "message": message, "finish_reason": collected.finishReason.rawValue]],
         ]
+        if let usage = collected.usage {
+            object["usage"] = [
+                "prompt_tokens": usage.prompt, "completion_tokens": usage.completion,
+                "total_tokens": usage.prompt + usage.completion,
+            ]
+        }
         return String(
             decoding: try JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical), as: UTF8.self)
     }
