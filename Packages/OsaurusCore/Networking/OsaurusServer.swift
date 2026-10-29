@@ -17,17 +17,23 @@ public actor OsaurusServer: Sendable {
         private let lock = NSLock()
         private let build: @Sendable () -> APIKeyValidator
         private var cached: APIKeyValidator?
+        /// Epoch the cached validator was built at. When the global epoch
+        /// advances (key minted/revoked, whitelist/agent change), the cache is
+        /// considered stale and rebuilt on next access.
+        private var cachedEpoch: UInt64 = 0
 
         init(_ build: @escaping @Sendable () -> APIKeyValidator) {
             self.build = build
         }
 
         func value() -> APIKeyValidator {
+            let epoch = APIKeyValidatorEpoch.shared.current()
             lock.lock()
             defer { lock.unlock() }
-            if let cached { return cached }
+            if let cached, cachedEpoch == epoch { return cached }
             let validator = build()
             cached = validator
+            cachedEpoch = epoch
             return validator
         }
     }
@@ -54,6 +60,12 @@ public actor OsaurusServer: Sendable {
     private let childChannels = ChildChannelRegistry()
 
     public init() {}
+
+    /// The port the server is actually bound to, or nil when stopped
+    /// (upstream; tests bind port 0).
+    public func boundPort() -> Int? {
+        channel?.localAddress?.port
+    }
 
     public func start(
         _ config: Config = .init(),
@@ -156,21 +168,40 @@ public actor OsaurusServer: Sendable {
             defer { masterKeyData.zeroOut() }
 
             let masterAddress = try deriveOsaurusId(from: masterKeyData)
-            let agentAddress: OsaurusID =
-                if let idx = agentIndex {
-                    try AgentKey.deriveAddress(masterKey: masterKeyData, index: idx)
-                } else {
-                    masterAddress
-                }
+
+            // Accept tokens scoped to ANY of the user's agents (upstream), so
+            // agent-scoped keys validate. The agent addresses come from the
+            // thread-safe `AgentIdentityRegistry` (mirrored from
+            // `AgentManager`). A specific `agentIndex` (single-agent config)
+            // restricts to that agent. Intel keeps the v1 index here;
+            // upstream's device-scoped `AgentKeyPath` comes with
+            // `W-identity-mobile`.
+            var agentAddresses: Set<OsaurusID> = []
+            if let idx = agentIndex {
+                agentAddresses.insert(try AgentKey.deriveAddress(masterKey: masterKeyData, index: idx))
+            } else {
+                agentAddresses.formUnion(AgentIdentityRegistry.shared.currentAddresses())
+            }
+            // Always keep a non-empty set; the master address is implicitly
+            // accepted by the validator regardless.
+            if agentAddresses.isEmpty { agentAddresses.insert(masterAddress) }
+
             APIKeyManager.shared.reload()
 
+            // The effective whitelist must cover every accepted agent so that
+            // agent-signed keys (iss == agent address) pass the whitelist gate.
+            var whitelist = WhitelistStore.shared.masterWhitelist()
+            whitelist.insert(masterAddress.lowercased())
+            for addr in agentAddresses {
+                whitelist.formUnion(
+                    WhitelistStore.shared.effectiveWhitelist(forAgent: addr, masterAddress: masterAddress)
+                )
+            }
+
             return APIKeyValidator(
-                agentAddress: agentAddress,
+                agentAddresses: agentAddresses,
                 masterAddress: masterAddress,
-                effectiveWhitelist: WhitelistStore.shared.effectiveWhitelist(
-                    forAgent: agentAddress,
-                    masterAddress: masterAddress
-                ),
+                effectiveWhitelist: whitelist,
                 revocationSnapshot: RevocationStore.shared.snapshot(),
                 hasKeys: !APIKeyManager.shared.listKeys().isEmpty
             )

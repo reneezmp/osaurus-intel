@@ -94,3 +94,44 @@ Each stage: gate run, Rosy section, row note in the backlog.
     `isMasterScoped`.
   - `AccessKeyValidatorTests` is enabled; `CryptoHelpersTests` and
     `AccessKeyIntegrationTests` are at upstream. 72 tests pass.
+- **Stage 1 (2026-10-29): gate and plumbing.** Upstream's request intake
+  sits in front of Intel's routes, in `HTTPHandler.swift`:
+  - **Limits:** header count and size limits (431); Content-Length and
+    streamed body limits (413), with the tighter pairing limit on `/pair*`
+    and `/secure/session`.
+  - **Origin checks:** CORS (loopback `*`, else Allowed Origins, an
+    explicit list on protected routes) and OPTIONS preflight. The #3178
+    `LocalAPIKeyPolicy` refuses unlisted browser origins and accepts the
+    per-launch app token over physical loopback.
+  - **Access-key gate:**
+    - public paths; loopback trust, withdrawn for relay-origin traffic and
+      local agent-scoped keys;
+    - Bearer validation with audience and key nonce;
+    - agent-scope confinement: legacy-key route policy, the peer-inference
+      gate (off: owner inference sharing is part of workspaces) and the
+      `X-Osaurus-Agent-Id` check;
+    - opportunistic loopback validation.
+  - **Request context:** `HTTPCallerContext` bound around request tasks.
+  - **Insights rows:** these carry the access-key attribution, and gate
+    replies close the connection.
+  - **Routing:** unknown routes now answer 404. The old Intel router
+    answered every path 200 "ok".
+  - **Validator rebuilds:**
+    - `APIKeyValidatorEpoch` is bumped by key, revocation and whitelist
+      changes and by the agent list.
+    - `AgentIdentityRegistry` mirrors agent addresses from Intel's
+      `AgentManager`.
+    - `OsaurusServer` rebuilds its cached validator when the epoch moves,
+      accepting every agent's audience.
+    - Intel keeps the v1 `agentIndex` config; upstream's `AgentKeyPath`
+      comes with `W-identity-mobile`.
+  - **Not in yet:** upstream's plugin, channel and harness exemptions
+    (`/plugins/*`, `/channels/*`, harness tokens), the secure-channel rewrite
+    and its owner-channel 426, and the workspace-minted key index.
+  - **Tests:** `HTTPAuthGateTests` (Intel copy of upstream's: 20 run,
+    8 disabled until stages 2–5, the workspace / credits / tasks / harness
+    cases left out) and `HTTPBodySizeLimitTests` are enabled.
+    `CORSHandlerTests` waits for stage 2 (`/api/tags`).
+  - **Server still loopback-only:** `AppDelegate` binds `127.0.0.1` until
+    stage 7.
+

@@ -220,6 +220,42 @@ private final class SendableBool: @unchecked Sendable {
     }
 }
 
+/// Thread-safe holder for the inbound request's attribution metadata
+/// (paired-key nonce + audience + transport). The auth gate sets it on the
+/// event loop; the request log can be emitted off-loop, where touching the
+/// `NIOLoopBound` `RequestState` would trap (upstream).
+private final class SendableConnectionBox: @unchecked Sendable {
+    private var _value: RequestConnectionInfo?
+    private let _lock = NSLock()
+    var value: RequestConnectionInfo? {
+        get { _lock.withLock { _value } }
+        set { _lock.withLock { _value = newValue } }
+    }
+}
+
+/// Off-loop-readable client address for the current request (upstream).
+private final class SendableClientIPBox: @unchecked Sendable {
+    private var _value: String = "unknown"
+    private let _lock = NSLock()
+    var value: String {
+        get { _lock.withLock { _value } }
+        set { _lock.withLock { _value = newValue } }
+    }
+}
+
+/// Carries a request's async work into its task (upstream
+/// `RequestTaskOperation`): the work runs once, on that task.
+private final class RequestTaskOperation: @unchecked Sendable {
+    private let operation: () async -> Void
+    init(_ operation: @escaping () async -> Void) { self.operation = operation }
+    func run() async { await operation() }
+}
+
+/// SwiftNIO HTTP request handler.
+///
+/// Intel (`W-server-api` stage 1, docs/SERVER_API_INTEL.md): upstream's
+/// request intake, limits, CORS and access-key gate in front of Intel's
+/// routes. Upstream's route bodies arrive stage by stage.
 final class HTTPHandler: ChannelInboundHandler, Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
@@ -229,6 +265,11 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     private var apiKeyValidator: APIKeyValidator { apiKeyValidatorProvider() }
     private let trustLoopback: Bool
     private let _isChannelActive = SendableBool(false)
+    /// Off-loop-readable mirror of the current request's inbound attribution
+    /// (set by the auth gate, cleared on each `.head`).
+    private let _inboundConnection = SendableConnectionBox()
+    /// Off-loop-readable mirror of the current request's client address.
+    private let _clientIP = SendableClientIPBox()
 
     private let jsonEncoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -239,19 +280,51 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         return d
     }()
 
+    /// Internal marker header stamped by `RelayTunnelManager` on every request
+    /// it proxies from the relay tunnel to the loopback server. Such requests
+    /// arrive over 127.0.0.1 but ORIGINATE from the public internet, so they
+    /// must never inherit the loopback auth/CORS trust that genuine local
+    /// callers (CLI, App Intents) get (upstream).
+    static let relayOriginHeaderName = "X-Osaurus-Relay-Origin"
+
     final class RequestState {
         var requestHead: HTTPRequestHead?
         var requestBodyBuffer: ByteBuffer?
+        var corsHeaders: [(String, String)] = []
+        var normalizedPath: String = ""
         var isStreaming = false
         var streamingDone = false
         var contextBox: ChannelHandlerContext?
-        /// M13 (Insights): wall-clock when the request head arrived, so
-        /// `sendResponse` can report request duration to InsightsService.
+        /// Wall-clock when the request head arrived, for request duration.
         var requestStartedAt: Date?
         /// Insights: the model and request body of a proxied chat completion,
         /// so its row says where it went (set by `serveChatCompletions`).
         var activityModel: String?
         var activityRequestBody: String?
+        /// Cached body-size cap for the current request (route-aware).
+        var bodyByteLimit: Int = Int.max
+        /// Running total of accumulated body bytes, so a chunked client
+        /// cannot bypass the Content-Length check.
+        var bodyBytesSeen: Int = 0
+        /// Set when the request has already been rejected (413 / 431) so any
+        /// subsequent `.body` / `.end` parts are dropped.
+        var rejectedTooLarge: Bool = false
+        /// Set at `.head` when the request carries the relay-origin marker.
+        /// Forces `isLoopbackConnection` to report `false`.
+        var isRelayOrigin: Bool = false
+        /// The validated access key's audience (lowercased). `nil` means the
+        /// caller was loopback-trusted or hit a public route.
+        var authedAudience: String?
+        /// `true` when `authedAudience` is the master address.
+        var authedScopeIsMaster: Bool = false
+        /// `true` when the caller presented a Bearer token that validated.
+        var callerHasVerifiedAccessKey: Bool = false
+        /// `true` when that verified key is master-scoped.
+        var callerAccessKeyIsMaster: Bool = false
+        /// Set by the auth gate when `LocalAPIKeyPolicy` made a loopback
+        /// caller present an agent-scoped key: that caller is held to the
+        /// remote contract, so `isLoopbackConnection` reports `false`.
+        var loopbackTrustWithdrawn: Bool = false
     }
 
     /// Intel's `/chat/completions` proxies to DeepSeek, so its activity row
@@ -310,16 +383,35 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     }
     let stateRef: NIOLoopBound<RequestState>
 
+    /// Live read of the owner's "share my models for inference with paired
+    /// agents" switch. Upstream reads `PeerInferenceSharing`, part of
+    /// workspace sharing (deferred on Intel), so it is off here; injectable
+    /// for the gate's tests.
+    private let peerInferenceSharingProvider: @Sendable () -> Bool
+    private var peerInferenceEnabled: Bool { peerInferenceSharingProvider() }
+
+    /// Live read of the owner's "require an access key from this Mac too"
+    /// switch (`LocalAPIKeyPolicy`, upstream #3178), injectable.
+    private let localKeyRequiredProvider: @Sendable () -> Bool
+
+    private func localKeyRequired(for normalizedPath: String) -> Bool {
+        LocalAPIKeyPolicy.isProtectedRoute(normalizedPath) && localKeyRequiredProvider()
+    }
+
     init(
         configuration: ServerConfiguration,
         apiKeyValidator: APIKeyValidator = .empty,
         apiKeyValidatorProvider: (@Sendable () -> APIKeyValidator)? = nil,
         eventLoop: EventLoop,
-        trustLoopback: Bool = true
+        trustLoopback: Bool = true,
+        peerInferenceSharingProvider: @escaping @Sendable () -> Bool = { false },
+        localKeyRequiredProvider: @escaping @Sendable () -> Bool = { LocalAPIKeyPolicy.isEnabled() }
     ) {
         self.configuration = configuration
         self.apiKeyValidatorProvider = apiKeyValidatorProvider ?? { apiKeyValidator }
         self.trustLoopback = trustLoopback
+        self.peerInferenceSharingProvider = peerInferenceSharingProvider
+        self.localKeyRequiredProvider = localKeyRequiredProvider
         self.stateRef = NIOLoopBound(RequestState(), eventLoop: eventLoop)
     }
 
@@ -335,6 +427,29 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         context.fireChannelInactive()
     }
 
+    func errorCaught(context: ChannelHandlerContext, error: Error) {
+        // Log and close the connection to avoid NIO debug preconditions
+        // crashing the app (upstream).
+        print("[Osaurus][NIO] errorCaught: \(error)")
+        context.close(promise: nil)
+    }
+
+    /// Runs a request's async work with the caller's auth proof bound as
+    /// `HTTPCallerContext` (upstream `runRequestTask`, minus its task
+    /// registry, which arrives with the routes that need it).
+    private func runRequestTask(_ operation: @escaping () async -> Void) {
+        let callerContext = HTTPCallerContext(
+            hasVerifiedAccessKey: stateRef.value.callerHasVerifiedAccessKey,
+            isSecureChannel: false
+        )
+        let operationBox = RequestTaskOperation(operation)
+        Task {
+            await HTTPCallerContext.$current.withValue(callerContext) {
+                await operationBox.run()
+            }
+        }
+    }
+
     func channelRead(context: ChannelHandlerContext, data: NIOAny) {
         let part = unwrapInboundIn(data)
 
@@ -344,29 +459,291 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             stateRef.value.requestStartedAt = Date()
             stateRef.value.activityModel = nil
             stateRef.value.activityRequestBody = nil
-            stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: 0)
             stateRef.value.isStreaming = false
             stateRef.value.streamingDone = false
+            stateRef.value.bodyBytesSeen = 0
+            stateRef.value.rejectedTooLarge = false
+            stateRef.value.authedAudience = nil
+            stateRef.value.authedScopeIsMaster = false
+            stateRef.value.callerHasVerifiedAccessKey = false
+            stateRef.value.callerAccessKeyIsMaster = false
+            stateRef.value.loopbackTrustWithdrawn = false
+            // Clear last request's attribution so a keep-alive connection's
+            // next (possibly loopback / public) request can't inherit it.
+            _inboundConnection.value = nil
+            // Detect relay-proxied traffic before computing CORS / loopback
+            // trust so the relay marker can strip loopback privileges.
+            stateRef.value.isRelayOrigin =
+                head.headers.first(name: HTTPHandler.relayOriginHeaderName) != nil
+            _clientIP.value = remoteIP(context)
+            stateRef.value.corsHeaders = computeCORSHeaders(
+                for: head,
+                isPreflight: false,
+                isLoopback: isLoopbackConnection(context),
+                explicitOriginsOnly: localKeyRequired(for: normalize(extractPath(from: head.uri)))
+            )
+            stateRef.value.bodyByteLimit = bodyByteLimit(for: head)
+
+            // Header DoS guard: reject pathological header sets before any
+            // further per-header work.
+            var headerCount = 0
+            var headerBytes = 0
+            for (name, value) in head.headers {
+                headerCount += 1
+                headerBytes += name.utf8.count + value.utf8.count
+                if headerCount > Self.maxRequestHeaderCount
+                    || headerBytes > Self.maxRequestHeaderBytes
+                {
+                    rejectHeadersTooLarge(context: context, head: head)
+                    return
+                }
+            }
+
+            // Reject before allocating the body buffer so a client lying
+            // about Content-Length can't force a huge allocation up front.
+            if let lengthStr = head.headers.first(name: "Content-Length") {
+                guard let length = Int(lengthStr), length >= 0 else {
+                    sendBadRequest(context: context)
+                    stateRef.value.requestHead = nil
+                    stateRef.value.requestBodyBuffer = nil
+                    return
+                }
+                if length > stateRef.value.bodyByteLimit {
+                    rejectPayloadTooLarge(
+                        context: context,
+                        head: head,
+                        declaredLength: length,
+                        limit: stateRef.value.bodyByteLimit
+                    )
+                    return
+                }
+                stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: length)
+            } else {
+                stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(capacity: 0)
+            }
 
         case .body(var buffer):
-            if stateRef.value.requestBodyBuffer != nil {
-                stateRef.value.requestBodyBuffer!.writeBuffer(&buffer)
+            if stateRef.value.rejectedTooLarge { return }
+            if stateRef.value.requestBodyBuffer == nil {
+                stateRef.value.requestBodyBuffer = context.channel.allocator.buffer(
+                    capacity: buffer.readableBytes
+                )
+            }
+            stateRef.value.bodyBytesSeen += buffer.readableBytes
+            if stateRef.value.bodyBytesSeen > stateRef.value.bodyByteLimit,
+                let head = stateRef.value.requestHead
+            {
+                rejectPayloadTooLarge(
+                    context: context,
+                    head: head,
+                    declaredLength: stateRef.value.bodyBytesSeen,
+                    limit: stateRef.value.bodyByteLimit
+                )
+                return
+            }
+            if var existing = stateRef.value.requestBodyBuffer {
+                existing.writeBuffer(&buffer)
+                stateRef.value.requestBodyBuffer = existing
             }
 
         case .end:
-            guard let head = stateRef.value.requestHead else {
-                sendEmptyResponse(context: context, status: .badRequest)
+            if stateRef.value.rejectedTooLarge {
+                stateRef.value.requestHead = nil
+                stateRef.value.requestBodyBuffer = nil
                 return
             }
-
+            guard let head = stateRef.value.requestHead else {
+                sendBadRequest(context: context)
+                return
+            }
+            guard admit(context: context, head: head) else {
+                stateRef.value.requestHead = nil
+                stateRef.value.requestBodyBuffer = nil
+                return
+            }
             handleRequest(context: context, head: head)
         }
+    }
+
+    // MARK: - Access gate (upstream)
+
+    /// CORS preflight, `LocalAPIKeyPolicy`, the access-key gate and the
+    /// agent-scope confinement, in upstream's order. Returns `false` when it
+    /// already answered the request.
+    private func admit(context: ChannelHandlerContext, head: HTTPRequestHead) -> Bool {
+        let path = normalize(extractPath(from: head.uri))
+        stateRef.value.normalizedPath = path
+        let startTime = stateRef.value.requestStartedAt ?? Date()
+        let method = head.method.rawValue
+        let userAgent = head.headers.first(name: "User-Agent")
+
+        // CORS preflight (OPTIONS): answered here, not logged.
+        if head.method == .OPTIONS {
+            let cors = computeCORSHeaders(
+                for: head,
+                isPreflight: true,
+                isLoopback: isLoopbackConnection(context),
+                explicitOriginsOnly: localKeyRequired(for: path)
+            )
+            sendGateResponse(context: context, head: head, status: .noContent, headers: cors, body: "")
+            return false
+        }
+
+        func refuse(_ status: HTTPResponseStatus, _ body: String, message: String? = nil) -> Bool {
+            var headers = [("Content-Type", "application/json; charset=utf-8")]
+            headers.append(contentsOf: stateRef.value.corsHeaders)
+            sendGateResponse(context: context, head: head, status: status, headers: headers, body: body)
+            logRequest(
+                method: method,
+                path: path,
+                userAgent: userAgent,
+                requestBody: nil,
+                responseBody: body,
+                responseStatus: Int(status.code),
+                startTime: startTime,
+                errorMessage: message
+            )
+            return false
+        }
+
+        // `LocalAPIKeyPolicy`: on a protected route, a browser origin not
+        // listed by name is refused outright (key or not), and the
+        // in-process app token stands in for a key over physical loopback.
+        let localKeyRequired = localKeyRequired(for: path)
+        var presentedAppToken = false
+        if localKeyRequired {
+            stateRef.value.corsHeaders = computeCORSHeaders(
+                for: head,
+                isPreflight: false,
+                isLoopback: false,
+                explicitOriginsOnly: true
+            )
+            if let origin = head.headers.first(name: "Origin"),
+                !LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: configuration.allowedOrigins)
+            {
+                let message =
+                    "Browser requests to this route are refused. Add the origin to Allowed Origins (CORS) to permit it."
+                return refuse(
+                    .forbidden,
+                    #"{"error":{"code":"browser_origin_refused","message":"\#(message)","type":"permission_error"}}"#,
+                    message: message
+                )
+            }
+            presentedAppToken =
+                isPhysicalLoopbackConnection(context)
+                && LocalAPIKeyPolicy.isAppSessionToken(head.headers.first(name: LocalAPIKeyPolicy.appTokenHeaderName))
+        }
+
+        // Access key authentication gate. Loopback connections (CLI / local
+        // tools) are trusted without a token unless `LocalAPIKeyPolicy` asks
+        // for one. Upstream's plugin, channel and harness exemptions arrive
+        // with those routes (`W-plugin-reliability`, channels, harnesses).
+        let publicPaths: Set<String> = [
+            "/", "/health", "/pair", "/pair/hello", "/pair/challenge", "/pair/code", "/pair/confirm", "/pair-invite",
+            "/secure/session",
+        ]
+        let isLoopback = isLoopbackConnection(context)
+
+        if !publicPaths.contains(path) && (!isLoopback || (localKeyRequired && !presentedAppToken)) {
+            let authHeader = head.headers.first(name: "Authorization") ?? ""
+            let token = authHeader.hasPrefix("Bearer ") ? String(authHeader.dropFirst(7)) : ""
+
+            let message: String
+            if !apiKeyValidator.hasKeys {
+                message = "No access keys configured. Create one in Osaurus settings."
+            } else {
+                switch apiKeyValidator.validate(rawKey: token) {
+                case .valid(_, let audience, let keyNonce):
+                    message = ""
+                    stateRef.value.callerHasVerifiedAccessKey = true
+                    stateRef.value.authedAudience = audience.lowercased()
+                    stateRef.value.authedScopeIsMaster = apiKeyValidator.isMasterScoped(audience: audience)
+                    stateRef.value.callerAccessKeyIsMaster = stateRef.value.authedScopeIsMaster
+                    // A local owner key keeps loopback behavior; a local
+                    // agent-scoped key gets exactly what it gets remotely.
+                    stateRef.value.loopbackTrustWithdrawn = isLoopback && !stateRef.value.authedScopeIsMaster
+                    _inboundConnection.value = RequestConnectionInfo(
+                        transport: .direct,
+                        accessKeyId: keyNonce,
+                        audience: audience.lowercased()
+                    )
+                case .expired:
+                    message = "Access key has expired"
+                case .revoked:
+                    message = "Access key has been revoked"
+                case .invalid(let reason):
+                    message = "Invalid access key: \(reason)"
+                }
+            }
+
+            if !message.isEmpty {
+                return refuse(.unauthorized, #"{"error":{"message":"\#(message)","type":"authentication_error"}}"#)
+            }
+
+            // Confinement for agent-scoped keys: route policy by key origin,
+            // plus the cross-agent `X-Osaurus-Agent-Id` check. Workspace-
+            // minted keys don't exist on Intel yet (deferred), so every
+            // agent-scoped key takes the legacy pairing policy.
+            let rejection =
+                Self.agentScopedRouteRejection(
+                    method: head.method,
+                    path: path,
+                    authedAudience: stateRef.value.authedAudience,
+                    authedScopeIsMaster: stateRef.value.authedScopeIsMaster,
+                    isWorkspaceMintedKey: false,
+                    peerInferenceEnabled: peerInferenceEnabled
+                )
+                ?? Self.agentHeaderScopeRejection(
+                    headerValue: head.headers.first(name: "X-Osaurus-Agent-Id"),
+                    authedAudience: stateRef.value.authedAudience,
+                    authedScopeIsMaster: stateRef.value.authedScopeIsMaster
+                )
+            if let rejection {
+                return refuse(
+                    .forbidden,
+                    #"{"error":{"code":"\#(rejection.code)","message":"\#(rejection.message)","type":"permission_error"}}"#,
+                    message: rejection.message
+                )
+            }
+        }
+
+        // Loopback callers skip the gate, but some downstream gates need
+        // proof of a key. Validate a volunteered Bearer token
+        // opportunistically: never rejecting, never setting `authedAudience`.
+        if isLoopback, !stateRef.value.callerHasVerifiedAccessKey {
+            let authHeader = head.headers.first(name: "Authorization") ?? ""
+            if authHeader.hasPrefix("Bearer ") {
+                let token = String(authHeader.dropFirst(7))
+                if case .valid(_, let audience, _) = apiKeyValidator.validate(rawKey: token) {
+                    stateRef.value.callerHasVerifiedAccessKey = true
+                    stateRef.value.callerAccessKeyIsMaster = apiKeyValidator.isMasterScoped(audience: audience)
+                }
+            }
+        }
+
+        // Simple HEAD (upstream answers it before routing).
+        if head.method == .HEAD {
+            var headers = [("Content-Type", "text/plain; charset=utf-8")]
+            headers.append(contentsOf: stateRef.value.corsHeaders)
+            sendGateResponse(context: context, head: head, status: .noContent, headers: headers, body: "")
+            logRequest(
+                method: method,
+                path: path,
+                userAgent: userAgent,
+                requestBody: nil,
+                responseBody: "",
+                responseStatus: 204,
+                startTime: startTime
+            )
+            return false
+        }
+        return true
     }
 
     // MARK: - Request Dispatch
 
     private func handleRequest(context: ChannelHandlerContext, head: HTTPRequestHead) {
-        let path = Router.normalizeStatic(head.uri)
+        let path = stateRef.value.normalizedPath
 
         switch (head.method, path) {
         case (.GET, "/health"):
@@ -380,11 +757,495 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/mcp"):
             serveMCP(context: context)
         default:
-            var router = Router(context: context, handler: self)
-            let bodyBuffer = stateRef.value.requestBodyBuffer ?? context.channel.allocator.buffer(capacity: 0)
-            let (status, headers, body) = router.route(method: head.method.rawValue, path: head.uri, bodyBuffer: bodyBuffer)
-            sendResponse(context: context, status: status, headers: headers, body: body)
+            // Upstream answers unknown routes 404 (Intel's old router
+            // answered every path 200 "ok").
+            sendResponse(context: context, status: .notFound, headers: textHeaders(), body: "Not Found")
         }
+    }
+
+    // MARK: - Gate helpers (upstream)
+
+    private func extractPath(from uri: String) -> String {
+        if let queryIndex = uri.firstIndex(of: "?") {
+            return String(uri[..<queryIndex])
+        }
+        return uri
+    }
+
+    /// Normalize common provider prefixes so we cover /, /v1, /api, /v1/api.
+    private func normalize(_ path: String) -> String {
+        Router.normalizeStatic(path)
+    }
+
+    private func sendBadRequest(context: ChannelHandlerContext) {
+        sendGateResponse(
+            context: context,
+            head: nil,
+            status: .badRequest,
+            headers: [("Content-Type", "text/plain; charset=utf-8")],
+            body: "Bad Request"
+        )
+    }
+
+    /// Body-byte cap for the request based on its route: the unauthenticated
+    /// pairing / handshake routes get the tighter pairing limit.
+    private func bodyByteLimit(for head: HTTPRequestHead) -> Int {
+        let path = normalize(extractPath(from: head.uri))
+        if path == "/pair" || path == "/pair/code" || path == "/pair/confirm" || path == "/pair-invite"
+            || path == "/secure/session"
+        {
+            return configuration.maxPairingBodyBytes
+        }
+        return configuration.maxRequestBodyBytes
+    }
+
+    /// Upper bound on the number of request headers we accept.
+    static let maxRequestHeaderCount = 200
+    /// Upper bound on the total bytes across all header names+values.
+    static let maxRequestHeaderBytes = 1 * 1024 * 1024
+    /// Maximum structural nesting depth we hand to a JSON decoder.
+    static let maxJSONNestingDepth = 256
+
+    /// Reply 431 and close, before any body allocation or routing.
+    private func rejectHeadersTooLarge(context: ChannelHandlerContext, head: HTTPRequestHead) {
+        stateRef.value.rejectedTooLarge = true
+        stateRef.value.requestBodyBuffer = nil
+        let path = normalize(extractPath(from: head.uri))
+        let body =
+            #"{"error":{"message":"Request header fields too large","type":"request_header_fields_too_large"}}"#
+        var headers = [("Content-Type", "application/json; charset=utf-8")]
+        headers.append(contentsOf: stateRef.value.corsHeaders)
+        let status = HTTPResponseStatus(statusCode: 431, reasonPhrase: "Request Header Fields Too Large")
+        sendGateResponse(context: context, head: head, status: status, headers: headers, body: body)
+        logRequest(
+            method: head.method.rawValue,
+            path: path,
+            userAgent: head.headers.first(name: "User-Agent"),
+            requestBody: nil,
+            responseBody: body,
+            responseStatus: 431,
+            startTime: stateRef.value.requestStartedAt ?? Date()
+        )
+        stateRef.value.requestHead = nil
+    }
+
+    /// Reply 413, log it, drop the rest of the body and close. Runs before
+    /// the auth gate so an unauthenticated client cannot OOM the server.
+    private func rejectPayloadTooLarge(
+        context: ChannelHandlerContext,
+        head: HTTPRequestHead,
+        declaredLength: Int,
+        limit: Int
+    ) {
+        stateRef.value.rejectedTooLarge = true
+        stateRef.value.requestBodyBuffer = nil
+        let path = normalize(extractPath(from: head.uri))
+        let body =
+            #"{"error":{"message":"Request body too large (\#(declaredLength) > \#(limit) bytes)","type":"payload_too_large"}}"#
+        var headers = [("Content-Type", "application/json; charset=utf-8")]
+        headers.append(contentsOf: stateRef.value.corsHeaders)
+        sendGateResponse(context: context, head: head, status: .payloadTooLarge, headers: headers, body: body)
+        logRequest(
+            method: head.method.rawValue,
+            path: path,
+            userAgent: head.headers.first(name: "User-Agent"),
+            requestBody: nil,
+            responseBody: body,
+            responseStatus: 413,
+            startTime: stateRef.value.requestStartedAt ?? Date()
+        )
+    }
+
+    /// Gate replies (upstream `sendResponse`): written and the connection
+    /// closed, never routed through Intel's logging `sendResponse`.
+    private func sendGateResponse(
+        context: ChannelHandlerContext,
+        head: HTTPRequestHead?,
+        status: HTTPResponseStatus,
+        headers: [(String, String)],
+        body: String
+    ) {
+        var responseHead = HTTPResponseHead(version: head?.version ?? .http1_1, status: status)
+        var buffer = context.channel.allocator.buffer(capacity: body.utf8.count)
+        buffer.writeString(body)
+        var nioHeaders = HTTPHeaders()
+        for (name, value) in headers {
+            nioHeaders.add(name: name, value: value)
+        }
+        nioHeaders.add(name: "Content-Length", value: String(buffer.readableBytes))
+        nioHeaders.add(name: "Connection", value: "close")
+        responseHead.headers = nioHeaders
+        context.write(wrapOutboundOut(.head(responseHead)), promise: nil)
+        context.write(wrapOutboundOut(.body(.byteBuffer(buffer))), promise: nil)
+        context.writeAndFlush(wrapOutboundOut(.end(nil))).whenComplete { _ in
+            context.close(promise: nil)
+        }
+    }
+
+    /// Bucketing key for the client address (upstream). Relay traffic keys on
+    /// the first `X-Forwarded-For` hop; it is a hint, never an identity claim.
+    private func remoteIP(_ context: ChannelHandlerContext) -> String {
+        let socketIP = context.channel.remoteAddress?.ipAddress ?? "unknown"
+        guard stateRef.value.isRelayOrigin else { return socketIP }
+        return Self.relayRateLimitKey(
+            forwardedFor: stateRef.value.requestHead?.headers.first(name: "X-Forwarded-For"),
+            socketIP: socketIP
+        )
+    }
+
+    /// Pure helper behind `remoteIP` for relay-origin requests.
+    static func relayRateLimitKey(forwardedFor: String?, socketIP: String) -> String {
+        let firstHop =
+            forwardedFor?
+            .split(separator: ",")
+            .first
+            .map { $0.trimmingCharacters(in: .whitespaces) }
+            ?? ""
+        let bounded = String(firstHop.prefix(64))
+        return bounded.isEmpty ? "relay:\(socketIP)" : "relay:\(bounded)"
+    }
+
+    /// Whether the inbound connection is a trusted local caller. Both the
+    /// auth gate and CORS auto-trust use this predicate. Relay traffic and
+    /// a local agent-scoped key never count.
+    private func isLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
+        guard !stateRef.value.isRelayOrigin, !stateRef.value.loopbackTrustWithdrawn else { return false }
+        return trustLoopback && (context.channel.remoteAddress?.isLoopback ?? false)
+    }
+
+    /// Whether the connection physically arrived over 127.0.0.1 / ::1,
+    /// independent of the `trustLoopback` policy flag.
+    private func isPhysicalLoopbackConnection(_ context: ChannelHandlerContext) -> Bool {
+        guard !stateRef.value.isRelayOrigin else { return false }
+        return context.channel.remoteAddress?.isLoopback ?? false
+    }
+
+    // MARK: - Agent-scope policy (upstream)
+
+    /// Enforce that an agent-scoped access key only addresses its own agent.
+    /// Returns a rejection when the validated key's audience is an agent
+    /// address that does not match the target agent. Loopback callers,
+    /// master-scoped keys, and public routes (no recorded audience) pass
+    /// through unrestricted. An unknown agent→address mapping is denied so a
+    /// scoped key cannot reach an agent we can't prove it owns.
+    private func agentScopeRejection(forAgentId agentId: UUID) -> (code: String, message: String)? {
+        Self.agentScopeRejection(
+            forAgentId: agentId,
+            authedAudience: stateRef.value.authedAudience,
+            authedScopeIsMaster: stateRef.value.authedScopeIsMaster
+        )
+    }
+
+    /// Pure core of the agent-scope check so it can run inside detached request
+    /// tasks (which must not touch the event-loop-bound `stateRef`). Callers
+    /// capture `authedAudience` / `authedScopeIsMaster` on the event loop and
+    /// pass them in.
+    static func agentScopeRejection(
+        forAgentId agentId: UUID,
+        authedAudience: String?,
+        authedScopeIsMaster: Bool
+    ) -> (code: String, message: String)? {
+        guard let aud = authedAudience, !authedScopeIsMaster else { return nil }
+        guard let target = AgentIdentityRegistry.shared.address(forAgentId: agentId), aud == target
+        else {
+            return (
+                "agent_scope_denied",
+                "This access key is not scoped to the requested agent."
+            )
+        }
+        return nil
+    }
+
+    /// Route-level confinement for agent-scoped access keys, by key origin.
+    ///
+    /// An agent-scoped key grants access to ONE agent, but historically only
+    /// `/agents/{id}*` consulted the key's audience. Two classes of key exist
+    /// and they get different policies so shipped integrations are not
+    /// disrupted:
+    ///
+    /// **Workspace-minted keys** (Workspaces attestation handshake; strict
+    /// default-deny allowlist — nothing shipped depends on more):
+    /// - `GET /models` — the teammate client probes it for model discovery.
+    /// - `GET /agents/{id}`, `POST /agents/{id}/run`
+    ///   — the per-agent check (`agentScopeRejection`) still applies inside.
+    /// - `POST /chat/completions` only while the owner shares inference
+    ///   (`PeerInferenceSharing`), so a teammate can use this host as a plain
+    ///   OpenAI-compatible backend (Mode 1) on the owner's say-so.
+    /// Detached dispatch and task routes are unavailable to workspace keys.
+    ///
+    /// **Legacy pairing / `AgentInvite` keys** keep their pre-existing surface
+    /// minus server administration (`/admin/*`) — a paired peer must never be
+    /// able to change how this host runs — and minus the inference routes
+    /// (`peerInferenceRouteRejection`) unless the owner shares inference.
+    /// Cross-agent reach is closed separately by `agentHeaderScopeRejection`
+    /// and `DispatchTaskOwnership`, neither of which a same-agent client ever
+    /// trips.
+    ///
+    /// Scope rejections use the same `agent_scope_denied` shape the per-agent
+    /// check uses; an inference route refused because the owner has not opted
+    /// in reports `peer_inference_disabled` so the peer's UI can explain it.
+    /// Master-scoped keys and callers with no recorded audience (loopback
+    /// trust, public routes) are unrestricted. `HEAD` is treated like `GET`.
+    static func agentScopedRouteRejection(
+        method: HTTPMethod,
+        path: String,
+        authedAudience: String?,
+        authedScopeIsMaster: Bool,
+        isWorkspaceMintedKey: Bool,
+        peerInferenceEnabled: Bool
+    ) -> (code: String, message: String)? {
+        guard authedAudience != nil, !authedScopeIsMaster else { return nil }
+        if let inferenceRejection = Self.peerInferenceRouteRejection(
+            method: method, path: path, peerInferenceEnabled: peerInferenceEnabled
+        ) {
+            return inferenceRejection
+        }
+        let allowed =
+            isWorkspaceMintedKey
+            ? Self.workspaceKeyMayReach(method: method, path: path, peerInferenceEnabled: peerInferenceEnabled)
+            : Self.legacyAgentScopedKeyMayReach(method: method, path: path)
+        if allowed { return nil }
+        return (
+            "agent_scope_denied",
+            "This access key is scoped to a single agent and cannot access \(path)."
+        )
+    }
+
+    /// The routes that run this host's models on a caller's behalf — text
+    /// generation, embeddings, and media generation. `path` is normalized (no
+    /// `/v1` / `/api` prefix, no query string). Model *listing* (`/models`,
+    /// `/tags`) is deliberately not here: peers may still call it, and the
+    /// handlers answer with an empty catalog while sharing is off
+    /// (`peerModelCatalogIsHidden`) so the peer client keeps connecting for
+    /// Mode 2 instead of tripping its "peer rejected the connection" path.
+    static func isPeerInferenceRoute(method: HTTPMethod, path: String) -> Bool {
+        guard method == .POST else { return false }
+        let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let root = components.first else { return false }
+        switch (root, components.count) {
+        case ("chat", 1), ("completions", 1), ("generate", 1), ("messages", 1), ("responses", 1),
+            ("embeddings", 1), ("embed", 1), ("systemone", 1):
+            return true
+        case ("chat", 2):
+            return components[1] == "completions"
+        case ("audio", 2):
+            return components[1] == "transcriptions"
+        case ("images", 2):
+            return ["generations", "edits", "upscale"].contains(components[1])
+        case ("videos", 2):
+            return ["quote", "generations"].contains(components[1])
+        default:
+            return false
+        }
+    }
+
+    /// Owner opt-in gate for every agent-scoped key (workspace-minted or
+    /// legacy): while the owner has not shared inference, the inference
+    /// routes are refused regardless of key origin. Callers pass the live
+    /// setting so the pure policy stays unit-testable.
+    static func peerInferenceRouteRejection(
+        method: HTTPMethod,
+        path: String,
+        peerInferenceEnabled: Bool
+    ) -> (code: String, message: String)? {
+        guard !peerInferenceEnabled, Self.isPeerInferenceRoute(method: method, path: path) else { return nil }
+        return (
+            "peer_inference_disabled",
+            "This Osaurus does not share its models for inference with paired agents. "
+                + "Ask the owner to enable it in Server → Overview."
+        )
+    }
+
+    /// Whether the model catalog (`/models`, `/tags`) should be answered with
+    /// an empty list: the caller holds an agent-scoped key (a paired peer) and
+    /// the owner has not shared inference. Loopback-trusted callers and
+    /// master-scoped keys always see the real catalog.
+    static func peerModelCatalogIsHidden(
+        authedAudience: String?,
+        authedScopeIsMaster: Bool,
+        peerInferenceEnabled: Bool
+    ) -> Bool {
+        guard authedAudience != nil, !authedScopeIsMaster else { return false }
+        return !peerInferenceEnabled
+    }
+
+    /// Cross-agent header check for agent-scoped keys: when a request names an
+    /// agent via `X-Osaurus-Agent-Id` (chat-completions history/memory
+    /// attribution, `/memory/*`, `/mcp/call`), that agent must be the one the
+    /// key is scoped to. A same-agent client (the relay tunnel stamps the
+    /// tunnel's own agent) is unaffected. The built-in Default agent id is
+    /// ignored here because the handlers already drop it for external callers.
+    /// Malformed values are left to the handlers' existing 4xx paths.
+    static func agentHeaderScopeRejection(
+        headerValue: String?,
+        authedAudience: String?,
+        authedScopeIsMaster: Bool,
+        resolveAddress: (UUID) -> String? = { AgentIdentityRegistry.shared.address(forAgentId: $0) }
+    ) -> (code: String, message: String)? {
+        guard let aud = authedAudience, !authedScopeIsMaster else { return nil }
+        guard let raw = headerValue?.trimmingCharacters(in: .whitespaces), !raw.isEmpty,
+            let agentId = UUID(uuidString: raw), agentId != Agent.defaultId
+        else { return nil }
+        if let target = resolveAddress(agentId), target.lowercased() == aud.lowercased() {
+            return nil
+        }
+        return (
+            "agent_scope_denied",
+            "X-Osaurus-Agent-Id names an agent this access key is not scoped to."
+        )
+    }
+
+    /// Legacy pairing / invite keys: everything they could reach before, minus
+    /// server administration and the owner's account data (`/credits/*`).
+    /// `path` is normalized (no `/v1` / `/api` prefix, no query string).
+    static func legacyAgentScopedKeyMayReach(method: HTTPMethod, path: String) -> Bool {
+        let components = path.split(separator: "/", omittingEmptySubsequences: true)
+        return components.first != "admin" && components.first != "credits"
+    }
+
+    /// Strict allowlist for workspace-minted keys. `path` is already
+    /// normalized (no `/v1` / `/api` prefix, no query string).
+    /// `peerInferenceEnabled` adds `POST /chat/completions` (the teammate
+    /// client's Mode 1 route) when the owner shares inference.
+    static func workspaceKeyMayReach(
+        method: HTTPMethod,
+        path: String,
+        peerInferenceEnabled: Bool = false
+    ) -> Bool {
+        let effectiveMethod: HTTPMethod = method == .HEAD ? .GET : method
+        let components = path.split(separator: "/", omittingEmptySubsequences: true).map(String.init)
+        guard let root = components.first else { return false }
+        switch root {
+        case "models":
+            return effectiveMethod == .GET && components.count == 1
+        case "chat":
+            return peerInferenceEnabled && effectiveMethod == .POST
+                && components.count == 2 && components[1] == "completions"
+        case "agents":
+            guard components.count >= 2, !components[1].isEmpty else { return false }
+            if components.count == 2 { return effectiveMethod == .GET }
+            if components.count == 3, effectiveMethod == .POST {
+                return components[2] == "run"
+            }
+            return false
+        default:
+            return false }
+    }
+
+    // MARK: - CORS (upstream)
+
+    /// Loopback callers always get `Access-Control-Allow-Origin: *` (issue
+    /// #952): a request reaching us via 127.0.0.1 / ::1 is by definition on
+    /// the user's machine, so it gets the same trust the auth gate already
+    /// grants. Non-loopback callers respect `configuration.allowedOrigins`:
+    /// a literal `"*"` matches everything; otherwise the request `Origin`
+    /// header must appear in the list verbatim, in which case it's echoed
+    /// back with `Vary: Origin`.
+    ///
+    /// `explicitOriginsOnly` (routes protected by `LocalAPIKeyPolicy`) drops
+    /// both the loopback grant and the `"*"` wildcard: only an origin listed
+    /// by name is echoed.
+    private func computeCORSHeaders(
+        for head: HTTPRequestHead,
+        isPreflight: Bool,
+        isLoopback: Bool,
+        explicitOriginsOnly: Bool = false
+    ) -> [(String, String)] {
+        let origin = head.headers.first(name: "Origin")
+        var headers: [(String, String)] = []
+
+        let allowsAny =
+            !explicitOriginsOnly && (isLoopback || configuration.allowedOrigins.contains("*"))
+        if allowsAny {
+            headers.append(("Access-Control-Allow-Origin", "*"))
+        } else if let origin,
+            !origin.contains("\r"), !origin.contains("\n"),
+            LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: configuration.allowedOrigins)
+        {
+            headers.append(("Access-Control-Allow-Origin", origin))
+            headers.append(("Vary", "Origin"))
+        } else {
+            // Not allowed; for preflight return no CORS headers which will cause browser to block
+            return []
+        }
+
+        if isPreflight {
+            // Methods
+            let reqMethod = head.headers.first(name: "Access-Control-Request-Method")
+            let allowMethods = sanitizeTokenList(reqMethod ?? "GET, POST, OPTIONS, HEAD")
+            headers.append(("Access-Control-Allow-Methods", allowMethods))
+            // Headers
+            let reqHeaders = head.headers.first(name: "Access-Control-Request-Headers")
+            let allowHeaders = sanitizeTokenList(reqHeaders ?? "Content-Type, Authorization")
+            headers.append(("Access-Control-Allow-Headers", allowHeaders))
+            headers.append(("Access-Control-Max-Age", "600"))
+        }
+        return headers
+    }
+
+    /// Allow only RFC7230 token characters plus comma and space for reflected header lists
+    private func sanitizeTokenList(_ value: String) -> String {
+        let allowedPunctuation = Set("!#$%&'*+-.^_`|~ ,")
+        var result = String()
+        result.reserveCapacity(value.count)
+        for scalar in value.unicodeScalars {
+            switch scalar.value {
+            case 0x30 ... 0x39,  // 0-9
+                0x41 ... 0x5A,  // A-Z
+                0x61 ... 0x7A:  // a-z
+                result.unicodeScalars.append(scalar)
+            default:
+                let ch = Character(scalar)
+                if allowedPunctuation.contains(ch) {
+                    result.append(ch)
+                }
+            }
+        }
+        // Trim leading/trailing spaces and collapse runs of spaces around commas
+        let collapsed = result.split(separator: ",").map { $0.trimmingCharacters(in: .whitespaces) }
+            .filter { !$0.isEmpty }.joined(separator: ", ")
+        return collapsed
+    }
+
+    // MARK: - Request logging (upstream `logRequest`)
+
+    /// Log a request the gate (or a gate-shaped reply) answered. Intel's
+    /// routes log through `sendResponse`; both stamp the access-key
+    /// attribution the gate recorded.
+    private func logRequest(
+        method: String,
+        path: String,
+        userAgent: String?,
+        requestBody: String?,
+        responseBody: String? = nil,
+        responseStatus: Int,
+        startTime: Date,
+        model: String? = nil,
+        finishReason: RequestLog.FinishReason? = nil,
+        errorMessage: String? = nil
+    ) {
+        let durationMs = Date().timeIntervalSince(startTime) * 1000
+        InsightsService.logAsync(
+            method: method,
+            path: path,
+            clientIP: _clientIP.value,
+            userAgent: userAgent,
+            requestBody: requestBody,
+            responseBody: responseBody,
+            responseStatus: responseStatus,
+            durationMs: durationMs,
+            model: model,
+            finishReason: finishReason,
+            errorMessage: errorMessage,
+            connection: inboundConnectionInfo()
+        )
+    }
+
+    /// Attribution metadata for an inbound request, built by the auth gate.
+    /// Nil for loopback / public routes that carried no token.
+    private func inboundConnectionInfo() -> RequestConnectionInfo? {
+        let info = _inboundConnection.value
+        return (info?.isEmpty == true) ? nil : info
     }
 
     // MARK: - Health / Root
@@ -474,7 +1335,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         let eventLoop = context.eventLoop
         let stateRef = self.stateRef
 
-        Task {
+        runRequestTask {
             let response = await MCPBridge.shared.handleMCPRequest(mcpRequest)
 
             eventLoop.execute {
@@ -556,7 +1417,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             )
         }
 
-        Task {
+        runRequestTask {
             do {
                 let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
                 guard let httpResponse = response as? HTTPURLResponse,
@@ -610,8 +1471,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         let eventLoop = context.eventLoop
         let stateRef = self.stateRef
 
-        Task {
-            let result = await runAgentLoop(messages: request.messages, model: model, apiKey: apiKey)
+        runRequestTask {
+            let result = await self.runAgentLoop(messages: request.messages, model: model, apiKey: apiKey)
 
             eventLoop.execute {
                 guard let ctx = stateRef.value.contextBox else { return }
@@ -754,6 +1615,10 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         for (name, value) in headers {
             responseHeaders.add(name: name, value: value)
         }
+        // CORS for the current request, computed at `.head` (upstream).
+        for (name, value) in stateRef.value.corsHeaders {
+            responseHeaders.add(name: name, value: value)
+        }
         responseHeaders.add(name: "content-length", value: String(body.utf8.count))
         responseHeaders.add(name: "connection", value: "keep-alive")
 
@@ -785,12 +1650,14 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 )
                 return
             }
-            InsightsService.logRequest(
-                source: .httpAPI,
+            _ = durationMs
+            logRequest(
                 method: head.method.rawValue,
-                path: Router.normalizeStatic(head.uri),
-                statusCode: Int(status.code),
-                durationMs: durationMs
+                path: stateRef.value.normalizedPath,
+                userAgent: head.headers.first(name: "User-Agent"),
+                requestBody: nil,
+                responseStatus: Int(status.code),
+                startTime: started ?? Date()
             )
         }
     }
@@ -801,6 +1668,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         headers.add(name: "cache-control", value: "no-cache")
         headers.add(name: "connection", value: "keep-alive")
         headers.add(name: "x-accel-buffering", value: "no")
+        for (name, value) in stateRef.value.corsHeaders {
+            headers.add(name: name, value: value)
+        }
 
         let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
         context.writeAndFlush(wrapOutboundOut(.head(head)), promise: nil)

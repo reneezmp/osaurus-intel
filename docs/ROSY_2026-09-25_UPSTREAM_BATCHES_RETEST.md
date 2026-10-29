@@ -2123,3 +2123,17 @@ Details: `UPSTREAM_SYNC.md`, "Agent detail redesign". Use a test agent.
       to schedule its next run in 10 minutes: the banner shows the time;
       Run now starts it in a fresh chat. Turn self-scheduling off: the
       banner disappears.
+
+## Local API server: access-key gate (2026-10-29)
+
+Details: `SERVER_API_INTEL.md`, stages 0–1. Nothing visible changes in the
+app; this checks the server still answers locally. Use Terminal on Rosy.
+
+- [ ] `curl -s http://127.0.0.1:1337/health` answers `"healthy"`.
+- [ ] `curl -s http://127.0.0.1:1337/v1/models` lists models (no key
+      needed on this Mac).
+- [ ] `curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:1337/nope`
+      prints `404` (it used to print 200).
+- [ ] `curl -s -H "X-Osaurus-Relay-Origin: 1" http://127.0.0.1:1337/v1/models`
+      answers an `authentication_error` (relayed traffic needs a key).
+- [ ] Insights shows rows for those requests.

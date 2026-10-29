@@ -7,6 +7,14 @@
 //  to verify the auth behavior end-to-end.
 //
 
+//  Intel (`W-server-api` stage 1, docs/SERVER_API_INTEL.md): upstream's
+//  suite. Tests that need a route a later stage adds are disabled with that
+//  stage. Left out until their features exist on Intel: the credits-balance
+//  gate (stage 5, Credits routes), the workspace-minted key cases
+//  (workspaces are deferred), foreign task ownership (stage 4, `/tasks`),
+//  and the harness-token case (`W-harness-runtimes`).
+//
+
 import Foundation
 import NIOCore
 import NIOHTTP1
@@ -92,6 +100,64 @@ struct HTTPAuthGateTests {
         #expect((resp as? HTTPURLResponse)?.statusCode == 200)
     }
 
+    // MARK: - Inbound Attribution (host-side Remote Connections)
+
+    /// A valid inbound request must stamp the matched access key's nonce +
+    /// audience + transport onto its `RequestLog`, so the host's Remote
+    /// Connections view can attribute `.httpAPI` traffic to a specific paired
+    /// peer. Drives a real authed `GET /v1/models` and asserts the resulting
+    /// Insights log carries the attribution. The token nonce is unique per run
+    /// so we can find our own row in the shared ring buffer.
+    @Test func validInboundRequest_stampsAccessKeyAndAudienceOntoLog() async throws {
+        let validator = APIKeyValidator.forAlice()
+        let server = try await startAuthTestServer(validator: validator)
+        defer { Task { await server.shutdown() } }
+
+        let nonce = "inbound-attribution-\(UUID().uuidString)"
+        let token = try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey,
+            iss: TestKeys.aliceAddress,
+            aud: TestKeys.aliceAddress,
+            nonce: nonce
+        )
+
+        var request = URLRequest(
+            url: URL(string: "http://\(server.host):\(server.port)/v1/models")!
+        )
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+
+        let (_, resp) = try await URLSession.shared.data(for: request)
+        #expect((resp as? HTTPURLResponse)?.statusCode == 200)
+
+        // The request log is appended via an async main-actor hop, so poll the
+        // shared buffer briefly for our uniquely-nonced row.
+        let log = await Self.findInboundLog(accessKeyId: nonce)
+        let found = try #require(
+            log,
+            "inbound request did not stamp accessKeyId=\(nonce) onto a RequestLog"
+        )
+        #expect(found.source == .httpAPI)
+        #expect(found.connection?.accessKeyId == nonce)
+        #expect(found.connection?.audience == TestKeys.aliceAddress.lowercased())
+        // Plain HTTP (no Secure Channel handshake) is attributed as direct.
+        #expect(found.connection?.transport == .direct)
+    }
+
+    /// Polls `InsightsService` (main-actor) for an inbound log stamped with the
+    /// given access-key nonce. Returns nil if it never appears within ~1s.
+    private static func findInboundLog(accessKeyId: String) async -> RequestLog? {
+        for _ in 0 ..< 40 {
+            let match = await MainActor.run {
+                InsightsService.shared.logs.first {
+                    $0.connection?.accessKeyId == accessKeyId
+                }
+            }
+            if let match { return match }
+            try? await Task.sleep(nanoseconds: 25_000_000)
+        }
+        return nil
+    }
+
     // MARK: - Expired Token → 401
 
     @Test func protectedPath_expiredToken_returns401() async throws {
@@ -175,6 +241,531 @@ struct HTTPAuthGateTests {
         #expect(status == 401)
         #expect(body.contains("Invalid access key"))
     }
+
+    // MARK: - Relay Loopback Bypass Regression
+
+    /// Baseline: with loopback trust enabled, a plain local request needs no token.
+    @Test func loopbackTrusted_noToken_returns200() async throws {
+        let server = try await startAuthTestServer(validator: .empty, trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+
+        let (_, resp) = try await URLSession.shared.data(
+            from: URL(string: "http://\(server.host):\(server.port)/v1/models")!
+        )
+        #expect((resp as? HTTPURLResponse)?.statusCode == 200)
+    }
+
+    /// Regression for the relay loopback auth bypass: traffic proxied by
+    /// `RelayTunnelManager` arrives over 127.0.0.1 but carries the relay-origin
+    /// marker, so it must NOT inherit loopback trust — a request without a
+    /// Bearer token has to 401 even when `trustLoopback` is on.
+    @Test func relayOriginHeader_disablesLoopbackTrust_returns401() async throws {
+        let server = try await startAuthTestServer(validator: .empty, trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+
+        var request = URLRequest(
+            url: URL(string: "http://\(server.host):\(server.port)/v1/models")!
+        )
+        request.setValue("1", forHTTPHeaderField: HTTPHandler.relayOriginHeaderName)
+
+        let (_, resp) = try await URLSession.shared.data(for: request)
+        #expect((resp as? HTTPURLResponse)?.statusCode == 401)
+    }
+
+    /// Relayed traffic with a valid Bearer token still passes the gate.
+    @Test func relayOriginHeader_withValidToken_returns200() async throws {
+        let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+
+        var request = URLRequest(
+            url: URL(string: "http://\(server.host):\(server.port)/v1/models")!
+        )
+        request.setValue("1", forHTTPHeaderField: HTTPHandler.relayOriginHeaderName)
+        request.authenticate()
+
+        let (_, resp) = try await URLSession.shared.data(for: request)
+        #expect((resp as? HTTPURLResponse)?.statusCode == 200)
+    }
+
+    // MARK: - Credits Balance Gate
+
+    // MARK: - Agent-Scoped Key Confinement (by key origin)
+
+    /// Builds a validator that knows Alice's master + one derived agent, and an
+    /// agent-scoped token for that agent. With `workspaceMinted`, the token's
+    /// nonce is registered in the host's workspace-key index (what the
+    /// Workspaces redeem does) so the gate applies the strict allowlist;
+    /// otherwise it is classified as a legacy `/pair` / invite key.
+    private static func agentScopedFixture(
+        workspaceMinted: Bool = false
+    ) throws -> (validator: APIKeyValidator, token: String, agent: String, nonce: String) {
+        let agent = try AgentKey.deriveAddress(masterKey: TestKeys.alicePrivateKey, index: 3)
+        let agentKey = AgentKey.derive(masterKey: TestKeys.alicePrivateKey, index: 3)
+        let validator = APIKeyValidator(
+            agentAddresses: [agent],
+            masterAddress: TestKeys.aliceAddress,
+            effectiveWhitelist: [TestKeys.aliceAddress.lowercased(), agent.lowercased()],
+            revocationSnapshot: RevocationSnapshot(revokedKeys: [], counterThresholds: [:]),
+            hasKeys: true
+        )
+        let nonce = UUID().uuidString.replacingOccurrences(of: "-", with: "").lowercased()
+        let token = try TokenBuilder.build(privateKey: agentKey, iss: agent, aud: agent, nonce: nonce)
+        // Intel: no workspace-key index yet (workspaces are deferred), so
+        // every fixture key is a legacy `/pair` / invite key.
+        _ = workspaceMinted
+        return (validator, token, agent, nonce)
+    }
+
+    private static func send(
+        _ method: String, _ path: String, token: String, server: AuthTestServer, body: Data? = nil
+    ) async throws -> (status: Int, body: String) {
+        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)\(path)")!)
+        request.httpMethod = method
+        request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        // URLSession refuses a GET/DELETE carrying a body (-1103), so only
+        // attach it to methods that actually send one.
+        if let body, method != "GET", method != "DELETE" {
+            request.httpBody = body
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, resp) = try await URLSession.shared.data(for: request)
+        return ((resp as? HTTPURLResponse)?.statusCode ?? -1, String(decoding: data, as: UTF8.self))
+    }
+
+    /// A legacy `/pair` / invite key (not in the workspace-key index) keeps
+    /// reaching the agent routes existing paired peers use and is never
+    /// handed an `agent_scope_denied` for them. `/admin/*` is closed, and the
+    /// inference routes — including raw `/chat/completions` (Mode 1) — are
+    /// closed as `peer_inference_disabled` until the owner shares.
+    @Test(.disabled("W-server-api stage 2: /api/tags and the empty peer catalog")) func legacyPairingKey_keepsItsAgentSurfaceExceptServerAdministration() async throws {
+        let fixture = try Self.agentScopedFixture(workspaceMinted: false)
+        let server = try await startAuthTestServer(validator: fixture.validator)
+        defer { Task { await server.shutdown() } }
+
+        // Reaches the handler (whatever the handler says about an empty
+        // body, it is not the gate's 403).
+        let stillOpen: [(String, String)] = [
+            ("GET", "/v1/models"),
+            ("GET", "/api/tags"),
+            ("GET", "/agents"),
+            ("GET", "/mcp/tools"),
+        ]
+        for (method, path) in stillOpen {
+            let result = try await Self.send(
+                method, path, token: fixture.token, server: server, body: Data("{}".utf8)
+            )
+            #expect(
+                !(result.status == 403),
+                "\(method) \(path) must not be gate-denied for a legacy key: \(result.status) \(result.body)"
+            )
+        }
+        // The catalogs answer, but empty, while sharing is off.
+        let models = try await Self.send("GET", "/v1/models", token: fixture.token, server: server)
+        let parsedModels = try JSONDecoder().decode(ModelsResponse.self, from: Data(models.body.utf8))
+        #expect(parsedModels.data.isEmpty, "\(models.body)")
+        let tags = try await Self.send("GET", "/api/tags", token: fixture.token, server: server)
+        let tagsObject = try JSONSerialization.jsonObject(with: Data(tags.body.utf8)) as? [String: Any]
+        #expect((tagsObject?["models"] as? [Any])?.isEmpty == true, "\(tags.body)")
+
+        for (method, path) in [("POST", "/v1/chat/completions"), ("POST", "/v1/embeddings")] {
+            let result = try await Self.send(
+                method, path, token: fixture.token, server: server, body: Data("{}".utf8)
+            )
+            #expect(result.status == 403, "\(method) \(path) returned \(result.status)")
+            #expect(result.body.contains("peer_inference_disabled"), "\(method) \(path): \(result.body)")
+        }
+
+        for (method, path) in [("GET", "/admin/runtime-settings"), ("PUT", "/admin/runtime-settings"), ("GET", "/admin/cache-stats"),
+        ] {
+            let result = try await Self.send(
+                method, path, token: fixture.token, server: server, body: Data("{}".utf8)
+            )
+            #expect(result.status == 403, "\(method) \(path) returned \(result.status)")
+            #expect(result.body.contains("agent_scope_denied"), "\(method) \(path): \(result.body)")
+        }
+    }
+
+    /// Owner opted in: a legacy key regains raw inference (`/chat/completions`,
+    /// `/embeddings` reach their handlers) while `/admin/*` stays closed.
+    @Test func legacyPairingKey_regainsInferenceWhenOwnerShares() async throws {
+        let fixture = try Self.agentScopedFixture(workspaceMinted: false)
+        let server = try await startAuthTestServer(validator: fixture.validator, peerInferenceSharing: true)
+        defer { Task { await server.shutdown() } }
+
+        for (method, path) in [("POST", "/v1/chat/completions"), ("POST", "/v1/embeddings")] {
+            let result = try await Self.send(
+                method, path, token: fixture.token, server: server, body: Data("{}".utf8)
+            )
+            #expect(
+                result.status != 403,
+                "\(method) \(path) must reach the handler when sharing: \(result.status) \(result.body)"
+            )
+        }
+        let admin = try await Self.send("GET", "/admin/runtime-settings", token: fixture.token, server: server)
+        #expect(admin.status == 403 && admin.body.contains("agent_scope_denied"), "\(admin.body)")
+    }
+
+    /// The owner's own key never sees the peer gate. With sharing off and
+    /// loopback trust off, the master-scoped key gets the real catalog —
+    /// whatever this machine exposes, so it is compared against a
+    /// loopback-trusted read rather than pinned — while the agent-scoped key
+    /// gets nothing. (Test servers are serialized by `HTTPServerTestLock`, so
+    /// the loopback-trusted reference read runs on its own server first.)
+    @Test(.disabled("W-server-api stage 2: the peer catalog gate on /models")) func masterScopedKey_isNotSubjectToThePeerCatalogGate() async throws {
+        func catalog(_ body: String) throws -> [String] {
+            try JSONDecoder().decode(ModelsResponse.self, from: Data(body.utf8)).data.map(\.id)
+        }
+        let fixture = try Self.agentScopedFixture(workspaceMinted: false)
+
+        let trusted = try await startAuthTestServer(validator: fixture.validator, trustLoopback: true)
+        let (loopbackData, loopbackResp) = try await URLSession.shared.data(
+            from: URL(string: "http://\(trusted.host):\(trusted.port)/v1/models")!
+        )
+        await trusted.shutdown()
+        #expect((loopbackResp as? HTTPURLResponse)?.statusCode == 200)
+        let reference = try catalog(String(decoding: loopbackData, as: UTF8.self))
+
+        let server = try await startAuthTestServer(validator: fixture.validator)
+        defer { Task { await server.shutdown() } }
+        let master = try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey, iss: TestKeys.aliceAddress, aud: TestKeys.aliceAddress
+        )
+        let owner = try await Self.send("GET", "/v1/models", token: master, server: server)
+        #expect(owner.status == 200)
+        #expect(try catalog(owner.body) == reference)
+
+        let peer = try await Self.send("GET", "/v1/models", token: fixture.token, server: server)
+        #expect(peer.status == 200)
+        #expect(try catalog(peer.body).isEmpty, "\(peer.body)")
+    }
+
+    /// The same routes stay open to a master-scoped key (unchanged contract),
+    /// including `PUT /admin/runtime-settings` from a relayed (non-loopback)
+    /// origin — remote automation with the owner's key is not disrupted.
+    @Test(.disabled("W-server-api stage 4: /agents and /admin/runtime-settings")) func masterScopedKey_isNotConfinedByRoutePolicy() async throws {
+        let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+        let token = try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey, iss: TestKeys.aliceAddress, aud: TestKeys.aliceAddress
+        )
+        let agents = try await Self.send("GET", "/agents", token: token, server: server)
+        #expect(agents.status == 200)
+        let settings = try await Self.send("GET", "/admin/runtime-settings", token: token, server: server)
+        #expect(settings.status == 200)
+
+        var relayedPut = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/admin/runtime-settings")!)
+        relayedPut.httpMethod = "PUT"
+        relayedPut.httpBody = Data("{}".utf8)
+        relayedPut.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        relayedPut.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization")
+        relayedPut.setValue("1", forHTTPHeaderField: HTTPHandler.relayOriginHeaderName)
+        let (putData, putResp) = try await URLSession.shared.data(for: relayedPut)
+        let putStatus = (putResp as? HTTPURLResponse)?.statusCode ?? -1
+        // The handler decides what to do with `{}` (validation), but the gate
+        // must not turn the owner away.
+        #expect(putStatus != 403 && putStatus != 401, "\(putStatus) \(String(decoding: putData, as: UTF8.self))")
+    }
+
+    /// `X-Osaurus-Agent-Id` naming an agent other than the key's own is refused
+    /// at the gate for every agent-scoped key, so a paired peer can't persist
+    /// into (or act as) another agent through `/chat/completions`, `/memory/*`
+    /// or `/mcp/call`. Naming its own agent passes through. Exercised with the
+    /// owner sharing inference so `/chat/completions` reaches the header check
+    /// rather than the (earlier) `peer_inference_disabled` gate.
+    @Test func agentScopedKey_cannotNameAnotherAgentInHeader() async throws {
+        let fixture = try Self.agentScopedFixture(workspaceMinted: false)
+        let server = try await startAuthTestServer(validator: fixture.validator, peerInferenceSharing: true)
+        defer { Task { await server.shutdown() } }
+
+        let mine = UUID()
+        let theirs = UUID()
+        let theirAddress = try AgentKey.deriveAddress(masterKey: TestKeys.alicePrivateKey, index: 4)
+        AgentIdentityRegistry.shared.update(
+            addresses: [fixture.agent, theirAddress], indices: [3, 4],
+            addressByAgentId: [mine: fixture.agent, theirs: theirAddress]
+        )
+        defer { AgentIdentityRegistry.shared.update(addresses: [], indices: [], addressByAgentId: [:]) }
+
+        func send(agentHeader: String) async throws -> (status: Int, body: String) {
+            var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/v1/chat/completions")!)
+            request.httpMethod = "POST"
+            request.httpBody = Data("{}".utf8)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+            request.setValue("Bearer \(fixture.token)", forHTTPHeaderField: "Authorization")
+            request.setValue(agentHeader, forHTTPHeaderField: "X-Osaurus-Agent-Id")
+            let (data, resp) = try await URLSession.shared.data(for: request)
+            return ((resp as? HTTPURLResponse)?.statusCode ?? -1, String(decoding: data, as: UTF8.self))
+        }
+
+        let foreign = try await send(agentHeader: theirs.uuidString)
+        #expect(foreign.status == 403, "\(foreign.status) \(foreign.body)")
+        #expect(foreign.body.contains("X-Osaurus-Agent-Id"), "\(foreign.body)")
+
+        let own = try await send(agentHeader: mine.uuidString)
+        #expect(!(own.status == 403 && own.body.contains("agent_scope_denied")), "\(own.status) \(own.body)")
+    }
+
+    // MARK: - Local Access Key Policy (`LocalAPIKeyPolicy`)
+
+    private struct LocalResult {
+        let status: Int
+        let body: String
+        let allowOrigin: String?
+    }
+
+    private static func sendLocal(
+        _ method: String,
+        _ path: String,
+        server: AuthTestServer,
+        token: String? = nil,
+        origin: String? = nil,
+        headers: [String: String] = [:]
+    ) async throws -> LocalResult {
+        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)\(path)")!)
+        request.httpMethod = method
+        if let token { request.setValue("Bearer \(token)", forHTTPHeaderField: "Authorization") }
+        if let origin { request.setValue(origin, forHTTPHeaderField: "Origin") }
+        for (name, value) in headers { request.setValue(value, forHTTPHeaderField: name) }
+        if method == "POST" {
+            request.httpBody = Data("{}".utf8)
+            request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        }
+        let (data, resp) = try await URLSession.shared.data(for: request)
+        let http = resp as? HTTPURLResponse
+        return LocalResult(
+            status: http?.statusCode ?? -1,
+            body: String(decoding: data, as: UTF8.self),
+            allowOrigin: http?.value(forHTTPHeaderField: "Access-Control-Allow-Origin")
+        )
+    }
+
+    private static func aliceMasterToken() throws -> String {
+        try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey, iss: TestKeys.aliceAddress, aud: TestKeys.aliceAddress
+        )
+    }
+
+    private static let protectedLocalRoutes: [(String, String)] = [
+        ("GET", "/agents"),
+        ("GET", "/v1/agents"),
+        ("POST", "/agents/00000000-0000-0000-0000-000000000001/run"),
+        ("GET", "/sessions"),
+        ("GET", "/v1/sessions/not-a-session"),
+        ("GET", "/mcp/tools"),
+        ("POST", "/mcp/call"),
+        ("GET", "/admin/config/schema"),
+        ("POST", "/admin/import/plan"),
+    ]
+
+    /// Setting off (every existing install): a key-less loopback caller and a
+    /// local browser page keep today's access and `*` CORS.
+    @Test(.disabled("W-server-api stages 3-4: /agents, /mcp/tools; /admin/config with W-declarative-config")) func localKeyPolicyOff_keepsKeylessLoopbackAccess() async throws {
+        let server = try await startAuthTestServer(validator: .forAlice(), trustLoopback: true)
+        defer { Task { await server.shutdown() } }
+
+        for (method, path) in [("GET", "/agents"), ("GET", "/mcp/tools"), ("GET", "/admin/config/schema")] {
+            let result = try await Self.sendLocal(method, path, server: server)
+            #expect(result.status == 200, "\(method) \(path) returned \(result.status): \(result.body)")
+        }
+        let browser = try await Self.sendLocal("GET", "/agents", server: server, origin: "https://any.example")
+        #expect(browser.status == 200)
+        #expect(browser.allowOrigin == "*")
+    }
+
+    @Test(.disabled("W-server-api stage 2: /api/tags")) func localKeyPolicyOn_keylessLoopbackGets401OnProtectedRoutesOnly() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true
+        )
+        defer { Task { await server.shutdown() } }
+
+        for (method, path) in Self.protectedLocalRoutes {
+            let result = try await Self.sendLocal(method, path, server: server)
+            #expect(result.status == 401, "\(method) \(path) returned \(result.status): \(result.body)")
+            #expect(result.body.contains("authentication_error"), "\(method) \(path): \(result.body)")
+        }
+        for path in ["/health", "/v1/models", "/api/tags"] {
+            let result = try await Self.sendLocal("GET", path, server: server)
+            #expect(result.status == 200, "\(path) returned \(result.status)")
+        }
+    }
+
+    @Test func localKeyPolicyOn_noKeysConfigured_explains401() async throws {
+        let server = try await startAuthTestServer(validator: .empty, trustLoopback: true, localKeyRequired: true)
+        defer { Task { await server.shutdown() } }
+
+        let result = try await Self.sendLocal("GET", "/agents", server: server)
+        #expect(result.status == 401)
+        #expect(result.body.contains("No access keys configured"))
+    }
+
+    /// An owner key keeps the full local surface, including owner-only
+    /// `/sessions` and plaintext `/agents/{id}/run` (no 426).
+    @Test(.disabled("W-server-api stages 3-5: /agents, /mcp/tools, /sessions; /admin/import with W-osaurus-bundles")) func localKeyPolicyOn_ownerKeyKeepsLocalBehavior() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true
+        )
+        defer { Task { await server.shutdown() } }
+        let token = try Self.aliceMasterToken()
+
+        for path in ["/agents", "/mcp/tools", "/admin/config/schema", "/sessions"] {
+            let result = try await Self.sendLocal("GET", path, server: server, token: token)
+            #expect(result.status == 200, "\(path) returned \(result.status): \(result.body)")
+        }
+        // Past the gate: the import endpoint itself rejects the request.
+        let importPlan = try await Self.sendLocal("POST", "/admin/import/plan", server: server, token: token)
+        #expect(importPlan.status == 400, "\(importPlan.status): \(importPlan.body)")
+        #expect(importPlan.body.contains("bundle_path"), "\(importPlan.body)")
+    }
+
+    @Test func localKeyPolicyOn_unlistedBrowserOriginIsRefusedEvenWithKey() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true,
+            allowedOrigins: ["https://app.example.com"]
+        )
+        defer { Task { await server.shutdown() } }
+        let token = try Self.aliceMasterToken()
+
+        for (method, path) in Self.protectedLocalRoutes {
+            let result = try await Self.sendLocal(
+                method, path, server: server, token: token, origin: "https://evil.example"
+            )
+            #expect(result.status == 403, "\(method) \(path) returned \(result.status)")
+            #expect(result.body.contains("browser_origin_refused"), "\(method) \(path): \(result.body)")
+            #expect(result.allowOrigin == nil, "\(method) \(path) leaked CORS: \(result.allowOrigin ?? "")")
+        }
+        // Unprotected routes keep loopback CORS.
+        let models = try await Self.sendLocal("GET", "/v1/models", server: server, origin: "https://evil.example")
+        #expect(models.status == 200)
+        #expect(models.allowOrigin == "*")
+    }
+
+    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_listedOriginStillNeedsAKey() async throws {
+        let listed = "https://app.example.com"
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true, allowedOrigins: [listed]
+        )
+        defer { Task { await server.shutdown() } }
+
+        let keyless = try await Self.sendLocal("GET", "/agents", server: server, origin: listed)
+        #expect(keyless.status == 401, "\(keyless.status): \(keyless.body)")
+        #expect(keyless.allowOrigin == listed)
+
+        let keyed = try await Self.sendLocal(
+            "GET", "/agents", server: server, token: try Self.aliceMasterToken(), origin: listed
+        )
+        #expect(keyed.status == 200, "\(keyed.status): \(keyed.body)")
+        #expect(keyed.allowOrigin == listed)
+    }
+
+    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_wildcardAllowedOriginsExemptsNothing() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true, allowedOrigins: ["*"]
+        )
+        defer { Task { await server.shutdown() } }
+        let token = try Self.aliceMasterToken()
+
+        let browser = try await Self.sendLocal(
+            "GET", "/agents", server: server, token: token, origin: "https://app.example.com"
+        )
+        #expect(browser.status == 403, "\(browser.status): \(browser.body)")
+        #expect(browser.body.contains("browser_origin_refused"))
+
+        let script = try await Self.sendLocal("GET", "/agents", server: server, token: token)
+        #expect(script.status == 200)
+        #expect(script.allowOrigin == nil)
+    }
+
+    @Test func localKeyPolicyOn_preflightOnlyAdmitsListedOrigins() async throws {
+        let listed = "https://app.example.com"
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true, allowedOrigins: [listed, "*"]
+        )
+        defer { Task { await server.shutdown() } }
+        let preflight = ["Access-Control-Request-Method": "POST", "Access-Control-Request-Headers": "authorization"]
+
+        let unlisted = try await Self.sendLocal(
+            "OPTIONS", "/admin/config/apply", server: server, origin: "https://evil.example", headers: preflight
+        )
+        #expect(unlisted.status == 204)
+        #expect(unlisted.allowOrigin == nil)
+
+        let admitted = try await Self.sendLocal(
+            "OPTIONS", "/admin/config/apply", server: server, origin: listed, headers: preflight
+        )
+        #expect(admitted.status == 204)
+        #expect(admitted.allowOrigin == listed)
+    }
+
+    /// App Intents (`OsaurusLocalClient`) present the in-process app token
+    /// instead of a key; a wrong token, or one replayed through the relay,
+    /// does not count.
+    @Test(.disabled("W-server-api stage 4: /agents")) func localKeyPolicyOn_appSessionTokenStandsInForAKeyOverLoopbackOnly() async throws {
+        let server = try await startAuthTestServer(
+            validator: .forAlice(), trustLoopback: true, localKeyRequired: true
+        )
+        defer { Task { await server.shutdown() } }
+        let header = LocalAPIKeyPolicy.appTokenHeaderName
+
+        let app = try await Self.sendLocal(
+            "GET", "/agents", server: server, headers: [header: LocalAPIKeyPolicy.appSessionToken]
+        )
+        #expect(app.status == 200, "\(app.status): \(app.body)")
+
+        let wrong = try await Self.sendLocal("GET", "/agents", server: server, headers: [header: "not-the-token"])
+        #expect(wrong.status == 401)
+
+        let relayed = try await Self.sendLocal(
+            "GET", "/agents", server: server,
+            headers: [header: LocalAPIKeyPolicy.appSessionToken, HTTPHandler.relayOriginHeaderName: "1"]
+        )
+        #expect(relayed.status == 401)
+    }
+
+}
+
+struct LocalAPIKeyPolicyTests {
+    @Test func protectedRoutesMatchOnlyTheFiveGroups() {
+        for path in [
+            "/sessions", "/sessions/abc", "/agents", "/agents/abc/run", "/mcp/tools", "/mcp/call",
+            "/admin/config/export", "/admin/config/apply", "/admin/import/plan", "/admin/import/apply",
+        ] {
+            #expect(LocalAPIKeyPolicy.isProtectedRoute(path), "\(path)")
+        }
+        for path in [
+            "/", "/health", "/models", "/chat/completions", "/sessionsx", "/agentsx", "/mcp",
+            "/admin/runtime-settings", "/admin/configx", "/admin/importx", "/plugins/x", "/channels/x",
+        ] {
+            #expect(!LocalAPIKeyPolicy.isProtectedRoute(path), "\(path)")
+        }
+    }
+
+    @Test func onlyOriginsListedByNameAreExplicitlyAllowed() {
+        #expect(LocalAPIKeyPolicy.isExplicitlyAllowedOrigin("https://a.example", allowedOrigins: ["https://a.example"]))
+        #expect(!LocalAPIKeyPolicy.isExplicitlyAllowedOrigin("https://a.example", allowedOrigins: ["*"]))
+        #expect(!LocalAPIKeyPolicy.isExplicitlyAllowedOrigin("*", allowedOrigins: ["*"]))
+        #expect(!LocalAPIKeyPolicy.isExplicitlyAllowedOrigin("null", allowedOrigins: []))
+    }
+
+    @Test func absentDefaultIsOffAndToggleRoundTrips() throws {
+        let suite = "LocalAPIKeyPolicyTests.\(UUID().uuidString)"
+        let defaults = try #require(UserDefaults(suiteName: suite))
+        defer { defaults.removePersistentDomain(forName: suite) }
+
+        #expect(!LocalAPIKeyPolicy.isEnabled(defaults: defaults))
+        LocalAPIKeyPolicy.setEnabled(true, defaults: defaults)
+        #expect(LocalAPIKeyPolicy.isEnabled(defaults: defaults))
+        LocalAPIKeyPolicy.setEnabled(false, defaults: defaults)
+        #expect(defaults.object(forKey: LocalAPIKeyPolicy.defaultsKey) == nil)
+    }
+
+    @Test func appSessionTokenComparesExactly() {
+        let token = LocalAPIKeyPolicy.appSessionToken
+        #expect(token.count == 64)
+        #expect(LocalAPIKeyPolicy.isAppSessionToken(token))
+        #expect(!LocalAPIKeyPolicy.isAppSessionToken(nil))
+        #expect(!LocalAPIKeyPolicy.isAppSessionToken(""))
+        #expect(!LocalAPIKeyPolicy.isAppSessionToken(String(token.dropLast()) + "x"))
+    }
 }
 
 // MARK: - Test Server Bootstrap
@@ -196,9 +787,14 @@ private struct AuthTestServer {
 }
 
 private func startAuthTestServer(
-    validator: APIKeyValidator
+    validator: APIKeyValidator,
+    trustLoopback: Bool = false,
+    peerInferenceSharing: Bool = false,
+    localKeyRequired: Bool = false,
+    allowedOrigins: [String] = []
 ) async throws -> AuthTestServer {
-    let config = ServerConfiguration.default
+    var config = ServerConfiguration.default
+    config.allowedOrigins = allowedOrigins
 
     let lease = await HTTPServerTestLock.shared.acquire()
     let group = MultiThreadedEventLoopGroup(numberOfThreads: 1)
@@ -213,7 +809,9 @@ private func startAuthTestServer(
                             configuration: config,
                             apiKeyValidator: validator,
                             eventLoop: channel.eventLoop,
-                            trustLoopback: false
+                            trustLoopback: trustLoopback,
+                            peerInferenceSharingProvider: { peerInferenceSharing },
+                            localKeyRequiredProvider: { localKeyRequired }
                         )
                     )
                 }
