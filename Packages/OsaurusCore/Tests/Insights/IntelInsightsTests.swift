@@ -269,26 +269,6 @@ struct IntelInsightsTests {
         #expect(log.path == "/internal/memory_distillation")
     }
 
-    @Test("Local API chat completions are cloud rows to DeepSeek")
-    func proxiedChatRow() async throws {
-        let model = "proxy-probe-\(UUID().uuidString.prefix(6))"
-        HTTPHandler.logProxiedChat(
-            model: model, statusCode: 200, durationMs: 40,
-            requestBody: #"{"model":"x","messages":[{"role":"user","content":"hi"}],"tools":[]}"#,
-            responseBody: nil, errorMessage: nil)
-        var row: RequestLog?
-        for _ in 0 ..< 100 where row == nil {
-            row = await MainActor.run { InsightsService.shared.logs.first { $0.model == model } }
-            if row == nil { try await Task.sleep(nanoseconds: 20_000_000) }
-        }
-        let log = try #require(row)
-        #expect(log.source == .httpAPI)
-        #expect(log.category == .inference)
-        #expect(log.locality == .remote)
-        #expect(log.egress?.destinationHost == "api.deepseek.com")
-        #expect(log.egress?.dataClasses.contains("tools") == true)
-    }
-
     @Test("Apple Speech on Apple's servers is a cloud transcription row")
     func appleSpeechServerRow() async throws {
         let model = "speech-probe-\(UUID().uuidString.prefix(6))"

@@ -313,7 +313,6 @@ let package = Package(
                 "Networking/SSELineParserTests.swift",
                 "Networking/ServerControllerConfigLoadingTests.swift",
                 "Networking/ServerRuntimeSettingsStoreTests.swift",
-                "Networking/ToolChoiceDecodingTests.swift",
                 "Onboarding/ConfigureAIStateDownloadTests.swift",
                 "Plugin/AgentManagerLifecycleNotificationTests.swift",
                 "Plugin/BackgroundTaskInterruptTests.swift",

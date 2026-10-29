@@ -2822,12 +2822,7 @@ struct IntelTool: Codable, Sendable {
 
 typealias Tool = IntelTool
 
-enum ToolChoiceOption: Codable, Sendable {
-    case auto
-    case none
-    case required
-    case function(String)
-}
+// `ToolChoiceOption` is upstream's, in Models/API/IntelOpenAIWire.swift.
 
 /// A named, individually-measurable slice of the Intel system prompt, so the
 /// context-budget popover can show Persona / Grounding / Agent Loop / Plugin

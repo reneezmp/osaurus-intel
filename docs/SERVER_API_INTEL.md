@@ -153,4 +153,53 @@ Each stage: gate run, Rosy section, row note in the backlog.
   - **Tests:** `CORSHandlerTests` and `ModelExposureStoreTests` are
     enabled, plus three gate tests that waited for `/api/tags` and the
     peer catalog.
+- **Stage 2b (2026-10-29): `/chat/completions` on Intel's engine.**
+  - **Decision: keep Intel's types.** Upstream's request, message and
+    response types (`OpenAIAPI.swift`) differ from the ones Intel's engine
+    and providers use. Swapping them is a `W-cov-reaudit`-sized refactor,
+    so routes keep Intel's types. Upstream's *wire* types are copied
+    verbatim (`Models/API/IntelOpenAIWire.swift`: `Usage`, `DeltaContent`,
+    `StreamChoice`, `ChatCompletionChunk`, `OpenAIError`, `DeltaToolCall`,
+    `ToolChoiceOption`), so the bytes on the wire are upstream's.
+  - **`ToolChoiceOption`:** now upstream's. Intel's synthesized-Codable
+    enum could not decode `"tool_choice": "auto"`. The engine now forwards
+    the caller's choice instead of always `"auto"`
+    (`ChatEngine.wireToolChoice`; the Anthropic and Codex adapters already
+    translate every form). Upstream's `ToolChoiceDecodingTests` is
+    enabled; Intel's copy was stale.
+  - **The route** (`IntelHTTPInference.swift`):
+    - It sends the client's messages and tools to `ChatEngine(source:
+      .httpAPI)` with `stopAtToolCalls`. That is one model round: proposed
+      calls go back as OpenAI `tool_calls`, never run, as upstream does.
+    - The engine's marker strings become typed events.
+    - Streaming uses upstream's `SSEResponseWriter`: role chunk, content
+      and `reasoning_content` deltas, tool calls as a start chunk plus
+      1 KB argument deltas, the finish reason, `data: [DONE]`, a 15 s
+      `: ping` keepalive, and an in-band error chunk after the 200 head.
+      The client disconnecting cancels generation.
+    - Non-streaming: upstream's `chat.completion` body.
+    - `usage` is left out in both, as upstream does when nothing was
+      measured.
+    - Upstream's `n` / `logprobs` / `response_format` rejections (400);
+      unknown model 404, other engine errors 503.
+    - One Insights row for the request, plus the engine's egress row.
+  - **The DeepSeek proxy is gone:** `DEEPSEEK_API_KEY`,
+    `DeepSeekAPIKeyStore`, its tool loop, and its Insights test. The
+    engine's env-var fallback is unchanged.
+  - **Not yet:** saving API chats to history (`X-Persist`, `X-Session-Id`,
+    `X-Osaurus-Agent-Id` memory attribution; with sessions, stage 5); the
+    stream-delta coalescing interval; `response_format` JSON mode and
+    reasoning effort passed through to the provider; the inference
+    admission limit; the TTFT trace.
+  - **Tests:** `IntelHTTPChatCompletionsTests` (scripted engine, real
+    loopback server).
+  - **Gate notes (2026-10-29):**
+    - One full run hung for 10 minutes after
+      `AppleToolExecutionTests.invalidArgs` started (fake calendar service;
+      the process idle, no Osaurus frame on any thread). The suite passes
+      alone, and the next full run passed (3,914 tests).
+    - Treat a recurrence as an ordering flake to bisect, not a stage-2
+      regression: nothing in that path changed.
+    - Live-file hits in the passing run were the running app's (`lsof`:
+      pid 64163) chat history, memory and activity log.
 

@@ -2141,3 +2141,11 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] `curl -s -H "X-Osaurus-Relay-Origin: 1" http://127.0.0.1:1337/v1/models`
       answers an `authentication_error` (relayed traffic needs a key).
 - [ ] Insights shows rows for those requests.
+- [ ] **Chat over the API** (any model you can chat with in the app; use
+      its id from the chat model picker, e.g. `osaurus/…` or `venice/…`):
+      `curl -s http://127.0.0.1:1337/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<id>","messages":[{"role":"user","content":"Say hi"}]}'`
+      answers a `chat.completion` with the reply.
+- [ ] Same with `"stream":true` added: a stream of `data:` lines ending in
+      `data: [DONE]`.
+- [ ] A model id that doesn't exist answers 404.
+- [ ] Insights shows the API request and the model call (to the provider).

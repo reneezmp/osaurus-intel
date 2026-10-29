@@ -918,6 +918,18 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return "\(hex[0...3].joined())-\(hex[4...5].joined())-\(hex[6...7].joined())-\(hex[8...9].joined())-\(hex[10...15].joined())"
     }
 
+    /// `tool_choice` in OpenAI Chat Completions form; the Anthropic and Codex
+    /// adapters translate each form.
+    nonisolated static func wireToolChoice(_ choice: ToolChoiceOption?) -> Any {
+        switch choice {
+        case nil, .some(.auto): return "auto"
+        case .some(.none): return "none"
+        case .some(.required): return "required"
+        case .some(.function(let selector)):
+            return ["type": selector.type, "function": ["name": selector.function.name]]
+        }
+    }
+
     func streamChat(request: ChatCompletionRequest) async throws -> AsyncThrowingStream<String, Error> {
         let resolvedModel = request.model ?? model
         if IntelClaudeCodeService.handles(resolvedModel) {
@@ -1122,7 +1134,10 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         }
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
-                            body["tool_choice"] = "auto"
+                            // The caller's choice (an API client's
+                            // `required` / `none` / named function, upstream);
+                            // "auto" when unset, as before.
+                            body["tool_choice"] = Self.wireToolChoice(request.tool_choice)
                         }
                         if endpoint.usesResponsesWire {
                             if let effort = Self.codexReasoningEffort(
@@ -2345,6 +2360,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     struct EngineError: LocalizedError {
         let message: String
         var errorDescription: String? { message }
+        /// The model has no endpoint (upstream answers that 404 on the API).
+        var isUnknownModel: Bool { message.hasPrefix("No endpoint for model") }
     }
 }
 

@@ -161,34 +161,6 @@ struct StreamOptions: Codable, Sendable {
     let include_usage: Bool?
 }
 
-struct ChatCompletionChunk: Codable, Sendable {
-    let id: String?
-    let object: String?
-    let created: Int?
-    let model: String?
-    let choices: [ChunkChoice]?
-    let usage: UsageInfo?
-}
-
-struct ChunkChoice: Codable, Sendable {
-    let index: Int?
-    let delta: ChunkDelta?
-    let finish_reason: String?
-}
-
-struct ChunkDelta: Codable, Sendable {
-    let role: String?
-    let content: String?
-    let reasoning_content: String?
-    let tool_calls: [ToolCall]?
-}
-
-struct UsageInfo: Codable, Sendable {
-    let prompt_tokens: Int?
-    let completion_tokens: Int?
-    let total_tokens: Int?
-}
-
 /// OpenAI-compatible model object
 struct OpenAIModel: Codable, Sendable {
     let id: String
@@ -403,6 +375,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     private let apiKeyValidatorProvider: @Sendable () -> APIKeyValidator
     private var apiKeyValidator: APIKeyValidator { apiKeyValidatorProvider() }
     private let trustLoopback: Bool
+    /// Engine override for tests (upstream injects `chatEngine` the same way).
+    private let injectedChatEngine: (any ChatEngineProtocol)?
     private let _isChannelActive = SendableBool(false)
     /// Off-loop-readable mirror of the current request's inbound attribution
     /// (set by the auth gate, cleared on each `.head`).
@@ -436,10 +410,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         var contextBox: ChannelHandlerContext?
         /// Wall-clock when the request head arrived, for request duration.
         var requestStartedAt: Date?
-        /// Insights: the model and request body of a proxied chat completion,
-        /// so its row says where it went (set by `serveChatCompletions`).
-        var activityModel: String?
-        var activityRequestBody: String?
+        /// Set by routes that write their own Insights row (with model and
+        /// finish reason), so `sendResponse` doesn't add a second one.
+        var routeLogsItself = false
         /// Cached body-size cap for the current request (route-aware).
         var bodyByteLimit: Int = Int.max
         /// Running total of accumulated body bytes, so a chunked client
@@ -466,15 +439,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         var loopbackTrustWithdrawn: Bool = false
     }
 
-    /// Intel's `/chat/completions` proxies to DeepSeek, so its activity row
-    /// is cloud egress (upstream logs API inference with the provider's
-    /// connection the same way).
-    static let deepSeekProxyConnection = RequestConnectionInfo(
-        remoteEndpoint: "https://api.deepseek.com/v1/chat/completions",
-        transport: .direct,
-        mode: .remoteInference
-    )
-
     /// Paths whose handler logs its own Insights row (see
     /// `RequestLog.mediaCategory(forPath:)`); in-process emitters on the same
     /// code path skip when `ChatExecutionContext.currentRequestSource` is
@@ -495,31 +459,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         return details
     }
 
-    /// One Insights row for a proxied chat completion (streamed or not).
-    static func logProxiedChat(
-        model: String,
-        statusCode: Int,
-        durationMs: Double,
-        requestBody: String?,
-        responseBody: String?,
-        errorMessage: String?
-    ) {
-        let connection = deepSeekProxyConnection
-        InsightsService.logRequest(
-            source: .httpAPI,
-            method: "POST",
-            path: "/chat/completions",
-            statusCode: statusCode,
-            durationMs: durationMs,
-            requestBody: requestBody,
-            responseBody: responseBody,
-            model: model,
-            finishReason: errorMessage == nil ? .stop : .error,
-            errorMessage: errorMessage,
-            connection: connection,
-            egress: InsightsService.inferenceEgress(connection: connection, requestBody: requestBody)
-        )
-    }
     let stateRef: NIOLoopBound<RequestState>
 
     /// Live read of the owner's "share my models for inference with paired
@@ -543,12 +482,14 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         apiKeyValidatorProvider: (@Sendable () -> APIKeyValidator)? = nil,
         eventLoop: EventLoop,
         trustLoopback: Bool = true,
+        chatEngine: (any ChatEngineProtocol)? = nil,
         peerInferenceSharingProvider: @escaping @Sendable () -> Bool = { false },
         localKeyRequiredProvider: @escaping @Sendable () -> Bool = { LocalAPIKeyPolicy.isEnabled() }
     ) {
         self.configuration = configuration
         self.apiKeyValidatorProvider = apiKeyValidatorProvider ?? { apiKeyValidator }
         self.trustLoopback = trustLoopback
+        self.injectedChatEngine = chatEngine
         self.peerInferenceSharingProvider = peerInferenceSharingProvider
         self.localKeyRequiredProvider = localKeyRequiredProvider
         self.stateRef = NIOLoopBound(RequestState(), eventLoop: eventLoop)
@@ -576,13 +517,14 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// Runs a request's async work with the caller's auth proof bound as
     /// `HTTPCallerContext` (upstream `runRequestTask`, minus its task
     /// registry, which arrives with the routes that need it).
-    private func runRequestTask(_ operation: @escaping () async -> Void) {
+    @discardableResult
+    private func runRequestTask(_ operation: @escaping () async -> Void) -> Task<Void, Never> {
         let callerContext = HTTPCallerContext(
             hasVerifiedAccessKey: stateRef.value.callerHasVerifiedAccessKey,
             isSecureChannel: false
         )
         let operationBox = RequestTaskOperation(operation)
-        Task {
+        return Task {
             await HTTPCallerContext.$current.withValue(callerContext) {
                 await operationBox.run()
             }
@@ -596,8 +538,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case .head(let head):
             stateRef.value.requestHead = head
             stateRef.value.requestStartedAt = Date()
-            stateRef.value.activityModel = nil
-            stateRef.value.activityRequestBody = nil
+            stateRef.value.routeLogsItself = false
             stateRef.value.isStreaming = false
             stateRef.value.streamingDone = false
             stateRef.value.bodyBytesSeen = 0
@@ -896,7 +837,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/show"):
             serveShow(context: context)
         case (.POST, "/chat/completions"):
-            serveChatCompletions(context: context)
+            serveChatCompletions(context: context, head: head)
         case (.POST, "/mcp"):
             serveMCP(context: context)
         default:
@@ -1548,35 +1489,172 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    // MARK: - Chat Completions (Cloud Proxy)
+    // MARK: - Chat Completions (upstream, on Intel's engine)
 
-    private func serveChatCompletions(context: ChannelHandlerContext) {
-        guard let bodyBuffer = stateRef.value.requestBodyBuffer,
-              let bodyData = bodyBuffer.getBytes(at: 0, length: bodyBuffer.readableBytes).map({ Data($0) }) else {
-            sendJSONError(context: context, status: .badRequest, message: "Empty request body")
+    /// The engine API requests run on (`InferenceSource.httpAPI`).
+    private func makeInferenceEngine() -> any ChatEngineProtocol {
+        injectedChatEngine ?? ChatEngine(source: .httpAPI)
+    }
+
+    /// `POST /chat/completions` (upstream's contract on Intel's engine): any
+    /// configured model, one model round, the client's tools returned as
+    /// `tool_calls` rather than run. Streams OpenAI chunks when asked.
+    private func serveChatCompletions(context: ChannelHandlerContext, head: HTTPRequestHead) {
+        let data = requestBodyData()
+        let requestBodyString = String(decoding: data, as: UTF8.self)
+        let startTime = stateRef.value.requestStartedAt ?? Date()
+        let userAgent = head.headers.first(name: "User-Agent")
+
+        func reject(_ status: HTTPResponseStatus, _ message: String) {
+            let body = Self.errorBody(.openai(type: "invalid_request_error"), message: message)
+            sendResponse(context: context, status: status, headers: jsonHeaders(), body: body)
+        }
+
+        guard let request = try? JSONDecoder().decode(ChatCompletionRequest.self, from: data),
+            let model = request.model, !model.isEmpty
+        else {
+            reject(.badRequest, "Invalid request format")
+            return
+        }
+        // Upstream rejects what it can't honor instead of silently ignoring it.
+        let raw = (try? JSONSerialization.jsonObject(with: data)) as? [String: Any] ?? [:]
+        if let unsupported = RequestValidator.unsupportedSamplerReason(
+            n: request.n,
+            responseFormatType: (raw["response_format"] as? [String: Any])?["type"] as? String,
+            logprobs: raw["logprobs"] as? Bool,
+            topLogprobs: raw["top_logprobs"] as? Int
+        ) {
+            reject(.badRequest, unsupported)
             return
         }
 
-        guard let request = try? jsonDecoder.decode(ChatCompletionRequest.self, from: bodyData) else {
-            sendJSONError(context: context, status: .badRequest, message: "Invalid JSON body")
+        let accept = head.headers.first(name: "Accept") ?? ""
+        let wantsSSE = (request.stream ?? false) || accept.contains("text/event-stream")
+        stateRef.value.routeLogsItself = true
+        let created = Int(Date().timeIntervalSince1970)
+        let responseId = Self.shortId(prefix: "chatcmpl-", length: 12)
+        let eventLoop = context.eventLoop
+        let stateRef = self.stateRef
+        let cors = stateRef.value.corsHeaders
+        let engine = makeInferenceEngine()
+
+        func log(status: Int, responseBody: String?, finish: RequestLog.FinishReason?, error: String?) {
+            logRequest(
+                method: "POST", path: "/chat/completions", userAgent: userAgent,
+                requestBody: requestBodyString, responseBody: responseBody, responseStatus: status,
+                startTime: startTime, model: model, finishReason: finish, errorMessage: error)
+        }
+
+        guard wantsSSE else {
+            runRequestTask {
+                do {
+                    let collected = try await IntelHTTPInference.collect(engine: engine, request: request)
+                    let body = try Self.chatCompletionBody(
+                        collected, id: responseId, created: created, model: model)
+                    self.respondOnLoop(eventLoop, status: .ok, headers: self.jsonHeaders(), body: body)
+                    log(status: 200, responseBody: body, finish: collected.finishReason, error: nil)
+                } catch {
+                    let mapped = Self.inferenceHTTPStatus(for: error)
+                    let body = Self.errorBody(.openai(type: mapped.type), message: error.localizedDescription)
+                    self.respondOnLoop(eventLoop, status: mapped.status, headers: self.jsonHeaders(), body: body)
+                    log(status: Int(mapped.status.code), responseBody: body, finish: .error, error: error.localizedDescription)
+                }
+            }
             return
         }
 
-        let shouldStream = request.stream ?? false
-        let model = request.model ?? "deepseek-v4-pro"
-        stateRef.value.activityModel = model
-        stateRef.value.activityRequestBody = String(data: bodyData, encoding: .utf8)
-
-        guard let apiKey = DeepSeekAPIKeyStore.shared.load() else {
-            sendJSONError(context: context, status: .internalServerError, message: "DEEPSEEK_API_KEY not set")
-            return
+        // Streaming: the head goes out now; the task writes chunks on the
+        // event loop and stops when the client disconnects.
+        stateRef.value.isStreaming = true
+        let writer = SSEResponseWriter()
+        writer.writeHeaders(context, extraHeaders: cors)
+        writer.writeRole("assistant", model: model, responseId: responseId, created: created, context: context)
+        let onLoop: @Sendable (@escaping @Sendable (ChannelHandlerContext) -> Void) -> Void = { body in
+            eventLoop.execute {
+                guard let ctx = stateRef.value.contextBox else { return }
+                body(ctx)
+            }
         }
-
-        if shouldStream {
-            serveChatCompletionsStreaming(context: context, request: request, model: model, apiKey: apiKey)
-        } else {
-            serveChatCompletionsNonStreaming(context: context, request: request, model: model, apiKey: apiKey)
+        let task = runRequestTask {
+            // SSE keepalive (upstream): a comment line every 15 s so proxies
+            // don't idle out long reasoning or tool pauses.
+            let keepalive = Task {
+                while !Task.isCancelled {
+                    try? await Task.sleep(nanoseconds: 15_000_000_000)
+                    if Task.isCancelled { break }
+                    onLoop { writer.writePing($0) }
+                }
+            }
+            defer { keepalive.cancel() }
+            var collected = IntelHTTPInference.Collected()
+            do {
+                for try await event in try await IntelHTTPInference.events(engine: engine, request: request) {
+                    try Task.checkCancellation()
+                    collected.consume(event)
+                    switch event {
+                    case .content(let text):
+                        onLoop { writer.writeContent(text, model: model, responseId: responseId, created: created, context: $0) }
+                    case .reasoning(let text):
+                        onLoop { writer.writeReasoning(text, model: model, responseId: responseId, created: created, context: $0) }
+                    case .toolCalls, .stats:
+                        break
+                    }
+                }
+                let finished = collected
+                onLoop { ctx in
+                    for (index, call) in finished.toolCalls.enumerated() {
+                        writer.writeToolCall(
+                            call, index: index, model: model, responseId: responseId, created: created, context: ctx)
+                    }
+                    writer.writeFinishWithReason(
+                        finished.finishReason.rawValue, model: model, responseId: responseId, created: created,
+                        context: ctx)
+                    writer.writeEnd(ctx)
+                }
+                log(status: 200, responseBody: nil, finish: finished.finishReason, error: nil)
+            } catch {
+                // The 200 head is out: the failure is an in-band error chunk.
+                onLoop { ctx in
+                    writer.writeErrorFromThrown(error, context: ctx)
+                    writer.writeEnd(ctx)
+                }
+                log(status: 200, responseBody: nil, finish: .error, error: error.localizedDescription)
+            }
         }
+        context.channel.closeFuture.whenComplete { _ in task.cancel() }
+    }
+
+    /// Upstream's non-streaming body (`chatCompletionsHTTPBody`): the
+    /// assistant message and finish reason; `usage` only when measured,
+    /// which Intel's engine does not report.
+    static func chatCompletionBody(
+        _ collected: IntelHTTPInference.Collected,
+        id: String,
+        created: Int,
+        model: String
+    ) throws -> String {
+        let toolCalls: [ToolCall]? =
+            collected.toolCalls.isEmpty
+            ? nil
+            : collected.toolCalls.map {
+                ToolCall(
+                    id: IntelHTTPInference.callId($0), type: "function",
+                    function: ToolCallFunction(name: $0.name, arguments: $0.arguments))
+            }
+        let assistant = ChatMessage(
+            role: "assistant",
+            content: collected.content.isEmpty && toolCalls != nil ? nil : collected.content,
+            tool_calls: toolCalls,
+            tool_call_id: nil,
+            reasoning_content: collected.reasoning.isEmpty ? nil : collected.reasoning
+        )
+        let message = try JSONSerialization.jsonObject(with: JSONEncoder.osaurusCanonical().encode(assistant))
+        let object: [String: Any] = [
+            "id": id, "object": "chat.completion", "created": created, "model": model,
+            "choices": [["index": 0, "message": message, "finish_reason": collected.finishReason.rawValue]],
+        ]
+        return String(
+            decoding: try JSONSerialization.data(withJSONObject: object, options: .osaurusCanonical), as: UTF8.self)
     }
 
     // MARK: - MCP
@@ -1639,243 +1717,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         }
     }
 
-    // MARK: - Streaming
-
-    private func serveChatCompletionsStreaming(
-        context: ChannelHandlerContext,
-        request: ChatCompletionRequest,
-        model: String,
-        apiKey: String
-    ) {
-        stateRef.value.isStreaming = true
-        sendSSEHeaders(context: context)
-
-        var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
-        urlRequest.httpMethod = "POST"
-        urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-        urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-        urlRequest.timeoutInterval = 300
-
-        var body: [String: Any] = [
-            "model": model,
-            "messages": request.messages.map { msg -> [String: Any] in
-                var m: [String: Any] = ["role": msg.role]
-                if let content = msg.content { m["content"] = content }
-                return m
-            },
-            "stream": true,
-        ]
-        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
-
-        guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
-            sendSSEError(context: context, message: "Failed to encode request")
-            return
-        }
-        urlRequest.httpBody = httpBody
-
-        let eventLoop = context.eventLoop
-        let stateRef = self.stateRef
-        // Insights: SSE responses bypass `sendResponse`, so the stream logs
-        // its own row when it ends.
-        let started = stateRef.value.requestStartedAt ?? Date()
-        let loggedRequestBody = stateRef.value.activityRequestBody
-        func logStream(status: Int, error: String?) {
-            Self.logProxiedChat(
-                model: model,
-                statusCode: status,
-                durationMs: Date().timeIntervalSince(started) * 1000,
-                requestBody: loggedRequestBody,
-                responseBody: nil,
-                errorMessage: error
-            )
-        }
-
-        runRequestTask {
-            do {
-                let (asyncBytes, response) = try await URLSession.shared.bytes(for: urlRequest)
-                guard let httpResponse = response as? HTTPURLResponse,
-                      httpResponse.statusCode == 200 else {
-                    let status = (response as? HTTPURLResponse)?.statusCode ?? 502
-                    logStream(status: status, error: "Upstream returned \(status)")
-                    eventLoop.execute {
-                        guard let ctx = stateRef.value.contextBox else { return }
-                        self.sendSSEError(context: ctx, message: "Upstream returned \(status)")
-                    }
-                    return
-                }
-
-                for try await line in asyncBytes.lines {
-                    guard line.hasPrefix("data: ") else { continue }
-                    let dataStr = String(line.dropFirst(6))
-                    let isDone = dataStr == "[DONE]"
-                    let sseLine = isDone ? "data: [DONE]\n\n" : "data: \(dataStr)\n\n"
-
-                    eventLoop.execute {
-                        guard let ctx = stateRef.value.contextBox else { return }
-                        self.writeSSELine(context: ctx, line: sseLine)
-                    }
-
-                    if isDone { break }
-                }
-
-                logStream(status: 200, error: nil)
-                eventLoop.execute {
-                    guard let ctx = stateRef.value.contextBox else { return }
-                    self.sendSSEEnd(context: ctx)
-                }
-            } catch {
-                logStream(status: 502, error: error.localizedDescription)
-                eventLoop.execute {
-                    guard let ctx = stateRef.value.contextBox else { return }
-                    self.sendSSEError(context: ctx, message: error.localizedDescription)
-                }
-            }
-        }
-    }
-
-    // MARK: - Non-streaming (Agentic with tool calls)
-
-    private func serveChatCompletionsNonStreaming(
-        context: ChannelHandlerContext,
-        request: ChatCompletionRequest,
-        model: String,
-        apiKey: String
-    ) {
-        let eventLoop = context.eventLoop
-        let stateRef = self.stateRef
-
-        runRequestTask {
-            let result = await self.runAgentLoop(messages: request.messages, model: model, apiKey: apiKey)
-
-            eventLoop.execute {
-                guard let ctx = stateRef.value.contextBox else { return }
-                switch result {
-                case .success(let json):
-                    self.sendResponse(context: ctx, status: .ok, headers: self.jsonHeaders(), body: json)
-                case .failure(let message):
-                    self.sendJSONError(context: ctx, status: .internalServerError, message: message)
-                }
-            }
-        }
-    }
-
-    private enum AgentResult {
-        case success(String)
-        case failure(String)
-    }
-
-    private func runAgentLoop(messages: [ChatMessage], model: String, apiKey: String, maxTurns: Int = 5) async -> AgentResult {
-        var conversation: [[String: Any]] = messages.map { msg in
-            var m: [String: Any] = ["role": msg.role]
-            if let content = msg.content { m["content"] = content }
-            return m
-        }
-
-        let tools = MCPBridge.shared.getToolsForOpenAI()
-
-        for _ in 0..<maxTurns {
-            var body: [String: Any] = [
-                "model": model,
-                "messages": conversation,
-                "stream": false,
-                "tools": tools,
-            ]
-
-            guard let httpBody = try? JSONSerialization.data(withJSONObject: body) else {
-                return .failure("Failed to encode request body")
-            }
-
-            var urlRequest = URLRequest(url: URL(string: "https://api.deepseek.com/v1/chat/completions")!)
-            urlRequest.httpMethod = "POST"
-            urlRequest.setValue("application/json", forHTTPHeaderField: "Content-Type")
-            urlRequest.setValue("Bearer \(apiKey)", forHTTPHeaderField: "Authorization")
-            urlRequest.timeoutInterval = 300
-            urlRequest.httpBody = httpBody
-
-            let data: Data
-            do {
-                data = try await URLSession.shared.data(for: urlRequest).0
-            } catch {
-                return .failure("Upstream request failed: \(error.localizedDescription)")
-            }
-
-            guard let responseJSON = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-                  let choices = responseJSON["choices"] as? [[String: Any]],
-                  let choice = choices.first else {
-                if let errStr = String(data: data, encoding: .utf8) {
-                    return .success(errStr)
-                }
-                return .failure("Invalid response from upstream")
-            }
-
-            let finishReason = choice["finish_reason"] as? String
-
-            guard finishReason == "tool_calls",
-                  let message = choice["message"] as? [String: Any],
-                  let toolCalls = message["tool_calls"] as? [[String: Any]] else {
-                // No tool calls — final response
-                if let jsonStr = String(data: data, encoding: .utf8) {
-                    return .success(jsonStr)
-                }
-                return .failure("Failed to stringify response")
-            }
-
-            // Append assistant message to conversation
-            conversation.append(message)
-
-            // Execute each tool call
-            for tc in toolCalls {
-                guard let function = tc["function"] as? [String: Any],
-                      let name = function["name"] as? String else { continue }
-
-                let argsStr = function["arguments"] as? String ?? "{}"
-                let argsData = argsStr.data(using: .utf8) ?? Data()
-                let argsJson = (try? JSONSerialization.jsonObject(with: argsData) as? [String: Any]) ?? [:]
-
-                // Convert to MCP.Value
-                var mcpArgs: [String: MCP.Value] = [:]
-                for (k, v) in argsJson {
-                    switch v {
-                    case let s as String: mcpArgs[k] = .string(s)
-                    case let n as Double: mcpArgs[k] = .double(n)
-                    case let n as Int: mcpArgs[k] = .double(Double(n))
-                    case let b as Bool: mcpArgs[k] = .bool(b)
-                    default: break
-                    }
-                }
-
-                let (result, _) = await MCPBridge.shared.callTool(name: name, arguments: mcpArgs)
-
-                conversation.append([
-                    "role": "tool",
-                    "tool_call_id": tc["id"] as? String ?? name,
-                    "content": result,
-                ])
-            }
-        }
-
-        return .failure("Max agent turns (\(maxTurns)) reached without final answer")
-    }
-
-    // MARK: - SSE Helpers
-
-    private func writeSSELine(context: ChannelHandlerContext, line: String) {
-        var buf = context.channel.allocator.buffer(capacity: line.utf8.count)
-        buf.writeString(line)
-        context.writeAndFlush(wrapOutboundOut(.body(.byteBuffer(buf))), promise: nil)
-    }
-
-    private func sendSSEEnd(context: ChannelHandlerContext) {
-        context.writeAndFlush(wrapOutboundOut(.end(nil)), promise: nil)
-    }
-
-    private func sendSSEError(context: ChannelHandlerContext, message: String) {
-        let errJSON = "{\"error\":{\"message\":\"\(message)\"}}"
-        writeSSELine(context: context, line: "data: \(errJSON)\n\n")
-        writeSSELine(context: context, line: "data: [DONE]\n\n")
-        sendSSEEnd(context: context)
-    }
-
     // MARK: - Response Helpers
 
     private func sendResponse(
@@ -1911,18 +1752,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         if let head = stateRef.value.requestHead {
             let started = stateRef.value.requestStartedAt
             let durationMs = started.map { Date().timeIntervalSince($0) * 1000 } ?? 0
-            if let model = stateRef.value.activityModel {
-                let isError = !(200 ..< 300).contains(Int(status.code))
-                Self.logProxiedChat(
-                    model: model,
-                    statusCode: Int(status.code),
-                    durationMs: durationMs,
-                    requestBody: stateRef.value.activityRequestBody,
-                    responseBody: body,
-                    errorMessage: isError ? body : nil
-                )
-                return
-            }
+            if stateRef.value.routeLogsItself { return }
             _ = durationMs
             logRequest(
                 method: head.method.rawValue,
@@ -1933,20 +1763,6 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 startTime: started ?? Date()
             )
         }
-    }
-
-    private func sendSSEHeaders(context: ChannelHandlerContext) {
-        var headers = HTTPHeaders()
-        headers.add(name: "content-type", value: "text/event-stream")
-        headers.add(name: "cache-control", value: "no-cache")
-        headers.add(name: "connection", value: "keep-alive")
-        headers.add(name: "x-accel-buffering", value: "no")
-        for (name, value) in stateRef.value.corsHeaders {
-            headers.add(name: name, value: value)
-        }
-
-        let head = HTTPResponseHead(version: .http1_1, status: .ok, headers: headers)
-        context.writeAndFlush(wrapOutboundOut(.head(head)), promise: nil)
     }
 
     private func sendEmptyResponse(context: ChannelHandlerContext, status: HTTPResponseStatus) {
@@ -1967,16 +1783,5 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     private func textHeaders() -> [(String, String)] {
         [("Content-Type", "text/plain; charset=utf-8")]
-    }
-}
-
-// MARK: - API Key Store
-
-final class DeepSeekAPIKeyStore: @unchecked Sendable {
-    static let shared = DeepSeekAPIKeyStore()
-    private init() {}
-
-    func load() -> String? {
-        ProcessInfo.processInfo.environment["DEEPSEEK_API_KEY"]
     }
 }

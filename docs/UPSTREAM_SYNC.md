@@ -4476,3 +4476,16 @@ Audit of the three upstream commits against Intel's agent page:
   at the trailing edge of the Abilities sub-tab bar
   (`AgentAbilityContextPreviewBar`, #2306). Intel's Abilities overview is
   its own (`COV-intel-own`); this is noted on `W-cov-reaudit`.
+
+### Local API server (`W-server-api`, in progress) — 2026-10-29
+
+Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
+- **Stage 0:** the tampered-key crash (#131) is fixed.
+- **Stage 1:** upstream's access-key gate sits in front of Intel's routes.
+- **Stage 2a:** the model routes and Server › Models.
+- **Stage 2b:** `/chat/completions` on Intel's engine.
+
+Intel keeps its own request types and copies upstream's wire types
+verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by
+Renée because the paired phone needs the gate and the routes.
+
