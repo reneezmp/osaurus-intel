@@ -141,6 +141,9 @@ let package = Package(
                 .product(name: "OsaurusRepository", package: "OsaurusRepository"),
                 .product(name: "OsaurusNetworking", package: "OsaurusNetworking"),
                 .product(name: "P256K", package: "swift-secp256k1"),
+                // Raw C API for `recoverAddress` (upstream): the P256K
+                // recovery wrapper aborts on unrecoverable signatures.
+                .product(name: "libsecp256k1", package: "swift-secp256k1"),
                 .product(name: "SwiftMath", package: "SwiftMath"),
                 .product(name: "Highlightr", package: "Highlightr"),
                 .product(name: "AAInfographics", package: "AAChartKit-Swift"),
@@ -218,17 +221,6 @@ let package = Package(
                 "Service/GenerationEventMapperTests.swift",
                 "Service/MLXBatchAdapterTests.swift",
                 "Helpers/FakeEmbedder.swift",
-                // Trips a fatalError inside swift-secp256k1 0.23.2 rather than
-                // failing: `P256K.Recovery.PublicKey(_:signature:format:)` calls
-                // `fatalError("secp256k1_ecdsa_recover failed with valid
-                // signature — library bug")` when recovery fails on a signature
-                // that parsed. Tampered input does exactly that, so this suite
-                // kills the test process outright, intermittently (the token
-                // carries timestamps, so each run tampers a different
-                // signature). See the security note in CryptoHelpers.swift —
-                // this is a real defect, not a test problem, and excluding the
-                // suite is a stopgap so the rest of the suite is runnable.
-                "Identity/AccessKeyValidatorTests.swift",
                 // --- Suites that COMPILE here but assert upstream behaviour ---
                 // Two kinds, both expected, neither a regression:
                 //  1. They exercise a surface this fork amputated. The HTTP ones
