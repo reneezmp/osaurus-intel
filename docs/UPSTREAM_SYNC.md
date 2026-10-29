@@ -4490,6 +4490,9 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
 - **Stage 4a:** agent management routes, owner-only, with upstream's
   `PhoneAgentEditing`. A remote owner key gets 426 until the Secure
   Channel is ported.
+- **Stage 4b:** `/agents/{id}/dispatch` and `/tasks/*`. Remote runs are
+  external: Intel's engine refuses `.ask` tools for them instead of
+  showing a card. `AgentManager.resolveAgentId` is upstream's now.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

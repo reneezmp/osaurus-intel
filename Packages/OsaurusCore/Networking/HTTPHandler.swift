@@ -883,6 +883,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveMCPCallTool(context: context, head: head)
         default:
             if routeAgentRequest(context: context, head: head, path: path) { return }
+            if routeTaskRequest(context: context, head: head, path: path) { return }
             // Upstream answers unknown routes 404 (Intel's old router
             // answered every path 200 "ok").
             sendResponse(context: context, status: .notFound, headers: textHeaders(), body: "Not Found")
@@ -1432,7 +1433,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     /// Attribution metadata for an inbound request, built by the auth gate.
     /// Nil for loopback / public routes that carried no token.
-    private func inboundConnectionInfo() -> RequestConnectionInfo? {
+    func inboundConnectionInfo() -> RequestConnectionInfo? {
         let info = _inboundConnection.value
         return (info?.isEmpty == true) ? nil : info
     }

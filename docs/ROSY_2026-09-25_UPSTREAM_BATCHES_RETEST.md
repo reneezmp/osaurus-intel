@@ -2193,3 +2193,14 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       `agent_not_editable`.
 - [ ] Delete the test agent: `curl -s -X DELETE http://127.0.0.1:1337/agents/<id>`
       answers `{"ok":true}` and it leaves the Agents list.
+- [ ] **Background task over the API** (stage 4b): pick a custom agent's
+      id from `curl -s http://127.0.0.1:1337/agents`, then
+      `curl -s http://127.0.0.1:1337/agents/<id>/dispatch -H 'Content-Type: application/json' -d '{"prompt":"What is 2+2?","title":"API task"}'`
+      answers `"status":"running"` and a `poll_url`. A background task
+      toast appears in the app.
+- [ ] `curl -s http://127.0.0.1:1337/v1/tasks/<task id>` shows it running,
+      then `completed` with a `summary` and `output`.
+- [ ] Dispatch a longer prompt, then `curl -s -X DELETE http://127.0.0.1:1337/tasks/<task id>`:
+      the task stops (toast says cancelled; status says `cancelled`).
+- [ ] A made-up agent id (`/agents/00000000-0000-0000-0000-00000000abcd/dispatch`)
+      answers `agent_not_found` and starts nothing.

@@ -11,8 +11,8 @@
 //  suite. Tests that need a route a later stage adds are disabled with that
 //  stage. Left out until their features exist on Intel: the credits-balance
 //  gate (stage 5, Credits routes), the workspace-minted key cases
-//  (workspaces are deferred), foreign task ownership (stage 4, `/tasks`),
-//  and the harness-token case (`W-harness-runtimes`).
+//  (workspaces are deferred; the foreign-task case drops its workspace
+//  nonce cleanup) and the harness-token case (`W-harness-runtimes`).
 //
 
 import Foundation
@@ -503,6 +503,35 @@ struct HTTPAuthGateTests {
 
         let own = try await send(agentHeader: mine.uuidString)
         #expect(!(own.status == 403 && own.body.contains("agent_scope_denied")), "\(own.status) \(own.body)")
+    }
+
+    /// `/tasks/{id}` is reachable, but only for the task's creator: an
+    /// agent-scoped key (either origin) that did not dispatch the task is
+    /// refused.
+    @Test func agentScopedKey_cannotTouchForeignTasks() async throws {
+        let fixture = try Self.agentScopedFixture(workspaceMinted: false)
+        let server = try await startAuthTestServer(validator: fixture.validator)
+        defer { Task { await server.shutdown() } }
+
+        let foreign = UUID()
+        HTTPHandler.DispatchTaskOwnership.shared.record(taskId: foreign, audience: "0x000000000000000000000000000000000000beef",
+            keyNonce: "other")
+        defer { HTTPHandler.DispatchTaskOwnership.shared.removeAll() }
+
+        for (method, suffix) in [("GET", ""), ("DELETE", ""), ("POST", "/clarify")] {
+            let result = try await Self.send(
+                method, "/v1/tasks/\(foreign.uuidString)\(suffix)", token: fixture.token, server: server,
+                body: Data(#"{"response":"x"}"#.utf8)
+            )
+            #expect(result.status == 403, "\(method) tasks\(suffix) returned \(result.status)")
+            #expect(result.body.contains("did not create"), "\(result.body)")
+        }
+
+        // A task it created itself is reachable (404: nothing is actually running).
+        let own = UUID()
+        HTTPHandler.DispatchTaskOwnership.shared.record(taskId: own, audience: fixture.agent, keyNonce: fixture.nonce)
+        let ownResult = try await Self.send("GET", "/v1/tasks/\(own.uuidString)", token: fixture.token, server: server)
+        #expect(ownResult.status == 404)
     }
 
     // MARK: - Local Access Key Policy (`LocalAPIKeyPolicy`)

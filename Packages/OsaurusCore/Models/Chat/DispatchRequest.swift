@@ -53,6 +53,11 @@ public struct DispatchRequest: Sendable {
     /// upstream relaxes the same guard. Never set from HTTP, plugins,
     /// schedules or watchers.
     public let allowsBuiltInAgent: Bool
+    /// Upstream: the run comes from an external caller (a non-loopback HTTP
+    /// dispatch). The background runner binds
+    /// `ChatExecutionContext.isExternalSurface` for it, so the external
+    /// tool deny list and the `.ask` refusal hold for the whole run.
+    public let externalSurface: Bool
 
     public init(
         id: UUID = UUID(),
@@ -68,7 +73,8 @@ public struct DispatchRequest: Sendable {
         externalSessionKey: String? = nil,
         reattachSession: Bool = true,
         requestedToolNames: [String] = [],
-        allowsBuiltInAgent: Bool = false
+        allowsBuiltInAgent: Bool = false,
+        externalSurface: Bool = false
     ) {
         self.id = id
         self.prompt = prompt
@@ -84,6 +90,7 @@ public struct DispatchRequest: Sendable {
         self.reattachSession = reattachSession
         self.requestedToolNames = requestedToolNames
         self.allowsBuiltInAgent = allowsBuiltInAgent
+        self.externalSurface = externalSurface
     }
 }
 

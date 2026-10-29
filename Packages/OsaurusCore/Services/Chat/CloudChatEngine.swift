@@ -251,6 +251,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// Upstream logs one-shots as `.system` with no turn, so a title or
     /// memory request made during a reply never answers that reply's
     /// Inspect response (`focus(turnId:)` takes the newest matching row).
+    /// Why an `.ask` tool didn't run: the user declined the card, or the
+    /// caller has no approval UI (upstream's external-surface refusal).
+    static var unapprovedReason: String {
+        ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts
+            ? "it needs approval in the Osaurus app, which this caller can't give (set it to Auto in Tools to allow it)"
+            : "you declined to run it this time"
+    }
+
     private static func loggedSource(default engineSource: RequestSource) -> RequestSource {
         activitySource ?? (activityPurpose == nil ? engineSource : .system)
     }
@@ -1402,6 +1410,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             approved = true
                                             break
                                         }
+                                        // Upstream: a caller with no approval UI (external MCP / HTTP,
+                                        // a remote dispatch) is refused instead of shown a card nobody
+                                        // there can answer. The owner's phone reviewer comes with
+                                        // `/approvals` (`W-server-api` stage 4d).
+                                        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+                                            approved = false
+                                            break
+                                        }
                                         // Upstream #2241: the global auto-allow switch
                                         // replaces the card, except for per-call tools.
                                         if ToolApprovalSettings.skipsApprovalCard(
@@ -1443,7 +1459,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     if !approved {
                                         let reason = policy == .deny
                                             ? "blocked by your tool permissions (Deny)"
-                                            : "you declined to run it this time"
+                                            : Self.unapprovedReason
                                         result = "⛔️ “\(call.name)” was not run — \(reason)."
                                     } else {
                                         do {
@@ -1768,6 +1784,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         approved = true
                                         break
                                     }
+                                    // Upstream: a caller with no approval UI (external MCP / HTTP,
+                                    // a remote dispatch) is refused instead of shown a card nobody
+                                    // there can answer. The owner's phone reviewer comes with
+                                    // `/approvals` (`W-server-api` stage 4d).
+                                    if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+                                        approved = false
+                                        break
+                                    }
                                     // Upstream #2241: the global auto-allow switch
                                     // replaces the card, except for per-call tools.
                                     if ToolApprovalSettings.skipsApprovalCard(
@@ -1817,7 +1841,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     let reason =
                                         policy == .deny
                                         ? "blocked by your tool permissions (Deny)"
-                                        : "you declined to run it this time"
+                                        : Self.unapprovedReason
                                     NSLog("[CloudChatEngine] tool '\(call.name)' not run — \(reason)")
                                     result = "⛔️ “\(call.name)” was not run — \(reason)."
                                 } else {

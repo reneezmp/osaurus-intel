@@ -424,6 +424,13 @@ public final class BackgroundTaskManager: ObservableObject {
     // MARK: - Dispatch
 
     /// Dispatch a chat task for background execution.
+    /// External-surface flag bound around the dispatched run (upstream).
+    /// Widen-only: a request marked external, or a dispatch issued from an
+    /// already-external context, runs external.
+    nonisolated static func resolvedExternalSurface(for request: DispatchRequest) -> Bool {
+        request.externalSurface || ChatExecutionContext.isExternalSurface
+    }
+
     public func dispatchChat(_ request: DispatchRequest) async -> DispatchHandle? {
         // Background dispatch is an external surface (schedules, watchers,
         // self-scheduled wakes, plugins): built-in agents (the Default agent)
@@ -561,10 +568,15 @@ public final class BackgroundTaskManager: ObservableObject {
         // the same `BackgroundTaskState.id` we just registered, so
         // streaming layers can call `recordUsage(backgroundId:)` for
         // mid-stream budget enforcement (spec §11.3).
-        await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
-            await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
-                await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
-                    await context.start(prompt: request.prompt)
+        // Upstream: `isExternalSurface` is rebound from the request so the
+        // external tool policy holds for the whole run. Widen-only.
+        let externalSurface = Self.resolvedExternalSurface(for: request)
+        await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
+            await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
+                await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
+                    await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
+                        await context.start(prompt: request.prompt)
+                    }
                 }
             }
         }

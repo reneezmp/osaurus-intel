@@ -7,7 +7,7 @@
 //  agent-metadata cases (its runtime-settings and DSV4 cases wait for
 //  stage 7 and MLX), the `/agents` halves of two `HTTPAuthGateTests` cases
 //  whose other halves need routes Intel doesn't have yet, and Intel cases
-//  for the owner-only edits.
+//  for the owner-only edits, dispatch and tasks (stage 4b).
 //
 
 import Foundation
@@ -278,6 +278,84 @@ struct IntelHTTPAgentRoutesTests {
         let tools = try await server.send(
             "GET", "/agents/\(Agent.defaultId.uuidString)/tools", token: token, headers: relay)
         #expect(tools.status == 403, "\(tools.body)")
+    }
+
+    // MARK: - Dispatch and tasks (stage 4b)
+
+    @Test func dispatch_validatesBeforeStartingAnything() async throws {
+        let server = try await startAgentTestServer()
+        defer { Task { await server.shutdown() } }
+        let agentPath = "/agents/\(Agent.defaultId.uuidString)/dispatch"
+
+        let missing = try await server.send("POST", agentPath, json: #"{"title":"x"}"#)
+        #expect(missing.status == 400, "\(missing.body)")
+        #expect(missing.body.contains("prompt"))
+
+        let blank = try await server.send("POST", agentPath, json: #"{"prompt":"   "}"#)
+        #expect(blank.status == 400, "\(blank.body)")
+        #expect(blank.body.contains("Prompt is empty"))
+
+        let unknown = try await server.send(
+            "POST", "/agents/\(UUID().uuidString)/dispatch", json: #"{"prompt":"hi"}"#)
+        #expect(unknown.status == 404, "\(unknown.body)")
+    }
+
+    /// Remote dispatch needs the Secure Channel, which Intel doesn't have yet.
+    @Test func dispatch_fromARemoteOwnerKeyNeedsTheSecureChannel() async throws {
+        let server = try await startAgentTestServer(validator: .forAlice())
+        defer { Task { await server.shutdown() } }
+        let token = try TokenBuilder.build(
+            privateKey: TestKeys.alicePrivateKey, iss: TestKeys.aliceAddress, aud: TestKeys.aliceAddress
+        )
+        let result = try await server.send(
+            "POST", "/agents/\(UUID().uuidString)/dispatch", json: #"{"prompt":"hi"}"#, token: token,
+            headers: [HTTPHandler.relayOriginHeaderName: "1"])
+        #expect(result.status == 426, "\(result.body)")
+    }
+
+    @Test func tasks_statusCancelAndClarify() async throws {
+        let server = try await startAgentTestServer()
+        defer { Task { await server.shutdown() } }
+        let id = UUID().uuidString
+
+        let badId = try await server.send("GET", "/tasks/not-a-task")
+        #expect(badId.status == 400)
+        #expect(badId.body.contains("invalid_task_id"))
+
+        let unknown = try await server.send("GET", "/v1/tasks/\(id)")
+        #expect(unknown.status == 404)
+
+        let cancel = try await server.send("DELETE", "/tasks/\(id)")
+        #expect(cancel.status == 204)
+
+        let clarify = try await server.send("POST", "/tasks/\(id)/clarify", json: #"{"response":"yes"}"#)
+        #expect(clarify.status == 410, "\(clarify.body)")
+        let clarifyBad = try await server.send("POST", "/tasks/\(id)/clarify", json: #"{}"#)
+        #expect(clarifyBad.status == 400)
+    }
+
+    @Test func dispatchSessionKey_isScopedToTheCredential() {
+        #expect(HTTPHandler.dispatchSessionKey(nil, audience: "0xabc", keyNonce: "n") == nil)
+        #expect(HTTPHandler.dispatchSessionKey("chat-1", audience: nil, keyNonce: nil) == "chat-1")
+        // An agent-scoped caller with no nonce can't reattach at all.
+        #expect(HTTPHandler.dispatchSessionKey("chat-1", audience: "0xabc", keyNonce: nil) == nil)
+        let mine = HTTPHandler.dispatchSessionKey("chat-1", audience: "0xABC", keyNonce: "n1")
+        let other = HTTPHandler.dispatchSessionKey("chat-1", audience: "0xabc", keyNonce: "n2")
+        #expect(mine?.hasPrefix("credential:") == true)
+        #expect(mine != other)
+        #expect(mine == HTTPHandler.dispatchSessionKey("chat-1", audience: "0xabc", keyNonce: "n1"))
+    }
+
+    /// Intel's engine asks before `execute`; an external run gets the
+    /// refusal text instead of a card nobody there can answer.
+    @Test func unapprovedReason_namesTheMissingApprovalUIForExternalRuns() {
+        #expect(ChatEngine.unapprovedReason == "you declined to run it this time")
+        let external = ChatExecutionContext.$isExternalSurface.withValue(true) { ChatEngine.unapprovedReason }
+        #expect(external.contains("needs approval in the Osaurus app"))
+        let headless = ChatExecutionContext.$denyUnapprovedToolPrompts.withValue(true) {
+            ChatEngine.unapprovedReason
+        }
+        #expect(headless.contains("needs approval in the Osaurus app"))
     }
 
     // MARK: - Halves of HTTPAuthGateTests cases (upstream)

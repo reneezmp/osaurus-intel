@@ -47,6 +47,8 @@ extension HTTPHandler {
             serveAgentAvatar(context: context, path: path)
         } else if method == .GET, isAgentPath {
             serveGetAgent(context: context, path: path)
+        } else if method == .POST, isAgentPath, path.hasSuffix("/dispatch") {
+            serveDispatch(context: context, path: path)
         } else {
             return false
         }

@@ -119,6 +119,12 @@ public enum OsaurusPaths {
     /// Per-agent invite ledger directory (one JSON file per agent).
     /// Sibling of `agents()` so `AgentStore` doesn't try to decode the
     /// ledger files as agent records.
+    /// Upstream's workspace state folder. Intel keeps only the remote task
+    /// ownership file here until workspaces are ported.
+    public static func workspaces() -> URL {
+        root().appendingPathComponent("workspaces", isDirectory: true)
+    }
+
     public static func agentInvites() -> URL {
         root().appendingPathComponent("agent-invites", isDirectory: true)
     }

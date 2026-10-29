@@ -22,9 +22,10 @@ Osaurus runs a local HTTP server that other apps on this Mac can use. On this In
 - `GET /mcp/tools`, `POST /mcp/call` — Osaurus's tools for other apps (see the MCP topic).
 - `GET /agents`, `GET /agents/{id}` — your agents, with their models and memory counts.
 - `POST /agents`, `PATCH` / `DELETE /agents/{id}`, `PUT /agents/{id}/model` and the `/agents/{id}/tools` routes — create, edit and delete agents and set their tools. Only this Mac's owner can make these changes: a caller on this Mac, or the owner's own key.
+- `POST /agents/{id}/dispatch` — start a background task for an agent; poll it at `GET /tasks/{id}` and stop it with `DELETE /tasks/{id}`. A task started from another device can't use tools set to Ask (nobody there can approve them); set those to Auto if it needs them.
 - `POST /completions` answers that raw completions need Apple silicon.
 
-Not in this build yet: agent runs, tasks, chat sessions, images and video. Shortcuts and Siri run agents inside the app.
+Not in this build yet: streamed agent runs, chat sessions, images and video. Shortcuts and Siri run agents inside the app.
 
 ## Access keys
 

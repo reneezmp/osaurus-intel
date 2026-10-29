@@ -385,3 +385,46 @@ Each stage: gate run, Rosy section, row note in the backlog.
       halves of two gate cases whose other halves wait for stage 7 and
       `W-declarative-config`.
     - Three `HTTPAuthGateTests` cases waiting for `/agents` are enabled.
+- **Stage 4b (2026-10-29): background dispatch and tasks**
+  (`IntelHTTPTasks.swift`).
+  - **Routes**, upstream's: `POST /agents/{id}/dispatch` (202 with a
+    `poll_url`), `GET /tasks/{id}`, `DELETE /tasks/{id}` (204), and
+    `POST /tasks/{id}/clarify`, which answers 410 as upstream's does
+    (clarifying happens in the chat window).
+  - **Upstream pieces:** `DispatchTaskOwnership` (an agent-scoped key may
+    only poll or cancel the tasks it started; kept in
+    `workspaces/dispatch-owners.json`, so `OsaurusPaths.workspaces()` is
+    in), `dispatchSessionKey` (a reattach key is scoped to the credential
+    that sent it) and the task-status JSON (`PluginHostContext.taskStateDict`,
+    in `Services/Plugin/IntelPluginTaskState.swift` because Intel doesn't
+    compile the plugin host).
+  - **External runs:** a non-loopback dispatch is an external surface, as
+    upstream. `DispatchRequest.externalSurface` and
+    `BackgroundTaskManager.resolvedExternalSurface` are upstream's; the
+    runner binds `ChatExecutionContext.isExternalSurface` for the whole run.
+  - **Intel change to the engine:** Intel asks for tool approval in
+    `CloudChatEngine`, before `ToolRegistry.execute`. An external run (or
+    one that denies prompts) now refuses an `.ask` tool there instead of
+    showing a card and then refusing in `execute`; the tool result says it
+    needs approval in the app (`ChatEngine.unapprovedReason`). Upstream
+    lets the owner's paired phone review instead (`hasRemoteReviewer`);
+    that comes with `/approvals` (stage 4d).
+  - **Built-in agent:** a loopback dispatch may target the Orchestrator
+    (upstream); Intel passes its `allowsBuiltInAgent` flag for that.
+  - **Fix found by the tests:** Intel's `AgentManager.resolveAgentId`
+    accepted any UUID (and looked agents up by name), so a dispatch to an
+    agent that doesn't exist started a run. It is upstream's now: a UUID
+    must name an agent, anything else is an agent address. `agent(byAddress:)`
+    is case-insensitive, as upstream's.
+  - **Not ported:** the workspace-key refusal and workspace audit records
+    (workspaces are deferred).
+  - **Tests:**
+    - Upstream's `AgentScopePolicyTests` and `DispatchTaskOwnershipTests`
+      (missed at stage 1), minus the `PeerInferenceSharing` round trip
+      (stage 7) and the pair-invite suite (`W-identity-mobile`).
+    - Upstream's `TaskStateDictTests`, and the three dispatch
+      external-surface cases in `MCPHTTPHandlerTests`.
+    - `HTTPAuthGateTests.agentScopedKey_cannotTouchForeignTasks`.
+    - Intel route cases for dispatch validation, the 426 for a remote
+      owner key, the task routes, session-key scoping and the engine's
+      refusal text.

@@ -7,9 +7,9 @@
 
 //  Intel (`W-server-api` stage 3, docs/SERVER_API_INTEL.md): upstream's
 //  suite minus the cases for pieces Intel doesn't have yet: harness agent
-//  tokens (`W-harness-runtimes`), the dispatch layer's external-surface
-//  binding and unattended auto-approval (stage 4, with `/dispatch`), and
-//  `/admin/cache-stats` (stage 7).
+//  tokens (`W-harness-runtimes`), unattended auto-approval (Intel's runs
+//  have no unattended lane yet) and `/admin/cache-stats` (stage 7). The
+//  dispatch layer's external-surface cases came with `/dispatch` (stage 4b).
 
 import Foundation
 import NIOCore
@@ -344,6 +344,82 @@ struct MCPHTTPHandlerTests {
             let message = EnvelopeAssertions.failureMessage(text) ?? ""
             #expect(message.contains("external callers"))
             #expect(!text.contains("must not leak"))
+        }
+    }
+
+    @Test func dispatcher_layer_rebinds_external_surface_from_request_metadata() async {
+        // Non-loopback HTTP dispatch marks the request external; the
+        // dispatcher-layer binding must deny agent-channel tools even
+        // without the HTTP handler's own task-local wrapper.
+        let external = DispatchRequest(prompt: "p", source: .http, externalSurface: true)
+        let internalRequest = DispatchRequest(prompt: "p", source: .http, externalSurface: false)
+
+        #expect(BackgroundTaskManager.resolvedExternalSurface(for: external))
+        #expect(!BackgroundTaskManager.resolvedExternalSurface(for: internalRequest))
+
+        let deniedViaDispatcher = ChatExecutionContext.$isExternalSurface.withValue(
+            BackgroundTaskManager.resolvedExternalSurface(for: external)
+        ) {
+            ToolRegistry.isDeniedForCurrentSurface("agent_channel_send_message")
+        }
+        #expect(deniedViaDispatcher)
+
+        // Widen-only: a trusted-looking request cannot clear an inherited
+        // external execution context.
+        let widened = ChatExecutionContext.$isExternalSurface.withValue(true) {
+            BackgroundTaskManager.resolvedExternalSurface(for: internalRequest)
+        }
+        #expect(widened)
+
+        // Propagates into the unstructured task the dispatched run starts.
+        let inherited = await ChatExecutionContext.$isExternalSurface.withValue(
+            BackgroundTaskManager.resolvedExternalSurface(for: external)
+        ) {
+            await Task {
+                ToolRegistry.isDeniedForCurrentSurface("agent_channel_send_message")
+            }.value
+        }
+        #expect(inherited)
+    }
+
+    @Test func remote_dispatch_surface_binding_denies_agent_channel_tools() {
+        #expect(!HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: true))
+        #expect(HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: false))
+
+        for toolName in Self.agentChannelToolNames {
+            let local = ChatExecutionContext.$isExternalSurface.withValue(
+                HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: true)
+            ) {
+                ToolRegistry.isDeniedForCurrentSurface(toolName)
+            }
+            #expect(!local, "\(toolName) should remain app-usable on loopback dispatch")
+
+            let remote = ChatExecutionContext.$isExternalSurface.withValue(
+                HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: false)
+            ) {
+                ToolRegistry.isDeniedForCurrentSurface(toolName)
+            }
+            #expect(remote, "\(toolName) should be denied on non-loopback dispatch")
+        }
+
+        let remoteHostWrite = ChatExecutionContext.$isExternalSurface.withValue(
+            HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: false)
+        ) {
+            ToolRegistry.isDeniedForCurrentSurface("file_write")
+        }
+        #expect(remoteHostWrite)
+    }
+
+    @Test func remote_dispatch_surface_binding_propagates_to_unstructured_tasks() async {
+        for toolName in Self.agentChannelToolNames {
+            let inherited = await ChatExecutionContext.$isExternalSurface.withValue(
+                HTTPHandler.shouldBindExternalSurfaceForDispatch(isLoopback: false)
+            ) {
+                await Task {
+                    ToolRegistry.isDeniedForCurrentSurface(toolName)
+                }.value
+            }
+            #expect(inherited, "\(toolName) should keep external-surface denial across unstructured tasks")
         }
     }
 

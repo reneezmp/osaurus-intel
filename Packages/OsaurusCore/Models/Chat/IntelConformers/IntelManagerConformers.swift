@@ -350,12 +350,19 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
     }
 
     func agent(byAddress address: String) -> Agent? {
-        agents.first { $0.agentAddress == address }
+        let lower = address.lowercased()
+        return agents.first { $0.agentAddress?.lowercased() == lower }
     }
 
+    /// Upstream: a UUID must name an existing agent; anything else is
+    /// looked up as an agent address. (Intel used to accept any UUID and
+    /// look names up, which let `/agents/{id}/dispatch` start a run for an
+    /// agent that doesn't exist.)
     func resolveAgentId(_ identifier: String) -> UUID? {
-        if let uuid = UUID(uuidString: identifier) { return uuid }
-        return agents.first { $0.name == identifier }?.id
+        if let uuid = UUID(uuidString: identifier) {
+            return agents.contains(where: { $0.id == uuid }) ? uuid : nil
+        }
+        return agent(byAddress: identifier)?.id
     }
 
     func agentsList() -> [Agent] { agents }
