@@ -199,6 +199,19 @@ Each stage: gate run, Rosy section, row note in the backlog.
       alone, and the next full run passed (3,914 tests).
     - Treat a recurrence as an ordering flake to bisect, not a stage-2
       regression: nothing in that path changed.
+    - **Update, same day:** it recurred once more (13:46), this time
+      after `AppleScriptAppKnowledgeTests.shortcutTaskGetsShortcutsRecipe`
+      started. Again, every thread was idle: the main `CFRunLoop`, a
+      `JavaScriptAppleEvents` runloop thread, and a parked worker. The
+      runner was awaiting a job that never ran.
+    - The suites before the hang, run alone four times (797 tests), always
+      passed in 5.5 s; the full gate passed at 12:44, 13:21 and 14:22
+      (3,941 tests).
+    - Working theory, not proven: an earlier test sends a real Apple Event
+      whose reply waits on macOS (an Automation consent prompt or a
+      launching app), leaving the awaiting test suspended. The gate script
+      runs without a cap: use `timeout 420` and kill the helper if it
+      hangs.
     - Live-file hits in the passing run were the running app's (`lsof`:
       pid 64163) chat history, memory and activity log.
 - **Stage 2c, part 1 (2026-10-29): Ollama `/api/chat` and `/api/generate`**
@@ -269,4 +282,11 @@ Each stage: gate run, Rosy section, row note in the backlog.
     Insights row.
   - **Tests** stop at validation: a real file would ask for
     speech-recognition access.
+- **Stage 2e, `/responses` (planned).** Upstream's `OpenResponsesAPI.swift`
+  does not compile on Intel as is: 70 errors, an experiment on 2026-10-29.
+  It is tied to upstream's typed Responses engine (generation and provider
+  options, output items, `ResponseFormat` / `ResponseJSONSchema`, cached /
+  per-second token counts). Next step: port its request and response wire
+  types and the `OpenResponsesSSEWriter`, with an Intel conversion to
+  `ChatCompletionRequest`, the way `/messages` works.
 

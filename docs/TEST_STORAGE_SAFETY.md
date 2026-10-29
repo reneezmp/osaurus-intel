@@ -220,6 +220,14 @@ After the run:
   script prints the "tests started" time: compare each hit's time against
   it before attributing it.
 
+**Intermittent gate hang (2026-10-29):** the full gate hung twice with
+every thread idle, both times early in the AppleScript / Apple-apps suites
+(details: `SERVER_API_INTEL.md`, "Gate notes"). Cap the run (`timeout 420`
+before the gate script) and kill `swiftpm-testing-helper` when it hangs.
+The script's cleanup still removes the test root. Attribute any
+`~/.osaurus` hits in the window as usual. A hung run proves nothing either
+way: re-run before committing.
+
 **Known non-test writer (2026-09-30):** on the dev Mac the installed
 `/Applications/osaurus.app` is upstream's arm64 build, which owns `~/.osaurus`
 and, while it runs, re-downloads its plugin catalog into
