@@ -390,6 +390,81 @@ extension IntelHTTPChatCompletionsTests {
     }
 }
 
+extension IntelHTTPChatCompletionsTests {
+    @Test func responsesAnswersWithOutputItemsAndContinues() async throws {
+        let call = StreamingToolHint.ProposedCall(callId: "call_9", name: "get_weather", arguments: #"{"city":"Rome"}"#)
+        let engine = ScriptedChatEngine([
+            StreamingReasoningHint.encode("plan"), "Checking.", StreamingToolHint.encodeProposed([call]),
+            StreamingUsageHint.encode(promptTokens: 9, completionTokens: 4),
+        ])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+
+        let (status, body) = try await postPath(server, "/v1/responses", #"""
+            {"model":"venice/llama","instructions":"Be brief.","input":"Weather in Rome?",
+             "tools":[{"type":"function","name":"get_weather","parameters":{"type":"object"}}]}
+            """#)
+        #expect(status == 200, "\(body)")
+        let object = try #require(try JSONSerialization.jsonObject(with: Data(body.utf8)) as? [String: Any])
+        #expect(object["object"] as? String == "response")
+        #expect(object["status"] as? String == "completed")
+        let output = try #require(object["output"] as? [[String: Any]])
+        #expect(output.map { $0["type"] as? String } == ["reasoning", "message", "function_call"])
+        #expect(output[2]["call_id"] as? String == "call_9")
+        let usage = try #require(object["usage"] as? [String: Any])
+        #expect(usage["input_tokens"] as? Int == 9)
+        let sent = try #require(engine.requests.first)
+        #expect(sent.messages.map(\.role) == ["system", "user"])
+        #expect(sent.tools?.first?.function.name == "get_weather")
+
+        // Continuing from that response carries the earlier turns, but not
+        // the earlier per-request instructions.
+        let id = try #require(object["id"] as? String)
+        let (next, _) = try await postPath(server, "/v1/responses",
+            #"{"model":"venice/llama","previous_response_id":"\#(id)","input":"And Paris?"}"#)
+        #expect(next == 200)
+        let second = try #require(engine.requests.last)
+        #expect(second.messages.map(\.role) == ["user", "assistant", "user"])
+        #expect(second.messages.last?.content == "And Paris?")
+
+        let (missing, missingBody) = try await postPath(server, "/v1/responses",
+            #"{"model":"venice/llama","previous_response_id":"resp_nope","input":"x"}"#)
+        #expect(missing == 404, "\(missingBody)")
+        let (otherModel, _) = try await postPath(server, "/v1/responses",
+            #"{"model":"other","previous_response_id":"\#(id)","input":"x"}"#)
+        #expect(otherModel == 404)
+    }
+
+    @Test func responsesStreamsTheEventLifecycle() async throws {
+        let engine = ScriptedChatEngine([StreamingReasoningHint.encode("hm"), "Hel", "lo"])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let (_, body) = try await postPath(server, "/v1/responses", #"{"model":"m","input":"hi","stream":true}"#)
+        let names = body.components(separatedBy: "\n").filter { $0.hasPrefix("event: ") }.map { String($0.dropFirst(7)) }
+        #expect(names.first == "response.created")
+        #expect(names.contains("response.reasoning_summary_text.delta"))
+        #expect(names.filter { $0 == "response.output_text.delta" }.count == 2)
+        #expect(names.last == "response.completed")
+        #expect(body.hasSuffix("data: [DONE]\n\n"))
+        // Sequence numbers increase by one.
+        let sequences = body.components(separatedBy: "\n").filter { $0.hasPrefix("data: {") }.compactMap {
+            (try? JSONSerialization.jsonObject(with: Data($0.dropFirst(6).utf8)) as? [String: Any])?["sequence_number"] as? Int
+        }
+        #expect(sequences == Array(1 ... sequences.count))
+    }
+
+    @Test func responsesRefusesStructuredOutputItCannotHonor() async throws {
+        let engine = ScriptedChatEngine([])
+        let server = try await startChatTestServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let (status, body) = try await postPath(server, "/v1/responses",
+            #"{"model":"m","input":"x","text":{"format":{"type":"json_object"}}}"#)
+        #expect(status == 400)
+        #expect(body.contains("Structured output"))
+        #expect(engine.requests.isEmpty)
+    }
+}
+
 // MARK: - Test server
 
 private struct ChatTestServer {

@@ -2157,6 +2157,10 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       Ollama client (e.g. an Obsidian plugin pointed at
       `http://127.0.0.1:1337`) can chat.
 - [ ] Insights shows the API request and the model call (to the provider).
+- [ ] **Responses API:** `curl -s http://127.0.0.1:1337/v1/responses -H 'Content-Type: application/json' -d '{"model":"<id>","input":"Say hi"}'`
+      answers a `response` with a `message` item. Send a second request
+      with `"previous_response_id":"<that id>","input":"Now say bye"`: the
+      model sees the earlier turn.
 - [ ] **Embeddings:** `curl -s http://127.0.0.1:1337/v1/embeddings -H 'Content-Type: application/json' -d '{"model":"potion-base-8M","input":"hello"}'`
       answers 256 numbers (the first call may take a moment to download
       the model). `"model":"potion-base-4M"` answers an error naming

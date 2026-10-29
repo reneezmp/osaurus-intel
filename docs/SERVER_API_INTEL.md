@@ -282,11 +282,30 @@ Each stage: gate run, Rosy section, row note in the backlog.
     Insights row.
   - **Tests** stop at validation: a real file would ask for
     speech-recognition access.
-- **Stage 2e, `/responses` (planned).** Upstream's `OpenResponsesAPI.swift`
-  does not compile on Intel as is: 70 errors, an experiment on 2026-10-29.
-  It is tied to upstream's typed Responses engine (generation and provider
-  options, output items, `ResponseFormat` / `ResponseJSONSchema`, cached /
-  per-second token counts). Next step: port its request and response wire
-  types and the `OpenResponsesSSEWriter`, with an Intel conversion to
-  `ChatCompletionRequest`, the way `/messages` works.
-
+- **Stage 2e (2026-10-29): `/responses`** (`IntelHTTPResponses.swift`).
+  - **Wire types:** upstream's `OpenResponsesAPI.swift` is back in the
+    build, trimmed to its wire types, stream events, errors and the
+    `toChatCompletionRequest` projection. Intel edits there: no `strict` on
+    tools, `Double` sampling values, no `reasoning_effort` /
+    `response_format`.
+  - **Left out** (they need upstream's typed Responses engine; the first
+    attempt to compile the whole file gave 70 errors): the native
+    `toResponsesInferenceRequest`, the `ResponsesGenerationResult`
+    projections, and the `ChatCompletionResponse` conversion.
+  - **The route:** one round through `IntelHTTPInference`.
+    - The response object holds reasoning / message / function-call items
+      and measured usage; a length stop is `incomplete` with
+      `max_output_tokens`.
+    - `previous_response_id` continuation uses upstream's
+      `OpenResponsesContextStore`: 128 entries, model-bound, unknown ids
+      404, per-request instructions not carried over.
+    - A structured `text.format` other than `text` answers 400 rather than
+      being ignored.
+  - **Streaming:** the portable half of upstream's
+    `OpenResponsesSSEWriter`, minus the native provider-event proxy and
+    prefill progress. The lifecycle is `response.created` →
+    `in_progress` → reasoning summary / output text deltas → item done
+    events → function-call items → `response.completed` or `incomplete`,
+    then `[DONE]`.
+  - **Tests:** three new cases in `IntelHTTPChatCompletionsTests`.
+- **Stage 2 complete** apart from the "Not yet" list in 2b.

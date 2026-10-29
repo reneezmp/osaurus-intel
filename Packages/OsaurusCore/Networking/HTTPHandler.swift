@@ -857,6 +857,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveEmbeddings(context: context, head: head, ollamaFormat: true)
         case (.POST, "/audio/transcriptions"):
             serveAudioTranscription(context: context, head: head)
+        case (.POST, "/responses"):
+            serveOpenResponses(context: context, head: head)
         case (.POST, "/messages"):
             serveAnthropicMessages(context: context, head: head)
         case (.POST, "/chat"):

@@ -6,13 +6,70 @@
 //  Based on the Open Responses specification: https://www.openresponses.org
 //
 
+// Intel (`W-server-api` stage 2e, docs/SERVER_API_INTEL.md): upstream's
+// wire types, stream events and errors, plus its Chat Completions
+// projection (`toChatCompletionRequest`). Left out: the native typed-engine
+// path (`toResponsesInferenceRequest`, the `ResponsesGenerationResult`
+// projections) and the `ChatCompletionResponse` conversion, which need
+// upstream's Responses engine and response types. Intel edits in the
+// projection are marked `Intel:`.
+
 import Foundation
 
 // MARK: - Request Models
 
 /// Reasoning configuration for reasoning models.
 public struct OpenResponsesReasoningConfig: Codable, Sendable {
-    public let effort: String
+    /// Optional on the wire: the Responses API defaults it server-side, and
+    /// real clients rely on that — Codex CLI sends `reasoning: {summary: …}`
+    /// with no `effort` for models it has no metadata for. Requiring it
+    /// rejected every Codex turn against `/v1/responses` with
+    /// "missing required key `effort` at reasoning".
+    public let effort: String?
+    /// Requests a human-readable reasoning summary, streamed as
+    /// `response.reasoning_summary_text.delta` events. Without it the
+    /// Responses API returns only the opaque `encrypted_content` blob, so the
+    /// UI has no reasoning to display. "auto" lets the server pick the
+    /// summary granularity (works without org verification).
+    public let summary: String?
+    /// Which prior reasoning items the model may use on a follow-up turn.
+    /// Osaurus manually replays complete history, so `all_turns` preserves the
+    /// same reasoning continuity as the Codex client.
+    public let context: String?
+
+    public init(effort: String?, summary: String? = nil, context: String? = nil) {
+        self.effort = effort
+        self.summary = summary
+        self.context = context
+    }
+}
+
+/// OpenAI Responses output formatting. This differs from Chat Completions'
+/// top-level `response_format`: JSON mode is `text.format` on `/responses`.
+public struct OpenResponsesTextConfig: Codable, Sendable {
+    public let format: OpenResponsesTextFormat?
+
+    public init(format: OpenResponsesTextFormat?) {
+        self.format = format
+    }
+}
+
+public struct OpenResponsesTextFormat: Codable, Sendable {
+    public let type: String
+
+    public let name: String?
+    public let description: String?
+    public let schema: JSONValue?
+    public let strict: Bool?
+
+    public init(type: String, name: String? = nil, description: String? = nil,
+                schema: JSONValue? = nil, strict: Bool? = nil) {
+        self.type = type
+        self.name = name
+        self.description = description
+        self.schema = schema
+        self.strict = strict
+    }
 }
 
 /// Open Responses API create request
@@ -41,6 +98,18 @@ public struct OpenResponsesRequest: Codable, Sendable {
     public let metadata: [String: String]?
     /// Reasoning configuration for reasoning models
     public let reasoning: OpenResponsesReasoningConfig?
+    /// Osaurus owns and replays conversation history locally. Disable remote
+    /// response-object storage so the wire contract matches that stateless
+    /// architecture and encrypted reasoning can be replayed.
+    public let store: Bool?
+    /// Additional response fields needed for stateless reasoning continuity.
+    public let include: [String]?
+    /// Whether the provider may issue independent function calls in parallel.
+    public let parallel_tool_calls: Bool?
+    /// Stable conversation-scoped cache-routing key.
+    public let prompt_cache_key: String?
+    /// Responses-native output formatting (`text.format`).
+    public let text: OpenResponsesTextConfig?
 }
 
 /// Input can be a string or array of input items
@@ -84,6 +153,16 @@ public enum OpenResponsesInputItem: Codable, Sendable {
     /// back as input items alongside the matching `function_call_output` result.
     case functionCall(OpenResponsesFunctionCall)
     case functionCallOutput(OpenResponsesFunctionCallOutputItem)
+    /// A prior reasoning item echoed back so a reasoning model can resume its
+    /// chain instead of re-deriving it. Carries the opaque `id` +
+    /// `encrypted_content` returned with `store:false` +
+    /// `include:["reasoning.encrypted_content"]`. Must appear immediately
+    /// before the `function_call`(s) it produced.
+    case reasoning(OpenResponsesReasoningInputItem)
+    /// Provider-native output Item replayed verbatim. Responses is explicitly
+    /// item-based, and preserving the original JSON retains assistant `phase`,
+    /// item identifiers, and future item fields that ChatMessage cannot model.
+    case raw(JSONValue)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -105,15 +184,13 @@ public enum OpenResponsesInputItem: Codable, Sendable {
             self = .functionCall(try OpenResponsesFunctionCall(from: decoder))
         case "function_call_output":
             self = .functionCallOutput(try OpenResponsesFunctionCallOutputItem(from: decoder))
+        case "reasoning":
+            self = .reasoning(try OpenResponsesReasoningInputItem(from: decoder))
         case nil:
             // OpenAI Responses clients omit this discriminator for plain message input items.
             self = .message(try OpenResponsesMessageItem(from: decoder))
         default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown input item type: \(type ?? "<missing>")"
-            )
+            self = .raw(try JSONValue(from: decoder))
         }
     }
 
@@ -125,7 +202,54 @@ public enum OpenResponsesInputItem: Codable, Sendable {
             try item.encode(to: encoder)
         case .functionCallOutput(let item):
             try item.encode(to: encoder)
+        case .reasoning(let item):
+            try item.encode(to: encoder)
+        case .raw(let item):
+            try item.encode(to: encoder)
         }
+    }
+}
+
+/// Reasoning item re-emitted as input for multi-turn continuity. The Responses
+/// API accepts `{ "type": "reasoning", "id": ..., "summary": [],
+/// "encrypted_content": ... }` and matches it to the model's prior turn.
+public struct OpenResponsesReasoningInputItem: Codable, Sendable {
+    public let type: String
+    public let id: String
+    public let summary: [OpenResponsesReasoningSummaryText]
+    public let encrypted_content: String?
+    let originalJSON: JSONValue?
+
+    private enum CodingKeys: String, CodingKey { case type, id, summary, encrypted_content }
+
+    public init(
+        id: String,
+        encryptedContent: String?,
+        summary: [OpenResponsesReasoningSummaryText] = []
+    ) {
+        self.type = "reasoning"
+        self.id = id
+        self.summary = summary
+        self.encrypted_content = encryptedContent
+        self.originalJSON = nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        id = try values.decode(String.self, forKey: .id)
+        summary = try values.decodeIfPresent([OpenResponsesReasoningSummaryText].self, forKey: .summary) ?? []
+        encrypted_content = try values.decodeIfPresent(String.self, forKey: .encrypted_content)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let originalJSON { try originalJSON.encode(to: encoder); return }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(id, forKey: .id)
+        try values.encode(summary, forKey: .summary)
+        try values.encodeIfPresent(encrypted_content, forKey: .encrypted_content)
     }
 }
 
@@ -134,20 +258,41 @@ public struct OpenResponsesMessageItem: Codable, Sendable {
     public let type: String
     public let role: String
     public let content: OpenResponsesMessageContent
+    /// Present when replaying a provider-authored output message.
+    public let id: String?
+    public let status: OpenResponsesItemStatus?
+    /// GPT-5.3 Codex and later distinguish intermediate commentary from the
+    /// final answer. OpenAI requires clients to preserve this on follow-ups.
+    public let phase: String?
+    let originalJSON: JSONValue?
 
     private enum CodingKeys: String, CodingKey {
         case type
         case role
         case content
+        case id
+        case status
+        case phase
     }
 
-    public init(role: String, content: OpenResponsesMessageContent) {
+    public init(
+        role: String,
+        content: OpenResponsesMessageContent,
+        id: String? = nil,
+        status: OpenResponsesItemStatus? = nil,
+        phase: String? = nil
+    ) {
         self.type = "message"
         self.role = role
         self.content = content
+        self.id = id
+        self.status = status
+        self.phase = phase
+        self.originalJSON = nil
     }
 
     public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
         let container = try decoder.container(keyedBy: CodingKeys.self)
         let decodedType: String
         if container.contains(.type) {
@@ -166,6 +311,26 @@ public struct OpenResponsesMessageItem: Codable, Sendable {
         self.type = "message"
         self.role = try container.decode(String.self, forKey: .role)
         self.content = try container.decode(OpenResponsesMessageContent.self, forKey: .content)
+        self.id = try container.decodeIfPresent(String.self, forKey: .id)
+        self.status = try container.decodeIfPresent(OpenResponsesItemStatus.self, forKey: .status)
+        self.phase = try container.decodeIfPresent(String.self, forKey: .phase)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if case .object(var fields) = originalJSON {
+            // Easy input messages may omit this discriminator. Normalize
+            // that omission while retaining every provider-authored field.
+            if fields["type"] == nil { fields["type"] = .string(type) }
+            try JSONValue.object(fields).encode(to: encoder)
+            return
+        }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(role, forKey: .role)
+        try values.encode(content, forKey: .content)
+        try values.encodeIfPresent(id, forKey: .id)
+        try values.encodeIfPresent(status, forKey: .status)
+        try values.encodeIfPresent(phase, forKey: .phase)
     }
 }
 
@@ -208,10 +373,11 @@ public enum OpenResponsesMessageContent: Codable, Sendable {
             return text
         case .parts(let parts):
             return parts.compactMap { part in
-                if case .inputText(let textPart) = part {
-                    return textPart.text
+                switch part {
+                case .inputText(let textPart): return textPart.text
+                case .outputText(let textPart): return textPart.text
+                case .inputImage: return nil
                 }
-                return nil
             }.joined(separator: "\n")
         }
     }
@@ -221,6 +387,12 @@ public enum OpenResponsesMessageContent: Codable, Sendable {
 public enum OpenResponsesContentPart: Codable, Sendable {
     case inputText(OpenResponsesInputTextPart)
     case inputImage(OpenResponsesInputImagePart)
+    /// A prior assistant message replayed as input. Responses clients echo
+    /// the model's own `message` items back verbatim, so their content parts
+    /// arrive as `output_text`, not `input_text`. Codex CLI does this on every
+    /// resumed thread; rejecting the part failed the whole `input` array.
+    /// Kept as its own case so re-encoding preserves the original type.
+    case outputText(OpenResponsesOutputText)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -235,6 +407,8 @@ public enum OpenResponsesContentPart: Codable, Sendable {
             self = .inputText(try OpenResponsesInputTextPart(from: decoder))
         case "input_image":
             self = .inputImage(try OpenResponsesInputImagePart(from: decoder))
+        case "output_text":
+            self = .outputText(try OpenResponsesOutputText(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -249,6 +423,8 @@ public enum OpenResponsesContentPart: Codable, Sendable {
         case .inputText(let part):
             try part.encode(to: encoder)
         case .inputImage(let part):
+            try part.encode(to: encoder)
+        case .outputText(let part):
             try part.encode(to: encoder)
         }
     }
@@ -293,6 +469,8 @@ extension OpenResponsesMessageContent {
             switch part {
             case .inputText(let textPart):
                 converted.append(.text(textPart.text))
+            case .outputText(let textPart):
+                converted.append(.text(textPart.text))
             case .inputImage(let imagePart):
                 guard let imageURL = imagePart.image_url, !imageURL.isEmpty else {
                     continue
@@ -311,28 +489,141 @@ public struct OpenResponsesFunctionCallOutputItem: Codable, Sendable {
     public let type: String
     public let call_id: String
     public let output: String
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, call_id, output }
 
     public init(callId: String, output: String) {
         self.type = "function_call_output"
         self.call_id = callId
         self.output = output
+        self.originalJSON = nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        call_id = try values.decode(String.self, forKey: .call_id)
+        output = try values.decode(String.self, forKey: .output)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let originalJSON { try originalJSON.encode(to: encoder); return }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(call_id, forKey: .call_id)
+        try values.encode(output, forKey: .output)
     }
 }
 
 // MARK: - Tool Definitions
 
-/// Tool definition
+/// Tool definition.
+///
+/// Function tools are decoded into typed fields. Every other tool type
+/// (`custom`, `web_search`, `mcp`, namespace tools, ...) is tolerated on
+/// decode and kept verbatim in `raw` so a request carrying them is never
+/// rejected outright: Codex and similar Responses clients send hosted tools
+/// alongside their function tools even for trivial prompts. Conversion to the
+/// internal chat request (`toChatCompletionRequest`) currently drops them;
+/// `raw` exists so a Responses-native upstream can forward them later.
 public struct OpenResponsesTool: Codable, Sendable {
     public let type: String
-    public let name: String
+    public let name: String?
     public let description: String?
     public let parameters: JSONValue?
+    /// Explicitly choose strict or best-effort behavior instead of relying on
+    /// provider-side schema normalization.
+    public let strict: Bool?
+    /// Original JSON object for non-function tools. `nil` for function tools.
+    public let raw: JSONValue?
 
-    public init(name: String, description: String?, parameters: JSONValue?) {
+    public var isFunction: Bool { type == "function" }
+
+    public init(name: String, description: String?, parameters: JSONValue?, strict: Bool? = nil) {
         self.type = "function"
         self.name = name
         self.description = description
         self.parameters = parameters
+        self.strict = strict
+        self.raw = nil
+    }
+
+    private enum CodingKeys: String, CodingKey {
+        case type, name, description, parameters, strict
+    }
+
+    public init(from decoder: Decoder) throws {
+        let value = try JSONValue(from: decoder)
+        guard case .object(let fields) = value else {
+            throw DecodingError.typeMismatch(
+                OpenResponsesTool.self,
+                DecodingError.Context(
+                    codingPath: decoder.codingPath,
+                    debugDescription: "Expected a tool object"
+                )
+            )
+        }
+
+        let type: String
+        if case .string(let declared) = fields["type"] {
+            type = declared
+        } else {
+            type = "function"
+        }
+        self.type = type
+
+        if case .string(let name) = fields["name"] {
+            self.name = name
+        } else {
+            self.name = nil
+        }
+        if case .string(let description) = fields["description"] {
+            self.description = description
+        } else {
+            self.description = nil
+        }
+        if let parameters = fields["parameters"], parameters != .null {
+            self.parameters = parameters
+        } else {
+            self.parameters = nil
+        }
+        if case .bool(let strict) = fields["strict"] {
+            self.strict = strict
+        } else {
+            self.strict = nil
+        }
+
+        if type == "function" {
+            guard let name = self.name, !name.isEmpty else {
+                throw DecodingError.keyNotFound(
+                    CodingKeys.name,
+                    DecodingError.Context(
+                        codingPath: decoder.codingPath,
+                        debugDescription: "Function tools require a non-empty `name`"
+                    )
+                )
+            }
+            self.raw = nil
+        } else {
+            self.raw = value
+        }
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let raw {
+            try raw.encode(to: encoder)
+            return
+        }
+        var container = encoder.container(keyedBy: CodingKeys.self)
+        try container.encode(type, forKey: .type)
+        try container.encodeIfPresent(name, forKey: .name)
+        try container.encodeIfPresent(description, forKey: .description)
+        let parameters =
+            parameters?.withEmptyPropertiesIfMissing
+            ?? .object(["type": .string("object"), "properties": .object([:])])
+        try container.encode(parameters, forKey: .parameters)
+        try container.encodeIfPresent(strict, forKey: .strict)
     }
 }
 
@@ -408,6 +699,8 @@ public struct OpenResponsesResponse: Codable, Sendable {
     public let output_text: String?
     public let usage: OpenResponsesUsage?
     public let metadata: [String: String]?
+    public let incomplete_details: OpenResponsesIncompleteDetails?
+    public var error: OpenResponsesError? = nil
 
     public init(
         id: String,
@@ -416,7 +709,9 @@ public struct OpenResponsesResponse: Codable, Sendable {
         model: String,
         output: [OpenResponsesOutputItem],
         usage: OpenResponsesUsage?,
-        outputText: String? = nil
+        outputText: String? = nil,
+        metadata: [String: String]? = nil,
+        incompleteReason: String? = nil
     ) {
         self.id = id
         self.object = "response"
@@ -426,7 +721,8 @@ public struct OpenResponsesResponse: Codable, Sendable {
         self.output = output
         self.output_text = outputText ?? Self.text(from: output)
         self.usage = usage
-        self.metadata = nil
+        self.metadata = metadata
+        self.incomplete_details = incompleteReason.map { OpenResponsesIncompleteDetails(reason: $0) }
     }
 
     private static func text(from output: [OpenResponsesOutputItem]) -> String? {
@@ -440,6 +736,10 @@ public struct OpenResponsesResponse: Codable, Sendable {
         let joined = parts.joined()
         return joined.isEmpty ? nil : joined
     }
+}
+
+public struct OpenResponsesIncompleteDetails: Codable, Sendable {
+    public let reason: String
 }
 
 /// Response status
@@ -456,6 +756,7 @@ public enum OpenResponsesOutputItem: Codable, Sendable {
     case message(OpenResponsesOutputMessage)
     case functionCall(OpenResponsesFunctionCall)
     case reasoning(OpenResponsesReasoningItem)
+    case raw(JSONValue)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -473,11 +774,7 @@ public enum OpenResponsesOutputItem: Codable, Sendable {
         case "reasoning":
             self = .reasoning(try OpenResponsesReasoningItem(from: decoder))
         default:
-            throw DecodingError.dataCorruptedError(
-                forKey: .type,
-                in: container,
-                debugDescription: "Unknown output item type: \(type)"
-            )
+            self = .raw(try JSONValue(from: decoder))
         }
     }
 
@@ -488,6 +785,8 @@ public enum OpenResponsesOutputItem: Codable, Sendable {
         case .functionCall(let item):
             try item.encode(to: encoder)
         case .reasoning(let item):
+            try item.encode(to: encoder)
+        case .raw(let item):
             try item.encode(to: encoder)
         }
     }
@@ -500,12 +799,37 @@ public struct OpenResponsesReasoningItem: Codable, Sendable {
     public let id: String
     public let status: OpenResponsesItemStatus
     public let summary: [OpenResponsesReasoningSummaryText]
+    public let encrypted_content: String?
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, id, status, summary, encrypted_content }
 
-    public init(id: String, status: OpenResponsesItemStatus, summary: [OpenResponsesReasoningSummaryText]) {
+    public init(id: String, status: OpenResponsesItemStatus, summary: [OpenResponsesReasoningSummaryText], encryptedContent: String? = nil) {
         self.type = "reasoning"
         self.id = id
         self.status = status
         self.summary = summary
+        self.encrypted_content = encryptedContent
+        self.originalJSON = nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        id = try values.decode(String.self, forKey: .id)
+        status = try values.decodeIfPresent(OpenResponsesItemStatus.self, forKey: .status) ?? .completed
+        summary = try values.decodeIfPresent([OpenResponsesReasoningSummaryText].self, forKey: .summary) ?? []
+        encrypted_content = try values.decodeIfPresent(String.self, forKey: .encrypted_content)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let originalJSON { try originalJSON.encode(to: encoder); return }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(id, forKey: .id)
+        try values.encode(status, forKey: .status)
+        try values.encode(summary, forKey: .summary)
+        try values.encodeIfPresent(encrypted_content, forKey: .encrypted_content)
     }
 }
 
@@ -528,13 +852,40 @@ public struct OpenResponsesOutputMessage: Codable, Sendable {
     public let status: OpenResponsesItemStatus
     public let role: String
     public let content: [OpenResponsesOutputContent]
+    public let phase: String?
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, id, status, role, content, phase }
 
-    public init(id: String, status: OpenResponsesItemStatus, content: [OpenResponsesOutputContent]) {
+    public init(id: String, status: OpenResponsesItemStatus, content: [OpenResponsesOutputContent], phase: String? = nil) {
         self.type = "message"
         self.id = id
         self.status = status
         self.role = "assistant"
         self.content = content
+        self.phase = phase
+        self.originalJSON = nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        id = try values.decode(String.self, forKey: .id)
+        status = try values.decode(OpenResponsesItemStatus.self, forKey: .status)
+        role = try values.decode(String.self, forKey: .role)
+        content = try values.decode([OpenResponsesOutputContent].self, forKey: .content)
+        phase = try values.decodeIfPresent(String.self, forKey: .phase)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let originalJSON { try originalJSON.encode(to: encoder); return }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(id, forKey: .id)
+        try values.encode(status, forKey: .status)
+        try values.encode(role, forKey: .role)
+        try values.encode(content, forKey: .content)
+        try values.encodeIfPresent(phase, forKey: .phase)
     }
 }
 
@@ -542,11 +893,13 @@ public struct OpenResponsesOutputMessage: Codable, Sendable {
 public enum OpenResponsesItemStatus: String, Codable, Sendable {
     case inProgress = "in_progress"
     case completed = "completed"
+    case incomplete = "incomplete"
 }
 
 /// Output content types
 public enum OpenResponsesOutputContent: Codable, Sendable {
     case outputText(OpenResponsesOutputText)
+    case refusal(OpenResponsesRefusal)
 
     private enum CodingKeys: String, CodingKey {
         case type
@@ -559,6 +912,8 @@ public enum OpenResponsesOutputContent: Codable, Sendable {
         switch type {
         case "output_text":
             self = .outputText(try OpenResponsesOutputText(from: decoder))
+        case "refusal":
+            self = .refusal(try OpenResponsesRefusal(from: decoder))
         default:
             throw DecodingError.dataCorruptedError(
                 forKey: .type,
@@ -571,6 +926,8 @@ public enum OpenResponsesOutputContent: Codable, Sendable {
     public func encode(to encoder: Encoder) throws {
         switch self {
         case .outputText(let content):
+            try content.encode(to: encoder)
+        case .refusal(let content):
             try content.encode(to: encoder)
         }
     }
@@ -587,22 +944,62 @@ public struct OpenResponsesOutputText: Codable, Sendable {
     }
 }
 
+/// A model safety refusal is content, not a transport decode failure.
+public struct OpenResponsesRefusal: Codable, Sendable {
+    public let type: String
+    public let refusal: String
+
+    public init(refusal: String) {
+        self.type = "refusal"
+        self.refusal = refusal
+    }
+}
+
 /// Function call output item
 public struct OpenResponsesFunctionCall: Codable, Sendable {
     public let type: String
     public let id: String
-    public let status: OpenResponsesItemStatus
+    /// Always set on items Osaurus emits. Optional on decode because the
+    /// Responses API makes it optional on *input* items, and Codex CLI echoes
+    /// prior `function_call`s back without it — requiring it failed every
+    /// Codex follow-up turn after a tool call ("wrong type at input").
+    public let status: OpenResponsesItemStatus?
     public let call_id: String
     public let name: String
     public let arguments: String
+    let originalJSON: JSONValue?
+    private enum CodingKeys: String, CodingKey { case type, id, status, call_id, name, arguments }
 
-    public init(id: String, status: OpenResponsesItemStatus, callId: String, name: String, arguments: String) {
+    public init(id: String, status: OpenResponsesItemStatus?, callId: String, name: String, arguments: String) {
         self.type = "function_call"
         self.id = id
         self.status = status
         self.call_id = callId
         self.name = name
         self.arguments = arguments
+        self.originalJSON = nil
+    }
+
+    public init(from decoder: Decoder) throws {
+        originalJSON = try JSONValue(from: decoder)
+        let values = try decoder.container(keyedBy: CodingKeys.self)
+        type = try values.decode(String.self, forKey: .type)
+        id = try values.decode(String.self, forKey: .id)
+        status = try values.decodeIfPresent(OpenResponsesItemStatus.self, forKey: .status)
+        call_id = try values.decode(String.self, forKey: .call_id)
+        name = try values.decode(String.self, forKey: .name)
+        arguments = try values.decode(String.self, forKey: .arguments)
+    }
+
+    public func encode(to encoder: Encoder) throws {
+        if let originalJSON { try originalJSON.encode(to: encoder); return }
+        var values = encoder.container(keyedBy: CodingKeys.self)
+        try values.encode(type, forKey: .type)
+        try values.encode(id, forKey: .id)
+        try values.encodeIfPresent(status, forKey: .status)
+        try values.encode(call_id, forKey: .call_id)
+        try values.encode(name, forKey: .name)
+        try values.encode(arguments, forKey: .arguments)
     }
 }
 
@@ -612,10 +1009,19 @@ public struct OpenResponsesUsage: Codable, Sendable {
     public let output_tokens: Int
     public let total_tokens: Int
 
-    public init(inputTokens: Int, outputTokens: Int) {
+    /// Optional measured runtime decode rate; absent when upstream did not report one.
+    public let tokens_per_second: Double?
+    public let input_tokens_details: InputTokenDetails?
+    public struct InputTokenDetails: Codable, Sendable {
+        public let cached_tokens: Int
+    }
+
+    public init(inputTokens: Int, outputTokens: Int, tokensPerSecond: Double? = nil, cachedInputTokens: Int? = nil) {
         self.input_tokens = inputTokens
         self.output_tokens = outputTokens
         self.total_tokens = inputTokens + outputTokens
+        self.tokens_per_second = tokensPerSecond.flatMap { $0.isFinite && $0 > 0 ? $0 : nil }
+        self.input_tokens_details = cachedInputTokens.map { .init(cached_tokens: $0) }
     }
 }
 
@@ -872,7 +1278,9 @@ public struct OpenResponsesErrorResponse: Codable, Sendable {
 // MARK: - Conversion Helpers
 
 extension OpenResponsesRequest {
-    /// Convert Open Responses request to internal ChatCompletionRequest
+    /// Explicit legacy Chat Completions compatibility projection. Builtin
+    /// Responses inference uses toResponsesInferenceRequest and retains native
+    /// Items/options instead of this lossy older-wire shape.
     func toChatCompletionRequest() -> ChatCompletionRequest {
         var messages: [ChatMessage] = []
 
@@ -922,24 +1330,52 @@ extension OpenResponsesRequest {
                             tool_call_id: outputItem.call_id
                         )
                     )
+                case .reasoning:
+                    // Reasoning input items are a Responses-native continuity
+                    // mechanism (opaque encrypted blob). The internal Chat
+                    // Completions path has no equivalent, so skip them here;
+                    // the assistant tool_calls / outputs that follow carry the
+                    // actionable history.
+                    continue
+                case .raw:
+                    // Unknown provider-native Items have no Chat Completions
+                    // equivalent. Preserve them on the outbound Responses path;
+                    // the local Chat Completions adapter intentionally ignores
+                    // them rather than inventing text.
+                    continue
                 }
             }
         }
 
         // Convert tools
+        // Only function tools have a chat-completions equivalent. Hosted and
+        // custom tool types (web_search, custom, mcp, ...) are dropped here
+        // rather than failing the whole request: Osaurus executes tools
+        // locally and forwards function declarations only.
         var openAITools: [Tool]? = nil
         if let tools = tools {
-            openAITools = tools.map { tool in
-                Tool(
+            let functionTools = tools.compactMap { tool -> Tool? in
+                guard tool.isFunction, let name = tool.name else { return nil }
+                return Tool(
                     type: "function",
                     function: ToolFunction(
-                        name: tool.name,
+                        name: name,
                         description: tool.description,
                         parameters: tool.parameters
+                        // Intel: `ToolFunction` has no `strict`.
                     )
                 )
             }
+            let droppedTypes = tools.filter { !$0.isFunction }.map(\.type)
+            if !droppedTypes.isEmpty {
+                debugLog(
+                    "[OpenResponses] dropped \(droppedTypes.count) non-function tool(s) "
+                        + "(\(droppedTypes.joined(separator: ", "))); only function tools are forwarded"
+                )
+            }
+            openAITools = functionTools.isEmpty ? nil : functionTools
         }
+        let forwardedToolNames = Set(openAITools?.map(\.function.name) ?? [])
 
         // Convert tool choice
         var openAIToolChoice: ToolChoiceOption? = nil
@@ -950,78 +1386,55 @@ extension OpenResponsesRequest {
             case .none:
                 openAIToolChoice = ToolChoiceOption.none
             case .required:
-                openAIToolChoice = .auto
+                openAIToolChoice = .required
             case .function(let name):
-                openAIToolChoice = .function(
-                    ToolChoiceOption.FunctionName(
-                        type: "function",
-                        function: ToolChoiceOption.Name(name: name)
+                // A forced choice naming a dropped (non-function) tool would
+                // make upstreams 400 and local runtimes force a call with no
+                // schema, so fall back to auto when the name is not forwarded.
+                if forwardedToolNames.contains(name) {
+                    openAIToolChoice = .function(
+                        ToolChoiceOption.FunctionName(
+                            type: "function",
+                            function: ToolChoiceOption.Name(name: name)
+                        )
                     )
-                )
+                } else {
+                    debugLog(
+                        "[OpenResponses] tool_choice names `\(name)`, which is not a forwarded function tool; using auto"
+                    )
+                    openAIToolChoice = openAITools == nil ? nil : .auto
+                }
             }
         }
 
         var request = ChatCompletionRequest(
             model: model,
             messages: messages,
-            temperature: temperature,
+            temperature: temperature.map { Double($0) },  // Intel: Double sampling values
             max_tokens: max_output_tokens,
             stream: stream,
-            top_p: top_p,
+            top_p: top_p.map { Double($0) },
             frequency_penalty: nil,
             presence_penalty: nil,
             stop: nil,
             n: nil,
             tools: openAITools,
             tool_choice: openAIToolChoice,
-            session_id: nil
+            // Codex CLI sends its thread id as `prompt_cache_key` on every
+            // turn of a thread. That is the conversation identity the local
+            // runtime keys on: the disk-cache chain (so a thread's own resume
+            // rows outlive other chats' rows under a tight cap), frozen
+            // memory prefixes, and tool-state scoping. Without it every turn
+            // was its own chat and a Codex thread had no chain at all.
+            session_id: prompt_cache_key.flatMap { key in
+                let trimmed = key.trimmingCharacters(in: .whitespacesAndNewlines)
+                return trimmed.isEmpty ? nil : trimmed
+            }
         )
-        request.reasoning_effort = reasoning?.effort
+        // Intel: the request has no `reasoning_effort` / `response_format`
+        // yet (docs/SERVER_API_INTEL.md, "Not yet"); the route refuses a
+        // structured `text.format` instead of ignoring it.
         return request
     }
 }
 
-extension ChatCompletionResponse {
-    /// Convert internal ChatCompletionResponse to Open Responses format
-    func toOpenResponsesResponse(responseId: String) -> OpenResponsesResponse {
-        var outputItems: [OpenResponsesOutputItem] = []
-
-        for choice in choices {
-            let itemId = "item_\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(24))"
-
-            // Check for tool calls
-            if let toolCalls = choice.message.tool_calls, !toolCalls.isEmpty {
-                for toolCall in toolCalls {
-                    let funcCall = OpenResponsesFunctionCall(
-                        id: itemId,
-                        status: .completed,
-                        callId: toolCall.id,
-                        name: toolCall.function.name,
-                        arguments: toolCall.function.arguments
-                    )
-                    outputItems.append(.functionCall(funcCall))
-                }
-            } else if let content = choice.message.content {
-                // Regular text message
-                let outputMessage = OpenResponsesOutputMessage(
-                    id: itemId,
-                    status: .completed,
-                    content: [.outputText(OpenResponsesOutputText(text: content))]
-                )
-                outputItems.append(.message(outputMessage))
-            }
-        }
-
-        return OpenResponsesResponse(
-            id: responseId,
-            createdAt: created,
-            status: .completed,
-            model: model,
-            output: outputItems,
-            usage: OpenResponsesUsage(
-                inputTokens: usage.prompt_tokens,
-                outputTokens: usage.completion_tokens
-            )
-        )
-    }
-}
