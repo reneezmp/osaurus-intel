@@ -358,6 +358,38 @@ extension IntelHTTPChatCompletionsTests {
     }
 }
 
+extension IntelHTTPChatCompletionsTests {
+    @Test func multipartParserReadsFieldsAndFileAndSurvivesGarbage() {
+        let body = "--XB\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nwhisper-1\r\n"
+            + "--XB\r\nContent-Disposition: form-data; name=\"file\"; filename=\"clip.m4a\"\r\n"
+            + "Content-Type: audio/mp4\r\n\r\nAUDIO\r\n--XB--\r\n"
+        let parsed = HTTPHandler.parseMultipartFormData(data: Data(body.utf8), boundary: "XB")
+        #expect(parsed.fields["model"] == "whisper-1")
+        #expect(parsed.filename == "clip.m4a")
+        #expect(parsed.file == Data("AUDIO".utf8))
+        // Upstream's parser traps on a body without any boundary.
+        #expect(HTTPHandler.parseMultipartFormData(data: Data("no parts here".utf8), boundary: "XB").file == nil)
+        #expect(HTTPHandler.parseMultipartFormData(data: Data(), boundary: "").file == nil)
+        #expect(HTTPHandler.extractBoundary(from: #"multipart/form-data; boundary="abc""#) == "abc")
+    }
+
+    /// Validation only: a real file would ask for speech-recognition access.
+    @Test func transcriptionRejectsWhatItCannotRead() async throws {
+        let server = try await startChatTestServer(engine: ScriptedChatEngine([]))
+        defer { Task { await server.shutdown() } }
+        let (json, _) = try await postPath(server, "/v1/audio/transcriptions", #"{"file":"x"}"#)
+        #expect(json == 400)
+
+        var request = URLRequest(url: URL(string: "http://\(server.host):\(server.port)/v1/audio/transcriptions")!)
+        request.httpMethod = "POST"
+        request.setValue("multipart/form-data; boundary=XB", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data("--XB\r\nContent-Disposition: form-data; name=\"model\"\r\n\r\nm\r\n--XB--\r\n".utf8)
+        let (data, resp) = try await URLSession.shared.data(for: request)
+        #expect((resp as? HTTPURLResponse)?.statusCode == 400)
+        #expect(String(decoding: data, as: UTF8.self).contains("Missing audio file"))
+    }
+}
+
 // MARK: - Test server
 
 private struct ChatTestServer {

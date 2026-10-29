@@ -252,4 +252,21 @@ Each stage: gate run, Rosy section, row note in the backlog.
       upstream's gets the "unsupported model" error rather than vectors
       of an unexpected size.
     - The model downloads on first use, as upstream's does.
+- **Stage 2d, transcription (2026-10-29):** `/audio/transcriptions`
+  (`IntelHTTPTranscription.swift`).
+  - **Port:** upstream's multipart parsing, `json` / `text` /
+    `verbose_json` formats and Insights details. It runs on Intel's
+    `SpeechService` (Apple Speech; upstream uses Parakeet on Apple silicon).
+  - **Two Intel fixes:**
+    - Upstream's parser traps on a body with no boundary
+      (`0 ..< (ranges.count - 1)`); Intel's returns no parts. Worth sending
+      upstream.
+    - The temporary file keeps the upload's extension so Apple Speech
+      reads non-WAV audio.
+  - **`runRequestTask`** now binds upstream's activity guard
+    (`ChatExecutionContext.currentRequestSource = .httpAPI` for routes that
+    log their own row), so the speech service doesn't add a second
+    Insights row.
+  - **Tests** stop at validation: a real file would ask for
+    speech-recognition access.
 

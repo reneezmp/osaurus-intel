@@ -528,9 +528,16 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             isSecureChannel: false
         )
         let operationBox = RequestTaskOperation(operation)
+        // Activity-log double-write guard (upstream): routes that write their
+        // own Insights row keep the in-process emitters they call
+        // (transcription, embeddings, media) quiet for this task.
+        let activityGuard: RequestSource? =
+            Self.handlerWritesOwnActivityRow(path: stateRef.value.normalizedPath) ? .httpAPI : nil
         return Task {
             await HTTPCallerContext.$current.withValue(callerContext) {
-                await operationBox.run()
+                await ChatExecutionContext.$currentRequestSource.withValue(activityGuard) {
+                    await operationBox.run()
+                }
             }
         }
     }
@@ -848,6 +855,8 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             serveEmbeddings(context: context, head: head, ollamaFormat: false)
         case (.POST, "/embed"):
             serveEmbeddings(context: context, head: head, ollamaFormat: true)
+        case (.POST, "/audio/transcriptions"):
+            serveAudioTranscription(context: context, head: head)
         case (.POST, "/messages"):
             serveAnthropicMessages(context: context, head: head)
         case (.POST, "/chat"):
