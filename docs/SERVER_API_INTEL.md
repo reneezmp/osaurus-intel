@@ -595,4 +595,52 @@ Each stage: gate run, Rosy section, row note in the backlog.
     `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
     `~/.osaurus` writes, identity keychain item unchanged.
 - **Stage 4 complete.** Next: stage 5 (sessions and the owner model
-  picker).
+  picker), split as 5a (sessions, projects, artifacts) and 5b (model
+  picker, options, favorites, credits).
+- **Stage 5a (2026-10-30): the chat history** (`IntelHTTPSessions.swift`).
+  - **Routes, in upstream's order:** `GET /projects`, `GET /sessions`,
+    `GET /sessions/{id}/turns/{turn id}/images/{index}`,
+    `GET /artifacts/{context id}/{filename}`, `POST /sessions/{id}/truncate`,
+    `GET`/`PATCH`/`DELETE /sessions/{id}`. All owner-only; a remote owner
+    needs the Secure Channel for every one (the owner-route gate), and
+    `/artifacts` checks it again itself, as upstream.
+  - **On Intel's history:** Intel keeps every chat, turns included, in
+    `ChatSessionsManager.sessions` (upstream reads `ChatSessionStore`,
+    excluded on Intel). The list is newest first with all of upstream's
+    filters (`agent_id`, `archived`, `pinned`, `origin`, `project_id`,
+    `plugin_id`, `workspace_id`, `capabilities`, `q`, `limit` ≤ 500); `q`
+    also matches message text through the sidebar's
+    `ChatHistoryList.sessionIds(withContentContaining:)`.
+  - **Intel differences:** Intel's turns don't store thinking time,
+    per-call tool durations or the run's start, so `thinking_duration_ms`,
+    `duration_ms` and `requested_at` are null and `ended_at` is the turn's
+    completion. No workspaces (deferred): `workspace_id` is null, the
+    workspace filter matches nothing, `GET /projects` lists no workspaces.
+    Plugins are named with `PluginDisplayNameResolver`, as Intel's history
+    filter does.
+  - **Ported from upstream:** `SessionTurnImages` verbatim
+    (`Services/MobileConnect/`; images only from the generated-images and
+    artifacts folders); `ChatWindowManager.syncOpenSessions` and
+    `deleteSession` (a PATCH or DELETE updates every window holding the
+    chat, so no open tab saves the old values back);
+    `ChatSession.truncateHostedTurns`.
+  - **`RemoteSessionContinuation`** (`Services/MobileConnect/`) is Intel's
+    part of upstream's file: `truncate`, `delete`, `isContinuable` (every
+    Intel chat: none is a teammate's), `isFromPairedPhone` (the
+    `osaurus-connect-phone` key only) and `phoneChatKey`. A truncate with
+    no open window saves through `ChatSessionsManager.save` and refreshes
+    every sidebar. The rest of the file (history replay, appending a phone
+    run's turns, phone runs in flight, pairing-key checks) comes with
+    `W-identity-mobile`.
+  - **Tests:** upstream's `SessionAPIMappingTests` mapping cases (Intel's
+    null timings; the phone-run cases wait for `W-identity-mobile`); new
+    `IntelHTTPSessionsTests` (list order, filters and content search,
+    detail with a turn's image served, PATCH, truncate, DELETE, projects,
+    artifact refusals, content sniffing). The suite deletes its chats when
+    done and checks only its own rows: other suites save chats into the
+    same storage root during a gate run.
+  - **Validation (2026-10-30):** full suite under the interim 27.0-SDK
+    gate: 4,064 tests, all stage 5a tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
+    `~/.osaurus` writes, identity keychain item unchanged.

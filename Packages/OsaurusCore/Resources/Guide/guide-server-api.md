@@ -26,9 +26,10 @@ Osaurus runs a local HTTP server that other apps on this Mac can use. On this In
 - `POST /agents/{id}/run` (or `/agents/default/run` for the Orchestrator) — run an agent on this Mac and stream its answer, OpenAI-style. The agent uses its own model, prompt, memory and tools; `osaurus_agent_tool` chunks show each tool as it starts and finishes. Tools set to Ask are refused in runs (nobody is there to approve them); set them to Auto if the agent needs them.
 - `GET /approvals`, `/config/approvals`, `/secrets/prompts`, `/computer-use/prompts` — the approval cards a run from your paired phone is waiting on, answered with `POST` to the same path plus the card's id. Owner-only. Empty in this build, since phone runs aren't here yet.
 - `POST /memory/ingest` — load past conversation turns into an agent's memory (`agent_id`, `conversation_id`, `turns: [{user, assistant}]`). The reply says whether an episode was distilled; agents with memory distillation off keep only the transcript. Not for the Orchestrator.
+- `GET /sessions` (filters: `q`, `agent_id`, `archived`, `pinned`, `project_id`, `limit`…), `GET` / `PATCH` / `DELETE /sessions/{id}`, `POST /sessions/{id}/truncate`, `GET /projects` — your chat history: list and search it, read a chat, rename, pin, archive or delete it, or cut it back to an earlier turn. Owner-only.
 - `POST /completions` answers that raw completions need Apple silicon.
 
-Not in this build yet: chat sessions, images and video, and runs from your phone. Shortcuts and Siri run agents inside the app.
+Not in this build yet: images and video, and runs from your phone. Shortcuts and Siri run agents inside the app.
 
 ## Access keys
 

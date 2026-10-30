@@ -945,6 +945,19 @@ final class ChatSession: ObservableObject {
 
     /// Rebuild `visibleBlocks` and `visibleBlocksGroupHeaderMap` from current turns.
     /// Cheap to call repeatedly — BlockMemoizer fast-paths when nothing changed.
+    /// Drop `turnId` and every turn after it, for a paired phone retrying a
+    /// reply (`POST /sessions/{id}/truncate`; upstream). Returns how many
+    /// turns went, or nil when the turn is not in this transcript. The
+    /// caller saves.
+    func truncateHostedTurns(fromTurnId turnId: UUID) -> Int? {
+        guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return nil }
+        let removed = turns.count - index
+        turns = Array(turns.prefix(index))
+        isDirty = true
+        rebuildVisibleBlocks()
+        return removed
+    }
+
     func rebuildVisibleBlocks() {
         ChatPerfTrace.shared.count("rebuildVisibleBlocks")
         ChatPerfTrace.shared.time("rebuildVisibleBlocks.total") {

@@ -1122,6 +1122,38 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         return id
     }
 
+    /// A chat's title or flags changed from outside any window (the paired
+    /// phone, `PATCH /sessions/{id}`; upstream). The sidebar callbacks sync
+    /// only their own window's open chat; this updates every tab holding
+    /// it, so none of their next full saves writes the old values back, and
+    /// refreshes every sidebar.
+    func syncOpenSessions(id: UUID, _ update: (ChatSession) -> Void) {
+        for state in windowStates.values {
+            for session in state.tabSessions where session.sessionId == id {
+                update(session)
+            }
+            state.refreshSessions()
+        }
+    }
+
+    /// A chat is deleted from outside any window (the paired phone,
+    /// `DELETE /sessions/{id}`; upstream). Does what History's Delete does
+    /// for its own window, for every window: cancel a registry-owned run,
+    /// move each window off the chat (a save from one would resurrect the
+    /// row), delete, refresh every sidebar.
+    func deleteSession(id: UUID) {
+        if let liveTask = BackgroundTaskManager.shared.liveTask(forSessionId: id) {
+            BackgroundTaskManager.shared.cancelTask(liveTask.id)
+        }
+        for state in windowStates.values {
+            state.prepareForSessionDeletion(id: id)
+        }
+        ChatSessionsManager.shared.delete(id: id)
+        for state in windowStates.values {
+            state.refreshSessions()
+        }
+    }
+
     /// The live `ChatSession` currently showing the given persisted session
     /// id in any open window, else one still running after its tab closed.
     /// Used by `SessionActivityMonitor.stop` to route a navigator Stop.

@@ -4504,6 +4504,10 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
 - **Stage 4e:** `/memory/ingest` on Intel's memory, with upstream's
   re-ingest deletes, `flushSessionAndWait` and the distillation outcome in
   the response. Distillation stays opt-in per agent. Stage 4 is complete.
+- **Stage 5a:** the chat history routes (`/sessions*`, `/projects`,
+  `/artifacts/*`) on Intel's `ChatSessionsManager`, with upstream's
+  `SessionTurnImages`, window sync/delete helpers and Intel's part of
+  `RemoteSessionContinuation`.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

@@ -2248,3 +2248,28 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] Use the Orchestrator's id (from `curl -s http://127.0.0.1:1337/agents`)
       as `agent_id`: the reply is 403. With Memory turned off in Settings,
       any agent answers 503 `memory_disabled`.
+- [ ] **Chat history** (stage 5a): `curl -s http://127.0.0.1:1337/sessions`
+      lists your chats newest first (title, agent, pinned, archived) — the
+      same as History in the app, without archived ones.
+      `curl -s 'http://127.0.0.1:1337/sessions?q=<a word from inside a chat>'`
+      finds that chat by its message text.
+- [ ] `curl -s http://127.0.0.1:1337/sessions/<id>` shows that chat's turns
+      with their text, thinking and tool calls. For a chat where you
+      attached a photo, the turn lists `images`, and
+      `curl -s -o /tmp/turn.jpg http://127.0.0.1:1337/sessions/<id>/turns/<turn id>/images/0`
+      saves the photo (open it to check).
+- [ ] With that chat **open in a window**:
+      `curl -s -X PATCH http://127.0.0.1:1337/sessions/<id> -H 'Content-Type: application/json' -d '{"title":"Renamed by curl","pinned":true}'`
+      — the window's title and the sidebar update at once, and the new
+      title survives sending another message in that chat.
+- [ ] Pick a scratch chat with at least two exchanges and copy the id of
+      its last user turn from the `/sessions/<id>` output, then
+      `curl -s -X POST http://127.0.0.1:1337/sessions/<id>/truncate -H 'Content-Type: application/json' -d '{"from_turn_id":"<turn id>"}'`
+      — the reply says how many turns went, and the chat (open or closed)
+      ends before that turn. While the chat is still answering, the same
+      call answers 409 `session_busy`.
+- [ ] `curl -s -X DELETE http://127.0.0.1:1337/sessions/<scratch id>` with
+      that chat open: the window moves off it and it disappears from
+      History; reopening the app doesn't bring it back.
+- [ ] `curl -s http://127.0.0.1:1337/projects` lists your projects and
+      installed plugins.
