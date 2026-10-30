@@ -70,6 +70,9 @@ the shared storage-path lock.
      --disable-xctest
    ```
 
+   With Xcode 27.2 this builds and runs arm64 despite `arch -x86_64`; check
+   Intel compilation separately (see "2026-10-30 gate crash" below).
+
    **Never write `export TEST_STORAGE_ROOT=… OSAURUS_TEST_ROOT="$TEST_STORAGE_ROOT"`
    on one line.** The shell expands `$TEST_STORAGE_ROOT` before `export`
    assigns it, so `OSAURUS_TEST_ROOT` is empty and `OsaurusPaths.root()`
@@ -379,3 +382,74 @@ the upstream app (and on other Macs) against the expected one.
 a postflight check now includes the identity item's `mdat`
 (`security find-generic-password -s com.osaurus.account -a master-key | grep mdat`,
 attributes only) before and after a run; it must not change.
+
+## 2026-10-30 gate crash: macOS beta older than the Xcode SDK
+
+Not a storage incident, but it stops the gate, so it lives here with the
+other gate failures.
+
+- **What happened:** Xcode updated overnight to 27.2 (27B52, macOS SDK
+  27.2 build 26B118). The next gate ended at once with
+  `swiftpm-testing-helper … exited with unexpected signal code 11`. The
+  crash reports (`~/Library/Logs/DiagnosticReports/swiftpm-testing-helper-*.ips`)
+  showed `EXC_BAD_ACCESS` at address 0 in `static Date.>= infix`, first from
+  a `#expect` in `AgentLoopToolsTests`, then from app code
+  (`AppleScriptLoop.run`). A clean rebuild did not help.
+- **Cause:** the 27.2 SDK declares `Date.<=` and `Date.>=` as
+  `@backDeployed(before: macOS 27.2)`. On older macOS the binary uses the
+  inlined copy; on 27.2 and later it calls Foundation's symbol, linked weak.
+  This Mac runs a **macOS 27.2 beta (26B5086k)** that reports 27.2 but
+  predates the symbol, so the call jumps to address 0. `nm -m` on the test
+  binary shows both as `weak external … (from Foundation)`.
+- **Who is affected:** only a Mac on a 27.2 beta older than the SDK. Ventura
+  and every release before 27.2 take the inlined path; 27.2 final has the
+  symbol. Shipped Intel builds are fine. A debug build run on this Mac would
+  crash the same way.
+- **Fix:** update this Mac to macOS 27.2 final (26B118 or later), or build
+  with the previous Xcode. Don't rewrite `Date` comparisons in app code or
+  tests for it.
+- **If the gate dies with signal 11:** nothing ran past the crashing test;
+  the live-data checks still apply as usual. Read the newest `.ips`
+  report's faulting thread to find the code, rather than assuming the most
+  recent change caused it, and compare `sw_vers -buildVersion` with
+  `xcrun --show-sdk-build-version`.
+- **Installing the update:** a plain restart did not install it. Software
+  Update had macOS 27.2 (26B123) downloaded with "Action: restart", but after
+  a restart `sw_vers` still showed 26B5086k. Use **Update Now** in System
+  Settings → General → Software Update, then check `sw_vers -buildVersion`.
+  A one-file check settles it in seconds:
+  `print(Date() <= Date().addingTimeInterval(1))` built with
+  `swiftc -target x86_64-apple-macos13.0` exits 139 while the bug is there.
+- **Interim gate (used for stage 4c):** build against the Command Line Tools
+  27.0 SDK, which predates the `@backDeployed` change. Three things are
+  needed, because Xcode 27.2's default build engine (Swift Build) ignores both
+  `SDKROOT` and `--sdk`, and the Command Line Tools alone can't compile
+  `.xcstrings`:
+
+  ```sh
+  P=/Applications/Xcode.app/Contents/Developer/Platforms/MacOSX.platform/Developer/usr
+  TEST_STORAGE_ROOT="$(mktemp -d /tmp/osaurus-tests.XXXXXX)"
+  OSAURUS_TEST_ROOT="$TEST_STORAGE_ROOT" OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1 \
+    /usr/bin/swift test --package-path Packages/OsaurusCore \
+    --build-system native \
+    -Xswiftc -external-plugin-path -Xswiftc "$P/lib/swift/host/plugins#$P/bin/swift-plugin-server" \
+    --sdk /Library/Developer/CommandLineTools/SDKs/MacOSX27.0.sdk \
+    --scratch-path <scratch>/build-sdk27 --no-parallel --disable-xctest
+  ```
+
+  The plugin path lets SwiftUI's `@State` macro run (its plugin is arm64
+  only). The native engine copies `Assets.xcassets` uncompiled, so
+  `IntelUpstreamBatch1007Tests` "Memory pressure empties the avatar bitmap
+  cache" fails under it (no image to render); every other test passed
+  (4,027 tests, 2026-10-30). Use the normal gate again once macOS is fixed.
+- **The gate runs arm64, not Intel.** Found while setting up the interim
+  gate: with Xcode 27.2, `arch -x86_64 /usr/bin/swift test` still builds and
+  runs the tests as native arm64 (`file` on
+  `.build/out/Products/Debug/OsaurusCoreTests.xctest/Contents/MacOS/OsaurusCoreTests`
+  says arm64; the crash reports say `ARM-64`, not translated), and
+  `swiftpm-testing-helper` is arm64 only, so an x86_64 test bundle can't be
+  run by it at all. The gate checks logic, which has no CPU-specific code
+  (`OSAURUS_INTEL` is a build define). Intel compilation is checked
+  separately with `swift build --package-path Packages/OsaurusCore --arch x86_64`
+  (or `--triple x86_64-apple-macosx13.0` under the interim setup), and Intel
+  behaviour by Rosy QA.

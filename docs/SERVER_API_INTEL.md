@@ -369,7 +369,8 @@ Each stage: gate run, Rosy section, row note in the backlog.
       image-to-video models, and remote models that aren't embedding
       models.
     - `features` is empty: upstream advertises `session_create`, which
-      needs runs that can start a chat (stage 4c).
+      needs runs that can start a chat (`osaurus_create_session`, which
+      comes with the phone's runs in `W-identity-mobile`).
   - **Found while testing:** over loopback with the local-key setting off,
     upstream's gate never reads a presented key, so a local agent-scoped
     key acts as the owner. That is upstream's behaviour (the
@@ -428,3 +429,78 @@ Each stage: gate run, Rosy section, row note in the backlog.
     - Intel route cases for dispatch validation, the 426 for a remote
       owner key, the task routes, session-key scoping and the engine's
       refusal text.
+- **Stage 4c (2026-10-30): streamed agent runs** (`IntelHTTPAgentRun.swift`).
+  - **Routes:** `POST /agents/{id}/run`, `GET /runs/{id}/events`,
+    `POST /runs/{id}/stop`, routed before the agent routes as upstream.
+  - **Upstream gates, in upstream's order:** 426 for a remote caller
+    without the Secure Channel; the body decoded after
+    `injectingEmptyModelIfMissing`; the agent from `default`, a UUID or an
+    address (any UUID is accepted, as upstream's run does); the built-in
+    agent for the owner only; agent-scope confinement.
+  - **How the run works on Intel:** upstream drives its own loop
+    (`AgentToolLoop`, not compiled on Intel). Intel's `ChatEngine` already
+    runs the tool loop, so the handler builds the agent's request and
+    streams the engine's output:
+    - the request is upstream's `enrichWithAgentContext` on Intel's
+      composer: the agent's prompt ahead of any caller system message
+      (upstream's `injectSystemContent`, now in Intel's
+      `SystemPromptComposer`), memory beside the last user turn, the agent's
+      tools plus caller functions that don't shadow a registered tool
+      (`mergeAgentContextTools`, without upstream's canonical sort);
+    - model: an omitted or `"default"` model is the agent's own
+      (`effectiveModel`); sampling from `resolveAgentSampling` (request
+      first, then the agent);
+    - tool calls run with `isExternalSurface` bound, as upstream binds it
+      around its batch executor: `.ask` tools are refused (stage 4b's engine
+      rule), the external deny list applies;
+    - the stream: text, reasoning, and upstream's `osaurus_agent_tool`
+      trace (`writeAgentToolTrace`, `AgentToolTraceDetail`,
+      `AgentToolTraceTimer`). Arguments, results, labels and durations go
+      to owner callers only. Intel has no `SecretArgumentScrubber` (no
+      sandbox secret tools), so arguments go through unchanged;
+    - a successful `complete` / `clarify` streams its summary or question
+      at the end; the tool-round cap streams upstream's "Tool-loop budget
+      of N iterations exhausted" notice instead of an error; other failures
+      are an in-band error chunk after the 200 head;
+    - `include_usage` adds the usage chunk when every model round reported
+      usage.
+  - **Engine changes (API runs only, chats unchanged):**
+    - `ChatCompletionRequest.reportsToolStarts`: the engine yields
+      `StreamingToolHint.encodeStarted` (call id, name, arguments) before
+      each tool it runs, in both the Chat Completions and Codex paths. The
+      existing `tool:` hint only carries a name while the call streams, so
+      it can't pair with the "completed" trace.
+    - `ChatCompletionRequest.maxToolRounds`: the run's limit (upstream's
+      `maxToolAttempts`, default 30, capped at 120) instead of the engine's
+      12. At the limit the engine throws `ChatEngine.ToolRoundLimitReached`
+      (same message the chat showed before).
+    - Usage is summed over the run's rounds (upstream `AgentRunUsage`,
+      ported with its tests); a round with no measured usage leaves the run
+      unreported. Single-round API requests report what they did before.
+  - **Wait for `W-identity-mobile`** (all need the Secure Channel, so no
+    caller can reach them yet): detached phone runs (`osaurus_run_id`,
+    `DetachedPhoneRuns`; `/runs/{id}/*` answer owner-only 403 or 404
+    `run_not_found`), the agent's host workspace folder, continuing a Mac
+    chat (`osaurus_session_id`, `osaurus_create_session`, and with it the
+    `session_create` feature in `GET /agents`), voice-call turns, the
+    phone's model options and privacy choice, the inbound shared-run tab.
+  - **Not ported:** inference admission control (Intel has none on any
+    route), workspace billing and audit, harness runtimes, Router billing
+    relay, `share_artifact` relay, memory-prefix replay per `session_id`
+    (`SessionToolStateStore`, not compiled on Intel), upstream's fallback
+    to the loaded local model (Intel has none; `effectiveModel` already
+    falls back to the chat default).
+  - **Tests:** upstream's `AgentRunUsageTests` and
+    `AgentRunSamplingResolutionTests`; new `IntelAgentRunEngineTests`
+    (started marker, round limit, usage across rounds, against an
+    in-process provider fixture) and `IntelHTTPAgentRunTests` (upstream's
+    built-in loopback case, the streamed trace with no in-band hints
+    leaking, the round-limit notice, validation, `/runs/*`, helpers).
+    Upstream's `HTTPHandlerChatStreamingTests` stays excluded: its fake
+    engines throw tool calls, upstream's engine contract, not Intel's.
+  - **Validation (2026-10-30):** full suite under the interim 27.0-SDK gate
+    (`TEST_STORAGE_SAFETY.md`, "2026-10-30 gate crash"): 4,027 tests, all
+    stage 4c suites pass; the one failure is the avatar-cache test that
+    gate can't run (uncompiled asset catalog). The package and its tests
+    also build for `x86_64-apple-macosx13.0`. No live `~/.osaurus` writes,
+    identity keychain item unchanged.

@@ -13,9 +13,9 @@
 //  as upstream's server does.
 //
 //  `SSEResponseWriter` is upstream's OpenAI Chat Completions stream writer
-//  (`Models/Chat/ResponseWriters.swift`, excluded on Intel), minus the
-//  phone-run recorder, agent tool traces, Router billing relay and
-//  artifacts chunk, which arrive with their routes.
+//  (`Models/Chat/ResponseWriters.swift`, excluded on Intel), with the agent
+//  tool trace (stage 4c), minus the phone-run recorder, Router billing relay
+//  and artifacts chunk, which arrive with their routes.
 //
 
 import Foundation
@@ -176,6 +176,70 @@ enum IntelHTTPInference {
 
 /// Stateless, so it may be used from a request's task and the event loop.
 final class SSEResponseWriter: @unchecked Sendable {
+    private struct AgentToolTraceChunk: Encodable {
+        struct Trace: Encodable {
+            var phase: String
+            var name: String
+            var call_id: String
+            var is_error: Bool?
+            var end_run: Bool?
+            // Owner-only detail (see `AgentToolTraceDetail`); omitted otherwise.
+            var label: String?
+            var category: String?
+            var icon: String?
+            var arguments: String?
+            var result: String?
+            var result_truncated: Bool?
+            var duration_ms: Int?
+        }
+
+        var id: String
+        var object: String
+        var created: Int
+        var model: String
+        var choices: [StreamChoice]
+        var osaurus_agent_tool: Trace
+    }
+
+    /// Upstream's `/agents/{id}/run` tool progress chunk: phase, tool name,
+    /// call id and end state for every caller; arguments, results and the
+    /// Mac's labels only for the owner (`detail`).
+    func writeAgentToolTrace(
+        phase: String,
+        toolName: String,
+        callId: String,
+        isError: Bool? = nil,
+        endRun: Bool? = nil,
+        detail: AgentToolTraceDetail? = nil,
+        model: String,
+        responseId: String,
+        created: Int,
+        context: ChannelHandlerContext
+    ) {
+        let chunk = AgentToolTraceChunk(
+            id: responseId,
+            object: "chat.completion.chunk",
+            created: created,
+            model: model,
+            choices: [],
+            osaurus_agent_tool: .init(
+                phase: phase,
+                name: toolName,
+                call_id: callId,
+                is_error: isError,
+                end_run: endRun,
+                label: detail?.label,
+                category: detail?.category,
+                icon: detail?.icon,
+                arguments: detail?.arguments,
+                result: detail?.result,
+                result_truncated: detail?.resultTruncated,
+                duration_ms: detail?.durationMs
+            )
+        )
+        writeSSEChunk(chunk, context: context)
+    }
+
     func writeHeaders(_ context: ChannelHandlerContext, extraHeaders: [(String, String)]? = nil) {
         var head = HTTPResponseHead(version: .http1_1, status: .ok)
         var headers = HTTPHeaders()
@@ -361,6 +425,10 @@ final class SSEResponseWriter: @unchecked Sendable {
         writeSSEChunk(chunk, context: context)
     }
 
+    func writeError(_ message: String, context: ChannelHandlerContext) {
+        writeStructuredError(message: message, type: "internal_error", code: nil, context: context)
+    }
+
     func writeStructuredError(message: String, type: String, code: String?, context: ChannelHandlerContext) {
         let encoder = IkigaJSONEncoder()
         var buffer = context.channel.allocator.buffer(capacity: 256)
@@ -520,5 +588,87 @@ extension HTTPHandler {
             }
         }
         return out
+    }
+}
+
+// MARK: - Agent tool trace detail (upstream)
+
+/// Rich tool-trace fields for callers that own this Mac (loopback, or a
+/// master-scoped key such as a paired phone), so they can render tool calls
+/// exactly like the Mac chat UI. Never sent to agent-scoped or
+/// workspace-minted callers: arguments and results may carry host data.
+struct AgentToolTraceDetail: Sendable {
+    static let maxArgumentsChars = 8_000
+    static let maxResultChars = 16_000
+
+    var label: String
+    var category: String
+    var icon: String
+    var arguments: String?
+    var result: String?
+    var resultTruncated: Bool?
+    var durationMs: Int?
+
+    /// "started": the running label and the (secret-scrubbed) arguments.
+    static func started(toolName: String, arguments: String) -> AgentToolTraceDetail {
+        let (category, icon) = categoryAndIcon(toolName)
+        return AgentToolTraceDetail(
+            label: ToolDisplayName.friendly(for: toolName, running: true, arguments: arguments),
+            category: category,
+            icon: icon,
+            arguments: capped(arguments, max: maxArgumentsChars).text
+        )
+    }
+
+    /// "completed": the done label, the (capped) result, and the duration.
+    static func completed(
+        toolName: String,
+        arguments: String,
+        result: String,
+        isError: Bool,
+        duration: TimeInterval?
+    ) -> AgentToolTraceDetail {
+        let (category, icon) = categoryAndIcon(toolName)
+        let capped = capped(result, max: maxResultChars)
+        return AgentToolTraceDetail(
+            label: ToolDisplayName.friendly(for: toolName, running: false, arguments: arguments, failed: isError),
+            category: category,
+            icon: icon,
+            result: capped.text,
+            resultTruncated: capped.truncated ? true : nil,
+            durationMs: duration.map { Int(($0 * 1000).rounded()) }
+        )
+    }
+
+    private static func categoryAndIcon(_ toolName: String) -> (String, String) {
+        let category = ToolCategory.from(toolName: toolName)
+        return (
+            String(describing: category),
+            SubagentCapabilityRegistry.iconName(forToolName: toolName) ?? category.icon
+        )
+    }
+
+    private static func capped(_ text: String, max: Int) -> (text: String, truncated: Bool) {
+        guard text.count > max else { return (text, false) }
+        return (String(text.prefix(max)), true)
+    }
+}
+
+/// Start times of in-flight tool calls, keyed by call id, so "completed"
+/// traces can carry a duration. Touched from concurrent tool tasks.
+final class AgentToolTraceTimer: @unchecked Sendable {
+    private let lock = NSLock()
+    private var starts: [String: Date] = [:]
+
+    func start(_ callId: String) {
+        lock.lock()
+        starts[callId] = Date()
+        lock.unlock()
+    }
+
+    func finish(_ callId: String) -> TimeInterval? {
+        lock.lock()
+        defer { lock.unlock() }
+        return starts.removeValue(forKey: callId).map { Date().timeIntervalSince($0) }
     }
 }

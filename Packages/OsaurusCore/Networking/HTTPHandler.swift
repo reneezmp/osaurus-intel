@@ -151,6 +151,14 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// with a `StreamingUsageHint` when the provider reported usage. Not
     /// encoded.
     var reportsUsage: Bool = false
+    /// Intel (`W-server-api` stage 4c): an agent run. The engine yields a
+    /// `StreamingToolHint.encodeStarted` marker before each tool it runs.
+    /// Not encoded.
+    var reportsToolStarts: Bool = false
+    /// Intel: the run's tool-round limit (upstream's configured
+    /// `maxToolAttempts` for `/agents/{id}/run`); `nil` keeps the engine's
+    /// own. Not encoded.
+    var maxToolRounds: Int? = nil
 
     private enum CodingKeys: String, CodingKey {
         case model, messages, stream, temperature, max_tokens, top_p
@@ -882,6 +890,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/mcp/call"):
             serveMCPCallTool(context: context, head: head)
         default:
+            if routeRunRequest(context: context, head: head, path: path) { return }
             if routeAgentRequest(context: context, head: head, path: path) { return }
             if routeTaskRequest(context: context, head: head, path: path) { return }
             // Upstream answers unknown routes 404 (Intel's old router

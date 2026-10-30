@@ -4493,6 +4493,10 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
 - **Stage 4b:** `/agents/{id}/dispatch` and `/tasks/*`. Remote runs are
   external: Intel's engine refuses `.ask` tools for them instead of
   showing a card. `AgentManager.resolveAgentId` is upstream's now.
+- **Stage 4c:** `/agents/{id}/run` streams an agent run on Intel's engine
+  (the engine runs the tools; a run-only "started" marker gives upstream's
+  tool trace its call id). `/runs/{id}/*` answer 404 until phone runs come
+  with `W-identity-mobile`.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

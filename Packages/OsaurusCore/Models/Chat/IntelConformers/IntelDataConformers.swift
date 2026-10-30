@@ -2247,6 +2247,23 @@ struct StreamingToolHint: Sendable {
             [ProposedCall].self, from: Data(delta.dropFirst(proposedPrefix.count).utf8))
     }
 
+    /// Intel (`W-server-api` stage 4c): a tool the engine is about to run,
+    /// sent only for requests that ask for it
+    /// (`ChatCompletionRequest.reportsToolStarts`), so `/agents/{id}/run`
+    /// streams upstream's "started" tool trace with the call id its
+    /// "completed" trace (`encodeDone`) carries.
+    private static let startedPrefix = "\u{1B}[[OSX_TOOL_STARTED]]"
+
+    static func encodeStarted(callId: String, name: String, arguments: String) -> String {
+        let data = (try? JSONEncoder().encode(ProposedCall(callId: callId, name: name, arguments: arguments))) ?? Data()
+        return startedPrefix + (String(data: data, encoding: .utf8) ?? "")
+    }
+
+    static func decodeStarted(_ delta: String) -> ProposedCall? {
+        guard delta.hasPrefix(startedPrefix) else { return nil }
+        return try? JSONDecoder().decode(ProposedCall.self, from: Data(delta.dropFirst(startedPrefix.count).utf8))
+    }
+
     static func encode(_ toolName: String) -> String { namePrefix + toolName }
     static func encodeArgs(_ fragment: String) -> String { argsPrefix + fragment }
     static func encodeDone(callId: String, name: String, arguments: String, result: String) -> String {
@@ -2275,7 +2292,7 @@ struct StreamingToolHint: Sendable {
     static func isSentinel(_ delta: String) -> Bool {
         delta.first == "\u{FFFE}"
             || delta.hasPrefix(donePrefix) || delta.hasPrefix(namePrefix) || delta.hasPrefix(argsPrefix)
-            || delta.hasPrefix(proposedPrefix)
+            || delta.hasPrefix(proposedPrefix) || delta.hasPrefix(startedPrefix)
     }
     static func decode(_ delta: String) -> String? {
         delta.hasPrefix(namePrefix) ? String(delta.dropFirst(namePrefix.count)) : nil
@@ -2788,6 +2805,31 @@ final class SystemPromptComposer: @unchecked Sendable {
         } else {
             messages.append(mem)
         }
+    }
+
+    /// Upstream: merge content into the first system message (prepending or
+    /// appending), or insert one at index 0.
+    static func mergeSystemContent(
+        _ content: String,
+        into messages: inout [ChatMessage],
+        prepend: Bool
+    ) {
+        let trimmed = content.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return }
+        if let idx = messages.firstIndex(where: { $0.role == "system" }),
+            let existing = messages[idx].content, !existing.isEmpty
+        {
+            let combined = prepend ? trimmed + "\n\n" + existing : existing + "\n\n" + trimmed
+            messages[idx] = ChatMessage(role: "system", content: combined)
+        } else {
+            messages.insert(ChatMessage(role: "system", content: trimmed), at: 0)
+        }
+    }
+
+    /// Upstream: the HTTP agent path lands the composed prompt ahead of any
+    /// caller-supplied system message.
+    static func injectSystemContent(_ content: String, into messages: inout [ChatMessage]) {
+        mergeSystemContent(content, into: &messages, prepend: true)
     }
 }
 

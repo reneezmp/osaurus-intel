@@ -1003,10 +1003,26 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                 // API requests (`reportsUsage`) get the provider's measured
                 // counts as an in-band marker at the end of the stream
                 // (`W-server-api`); app chats never see it.
+                // Usage summed over the run's model rounds (upstream
+                // `AgentRunUsage`): a round with no measured usage leaves
+                // the run's counts incomplete, so none are reported.
+                var runUsage = AgentRunUsage()
+                var roundPromptTokens: Int?
+                var roundCompletionTokens: Int?
+                var roundUsageOpen = false
+                func closeRoundUsage() {
+                    guard roundUsageOpen else { return }
+                    roundUsageOpen = false
+                    runUsage.append(
+                        promptTokens: roundPromptTokens, completionTokens: roundCompletionTokens,
+                        tokensPerSecond: nil)
+                }
                 func yieldUsageIfRequested() {
-                    guard request.reportsUsage, let promptTokens, let completionTokens else { return }
+                    closeRoundUsage()
+                    guard request.reportsUsage, runUsage.hasCompleteTokenCounts else { return }
                     continuation.yield(
-                        StreamingUsageHint.encode(promptTokens: promptTokens, completionTokens: completionTokens))
+                        StreamingUsageHint.encode(
+                            promptTokens: runUsage.promptTokens, completionTokens: runUsage.completionTokens))
                 }
 
                 func captureResponseText(_ emission: String) {
@@ -1103,13 +1119,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     let compactionWatermark = CompactionWatermark()
                     var tokenBudgetNoticeFired = false
                     var codexReplayItems: [[String: Any]] = []
-                    let maxToolRounds = 12
+                    let maxToolRounds = request.maxToolRounds ?? 12
                     var round = 0
                     var totalChunks = 0
 
                     while round < maxToolRounds {
                         try Task.checkCancellation()
                         round += 1
+                        closeRoundUsage()
+                        roundPromptTokens = nil
+                        roundCompletionTokens = nil
+                        roundUsageOpen = true
 
                         // Trim first, then the transient notices (upstream's
                         // order): compaction decisions stay notice-independent.
@@ -1386,6 +1406,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                     throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
                                 }
+                                if request.reportsToolStarts {
+                                    continuation.yield(
+                                        StreamingToolHint.encodeStarted(
+                                            callId: call.callID, name: call.name, arguments: call.arguments))
+                                }
                                 var result: String
                                 if let harnessResult = Self.harnessResult(
                                     taskState, name: call.name, arguments: call.arguments,
@@ -1593,6 +1618,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 if let usage = json["usage"] as? [String: Any] {
                                     promptTokens = usage["prompt_tokens"] as? Int ?? promptTokens
                                     completionTokens = usage["completion_tokens"] as? Int ?? completionTokens
+                                    roundPromptTokens = usage["prompt_tokens"] as? Int ?? roundPromptTokens
+                                    roundCompletionTokens = usage["completion_tokens"] as? Int ?? roundCompletionTokens
                                     let hit = usage["prompt_cache_hit_tokens"] as? Int ?? -1
                                     let miss = usage["prompt_cache_miss_tokens"] as? Int ?? -1
                                     let promptTok = usage["prompt_tokens"] as? Int ?? -1
@@ -1753,6 +1780,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     )
                                 )
                                 throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
+                            }
+                            if request.reportsToolStarts {
+                                continuation.yield(
+                                    StreamingToolHint.encodeStarted(
+                                        callId: callId, name: call.name, arguments: call.arguments))
                             }
                             var result: String
                             let toolStart = Date()
@@ -1925,7 +1957,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     }
 
                     NSLog("[CloudChatEngine] Tool loop hit max rounds (\(maxToolRounds))")
-                    let error = EngineError(message: "Tool-call limit reached before the response completed.")
+                    let error = ToolRoundLimitReached(rounds: maxToolRounds)
                     logInference(error: error)
                     continuation.finish(throwing: error)
                 } catch {
@@ -2399,6 +2431,14 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         var errorDescription: String? { message }
         /// The model has no endpoint (upstream answers that 404 on the API).
         var isUnknownModel: Bool { message.hasPrefix("No endpoint for model") }
+    }
+
+    /// The run used every tool round it was allowed without a final answer.
+    /// The chat shows the message; `/agents/{id}/run` streams upstream's
+    /// iteration-cap notice instead.
+    struct ToolRoundLimitReached: LocalizedError {
+        let rounds: Int
+        var errorDescription: String? { "Tool-call limit reached before the response completed." }
     }
 }
 

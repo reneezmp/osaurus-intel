@@ -2204,3 +2204,21 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       the task stops (toast says cancelled; status says `cancelled`).
 - [ ] A made-up agent id (`/agents/00000000-0000-0000-0000-00000000abcd/dispatch`)
       answers `agent_not_found` and starts nothing.
+- [ ] **Streamed agent run** (stage 4c): with a custom agent that has a
+      model set,
+      `curl -N http://127.0.0.1:1337/agents/<id>/run -H 'Content-Type: application/json' -d '{"messages":[{"role":"user","content":"What time is it? Use a tool."}]}'`
+      streams `data:` chunks: the answer's text, plus `osaurus_agent_tool`
+      chunks with `"phase":"started"` then `"phase":"completed"` (same
+      `call_id`, with a `label` and the tool's `result`), then `[DONE]`.
+      No odd escape characters appear in the text.
+- [ ] The same with `/agents/default/run` runs the Orchestrator.
+- [ ] Add `"stream_options":{"include_usage":true}`: the last chunk before
+      `[DONE]` carries `usage` (only for providers that report it, e.g.
+      DeepSeek).
+- [ ] An agent with a tool set to **Ask**: asking it to use that tool in a
+      run shows no approval card; the tool's result says it needs approval
+      in the app.
+- [ ] Stop `curl` (Ctrl-C) during a long answer: the run stops (Insights
+      shows the request ended).
+- [ ] `curl -s http://127.0.0.1:1337/runs/abc/events` answers
+      `run_not_found`.
