@@ -4,18 +4,16 @@
 //
 //  Coverage for the issue #1632 distillation/ingestion robustness fixes:
 //  id-scoped signal marking (D2), bounded retries + dead-lettering (D1),
-//  the stored-memory episode count (U3), and the `DistillOutcome` -> API
-//  status mapping (A).
+//  per-conversation idempotency deletes (I1), the stored-memory episode
+//  count (U3), and the `DistillOutcome` -> API status mapping (A).
 //
 //  All DB tests use an in-memory `MemoryDatabase` (runs migrations through
 //  v10 on open) so they're deterministic and don't touch the user's
 //  on-disk memory store or any model runtime.
 //
-//  Intel (2026-10-27): upstream's file minus the I1 idempotency deletes
-//  (`deletePendingSignalsForConversation`, `deleteEpisodesForConversation`),
-//  which back upstream's `/memory/ingest` re-ingest path and are not ported.
-//  Adds the diagnostics count of dead-lettered rows, which Intel read under
-//  the wrong status name (`'dead'`) until this port.
+//  Intel (2026-10-27): adds the diagnostics count of dead-lettered rows,
+//  which Intel read under the wrong status name (`'dead'`) until this port.
+//  The I1 deletes came back with `/memory/ingest` (2026-10-30, stage 4e).
 //
 
 import Foundation
@@ -133,6 +131,36 @@ struct MemoryIngestRobustnessTests {
         let result = try db.recordDistillFailure(ids: [], maxAttempts: 3)
         #expect(result.attempts == 0)
         #expect(result.deadLettered == false)
+    }
+
+    // MARK: - I1: per-conversation idempotency deletes
+
+    @Test func deletePendingSignalsForConversation_clearsRegardlessOfStatus() throws {
+        let db = try makeTempDB()
+        try db.insertPendingSignal(PendingSignal(agentId: "a", conversationId: "c", userMessage: "pending"))
+        try db.insertPendingSignal(PendingSignal(agentId: "a", conversationId: "c", userMessage: "to-process"))
+        let ids = try db.loadPendingSignals(conversationId: "c").map(\.id)
+        try db.markSignals(ids: [ids[0]], status: "processed")
+        // One pending, one processed — both should be cleared.
+
+        try db.deletePendingSignalsForConversation("c")
+        #expect(try db.loadPendingSignals(conversationId: "c").isEmpty)
+        // Re-buffering after the clear starts fresh.
+        try db.insertPendingSignal(PendingSignal(agentId: "a", conversationId: "c", userMessage: "fresh"))
+        #expect(try db.loadPendingSignals(conversationId: "c").count == 1)
+    }
+
+    @Test func deleteEpisodesForConversation_clearsThatConversationOnly() throws {
+        let db = try makeTempDB()
+        _ = try db.insertEpisode(episode("a", "c1", "first"))
+        _ = try db.insertEpisode(episode("a", "c1", "duplicate of first"))
+        _ = try db.insertEpisode(episode("a", "c2", "other conversation"))
+
+        try db.deleteEpisodesForConversation("c1")
+
+        let remaining = try db.loadEpisodes(agentId: "a")
+        #expect(remaining.count == 1)
+        #expect(remaining[0].conversationId == "c2")
     }
 
     /// Intel: the diagnostics panel's counts follow upstream's status names.

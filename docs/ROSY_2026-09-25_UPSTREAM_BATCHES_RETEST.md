@@ -2234,3 +2234,17 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] Regression: ask the Orchestrator in a Mac chat to change its
       settings (e.g. "set the new-chat agent to the Orchestrator"); the
       review card still appears in that chat and Apply works.
+- [ ] **Memory ingest** (stage 4e): with Memory on, pick a custom agent
+      whose memory distillation is **on** (agent settings) and run
+      `curl -s http://127.0.0.1:1337/memory/ingest -H 'Content-Type: application/json' -d '{"agent_id":"<agent id>","conversation_id":"rosy-ingest-1","turns":[{"user":"I keep three beehives on my roof and harvest about twenty kilos of honey a year.","assistant":"Lovely, noted."}]}'`
+      — after the model answers, the reply has `"distillation":"distilled"`
+      and an `episode_id`, and Memory shows a new episode about beehives
+      for that agent.
+- [ ] Run the same command again: Memory still shows **one** episode for
+      that conversation, not two.
+- [ ] The same with an agent whose distillation is **off**: the reply says
+      `"distillation":"skipped:distillation_opted_out"` and no episode
+      appears (nothing is sent to the model).
+- [ ] Use the Orchestrator's id (from `curl -s http://127.0.0.1:1337/agents`)
+      as `agent_id`: the reply is 403. With Memory turned off in Settings,
+      any agent answers 503 `memory_disabled`.

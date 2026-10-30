@@ -56,6 +56,16 @@ public actor MemoryService {
         ISO8601DateFormatter()
     }()
 
+    /// Test seam for the distill model call, receiving (prompt, system
+    /// prompt) (upstream). Nil in production, where `ChatEngine` answers.
+    /// While set, distillation also skips model resolution, which needs a
+    /// connected provider.
+    private var distillGenerateOverride: (@Sendable (String, String) async throws -> String)?
+
+    func setDistillGenerateOverrideForTests(_ override: (@Sendable (String, String) async throws -> String)?) {
+        distillGenerateOverride = override
+    }
+
     private static func iso8601Now() -> String {
         iso8601Formatter.string(from: Date())
     }
@@ -213,6 +223,24 @@ public actor MemoryService {
         debounceTasks[conversationId] = Task { [weak self] in
             await self?.distillSession(agentId: agentId, conversationId: conversationId)
         }
+    }
+
+    /// Force immediate distillation for a session and await the outcome
+    /// (upstream). Used by `POST /memory/ingest` so the response reports
+    /// whether an episode was written instead of a blind `{"status":"ok"}`.
+    /// Intel has no residency gate to lift: distillation runs on the cloud
+    /// model the user chats with.
+    @discardableResult
+    public func flushSessionAndWait(
+        agentId: String,
+        conversationId: String,
+        sessionDate: String? = nil
+    ) async -> DistillOutcome {
+        // Cancel any armed debounce so we don't double-distill this
+        // session; we drive the distill directly below and await it.
+        debounceTasks[conversationId]?.cancel()
+        debounceTasks[conversationId] = nil
+        return await distillSession(agentId: agentId, conversationId: conversationId, sessionDate: sessionDate)
     }
 
     /// Immediately mirror a raw transcript turn into a project's shared
@@ -430,14 +458,15 @@ public actor MemoryService {
 
     // MARK: - Distillation (one LLM call per session)
 
+    @discardableResult
     private func distillSession(
         agentId: String,
         conversationId: String,
         sessionDate: String? = nil
-    ) async {
+    ) async -> DistillOutcome {
         let config = MemoryConfigurationStore.load()
-        guard config.enabled else { return }
-        await performDistillSession(
+        guard config.enabled else { return .skipped(reason: "memory_disabled") }
+        return await performDistillSession(
             agentId: agentId,
             conversationId: conversationId,
             sessionDate: sessionDate
@@ -446,13 +475,15 @@ public actor MemoryService {
 
     /// The actual distillation body. Re-loads signals fresh so we don't miss
     /// turns buffered while the call was queued behind another distill.
+    /// Returns what happened, for `POST /memory/ingest` (upstream).
+    @discardableResult
     private func performDistillSession(
         agentId: String,
         conversationId: String,
         sessionDate: String? = nil
-    ) async {
+    ) async -> DistillOutcome {
         let config = MemoryConfigurationStore.load()
-        guard config.enabled else { return }
+        guard config.enabled else { return .skipped(reason: "memory_disabled") }
 
         // Defense-in-depth for the same Phase 3 gate `bufferTurn` enforces
         // at the front door. `bufferTurn` refusing to queue a disabled
@@ -478,10 +509,11 @@ public actor MemoryService {
             logProcessing(
                 agentId: agentId, taskType: "distill", model: "none",
                 status: "skipped", details: "distillation_opted_out")
-            return
+            return .skipped(reason: "distillation_opted_out")
         }
 
-        guard let model = await resolveDistillModel() else {
+        let resolvedModel = distillGenerateOverride != nil ? "test-distill-override" : await resolveDistillModel()
+        guard let model = resolvedModel else {
             // `resolveDistillModel()` already validated the configured core/
             // default model against every connected provider's discovered
             // models and rejected both (or found nothing configured at all).
@@ -504,7 +536,7 @@ public actor MemoryService {
             logProcessing(
                 agentId: agentId, taskType: "distill", model: "none",
                 status: "skipped", details: detail)
-            return
+            return .skipped(reason: detail)
         }
 
         let startTime = Date()
@@ -512,9 +544,9 @@ public actor MemoryService {
         let signals: [PendingSignal]
         do { signals = try db.loadPendingSignals(conversationId: conversationId) } catch {
             MemoryLogger.service.error("distill: failed to load signals for \(conversationId): \(error)")
-            return
+            return .error("load_signals_failed: \(error.localizedDescription)")
         }
-        guard !signals.isEmpty else { return }
+        guard !signals.isEmpty else { return .noSignals }
         // Snapshot the ids so we only ever mark *these* signals processed —
         // turns buffered while the LLM call is in flight stay pending
         // (upstream #1635, issue #1632 D2).
@@ -535,7 +567,7 @@ public actor MemoryService {
                 agentId: agentId, taskType: "distill", model: model,
                 status: "skipped", details: "low_novelty:\(combinedChars)chars")
             debounceTasks[conversationId] = nil
-            return
+            return .skipped(reason: "low_novelty:\(combinedChars)chars")
         }
 
         let identity = (try? db.loadIdentity()) ?? Identity()
@@ -559,7 +591,7 @@ public actor MemoryService {
         } catch {
             // Unknown provenance must not be downgraded to user identity.
             MemoryLogger.service.error("distill: provenance lookup failed for \(conversationId): \(error)")
-            return
+            return .error("provenance_lookup_failed: \(error.localizedDescription)")
         }
         let prompt = buildDistillPrompt(
             signals: signals,
@@ -604,7 +636,7 @@ public actor MemoryService {
                     durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
                     details: "no_episode")
                 debounceTasks[conversationId] = nil
-                return
+                return .empty(reason: "no_episode")
             }
 
             let summaryText = stripPreamble(episode.summary)
@@ -616,7 +648,7 @@ public actor MemoryService {
                     durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
                     details: "empty_summary")
                 debounceTasks[conversationId] = nil
-                return
+                return .empty(reason: "empty_summary")
             }
 
             let tokenCount = max(1, summaryText.count / MemoryConfiguration.charsPerToken)
@@ -650,12 +682,11 @@ public actor MemoryService {
                 } catch {
                     MemoryLogger.service.error(
                         "distill: failed to insert episode for \(conversationId): \(error)")
-                    recordRetryableDistillFailure(
+                    return recordRetryableDistillFailure(
                         message: "episode_insert_failed: \(error.localizedDescription)",
                         agentId: agentId, conversationId: conversationId, model: model,
                         signalIds: signalIds,
                         durationMs: Int(Date().timeIntervalSince(startTime) * 1000))
-                    return
                 }
 
                 var stored = ep
@@ -684,12 +715,11 @@ public actor MemoryService {
                 } catch {
                     MemoryLogger.service.error(
                         "distill: failed to insert project episode for \(conversationId): \(error)")
-                    recordRetryableDistillFailure(
+                    return recordRetryableDistillFailure(
                         message: "episode_insert_failed: \(error.localizedDescription)",
                         agentId: agentId, conversationId: conversationId, model: model,
                         signalIds: signalIds,
                         durationMs: Int(Date().timeIntervalSince(startTime) * 1000))
-                    return
                 }
                 projectEpisode.id = episodeId
                 await MemorySearchService.shared.indexEpisode(projectEpisode)
@@ -699,7 +729,7 @@ public actor MemoryService {
                     episodeId: episodeId
                 )
             } else {
-                return
+                return .skipped(reason: "distillation_opted_out")
             }
 
             let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
@@ -711,6 +741,10 @@ public actor MemoryService {
             MemoryLogger.service.info(
                 "distill: \(conversationId) → episode #\(episodeId), \(storedPinned) pinned, \(personalDistillationEnabled && !delegated ? parsed.identityFacts.count : 0) identity facts\(delegated ? " (delegated session: identity not written)" : "") (\(durationMs)ms)"
             )
+            debounceTasks[conversationId] = nil
+            return .distilled(
+                episodeId: episodeId, pinned: storedPinned,
+                identityFacts: personalDistillationEnabled && !delegated ? parsed.identityFacts.count : 0)
         } catch is CancellationError {
             // Interrupted (app quitting, caller walked away). Not an error
             // and NOT counted toward the dead-letter cap — signals stay
@@ -720,6 +754,8 @@ public actor MemoryService {
                 agentId: agentId, taskType: "distill", model: model, status: "skipped",
                 durationMs: Int(Date().timeIntervalSince(startTime) * 1000),
                 details: "cancelled")
+            debounceTasks[conversationId] = nil
+            return .skipped(reason: "cancelled")
         } catch {
             let durationMs = Int(Date().timeIntervalSince(startTime) * 1000)
             if Self.classifyCoreModelFailure(error) == .unavailable {
@@ -731,25 +767,26 @@ public actor MemoryService {
                 logProcessing(
                     agentId: agentId, taskType: "distill", model: model, status: "skipped",
                     durationMs: durationMs, details: "core_model_unavailable")
+                debounceTasks[conversationId] = nil
+                return .skipped(reason: "core_model_unavailable")
             } else {
                 // Timeouts and hung models (`.hung`) count, like upstream's
                 // `.timedOut` / `.unresponsive`, so a session that is always
                 // too slow eventually dead-letters instead of retrying forever.
                 MemoryLogger.service.error("distill: failed for \(conversationId): \(error)")
-                recordRetryableDistillFailure(
+                return recordRetryableDistillFailure(
                     message: error.localizedDescription,
                     agentId: agentId, conversationId: conversationId, model: model,
                     signalIds: signalIds, durationMs: durationMs)
             }
         }
-
-        debounceTasks[conversationId] = nil
     }
 
     /// Record one retryable distillation failure and dead-letter the
     /// session's signals once they reach `distillMaxAttempts` (upstream
     /// #1635, issue #1632 D1). Writes the matching `processing_log` row
-    /// (`error` or `dead_letter`).
+    /// (`error` or `dead_letter`), and returns the matching outcome.
+    @discardableResult
     private func recordRetryableDistillFailure(
         message: String,
         agentId: String,
@@ -757,7 +794,7 @@ public actor MemoryService {
         model: String,
         signalIds: [Int],
         durationMs: Int
-    ) {
+    ) -> DistillOutcome {
         let failure =
             (try? db.recordDistillFailure(
                 ids: signalIds,
@@ -774,6 +811,7 @@ public actor MemoryService {
                 : message
         )
         debounceTasks[conversationId] = nil
+        return failure.deadLettered ? .deadLettered(attempts: failure.attempts) : .error(message)
     }
 
     // MARK: - Core Model Call (Intel: CloudChatEngine)
@@ -933,6 +971,9 @@ public actor MemoryService {
     /// One-shot completion via the Intel cloud engine, mirroring the
     /// `intelComplete` plugin path. Returns the assistant message text.
     private func generate(prompt: String, model: String) async throws -> String {
+        if let distillGenerateOverride {
+            return try await distillGenerateOverride(prompt, distillSystemPrompt)
+        }
         let engine = ChatEngine(model: model)
         let request = ChatCompletionRequest(
             model: model,

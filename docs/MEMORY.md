@@ -256,6 +256,10 @@ curl http://127.0.0.1:1337/memory/ingest \
 | `session_date` | string | Optional ISO 8601 date for the whole batch |
 | `skip_extraction` | bool | When `true`, only insert transcript rows; skip distillation |
 
+The response is `{"status":"ok","turns_ingested":N}`, plus `distillation` (`distilled`, `no_signals`, `skipped:<reason>`, `empty:<reason>`, `dead_letter:<attempts>` or `error:<message>`) and `episode_id` when extraction ran. Re-ingesting a `conversation_id` replaces its transcript, pending turns and episodes. The built-in agent's memory can't be written this way (403); memory turned off answers 503.
+
+**Intel (2026-10-30):** distillation stays opt-in per agent (`MEMORY_PLAN.md` §2), so an agent that hasn't opted in keeps only the transcript and reports `skipped:distillation_opted_out`. Distillation runs on the cloud model the user chats with, so the call waits for that model's answer (up to 150 s).
+
 ### List Agents — `GET /agents`
 
 Returns all configured agents with their pinned-fact counts. Use this to discover valid agent IDs.

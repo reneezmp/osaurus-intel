@@ -4501,6 +4501,9 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   `/secrets/prompts`, `/computer-use/prompts`, and the remote-reviewer
   plumbing (`hasRemoteReviewer` in the engine, registry and config queue).
   Empty until the Secure Channel; upstream's `RemoteSecretPromptQueue` is in.
+- **Stage 4e:** `/memory/ingest` on Intel's memory, with upstream's
+  re-ingest deletes, `flushSessionAndWait` and the distillation outcome in
+  the response. Distillation stays opt-in per agent. Stage 4 is complete.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

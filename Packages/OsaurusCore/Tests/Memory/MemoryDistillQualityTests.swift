@@ -11,11 +11,14 @@ import Testing
 /// question.
 ///
 /// Intel (2026-10-27): upstream #3210's file against `IntelMemoryService`.
-/// The two end-to-end tests that script the core model through
-/// `setDistillGenerateOverrideForTests` / `flushSessionAndWait` are omitted:
-/// Intel's distiller calls `CloudChatEngine` and has neither seam. The
-/// delegated-marker test passes a project id because Intel's distillation is
-/// opt-in per agent and a project chat still buffers.
+/// The delegated-marker test passes a project id because Intel's
+/// distillation is opt-in per agent and a project chat still buffers.
+/// 2026-10-30 (`W-server-api` stage 4e): the two end-to-end tests that script
+/// the core model through `setDistillGenerateOverrideForTests` /
+/// `flushSessionAndWait` are back, now that Intel has both. Intel opts the
+/// built-in agent in to distillation instead of naming a core model (the
+/// seam skips Intel's provider lookup), and buffers the delegated turn with
+/// `bufferTurn(provenance: .delegated)`.
 @MainActor
 @Suite(.serialized, .timeLimit(.minutes(1)))
 struct MemoryDistillQualityTests {
@@ -125,6 +128,134 @@ struct MemoryDistillQualityTests {
             #expect(try MemoryDatabase.shared.isDelegatedConversation(delegatedConversation))
             #expect(try MemoryDatabase.shared.loadPendingSignals(conversationId: delegatedConversation).count == 1)
         }
+    }
+
+    // MARK: - Every sink sees the screened distillate
+
+    /// Opens an in-memory memory DB with memory on and the built-in agent
+    /// opted in to distillation (Intel's per-agent gate), then runs `body`.
+    private func withDistillableMemory(_ body: @MainActor @Sendable () async throws -> Void) async throws {
+        try await ChatHistoryTestStorage.run {
+            MemoryConfigurationStore.invalidateCache()
+            MemoryDatabase.shared.close()
+            try MemoryDatabase.shared.openInMemory()
+            var memoryConfig = MemoryConfiguration.default
+            memoryConfig.enabled = true
+            memoryConfig.distillationEnabledAgents[Agent.defaultId.uuidString] = true
+            MemoryConfigurationStore.save(memoryConfig)
+            defer {
+                MemoryDatabase.shared.close()
+                MemoryConfigurationStore.invalidateCache()
+            }
+            try #require(!AgentManager.shared.effectiveDistillationDisabled(for: Agent.defaultId))
+            try await body()
+        }
+    }
+
+    /// Drives the real `flushSessionAndWait` → `performDistillSession` path
+    /// with a scripted core-model reply, in a project chat, so the agent's
+    /// pinned facts, the project mirror and identity are all written by
+    /// production code from one distillate.
+    @Test func agentProjectMirrorAndIdentityReceiveTheSameScreenedDistillate() async throws {
+        try await withDistillableMemory {
+            let reply = """
+                {"episode": {"summary": "The user had the assistant read probe.json and stated a unit preference.", \
+                "topics": ["probe.json"], "decisions": [], "action_items": [], "salience": 0.5}, \
+                "entities": ["probe.json"], \
+                "pinned_candidates": [{"content": "\(Self.staleInstruction)", "salience": 0.8, "tags": []}, \
+                {"content": "User prefers metric units.", "salience": 0.7, "tags": ["preference"]}], \
+                "identity_facts": ["User's name is not specified", "No identity facts found", "User's name is Eric"]}
+                """
+            // Control: the scripted reply really carries the rejected shapes,
+            // so the assertions below cannot pass on an empty distillate.
+            let unscreened = MemoryService.shared.parseDistillResponse(reply)
+            try #require(unscreened.pinnedCandidates.count == 2)
+            try #require(unscreened.identityFacts.count == 3)
+
+            await MemoryService.shared.setDistillGenerateOverrideForTests { _, _ in reply }
+            defer { Task { await MemoryService.shared.setDistillGenerateOverrideForTests(nil) } }
+
+            let agentKey = Agent.defaultId.uuidString
+            let conversationId = UUID().uuidString
+            let projectId = UUID()
+            await MemoryService.shared.bufferTurn(
+                userMessage: Self.staleInstruction,
+                assistantMessage: "probe.json holds 45.",
+                agentId: agentKey, conversationId: conversationId, projectId: projectId)
+            await MemoryService.shared.bufferTurn(
+                userMessage: "Also, I prefer metric units for anything you measure.",
+                assistantMessage: "Noted, metric units from now on.",
+                agentId: agentKey, conversationId: conversationId, projectId: projectId)
+
+            let outcome = await MemoryService.shared.flushSessionAndWait(
+                agentId: agentKey, conversationId: conversationId)
+            try #require(outcome.episodeId != nil, "distill did not produce an episode: \(outcome)")
+
+            let agentFacts = try MemoryDatabase.shared.loadPinnedFacts(agentId: agentKey).map(\.content)
+            let projectFacts = try MemoryDatabase.shared.loadPinnedFacts(
+                agentId: MemoryNamespace.project(projectId).key).map(\.content)
+            #expect(agentFacts == ["User prefers metric units."])
+            #expect(projectFacts == ["User prefers metric units."])
+            let identity = try #require(try MemoryDatabase.shared.loadIdentity())
+            #expect(identity.overrides == ["User's name is Eric"])
+        }
+    }
+
+    /// The replay's worker session (agent 8129DE06…) distilled "User's token
+    /// is BG_TOKEN_9 within the delegated task context" into the global
+    /// identity at 10:41:08Z. A delegated session's requester is an agent.
+    @Test func delegatedSessionNeverWritesTheUsersIdentity() async throws {
+        try await withDistillableMemory {
+            let reply = """
+                {"episode": {"summary": "A delegated task returned BG_TOKEN_9.", "topics": [], "decisions": [], \
+                "action_items": [], "salience": 0.4}, "entities": [], \
+                "pinned_candidates": [{"content": "Delegated runs return the literal token they are asked for.", \
+                "salience": 0.6, "tags": []}], \
+                "identity_facts": ["User's token is BG_TOKEN_9 within the delegated task context"]}
+                """
+            let prompts = PromptCapture()
+            await MemoryService.shared.setDistillGenerateOverrideForTests { prompt, _ in
+                await prompts.record(prompt)
+                return reply
+            }
+            defer { Task { await MemoryService.shared.setDistillGenerateOverrideForTests(nil) } }
+
+            let agentKey = Agent.defaultId.uuidString
+            let delegatedConversation = UUID().uuidString
+            await MemoryService.shared.bufferTurn(
+                userMessage: "Return exactly BG_TOKEN_9 and nothing else. This is a delegated proof task.",
+                assistantMessage: "BG_TOKEN_9",
+                agentId: agentKey, conversationId: delegatedConversation, provenance: .delegated)
+            try #require(try MemoryDatabase.shared.isDelegatedConversation(delegatedConversation))
+
+            let outcome = await MemoryService.shared.flushSessionAndWait(
+                agentId: agentKey, conversationId: delegatedConversation)
+            try #require(outcome.episodeId != nil, "distill did not produce an episode: \(outcome)")
+            // The worker still learns from its own run.
+            #expect(try MemoryDatabase.shared.loadPinnedFacts(agentId: agentKey).map(\.content)
+                == ["Delegated runs return the literal token they are asked for."])
+            #expect((try MemoryDatabase.shared.loadIdentity())?.overrides ?? [] == [])
+            let prompt = try #require(await prompts.all.last)
+            #expect(prompt.contains("\nDelegating agent: Return exactly BG_TOKEN_9"))
+            #expect(!prompt.contains("\nUser: "))
+
+            // Control: the same reply from the user's own session does write
+            // identity, so the empty identity above is the delegated gate.
+            let userConversation = UUID().uuidString
+            await MemoryService.shared.bufferTurn(
+                userMessage: "Return exactly BG_TOKEN_9 and nothing else. This is my own proof task.",
+                assistantMessage: "BG_TOKEN_9",
+                agentId: agentKey, conversationId: userConversation)
+            _ = await MemoryService.shared.flushSessionAndWait(agentId: agentKey, conversationId: userConversation)
+            #expect((try MemoryDatabase.shared.loadIdentity())?.overrides
+                == ["User's token is BG_TOKEN_9 within the delegated task context"])
+            #expect(try !MemoryDatabase.shared.isDelegatedConversation(userConversation))
+        }
+    }
+
+    private actor PromptCapture {
+        private(set) var all: [String] = []
+        func record(_ prompt: String) { all.append(prompt) }
     }
 
     // MARK: - FTS recall terms

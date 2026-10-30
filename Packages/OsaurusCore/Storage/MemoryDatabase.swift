@@ -2313,6 +2313,32 @@ public final class MemoryDatabase: @unchecked Sendable {
         }
     }
 
+    /// Delete every pending signal for a conversation regardless of status.
+    /// Used by `/memory/ingest` to make re-ingesting a `conversation_id`
+    /// idempotent (upstream, issue #1632 I1) — a fresh ingest fully replaces
+    /// the prior buffered state instead of stacking duplicate signals.
+    public func deletePendingSignalsForConversation(_ conversationId: String) throws {
+        _ = try executeUpdate(
+            "DELETE FROM pending_signals WHERE conversation_id = ?1"
+        ) { stmt in
+            Self.bindText(stmt, index: 1, value: conversationId)
+        }
+    }
+
+    /// Delete every episode for a conversation (upstream). Paired with
+    /// `deletePendingSignalsForConversation` so a re-ingested
+    /// `conversation_id` yields exactly one active episode instead of a
+    /// duplicate per run (`episodes` has no `UNIQUE(conversation_id)`).
+    /// FTS stays trigger-synced; stale vector-index rows resolve to a missing
+    /// SQL row and are filtered on read.
+    public func deleteEpisodesForConversation(_ conversationId: String) throws {
+        _ = try executeUpdate(
+            "DELETE FROM episodes WHERE conversation_id = ?1"
+        ) { stmt in
+            Self.bindText(stmt, index: 1, value: conversationId)
+        }
+    }
+
     public func loadTranscript(
         agentId: String? = nil,
         days: Int = 30,

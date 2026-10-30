@@ -556,3 +556,43 @@ Each stage: gate run, Rosy section, row note in the backlog.
     avatar-cache test that gate can't run. The package and tests build for
     `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
     `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 4e (2026-10-30): `/memory/ingest`** (`IntelHTTPMemoryIngest.swift`).
+  - **Upstream's checks, in order:** body decode (400, text), the built-in
+    agent refused for everyone (403), memory off (503 `memory_disabled`),
+    database not open within 8 s (503), then the ingest. No owner check,
+    as upstream; a remote owner key needs the Secure Channel (the
+    owner-route gate), and workspace-key confinement waits with workspaces.
+  - **Ingest:** the transcript is replaced and each turn indexed; unless
+    `skip_extraction`, the conversation's pending signals and episodes are
+    cleared first (upstream I1), every turn is buffered, and distillation
+    runs at once and is awaited. The response carries `distillation`
+    (`DistillOutcome.apiStatus`) and `episode_id`. Agent ids are
+    canonicalised to uppercase UUIDs (upstream I3).
+  - **Intel's memory gains:** `MemoryDatabase.deletePendingSignalsForConversation`
+    and `deleteEpisodesForConversation` (upstream); `MemoryService.flushSessionAndWait`;
+    `performDistillSession` / `distillSession` now return a
+    `DistillOutcome` at every exit, using the tokens they already log
+    (`distillation_opted_out`, `no_model…`, `low_novelty:<n>chars`,
+    `core_model_unavailable`, `cancelled`, `no_episode`, `empty_summary`,
+    dead-letter / error from `recordRetryableDistillFailure`); and
+    upstream's `setDistillGenerateOverrideForTests` seam (while set, model
+    resolution is skipped, since it needs a connected provider).
+  - **Intel difference:** distillation stays opt-in per agent, so an agent
+    that hasn't opted in reports `skipped:distillation_opted_out` and keeps
+    only the transcript. Responses are plain Intel responses (upstream
+    closes the connection after each).
+  - **Tests:** new `IntelHTTPMemoryIngestTests` (gates, transcript-only over
+    HTTP with the canonical id, an opted-in agent distilled with its
+    episode reported, re-ingest replacing the conversation, an opted-out
+    agent, the status tokens); upstream's two I1 delete tests back in
+    `MemoryIngestRobustnessTests`; upstream's two end-to-end distillation
+    tests back in `MemoryDistillQualityTests` (the built-in agent opted in
+    instead of naming a core model; the delegated turn buffered with
+    `provenance: .delegated`).
+  - **Validation (2026-10-30):** full suite under the interim 27.0-SDK
+    gate: 4,051 tests, all stage 4e tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
+    `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 4 complete.** Next: stage 5 (sessions and the owner model
+  picker).
