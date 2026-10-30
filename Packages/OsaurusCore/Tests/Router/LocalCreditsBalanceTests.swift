@@ -110,8 +110,14 @@ struct LocalCreditsBalanceTests {
         }
     }
 
-    // Intel: upstream's `legacyAgentScopedKey_cannotReachCredits` and
-    // `workspaceMintedKey_cannotReachCredits` test the local API's access-key
-    // scoping (`HTTPHandler.legacyAgentScopedKeyMayReach` /
-    // `workspaceKeyMayReach`), which comes with `W-server-api`.
+    @Test func legacyAgentScopedKey_cannotReachCredits() {
+        #expect(!HTTPHandler.legacyAgentScopedKeyMayReach(method: .GET, path: "/credits/balance"))
+        #expect(HTTPHandler.legacyAgentScopedKeyMayReach(method: .GET, path: "/models"))
+    }
+
+    @Test func workspaceMintedKey_cannotReachCredits() {
+        #expect(
+            !HTTPHandler.workspaceKeyMayReach(method: .GET, path: "/credits/balance", peerInferenceEnabled: true)
+        )
+    }
 }

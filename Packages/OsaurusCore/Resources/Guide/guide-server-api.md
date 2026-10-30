@@ -27,6 +27,8 @@ Osaurus runs a local HTTP server that other apps on this Mac can use. On this In
 - `GET /approvals`, `/config/approvals`, `/secrets/prompts`, `/computer-use/prompts` — the approval cards a run from your paired phone is waiting on, answered with `POST` to the same path plus the card's id. Owner-only. Empty in this build, since phone runs aren't here yet.
 - `POST /memory/ingest` — load past conversation turns into an agent's memory (`agent_id`, `conversation_id`, `turns: [{user, assistant}]`). The reply says whether an episode was distilled; agents with memory distillation off keep only the transcript. Not for the Orchestrator.
 - `GET /sessions` (filters: `q`, `agent_id`, `archived`, `pinned`, `project_id`, `limit`…), `GET` / `PATCH` / `DELETE /sessions/{id}`, `POST /sessions/{id}/truncate`, `GET /projects` — your chat history: list and search it, read a chat, rename, pin, archive or delete it, or cut it back to an earlier turn. Owner-only.
+- `GET /models/picker`, `POST` / `PUT /models/options`, `PUT /models/favorites` — the composer's model picker: the models in its tabs, a model's Model Options (Thinking and the like), and hearting a model. Owner-only.
+- `GET /credits/balance` — your Osaurus credit balance, for a usage dashboard or menu bar app. Needs your access key, or "Allow local API access without a key" in Credits.
 - `POST /completions` answers that raw completions need Apple silicon.
 
 Not in this build yet: images and video, and runs from your phone. Shortcuts and Siri run agents inside the app.
@@ -34,6 +36,8 @@ Not in this build yet: images and video, and runs from your phone. Shortcuts and
 ## Access keys
 
 Settings → Server → Access Keys: **Generate Key** creates an `osk-v1` key for callers when network exposure is on. The full key is shown once; Revoke takes effect immediately. Agent-scoped keys come from the agent's row in Settings → Identity.
+
+Models from the Osaurus Router spend your credits, so another app on this Mac can only use them over the API with your access key (`Authorization: Bearer <key>`), or once you turn on **Allow local API access without a key** in Credits. Chats in the app aren't affected.
 
 ## Command-line tool
 

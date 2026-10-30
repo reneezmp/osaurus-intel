@@ -644,3 +644,62 @@ Each stage: gate run, Rosy section, row note in the backlog.
     avatar-cache test that gate can't run. The package and tests build for
     `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
     `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 5b (2026-10-30): the model picker and credits**
+  (`IntelHTTPModelPicker.swift`).
+  - **Routes:** `GET /models/picker`, `POST`/`PUT /models/options`,
+    `PUT /models/favorites` (owner-only; writes need the Secure Channel from
+    a remote owner) and `GET /credits/balance` (a verified master key, or a
+    key-less loopback caller with the opt-in and no `Origin`; upstream's
+    `LocalCreditsBalance`).
+  - **Picker:** Intel's `ModelPickerItemCache` items (built once if empty),
+    grouped with upstream's `groupedByTab` (now in Intel's
+    `ModelPickerItem`, with `ModelPickerTab`): Local first, then the
+    Osaurus Router, then other providers, models by name. `vision` uses the
+    4a helper, `thinking` the model's profile. Chat models only: upstream's
+    `kind: image` rows with their `image` / `cloud` controls come with the
+    media routes (stage 6). `privacy` waits for `W-privacy-filter`;
+    `external_source` and `available: false` concern local bundles Intel
+    never lists.
+  - **Options:** Intel's part of upstream's `ModelOptionsSnapshot`
+    (`Models/Configuration/`), on the same `ModelProfileRegistry` /
+    `ModelOptionsStore` the composer uses. Thinking shows the explicit
+    choice, else off, with `tristate: false`, matching Intel's composer
+    (`supportsUnspecifiedDefault` off). No catalog effort levels,
+    local-bundle reasoning contract or Native MTP row (none on Intel), and
+    no help text (Intel's option definitions have none). A write posts
+    `.modelOptionsChanged`; an open chat with that model reloads its
+    options (upstream's observer, now in Intel's `ChatSession`), so its next
+    composer change doesn't write the old values back. Image models answer
+    an empty snapshot (writes 404), as upstream.
+  - **Router spend gate (found while porting credits):** since stage 2 the
+    local API can run any configured model, so a key-less loopback caller
+    could spend the user's Router credits. Upstream's
+    `routerSpendAuthorizationError` is now in Intel's engine, checked after
+    the endpoint resolves in both `streamChat` and `completeChat`; the
+    refusal is a 403 `EngineError` (new optional `httpStatus`). **Intel
+    difference:** the gate applies only when an `HTTPCallerContext` is
+    bound (inside `runRequestTask`). Intel's in-app background work
+    (memory distillation, compaction, delegation, plugins) builds
+    `ChatEngine(model:)` with the default `.httpAPI` source; outside an
+    HTTP request it is the app's own work. Work an unkeyed HTTP request
+    triggers in its own task (e.g. `/memory/ingest`'s distillation on a
+    Router model) is gated too, and its signals stay pending for the app to
+    distil later.
+  - **Credits page:** upstream's `localAPISpendFooter` ("Allow local API
+    access without a key") is back under the Router switch, and
+    `LocalCreditsBalanceTests` is upstream's file again.
+  - **Tests:** new `IntelHTTPModelPickerTests` (picker mapping and tabs,
+    the route's shape, favourites, options read / write / reset / errors,
+    the reload notification, credits refusals); upstream's
+    `RouterSpendGateTests` policy cases with Intel engine cases (an unkeyed
+    HTTP caller refused before any request, a keyed one and in-app work
+    outside a request not refused, the 403 on the API); upstream's
+    `ModelPickerTabTests` grouping cases; `LocalCreditsBalanceTests`' two
+    key-scope cases restored.
+  - **Validation (2026-10-30):** full suite under the interim 27.0-SDK
+    gate: 4,088 tests, all stage 5b tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
+    `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 5 complete.** Next: stage 6 (media routes), which also adds the
+  picker's image rows.

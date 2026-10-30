@@ -5,8 +5,10 @@
 //  Upstream's Credits page (W-credits-ui-sync, 2026-10-10). Intel edits to
 //  keep on re-sync: single-value `onChange`, themed buttons and the
 //  `stethoscope` Insights symbol (Ventura);
-//  `CreditsWelcomeClaimCard` (click-only welcome credit); no
-//  `localAPISpendFooter` (Intel's local API never routes to the Router).
+//  `CreditsWelcomeClaimCard` (click-only welcome credit).
+//  `localAPISpendFooter` is back (2026-10-30, `W-server-api` stage 5b):
+//  since stage 2 Intel's local API reaches the Router, and the engine's
+//  spend gate reads this opt-in.
 //
 
 import AppKit
@@ -72,10 +74,9 @@ struct CreditsView: View {
                         routerOffCard
                     }
                     routerToggleFooter
-                    // Intel: no `localAPISpendFooter`. Intel's local API proxies
-                    // to DeepSeek and never routes to the Router, so the
-                    // key-less loopback spend opt-in would guard nothing
-                    // (`W-server-api`).
+                    if routerEnabled {
+                        localAPISpendFooter
+                    }
                 }
                 .padding(.horizontal, 24)
                 .padding(.vertical, 24)

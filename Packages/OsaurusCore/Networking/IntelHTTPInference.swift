@@ -559,6 +559,11 @@ extension HTTPHandler {
     /// client went away).
     static func inferenceHTTPStatus(for error: Error) -> (status: HTTPResponseStatus, type: String) {
         if let engineError = error as? ChatEngine.EngineError {
+            // The Router spend gate's 403 (upstream keeps the type
+            // `service_unavailable` for every non-404 engine error).
+            if let status = engineError.httpStatus {
+                return (HTTPResponseStatus(statusCode: status), status == 404 ? "invalid_request_error" : "service_unavailable")
+            }
             return engineError.isUnknownModel
                 ? (.notFound, "invalid_request_error") : (.serviceUnavailable, "service_unavailable")
         }

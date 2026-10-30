@@ -2273,3 +2273,24 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       History; reopening the app doesn't bring it back.
 - [ ] `curl -s http://127.0.0.1:1337/projects` lists your projects and
       installed plugins.
+- [ ] **Model picker** (stage 5b): `curl -s http://127.0.0.1:1337/models/picker`
+      lists the same chat models as the composer's picker, Osaurus first,
+      each with its `tab_title`, and `favorites` matches your hearted models.
+- [ ] `curl -s -X PUT http://127.0.0.1:1337/models/favorites -H 'Content-Type: application/json' -d '{"key":"<a favorite_key from the picker>","favorite":true}'`
+      — the model shows a heart in the composer's picker; `false` removes it.
+- [ ] Open a chat on a model with a Thinking switch (a Qwen3 model) and run
+      `curl -s -X PUT http://127.0.0.1:1337/models/options -H 'Content-Type: application/json' -d '{"model":"<its id>","option":"thinking","value":true}'`
+      — the composer's Model Options shows Thinking on without reopening
+      the chat; `"value":null` puts it back to default.
+- [ ] **Router spend** (security): Credits page, Osaurus Router on. With
+      "Allow local API access without a key" **off**, a chat completion on
+      an Osaurus model is refused:
+      `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337/v1/chat/completions -H 'Content-Type: application/json' -d '{"model":"<an Osaurus model id from the picker>","messages":[{"role":"user","content":"hi"}]}'`
+      prints `403`, and no credits are spent. Turn the switch **on** and
+      the same call answers (and spends a little). Turn it off again.
+- [ ] With the switch off: a chat in the app on that Osaurus model still
+      answers, and Memory still distils (Settings › Memory, "Distill
+      pending"), so in-app use is never refused.
+- [ ] `curl -s http://127.0.0.1:1337/credits/balance` answers 403
+      `credits_access_not_authorized` with the switch off, and your balance
+      with it on.

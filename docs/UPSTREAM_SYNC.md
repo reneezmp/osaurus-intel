@@ -3523,7 +3523,9 @@ Intel's Credits page was upstream's June version plus hand-ported gates
 - `CreditsView`:
   - single-value `onChange`, themed buttons and the `stethoscope` symbol;
   - a click-only `CreditsWelcomeClaimCard`;
-  - no `localAPISpendFooter`;
+  - `localAPISpendFooter` restored 2026-10-30 (`W-server-api` stage 5b: the
+    local API reaches the Router since stage 2, and the engine's spend gate
+    reads this opt-in);
   - chats open through `ChatSessionsManager` + `openSessionAsTab`.
 - `WelcomeCreditService`: `observesNotifications` defaults to false.
 - `AnnouncementsService` keeps Intel's labelled feed.
@@ -4508,6 +4510,10 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   `/artifacts/*`) on Intel's `ChatSessionsManager`, with upstream's
   `SessionTurnImages`, window sync/delete helpers and Intel's part of
   `RemoteSessionContinuation`.
+- **Stage 5b:** `/models/picker`, `/models/options`, `/models/favorites`,
+  `/credits/balance`, and upstream's Router spend gate in Intel's engine
+  (an unkeyed local caller can't spend Router credits without the Credits
+  opt-in, which is back on the Credits page). Stage 5 is complete.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

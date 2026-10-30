@@ -952,6 +952,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     "No endpoint for model \"\(resolvedModel)\". Add a provider (and key, if it needs one) in Settings → Providers, or set the DEEPSEEK_API_KEY env var."
             )
         }
+        try checkRouterSpendAuthorization(endpoint)
         let usesResponsesLite = endpoint.isCodex
             && OpenAICodexOAuthService.usesResponsesLite(modelId: endpoint.modelId)
         let responsesLiteSessionId = usesResponsesLite
@@ -1986,6 +1987,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     "No endpoint for model \"\(resolvedModel)\". Add a provider (and key, if it needs one) in Settings → Providers, or set the DEEPSEEK_API_KEY env var."
             )
         }
+        try checkRouterSpendAuthorization(endpoint)
 
         // Native wires answer one-shots through the streaming path (their
         // non-streaming bodies are not chat-completions JSON).
@@ -2433,9 +2435,60 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
     struct EngineError: LocalizedError {
         let message: String
+        /// The status the API answers with, when not upstream's 503 / 404
+        /// default (the Router spend gate's 403).
+        var httpStatus: Int? = nil
         var errorDescription: String? { message }
         /// The model has no endpoint (upstream answers that 404 on the API).
         var isUnknownModel: Bool { message.hasPrefix("No endpoint for model") }
+
+        /// Upstream `EngineError.Kind.routerSpendNotAuthorized`.
+        static let routerSpendNotAuthorized = EngineError(
+            message:
+                "This model routes through the Osaurus Router and spends account credits. Include a valid Osaurus access key (Authorization: Bearer <key>), or enable 'Allow local API access without a key' for the Router in Osaurus Credits settings.",
+            httpStatus: 403
+        )
+    }
+
+    // MARK: - Osaurus Router spend gate (upstream)
+
+    /// Pure decision core for the Router credit-spend gate (upstream).
+    ///
+    /// Osaurus Router requests are signed with the user's master key and
+    /// spend real credits, while the loopback HTTP API is deliberately
+    /// unauthenticated. Without this gate any local process could silently
+    /// drain the user's Router balance. Policy: HTTP-origin requests may
+    /// route to the Router only when the caller proved possession of a valid
+    /// access key, or the user explicitly opted in to key-less loopback
+    /// spend. App-internal sources are not affected.
+    static func routerSpendAuthorizationError(
+        serviceIsOsaurusRouter: Bool,
+        source: InferenceSource,
+        callerHasVerifiedAccessKey: Bool,
+        allowsUnkeyedLoopbackSpend: Bool
+    ) -> EngineError? {
+        guard serviceIsOsaurusRouter, source == .httpAPI else { return nil }
+        if callerHasVerifiedAccessKey || allowsUnkeyedLoopbackSpend { return nil }
+        return .routerSpendNotAuthorized
+    }
+
+    /// Enforce the Router spend gate for a resolved endpoint, in the caller's
+    /// task so the `HTTPCallerContext` bound by `HTTPHandler.runRequestTask`
+    /// is visible (upstream). Intel difference: only inside an HTTP request.
+    /// Intel's in-app background work (memory distillation, compaction,
+    /// delegation, plugins) builds `ChatEngine(model:)` with the default
+    /// `.httpAPI` source, which upstream routes through its own engine; with
+    /// no HTTP caller bound it is the app's own work and is never gated.
+    private func checkRouterSpendAuthorization(_ endpoint: ResolvedEndpoint) throws {
+        guard let caller = HTTPCallerContext.current else { return }
+        if let error = Self.routerSpendAuthorizationError(
+            serviceIsOsaurusRouter: endpoint.isOsaurusRouter,
+            source: source,
+            callerHasVerifiedAccessKey: caller.hasVerifiedAccessKey,
+            allowsUnkeyedLoopbackSpend: OsaurusRouter.allowsUnkeyedLoopbackSpend
+        ) {
+            throw error
+        }
     }
 
     /// The run used every tool round it was allowed without a final answer.

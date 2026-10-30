@@ -451,6 +451,10 @@ final class ChatSession: ObservableObject {
     private var isLoadingModel: Bool = false
 
     nonisolated(unsafe) private var localModelsObserver: NSObjectProtocol?
+    /// Observer for `.modelOptionsChanged`: the paired phone stored a model
+    /// option (`PUT /models/options`), so reload the options when it's this
+    /// window's model (upstream). Removed in deinit.
+    nonisolated(unsafe) private var modelOptionsObserver: NSObjectProtocol?
     /// Keeps this live session's `projectId` in sync when the chat is moved
     /// between projects (or its project is deleted) from another window —
     /// otherwise the next send would keep injecting a stale project's
@@ -539,6 +543,18 @@ final class ChatSession: ObservableObject {
             queue: .main
         ) { [weak self] _ in
             Task { @MainActor in await self?.refreshPickerItems() }
+        }
+
+        modelOptionsObserver = NotificationCenter.default.addObserver(
+            forName: .modelOptionsChanged,
+            object: nil,
+            queue: .main
+        ) { [weak self] notification in
+            let model = notification.object as? String
+            Task { @MainActor in
+                guard let self, model == self.selectedModel else { return }
+                self.loadActiveModelOptions(for: model)
+            }
         }
 
         // Regroup open transcripts live when the roll-up toggle flips; the
@@ -658,6 +674,9 @@ final class ChatSession: ObservableObject {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = localModelsObserver {
+            NotificationCenter.default.removeObserver(observer)
+        }
+        if let observer = modelOptionsObserver {
             NotificationCenter.default.removeObserver(observer)
         }
         if let observer = agentTodoObserver {

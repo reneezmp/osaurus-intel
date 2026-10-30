@@ -339,6 +339,88 @@ extension Array where Element == ModelPickerItem {
             .sorted { $0.key.sortOrder < $1.key.sortOrder }
             .map { (source: $0.key, models: $0.value.sorted { $0.displayName < $1.displayName }) }
     }
+
+    /// Group models into picker tabs (upstream): a single "Local" tab
+    /// (Foundation first, then on-device models sorted by name) followed by
+    /// one tab per remote provider in first-appearance order, with the
+    /// Osaurus Router pinned first. Tabs with no models are omitted. Used by
+    /// `GET /models/picker` so the phone shows the Mac's tabs; Intel has no
+    /// AppleScript bundles or on-device image models to place.
+    func groupedByTab() -> [ModelPickerTab] {
+        var foundationModels: [ModelPickerItem] = []
+        var localModels: [ModelPickerItem] = []
+        // Keyed by uniqueKey; insertion order preserved separately so provider
+        // tabs keep a stable order matching the incoming options array.
+        var remoteModels: [String: [ModelPickerItem]] = [:]
+        var remoteOrder: [(key: String, title: String)] = []
+
+        for model in self {
+            switch model.source {
+            case .foundation:
+                foundationModels.append(model)
+            case .local:
+                localModels.append(model)
+            case .remote(let providerName, _):
+                let key = model.source.uniqueKey
+                if remoteModels[key] == nil {
+                    remoteOrder.append((key: key, title: providerName))
+                }
+                remoteModels[key, default: []].append(model)
+            }
+        }
+
+        var tabs: [ModelPickerTab] = []
+        tabs.reserveCapacity(remoteOrder.count + 1)
+
+        if !foundationModels.isEmpty || !localModels.isEmpty {
+            tabs.append(
+                ModelPickerTab(
+                    key: "local",
+                    title: "Local",
+                    models: foundationModels + localModels.sorted { $0.displayName < $1.displayName }
+                )
+            )
+        }
+
+        let osaurusTabs = remoteOrder.filter { $0.title == "Osaurus" }
+        let otherRemoteTabs = remoteOrder.filter { $0.title != "Osaurus" }
+        let orderedRemoteTabs = osaurusTabs + otherRemoteTabs
+
+        for entry in orderedRemoteTabs {
+            guard let models = remoteModels[entry.key], !models.isEmpty else { continue }
+            tabs.append(
+                ModelPickerTab(
+                    key: entry.key,
+                    title: entry.title,
+                    models: models.sorted { $0.displayName < $1.displayName }
+                )
+            )
+        }
+
+        return tabs
+    }
+}
+
+// MARK: - Tabs
+
+/// A horizontal tab in the model picker (upstream): "Local" (Foundation +
+/// on-device models) followed by one tab per connected remote provider.
+struct ModelPickerTab: Identifiable, Equatable {
+    /// Stable key: "local" or "remote-<providerId>".
+    let key: String
+
+    /// Display title: "Local" or the provider name.
+    let title: String
+
+    /// Models shown when this tab is active. For the Local tab, Foundation
+    /// items come first, then on-device models sorted by name.
+    let models: [ModelPickerItem]
+
+    var id: String { key }
+
+    /// The Osaurus Router tab, identified by provider title (matching how
+    /// `groupedByTab()` pins it).
+    var isOsaurus: Bool { title == "Osaurus" }
 }
 
 // MARK: - Mock Data (For Testing Performance)
