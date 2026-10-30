@@ -2,7 +2,8 @@
 set -euo pipefail
 
 # Build a Rosy-ready Osaurus.app — the Intel fork, x86_64, ad-hoc signed for
-# local install on Rosy (2017 Intel MacBook Air, macOS Sequoia via OCLP).
+# local install on Rosy (2017 Intel MacBook Air, macOS Ventura 13 as of
+# 2026-10-30; it ran Sequoia via OCLP for a while).
 #
 # The key difference from a dev build: this app carries
 # `OsaurusCanonicalData = true` in its Info.plist, so it owns the canonical

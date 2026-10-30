@@ -2294,3 +2294,48 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] `curl -s http://127.0.0.1:1337/credits/balance` answers 403
       `credits_access_not_authorized` with the switch off, and your balance
       with it on.
+
+## Release candidate 1.0.61 (build 62) — smoke pass (2026-10-30)
+
+Candidate for public release 1.0.61 (to be cut as build 63 once this passes).
+It carries everything since 1.0.60: the 10-26 / 10-27 upstream audits, the
+memory database at schema v10, themes, onboarding, providers, image and video,
+Mac Automation, Browser Use, the agent page redesign and the local API server
+(stages 0–5b). The sections above hold the full checks; this pass covers what
+would hurt most if a release broke it.
+
+- Candidate: `1.0.61` build `62` (Debug, thin x86_64, macOS 13.0 minimum,
+  built with Xcode 27.2 / SDK 27.2), from `f5fc5ab00`.
+- Archive: `build/rosy-deploy/Osaurus-Intel-RC-1.0.61-62-2026-10-30.zip`
+  in the main checkout (85,901,868 bytes), SHA-256
+  `4bc39c1f95c06ef759e235a9b07e4a097af851e60337f5a8d1ec8914a4d572be`.
+- Checked on the build Mac: ZIP valid, six framework symlinks kept, strict
+  codesign passes with the stable Intel certificate, canonical `~/.osaurus`,
+  Sparkle key `bYYJJqFx…`. **Not launched there:** the build Mac runs a macOS
+  27.2 beta that crashes any binary built with the 27.2 SDK
+  (`TEST_STORAGE_SAFETY.md`, "2026-10-30 gate crash"). Rosy (Ventura 13)
+  takes the inlined code path and is the first launch.
+- Rosy's build number becomes `62`; the public release must use `63` or
+  higher.
+
+Before installing: quit Osaurus. Optional safety copy of `~/.osaurus`
+(the memory database upgrade below is one-way).
+
+- [ ] **Launch:** the app opens without a crash; no storage or memory warning
+      on Settings → Storage.
+- [ ] **Memory upgrade:** Memory still lists your pinned facts and episodes;
+      ask something you told it in an older chat and it is recalled.
+- [ ] **Chat:** a chat on an Osaurus Router model and one on another provider
+      both answer; an image attached to a vision model is described.
+- [ ] **Approval card:** set a tool to Ask (e.g. `file_write`), ask for it in
+      a chat with a folder: one card appears, Allow runs it.
+- [ ] **Onboarding** shows only on a fresh profile; on Rosy's existing data it
+      does not appear.
+- [ ] **Credits:** the page shows "Allow local API access without a key"
+      under the Router switch, off; chatting on a Router model still works.
+- [ ] **Local API:** `curl -s http://127.0.0.1:1337/health` answers;
+      `curl -s http://127.0.0.1:1337/sessions` lists your chats.
+- [ ] **Quit and relaunch:** tabs and the open chat come back.
+
+Result: _pending_. If it passes, cut with
+`BUILD_NUMBER=63 scripts/release/cut_intel_release.sh 1.0.61 "<notes>"`.
