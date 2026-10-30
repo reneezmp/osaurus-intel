@@ -42,7 +42,7 @@ agent, session and run routes inside the encrypted secure channel.
 | Access-key gate, loopback trust, CORS, body limits, caller context, request logging, protocol errors, `/health` | 1 |
 | `/models`, `/tags`, `/show`, `/chat/completions`, `/completions`, `/responses`, `/messages`, `/chat`, `/generate`, `/embeddings` (`/embed`), `/audio/transcriptions` | 2 |
 | `/mcp/health`, `/mcp/tools`, `/mcp/call`, external-caller tool policy (`ExternalMCPToolPolicy`) | 3 |
-| `/agents` (list, get, create, patch, delete, tools, tools preset, avatar, model), `/agents/{id}/run`, `/agents/{id}/dispatch`, `/tasks/*`, `/runs/{id}/events`, `/runs/{id}/stop`, `/approvals*`, `/config/approvals*`, `/secrets/prompts*`, `/memory/ingest` | 4 |
+| `/agents` (list, get, create, patch, delete, tools, tools preset, avatar, model), `/agents/{id}/run`, `/agents/{id}/dispatch`, `/tasks/*`, `/runs/{id}/events`, `/runs/{id}/stop`, `/approvals*`, `/config/approvals*`, `/secrets/prompts*`, `/computer-use/prompts*` (moved from `W-computer-use` in 4d), `/memory/ingest` | 4 |
 | `/sessions*`, `/projects`, `/artifacts/*`, `/models/picker`, `/models/options`, `/models/favorites`, `/credits/balance` | 5 |
 | `/images/*`, `/images/jobs/*/events`, `/videos/*` (Intel's coordinator is in, `MEDIA_GENERATION_INTEL.md`) | 6 |
 | `/admin/cache-stats`, `/admin/generation-settings`; Server tab endpoint list and "Expose to network" | 7 |
@@ -51,7 +51,6 @@ agent, session and run routes inside the encrypted secure channel.
 | `/pair*`, `/secure/*`, `/pair-invite`, phone runs | `W-identity-mobile` |
 | `/workspace-agents/*`, `/workspaces/*`, `/channels/*` | deferred (workspaces, channels) |
 | `/privacy/reviews*` | `W-privacy-filter` |
-| `/computer-use/prompts*` | `W-computer-use` |
 | `/plugins/*` | `W-plugin-reliability` |
 | `/systemone*` | check when reached (upstream on-device model) |
 
@@ -504,3 +503,56 @@ Each stage: gate run, Rosy section, row note in the backlog.
     gate can't run (uncompiled asset catalog). The package and its tests
     also build for `x86_64-apple-macosx13.0`. No live `~/.osaurus` writes,
     identity keychain item unchanged.
+- **Stage 4d (2026-10-30): the phone's cards** (`IntelHTTPApprovals.swift`).
+  - **Routes (upstream handlers, Intel helpers):** `GET /approvals`,
+    `POST /approvals/{id}` (`deny | allow_once | allow_for_run |
+    always_allow`); `GET /config/approvals`, `POST /config/approvals/{id}`
+    (`apply | cancel`); `GET /secrets/prompts`, `POST /secrets/prompts/{id}`
+    (`{value}` or `{decision:"cancel"}`); `GET /computer-use/prompts`,
+    `POST /computer-use/prompts/{id}`. All owner-only; answers need the
+    Secure Channel from a remote owner (`requiresOwnerChannel`), and so do
+    reads (the owner-route gate in the access check). A gone card answers
+    404 (`approval_not_pending` / `prompt_not_pending`); a decision that
+    doesn't fit a computer-use card answers 400 and leaves it waiting.
+  - **`/computer-use/prompts` came forward** from `W-computer-use`:
+    `ComputerUsePromptQueue` with its paired-phone list and answer is
+    already compiled, and the route shares upstream's handler with
+    `/secrets/prompts`.
+  - **Remote reviewer:** `/run` binds `ChatExecutionContext.hasRemoteReviewer`
+    to `authedScopeIsMaster && requestIsSecureChannel` (upstream), so it is
+    always false until `W-identity-mobile`; the lists stay empty until then.
+    With it set: Intel's engine lets an `.ask` tool through to the card
+    (`isExternalSurface && !hasRemoteReviewer`, both tool paths and
+    `unapprovedReason`), `ToolPermissionPromptService` marks the card
+    `fromPairedPhone`, and the registry's external-surface refusal is
+    upstream's phone wording with `requires_mac` metadata. That refusal
+    lives in Intel's `ToolRegistry` in
+    `Models/Chat/IntelConformers/IntelStubConformers.swift`;
+    `Tools/ToolRegistry.swift` is excluded on Intel (an edit there compiles
+    nothing, which the test caught).
+  - **Secrets:** upstream's `RemoteSecretPromptQueue` verbatim
+    (`Services/MobileConnect/`). Its caller, `sandbox_secret_set` in
+    `SandboxSecretTools.swift`, is excluded with the sandbox, so nothing
+    raises a secret prompt on Intel yet; it arrives with the sandbox work.
+    Intel's request log records no request bodies, so the secret is never
+    logged.
+  - **Config plans:** Intel keeps its own `IntelConfigApprovalQueue` (the
+    Orchestrator's settings; upstream's `ConfigApprovalQueue` comes with
+    `W-declarative-config`). It gains upstream's `fromPairedPhone`,
+    `resolveFromPairedPhone` and `pairedPhoneListJSON`; rows use upstream's
+    shape, one `update` action per changed path, `prune` always false,
+    warnings as `notes` with `high_risk`. `IntelConfigApprovalService`
+    parks a remote-reviewer run's plan for the phone (300 s) before its
+    "no mounted chat surface" fail-closed check, as upstream's tool does.
+    The Mac's card only shows its own chat's plans, so a phone plan never
+    appears there.
+  - **Tests:** upstream's `RemoteApprovalDecisionTests`; new
+    `IntelHTTPApprovalsTests` (empty lists, validation, agent-scoped key
+    403, remote owner 426, a phone run's tool card / secret / config plan
+    listed and answered over HTTP, Mac-raised cards never listed, the
+    config service parking a phone plan, the engine and registry wording).
+  - **Validation (2026-10-30):** full suite under the interim 27.0-SDK
+    gate: 4,041 tests, all stage 4d suites pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live
+    `~/.osaurus` writes, identity keychain item unchanged.

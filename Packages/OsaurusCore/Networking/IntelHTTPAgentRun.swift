@@ -224,6 +224,13 @@ extension HTTPHandler {
         // Full tool detail (arguments, results, labels) only for callers that
         // own this Mac; everyone else gets the sanitized trace.
         let includeToolDetail = isLoopbackConnection(context) || stateRef.value.authedScopeIsMaster
+        // The owner's paired phone: owner scope AND the Secure Channel it
+        // always speaks (upstream). Only this caller gets cards relayed
+        // (`/approvals`, `/config/approvals`, `/secrets/prompts`); a bare
+        // loopback script is still owner but has no one polling for cards,
+        // so it keeps failing closed. Always false on Intel until
+        // `W-identity-mobile` brings the channel.
+        let remoteReviewer = stateRef.value.authedScopeIsMaster && requestIsSecureChannel
         let startTime = stateRef.value.requestStartedAt ?? Date()
         let userAgent = head.headers.first(name: "User-Agent")
         let includeUsage = req.stream_options?.include_usage == true
@@ -331,8 +338,10 @@ extension HTTPHandler {
                 do {
                     // Every tool call of a run is an external-surface call
                     // (upstream binds it around the batch executor), so Ask
-                    // tools are refused rather than shown as a card.
+                    // tools are refused rather than shown as a card, unless
+                    // the owner's paired phone can answer it.
                     let stream = try await ChatExecutionContext.$isExternalSurface.withValue(true) {
+                        try await ChatExecutionContext.$hasRemoteReviewer.withValue(remoteReviewer) {
                         try await ChatExecutionContext.$currentAgentId.withValue(agentId) {
                             try await ChatExecutionContext.$currentSessionId.withValue(sessionKey) {
                                 try await ChatExecutionContext.$agentTodoRunScope.withValue(AgentTodoRunScope()) {
@@ -341,6 +350,7 @@ extension HTTPHandler {
                                     }
                                 }
                             }
+                        }
                         }
                     }
                     for try await delta in stream {

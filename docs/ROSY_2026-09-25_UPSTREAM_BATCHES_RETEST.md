@@ -2222,3 +2222,15 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       shows the request ended).
 - [ ] `curl -s http://127.0.0.1:1337/runs/abc/events` answers
       `run_not_found`.
+- [ ] **Phone cards** (stage 4d): `curl -s http://127.0.0.1:1337/approvals`
+      answers `{"approvals":[]}`; `/config/approvals` the same;
+      `/secrets/prompts` and `/computer-use/prompts` answer
+      `{"prompts":[]}`. (They fill only for runs from the paired phone,
+      retested with `W-identity-mobile`.)
+- [ ] `curl -s -X POST http://127.0.0.1:1337/approvals/00000000-0000-0000-0000-000000000001 -H 'Content-Type: application/json' -d '{"decision":"allow"}'`
+      answers 400; with `"deny"` it answers 404 `approval_not_pending`.
+- [ ] Regression: an Ask tool in a Mac chat still shows the approval card,
+      and an Ask tool in a `curl` run is still refused without a card.
+- [ ] Regression: ask the Orchestrator in a Mac chat to change its
+      settings (e.g. "set the new-chat agent to the Orchestrator"); the
+      review card still appears in that chat and Apply works.

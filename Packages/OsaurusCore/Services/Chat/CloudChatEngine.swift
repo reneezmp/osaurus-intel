@@ -254,7 +254,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
     /// Why an `.ask` tool didn't run: the user declined the card, or the
     /// caller has no approval UI (upstream's external-surface refusal).
     static var unapprovedReason: String {
-        ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts
+        (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
+            || ChatExecutionContext.denyUnapprovedToolPrompts
             ? "it needs approval in the Osaurus app, which this caller can't give (set it to Auto in Tools to allow it)"
             : "you declined to run it this time"
     }
@@ -1437,9 +1438,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                         }
                                         // Upstream: a caller with no approval UI (external MCP / HTTP,
                                         // a remote dispatch) is refused instead of shown a card nobody
-                                        // there can answer. The owner's phone reviewer comes with
-                                        // `/approvals` (`W-server-api` stage 4d).
-                                        if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+                                        // there can answer. The owner's paired phone can: its run falls
+                                        // through to the card, which `GET /approvals` relays to it.
+                                        if (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
+                                            || ChatExecutionContext.denyUnapprovedToolPrompts
+                                        {
                                             approved = false
                                             break
                                         }
@@ -1818,9 +1821,11 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     }
                                     // Upstream: a caller with no approval UI (external MCP / HTTP,
                                     // a remote dispatch) is refused instead of shown a card nobody
-                                    // there can answer. The owner's phone reviewer comes with
-                                    // `/approvals` (`W-server-api` stage 4d).
-                                    if ChatExecutionContext.isExternalSurface || ChatExecutionContext.denyUnapprovedToolPrompts {
+                                    // there can answer. The owner's paired phone can: its run falls
+                                    // through to the card, which `GET /approvals` relays to it.
+                                    if (ChatExecutionContext.isExternalSurface && !ChatExecutionContext.hasRemoteReviewer)
+                                        || ChatExecutionContext.denyUnapprovedToolPrompts
+                                    {
                                         approved = false
                                         break
                                     }

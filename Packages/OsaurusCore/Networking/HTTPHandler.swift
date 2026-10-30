@@ -893,6 +893,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             if routeRunRequest(context: context, head: head, path: path) { return }
             if routeAgentRequest(context: context, head: head, path: path) { return }
             if routeTaskRequest(context: context, head: head, path: path) { return }
+            if routeApprovalsRequest(context: context, head: head, path: path) { return }
             // Upstream answers unknown routes 404 (Intel's old router
             // answered every path 200 "ok").
             sendResponse(context: context, status: .notFound, headers: textHeaders(), body: "Not Found")

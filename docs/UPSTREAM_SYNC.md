@@ -4497,6 +4497,10 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   (the engine runs the tools; a run-only "started" marker gives upstream's
   tool trace its call id). `/runs/{id}/*` answer 404 until phone runs come
   with `W-identity-mobile`.
+- **Stage 4d:** the phone's cards: `/approvals`, `/config/approvals`,
+  `/secrets/prompts`, `/computer-use/prompts`, and the remote-reviewer
+  plumbing (`hasRemoteReviewer` in the engine, registry and config queue).
+  Empty until the Secure Channel; upstream's `RemoteSecretPromptQueue` is in.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by
