@@ -6,6 +6,28 @@
     <description>Updates for Osaurus (Intel) — the cloud-powered Intel Mac fork.</description>
     <language>en</language>
     <item>
+      <title>1.0.61</title>
+      <pubDate>Sun, 01 Nov 2026 18:37:14 +0000</pubDate>
+      <sparkle:channel>release</sparkle:channel>
+      <sparkle:version>65</sparkle:version>
+      <sparkle:shortVersionString>1.0.61</sparkle:shortVersionString>
+      <sparkle:minimumSystemVersion>13.0</sparkle:minimumSystemVersion>
+      <enclosure url="https://github.com/reneezmp/osaurus-intel/releases/download/1.0.61/Osaurus-Intel-1.0.61.zip" length="85919393" type="application/octet-stream" sparkle:edSignature="Sxi/2GIrWoBFNa92Mdi0bvyhad11LwIkuh9B8F0sstPetUGQMRrsLbmTtGsHbOleK+MqqCggrUdmsvpbMdnTCQ=="/>
+      <description sparkle:format="markdown"><![CDATA[
+## Osaurus (Intel) 1.0.61
+
+Catch-up with upstream Osaurus, 2026-10-11 to 11-01.
+
+- **Local API server**: OpenAI, Anthropic and Ollama-compatible chat on any model you can chat with, embeddings, transcription, MCP over HTTP, agents (manage, dispatch, streamed runs, tasks), memory ingest, your chat history and the model picker. Owner-only routes stay on this Mac. Osaurus Router models need your access key or the new Credits switch "Allow local API access without a key".
+- **Image and video generation** in chat and as agent tools; **Mac Automation** with AppleScript and **Browser Use**.
+- **Themes** library and sharing, system accent colour, upstream's **onboarding**, the **Cloud Models** dashboard and a catalog-driven Add Provider sheet, MCP service health, a redesigned **agent page**, an in-app guide.
+- **Memory** at upstream's database schema, with upstream's relevance check: memory joins a message when it asks for it.
+- **Fixes**: Router chats no longer stop at 1,024 tokens; Venice provider settings now apply; traffic lights show their symbols and red closes the window; hang and crash fixes from upstream.
+
+_Intel fork · synced to upstream Osaurus 0.24.7 — see UPSTREAM_SYNC.md._
+]]></description>
+    </item>
+    <item>
       <title>1.0.60</title>
       <pubDate>Sun, 11 Oct 2026 11:46:57 +0000</pubDate>
       <sparkle:channel>release</sparkle:channel>
