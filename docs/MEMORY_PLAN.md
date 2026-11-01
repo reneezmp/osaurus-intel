@@ -49,7 +49,10 @@ warning does not apply.
 - Embedding stack — `potion-base-8M` static embedder, downloaded on first use.
   This is the *retrieval* half; it does not summarise anything.
 - Recall: four-layer budgeted assembly (identity → pinned → episodes → transcript),
-  injected as its own system message before the last user turn.
+  prepended to the latest user message as `[Memory]…[/Memory]`, as upstream
+  does (until 2026-11-01 it was its own system message before that turn,
+  which broke some models' chat templates; `UPSTREAM_SYNC.md`, "Rosy
+  candidate 1.0.61 (build 62)").
 - Memory settings UI: a 268-line four-card panel (`MemoryView.swift:1077-1345`).
 
 ### Historical gap inventory (resolved unless explicitly noted)

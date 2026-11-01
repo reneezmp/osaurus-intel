@@ -138,7 +138,10 @@ struct IntelCodexEngineTests {
         let body = try #require(FixtureProtocol.lastBody)
         let json = try #require(JSONSerialization.jsonObject(with: body) as? [String: Any])
         #expect(json["system"] as? String == "Be brief")
-        #expect(json["max_tokens"] as? Int == 4096)
+        // Upstream `remoteChatMaxTokens`: Anthropic always gets an explicit
+        // cap, the 16,384 implicit budget when the caller sets none (Intel
+        // sent no cap and the adapter fell back to 4,096 until 2026-11-01).
+        #expect(json["max_tokens"] as? Int == 16_384)
         #expect(json["stream_options"] == nil)
         let messages = try #require(json["messages"] as? [[String: Any]])
         #expect(messages.count == 1)

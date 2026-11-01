@@ -2794,17 +2794,33 @@ final class SystemPromptComposer: @unchecked Sendable {
         }
     }
 
-    /// Splice the memory block in as its own system message immediately *before*
-    /// the final user turn — so the long, stable system prefix stays byte-identical
-    /// (keeps DeepSeek's prompt cache warm) while memory sits next to the query.
+    /// Upstream: prepend the per-turn block (memory, the clock, the agent
+    /// database state, project instructions) to the latest user message as
+    /// `[Memory]…[/Memory]`, so the long system prefix stays byte-identical
+    /// across turns and the block sits next to the query.
+    ///
+    /// Intel used to insert it as a separate `system` message just before the
+    /// last user turn. Rosy (2026-11-01) showed that breaks models whose chat
+    /// template expects one system message at the start: Venice Uncensored
+    /// repeated its previous answer on every turn. Intel difference: a user
+    /// message with image or audio parts gets the block as a leading text
+    /// part (upstream leaves such a message without it).
     static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {
-        guard let section, !section.isEmpty else { return }
-        let mem = ChatMessage(role: "system", content: section)
-        if let lastUser = messages.lastIndex(where: { $0.role == "user" }) {
-            messages.insert(mem, at: lastUser)
-        } else {
-            messages.append(mem)
-        }
+        guard let section,
+            case let trimmed = section.trimmingCharacters(in: .whitespacesAndNewlines),
+            !trimmed.isEmpty,
+            let idx = messages.lastIndex(where: { $0.role == "user" })
+        else { return }
+        let existing = messages[idx]
+        let prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
+        messages[idx] = ChatMessage(
+            role: existing.role,
+            content: prefix + (existing.content ?? ""),
+            tool_calls: existing.tool_calls,
+            tool_call_id: existing.tool_call_id,
+            reasoning_content: existing.reasoning_content,
+            contentParts: existing.contentParts.map { [.text(prefix)] + $0 }
+        )
     }
 
     /// Upstream: merge content into the first system message (prepending or

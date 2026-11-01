@@ -4519,3 +4519,69 @@ Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by
 Renée because the paired phone needs the gate and the routes.
 
+
+### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
+
+Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
+Launch, the memory upgrade, the approval card, onboarding, the Credits switch,
+the local API and tab restore passed. Chat on two Router models, a Router image
+and responsiveness failed; the release was held. Evidence (Insights request
+bodies, a screenshot, a 10-second `sample`) and what it showed:
+
+- **`e2ee-qwen3-8-27b` (Router): slow first turn, then "The model returned no
+  visible text … 1024 tokens".** Intel's streamed requests never carried
+  `max_tokens` (the one-shot path only when the caller set it), so the Router
+  applied its own 1,024-token default and a reasoning model spent it all. Every
+  streamed Router chat was capped at 1,024 tokens the same way. **Fix:**
+  upstream's `remoteChatMaxTokens` as `ChatEngine.streamMaxTokens`: the Router
+  and Anthropic get the caller's cap or upstream's implicit 16,384; other
+  providers only the caller's. Applied to streamed and one-shot requests (not
+  the Codex Responses wire). The Anthropic adapter's 4,096 fallback is no
+  longer reached for chats (`IntelCodexEngineTests` now expects 16,384, as
+  upstream sends). The reasoning itself was not shown either; whether the
+  Router streams it for this model is unconfirmed (no response body captured).
+- **`venice-uncensored-1-2` (Router): repeated its previous answer every
+  turn.** Intel put the per-turn block (clock, agent database state, recalled
+  memory, project instructions) in a separate `system` message just before
+  the latest user message; upstream prepends it to that user message as
+  `[Memory]…[/Memory]`. A mid-conversation system message is known to break
+  some chat templates (Mistral-family, which Venice Uncensored is). **Fix:**
+  Intel's `injectMemoryPrefix` now follows upstream, and upstream's
+  `MemoryUserPrefixTests` is enabled again (it had been excluded as "only the
+  shape differs"). Intel difference: a message with image or audio parts gets
+  the block as a leading text part (upstream leaves it without).
+- **Venice provider settings (found while checking Venice):** Intel never sent
+  upstream's `venice_parameters`, so a Venice AI provider's Web Search,
+  Disable Thinking and Venice System Prompt switches did nothing. **Fix:**
+  upstream's `buildVeniceParameters` as `ChatEngine.veniceParameters`, sent to
+  `venice.ai` only and only when a value differs from Venice's default. Rosy's
+  Venice model came through the Router, which this does not touch.
+- **Nano Banana 2 Lite: "provider returned invalid image media".** Insights
+  shows the Router answered `POST /v1/media/images/generations` with HTTP 502
+  (85-byte body) after 8.5 s; the wording is the server's, not Intel's or
+  upstream's. Server-side; not an Intel fix.
+- **App much slower after these chats.** The `sample` found no Osaurus thread
+  busy (main thread idle in the event loop, workers parked, the main-thread
+  watchdog waiting) and collected only 722 samples in 10 s, which points at
+  the whole Mac being starved (another process, memory pressure or swap);
+  footprint 526 MB, peak 1.2 GB, two days since launch. Not yet explained;
+  needs Activity Monitor (CPU and memory for Osaurus and WindowServer, memory
+  pressure) while it is slow.
+- **Not fixed, recorded:** Intel's streamed requests also never send
+  `temperature` (only the one-shot path does), so an agent's temperature
+  setting doesn't reach chats. Upstream sends it except for reasoning models.
+  Left for its own change.
+
+Tests: new `IntelRequestShapeTests`; `MemoryUserPrefixTests` enabled. The next
+candidate is build 63; the public release then needs 64 or higher.
+
+Validation: full suite under the interim 27.0-SDK gate: 4,101 tests, all new
+and re-enabled tests pass; the only failure is the avatar-cache test that gate
+can't run. Package and tests build for `x86_64-apple-macosx13.0`.
+`classify_gated` UNASSIGNED 0; `classify_gap` UNASSIGNED 0 against the audited
+`bce907045` but 13 against `upstream/main`, because upstream gained 47 commits
+since that audit (fetched 2026-11-01, head `17fd36b01`). **The classifiers
+default to `upstream/main`, so after any `git fetch upstream` pass the audited
+ref (`classify_gap.py bce907045`) to check a change; the 13 new files
+(agent generation settings, Anthropic reasoning contract, preview context
+cache, knowledge vector indexer, …) belong to the next upstream audit.**

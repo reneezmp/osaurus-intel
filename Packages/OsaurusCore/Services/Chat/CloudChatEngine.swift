@@ -609,6 +609,51 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         }
     }
 
+    /// Venice's own request settings (upstream
+    /// `RemoteProviderService.buildVeniceParameters`): web search, thinking off
+    /// and leaving out Venice's system prompt, from the model's Model Options.
+    /// Sent only to venice.ai and only when something differs from Venice's
+    /// defaults. Intel never sent them before 2026-11-01, so those three
+    /// switches did nothing on a Venice provider.
+    static func veniceParameters(_ options: [String: ModelOptionValue]?, host: String) -> [String: Any]? {
+        guard host.lowercased().contains("venice.ai"), let options else { return nil }
+        let webSearch = options["enableWebSearch"]?.stringValue
+        let disableThinking = options["disableThinking"]?.boolValue
+        let includeSystemPrompt = options["includeVeniceSystemPrompt"]?.boolValue
+        var parameters: [String: Any] = [:]
+        if let webSearch, webSearch != "off" { parameters["enable_web_search"] = webSearch }
+        if disableThinking == true { parameters["disable_thinking"] = true }
+        if includeSystemPrompt == false { parameters["include_venice_system_prompt"] = false }
+        return parameters.isEmpty ? nil : parameters
+    }
+
+    static func applyVeniceParameters(
+        _ options: [String: ModelOptionValue]?, host: String, into body: inout [String: Any]
+    ) {
+        if let parameters = veniceParameters(options, host: host) { body["venice_parameters"] = parameters }
+    }
+
+    /// Upstream's implicit output budget (`ChatEngine`: 16,384 when the
+    /// caller sets none).
+    static let implicitMaxOutputTokens = 16_384
+
+    /// `max_tokens` for a streamed request (upstream
+    /// `RemoteProviderService.remoteChatMaxTokens`): the Osaurus Router and
+    /// Anthropic require an explicit cap, so they get the caller's value or
+    /// the implicit budget; other providers get one only when the caller set
+    /// it. Intel's streamed requests sent none at all until 2026-11-01, so the
+    /// Router applied its own 1,024-token default: a reasoning model (Rosy's
+    /// `e2ee-qwen3-8-27b`) spent it all and returned no visible text, and long
+    /// answers on Router models were cut short.
+    static func streamMaxTokens(
+        requested: Int?, isOsaurusRouter: Bool, providerType: RemoteProviderType?
+    ) -> Int? {
+        if isOsaurusRouter || providerType == .osaurusRouter || providerType == .anthropic {
+            return requested ?? implicitMaxOutputTokens
+        }
+        return requested
+    }
+
     private func applyReasoningMode(
         _ request: ChatCompletionRequest, endpoint: ResolvedEndpoint, into body: inout [String: Any]
     ) {
@@ -1202,12 +1247,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             // Ask for a final usage chunk so the prompt-cache hit/miss
                             // split is observable per request (logged below).
                             body["stream_options"] = ["include_usage": true]
+                            if let maxTokens = Self.streamMaxTokens(
+                                requested: request.max_tokens,
+                                isOsaurusRouter: endpoint.isOsaurusRouter,
+                                providerType: endpoint.provider?.providerType)
+                            {
+                                body["max_tokens"] = maxTokens
+                            }
                             Self.applyPromptCacheRouting(
                                 provider: endpoint.provider,
                                 sessionId: request.session_id,
                                 into: &body
                             )
                             self.applyReasoningMode(request, endpoint: endpoint, into: &body)
+                            Self.applyVeniceParameters(
+                                request.modelOptions, host: URL(string: endpoint.url)?.host ?? "", into: &body)
                             if endpoint.usesAnthropicWire {
                                 body = try IntelAnthropicMessagesAdapter.makeRequest(chatCompletions: body)
                             } else if endpoint.usesGeminiWire {
@@ -2035,13 +2089,19 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         // reasoning_content and return empty content — which is exactly why
         // model-generated chat titles came back blank. With no modelOptions,
         // applyReasoningMode disables thinking (fast, deterministic for titles).
-        if let maxTokens = request.max_tokens { body["max_tokens"] = maxTokens }
+        if let maxTokens = Self.streamMaxTokens(
+            requested: request.max_tokens, isOsaurusRouter: endpoint.isOsaurusRouter,
+            providerType: endpoint.provider?.providerType)
+        {
+            body["max_tokens"] = maxTokens
+        }
         // OpenAI reasoning models (o-series, gpt-5*, gpt-6*) reject
         // `temperature`; upstream strips it on the same predicate.
         if let temperature = request.temperature, !Self.rejectsSamplingTemperature(modelId: endpoint.modelId) {
             body["temperature"] = temperature
         }
         applyReasoningMode(request, endpoint: endpoint, into: &body)
+        Self.applyVeniceParameters(request.modelOptions, host: URL(string: endpoint.url)?.host ?? "", into: &body)
         Self.applyPromptCacheRouting(provider: endpoint.provider, sessionId: request.session_id, into: &body)
 
         // CANONICAL (sorted-key) serialization — bare JSONSerialization emits

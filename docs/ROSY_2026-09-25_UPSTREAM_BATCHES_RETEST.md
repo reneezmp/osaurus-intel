@@ -2337,5 +2337,9 @@ Before installing: quit Osaurus. Optional safety copy of `~/.osaurus`
       `curl -s http://127.0.0.1:1337/sessions` lists your chats.
 - [ ] **Quit and relaunch:** tabs and the open chat come back.
 
-Result: _pending_. If it passes, cut with
-`BUILD_NUMBER=63 scripts/release/cut_intel_release.sh 1.0.61 "<notes>"`.
+Result (2026-11-01, Rosy on Ventura 13.7.8): launch, memory upgrade,
+approval card, onboarding, Credits switch, local API and tab restore
+**passed**. Chats on `e2ee-qwen3-8-27b` and `venice-uncensored-1-2` (both
+Router), a Nano Banana 2 Lite image and responsiveness **failed**; release
+held. Causes and fixes: `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61 (build
+62): results and fixes". Next candidate: build 63.

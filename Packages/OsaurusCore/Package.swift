@@ -229,12 +229,11 @@ let package = Package(
                 //     RuntimePolicySource asserts on vMLX source policy;
                 //     Sandbox/PluginDispatch test excluded subsystems.
                 //  2. They encode an upstream implementation this fork
-                //     deliberately does differently. MemoryUserPrefixTests
-                //     expects memory to be prepended INTO the latest user
-                //     message as "[Memory]...[/Memory]"; the Intel mirror
-                //     instead inserts a separate system message before that
-                //     turn (IntelDataConformers.injectMemoryPrefix). Both
-                //     deliver the context; only the shape differs.
+                //     deliberately does differently. (MemoryUserPrefixTests
+                //     was here until 2026-11-01: Intel now prepends memory to
+                //     the latest user message as upstream does, after Rosy
+                //     showed a mid-conversation system message breaks some
+                //     models' chat templates.)
                 // Adapting these to the fork's behaviour would be worthwhile;
                 // until then they are excluded so `swift test` is a usable
                 // signal rather than permanently red.
@@ -242,7 +241,6 @@ let package = Package(
                 "Service/StreamingHintTests.swift",
                 "Sandbox/DiagnosticWarningsTests.swift",
                 "Model/ModelProfileRegistryTests.swift",
-                "Chat/MemoryUserPrefixTests.swift",
                 "Chat/SandboxImportContractTests.swift",
                 "Plugin/PluginDispatchInstructionsInjectionTests.swift",
                 "Chat/FolderContextRenderTests.swift",
