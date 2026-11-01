@@ -4619,3 +4619,28 @@ cache, knowledge vector indexer, …) belong to the next upstream audit.**
   unchanged since. Not reproducible off Ventura; recorded in the backlog,
   not a 1.0.61 blocker.
 - Next candidate: build 64; the public release then needs 65 or higher.
+
+### Rosy candidate 1.0.61 (build 64): results — 2026-11-01
+
+- **Passed:** memory (a greeting no longer brings up old chats; recall
+  questions still work), traffic lights (hover symbols; red closes the window,
+  tabs come back; ⌘W closes a tab), Qwen answers every turn.
+- **Qwen shows no Thinking: Router-side.** The raw response (Insights → Copy
+  response (server)) is plain `content` deltas from the first chunk (starting
+  with `"\n\n"`, what a model leaves after a hidden thinking block), no
+  `reasoning_content` or any other reasoning field, while the Router's
+  summary frame bills `output_tokens: 1342` for a visible answer far shorter
+  than that. The Router strips this model's reasoning; there is nothing for
+  the app to display. Not an Intel bug.
+- **Venice Uncensored (via the Router):** answers are now on topic; one
+  paragraph repeated once on the second turn, and the model doesn't take on
+  the agent's persona. Consistent with Venice's own system prompt outranking
+  the agent's; through the Router, Intel can't send `venice_parameters` to
+  turn it off. Model/route behaviour, not an Intel bug.
+- **Settings › Conversation › Behavior: rows overlap** ("Core Model" and "Fill
+  In Missing Agent Descriptions"; "Disable Tools" and "Enable Memory" run into
+  each other). Same family as the Folder Tool Permissions gaps: rows sized
+  wrongly when their text wraps on Ventura. The page (upstream's layout,
+  ported 2026-09-30) and `SettingsGroup`/`SettingsToggle` are unchanged since
+  1.0.60. Added to backlog `W-settings-ventura-gaps`; needs Rosy screenshots
+  per attempt (not reproducible on the build Mac).

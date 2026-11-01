@@ -2410,3 +2410,9 @@ in 1.0.60, backlog `W-settings-ventura-gaps`). Fixes: `UPSTREAM_SYNC.md`,
       Copy ▾ → Copy response (server), and send it (for the missing Thinking).
 - [ ] **Sunny with memory on:** a normal chat still feels like Sunny (persona
       and recent context intact).
+
+Result (build 64, 2026-11-01): memory, traffic lights and Qwen **passed**.
+Qwen's missing Thinking and Venice's persona are Router/model behaviour (see
+`UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61 (build 64): results"). Settings
+layout issues (Behavior overlap, Folder Tool gaps) predate 1.0.61; backlog
+`W-settings-ventura-gaps`.
