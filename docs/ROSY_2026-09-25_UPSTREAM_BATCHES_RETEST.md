@@ -2343,3 +2343,40 @@ approval card, onboarding, Credits switch, local API and tab restore
 Router), a Nano Banana 2 Lite image and responsiveness **failed**; release
 held. Causes and fixes: `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61 (build
 62): results and fixes". Next candidate: build 63.
+
+## Release candidate 1.0.61 (build 63) — retest of the failures (2026-11-01)
+
+Build 62 plus the fixes in `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61
+(build 62): results and fixes" (Router output cap, memory block on the user
+message, Venice provider settings).
+
+- Candidate: `1.0.61` build `63` (Debug, thin x86_64, macOS 13.0 minimum),
+  from `c41913be6`.
+- Archive: `build/rosy-deploy/Osaurus-Intel-RC-1.0.61-63-2026-11-01.zip` in the
+  main checkout (85,912,927 bytes), SHA-256
+  `d51f53ed996e93ee44e1002aea064deb323e43c905e783180253fe87731fa348`.
+  ZIP valid, six framework symlinks kept, strict codesign passes.
+- Rosy's build number becomes `63`; the public release needs `64` or higher.
+
+- [ ] **Qwen on the Router:** in a new chat on `e2ee-qwen3-8-27b`, ask two or
+      three questions in a row. Every turn answers with visible text (it may
+      still be slow while the model thinks); none says "no visible text", and
+      the footer's token count goes above 1,024 when the answer is long.
+- [ ] **Long answer on a Router model:** ask a DeepSeek model on the Router for
+      something long ("explain X in detail, with examples"); the answer
+      finishes instead of stopping mid-sentence.
+- [ ] **Venice Uncensored on the Router:** a new chat, three different
+      questions; each gets its own answer, with no paragraph repeated from the
+      previous turn.
+- [ ] **Memory and the clock still reach the model:** ask "what time is it?"
+      in a chat with an agent that uses Apple apps (or "what's in my
+      database?" with an agent database); the answer knows. Ask something you
+      told it in an older chat; it still remembers.
+- [ ] **Image turn:** attach a photo and ask about it; it is described.
+- [ ] **Slowdown:** after the chats above, if the app feels slow, Activity
+      Monitor screenshots: CPU tab (sorted by % CPU) and Memory tab with the
+      Memory Pressure graph.
+- [ ] **Image generation (server check):** Nano Banana 2 Lite. If it still
+      fails with "provider returned invalid image media", try the same model
+      in the regular app on the M4 Mac; the same error there confirms it is
+      the Router's.
