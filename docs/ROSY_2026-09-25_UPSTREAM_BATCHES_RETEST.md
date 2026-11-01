@@ -2380,3 +2380,33 @@ message, Venice provider settings).
       fails with "provider returned invalid image media", try the same model
       in the regular app on the M4 Mac; the same error there confirms it is
       the Router's.
+
+## Release candidate 1.0.61 (build 64) — memory gate and traffic lights (2026-11-01)
+
+Build 63 result: Qwen answers every turn (no Thinking block shown yet);
+Venice Uncensored answered old chats from the memory block; traffic lights
+had no hover symbols and red closed a tab; Conversation settings gaps (also
+in 1.0.60, backlog `W-settings-ventura-gaps`). Fixes: `UPSTREAM_SYNC.md`,
+"Rosy candidate 1.0.61 (build 63): results and fixes".
+
+- Candidate: `1.0.61` build `64` (Debug, thin x86_64, macOS 13.0 minimum),
+  from `54cc3ae15`.
+- Archive: `build/rosy-deploy/Osaurus-Intel-RC-1.0.61-64-2026-11-01.zip`
+  (85,919,371 bytes), SHA-256
+  `3fb081d0588d83f5abec9b7e3b43137e5e307c1b2f2f0207b44f2bea6cae40cf`, also on
+  the build Mac's Desktop. ZIP valid, six framework symlinks kept, strict
+  codesign passes.
+- Rosy's build number becomes `64`; the public release needs `65` or higher.
+
+- [ ] **Venice Uncensored:** a new chat with "Hello!" then two unrelated
+      questions; each answer is about what you asked, not about another chat.
+- [ ] **Memory when asked:** "what's my name?" and "do you remember what we
+      said about <something from an older chat>?" are answered from memory;
+      a plain "hello" doesn't bring up old topics.
+- [ ] **Traffic lights:** hovering over the three buttons shows ×, − and +
+      (also on an inactive window); red closes the whole chat window, and the
+      tabs come back when you open a new one; ⌘W still closes just the tab.
+- [ ] **Qwen:** still answers every turn. In Insights, for one Qwen turn,
+      Copy ▾ → Copy response (server), and send it (for the missing Thinking).
+- [ ] **Sunny with memory on:** a normal chat still feels like Sunny (persona
+      and recent context intact).
