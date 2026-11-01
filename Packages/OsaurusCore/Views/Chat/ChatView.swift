@@ -363,6 +363,11 @@ final class ChatSession: ObservableObject {
     /// Latches per completed turn so a re-entrant cleanup can't fire a second
     /// generation for the same turn. A failed attempt clears it.
     private var followUpGenerationStarted = false
+    /// Bumped by every `clearFollowUpSuggestions()`. An in-flight follow-up
+    /// generation captures the value it started under and drops its result
+    /// when the value moved. See the INVARIANT notes in
+    /// `maybeGenerateFollowUps`. (Upstream #3275.)
+    private var followUpGeneration = 0
 
     /// Weak back-reference to the owning window state (set by ChatWindowState).
     weak var windowState: ChatWindowState?
@@ -1143,6 +1148,11 @@ final class ChatSession: ObservableObject {
     /// Clear any rendered follow-up suggestions and reset the per-turn latch.
     private func clearFollowUpSuggestions() {
         followUpGenerationStarted = false
+        // Invalidate any generation still in flight. Resetting the latch alone
+        // is not enough: the background Task started by the previous
+        // completion keeps running and would otherwise inject its result into
+        // the turn that is starting now. Do not remove.
+        followUpGeneration &+= 1
         followUpTurnId = nil
         let hadSuggestions = !followUpSuggestions.isEmpty
         if hadSuggestions { followUpSuggestions = [] }
@@ -1171,6 +1181,7 @@ final class ChatSession: ObservableObject {
         else { return }
 
         followUpGenerationStarted = true
+        let generation = followUpGeneration
         let userText = userTurn.content
         let assistantText = assistantTurn.content
         let liveAssistantId = assistantTurn.id
@@ -1182,6 +1193,17 @@ final class ChatSession: ObservableObject {
                 fallbackModel: fallbackModel
             )
             guard let self, self.sessionId == sid else { return }
+            // INVARIANT: never inject suggestions while a run is in progress.
+            // Generation takes seconds, and in that window a new run can start
+            // (user send, queued send, working-folder continuation). Those
+            // paths clear suggestions and bump `followUpGeneration`, but they
+            // cannot cancel this Task. The "still the last assistant message"
+            // check further down does NOT cover this case: a new run that is
+            // only thinking or calling tools has no visible content yet, so the
+            // old turn still looks current. Keep all three conditions.
+            guard generation == self.followUpGeneration,
+                !self.isStreaming, self.activeRunId == nil
+            else { return }
             guard !suggestions.isEmpty else {
                 self.followUpGenerationStarted = false
                 return
@@ -2787,7 +2809,16 @@ final class ChatSession: ObservableObject {
         consolidateAssistantTurns()
         rebuildVisibleBlocks()
         save()
-        maybeGenerateFollowUps()
+        // INVARIANT (upstream #3275): follow-up suggestions appear only once the
+        // agent is truly done with the user's request. When
+        // `prompt_working_folder` attached a folder, this same cleanup starts a
+        // host continuation run below, and generating here would render the
+        // "Follow up" rows mid-turn. Do not reorder after the continuation
+        // without an equivalent check. The apply-time guard inside
+        // `maybeGenerateFollowUps` is the second line of defense.
+        if !pendingWorkingFolderContinuation {
+            maybeGenerateFollowUps()
+        }
         flushQueuedSendIfEligible()
         continueAfterWorkingFolderAttachIfEligible()
     }
