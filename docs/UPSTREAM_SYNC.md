@@ -4644,3 +4644,31 @@ cache, knowledge vector indexer, …) belong to the next upstream audit.**
   ported 2026-09-30) and `SettingsGroup`/`SettingsToggle` are unchanged since
   1.0.60. Added to backlog `W-settings-ventura-gaps`; needs Rosy screenshots
   per attempt (not reproducible on the build Mac).
+
+### Public release 1.0.61 (build 65) — 2026-11-01
+
+Cut with `BUILD_NUMBER=65 scripts/release/cut_intel_release.sh 1.0.61` from
+`dd941f790` (build 65: Rosy candidates 62–64 consumed 62–64). Contents:
+everything from 2026-10-11 to 11-01 in this ledger — the 10-26 / 10-27
+upstream audits, the memory database at schema v10, themes, onboarding,
+providers and MCP health, image and video, Mac Automation, Browser Use, the
+agent page redesign, the local API server (`W-server-api` stages 0–5b, with
+the Router spend gate), and the Rosy candidate fixes (Router output cap,
+memory on the user message with upstream's relevance gate, Venice provider
+settings, traffic-light symbols and red closing the window).
+
+Rosy validation: the candidate smoke pass and both retests
+(`ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`, builds 62–64). Known, not
+blocking: Qwen's reasoning is stripped by the Router; Venice Uncensored keeps
+Venice's own persona via the Router; Settings › Conversation row sizing on
+Ventura (`W-settings-ventura-gaps`, also in 1.0.60).
+
+Verified after publishing: x86_64, `codesign --verify --deep --strict`
+passes, version 1.0.61 / 65, `SUPublicEDKey` `bYYJJqFx…`, minimum macOS
+13.0. The asset is `Osaurus-Intel-1.0.61.zip` (85,919,393 bytes), matching the
+appcast `length`; the downloaded asset's SHA-256 matches the local zip, and
+the live feed (raw `intel-fork/docs/appcast.xml`) serves build 65. The
+appcast commit is `dfda3d5a4`. **The next release needs a build number above
+65.** The release was built with Xcode 27.2 against the 27.2 SDK; it was not
+launched on the build Mac (macOS beta, `TEST_STORAGE_SAFETY.md`), only on
+Rosy (candidate builds from the same commit line).
