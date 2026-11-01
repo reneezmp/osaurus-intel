@@ -1735,6 +1735,13 @@ final class IntelChatWindow: NSWindow {
         super.performClose(sender)
     }
 
+    /// The red traffic light: close the window itself, tabs and all (they are
+    /// remembered and come back with the next window, mid-run ones keep
+    /// running), still through `windowShouldClose`'s streaming confirmation.
+    func closeWindowWithAllTabs(_ sender: Any?) {
+        super.performClose(sender)
+    }
+
     override func performKeyEquivalent(with event: NSEvent) -> Bool {
         if let state = chatWindowState,
             let shortcut = ChatTabShortcut(event: event),

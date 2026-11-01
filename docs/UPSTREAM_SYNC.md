@@ -4585,3 +4585,37 @@ default to `upstream/main`, so after any `git fetch upstream` pass the audited
 ref (`classify_gap.py bce907045`) to check a change; the 13 new files
 (agent generation settings, Anthropic reasoning contract, preview context
 cache, knowledge vector indexer, …) belong to the next upstream audit.**
+
+### Rosy candidate 1.0.61 (build 63): results and fixes — 2026-11-01
+
+- **Qwen (`e2ee-qwen3-8-27b`) now answers every turn** with the Router cap.
+  It still sits silent while it reasons: no Thinking block appears. Open: the
+  raw Router response (Insights → Copy response (server)) will show whether
+  reasoning arrives under a key Intel doesn't read or not at all.
+- **Venice Uncensored answered old chats.** To "Hello, dearie!" it replied
+  about Switch ROM sites, the topic of another chat. Cause: Intel recalled
+  memory on every turn, including `### Earlier conversation detail` excerpts,
+  because upstream's `MemoryRelevanceGate` is only called from upstream's
+  `MemoryContextAssembler`, which Intel doesn't compile. With the block now
+  in the user message (build 63), a weak model takes it as the question.
+  **Fix (Renée chose to follow upstream):** Intel's `MemorySearchService.recall`
+  runs upstream's gate first (`recallSection`, fed recent episode entities
+  and identity-override words as upstream's assembler does). No signal → only
+  the identity overrides (upstream always includes those); a signal
+  (identity question, "remember…", "last week", "my X", a known name) → the
+  full layered recall as before. `relevanceGateMode = .off` keeps the old
+  every-turn recall. Intel difference: a firing gate runs every layer rather
+  than upstream's single chosen slice. Tests: `IntelMemoryRelevanceGateTests`.
+- **Traffic lights.** Intel's own strip (`IntelTrafficLightStripView`, since
+  the September Ventura work) never drew hover symbols; it now shows ×, − and
+  + over the group, and lights an inactive window's buttons while hovered, as
+  AppKit does. **Red now closes the chat window** with its tabs (they come
+  back with the next window; running ones keep going), still through the
+  streaming confirmation; ⌘W keeps closing the active tab (Renée's choice;
+  upstream's red button closes a tab, since both use `performClose`). Test:
+  `IntelTrafficLightHoverTests`.
+- **Conversation › Folder Tool Permissions shows large uneven gaps between
+  rows on Rosy.** Already in 1.0.60 (Renée); the page and its rows are
+  unchanged since. Not reproducible off Ventura; recorded in the backlog,
+  not a 1.0.61 blocker.
+- Next candidate: build 64; the public release then needs 65 or higher.

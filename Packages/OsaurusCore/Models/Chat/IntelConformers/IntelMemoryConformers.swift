@@ -211,6 +211,22 @@ final class MemorySearchService: @unchecked Sendable {
     /// which already threads a `projectId` for the separate "Project
     /// Instructions" block) compiles and behaves unchanged until it is
     /// updated to also pass it here — see docs/MEMORY_PLAN.md §3.
+    /// Upstream `MemoryRelevanceGate.decide`, fed as upstream's assembler
+    /// feeds it: names from the agent's recent episodes and words of the
+    /// identity overrides (four letters or more).
+    static func recallSection(
+        for query: String, agentId: String?, identity: Identity?, mode: MemoryRelevanceGateMode
+    ) -> MemoryRecallSection {
+        let recentEpisodes =
+            agentId.flatMap { try? MemoryDatabase.shared.loadEpisodes(agentId: $0, days: 90, limit: 25) } ?? []
+        let knownEntities = Set(
+            recentEpisodes.flatMap(\.entities)
+                + (identity?.overrides ?? []).flatMap { $0.split(separator: " ").map(String.init) }
+        ).filter { $0.count >= 4 }
+        return MemoryRelevanceGate.decide(
+            query: query, identity: identity, knownEntities: Array(knownEntities), mode: mode)
+    }
+
     func recall(
         query: String, agentId: String? = nil, projectId: UUID? = nil, days: Int, budgetTokens: Int
     ) async -> String? {
@@ -223,8 +239,25 @@ final class MemorySearchService: @unchecked Sendable {
         var charBudget = totalCharBudget
         var blocks: [String] = []
 
+        // Upstream's relevance gate (`MemoryContextAssembler`, which Intel
+        // doesn't compile): decide from the message alone whether memory is
+        // wanted. With no signal (a greeting, an ordinary question) only the
+        // user's identity overrides go in, as upstream; recalled facts,
+        // sessions and old chat excerpts stay out. Intel recalled them on
+        // every turn until 2026-11-01, and Rosy showed a model answering
+        // those excerpts instead of the user. When the gate fires, Intel's
+        // full layered recall runs (upstream fetches only the chosen slice).
+        let loadedIdentity = try? MemoryDatabase.shared.loadIdentity()
+        if Self.recallSection(for: q, agentId: agentId, identity: loadedIdentity, mode: cfg.relevanceGateMode) == .none {
+            let overrides = (loadedIdentity?.overrides ?? []).prefix(12)
+                .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+                .filter { !$0.isEmpty }
+            let lines = Self.budgetedLines(overrides.map { "- \($0)" }, budget: &charBudget)
+            return lines.isEmpty ? nil : "### About you\n" + lines.joined(separator: "\n")
+        }
+
         // Layer 1: Identity (overrides + auto-derived content).
-        if let identity = try? MemoryDatabase.shared.loadIdentity() {
+        if let identity = loadedIdentity {
             var idLines: [String] = []
             for override in identity.overrides.prefix(12) {
                 let trimmed = override.trimmingCharacters(in: .whitespacesAndNewlines)

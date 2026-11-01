@@ -37,9 +37,21 @@ final class IntelTrafficLightStripView: NSView {
             case .zoom: return "Zoom"
             }
         }
+
+        /// The symbol AppKit's own buttons show while the pointer is over
+        /// the group.
+        var glyph: String {
+            switch self {
+            case .close: return "xmark"
+            case .minimize: return "minus"
+            case .zoom: return "plus"
+            }
+        }
     }
 
     private var buttons: [(Kind, NSButton)] = []
+    private var isHovering = false
+    private var hoverTracking: NSTrackingArea?
 
     override init(frame frameRect: NSRect) {
         super.init(frame: frameRect)
@@ -93,6 +105,27 @@ final class IntelTrafficLightStripView: NSView {
         }
     }
 
+    /// AppKit shows the three symbols together while the pointer is anywhere
+    /// over the group (the strip had none until 2026-11-01).
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverTracking { removeTrackingArea(hoverTracking) }
+        let area = NSTrackingArea(
+            rect: bounds, options: [.mouseEnteredAndExited, .activeAlways, .inVisibleRect], owner: self)
+        addTrackingArea(area)
+        hoverTracking = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        isHovering = true
+        updateAppearance()
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        isHovering = false
+        updateAppearance()
+    }
+
     override func viewDidMoveToWindow() {
         super.viewDidMoveToWindow()
         updateAppearance()
@@ -101,8 +134,17 @@ final class IntelTrafficLightStripView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     func updateAppearance() {
-        let isActive = window?.isKeyWindow == true
+        // Hovering lights an inactive window's buttons too, as AppKit does.
+        let isActive = window?.isKeyWindow == true || isHovering
         for (kind, button) in buttons {
+            if isHovering, let symbol = NSImage(systemSymbolName: kind.glyph, accessibilityDescription: nil) {
+                let configured = symbol.withSymbolConfiguration(.init(pointSize: 7, weight: .bold)) ?? symbol
+                button.image = configured
+                button.imagePosition = .imageOnly
+                button.contentTintColor = NSColor.black.withAlphaComponent(0.55)
+            } else {
+                button.image = nil
+            }
             let color = isActive ? kind.activeColor : NSColor(calibratedWhite: 0.72, alpha: 1)
             button.layer?.backgroundColor = color.cgColor
             button.layer?.borderColor = (isActive
@@ -117,7 +159,16 @@ final class IntelTrafficLightStripView: NSView {
         updateAppearance()
     }
 
-    @objc private func closeWindow() { window?.performClose(nil) }
+    /// Red closes the whole window, like Safari; ⌘W keeps closing the active
+    /// tab (Renée, 2026-11-01). Upstream routes both through `performClose`,
+    /// so its red button closes a tab.
+    @objc private func closeWindow() {
+        if let chat = window as? IntelChatWindow {
+            chat.closeWindowWithAllTabs(nil)
+        } else {
+            window?.performClose(nil)
+        }
+    }
     @objc private func minimizeWindow() { window?.miniaturize(nil) }
     @objc private func zoomWindow() { window?.performZoom(nil) }
 }

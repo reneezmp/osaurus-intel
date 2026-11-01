@@ -52,7 +52,9 @@ warning does not apply.
   prepended to the latest user message as `[Memory]…[/Memory]`, as upstream
   does (until 2026-11-01 it was its own system message before that turn,
   which broke some models' chat templates; `UPSTREAM_SYNC.md`, "Rosy
-  candidate 1.0.61 (build 62)").
+  candidate 1.0.61 (build 62)"). Since 2026-11-01 upstream's relevance gate
+  runs first: a message with no recall signal gets only the identity
+  overrides (`UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61 (build 63)").
 - Memory settings UI: a 268-line four-card panel (`MemoryView.swift:1077-1345`).
 
 ### Historical gap inventory (resolved unless explicitly noted)
