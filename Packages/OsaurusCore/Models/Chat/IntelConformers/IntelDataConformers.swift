@@ -3150,9 +3150,12 @@ final class ServerController: ObservableObject, @unchecked Sendable {
 
     /// ServerView (un-body-swapped in M11 Phase 11.B.1) reads these for
     /// the connection URL + status badge. The Intel HTTP server
-    /// (`OsaurusServer`) is loopback-only and always up while the app
-    /// runs, so health is `.running` and the address is loopback.
-    var localNetworkAddress: String { "127.0.0.1" }
+    /// (`OsaurusServer`) is always up while the app runs, so health is
+    /// `.running`. The address is this Mac's LAN address while "Expose to
+    /// Network" is on (upstream's `LocalNetworkAddress`), else loopback.
+    var localNetworkAddress: String {
+        configuration.exposeToNetwork ? LocalNetworkAddress.primaryIPv4() : "127.0.0.1"
+    }
     var serverHealth: ServerHealth { .running }
 
     /// ServerView's start button. The Intel `OsaurusServer` is started

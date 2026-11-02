@@ -38,6 +38,10 @@ F=[
 ("W-skills-plugins-import","W",r"Skill|ClaudeMarketplace|ClaudePlugin|GitHubImportSheet|GitHubTokenViews|GitHubAuth|PluginProcessHost|PluginHost/main|ExternalTool"),
 ("W-media-generation","W",r"MediaGeneration|VideoTool"),
 # 2026-10-28: the `/v1/images` and `/v1/videos` DTOs need the server's auth layer first (billable).
+# 2026-11-02 (W-server-api stage 7): upstream's live inference registry is
+# fed only by the MLX runtime; the evidence registry only by OsaurusEvals.
+("INC-mlx","I",r"Services/Inference/InferenceActivityRegistry"),
+("N-dev-tooling","N",r"Evidence/EvidenceReportRegistry"),
 ("W-server-api","W",r"Models/API/ImageAPI"),
 ("W-agent-loop-tools","W",r"AgentLoopTools|AgentTaskState|RunProgress|StreamRepetitionDetector|ToolOutputCaps|ToolOutputCompressor|ToolExecutionScope|SchemaValidator|ToolWirePropertyOrder|CurrentTimeTool|SubagentApprovalArguments|Grounded.*Check|ToolResultMediaBridge|ChatErrorMessages|ChatTurnGenerationControls"),
 ("W-tool-catalog-ui","W",r"ToolDisplayName|Views/Tool/|Models/Tool/|ToolAvailabilityBadge|CapabilityTools|CapabilityQueryIntent|AgentCapabilityReadiness"),

@@ -17,6 +17,7 @@ This document covers what's encrypted, how the key is managed, what happens duri
 - [Background Maintenance](#background-maintenance)
 - [Storage Paths Reference](#storage-paths-reference)
 - [Migrating an install to another Mac](#migrating-an-install-to-another-mac)
+- [Storage Location Standards](#storage-location-standards)
 - [Limitations and Trade-offs](#limitations-and-trade-offs)
 
 ---
@@ -319,6 +320,30 @@ Two failure modes worth avoiding:
 
 - **Do not copy an encrypted database to a Mac whose Keychain lacks the matching key.** It cannot be opened, and it will also break **Rotate storage key**, which verifies the old key against every target and stops on the first one it cannot read.
 - **Do not copy databases the destination build does not implement.** On Intel, `chat-history/history.sqlite`, `methods/`, `tool-index/` and per-agent `db.sqlite` are stubbed; leaving plaintext files at those paths achieves nothing and breaks rotation.
+
+---
+
+## Storage Location Standards
+
+Issue [#1422](https://github.com/osaurus-ai/osaurus/issues/1422) is right: the app-data root `~/.osaurus/` follows neither [Apple's file-system guidance](https://developer.apple.com/documentation/foundation/using-the-file-system-effectively) (app data belongs under `~/Library/Application Support/`) nor the [XDG base-directory spec](https://specifications.freedesktop.org/basedir/latest/). Historically the data deliberately moved *out of* `~/Library/Application Support/com.dinoki.osaurus/` *into* `~/.osaurus/` (see `OsaurusPaths.defaultRoot`), so this is a known trade-off, not an accident.
+
+### Where things stand
+
+| Root | Current location | Spec-compliant target |
+|---|---|---|
+| App data | `~/.osaurus/` | `~/Library/Application Support/Osaurus/` |
+| Legacy app data | `~/Library/Application Support/com.dinoki.osaurus/` (copied/merged once into `~/.osaurus/` when the marker is missing; never deleted) | n/a — retired by `~/.osaurus/.legacy-application-support-merge.done` |
+| Model weights | `~/MLXModels/` (legacy `~/Documents/MLXModels/`, env override, or user-picked folder) | separate decision — weights are user-managed and home-visible by design. **Intel:** no local models; the audit reports upstream's default `~/MLXModels` without probing it |
+
+### The audit surface
+
+`GET /admin/cache-stats` returns a read-only `storage_locations` block (built by [`StorageLocationStandards`](../Packages/OsaurusCore/Utils/StorageLocationStandards.swift)) reporting: the active root and its classification, `spec_compliant`, whether the legacy `com.dinoki.osaurus` root still exists, whether the one-shot merge marker is present, the models root classification, and stable snake_case `reason_codes`. The audit never creates, copies, moves, or deletes anything.
+
+### Why the root has not moved (yet)
+
+Relocating `~/.osaurus/` is a data-safety decision pending an explicit maintainer call, because the (optional) Keychain DEK and HKDF salt sidecar are paired with the existing tree, sandbox tooling references `~/.osaurus/` literally, and plugin/container trees can be many gigabytes. Until that decision, paths resolve exclusively through `OsaurusPaths`, and no code outside `OsaurusPaths` may invent a storage root.
+
+**Intel (2026-11-02, `W-server-api` stage 7):** this section, `StorageLocationStandards` and the one-shot merge marker (upstream #1522, June) are upstream's. Until then Intel's `OsaurusPaths.defaultRoot` still re-merged a present legacy `com.dinoki.osaurus/` root on every launch (newer file wins), because Intel kept its own copy of `OsaurusPaths` and the file-level audit never compared its behaviour (`W-cov-reaudit`). The first launch of a build with the marker merges once more if the legacy root exists, then writes the marker.
 
 ---
 

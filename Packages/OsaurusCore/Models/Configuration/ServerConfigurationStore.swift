@@ -27,7 +27,9 @@ enum ServerConfigurationStore {
         }
     }
 
-    static func save(_ configuration: ServerConfiguration) {
+    /// `synchronous` writes before returning (the launch-time exposure
+    /// reset, read back at once by the server start).
+    static func save(_ configuration: ServerConfiguration, synchronous: Bool = false) {
         let url = configurationFileURL()
         OsaurusPaths.ensureExistsSilent(url.deletingLastPathComponent())
         do {
@@ -40,7 +42,7 @@ enum ServerConfigurationStore {
             ConfigDiskWriter.write(
                 try encoder.encode(configuration),
                 to: url,
-                synchronous: OsaurusPaths.overrideRoot != nil || OsaurusPaths.isTestProcess,
+                synchronous: synchronous || OsaurusPaths.overrideRoot != nil || OsaurusPaths.isTestProcess,
                 onError: { print("[Osaurus] Failed to save ServerConfiguration: \($0)") }
             )
         } catch {

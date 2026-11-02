@@ -24,23 +24,98 @@ public enum OsaurusPaths {
         let supportDir = fm.urls(for: .applicationSupportDirectory, in: .userDomainMask).first!
         let oldRoot = supportDir.appendingPathComponent("com.dinoki.osaurus", isDirectory: true)
 
-        // Copy data from old Application Support on first access (never deletes the original).
-        if fm.fileExists(atPath: oldRoot.path) {
-            if !fm.fileExists(atPath: newRoot.path) {
-                do {
-                    try fm.copyItem(at: oldRoot, to: newRoot)
-                    print("[Osaurus] Copied data from \(oldRoot.path) to \(newRoot.path)")
-                    return newRoot
-                } catch {
-                    print("[Osaurus] Copy failed, falling back to merge: \(error)")
-                }
-            }
-            mergeDirectory(from: oldRoot, into: newRoot)
-            print("[Osaurus] Merged data from \(oldRoot.path) into \(newRoot.path)")
-        }
+        // Copied or merged once, then marked (upstream #1522); the legacy
+        // root is never deleted. Before 2026-11-02 Intel re-merged it on
+        // every launch, which could bring back files deleted since.
+        _ = migrateLegacyApplicationSupportRootIfNeeded(
+            fileManager: fm,
+            legacyRoot: oldRoot,
+            activeRoot: newRoot
+        )
 
         return newRoot
     }()
+
+    /// Marker written after the legacy Application Support root has been
+    /// copied/merged into `~/.osaurus`. The legacy root is intentionally never
+    /// deleted, so this marker prevents every future launch from re-merging it.
+    public static let legacyApplicationSupportMergeMarkerName =
+        ".legacy-application-support-merge.done"
+
+    enum LegacyApplicationSupportMigrationResult: Equatable {
+        case legacyRootAbsent
+        case alreadyMarked(URL)
+        case copied(URL)
+        case merged(URL)
+    }
+
+    /// Returns the marker path for a resolved root without triggering another
+    /// root lookup when the caller already has one.
+    public static func legacyApplicationSupportMergeMarker(for root: URL) -> URL {
+        root.appendingPathComponent(legacyApplicationSupportMergeMarkerName)
+    }
+
+    static func migrateLegacyApplicationSupportRootIfNeeded(
+        fileManager fm: FileManager = .default,
+        legacyRoot oldRoot: URL,
+        activeRoot newRoot: URL
+    ) -> LegacyApplicationSupportMigrationResult {
+        var isLegacyDirectory = ObjCBool(false)
+        guard fm.fileExists(atPath: oldRoot.path, isDirectory: &isLegacyDirectory),
+            isLegacyDirectory.boolValue
+        else {
+            return .legacyRootAbsent
+        }
+
+        let marker = legacyApplicationSupportMergeMarker(for: newRoot)
+        if fm.fileExists(atPath: marker.path) {
+            print("[Osaurus] Legacy data migration already marked at \(marker.path); skipping")
+            return .alreadyMarked(marker)
+        }
+
+        if !fm.fileExists(atPath: newRoot.path) {
+            do {
+                try fm.copyItem(at: oldRoot, to: newRoot)
+                writeLegacyApplicationSupportMergeMarker(
+                    marker,
+                    legacyRoot: oldRoot,
+                    activeRoot: newRoot
+                )
+                print("[Osaurus] Copied data from \(oldRoot.path) to \(newRoot.path)")
+                return .copied(marker)
+            } catch {
+                print("[Osaurus] Copy failed, falling back to merge: \(error)")
+            }
+        }
+
+        mergeDirectory(from: oldRoot, into: newRoot)
+        writeLegacyApplicationSupportMergeMarker(
+            marker,
+            legacyRoot: oldRoot,
+            activeRoot: newRoot
+        )
+        print("[Osaurus] Merged data from \(oldRoot.path) into \(newRoot.path)")
+        return .merged(marker)
+    }
+
+    private static func writeLegacyApplicationSupportMergeMarker(
+        _ marker: URL,
+        legacyRoot: URL,
+        activeRoot: URL
+    ) {
+        let payload = """
+            legacy_application_support_migrated=1
+            legacy_root=\(legacyRoot.path)
+            active_root=\(activeRoot.path)
+
+            """
+        do {
+            try ensureExists(marker.deletingLastPathComponent())
+            try Data(payload.utf8).write(to: marker, options: .atomic)
+        } catch {
+            print("[Osaurus] Failed to write legacy data migration marker \(marker.path): \(error)")
+        }
+    }
 
     /// The root data directory for Osaurus: `~/.osaurus/`
     public static func root() -> URL {

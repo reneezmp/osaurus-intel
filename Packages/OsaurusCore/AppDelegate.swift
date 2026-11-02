@@ -267,12 +267,12 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         startUpstreamAnnouncements()
 
         let serverStartupTask = Task { @MainActor in
+            // A saved "Expose to Network" was never in effect before Intel
+            // honoured it: turned off once (W-server-api stage 7).
+            IntelNetworkExposure.resetSavedExposureOnce()
             let config = ServerConfigurationStore.load() ?? .default
-            let serverConfig = OsaurusServer.Config(
-                host: "127.0.0.1",
-                port: config.port,
-                trustLoopback: true
-            )
+            ServerController.shared.configuration = config
+            let serverConfig = IntelNetworkExposure.serverConfig(for: config)
             // Upstream #3018: a port still held, most often by an Osaurus that
             // is quitting as this one launches, is retried for a few seconds
             // before giving up; otherwise the survivor runs with no server.
@@ -280,7 +280,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             while true {
                 do {
                     try await server.start(serverConfig, serverConfiguration: config)
-                    NSLog("[Osaurus Intel] HTTP server started on port \(config.port)")
+                    NSLog(
+                        "[Osaurus Intel] HTTP server started on \(serverConfig.host):\(config.port)")
+                    IntelNetworkExposure.syncBonjour(for: config)
                     break
                 } catch where AppDelegate.isAddressInUse(error) && attempt < AppDelegate.serverBindAttempts {
                     NSLog("[Osaurus Intel] Port \(config.port) busy, retrying (\(attempt)/\(AppDelegate.serverBindAttempts))")
@@ -299,6 +301,22 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // chat + the agent capability picker can't see them.
             await MCPProviderManager.shared.connectEnabledProviders()
             NSLog("[Osaurus Intel] MCP providers reconnected")
+
+            // Upstream: an agent with Bonjour discovery on turns "Expose to
+            // Network" on (never off), and the server restarts on the LAN.
+            AgentManager.shared.$agents
+                .receive(on: RunLoop.main)
+                .sink { [weak self] agents in
+                    Task { @MainActor in
+                        let current = ServerController.shared.configuration
+                        guard IntelNetworkExposure.exposureRequired(by: agents, current: current) else { return }
+                        var exposed = current
+                        exposed.exposeToNetwork = true
+                        ServerController.shared.configuration = exposed
+                        await self?.applyServerConfiguration(exposed)
+                    }
+                }
+                .store(in: &self.cancellables)
 
             // M13 Schedules restore (Renée 2026-06-03): start the cron loop so
             // scheduled agents fire headless. The first iteration does cold-start
@@ -848,26 +866,23 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     /// Server → Settings tab revival (2026-09-04, Renée): persists
     /// `config` to `server.json` and stops + restarts the live
     /// `OsaurusServer` in place so a changed port / CORS allow-list /
-    /// request-body cap takes effect without quitting the app. Intel's
-    /// HTTP server is loopback-only by design — this always binds
-    /// `127.0.0.1` with `trustLoopback: true`, mirroring the launch-time
-    /// config in `applicationDidFinishLaunching`. Called by the Intel
-    /// `ServerController` stub's `restartServer()`.
+    /// request-body cap / network exposure takes effect without quitting
+    /// the app. Binds as the launch does (`IntelNetworkExposure`: this Mac
+    /// only, or every interface without loopback trust while "Expose to
+    /// Network" is on). Called by the Intel `ServerController` stub's
+    /// `restartServer()`.
     @MainActor
     func applyServerConfiguration(_ config: ServerConfiguration) async {
         ServerConfigurationStore.save(config)
         await server.stop()
-        let serverConfig = OsaurusServer.Config(
-            host: "127.0.0.1",
-            port: config.port,
-            trustLoopback: true
-        )
+        let serverConfig = IntelNetworkExposure.serverConfig(for: config)
         do {
             try await server.start(serverConfig, serverConfiguration: config)
-            NSLog("[Osaurus Intel] HTTP server restarted on port \(config.port)")
+            NSLog("[Osaurus Intel] HTTP server restarted on \(serverConfig.host):\(config.port)")
         } catch {
             NSLog("[Osaurus Intel] Server restart failed: \(error)")
         }
+        IntelNetworkExposure.syncBonjour(for: config)
     }
 }
 

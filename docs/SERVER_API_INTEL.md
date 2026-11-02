@@ -78,6 +78,8 @@ agent, session and run routes inside the encrypted secure channel.
 6. **Media routes.**
 7. **Admin bits, Server tab and network exposure.** Honour "Expose to
    network" only once stages 0–1 are in.
+8. **Codex CLI card** (found 2026-11-02, the last `W-server-api` file):
+   upstream's `CodexCLIConfiguration` and its Server tab card.
 
 Each stage: gate run, Rosy section, row note in the backlog.
 
@@ -781,3 +783,84 @@ Each stage: gate run, Rosy section, row note in the backlog.
     clean. No live `~/.osaurus` writes, identity keychain item unchanged.
 - **Stage 6 complete.** Next: stage 7 (admin routes, Server tab endpoint
   list, Expose to network).
+- **Stage 7 (2026-11-02): admin routes, the Server tab and network
+  exposure.**
+  - **Admin routes** (`IntelHTTPAdmin.swift`). Upstream's three runtime
+    routes are about the on-device (vmlx) engine:
+    - `GET /admin/cache-stats` answers upstream's shape in its cold state:
+      no models, the 16 aggregate counters at zero, `memory_safety` and
+      `batch_diagnostics` null, `inference_activity` empty. The parts that
+      apply here are real: `context_policy` (the chat context length and
+      `ContextBudgetManager.safetyMargin`; the KV-retention fields null) and
+      `storage_locations`.
+    - `GET /admin/generation-settings`: upstream's shape, empty.
+    - `GET` / `PUT /admin/runtime-settings` (vMLX memory, cache and batch
+      settings; `ServerRuntimeSettingsStore` is excluded, `INC-mlx`): 501.
+    - Access is the gate's: loopback callers and master keys; agent-scoped
+      keys never reach `/admin/*` (stage 1). `/admin/config/*` is
+      `W-declarative-config`, `/admin/import/*` `W-osaurus-bundles`.
+  - **Storage audit:** upstream's `Utils/StorageLocationStandards.swift`
+    and its tests. Intel has no models folder or directory picker, so the
+    models root is upstream's default `~/MLXModels`, never probed
+    (`intelModelsRootPath`). See `STORAGE.md`, "Storage Location
+    Standards".
+  - **Found while porting it:** upstream #1522 (`ae34ca6ac`, June) was
+    missing. Upstream writes a one-shot marker
+    (`~/.osaurus/.legacy-application-support-merge.done`) after merging the
+    legacy `~/Library/Application Support/com.dinoki.osaurus` root. Intel's
+    own `OsaurusPaths` re-merged that root on every launch (newer file
+    wins), which can bring back changed files. Ported with upstream's
+    migration tests; recorded on `W-cov-reaudit`. Neither this Mac nor a
+    fresh install has the legacy root.
+  - **Server tab endpoint list:** Intel's list is upstream's, and since
+    stages 2–4 every route on it is served (the 2026-10-27 note about ~25
+    unserved routes no longer applies). No change.
+  - **Expose to Network** (`IntelNetworkExposure.swift`, `AppDelegate`):
+    - **Bind rule (upstream's `ServerController`):** off binds
+      `127.0.0.1` with loopback trust; on binds `0.0.0.0` with loopback
+      trust **off**. So while exposed, a local caller needs a key too,
+      except the app's own clients, which send the per-launch app token
+      (#3178), and public paths. Used at launch and on every Settings
+      restart.
+    - **Bonjour:** agents with Local Network Discovery on are advertised
+      only while exposed. An agent switching discovery on turns the switch
+      on and restarts the server on the LAN; nothing but the user turns it
+      off (upstream). The agent page already warns about this.
+    - **One-time reset (Renée's call, 2026-11-02):** a saved "on" was never
+      in effect (Intel always bound loopback), and her own `server.json`
+      had it on. The first launch of this build turns a saved "on" off
+      once and writes `config/intel-network-exposure-reset.marker`, so no
+      Mac starts listening on the network by surprise after updating.
+      Turning it on afterwards sticks. No agent on her Mac has Bonjour on,
+      so nothing turns it straight back on.
+    - **UI:** the Connection card shows upstream's toggle on Intel too.
+      The Server tab's access-key text and the connection URL follow the
+      switch, using upstream's `LocalNetworkAddress` for the LAN address
+      (stub `ServerController.localNetworkAddress`).
+    - `ServerConfigurationStore.save` gained `synchronous:` so the reset
+      is on disk before the server start reads it (saves are otherwise
+      off the main thread).
+  - **Tests:**
+    - New `IntelHTTPAdminTests`: cache-stats shape and storage block,
+      generation-settings, the routes over HTTP (501 for runtime settings,
+      404 for unknown admin paths), the bind rule, the Bonjour rule, the
+      one-time reset (on → off once, then left alone) and a fresh install.
+    - Upstream's `StorageLocationStandardsTests`, including its two merge
+      marker cases (temp folders only).
+  - **Classifier:** upstream's `InferenceActivityRegistry` (fed only by the
+    MLX `ModelRuntime`) moved to `INC-mlx`, and the evidence report
+    registry (used only by the `OsaurusEvals` package) to `N-dev-tooling`.
+  - **Validation (2026-11-02):** full suite under the interim 27.0-SDK
+    gate: 4,148 tests, all stage 7 tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0; guide check
+    clean. No live `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 7 complete.** One upstream file is still `W-server-api`'s:
+  `CodexCLIConfiguration` (373 lines), the Server tab card that writes
+  `~/.codex` so OpenAI's Codex CLI uses this Mac's `/v1/responses` as a
+  provider (upstream `c1c4d712f`; it waited for Intel's `/responses`,
+  stage 2e). That is stage 8. Routes left in the inventory table belong to
+  other items: `W-identity-mobile` (pairing, Secure Channel, phone runs and
+  image jobs), `W-declarative-config`, `W-osaurus-bundles`,
+  `W-privacy-filter`, `W-plugin-reliability`, and the deferred workspaces
+  and channels.

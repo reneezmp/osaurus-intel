@@ -101,13 +101,12 @@ struct ConnectionSection: View {
 #else
 import SwiftUI
 
-/// Intel port + CORS controls. The fork's HTTP server
-/// (`Networking/ServerController.swift`, excluded on Intel) is
-/// loopback-only by design, so there's no "Expose to Network" toggle
-/// here and no served-model alias (there is no single local model to
-/// alias — Intel is a cloud-only proxy). This edits the subset of the
-/// legacy `ServerConfiguration` that Intel's `OsaurusServer` actually
-/// reads: listening port and the CORS allow-list. Saving restarts the
+/// Intel port, network exposure and CORS controls. No served-model alias
+/// (there is no single local model to alias — Intel is a cloud-only
+/// proxy). This edits the subset of the legacy `ServerConfiguration` that
+/// Intel's `OsaurusServer` actually reads: listening port, "Expose to
+/// Network" (honoured since `W-server-api` stage 7,
+/// `IntelNetworkExposure`) and the CORS allow-list. Saving restarts the
 /// live server in place via `ServerController.restartServer()`.
 struct ConnectionSection: View {
     @Binding var draft: ServerConfiguration
@@ -131,6 +130,13 @@ struct ConnectionSection: View {
                 defaultValue: 1337
             )
             .onChange(of: portText) { _ in commitPort() }
+
+            SettingsToggle(
+                title: L("Expose to Network"),
+                description:
+                    "Off binds to 127.0.0.1 (this Mac only). On binds to 0.0.0.0 so phones, iPads, and other devices on your network can connect.",
+                isOn: $draft.exposeToNetwork
+            )
 
             SettingsDivider()
 

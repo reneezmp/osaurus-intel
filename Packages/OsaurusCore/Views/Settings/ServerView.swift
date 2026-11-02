@@ -431,9 +431,9 @@ private struct AccessKeysSection: View {
         )
     }
 
-    /// (Intel) `ServerController` is excluded — its `configuration` is type-erased
-    /// here and the Intel server is loopback-only, so network exposure is always off.
-    private var isServerNetworkExposed: Bool { false }
+    /// Upstream reads `server.configuration.exposeToNetwork` directly; Intel's
+    /// `ServerController` stub holds the same saved configuration.
+    private var isServerNetworkExposed: Bool { server.configuration.exposeToNetwork }
 
     private var accessKeySummaryText: String {
         if isServerNetworkExposed {

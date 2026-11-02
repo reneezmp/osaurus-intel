@@ -4520,6 +4520,15 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   `/images/models`) answer 501 or empty: they are MLX. The phone's image
   session and detached-job fields wait for `W-identity-mobile`.
   `MediaGenerationContractTests` matches upstream again.
+- **Stage 7:** `/admin/cache-stats` (upstream's cold shape with the
+  context policy and storage audit), `/admin/generation-settings` (empty),
+  `/admin/runtime-settings` (501, vMLX only). "Expose to Network" is
+  honoured with upstream's bind and Bonjour rules; a saved "on", never in
+  effect before, is turned off once. Upstream's `StorageLocationStandards`
+  and `LocalNetworkAddress` are in, and so is the one-shot legacy merge
+  marker (#1522, `ae34ca6ac`), which Intel's own `OsaurusPaths` had missed:
+  it re-merged the old Application Support root on every launch (see
+  `W-cov-reaudit`). Left: stage 8, the Server tab's Codex CLI card.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

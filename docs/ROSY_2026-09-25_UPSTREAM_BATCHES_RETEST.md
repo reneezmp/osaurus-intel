@@ -2331,6 +2331,31 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
       and once `completed`,
       `curl -s -o /tmp/clip.mp4 http://127.0.0.1:1337/v1/videos/jobs/<id>/content`
       saves the video. A token works once.
+- [ ] **Admin** (stage 7): `curl -s http://127.0.0.1:1337/admin/cache-stats`
+      answers `"status":"ok"` with empty `models` and a `storage_locations`
+      block whose `active_root` is your `~/.osaurus`.
+      `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337/admin/runtime-settings`
+      prints `501`.
+- [ ] **Expose to Network, after updating:** Settings › Server › Settings ›
+      Connection shows **Expose to Network** off, even if it was on before
+      (Intel never honoured it; this update turns a saved "on" off once).
+      `curl -s http://127.0.0.1:1337/health` still answers.
+- [ ] Turn **Expose to Network** on and save. The Server tab's address
+      changes to Rosy's network address (`http://192.168.…:1337`). From the
+      phone's browser or another computer on the same Wi-Fi,
+      `http://<that address>:1337/health` answers. `…/v1/models` from
+      there answers 401 without an access key, and lists the models with
+      `Authorization: Bearer <a key from Access Keys>`.
+- [ ] While it's on, `curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:1337/v1/models`
+      on Rosy itself prints `401` (local callers need a key too). An
+      Osaurus action in Shortcuts still works.
+- [ ] Quit and reopen Osaurus: the switch is still on (the one-time reset
+      doesn't come back) and the other device still reaches `/health`.
+- [ ] Turn it off and save: the other device can't connect any more, and
+      the key-less local curl to `/v1/models` answers 200 again.
+- [ ] Optional: on an agent's page, turn **Local Network Discovery** on.
+      Expose to Network turns itself on (the warning under the switch says
+      so). Turn discovery off, then turn Expose to Network off by hand.
 
 ## Release candidate 1.0.61 (build 62) — smoke pass (2026-10-30)
 
