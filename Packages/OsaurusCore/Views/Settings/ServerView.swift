@@ -110,6 +110,7 @@ private struct OverviewTabContent: View {
                 ServerStatusCard()
                 AccessKeysSection()
                 CommandLineToolSection()
+                CodexCLISetupSection()
                 RelaysSectionView()
             }
             .padding(.horizontal, 24)
@@ -623,6 +624,315 @@ private struct AccessKeysSection: View {
         guard server.isRunning else { return }
         Task { await server.restartServer() }
     }
+}
+
+// MARK: - Codex CLI Setup
+
+/// "Use with Codex CLI" (upstream #2850 / #2852, `W-server-api` stage 8):
+/// generates the `~/.codex` provider + profile config that points OpenAI's
+/// Codex CLI at this server, and can write it in place.
+///
+/// The snippet is derived from the live `ServerController` state on every
+/// render, so a port or exposure change is reflected immediately. Writing
+/// goes through `CodexCLIConfiguration.write`, which refuses (rather than
+/// duplicates) when the user already defines the provider by hand.
+///
+/// Intel differences: upstream lists the on-device models (MLX bundles and
+/// Apple's Foundation model); Intel offers the cloud models this server
+/// lists at `/v1/models` (Server › Models), and the context window is the
+/// model's catalog value (no on-device KV cap). Osaurus Router models spend
+/// credits, so a key-less Codex is refused for them unless Credits allows
+/// local API access without a key; the card says so. `onChange` uses the
+/// one-argument form (macOS 13).
+private struct CodexCLISetupSection: View {
+    @Environment(\.theme) private var theme
+    @EnvironmentObject var server: ServerController
+
+    @State private var modelIds: [String] = []
+    @State private var hasLoadedModels = false
+    @State private var selectedModelId: String = ""
+    /// The model's catalog context length; nil omits
+    /// `model_context_window` from the profile.
+    @State private var contextWindow: Int?
+    @State private var writeStatus: WriteStatus?
+    @State private var didCopy = false
+
+    private enum WriteStatus: Equatable {
+        case success(configPath: String, profilePath: String, replaced: Bool)
+        case failure(String)
+    }
+
+    private var codexHome: URL { CodexCLIConfiguration.codexHome() }
+
+    private var snippet: String {
+        CodexCLIConfiguration.snippet(
+            port: server.port,
+            exposeToNetwork: server.configuration.exposeToNetwork,
+            modelId: selectedModelId.isEmpty ? "<model>" : selectedModelId,
+            contextWindow: contextWindow,
+            codexHome: codexHome
+        )
+    }
+
+    /// A key-less Codex on an Osaurus Router model is refused by the Router
+    /// spend gate unless Credits allows it (while exposed, Codex sends a key).
+    private var routerNeedsSpendOptIn: Bool {
+        !server.configuration.exposeToNetwork
+            && IntelCodexCLIModels.isOsaurusRouterModel(selectedModelId)
+            && !OsaurusRouter.allowsUnkeyedLoopbackSpend
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            Label {
+                Text("Use with Codex CLI", bundle: .module)
+            } icon: {
+                Image(systemName: "terminal")
+            }
+            .font(.system(size: 14, weight: .semibold))
+            .foregroundColor(theme.primaryText)
+
+            Text(
+                "Run OpenAI's Codex CLI against the models this server shares. Osaurus registers itself as a Codex model provider and adds an `osaurus` profile; nothing else in your Codex config is touched.",
+                bundle: .module
+            )
+            .font(.system(size: 12))
+            .foregroundColor(theme.secondaryText)
+            .fixedSize(horizontal: false, vertical: true)
+
+            modelRow
+
+            snippetView
+
+            HStack(spacing: 10) {
+                Button(action: copySnippet) {
+                    HStack(spacing: 6) {
+                        Image(systemName: didCopy ? "checkmark" : "doc.on.doc")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(verbatim: didCopy ? L("Copied") : L("Copy"))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(theme.primaryText)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .stroke(theme.primaryBorder.opacity(0.6), lineWidth: 1)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .localizedHelp("Copy both files and the command")
+
+                Button(action: writeConfig) {
+                    HStack(spacing: 6) {
+                        Image(systemName: "square.and.arrow.down")
+                            .font(.system(size: 10, weight: .semibold))
+                        Text(verbatim: String(format: L("Add to %@"), CodexCLIConfiguration.displayPath(codexHome)))
+                            .font(.system(size: 12, weight: .semibold))
+                    }
+                    .foregroundColor(.white)
+                    .padding(.horizontal, 12)
+                    .padding(.vertical, 6)
+                    .background(
+                        RoundedRectangle(cornerRadius: 6)
+                            .fill(selectedModelId.isEmpty ? theme.accentColor.opacity(0.4) : theme.accentColor)
+                    )
+                }
+                .buttonStyle(PlainButtonStyle())
+                .disabled(selectedModelId.isEmpty)
+                .localizedHelp("Write config.toml and osaurus.config.toml")
+
+                Spacer()
+            }
+
+            if let writeStatus {
+                statusView(writeStatus)
+            }
+
+            if server.configuration.exposeToNetwork {
+                note(
+                    String(
+                        format: L(
+                            "Network exposure is on, so Codex must send an access key even from this Mac. Create one under Access Keys and export %@ in the shell that runs codex."
+                        ),
+                        CodexCLIConfiguration.accessKeyEnvironmentVariable
+                    ))
+            } else if routerNeedsSpendOptIn {
+                note(
+                    L(
+                        "Osaurus Router models spend your credits, so Codex is refused for them until you turn on \"Allow local API access without a key\" in Credits."
+                    ))
+            }
+        }
+        .padding(16)
+        .background(
+            RoundedRectangle(cornerRadius: 12)
+                .fill(theme.secondaryBackground)
+        )
+        .settingsLandingAnchor("server.codexCLI")
+        .task { await loadModels() }
+        .onChange(of: selectedModelId) { newValue in
+            writeStatus = nil
+            contextWindow = IntelCodexCLIModels.contextWindow(for: newValue)
+        }
+        .onChange(of: server.port) { _ in writeStatus = nil }
+        .onChange(of: server.configuration.exposeToNetwork) { _ in writeStatus = nil }
+    }
+
+    private func note(_ text: String) -> some View {
+        HStack(alignment: .top, spacing: 6) {
+            Image(systemName: "key.fill")
+                .font(.system(size: 10, weight: .semibold))
+                .foregroundColor(theme.warningColor)
+            Text(verbatim: text)
+                .font(.system(size: 11))
+                .foregroundColor(theme.secondaryText)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private var modelRow: some View {
+        HStack(spacing: 12) {
+            Text("Model", bundle: .module)
+                .font(.system(size: 12, weight: .medium))
+                .foregroundColor(theme.secondaryText)
+
+            if !hasLoadedModels {
+                ProgressView()
+                    .controlSize(.small)
+            } else if modelIds.isEmpty {
+                Text("No models are shared with the API yet. Turn some on in Server › Models first.", bundle: .module)
+                    .font(.system(size: 12))
+                    .foregroundColor(theme.tertiaryText)
+            } else {
+                Picker("", selection: $selectedModelId) {
+                    ForEach(modelIds, id: \.self) { id in
+                        Text(id).tag(id)
+                    }
+                }
+                .pickerStyle(.menu)
+                .labelsHidden()
+                .frame(maxWidth: 360, alignment: .leading)
+                .accessibilityIdentifier("server.codexCLI.model")
+            }
+
+            Spacer()
+
+            if let contextWindow {
+                Text(verbatim: String(format: L("%@ context"), Self.tokenFormatter.string(from: NSNumber(value: contextWindow)) ?? "\(contextWindow)"))
+                    .font(.system(size: 11))
+                    .foregroundColor(theme.tertiaryText)
+            }
+        }
+    }
+
+    private var snippetView: some View {
+        ScrollView(.horizontal, showsIndicators: false) {
+            Text(snippet)
+                .font(.system(size: 11, design: .monospaced))
+                .foregroundColor(theme.primaryText)
+                .textSelection(.enabled)
+                .fixedSize(horizontal: true, vertical: true)
+                .padding(12)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .background(
+            RoundedRectangle(cornerRadius: 8)
+                .fill(theme.inputBackground)
+                .overlay(
+                    RoundedRectangle(cornerRadius: 8)
+                        .stroke(theme.inputBorder, lineWidth: 1)
+                )
+        )
+        .accessibilityIdentifier("server.codexCLI.snippet")
+    }
+
+    private func statusView(_ status: WriteStatus) -> some View {
+        let isSuccess: Bool
+        let icon: String
+        let color: Color
+        let message: String
+        switch status {
+        case .success(let configPath, let profilePath, let replaced):
+            isSuccess = true
+            icon = "checkmark.circle.fill"
+            color = theme.successColor
+            message = String(
+                format: replaced
+                    ? L("Updated %@ and wrote %@. Run `%@`.")
+                    : L("Added the provider to %@ and wrote %@. Run `%@`."),
+                configPath, profilePath, CodexCLIConfiguration.usageCommand
+            )
+        case .failure(let detail):
+            isSuccess = false
+            icon = "exclamationmark.triangle.fill"
+            color = theme.errorColor
+            message = detail
+        }
+        return HStack(alignment: .top, spacing: 6) {
+            Image(systemName: icon)
+                .font(.system(size: 11, weight: .semibold))
+                .foregroundColor(color)
+            Text(verbatim: message)
+                .font(.system(size: 11, weight: isSuccess ? .regular : .medium))
+                .foregroundColor(isSuccess ? theme.secondaryText : theme.errorColor)
+                .fixedSize(horizontal: false, vertical: true)
+                .textSelection(.enabled)
+        }
+        .accessibilityIdentifier("server.codexCLI.status")
+    }
+
+    // MARK: Actions
+
+    private func copySnippet() {
+        NSPasteboard.general.clearContents()
+        NSPasteboard.general.setString(snippet, forType: .string)
+        didCopy = true
+        Task {
+            try? await Task.sleep(nanoseconds: 1_500_000_000)
+            didCopy = false
+        }
+    }
+
+    private func writeConfig() {
+        guard !selectedModelId.isEmpty else { return }
+        do {
+            let result = try CodexCLIConfiguration.write(
+                port: server.port,
+                exposeToNetwork: server.configuration.exposeToNetwork,
+                modelId: selectedModelId,
+                contextWindow: contextWindow,
+                codexHome: codexHome
+            )
+            writeStatus = .success(
+                configPath: CodexCLIConfiguration.displayPath(result.configURL),
+                profilePath: CodexCLIConfiguration.displayPath(result.profileURL),
+                replaced: result.replacedExistingBlock
+            )
+        } catch {
+            writeStatus = .failure(error.localizedDescription)
+        }
+    }
+
+    // MARK: Loading
+
+    /// The models `/v1/models` lists (Intel: cloud models shared in
+    /// Server › Models), in that order.
+    private func loadModels() async {
+        let ids = IntelCodexCLIModels.servedModelIds()
+        modelIds = ids
+        hasLoadedModels = true
+        if selectedModelId.isEmpty || !ids.contains(selectedModelId) {
+            selectedModelId = ids.first ?? ""
+        }
+        contextWindow = IntelCodexCLIModels.contextWindow(for: selectedModelId)
+    }
+
+    private static let tokenFormatter: NumberFormatter = {
+        let f = NumberFormatter()
+        f.numberStyle = .decimal
+        return f
+    }()
 }
 
 // MARK: - Relays Section

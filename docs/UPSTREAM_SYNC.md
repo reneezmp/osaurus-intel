@@ -4479,7 +4479,7 @@ Audit of the three upstream commits against Intel's agent page:
   (`AgentAbilityContextPreviewBar`, #2306). Intel's Abilities overview is
   its own (`COV-intel-own`); this is noted on `W-cov-reaudit`.
 
-### Local API server (`W-server-api`, in progress) — 2026-10-29
+### Local API server (`W-server-api`, complete 2026-11-02) — 2026-10-29
 
 Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
 - **Stage 0:** the tampered-key crash (#131) is fixed.
@@ -4528,7 +4528,12 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   and `LocalNetworkAddress` are in, and so is the one-shot legacy merge
   marker (#1522, `ae34ca6ac`), which Intel's own `OsaurusPaths` had missed:
   it re-merged the old Application Support root on every launch (see
-  `W-cov-reaudit`). Left: stage 8, the Server tab's Codex CLI card.
+  `W-cov-reaudit`).
+- **Stage 8:** upstream's "Use with Codex CLI" card and
+  `CodexCLIConfiguration` (#2850, #2852), offering the cloud models
+  `/v1/models` lists instead of on-device ones, with a note when an Osaurus
+  Router model would be refused for lack of a key. `W-server-api` is
+  complete.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

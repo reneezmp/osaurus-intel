@@ -79,7 +79,8 @@ agent, session and run routes inside the encrypted secure channel.
 7. **Admin bits, Server tab and network exposure.** Honour "Expose to
    network" only once stages 0–1 are in.
 8. **Codex CLI card** (found 2026-11-02, the last `W-server-api` file):
-   upstream's `CodexCLIConfiguration` and its Server tab card.
+   upstream's `CodexCLIConfiguration` and its Server tab card. Done
+   2026-11-02.
 
 Each stage: gate run, Rosy section, row note in the backlog.
 
@@ -864,3 +865,36 @@ Each stage: gate run, Rosy section, row note in the backlog.
   image jobs), `W-declarative-config`, `W-osaurus-bundles`,
   `W-privacy-filter`, `W-plugin-reliability`, and the deferred workspaces
   and channels.
+- **Stage 8 (2026-11-02): "Use with Codex CLI".**
+  - **Ported:** upstream's `Models/Configuration/CodexCLIConfiguration.swift`
+    (#2850, #2852) and `CodexCLIConfigurationTests`, verbatim. It writes a
+    marker-wrapped `[model_providers.osaurus]` block into
+    `~/.codex/config.toml`, never touching the rest and refusing when the
+    user already defines that provider by hand. It also writes the whole
+    `osaurus.config.toml` profile, used with `codex --profile osaurus`. The
+    base URL is always `http://127.0.0.1:<port>/v1`. While exposed, it names
+    `OSAURUS_API_KEY` (`env_key`), never a key.
+  - **The card:** upstream's `CodexCLISetupSection` on Server › Overview,
+    after Command Line Tool.
+  - **Intel differences** (`IntelCodexCLIModels`):
+    - **Models:** upstream lists on-device bundles and Apple's Foundation
+      model. Intel offers the ids `/v1/models` lists (the cloud models
+      shared in Server › Models).
+    - **Context window:** the model's catalog context length from the
+      picker cache (no on-device KV cap).
+    - **Router note:** an Osaurus Router model shows a note when "Allow
+      local API access without a key" is off and the server isn't exposed.
+      Codex sends no key then, so the Router spend gate (stage 5b) would
+      refuse it.
+    - `onChange` uses the one-argument form (macOS 13).
+  - **Tests:** upstream's `CodexCLIConfigurationTests` (temp `CODEX_HOME`
+    folders only), new `IntelCodexCLIModelsTests` (id prefix, Router
+    detection, catalog context window).
+  - **Validation (2026-11-02):** full suite under the interim 27.0-SDK
+    gate: 4,172 tests, all stage 8 tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0; guide check
+    clean. No live `~/.osaurus` or `~/.codex` writes, identity keychain
+    item unchanged.
+- **Stage 8 complete. `W-server-api` is complete:** the classifier lists
+  no upstream file under it (`W-server-api 0 files`).

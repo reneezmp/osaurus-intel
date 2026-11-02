@@ -2356,6 +2356,21 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] Optional: on an agent's page, turn **Local Network Discovery** on.
       Expose to Network turns itself on (the warning under the switch says
       so). Turn discovery off, then turn Expose to Network off by hand.
+- [ ] **Use with Codex CLI** (stage 8): Server › Overview shows the card
+      under Command Line Tool. Its Model menu lists the same ids as
+      `curl -s http://127.0.0.1:1337/v1/models` (the models switched on in
+      Server › Models); with none switched on it says so. Picking a model
+      updates the snippet (`model = "…"`, and `model_context_window` when
+      the catalog knows it).
+- [ ] With an Osaurus Router model picked and Credits' "Allow local API
+      access without a key" off, the card shows the note about Credits;
+      with a Venice (or other) model it doesn't.
+- [ ] **Copy** puts both files and `codex --profile osaurus` on the
+      clipboard. If Codex CLI is installed: the Add to `~/.codex` button
+      reports what it wrote; `~/.codex/config.toml` keeps everything that
+      was there plus an `osaurus managed` block, and a second click replaces
+      that block instead of adding another. `codex --profile osaurus`
+      answers a short prompt on a non-Router model.
 
 ## Release candidate 1.0.61 (build 62) — smoke pass (2026-10-30)
 

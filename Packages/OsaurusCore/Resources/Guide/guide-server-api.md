@@ -46,6 +46,10 @@ Settings → Server → Access Keys: **Generate Key** creates an `osk-v1` key fo
 
 Models from the Osaurus Router spend your credits, so another app on this Mac can only use them over the API with your access key (`Authorization: Bearer <key>`), or once you turn on **Allow local API access without a key** in Credits. Chats in the app aren't affected.
 
+## Use with Codex CLI
+
+Server → Overview → **Use with Codex CLI** sets up OpenAI's Codex CLI to use this Mac as its model provider. Pick one of the models shared in Server → Models, then **Copy** the two files, or write them with the Add to `~/.codex` button, and run `codex --profile osaurus`. Only an `osaurus` section of Codex's `config.toml` is touched, plus its own `osaurus.config.toml`. Osaurus Router models also need **Allow local API access without a key** in Credits, or an access key while Expose to Network is on.
+
 ## Command-line tool
 
 Settings → Server → Command Line Tool installs the `osaurus` CLI (`osaurus status`, `osaurus serve`, `osaurus ui`, `osaurus version`).
