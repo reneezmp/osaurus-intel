@@ -43,6 +43,7 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         didSet {
             _contentLength = content.count
             _cachedVisibleContent = nil
+            _cachedContentIsBlank = nil
             Self.bumpTokenEstimateRevision()
         }
     }
@@ -50,13 +51,23 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     private var _contentLength: Int
 
     var contentIsEmpty: Bool { _contentLength == 0 }
+    /// Memoized `contentIsBlank`. Trimming copies the whole message, and
+    /// visible-block rebuilds read this for every assistant turn on every
+    /// streaming sync (upstream #3267, APPLE-MACOS-3KF). Reset in `content`'s
+    /// `didSet`, which every Intel mutation path goes through.
+    private var _cachedContentIsBlank: Bool?
     var contentIsBlank: Bool {
-        content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if _contentLength == 0 { return true }
+        if let cached = _cachedContentIsBlank { return cached }
+        let blank = content.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        _cachedContentIsBlank = blank
+        return blank
     }
 
     @Published var thinking: String {
         didSet {
             _thinkingLength = thinking.count
+            _cachedThinkingIsBlank = nil
             Self.bumpTokenEstimateRevision()
         }
     }
@@ -64,8 +75,14 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     private var _thinkingLength: Int
 
     var thinkingIsEmpty: Bool { _thinkingLength == 0 }
+    /// Memoized `thinkingIsBlank` (see `_cachedContentIsBlank`, upstream #3267).
+    private var _cachedThinkingIsBlank: Bool?
     var thinkingIsBlank: Bool {
-        thinking.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        if _thinkingLength == 0 { return true }
+        if let cached = _cachedThinkingIsBlank { return cached }
+        let blank = thinking.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        _cachedThinkingIsBlank = blank
+        return blank
     }
 
     var hasThinking: Bool { _thinkingLength > 0 }
