@@ -3543,20 +3543,21 @@ extension FloatingInputCard {
 
     /// Placeholder text for the input field.
     private var placeholderText: String {
-        // Upstream (`W-media-generation`).
+        // Evaluated on every keystroke: memoized `LCached` keeps it cheap
+        // (upstream #3253, hang APPLE-MACOS-1E7).
         if let media = selectedPickerItem?.mediaModel {
             switch media.kind {
             case .image:
-                return L("Describe the image...")
+                return LCached("Describe the image...")
             case .textToVideo:
-                return L("Describe the video...")
+                return LCached("Describe the video...")
             case .imageToVideo:
                 return pendingAttachments.contains(where: \.isImage)
-                    ? L("Describe how the image should move...")
-                    : L("Attach one image, then describe the video...")
+                    ? LCached("Describe how the image should move...")
+                    : LCached("Attach one image, then describe the video...")
             }
         }
-        return L("Message or attach files...")
+        return LCached("Message or attach files...")
     }
 
     private var textInputArea: some View {
