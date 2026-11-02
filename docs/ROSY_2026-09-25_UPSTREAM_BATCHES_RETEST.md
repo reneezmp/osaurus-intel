@@ -2294,6 +2294,43 @@ app; this checks the server still answers locally. Use Terminal on Rosy.
 - [ ] `curl -s http://127.0.0.1:1337/credits/balance` answers 403
       `credits_access_not_authorized` with the switch off, and your balance
       with it on.
+- [ ] **Images and video** (stage 6). These spend credits or Venice money;
+      each paid step says so. `curl -s http://127.0.0.1:1337/models/picker`
+      now also lists the Osaurus Cloud and Venice image models with
+      `"kind":"image"` and a `cloud` block (its `target`, aspect ratios and
+      a `price_label` such as "From 4 credits"). Video models are not in
+      the picker list.
+- [ ] Copy one image model's `cloud.target` and send it **without**
+      permission to spend:
+      `curl -s -X POST http://127.0.0.1:1337/v1/images/generations -H 'Content-Type: application/json' -d '{"prompt":"a red apple","target":<the target>}'`
+      — 403, "requires allow_remote_media_spend=true", nothing spent.
+- [ ] **Paid:** the same with `"allow_remote_media_spend":true` and
+      `"response_format":"b64_json"` added: after a few seconds the reply
+      holds `data[0].b64_json`. Without `response_format` it holds a
+      `file://` URL under `~/.osaurus/generated-images/`; open it. Insights
+      shows the request with the model and size.
+- [ ] **Paid:** add `"stream":true` instead: the reply is `data:` lines — a
+      `queued` event with a `job_id`, then `completed` with the image, then
+      `[DONE]`.
+- [ ] `curl -s -X POST http://127.0.0.1:1337/v1/images/generations -H 'Content-Type: application/json' -d '{"prompt":"a red apple","model":"flux"}'`
+      (a bare model name means an on-device model) answers 501 "needs an
+      Apple Silicon Mac". So do `/v1/images/edits` and `/v1/images/upscale`
+      with an image, and `curl -s http://127.0.0.1:1337/v1/images/models`
+      lists no models.
+- [ ] **Video quote (free):** with a Venice or Osaurus Cloud video model
+      (its target from Cloud Models / the composer:
+      `{"backend":"osaurus_cloud","model":"<id>"}` or
+      `{"backend":"remote_provider","provider_id":"<Venice provider id>","model":"<id>"}`):
+      `curl -s -X POST http://127.0.0.1:1337/v1/videos/quote -H 'Content-Type: application/json' -d '{"prompt":"waves at sunset","duration":"5s","target":<target>}'`
+      answers `quote_usd`, a `quote_token` and `expires_at`.
+- [ ] Sending that to `/v1/videos/generations` with the `quote_token` but
+      without `allow_remote_media_spend` answers 403; with a made-up
+      token and the flag it answers 400 about the quote. **Paid, optional:**
+      with the real token and the flag it answers 202 with a job `id`;
+      `curl -s http://127.0.0.1:1337/v1/videos/jobs/<id>` shows its status,
+      and once `completed`,
+      `curl -s -o /tmp/clip.mp4 http://127.0.0.1:1337/v1/videos/jobs/<id>/content`
+      saves the video. A token works once.
 
 ## Release candidate 1.0.61 (build 62) — smoke pass (2026-10-30)
 

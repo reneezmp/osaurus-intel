@@ -148,9 +148,9 @@ kinds directly:
 
 ## Tests
 
-`Tests/MediaGeneration/MediaGenerationContractTests.swift` (upstream, minus
-the `SubagentConfiguration` migration case and the two HTTP cases that come
-with the server routes) and `IntelMediaGenerationTests.swift` (Venice host
+`Tests/MediaGeneration/MediaGenerationContractTests.swift` (upstream; the
+`SubagentConfiguration` migration case and the two HTTP cases came back with
+the server routes, 2026-11-02) and `IntelMediaGenerationTests.swift` (Venice host
 check and discovery split, local targets refused, Cloud fails closed without
 its catalog). Stub transports only; nothing reaches the network. Part B:
 upstream's `CloudModelCategoryTests` (media cases back) and
@@ -169,3 +169,10 @@ tools). The `/v1/images` and `/v1/videos` server routes moved to
 an `APIKeyValidator` but never checks it, so they wait for that check
 (`Models/API/ImageAPI.swift` is classified there). Follow-ups: a place to
 see recent video jobs (upstream shows them in its Images panel).
+
+**Server routes (2026-11-02, `W-server-api` stage 6):** served from
+`Networking/IntelHTTPMedia.swift` on this coordinator; see
+`SERVER_API_INTEL.md` stage 6. Remote spend needs
+`allow_remote_media_spend: true`; video queueing needs a single-use quote
+token from `/videos/quote` (`MediaQuoteStore`). A video job queued over HTTP
+is the same durable job the chat queues, recovered after a restart.

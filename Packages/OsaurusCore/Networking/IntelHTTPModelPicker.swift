@@ -16,10 +16,12 @@
 //  Secure Channel from a remote owner). Credits answers a verified master
 //  key, or a key-less loopback caller once the user opts in.
 //
-//  Intel differences: image models (upstream's `kind: image` rows with their
-//  `image` / `cloud` controls) come with the media routes (stage 6); the
-//  Privacy Filter's per-model `privacy` field with `W-privacy-filter`; local
-//  bundles' external source and Native MTP have no Intel counterpart.
+//  Intel differences: cloud image models (Osaurus Cloud, Venice) are listed
+//  as upstream's `kind: image` rows with their `cloud` controls (stage 6);
+//  the on-device image rows and their `image` controls are MLX, so never
+//  listed. The Privacy Filter's per-model `privacy` field waits for
+//  `W-privacy-filter`; local bundles' external source and Native MTP have no
+//  Intel counterpart.
 //
 
 import Foundation
@@ -72,9 +74,15 @@ extension HTTPHandler {
         /// Where an externally discovered local bundle came from. Always nil
         /// on Intel.
         let externalSource: String?
-        /// `chat` or `image`. Only chat models until stage 6.
+        /// `chat` or `image`. Image models answer through `/images/generations`,
+        /// never a chat run; `edits` says `/images/edits` takes a source image
+        /// (never on Intel: that is the on-device engine).
         let kind: String
         let edits: Bool
+        /// For a cloud image model only: its target, the choices its catalog
+        /// offers and its starting price, for the phone's controls and its
+        /// spend confirmation (upstream MOBILE_PROTOCOL §12.5).
+        let cloud: PickerCloudImageDTO?
         /// How the Privacy Filter treats a run on this model. Nil until
         /// `W-privacy-filter`.
         let privacy: String?
@@ -82,6 +90,7 @@ extension HTTPHandler {
         enum CodingKeys: String, CodingKey {
             case id, name, provider, source, vision, thinking, params, quantization, available, description, tab
             case kind, edits
+            case cloud
             case privacy
             case tabTitle = "tab_title"
             case favoriteKey = "favorite_key"
@@ -92,9 +101,85 @@ extension HTTPHandler {
         }
     }
 
-    /// The picker's chat models, in its tabs (upstream's mapping).
+    /// A cloud image model: where `/images/generations` sends it (`target`),
+    /// the catalog's choices, and the cheapest price, in USD and as the Mac's
+    /// own "From … credits" label. Billable: the phone confirms before it
+    /// sends `allow_remote_media_spend` (upstream).
+    struct PickerCloudImageDTO: Encodable {
+        struct Target: Encodable {
+            let backend: String
+            let providerId: String?
+            let model: String
+
+            enum CodingKeys: String, CodingKey {
+                case backend, model
+                case providerId = "provider_id"
+            }
+        }
+
+        let target: Target
+        let aspectRatios: [String]
+        let defaultAspectRatio: String?
+        let resolutions: [String]
+        let defaultResolution: String?
+        let qualities: [String]
+        let defaultQuality: String?
+        let defaultSteps: Int?
+        let maxSteps: Int?
+        let promptCharacterLimit: Int?
+        let formats: [String]
+        let maxCount: Int
+        let minPriceUSD: Double?
+        let priceLabel: String?
+        let privacy: String?
+
+        enum CodingKeys: String, CodingKey {
+            case target, resolutions, qualities, formats, privacy
+            case aspectRatios = "aspect_ratios"
+            case defaultAspectRatio = "default_aspect_ratio"
+            case defaultResolution = "default_resolution"
+            case defaultQuality = "default_quality"
+            case defaultSteps = "default_steps"
+            case maxSteps = "max_steps"
+            case promptCharacterLimit = "prompt_character_limit"
+            case maxCount = "max_count"
+            case minPriceUSD = "min_price_usd"
+            case priceLabel = "price_label"
+        }
+
+        init?(_ item: ModelPickerItem) {
+            guard let media = item.mediaModel, media.kind == .image, media.isAvailable else { return nil }
+            switch media.target.backend {
+            case .local: return nil
+            case .remoteProvider(let id):
+                target = Target(backend: "remote_provider", providerId: id.uuidString, model: media.target.modelID)
+            case .osaurusCloud:
+                target = Target(backend: "osaurus_cloud", providerId: nil, model: media.target.modelID)
+            }
+            let c = media.constraints
+            aspectRatios = c.aspectRatios
+            defaultAspectRatio = c.defaultAspectRatio
+            resolutions = c.resolutions
+            defaultResolution = c.defaultResolution
+            qualities = c.qualities
+            defaultQuality = c.defaultQuality
+            defaultSteps = c.defaultSteps
+            maxSteps = c.maxSteps
+            promptCharacterLimit = c.promptCharacterLimit
+            formats = ImageOutputFormat.allCases.map(\.rawValue)
+            maxCount = 4
+            minPriceUSD = media.pricing?.minimumUSD
+            priceLabel = minPriceUSD.map { "From \(OsaurusRouter.formatUSDAsCredits($0))" }
+            privacy = media.privacy
+        }
+    }
+
+    /// The picker's chat models and available cloud image models, in its
+    /// tabs (upstream's mapping). Video models aren't listed (upstream).
     static func pickerModels(from allItems: [ModelPickerItem]) -> [PickerModelDTO] {
-        let items = allItems.filter { $0.isLikelyChatCapable && $0.mediaModel == nil }
+        let items = allItems.filter {
+            ($0.isLikelyChatCapable && $0.mediaModel == nil) || PickerCloudImageDTO($0) != nil
+        }
         let tabbed = items.groupedByTab().flatMap { tab in tab.models.map { (tab: tab, item: $0) } }
         return tabbed.map { entry -> PickerModelDTO in
             let (tab, item) = entry
@@ -104,13 +189,16 @@ extension HTTPHandler {
             case .local: source = "local"
             case .remote: source = "remote"
             }
+            let cloud = PickerCloudImageDTO(item)
             return PickerModelDTO(
                 id: item.id,
                 name: item.displayName,
                 provider: item.source.displayName,
                 source: source,
-                vision: modelSupportsImages(modelId: item.id, pickerItems: allItems),
-                thinking: ModelProfileRegistry.profile(for: item.id)?.thinkingOption != nil,
+                // Image models keep their own flag; an image model never
+                // thinks, whatever chat profile its name matches.
+                vision: cloud == nil ? modelSupportsImages(modelId: item.id, pickerItems: allItems) : item.isVLM,
+                thinking: cloud == nil && ModelProfileRegistry.profile(for: item.id)?.thinkingOption != nil,
                 params: item.parameterCount,
                 quantization: item.quantization,
                 available: source != "local",
@@ -122,8 +210,10 @@ extension HTTPHandler {
                 inputPrice: item.inputPriceMicroPerMTok,
                 outputPrice: item.outputPriceMicroPerMTok,
                 externalSource: nil,
-                kind: "chat",
+                kind: cloud != nil ? "image" : "chat",
+                // Cloud models can't edit over HTTP (upstream).
                 edits: false,
+                cloud: cloud,
                 privacy: nil
             )
         }

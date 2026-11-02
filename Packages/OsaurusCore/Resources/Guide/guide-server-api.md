@@ -29,9 +29,11 @@ Osaurus runs a local HTTP server that other apps on this Mac can use. On this In
 - `GET /sessions` (filters: `q`, `agent_id`, `archived`, `pinned`, `project_id`, `limit`…), `GET` / `PATCH` / `DELETE /sessions/{id}`, `POST /sessions/{id}/truncate`, `GET /projects` — your chat history: list and search it, read a chat, rename, pin, archive or delete it, or cut it back to an earlier turn. Owner-only.
 - `GET /models/picker`, `POST` / `PUT /models/options`, `PUT /models/favorites` — the composer's model picker: the models in its tabs, a model's Model Options (Thinking and the like), and hearting a model. Owner-only.
 - `GET /credits/balance` — your Osaurus credit balance, for a usage dashboard or menu bar app. Needs your access key, or "Allow local API access without a key" in Credits.
-- `POST /completions` answers that raw completions need Apple silicon.
+- `POST /images/generations` — an image from an Osaurus Cloud or Venice image model. Name it with `target` (`/models/picker` lists each image model's target, options and starting price) and add `"allow_remote_media_spend": true`, since it spends credits or Venice money. `"stream": true` answers as events; `POST /images/cancel` with the event's `job_id` stops it.
+- `POST /videos/quote`, then `POST /videos/generations` with the `quote_token` and `"allow_remote_media_spend": true` — a video from an Osaurus Cloud or Venice video model. Check it at `GET /videos/jobs/{id}` and download it from `GET /videos/jobs/{id}/content` once it's done.
+- `POST /completions` answers that raw completions need Apple silicon, and so do on-device image models (`/images/edits`, `/images/upscale`, a bare `model` name).
 
-Not in this build yet: images and video, and runs from your phone. Shortcuts and Siri run agents inside the app.
+Not in this build yet: runs from your phone. Shortcuts and Siri run agents inside the app.
 
 ## Access keys
 

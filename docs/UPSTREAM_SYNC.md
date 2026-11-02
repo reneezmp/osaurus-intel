@@ -4514,6 +4514,12 @@ Staged in [`SERVER_API_INTEL.md`](SERVER_API_INTEL.md):
   `/credits/balance`, and upstream's Router spend gate in Intel's engine
   (an unkeyed local caller can't spend Router credits without the Credits
   opt-in, which is back on the Credits page). Stage 5 is complete.
+- **Stage 6:** the media routes (`/images/*`, `/videos/*`) on the cloud
+  media coordinator, with upstream's `ImageAPI.swift` and the picker's
+  cloud image rows. On-device image paths (bare `model`, edits, upscale,
+  `/images/models`) answer 501 or empty: they are MLX. The phone's image
+  session and detached-job fields wait for `W-identity-mobile`.
+  `MediaGenerationContractTests` matches upstream again.
 
 Intel keeps its own request types and copies upstream's wire types
 verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by

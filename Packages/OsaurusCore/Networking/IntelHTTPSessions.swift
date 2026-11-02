@@ -543,7 +543,7 @@ extension HTTPHandler {
     }
 
     /// A binary body, not cached (upstream's image responses).
-    private func sendBytesOnLoop(_ eventLoop: EventLoop, data: Data, contentType: String) {
+    func sendBytesOnLoop(_ eventLoop: EventLoop, data: Data, contentType: String) {
         let stateRef = self.stateRef
         eventLoop.execute {
             guard let context = stateRef.value.contextBox else { return }

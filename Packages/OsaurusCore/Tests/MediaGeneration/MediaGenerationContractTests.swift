@@ -3,11 +3,10 @@ import Testing
 
 @testable import OsaurusCore
 
-// Upstream's media contracts (`W-media-generation`). Not ported here:
-// `legacyImageModelMigratesToLocalStableTarget` (upstream's
-// `SubagentConfiguration`, which Intel does not have), and the HTTP cases
+// Upstream's media contracts (`W-media-generation`). The HTTP cases
 // `typedHTTPMediaTargetsFailClosed` / `remoteSourceImagePreservesMIMEAndRejectsFileURLs`
-// (they come with the `/v1/images` and `/v1/videos` routes).
+// and the `SubagentConfiguration` migration case came back with the media
+// routes (`W-server-api` stage 6); the file matches upstream again.
 
 @Suite("Media generation contracts", .serialized)
 struct MediaGenerationContractTests {
@@ -94,6 +93,43 @@ struct MediaGenerationContractTests {
         #expect(video.constraints.audioConfigurable)
         #expect(video.constraints.promptCharacterLimit == 1000)
         #expect(video.target == MediaModelTarget(backend: .remoteProvider(providerID), modelID: "video-text"))
+    }
+
+    @Test
+    func legacyImageModelMigratesToLocalStableTarget() throws {
+        let data = Data(#"{"defaultImageGenerationModelId":" legacy-image "}"#.utf8)
+        let config = try JSONDecoder().decode(SubagentConfiguration.self, from: data)
+        #expect(
+            config.defaultImageGenerationTarget
+                == MediaModelTarget(backend: .local, modelID: "legacy-image")
+        )
+    }
+
+    @Test
+    func typedHTTPMediaTargetsFailClosed() {
+        let providerID = UUID()
+        #expect(
+            MediaTargetRequestDTO(
+                backend: "remote_provider",
+                provider_id: providerID,
+                model: "video-model"
+            ).target()
+                == MediaModelTarget(backend: .remoteProvider(providerID), modelID: "video-model")
+        )
+        #expect(
+            MediaTargetRequestDTO(
+                backend: "remote_provider",
+                provider_id: nil,
+                model: "video-model"
+            ).target() == nil
+        )
+        #expect(
+            MediaTargetRequestDTO(
+                backend: "unknown",
+                provider_id: nil,
+                model: "video-model"
+            ).target() == nil
+        )
     }
 
     @Test
@@ -346,6 +382,21 @@ struct MediaGenerationContractTests {
                 for: Self.videoRequest(duration: "10s")
             )
         }
+    }
+
+    @Test
+    func remoteSourceImagePreservesMIMEAndRejectsFileURLs() throws {
+        let jpeg = Data([0xFF, 0xD8, 0xFF, 0xD9])
+        let dataURL = "data:image/jpeg;base64,\(jpeg.base64EncodedString())"
+        let decoded = try #require(HTTPHandler.decodeImageInputWithMIME(dataURL))
+        #expect(decoded.data == jpeg)
+        #expect(decoded.mimeType == "image/jpeg")
+        #expect(HTTPHandler.decodeImageInputWithMIME("file:///tmp/private.jpg") == nil)
+        #expect(
+            HTTPHandler.decodeImageInputWithMIME(
+                "data:image/png;base64,\(jpeg.base64EncodedString())"
+            ) == nil
+        )
     }
 
     @Test

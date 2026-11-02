@@ -1,0 +1,301 @@
+//
+//  ImageAPI.swift
+//  osaurus
+//
+//  HTTP DTOs for the OpenAI-compatible `/v1/images/*` surface. The route
+//  shapes follow `OSAURUS_IMAGE_OPENAPI.json` from vmlx-swift. Request DTOs
+//  decode the wire body; response/event DTOs encode it. The handlers in
+//  `HTTPHandler` translate between these and `ImageGenerationService`'s
+//  osaurus-native types.
+//
+
+import Foundation
+
+// MARK: - Requests
+
+struct MediaTargetRequestDTO: Decodable, Sendable {
+    let backend: String
+    let provider_id: UUID?
+    let model: String
+
+    func target() -> MediaModelTarget? {
+        let value = model.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !value.isEmpty else { return nil }
+        switch backend {
+        case "local":
+            return MediaModelTarget(backend: .local, modelID: value)
+        case "remote_provider":
+            guard let provider_id else { return nil }
+            return MediaModelTarget(backend: .remoteProvider(provider_id), modelID: value)
+        case "osaurus_cloud":
+            return MediaModelTarget(backend: .osaurusCloud, modelID: value)
+        default:
+            return nil
+        }
+    }
+}
+
+struct ImageGenerationRequestDTO: Decodable, Sendable {
+    /// Optional: when omitted/empty the handler falls back to the configured
+    /// `defaultImageGenerationModelId` (Settings → Agent Delegation), matching
+    /// the agent `image` tool's default-resolution behavior.
+    let model: String?
+    let target: MediaTargetRequestDTO?
+    let prompt: String
+    let negative_prompt: String?
+    let n: Int?
+    var seeds: [UInt64]? = nil
+    var batch_size: Int? = nil
+    let size: String?
+    let width: Int?
+    let height: Int?
+    let steps: Int?
+    let guidance: Double?
+    var sampler: String? = nil
+    var scheduler: String? = nil
+    var shift: Float? = nil
+    var adapters: [ImageAdapterParameters]? = nil
+    var preview_interval: Int? = nil
+    var preview_max_pixel: Int? = nil
+    let seed: UInt64?
+    let response_format: String?  // "url" | "b64_json"
+    let output_format: String?  // "png" | "jpeg" | "webp"
+    let stream: Bool?
+    let aspect_ratio: String?
+    let resolution: String?
+    let quality: String?
+    let allow_remote_media_spend: Bool?
+    /// A Mac chat (docs/MOBILE_PROTOCOL.md §12.5) the owner's phone is
+    /// generating in; the prompt and result are appended to it.
+    let osaurus_session_id: String?
+    /// `osaurus_session_id` names a chat the phone starts with this image,
+    /// under `osaurus_agent_id`; the Mac creates it if it has no such chat
+    /// (docs/MOBILE_PROTOCOL.md §14.5). The owner's paired phone only.
+    var osaurus_create_session: Bool? = nil
+    var osaurus_agent_id: String? = nil
+    /// The owner's phone names its job so it outlives the connection: a
+    /// dropped phone comes back to `GET /images/jobs/{id}/events?after=N`
+    /// (docs/MOBILE_PROTOCOL.md §12.5). Also the id `/images/cancel` takes.
+    var osaurus_job_id: String? = nil
+}
+
+struct ImageEditRequestDTO: Decodable, Sendable {
+    /// Optional: when omitted/empty the handler falls back to the configured
+    /// `defaultImageEditModelId` (Settings → Agent Delegation), matching the
+    /// agent `image` tool's (edit mode) default-resolution behavior.
+    let model: String?
+    let prompt: String
+    let image: String?
+    let images: [String]?
+    let mask: String?
+    let strength: Double?
+    let negative_prompt: String?
+    let size: String?
+    let width: Int?
+    let height: Int?
+    let steps: Int?
+    let guidance: Double?
+    var sampler: String? = nil
+    var scheduler: String? = nil
+    var shift: Float? = nil
+    var adapters: [ImageAdapterParameters]? = nil
+    var preview_interval: Int? = nil
+    var preview_max_pixel: Int? = nil
+    let seed: UInt64?
+    let response_format: String?
+    let output_format: String?
+    let stream: Bool?
+    let osaurus_session_id: String?
+    /// As on `ImageGenerationRequestDTO`.
+    var osaurus_create_session: Bool? = nil
+    var osaurus_agent_id: String? = nil
+    /// As on `ImageGenerationRequestDTO`.
+    var osaurus_job_id: String? = nil
+}
+
+struct ImageUpscaleRequestDTO: Decodable {
+    let model: String
+    let image: String
+    let scale: Int?
+    let steps: Int?
+    let seed: UInt64?
+    let response_format: String?
+    let output_format: String?
+    let stream: Bool?
+}
+
+struct ImageCancelRequestDTO: Decodable {
+    let job_id: String
+}
+
+struct VideoGenerationRequestDTO: Decodable {
+    let target: MediaTargetRequestDTO
+    let prompt: String
+    let negative_prompt: String?
+    let source_image: String?
+    let duration: String
+    let aspect_ratio: String?
+    let resolution: String?
+    let audio: Bool?
+    let quote_token: String?
+    let allow_remote_media_spend: Bool?
+    var width: Int? = nil
+    var height: Int? = nil
+    var frame_count: Int? = nil
+    var fps: Int? = nil
+    var steps: Int? = nil
+    var guidance: Float? = nil
+    var seed: UInt64? = nil
+
+    func request() -> MediaVideoGenerationRequest? {
+        guard let target = target.target() else { return nil }
+        let source = source_image.flatMap(HTTPHandler.decodeImageInputWithMIME)
+        if source_image != nil, source == nil { return nil }
+        return MediaVideoGenerationRequest(
+            target: target,
+            prompt: prompt,
+            negativePrompt: negative_prompt,
+            sourceImage: source?.data,
+            sourceImageMIMEType: source?.mimeType,
+            duration: duration,
+            aspectRatio: aspect_ratio,
+            resolution: resolution,
+            audio: audio, width: width, height: height, frameCount: frame_count,
+            fps: fps, steps: steps, guidance: guidance, seed: seed
+        )
+    }
+}
+
+struct VideoQuoteResponseDTO: Encodable {
+    let quote_usd: Double
+    let quote_token: String
+    let expires_at: String
+}
+
+struct VideoResultResponseDTO: Encodable {
+    let created: Int
+    let url: String
+    let mime_type: String
+    let model: String
+}
+
+struct VideoJobResponseDTO: Encodable {
+    let id: String
+    let status: String
+    let model: String
+    let kind: String
+    let quote_usd: Double?
+    let url: String?
+    let error: String?
+    let effective_parameters: VideoEffectiveParameters?
+
+    init(_ job: DurableMediaJob) {
+        id = job.id.uuidString.lowercased()
+        status = job.state.rawValue
+        model = job.modelID
+        kind = job.kind.rawValue
+        quote_usd = job.quoteUSD
+        url =
+            job.outputURL == nil
+            ? nil
+            : "/v1/videos/jobs/\(job.id.uuidString.lowercased())/content"
+        error = job.errorMessage
+        effective_parameters = job.effectiveVideo
+    }
+}
+
+// MARK: - Models list
+
+struct ImageCapabilitiesDTO: Encodable {
+    let text_to_image: Bool
+    let image_edit: Bool
+    let upscale: Bool
+    let negative_prompt: Bool
+    var edit_negative_prompt: Bool? = nil
+    var edit_strength: Bool? = nil
+    let mask: Bool
+    let multiple_source_images: Bool
+    let lora: Bool
+}
+
+struct ImageDefaultsDTO: Encodable {
+    let steps: Int?
+    let guidance: Double?
+}
+
+struct ImageLimitsDTO: Encodable {
+    let min_steps: Int
+    let max_steps: Int?
+    let size_multiple: Int
+    let max_pixels: Int?
+    let supported_sizes: [String]
+    var min_dimension: Int? = nil
+    var max_dimension: Int? = nil
+    var fixed_steps: Int? = nil
+    var max_images: Int? = nil
+    var max_source_images: Int? = nil
+    var formats: [String]? = nil
+    var samplers: [String]? = nil
+    var schedulers: [String]? = nil
+}
+
+struct ImageModelDTO: Encodable {
+    let id: String
+    let object: String
+    let display_name: String
+    let kind: String
+    let ready: Bool
+    let quantization_bits: Int?
+    let capabilities: ImageCapabilitiesDTO
+    let defaults: ImageDefaultsDTO
+    let limits: ImageLimitsDTO
+    let blocked_reasons: [String]
+}
+
+struct ImageModelsResponseDTO: Encodable {
+    let object: String
+    let data: [ImageModelDTO]
+}
+
+// MARK: - Non-streaming result
+
+struct ImageResultDTO: Encodable {
+    let url: String?
+    let b64_json: String?
+    let seed: UInt64
+    var effective_parameters: ImageEffectiveParameters? = nil
+}
+
+struct ImagesResponseDTO: Encodable {
+    let created: Int
+    let data: [ImageResultDTO]
+}
+
+/// A failed batch can still have durable, successfully completed images.
+/// Keep the normal error envelope while returning those artifacts explicitly.
+struct ImagePartialFailureDTO: Encodable {
+    struct Failure: Encodable { let message: String; let type: String }
+    let error: Failure
+    let data: [ImageResultDTO]
+}
+
+// MARK: - Streaming (SSE) event
+
+/// One SSE `data:` payload. A single struct with optional fields — the
+/// synthesized encoder omits nil keys, so each event type only carries the
+/// fields the spec lists for it (`queued`, `loading_model`, `step`,
+/// `preview`, `completed`, `error`, `cancelled`).
+struct ImageStreamEventDTO: Encodable {
+    let type: String
+    var job_id: String? = nil
+    var model: String? = nil
+    var step: Int? = nil
+    var total: Int? = nil
+    var progress: Double? = nil
+    var eta_seconds: Double? = nil
+    var image: String? = nil
+    var images: [ImageResultDTO]? = nil
+    var index: Int? = nil
+    var message: String? = nil
+    var hf_auth: Bool? = nil
+}

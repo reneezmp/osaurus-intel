@@ -703,3 +703,81 @@ Each stage: gate run, Rosy section, row note in the backlog.
     `~/.osaurus` writes, identity keychain item unchanged.
 - **Stage 5 complete.** Next: stage 6 (media routes), which also adds the
   picker's image rows.
+- **Stage 6 (2026-11-02): media routes** (`IntelHTTPMedia.swift`, upstream's
+  `Models/API/ImageAPI.swift` verbatim).
+  - **Routes:**
+    - `POST /images/generations` runs an Osaurus Cloud or Venice image
+      through `MediaGenerationCoordinator`. The target comes from `target`,
+      else the configured default (`SubagentConfigurationStore`, which
+      compiles on Intel). It answers JSON (`url` or `b64_json`), or SSE with
+      `stream: true`.
+    - `POST /videos/quote`, `POST /videos/generations` (202 with the job),
+      `GET /videos/jobs/{id}` and `GET /videos/jobs/{id}/content`:
+      upstream's single-use quote receipts (`MediaQuoteStore`) and durable
+      jobs.
+    - `POST /images/cancel` and `GET /images/jobs/{id}/events` (below).
+  - **Upstream's rules, kept:**
+    - Remote spend needs `allow_remote_media_spend: true` (403 otherwise).
+    - Native batch fields (`seeds`, `batch_size`, sampler, adapters,
+      previews) are refused before any billable call
+      (`validateRemoteImageBatch`, upstream's
+      `ImageHTTPParameterBuilder.validateRemoteBatch`; the rest of that file
+      is the MLX engine's, `INC-mlx`).
+    - A remote source image must be a base64 PNG / JPEG / WebP whose bytes
+      match its type. `file://` and URLs are refused, so the API can't send
+      the Mac's files to a provider.
+    - The request log replaces `source_image` with `[REDACTED IMAGE]` and
+      carries upstream's media details (kind, operation, backend, size).
+      The handler writes its own Insights row, so the coordinator's
+      in-process row stays quiet (the stage 1 activity guard).
+    - Status mapping is upstream's `mediaErrorStatus`: 402 out of funds,
+      404 unknown model or provider, 501 unsupported, 502 provider
+      failures.
+    - These routes stay plaintext for third-party SDKs (only
+      `/images/jobs` is an owner-channel route). Agent-scoped keys are
+      refused while the owner doesn't share inference (the stage 1 peer
+      gate already listed them).
+  - **On-device paths (MLX):**
+    - A bare `model`, or a `local` target, answers 501 with the
+      coordinator's "needs an Apple Silicon Mac" message. So do
+      `/images/edits` and `/images/upscale` after upstream's own checks
+      (source image, mask, output format).
+    - `GET /images/models` lists upstream's on-device models only, so it
+      is always empty here.
+    - The picker's `kind: image` rows are the available cloud image models
+      with upstream's `cloud` block (target, catalog choices, price, "From
+      … credits" label). Video models aren't listed, as upstream. The
+      on-device rows and their `image` block never appear.
+  - **Intel differences:**
+    - **Streamed cloud image:** upstream's cloud SSE path sends only
+      `completed` / `error`, because its phone names the job itself
+      (`osaurus_job_id`). Intel opens with a `queued` event carrying a
+      `job_id` (as upstream's on-device path does), and `/images/cancel`
+      with that id stops the request. A provider call already sent may
+      still bill.
+    - **Phone-only parts (`W-identity-mobile`):** `osaurus_session_id` /
+      `osaurus_create_session` (appending the exchange to a Mac chat) and
+      `osaurus_job_id` (detached jobs, rejoined at
+      `/images/jobs/{id}/events`) are ignored, as `/agents/{id}/run`
+      ignores its phone fields. `/images/jobs/{id}/events` is owner-only
+      and answers 404 `job_not_found`.
+    - The SSE event writer is upstream's `writeRawJSONData`, in Intel's
+      `SSEResponseWriter` (`IntelHTTPInference.swift`). **Trap:** the
+      upstream `Models/Chat/ResponseWriters.swift` also defines an
+      `SSEResponseWriter` but is excluded from the build, so edits there do
+      nothing (same trap as `Tools/ToolRegistry.swift`, stage 4d). The video
+      content route reuses 5a's `sendBytesOnLoop`.
+  - **Tests:**
+    - New `IntelHTTPMediaTests`: picker rows and wire shape, the batch
+      check, the helpers, cancel, every refusal and 501 path, the SSE
+      shape, video quote / queue / job refusals. Every case stops before a
+      provider is called.
+    - `MediaGenerationContractTests` matches upstream again: the two HTTP
+      cases and the `SubagentConfiguration` migration case are back.
+  - **Validation (2026-11-02):** full suite under the interim 27.0-SDK
+    gate: 4,121 tests, all stage 6 tests pass; the only failure is the
+    avatar-cache test that gate can't run. The package and tests build for
+    `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0; guide check
+    clean. No live `~/.osaurus` writes, identity keychain item unchanged.
+- **Stage 6 complete.** Next: stage 7 (admin routes, Server tab endpoint
+  list, Expose to network).

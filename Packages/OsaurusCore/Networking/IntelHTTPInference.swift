@@ -481,6 +481,18 @@ final class SSEResponseWriter: @unchecked Sendable {
         }
     }
 
+    /// One SSE `data:` event holding an already-encoded JSON object (the
+    /// image routes' `ImageStreamEventDTO`). Upstream's, minus the phone's
+    /// detached-run recorder (`W-identity-mobile`).
+    func writeRawJSONData(_ json: String, context: ChannelHandlerContext) {
+        var buffer = context.channel.allocator.buffer(capacity: json.utf8.count + 8)
+        buffer.writeString("data: ")
+        buffer.writeString(json)
+        buffer.writeString("\n\n")
+        context.write(NIOAny(HTTPServerResponsePart.body(.byteBuffer(buffer))), promise: nil)
+        context.flush()
+    }
+
     /// SSE comment line used as a keepalive heartbeat.
     func writePing(_ context: ChannelHandlerContext) {
         var buf = context.channel.allocator.buffer(capacity: 16)
