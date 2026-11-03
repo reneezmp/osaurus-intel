@@ -86,7 +86,8 @@ phone and use the feature from it, not only protocol tests.
      (image exchanges written into the chat).
 4. **Reach From Anywhere (§6.1, §11.6).** The real `RelayTunnelManager`
    behind the Relays section and Settings → Mobile.
-5. **Peers and other devices.**
+5. **Peers and other devices.** Done 2026-11-03 as owner redeem only (see
+   Progress); the Mac-to-Mac pieces moved to `W-workspaces-sharing`.
    - `/pair` and `/pair/challenge` (agent pairing between Macs),
      `BonjourBrowser` and `SecureChannelClient` (this Mac as a client of
      another's agent), `/pair-invite`.
@@ -461,3 +462,47 @@ the backlog.
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Paired iPhone: Reach From Anywhere" in the Rosy retest
       checklist.
+- **Stage 5 (2026-11-03): owner redeem. The Mac-to-Mac pieces are deferred.**
+  - **Assessment:** stage 5 was mostly one Mac using another's agents:
+    `BonjourBrowser` (other Macs' agents in the agent picker), the invite
+    deep link (`PairingDeepLinkRouter`, `IncomingPairCoordinator`, the
+    incoming-invite sheet), `/pair` and `/pair/challenge` (Mac-to-Mac
+    pairing), and the invite and workspace branches of `/pair-invite`. All
+    need the real `RemoteAgentManager` (an Intel stub) and are sharing work.
+    Renée chose owner redeem only; the rest moved to `W-workspaces-sharing`
+    (deferred until someone asks), classifier and backlog updated.
+    `SecureChannelClient` (the client side) came in with stage 2 and stays
+    unused until then.
+  - **Ported from upstream:** `OwnerDeviceAccessHost` and the owner branch
+    of `POST /pair-invite` (`IntelHTTPPairInvite.swift`) with upstream's
+    request-log redaction. A device holding this Mac's master identity (set
+    up from the 24-word recovery phrase; the iCloud Keychain path needs
+    stage 7 and is blocked for phones upstream too) signs the host's
+    single-use nonce with the master key and gets a 90-day agent-scoped
+    key, HPKE-sealed to its ephemeral key. Rotating an agent's key forgets
+    its owner-device records (`IdentityView`).
+  - **Intel differences:**
+    - Keys are minted for the v1 `agentIndex` (stage 7 brings
+      `agentKeyPath`).
+    - **macOS 14+ only:** the key is always HPKE-sealed, and CryptoKit's HPKE
+      is macOS 14. On Ventura (Rosy) `/pair-invite` owner requests answer
+      `501` before any challenge is issued.
+    - The workspace constants it shared (challenge lifetime 120 s, 256
+      outstanding challenges) are inlined.
+    - `team_redeem` and agent invites answer `501` ("aren't available on
+      this Mac yet") instead of running deferred code.
+  - **Tests:** upstream's `OwnerDeviceAccessHostTests` (workspace envelope
+    and message written out; the host suite skips itself below macOS 14);
+    `IntelHTTPPairingTests` gained the route: owner step one answers a
+    challenge (or `501` below macOS 14), the deferred handshakes `501`, bad
+    JSON `400`, and the log redaction.
+
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,363 tests in 543 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 (macOS 13) build with tests compiles.
+    - Classifiers: `W-identity-mobile` 4 files left (stages 6–7),
+      `W-workspaces-sharing` 39, UNASSIGNED 0. Guide check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Owner redeem on `/pair-invite`" in the Rosy retest checklist.

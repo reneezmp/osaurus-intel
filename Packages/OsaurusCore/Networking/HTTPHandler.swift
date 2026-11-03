@@ -988,6 +988,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         default:
             if routeSecureChannelRequest(context: context, head: head, path: path) { return }
             if routePairingRequest(context: context, head: head, path: path) { return }
+            if routePairInviteRequest(context: context, head: head, path: path) { return }
             if routeRunRequest(context: context, head: head, path: path) { return }
             if routeAgentRequest(context: context, head: head, path: path) { return }
             if routeTaskRequest(context: context, head: head, path: path) { return }

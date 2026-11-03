@@ -2665,3 +2665,18 @@ this on connects Rosy to the Osaurus relay (`agent.osaurus.ai`).
       no longer reach Rosy (it says it can't connect).
 - [ ] Agent with a long name (40+ characters) and Bonjour on, with Expose
       to Network on: the phone on Wi-Fi still finds it when pairing.
+
+## Owner redeem on `/pair-invite` (2026-11-03)
+
+`W-identity-mobile` stage 5 (`IDENTITY_MOBILE_INTEL.md`). Owner redeem
+seals keys with HPKE, which needs macOS 14, so on Rosy (Ventura) it is
+expected to refuse. From Terminal on Rosy, with the server running:
+
+- [ ] `curl -s -X POST http://127.0.0.1:1337/pair-invite -H 'Content-Type: application/json' -d '{"owner_redeem":{"v":1,"agent_address":"0x00000000000000000000000000000000000000aa","device_id":"test"}}'`
+      prints `{"error":"Owner redeem needs macOS 14 or later on this Mac"}`.
+- [ ] `curl -s -X POST http://127.0.0.1:1337/pair-invite -H 'Content-Type: application/json' -d '{"team_redeem":{"v":1}}'`
+      prints the "aren't available on this Mac yet" error.
+- [ ] Insights lists both `/pair-invite` requests with `device_id` shown as
+      `<redacted>`.
+- [ ] Pairing the iPhone with the 6-digit code (earlier sections) still
+      works: owner redeem is an extra way in, not a replacement.

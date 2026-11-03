@@ -128,6 +128,34 @@ struct IntelHTTPPairingTests {
         #expect(service.pairedDevice == nil)
     }
 
+    /// Stage 5: `/pair-invite` serves owner redeem; workspace sign-ins and
+    /// agent invites are deferred and say so.
+    @Test func pairInvite_ownerChallenge_andDeferredHandshakes() async throws {
+        let server = try await startPairingTestServer()
+        defer { Task { await server.shutdown() } }
+        let owner = try await server.send(
+            "POST", "/pair-invite",
+            json: #"{"owner_redeem":{"v":1,"agent_address":"0x00000000000000000000000000000000000000aa","device_id":"phone-1","device_name":"iPhone"}}"#)
+        if #available(macOS 14.0, *) {
+            #expect(owner.status == 200)
+            let challenge = try #require(try owner.object()["owner_challenge"] as? [String: Any])
+            #expect((challenge["nonce"] as? String)?.isEmpty == false)
+            #expect(challenge["expires_in"] as? Int == 120)
+        } else {
+            #expect(owner.status == 501)
+        }
+        let team = try await server.send(
+            "POST", "/pair-invite", json: #"{"team_redeem":{"v":1,"agent_address":"0xabc","attestation":"t"}}"#)
+        #expect(team.status == 501)
+        let invite = try await server.send("POST", "/pair-invite", json: #"{"v":1,"addr":"0xabc","sig":"00"}"#)
+        #expect(invite.status == 501)
+        #expect(try await server.send("POST", "/pair-invite", json: "{").status == 400)
+        #expect(
+            HTTPHandler.redactedPairInviteRequestBody(
+                Data(#"{"owner_redeem":{"device_id":"d","wallet_signature":"s","v":1}}"#.utf8))
+                .contains("<redacted>"))
+    }
+
     @Test func badRequests_andUnpair() async throws {
         let server = try await startPairingTestServer()
         defer { Task { await server.shutdown() } }

@@ -26,6 +26,10 @@ F=[
 ("W-applescript-agent","W",r"AppleScript/|MacQueryTool"),
 ("W-privacy-filter","W",r"PrivacyFilter|RedactionTool|Redaction(Highlighter|HoverController)|SecretScrubber"),
 ("W-channels","D",r"AgentChannel|ChannelActivityLogger|Services/(Slack|Telegram|Discord|WhatsApp|IMessage|Channels)/|Models/(Slack|Telegram|Discord|WhatsApp|IMessage|Channels)/|N8n|OsaurusRunningInstanceInspector|Storage/AgentChannelMessageStore|Views/Settings/(Slack|Telegram|Discord|WhatsApp|IMessage)SettingsView|ConfigChannelDetails"),
+# Mac-to-Mac discovery and invites (BonjourBrowser, the invite deep link and
+# its sheet coordinator) moved to the deferred sharing item, W-identity-mobile
+# stage 5 (Renée, 2026-11-03); owner redeem stays with the phone.
+("W-workspaces-sharing","D",r"Networking/BonjourBrowser\.swift|Services/Pairing/IncomingPairCoordinator\.swift|Services/Pairing/PairingDeepLinkRouter\.swift"),
 ("W-identity-mobile","W",r"ModelOptionsSnapshot|OsaurusID|Identity/|MobileConnect|Pairing|RelayTunnel|SecureChannel|OwnerDeviceAccessHost|BonjourBrowser|OsaurusConnectView|LocalNetworkAddress|SharedEventLoopGroups|HTTPCallerContext|AgentRunUsage|RemoteSessionContinuation|RemoteSecretPromptQueue|DetachedPhoneRuns|PhoneAgentEditing|PhoneChatHandoff|SessionTurnImages|VoiceCallReplies"),
 ("W-workspaces-sharing","D",r"Workspace|PeerInferenceSharing|Router/|RemoteAgentManager|AgentInvite|AgentSharedWithSection|PeerCallNotifier|RemoteRunArtifacts|AgentCollaboration|HostedRunNotice|RemoteAgentRunLog|SharedAgentIdentity|InboundSharedRun|OsaurusRelayPresence"),
 ("W-declarative-config","W",r"ProviderCredentialPrompt|Configuration/Declarative|Tools/Configuration|Tools/ConfigurationTools|ConfigApprovalModal|OrchestratorSupportSections"),

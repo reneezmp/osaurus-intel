@@ -4585,6 +4585,12 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   per-agent tunnels saved by another build are turned off once
   (`IntelNetworkExposure.resetSavedRelaysOnce`). Also upstream's 63-byte
   Bonjour instance names, and `PairingHardeningTests` enabled.
+- **Stage 5 (2026-11-03):** owner redeem only (Renée's choice):
+  `OwnerDeviceAccessHost` and the owner branch of `POST /pair-invite`, v1
+  agent keys, macOS 14+ (HPKE; `501` on Ventura). Mac-to-Mac discovery
+  (`BonjourBrowser`), the invite deep link and `/pair` moved to
+  `W-workspaces-sharing`; workspace and invite requests on `/pair-invite`
+  answer `501`.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

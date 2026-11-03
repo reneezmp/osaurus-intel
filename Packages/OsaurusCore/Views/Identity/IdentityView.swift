@@ -1155,6 +1155,12 @@ private struct AgentAddressesSection: View {
             // The relay pins the OLD address; move it or the agent goes dark
             // away from home (upstream; `W-identity-mobile` stage 4).
             RelayTunnelManager.shared.handleAddressRotated(agentId: agent.id, previousAddress: previousAddress)
+            if let previousAddress {
+                // Owner-device keys for the old address were revoked with the
+                // rotation; drop their records so a device re-redeems against
+                // the new address (upstream; stage 5).
+                Task { await OwnerDeviceAccessHost.shared.forgetRecords(agentAddress: previousAddress) }
+            }
             onChange()
         } catch {
             errorMessage = error.localizedDescription
