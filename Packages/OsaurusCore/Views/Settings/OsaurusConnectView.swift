@@ -7,8 +7,8 @@
 //  All state lives in `MobilePairingService`; this view only renders it.
 //
 //  Intel (`W-identity-mobile` stage 1, docs/IDENTITY_MOBILE_INTEL.md):
-//  "Reach From Anywhere" and its relay status wait for the real relay
-//  (stage 4), so they are hidden until then (`intelRelayReady`).
+//  "Reach From Anywhere" (the relay, stage 4) starts off on Intel: nothing
+//  connects to the relay until the user turns it on (Renée, 2026-11-03).
 //  "Continue Phone Chats on This Mac" is shown since stage 3b.
 //  `onChange` uses the one-argument form (macOS 13),
 //  and turning on network access goes through Intel's `ServerController`.
@@ -24,10 +24,8 @@ struct OsaurusConnectView: View {
     @EnvironmentObject private var server: ServerController
 
     @AppStorage(MobilePairingService.keepAwakeDefaultsKey) private var keepMacAwake: Bool = true
-    @AppStorage(MobilePairingService.reachAnywhereDefaultsKey) private var reachFromAnywhere: Bool = true
+    @AppStorage(MobilePairingService.reachAnywhereDefaultsKey) private var reachFromAnywhere: Bool = false
     @AppStorage(PhoneChatHandoff.defaultsKey) private var continuePhoneChats: Bool = true
-    /// Intel: the relay is a stub until stage 4.
-    static let intelRelayReady = RelayTunnelManager.isAvailableOnIntel
     @State private var hasAppeared = false
     @State private var isEnablingNetwork = false
     @State private var showRevokeConfirm = false
@@ -229,19 +227,17 @@ struct OsaurusConnectView: View {
     @ViewBuilder private var powerSection: some View {
         SettingsSection(title: L("Availability"), icon: "bolt.horizontal.circle.fill") {
             VStack(alignment: .leading, spacing: 14) {
-                if Self.intelRelayReady {
-                    SettingsToggle(
-                        title: L("Reach From Anywhere"),
-                        description: L(
-                            "Use your agents from your iPhone away from this network, through the Osaurus relay. Traffic stays end-to-end encrypted between your iPhone and this Mac."
-                        ),
-                        isOn: $reachFromAnywhere
-                    )
-                    .settingsLandingAnchor("settings.connect.reachAnywhere")
+                SettingsToggle(
+                    title: L("Reach From Anywhere"),
+                    description: L(
+                        "Use your agents from your iPhone away from this network, through the Osaurus relay. Traffic stays end-to-end encrypted between your iPhone and this Mac."
+                    ),
+                    isOn: $reachFromAnywhere
+                )
+                .settingsLandingAnchor("settings.connect.reachAnywhere")
 
-                    if reachFromAnywhere, pairing.pairedDevice != nil {
-                        relayStatusRow
-                    }
+                if reachFromAnywhere, pairing.pairedDevice != nil {
+                    relayStatusRow
                 }
 
                 SettingsToggle(

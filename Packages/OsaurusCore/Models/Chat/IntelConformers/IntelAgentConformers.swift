@@ -172,47 +172,9 @@ public struct SandboxCleanupNotice: Sendable {
     }
 }
 
-// MARK: - Relay status
-
-/// Per-agent relay tunnel status. Relay is amputated on Intel; the type
-/// exists for the relay section's bindings.
-public enum AgentRelayStatus: Sendable, Equatable {
-    case disconnected
-    case connecting
-    case connected(String)
-    case error(String)
-    /// Upstream: another Mac with the same identity holds this agent's tunnel.
-    case servedElsewhere
-}
-
-// Agent bundle manifest: the real one (Services/AgentBridge/AgentBundleService.swift).
-
-// MARK: - Relay Tunnel Manager (Intel stub)
-
-@MainActor
-final class RelayTunnelManager: ObservableObject, @unchecked Sendable {
-    static let shared = RelayTunnelManager()
-    @Published var agentStatuses: [UUID: AgentRelayStatus] = [:]
-    private init() {}
-    func status(for agentId: UUID) -> AgentRelayStatus { .disconnected }
-    func isTunnelEnabled(for agentId: UUID) -> Bool { false }
-    func enable(for agentId: UUID) async throws {}
-    func disable(for agentId: UUID) {}
-    func baseURL(for agentId: UUID) -> URL? { nil }
-    /// Sync no-op (relay is amputated). Upstream is async; the Intel
-    /// call sites invoke it from non-async alert-button closures, so
-    /// the Intel surface is synchronous + non-throwing.
-    func setTunnelEnabled(_ enabled: Bool, for agentId: UUID) {}
-    /// Upstream's relay URL for an agent address (§6.1).
-    nonisolated static func publicURL(forAddress address: String) -> String {
-        "https://\(address.lowercased()).agent.osaurus.ai"
-    }
-
-    /// False until the relay is real (`W-identity-mobile` stage 4): the
-    /// pairing payload then offers no relay URLs, so the phone is never
-    /// handed a route that can't answer.
-    nonisolated static let isAvailableOnIntel = false
-}
+// Relay: the real `RelayTunnelManager` and `AgentRelayStatus`
+// (Networking/RelayTunnelManager.swift), un-excluded with `W-identity-mobile`
+// stage 4 (docs/IDENTITY_MOBILE_INTEL.md).
 
 // ScheduleManager is now the real one (Managers/ScheduleManager.swift),
 // un-excluded in the M13 Schedules restore.

@@ -2641,3 +2641,27 @@ picked in the app; it spends credits, so use one image per step.
       with an iPhone badge holding the prompt and the image.
 - [ ] Stop: ask for an image and stop it on the phone before it arrives.
       The phone shows it as stopped; no image is added to the chat.
+
+## Paired iPhone: Reach From Anywhere (2026-11-03)
+
+`W-identity-mobile` stage 4 (`IDENTITY_MOBILE_INTEL.md`). Pair first. Turning
+this on connects Rosy to the Osaurus relay (`agent.osaurus.ai`).
+
+- [ ] First launch of this build: Settings › Mobile shows **Reach From
+      Anywhere** off, and Settings › Server › Relays shows every agent's
+      relay off, even if they were on before.
+- [ ] Turn **Reach From Anywhere** on. Under it a status row appears and,
+      within a few seconds, says the relay is connected (not an error).
+      The Relays section in Settings › Server shows the phone's agents on
+      and connected.
+- [ ] Away from home: turn the phone's Wi-Fi off (mobile data only) and
+      open the app. Agents load, a chat streams a reply, and the chat
+      shows up on Rosy as with Wi-Fi.
+- [ ] Quit and reopen Osaurus with Reach From Anywhere on: the relay
+      reconnects by itself (status row green again), and the phone on
+      mobile data works again.
+- [ ] Turn **Reach From Anywhere** off: the status row goes away, the
+      Relays section shows the agents off, and the phone on mobile data can
+      no longer reach Rosy (it says it can't connect).
+- [ ] Agent with a long name (40+ characters) and Bonjour on, with Expose
+      to Network on: the phone on Wi-Fi still finds it when pairing.

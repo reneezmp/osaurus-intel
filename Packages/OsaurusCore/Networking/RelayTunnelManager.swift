@@ -6,6 +6,12 @@
 //  Authenticates agents via EIP-191 signed messages, forwards inbound
 //  HTTP requests to the local server, and handles keepalive + reconnect.
 //
+//  Intel (`W-identity-mobile` stage 4, docs/IDENTITY_MOBILE_INTEL.md):
+//  upstream's file, signing with the v1 agent key (`agentIndex`); upstream's
+//  v2 `agentKeyPath` comes with stage 7. A missing agent identity is
+//  assigned in place (`AgentManager.assignAddress`, which never prompts on
+//  Intel) instead of upstream's background assignment.
+//
 
 import Foundation
 import LocalAuthentication
@@ -17,6 +23,122 @@ public enum AgentRelayStatus: Equatable {
     case connecting
     case connected(url: String)
     case error(String)
+    /// The relay evicted this agent because a newer tunnel authenticated the
+    /// same address — another device sharing this identity is serving it
+    /// now. The manager stops reconnecting for the address (per the relay
+    /// contract: two auto-reconnecting sessions would evict each other
+    /// forever) until the user explicitly re-enables the tunnel here or the
+    /// app relaunches.
+    case servedElsewhere
+}
+
+// MARK: - Public URL Probe
+
+/// Captures the public-route verdict separately from tunnel auth so callers can
+/// keep the UI out of a false-green state until the HTTPS route works.
+struct RelayPublicRouteCheckResult: Equatable, Sendable {
+    let reachable: Bool
+    let statusCode: Int?
+    let failureDescription: String?
+}
+
+/// Performs the cheap public `/health` request that proves the relay hostname
+/// can actually proxy back to the local Osaurus server.
+struct RelayPublicURLProbe: Sendable {
+    typealias Transport = @Sendable (URLRequest) async throws -> (Data, URLResponse)
+
+    private static let timeout: TimeInterval = 8
+    private let transport: Transport
+
+    init(transport: @escaping Transport) {
+        self.transport = transport
+    }
+
+    static func live() -> RelayPublicURLProbe {
+        RelayPublicURLProbe { request in
+            let session = Self.makeHealthCheckSession()
+            defer { session.finishTasksAndInvalidate() }
+            return try await session.data(for: request)
+        }
+    }
+
+    static func makeHealthCheckSession() -> URLSession {
+        let config = URLSessionConfiguration.ephemeral
+        config.waitsForConnectivity = false
+        config.timeoutIntervalForRequest = timeout
+        config.timeoutIntervalForResource = timeout
+        return GlobalProxySettings.makeSession(base: config)
+    }
+
+    static func makeHealthRequest(baseURL: String) -> URLRequest? {
+        guard let base = URL(string: baseURL),
+            let scheme = base.scheme?.lowercased(),
+            scheme == "https" || scheme == "http",
+            base.host?.isEmpty == false
+        else { return nil }
+        let healthURL = base.appendingPathComponent("health")
+        var request = URLRequest(url: healthURL)
+        request.httpMethod = "GET"
+        request.timeoutInterval = timeout
+        request.setValue("no-cache", forHTTPHeaderField: "Cache-Control")
+        request.setValue("OsaurusRelayHealthCheck/1", forHTTPHeaderField: "User-Agent")
+        return request
+    }
+
+    func check(
+        baseURL: String,
+        attempts: Int = 3,
+        retryDelayNanoseconds: UInt64 = 1_000_000_000
+    ) async -> RelayPublicRouteCheckResult {
+        guard let request = Self.makeHealthRequest(baseURL: baseURL) else {
+            return RelayPublicRouteCheckResult(
+                reachable: false,
+                statusCode: nil,
+                failureDescription: "Public link URL is invalid."
+            )
+        }
+
+        let maxAttempts = max(1, attempts)
+        var lastResult = RelayPublicRouteCheckResult(
+            reachable: false,
+            statusCode: nil,
+            failureDescription: "Public link check did not run."
+        )
+
+        for attempt in 1 ... maxAttempts {
+            guard !Task.isCancelled else { return lastResult }
+
+            do {
+                let (_, response) = try await transport(request)
+                let statusCode = (response as? HTTPURLResponse)?.statusCode
+                if statusCode == 200 {
+                    return RelayPublicRouteCheckResult(
+                        reachable: true,
+                        statusCode: statusCode,
+                        failureDescription: nil
+                    )
+                }
+                lastResult = RelayPublicRouteCheckResult(
+                    reachable: false,
+                    statusCode: statusCode,
+                    failureDescription: "Public link health check returned HTTP \(statusCode ?? 0)."
+                )
+            } catch {
+                lastResult = RelayPublicRouteCheckResult(
+                    reachable: false,
+                    statusCode: nil,
+                    failureDescription: "Public link check failed: \(error.localizedDescription)"
+                )
+            }
+
+            if attempt < maxAttempts, retryDelayNanoseconds > 0 {
+                try? await Task.sleep(nanoseconds: retryDelayNanoseconds)
+                guard !Task.isCancelled else { return lastResult }
+            }
+        }
+
+        return lastResult
+    }
 }
 
 // MARK: - Relay Frame Types
@@ -28,6 +150,9 @@ private struct RelayRequestFrame: Decodable {
     let path: String
     let headers: [String: String]
     let body: String?
+    /// When `"base64"`, `body` is base64-encoded raw bytes (binary-safe mode).
+    /// Absent/other values mean UTF-8 text (legacy mode).
+    let bodyEncoding: String?
 }
 
 private struct RelayResponseFrame: Encodable {
@@ -36,6 +161,11 @@ private struct RelayResponseFrame: Encodable {
     let status: Int
     let headers: [String: String]
     let body: String
+    /// Set to `"base64"` when `body` carries base64-encoded raw bytes. Bodies
+    /// that are not valid UTF-8 (images, audio, etc.) were previously mangled
+    /// through `String(data:encoding:) ?? ""`; base64 keeps them intact for
+    /// relays that understand the field. Omitted for plain text bodies.
+    let bodyEncoding: String?
 }
 
 private struct RelayStreamStartFrame: Encodable {
@@ -56,6 +186,20 @@ private struct RelayStreamEndFrame: Encodable {
     let id: String
 }
 
+/// Async sink for one serialized WebSocket text frame. Returns `false` when the
+/// frame could not be handed to the transport (no socket or a send error), so
+/// streaming callers can stop instead of pumping more bytes into a dead socket.
+///
+/// Routing every frame through this seam (instead of calling
+/// `URLSessionWebSocketTask.send` directly) gives the relay path three
+/// properties the old fire-and-forget send lacked: backpressure (the next frame
+/// is enqueued only after the transport accepts the previous one), ordering
+/// (per-request awaits preserve `stream_start` -> `stream_chunk`* ->
+/// `stream_end`), and fail-fast (a mid-stream send error stops the loop). It is
+/// also the unit-test seam: tests drive `relayStreamingResponse` with a
+/// recording sink instead of a live WebSocket.
+typealias RelayFrameSink = @Sendable (_ json: String) async -> Bool
+
 // MARK: - Relay Tunnel Manager
 
 @MainActor
@@ -63,6 +207,12 @@ public final class RelayTunnelManager: ObservableObject {
     public static let shared = RelayTunnelManager()
 
     private static let relayURL = URL(string: "wss://agent.osaurus.ai/tunnel/connect")!
+
+    /// Public HTTPS base URL the relay serves an agent address at
+    /// (docs/MOBILE_PROTOCOL.md §6.1).
+    nonisolated public static func publicURL(forAddress address: String) -> String {
+        "https://\(address.lowercased()).agent.osaurus.ai"
+    }
 
     // MARK: - Published State
 
@@ -82,11 +232,61 @@ public final class RelayTunnelManager: ObservableObject {
     private var authenticatedAgents: Set<String> = []
     /// O(1) lookup from lowercased agent address to agent UUID, built at auth time.
     private var addressToAgentId: [String: UUID] = [:]
-    /// Set before expecting a `challenge` frame; consumed when the nonce arrives.
-    private var pendingNonceHandler: ((String) -> Void)?
+    /// FIFO queue of challenge handlers. The relay answers challenges in the
+    /// order they are requested (one on socket open, one per
+    /// `request_challenge`), so each inbound `challenge` frame consumes the
+    /// oldest handler. A single-slot value here used to let a concurrent
+    /// `addAgentToTunnel()` clobber the `connect()` handler, permanently
+    /// stalling tunnel auth.
+    private var pendingNonceHandlers: [(String) -> Void] = []
+    /// Bounded retry budget for `auth_error` frames (e.g. transient clock
+    /// skew). Reset on a successful auth.
+    private var authErrorRetries = 0
+    private static let maxAuthErrorRetries = 3
+    /// Agents the relay evicted with `reason: "superseded"` — a newer tunnel
+    /// (another device sharing this identity) now serves their address.
+    /// Excluded from every automatic auth/reconnect until a user-initiated
+    /// enable or an app relaunch clears them, so two devices that both hold
+    /// a legacy (v1) address can't ping-pong ownership.
+    private var supersededAgentIds: Set<UUID> = []
+    /// Superseded frames can arrive before the address→agent map is built
+    /// (or after it was torn down); remember the address so the next
+    /// `connect()` still honours the eviction.
+    private var supersededAddresses: Set<String> = []
+    /// Public-link checks run after relay auth so green UI means the public
+    /// HTTPS route, not just the WebSocket auth handshake, is usable.
+    private let publicURLProbe = RelayPublicURLProbe.live()
+    private var publicCheckTasks: [UUID: Task<Void, Never>] = [:]
+    private var pendingPublicCheckURLs: [UUID: String] = [:]
+
+    /// In-flight proxied requests keyed by relay frame `id`. Tracking these lets
+    /// teardown (`disconnectAll`/`handleDisconnect`/`handleAuthError`), per-agent
+    /// removal, and an initiator `cancel` frame cancel the detached proxy task.
+    /// Cancelling the task drops the `URLSession.AsyncBytes` loop, which closes
+    /// the loopback connection so the run endpoint's `closeFuture` cancels model
+    /// generation and unloads -- no zombie loads on a dead tunnel.
+    struct InFlightRequest {
+        let agentUUID: String?
+        let task: Task<Void, Never>
+    }
+    var inFlightRequests: [String: InFlightRequest] = [:]
+
+    /// Upper bound on concurrently-proxied relay requests. The local server's
+    /// own concurrency limits bound generation and `URLSession` bounds loopback
+    /// connections, but a misbehaving or hostile relay could still enqueue
+    /// unbounded proxy tasks; past this many in-flight, new requests are
+    /// rejected with a 503 frame so the host can't be driven into unbounded
+    /// task/memory growth. Generous enough that legitimate multi-agent /
+    /// multi-peer traffic never hits it — real concurrent generation is far
+    /// lower than this.
+    static let maxConcurrentInFlightRequests = 64
 
     private init() {
         configuration = RelayConfigurationStore.load()
+    }
+
+    nonisolated static func makeWebSocketSession() -> URLSession {
+        GlobalProxySettings.makeSession(base: .default)
     }
 
     // MARK: - Public API
@@ -97,6 +297,9 @@ public final class RelayTunnelManager: ObservableObject {
         RelayConfigurationStore.save(configuration)
 
         if enabled {
+            // A user-initiated enable is the one legitimate way to take an
+            // address back from the device that superseded us.
+            clearSuperseded(agentId)
             agentStatuses[agentId] = .connecting
             if isConnected {
                 Task { await addAgentToTunnel(agentId: agentId) }
@@ -115,12 +318,64 @@ public final class RelayTunnelManager: ObservableObject {
         configuration.isEnabled(for: agentId)
     }
 
+    /// The agent's address was rotated. The relay maps *addresses* to
+    /// tunnels, so the live tunnel keeps serving the OLD address until told
+    /// otherwise: drop it (`remove_agent`) and authenticate the new one
+    /// (`add_agent`) in place. A rotation is also a fresh claim, so any
+    /// `superseded` mark from the old address is cleared — the new address
+    /// has never been contested.
+    ///
+    /// No-op when the agent's tunnel is disabled. When enabled but not
+    /// connected, the next `connect()` picks the new address up from the
+    /// agent record on its own.
+    public func handleAddressRotated(agentId: UUID, previousAddress: String?) {
+        clearSuperseded(agentId)
+        if let previousAddress {
+            supersededAddresses.remove(previousAddress.lowercased())
+        }
+        guard configuration.isEnabled(for: agentId) else { return }
+        agentStatuses[agentId] = .connecting
+        guard isConnected else {
+            Task { await connect() }
+            return
+        }
+        if let previousAddress {
+            let lower = previousAddress.lowercased()
+            sendJSON(["type": "remove_agent", "address": previousAddress])
+            authenticatedAgents.remove(lower)
+            addressToAgentId.removeValue(forKey: lower)
+            cancelInFlightRequests(forAgentUUID: agentId.uuidString)
+            cancelPublicCheck(for: agentId)
+        }
+        Task { await addAgentToTunnel(agentId: agentId) }
+    }
+
+    /// Whether the relay handed this agent's address to another device's
+    /// tunnel and we are deliberately not reconnecting for it.
+    public func isServedElsewhere(_ agentId: UUID) -> Bool {
+        supersededAgentIds.contains(agentId)
+    }
+
+    /// User-initiated "serve this agent from this device again" after a
+    /// `servedElsewhere` eviction. Equivalent to re-enabling the tunnel; the
+    /// other device receives the `superseded` frame and goes quiet.
+    public func reclaimTunnel(for agentId: UUID) {
+        setTunnelEnabled(true, for: agentId)
+    }
+
     /// Called when the local server starts -- reconnects tunnels for any previously-enabled agents.
     public func reconnectIfNeeded(port: Int) {
         localPort = port
         configuration = RelayConfigurationStore.load()
+        // A server (re)start is a fresh session; the relay contract allows an
+        // app restart to legitimately supersede a stale session elsewhere.
+        supersededAgentIds.removeAll()
+        supersededAddresses.removeAll()
         let enabled = configuration.enabledAgentIds
-        guard !enabled.isEmpty else { return }
+        guard !enabled.isEmpty else {
+            MobileConnectLog.write("relay: no agent has Reach From Anywhere on, not opening a tunnel")
+            return
+        }
 
         for id in enabled {
             agentStatuses[id] = .connecting
@@ -131,11 +386,13 @@ public final class RelayTunnelManager: ObservableObject {
 
     /// Called when the local server stops -- tears down the tunnel.
     public func disconnectAll() {
+        MobileConnectLog.write("relay: tunnel closed on purpose (server stopping)")
         shouldReconnect = false
         reconnectTask?.cancel()
         reconnectTask = nil
         receiveTask?.cancel()
         receiveTask = nil
+        cancelAllInFlightRequests()
         webSocketTask?.cancel(with: .goingAway, reason: nil)
         webSocketTask = nil
         urlSession?.invalidateAndCancel()
@@ -143,7 +400,10 @@ public final class RelayTunnelManager: ObservableObject {
         isConnected = false
         authenticatedAgents.removeAll()
         addressToAgentId.removeAll()
-        pendingNonceHandler = nil
+        pendingNonceHandlers.removeAll()
+        supersededAgentIds.removeAll()
+        supersededAddresses.removeAll()
+        cancelAllPublicChecks()
         for id in agentStatuses.keys {
             agentStatuses[id] = .disconnected
         }
@@ -158,9 +418,22 @@ public final class RelayTunnelManager: ObservableObject {
 
     private func connect() async {
         guard webSocketTask == nil || !isConnected else { return }
+        // Identity of whatever task was live when this connect started. The
+        // suspensions below (master key, session build) are windows in which
+        // another connect can publish a new socket; `isConnected` only flips
+        // in `handleAuthOk`, so a guard on it alone passes for the whole
+        // handshake and let two overlapping connects publish two sockets.
+        // Re-checking against this identity catches the overlap exactly.
+        let taskAtEntry = webSocketTask
 
-        let enabled = configuration.enabledAgentIds
-        guard !enabled.isEmpty else { return }
+        // Addresses another device now serves are never re-claimed
+        // automatically (relay contract). If that leaves nothing to
+        // authenticate, there is no tunnel to open.
+        let enabled = configuration.enabledAgentIds.filter { !isSupersededAgent($0) }
+        guard !enabled.isEmpty else {
+            MobileConnectLog.write("relay: every enabled agent is served from another device, not connecting")
+            return
+        }
 
         for id in enabled {
             ensureAgentIdentity(id)
@@ -170,6 +443,7 @@ public final class RelayTunnelManager: ObservableObject {
             enabled.contains(agent.id) && agent.agentAddress != nil && agent.agentIndex != nil
         }
         guard !agents.isEmpty else {
+            MobileConnectLog.write("relay: FAILED to connect, none of the \(enabled.count) enabled agents has an identity")
             for id in enabled {
                 let agent = AgentManager.shared.agent(for: id)
                 if agent?.agentAddress == nil {
@@ -180,33 +454,63 @@ public final class RelayTunnelManager: ObservableObject {
         }
 
         guard let masterKey = await obtainMasterKey() else {
+            MobileConnectLog.write("relay: FAILED to connect, the master key could not be read from the keychain")
             for agent in agents { agentStatuses[agent.id] = .error("No identity") }
             return
         }
 
         // Re-check after the suspension: another connect may have won the race
-        guard webSocketTask == nil || !isConnected else { return }
+        guard webSocketTask === taskAtEntry else { return }
 
-        let session = URLSession(configuration: .default)
+        // Detached: building the session reads the disk-backed proxy/server
+        // configuration (a stat plus a possible file read + decode under the
+        // config cache lock), which has stalled the main actor on slow disks.
+        let session = await Task.detached(priority: .userInitiated) {
+            Self.makeWebSocketSession()
+        }.value
+        // The detached hop is another suspension a racing connect could have
+        // crossed; re-check before publishing the new task.
+        guard webSocketTask === taskAtEntry else { return }
+        // A stale, never-authenticated task from a failed handshake is what
+        // let the entry guard through; retire it so it can't leak.
+        taskAtEntry?.cancel(with: .goingAway, reason: nil)
+        urlSession?.invalidateAndCancel()
         let task = session.webSocketTask(with: Self.relayURL)
         self.urlSession = session
         self.webSocketTask = task
         task.resume()
+        MobileConnectLog.write(
+            "relay: connecting to \(Self.relayURL.host ?? "relay") for \(agents.count) agent(s): \(agents.compactMap(\.agentAddress).joined(separator: ", "))"
+        )
 
-        pendingNonceHandler = { [weak self] nonce in
-            guard let self else { return }
+        // `keyBox` is captured by reference; the handler zeroes the key bytes
+        // after signing so master-key material doesn't outlive its single use
+        // inside a long-lived closure.
+        var keyBox: Data? = masterKey
+        pendingNonceHandlers.append { [weak self] nonce in
+            guard let self else {
+                keyBox?.zeroOut()
+                keyBox = nil
+                return
+            }
+            defer {
+                keyBox?.zeroOut()
+                keyBox = nil
+            }
+            guard let signingKey = keyBox else { return }
+
             let timestamp = Int(Date().timeIntervalSince1970)
             var authAgents: [[String: Any]] = []
 
             for agent in agents {
-                guard let index = agent.agentIndex, let address = agent.agentAddress else { continue }
+                guard let agentIndex = agent.agentIndex, let address = agent.agentAddress else { continue }
                 do {
                     let sigHex = try Self.signAgentAuth(
                         address: address,
                         nonce: nonce,
                         timestamp: timestamp,
-                        masterKey: masterKey,
-                        agentIndex: index
+                        masterKey: signingKey,
+                        agentIndex: agentIndex
                     )
                     authAgents.append(["address": address, "signature": sigHex])
                 } catch {
@@ -235,8 +539,16 @@ public final class RelayTunnelManager: ObservableObject {
                 guard let task = self.webSocketTask else { break }
                 do {
                     let message = try await task.receive()
+                    // A socket retired by a newer connect must neither feed
+                    // frames into the live session nor tear it down when its
+                    // final receive fails; only the current task may.
+                    guard self.webSocketTask === task else { break }
                     self.handleMessage(message)
                 } catch {
+                    guard self.webSocketTask === task else { break }
+                    MobileConnectLog.write(
+                        "relay: tunnel dropped: \(error.localizedDescription) (close code \(task.closeCode.rawValue))"
+                    )
                     self.handleDisconnect()
                     break
                 }
@@ -268,9 +580,19 @@ public final class RelayTunnelManager: ObservableObject {
             handlePing(json)
         case "request":
             dispatchRequest(data)
+        case "cancel":
+            // Forward-compatible: because the relay multiplexes every request on
+            // one shared WebSocket, a per-request initiator hangup can only reach
+            // the host as a `cancel` frame. Handling it now means host generation
+            // stops the instant the relay forwards a disconnect; until the relay
+            // emits this frame the case is dormant.
+            if let cancelId = json["id"] as? String {
+                cancelInFlightRequest(id: cancelId)
+            }
         case "error":
             let errorMsg = json["error"] as? String ?? "unknown"
             print("[Relay] Error frame: \(errorMsg)")
+            MobileConnectLog.write("relay: error frame from the relay: \(errorMsg)")
         default:
             break
         }
@@ -278,16 +600,20 @@ public final class RelayTunnelManager: ObservableObject {
 
     private func handleChallenge(_ json: [String: Any]) {
         guard let nonce = json["nonce"] as? String else { return }
-        let handler = pendingNonceHandler
-        pendingNonceHandler = nil
-        handler?(nonce)
+        guard !pendingNonceHandlers.isEmpty else { return }
+        let handler = pendingNonceHandlers.removeFirst()
+        handler(nonce)
     }
 
     private func handleAuthOk(_ json: [String: Any]) {
         isConnected = true
         reconnectDelay = 1
+        authErrorRetries = 0
 
         guard let agents = json["agents"] as? [[String: Any]] else { return }
+        MobileConnectLog.write(
+            "relay: tunnel up, serving \(agents.compactMap { ($0["address"] as? String)?.lowercased() }.joined(separator: ", "))"
+        )
         for agentInfo in agents {
             guard let address = agentInfo["address"] as? String,
                 let url = agentInfo["url"] as? String
@@ -298,7 +624,7 @@ public final class RelayTunnelManager: ObservableObject {
 
             if let agent = findAgent(byAddress: lower) {
                 addressToAgentId[lower] = agent.id
-                agentStatuses[agent.id] = .connected(url: url)
+                beginPublicRouteCheck(for: agent.id, url: url)
             }
         }
     }
@@ -306,9 +632,11 @@ public final class RelayTunnelManager: ObservableObject {
     private func handleAuthError(_ json: [String: Any]) {
         let error = json["error"] as? String ?? "auth_failed"
         print("[Relay] Auth error: \(error)")
+        MobileConnectLog.write("relay: auth REFUSED by the relay: \(error) (retry \(authErrorRetries + 1) of \(Self.maxAuthErrorRetries))")
         for id in configuration.enabledAgentIds {
             agentStatuses[id] = .error(error)
         }
+        cancelAllInFlightRequests()
         webSocketTask?.cancel(with: .normalClosure, reason: nil)
         webSocketTask = nil
         urlSession?.invalidateAndCancel()
@@ -316,7 +644,28 @@ public final class RelayTunnelManager: ObservableObject {
         isConnected = false
         authenticatedAgents.removeAll()
         addressToAgentId.removeAll()
-        pendingNonceHandler = nil
+        pendingNonceHandlers.removeAll()
+        cancelAllPublicChecks()
+
+        // An auth_error used to permanently kill the tunnel: the receive loop
+        // exits (webSocketTask is nil) and nothing rescheduled a connect, so a
+        // transient failure (clock skew, relay restart mid-handshake) required
+        // an app restart. Retry with backoff, bounded so a genuinely bad
+        // signature doesn't hammer the relay forever.
+        guard shouldReconnect, authErrorRetries < Self.maxAuthErrorRetries else { return }
+        authErrorRetries += 1
+        for id in configuration.enabledAgentIds {
+            agentStatuses[id] = .connecting
+        }
+        reconnectTask?.cancel()
+        reconnectTask = Task { [weak self] in
+            guard let self else { return }
+            let delay = self.reconnectDelay
+            try? await Task.sleep(nanoseconds: UInt64(delay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            self.reconnectDelay = min(self.reconnectDelay * 2, 60)
+            await self.connect()
+        }
     }
 
     private func handleAgentAdded(_ json: [String: Any]) {
@@ -326,18 +675,63 @@ public final class RelayTunnelManager: ObservableObject {
 
         let lower = address.lowercased()
         authenticatedAgents.insert(lower)
+        MobileConnectLog.write("relay: now serving \(lower)")
         if let agent = findAgent(byAddress: lower) {
             addressToAgentId[lower] = agent.id
-            agentStatuses[agent.id] = .connected(url: url)
+            beginPublicRouteCheck(for: agent.id, url: url)
         }
     }
 
-    private func handleAgentRemoved(_ json: [String: Any]) {
+    /// Relay frame `{type:"agent_removed", address, reason?}`. Internal (not
+    /// private) so the supersession contract can be unit-tested without a
+    /// live socket.
+    func handleAgentRemoved(_ json: [String: Any]) {
         guard let address = json["address"] as? String else { return }
         let lower = address.lowercased()
+        let superseded = (json["reason"] as? String) == "superseded"
+        MobileConnectLog.write("relay: stopped serving \(lower)\(superseded ? ", another device took it over" : "")")
         authenticatedAgents.remove(lower)
-        if let agentId = addressToAgentId.removeValue(forKey: lower) {
+        if superseded {
+            supersededAddresses.insert(lower)
+        }
+        let agentId = addressToAgentId.removeValue(forKey: lower) ?? findAgent(byAddress: lower)?.id
+        guard let agentId else { return }
+        cancelInFlightRequests(forAgentUUID: agentId.uuidString)
+        cancelPublicCheck(for: agentId)
+        if superseded {
+            supersededAgentIds.insert(agentId)
+            agentStatuses[agentId] = .servedElsewhere
+            print("[Relay] \(lower) is now served from another device; not reconnecting for it")
+            // The relay closes the socket once it carries no agents; when
+            // every enabled agent was taken over, stop the reconnect loop
+            // proactively instead of re-opening a tunnel with nothing to auth.
+            if configuration.enabledAgentIds.allSatisfy({ isSupersededAgent($0) }) {
+                reconnectTask?.cancel()
+                reconnectTask = nil
+            }
+        } else {
             agentStatuses[agentId] = .disconnected
+        }
+    }
+
+    /// Superseded by agent id, or by the address the relay named when the
+    /// id map was not populated at the time.
+    func isSupersededAgent(_ agentId: UUID) -> Bool {
+        if supersededAgentIds.contains(agentId) { return true }
+        guard !supersededAddresses.isEmpty,
+            let address = AgentManager.shared.agent(for: agentId)?.agentAddress?.lowercased()
+        else { return false }
+        if supersededAddresses.contains(address) {
+            supersededAgentIds.insert(agentId)
+            return true
+        }
+        return false
+    }
+
+    func clearSuperseded(_ agentId: UUID) {
+        supersededAgentIds.remove(agentId)
+        if let address = AgentManager.shared.agent(for: agentId)?.agentAddress?.lowercased() {
+            supersededAddresses.remove(address)
         }
     }
 
@@ -349,18 +743,87 @@ public final class RelayTunnelManager: ObservableObject {
 
     // MARK: - Request Proxying
 
-    /// Decode a request frame, resolve the agent UUID, and dispatch to a detached task
-    /// so the HTTP round-trip runs off @MainActor and multiple requests multiplex concurrently.
+    /// Decode a request frame, resolve the agent UUID, and dispatch to a detached
+    /// task so the HTTP round-trip runs off @MainActor and multiple requests
+    /// multiplex concurrently. The task is tracked in `inFlightRequests` so
+    /// teardown, per-agent removal, or a `cancel` frame can interrupt it.
     private func dispatchRequest(_ data: Data) {
         guard let frame = try? JSONDecoder().decode(RelayRequestFrame.self, from: data) else { return }
+
+        // Defend against a misbehaving/hostile relay flooding the host: past the
+        // in-flight cap, reject new requests with a single 503 frame instead of
+        // spawning more proxy tasks and loopback connections. Fire-and-forget is
+        // correct here — it is one terminal frame, not a stream.
+        if let rejection = inFlightCapacityRejection(id: frame.id) {
+            sendJSON(rejection)
+            return
+        }
 
         let agentUUID = resolveAgentId(for: frame.headers["x-agent-address"])
         let port = localPort
         let ws = webSocketTask
+        let requestId = frame.id
 
-        Task.detached(priority: .userInitiated) {
+        // Track the task so teardown / per-agent removal / a `cancel` frame can
+        // interrupt it. The detached task runs off @MainActor; it hops back to
+        // clear its own registry slot when the round-trip finishes. Storing
+        // happens synchronously here, before the detached task can possibly
+        // complete its network round-trip, so there is no store-vs-clear race.
+        let task = Task.detached(priority: .userInitiated) { [weak self] in
             await Self.proxyRequest(frame, localPort: port, agentUUID: agentUUID, webSocket: ws)
+            await self?.clearInFlightRequest(id: requestId)
         }
+        inFlightRequests[requestId] = InFlightRequest(agentUUID: agentUUID, task: task)
+    }
+
+    /// Remove a completed request's registry slot (called from the proxy task
+    /// after the round-trip ends). Hops to @MainActor via the actor isolation.
+    private func clearInFlightRequest(id: String) {
+        inFlightRequests[id] = nil
+    }
+
+    /// Cancel a single in-flight request by frame id. Used by the `cancel` frame
+    /// handler so a relayed initiator hangup stops host generation.
+    func cancelInFlightRequest(id: String) {
+        if let entry = inFlightRequests.removeValue(forKey: id) {
+            entry.task.cancel()
+        }
+    }
+
+    /// Cancel every tracked in-flight request. Called on tunnel teardown and
+    /// re-auth so the host never keeps generating into a dead socket.
+    func cancelAllInFlightRequests() {
+        let entries = inFlightRequests
+        inFlightRequests.removeAll()
+        for (_, entry) in entries {
+            entry.task.cancel()
+        }
+    }
+
+    /// Cancel in-flight requests bound to a specific agent (by resolved UUID
+    /// string), used when an agent is removed from the tunnel.
+    private func cancelInFlightRequests(forAgentUUID agentUUID: String) {
+        let matching = inFlightRequests.filter { $0.value.agentUUID == agentUUID }
+        for (id, entry) in matching {
+            inFlightRequests[id] = nil
+            entry.task.cancel()
+        }
+    }
+
+    /// The relay `response` frame to send when the in-flight cap is reached, or
+    /// `nil` when there is capacity for one more request. Kept pure + internal
+    /// so the cap policy is unit-testable without a live tunnel. A 503 lets the
+    /// relay close the initiator's request promptly with a retry-able status
+    /// instead of leaving it to hang until a timeout.
+    func inFlightCapacityRejection(id: String) -> [String: Any]? {
+        guard inFlightRequests.count >= Self.maxConcurrentInFlightRequests else { return nil }
+        return [
+            "type": "response",
+            "id": id,
+            "status": 503,
+            "headers": ["content-type": "application/json"],
+            "body": #"{"error":"host_busy","message":"Too many concurrent relay requests; retry shortly."}"#,
+        ]
     }
 
     /// Resolve an agent crypto address to its UUID string via the pre-built lookup table.
@@ -380,8 +843,9 @@ public final class RelayTunnelManager: ObservableObject {
         agentUUID: String?,
         webSocket: URLSessionWebSocketTask?
     ) async {
+        let sink = webSocketSink(webSocket)
         guard let request = buildLocalRequest(from: frame, localPort: localPort, agentUUID: agentUUID) else {
-            sendErrorResponse(id: frame.id, error: "invalid_path", via: webSocket)
+            await sendErrorResponse(id: frame.id, error: "invalid_path", via: sink)
             return
         }
 
@@ -390,16 +854,19 @@ public final class RelayTunnelManager: ObservableObject {
             let httpResponse = response as? HTTPURLResponse
             let status = httpResponse?.statusCode ?? 502
             let headers = flattenHeaders(httpResponse?.allHeaderFields)
-            let contentType = headers["content-type"] ?? ""
+            // Lowercase the value (headers["content-type"] is already a
+            // lowercased key) so detection is robust to mixed-case content
+            // types from future/SDK responses, not just the encryptor's
+            // lowercase output.
+            let contentType = (headers["content-type"] ?? "").lowercased()
 
             if contentType.contains("text/event-stream") || contentType.contains("application/x-ndjson") {
                 await relayStreamingResponse(
                     id: frame.id,
                     status: status,
                     headers: headers,
-                    contentType: contentType,
                     bytes: bytes,
-                    via: webSocket
+                    via: sink
                 )
             } else {
                 await relayBufferedResponse(
@@ -407,11 +874,12 @@ public final class RelayTunnelManager: ObservableObject {
                     status: status,
                     headers: headers,
                     bytes: bytes,
-                    via: webSocket
+                    via: sink
                 )
             }
         } catch {
-            sendErrorResponse(id: frame.id, error: "local_server_error", via: webSocket)
+            if Task.isCancelled { return }
+            await sendErrorResponse(id: frame.id, error: "local_server_error", via: sink)
         }
     }
 
@@ -422,6 +890,13 @@ public final class RelayTunnelManager: ObservableObject {
     ) -> URLRequest? {
         guard let url = URL(string: "http://127.0.0.1:\(localPort)\(frame.path)") else { return nil }
         var request = URLRequest(url: url)
+        // Explicit ceiling for the loopback hop. `URLSession.shared` would
+        // otherwise apply its 60s idle default — too tight for long local
+        // generation/tool turns — while an unbounded value would let a wedged
+        // local handler pin the proxy task (and its in-flight slot) forever.
+        // One hour of *idleness* (the timer resets on every received byte) is
+        // far beyond any legitimate silent stretch of a local run.
+        request.timeoutInterval = 60 * 60
         request.httpMethod = frame.method
         for (key, value) in frame.headers {
             request.setValue(value, forHTTPHeaderField: key)
@@ -429,8 +904,20 @@ public final class RelayTunnelManager: ObservableObject {
         if let agentUUID {
             request.setValue(agentUUID, forHTTPHeaderField: "X-Osaurus-Agent-Id")
         }
+        // Stamp the relay-origin marker LAST (after caller headers) so the
+        // local server never treats this loopback request as a trusted local
+        // caller. `setValue` overwrites any value a remote caller tried to
+        // smuggle in through the relay frame, so the marker cannot be removed.
+        request.setValue("1", forHTTPHeaderField: HTTPHandler.relayOriginHeaderName)
         if let body = frame.body, !body.isEmpty {
-            request.httpBody = body.data(using: .utf8)
+            if frame.bodyEncoding == "base64" {
+                // Binary-safe mode: reject the frame if the relay claims base64
+                // but the payload doesn't decode, rather than forwarding junk.
+                guard let decoded = Data(base64Encoded: body) else { return nil }
+                request.httpBody = decoded
+            } else {
+                request.httpBody = body.data(using: .utf8)
+            }
         }
         return request
     }
@@ -444,82 +931,194 @@ public final class RelayTunnelManager: ObservableObject {
         return result
     }
 
-    private static func relayStreamingResponse(
+    /// Forward a streaming (SSE / NDJSON) response verbatim. The previous
+    /// implementation re-split the stream with `bytes.lines`, which destroyed
+    /// multi-line SSE events (`event:` + `data:`, multi-`data:` events, and
+    /// comment keepalives) and re-invented event boundaries. Instead, forward
+    /// the raw byte stream in UTF-8-safe chunks, flushing on every newline for
+    /// low latency, so the public caller sees exactly what the local server
+    /// produced.
+    ///
+    /// Generic over the byte sequence so unit tests can drive it with a synthetic
+    /// `AsyncStream<UInt8>` and a recording `RelayFrameSink`; production passes
+    /// `URLSession.AsyncBytes`.
+    static func relayStreamingResponse<Bytes: AsyncSequence>(
         id: String,
         status: Int,
         headers: [String: String],
-        contentType: String,
-        bytes: URLSession.AsyncBytes,
-        via webSocket: URLSessionWebSocketTask?
-    ) async {
-        sendFrame(RelayStreamStartFrame(id: id, status: status, headers: headers), via: webSocket)
+        bytes: Bytes,
+        via sink: RelayFrameSink
+    ) async where Bytes.Element == UInt8 {
+        // Fail-fast: if the opening frame can't be sent, the socket is gone --
+        // don't bother reading the local stream.
+        guard await sendFrame(RelayStreamStartFrame(id: id, status: status, headers: headers), via: sink) else {
+            return
+        }
 
-        let isSSE = contentType.contains("text/event-stream")
+        let flushThreshold = 16 * 1024
+        var buffer = Data()
+        /// Flush the longest valid-UTF-8 prefix, leaving any split trailing
+        /// multi-byte sequence buffered for the next flush. Returns `false` if a
+        /// send failed (caller must stop).
+        func flushValidPrefix() async -> Bool {
+            guard let chunk = takeUTF8Prefix(&buffer), !chunk.isEmpty else { return true }
+            return await sendFrame(RelayStreamChunkFrame(id: id, data: chunk), via: sink)
+        }
 
+        var sendFailed = false
         do {
-            for try await line in bytes.lines {
-                guard !line.isEmpty else { continue }
-                if isSSE {
-                    // URLSession.AsyncBytes.lines does not yield empty strings for consecutive
-                    // newlines, so blank-line SSE event boundaries are never observed here.
-                    // Each non-empty line from the NIO server is one complete SSE event
-                    // (e.g. "data: {...}"), so forward it immediately with the required \n\n
-                    // terminator so Machine A's SSE parser sees proper event boundaries.
-                    sendFrame(RelayStreamChunkFrame(id: id, data: line + "\n\n"), via: webSocket)
-                } else {
-                    sendFrame(RelayStreamChunkFrame(id: id, data: line + "\n"), via: webSocket)
+            for try await byte in bytes {
+                // Prompt cancellation: a cancelled proxy task (tunnel teardown,
+                // per-agent removal, initiator cancel) stops reading and drops
+                // the byte stream, closing the loopback connection so the run
+                // endpoint cancels generation. The socket is gone, so emit no
+                // further frames.
+                if Task.isCancelled { return }
+                buffer.append(byte)
+                // Newline flush keeps SSE/NDJSON latency low; size flush bounds
+                // memory for long lines.
+                if byte == 0x0A || buffer.count >= flushThreshold {
+                    if !(await flushValidPrefix()) {
+                        sendFailed = true
+                        break
+                    }
                 }
             }
         } catch {
-            // Stream interrupted — close cleanly
+            // A cancelled read also surfaces here (e.g. URLError.cancelled);
+            // treat it like cancellation and emit nothing further.
+            if Task.isCancelled { return }
+            // Otherwise the local stream errored mid-flight: fall through to
+            // flush what we have and send stream_end so the initiator gets a
+            // prompt close (and detects the missing `fin` as truncation) rather
+            // than hanging until a relay timeout.
         }
 
-        sendFrame(RelayStreamEndFrame(id: id), via: webSocket)
+        if sendFailed { return }
+
+        // Final flush of the valid prefix.
+        if !(await flushValidPrefix()) { return }
+        // Forward any remaining bytes (an incomplete trailing multi-byte
+        // sequence at end-of-stream) instead of silently dropping them. The
+        // encrypted SSE wire is ASCII so this never triggers there, but general
+        // UTF-8 SSE must not lose its tail. Lossy decode replaces invalid bytes
+        // rather than discarding them.
+        if !buffer.isEmpty {
+            let tail = String(decoding: buffer, as: UTF8.self)
+            buffer.removeAll(keepingCapacity: false)
+            if !tail.isEmpty, !(await sendFrame(RelayStreamChunkFrame(id: id, data: tail), via: sink)) {
+                return
+            }
+        }
+
+        _ = await sendFrame(RelayStreamEndFrame(id: id), via: sink)
     }
 
-    private static func relayBufferedResponse(
+    /// Pop the longest valid-UTF-8 prefix from `data` as a String, leaving any
+    /// trailing bytes of a split multi-byte character in place for the next
+    /// flush. Returns nil when no valid prefix exists yet. Internal for tests.
+    nonisolated static func takeUTF8Prefix(_ data: inout Data) -> String? {
+        guard !data.isEmpty else { return nil }
+        if let s = String(data: data, encoding: .utf8) {
+            data.removeAll(keepingCapacity: true)
+            return s
+        }
+        // A UTF-8 code point is at most 4 bytes; back off up to 3 bytes to
+        // find a clean boundary.
+        for back in 1 ... 3 where data.count > back {
+            let prefix = data.prefix(data.count - back)
+            if let s = String(data: prefix, encoding: .utf8) {
+                data.removeFirst(data.count - back)
+                return s
+            }
+        }
+        return nil
+    }
+
+    static func relayBufferedResponse<Bytes: AsyncSequence>(
         id: String,
         status: Int,
         headers: [String: String],
-        bytes: URLSession.AsyncBytes,
-        via webSocket: URLSessionWebSocketTask?
-    ) async {
+        bytes: Bytes,
+        via sink: RelayFrameSink
+    ) async where Bytes.Element == UInt8 {
         var allData = Data()
         do {
             for try await byte in bytes {
+                // A buffered response is a single atomic frame; a cancelled
+                // request means the initiator is gone, so deliver nothing
+                // (a partial body sent as a complete `response` would be wrong).
+                if Task.isCancelled { return }
                 allData.append(byte)
             }
         } catch {
-            // Partial read — send whatever we collected
+            if Task.isCancelled { return }
+            // Partial read on a genuine error — send whatever we collected.
         }
-        sendFrame(
-            RelayResponseFrame(
-                id: id,
-                status: status,
-                headers: headers,
-                body: String(data: allData, encoding: .utf8) ?? ""
-            ),
-            via: webSocket
-        )
+        // Text passes through as-is; anything not valid UTF-8 (images, audio,
+        // multipart) is base64-encoded with `bodyEncoding` so it is no longer
+        // silently corrupted into "" by lossy string conversion.
+        if let text = String(data: allData, encoding: .utf8) {
+            _ = await sendFrame(
+                RelayResponseFrame(
+                    id: id,
+                    status: status,
+                    headers: headers,
+                    body: text,
+                    bodyEncoding: nil
+                ),
+                via: sink
+            )
+        } else {
+            _ = await sendFrame(
+                RelayResponseFrame(
+                    id: id,
+                    status: status,
+                    headers: headers,
+                    body: allData.base64EncodedString(),
+                    bodyEncoding: "base64"
+                ),
+                via: sink
+            )
+        }
     }
 
-    private static func sendErrorResponse(id: String, error: String, via webSocket: URLSessionWebSocketTask?) {
-        sendFrame(
+    private static func sendErrorResponse(id: String, error: String, via sink: RelayFrameSink) async {
+        _ = await sendFrame(
             RelayResponseFrame(
                 id: id,
                 status: 502,
                 headers: ["content-type": "application/json"],
-                body: "{\"error\":\"\(error)\"}"
+                body: "{\"error\":\"\(error)\"}",
+                bodyEncoding: nil
             ),
-            via: webSocket
+            via: sink
         )
     }
 
-    private static func sendFrame<T: Encodable>(_ frame: T, via webSocket: URLSessionWebSocketTask?) {
+    /// Production sink: awaits the WebSocket send so frames are ordered and
+    /// backpressured, and reports failure (no socket / send threw) so streaming
+    /// callers stop. Control frames (auth/pong/add_agent) stay on the
+    /// fire-and-forget `sendJSON` path -- they are single frames, not streams.
+    private static func webSocketSink(_ webSocket: URLSessionWebSocketTask?) -> RelayFrameSink {
+        return { @Sendable str in
+            guard let webSocket else { return false }
+            do {
+                try await webSocket.send(.string(str))
+                return true
+            } catch {
+                return false
+            }
+        }
+    }
+
+    /// Encode a frame and hand it to the sink. Returns `false` if encoding fails
+    /// or the sink reports the transport is gone.
+    private static func sendFrame<T: Encodable>(_ frame: T, via sink: RelayFrameSink) async -> Bool {
         guard let data = try? JSONEncoder.osaurusCanonical().encode(frame),
             let str = String(data: data, encoding: .utf8)
-        else { return }
-        webSocket?.send(.string(str)) { _ in }
+        else { return false }
+        return await sink(str)
     }
 
     // MARK: - Mid-Session Agent Management
@@ -528,7 +1127,7 @@ public final class RelayTunnelManager: ObservableObject {
         ensureAgentIdentity(agentId)
 
         guard let agent = AgentManager.shared.agent(for: agentId),
-            let index = agent.agentIndex,
+            let agentIndex = agent.agentIndex,
             let address = agent.agentAddress
         else {
             agentStatuses[agentId] = .error("No identity")
@@ -540,16 +1139,27 @@ public final class RelayTunnelManager: ObservableObject {
             return
         }
 
-        pendingNonceHandler = { [weak self] nonce in
-            guard let self else { return }
+        var keyBox: Data? = masterKey
+        pendingNonceHandlers.append { [weak self] nonce in
+            guard let self else {
+                keyBox?.zeroOut()
+                keyBox = nil
+                return
+            }
+            defer {
+                keyBox?.zeroOut()
+                keyBox = nil
+            }
+            guard let signingKey = keyBox else { return }
+
             let timestamp = Int(Date().timeIntervalSince1970)
             do {
                 let sigHex = try Self.signAgentAuth(
                     address: address,
                     nonce: nonce,
                     timestamp: timestamp,
-                    masterKey: masterKey,
-                    agentIndex: index
+                    masterKey: signingKey,
+                    agentIndex: agentIndex
                 )
                 self.sendJSON([
                     "type": "add_agent",
@@ -576,9 +1186,12 @@ public final class RelayTunnelManager: ObservableObject {
             "address": address,
         ]
         sendJSON(frame)
+        MobileConnectLog.write("relay: Reach From Anywhere turned off for \(address.lowercased())")
         let lower = address.lowercased()
         authenticatedAgents.remove(lower)
         addressToAgentId.removeValue(forKey: lower)
+        cancelInFlightRequests(forAgentUUID: agentId.uuidString)
+        cancelPublicCheck(for: agentId)
     }
 
     /// Attempt to auto-assign a cryptographic identity if the agent is missing one.
@@ -586,6 +1199,8 @@ public final class RelayTunnelManager: ObservableObject {
         guard let agent = AgentManager.shared.agent(for: agentId),
             agent.agentAddress == nil || agent.agentIndex == nil
         else { return }
+        // Intel: no background assignment; Intel's master key read never
+        // prompts, and the caller reads the address straight after.
         try? AgentManager.shared.assignAddress(to: agent)
     }
 
@@ -593,21 +1208,35 @@ public final class RelayTunnelManager: ObservableObject {
 
     private func handleDisconnect() {
         isConnected = false
+        cancelAllInFlightRequests()
         webSocketTask = nil
         urlSession?.invalidateAndCancel()
         urlSession = nil
         authenticatedAgents.removeAll()
         addressToAgentId.removeAll()
-        pendingNonceHandler = nil
+        pendingNonceHandlers.removeAll()
+        cancelAllPublicChecks()
 
-        for id in configuration.enabledAgentIds {
+        let stillOurs = configuration.enabledAgentIds.filter { !isSupersededAgent($0) }
+        for id in stillOurs {
             if agentStatuses[id] != .disconnected {
                 agentStatuses[id] = .connecting
             }
         }
 
-        guard shouldReconnect else { return }
+        guard shouldReconnect else {
+            MobileConnectLog.write("relay: not reconnecting, the tunnel was closed on purpose")
+            return
+        }
+        // Every enabled address is served from another device: the relay
+        // contract says do not reconnect for them, and there is nothing else
+        // to authenticate. A user-initiated enable or relaunch resumes.
+        guard !stillOurs.isEmpty else {
+            MobileConnectLog.write("relay: not reconnecting, every enabled agent is served from another device")
+            return
+        }
 
+        MobileConnectLog.write("relay: reconnecting in \(Int(reconnectDelay))s")
         reconnectTask?.cancel()
         reconnectTask = Task { [weak self] in
             guard let self else { return }
@@ -640,7 +1269,8 @@ public final class RelayTunnelManager: ObservableObject {
         agentIndex: UInt32
     ) throws -> String {
         let message = "osaurus-tunnel:\(address):\(nonce):\(timestamp)"
-        let childKey = AgentKey.derive(masterKey: masterKey, index: agentIndex)
+        var childKey = AgentKey.derive(masterKey: masterKey, index: agentIndex)
+        defer { childKey.zeroOut() }
         let sig = try signEIP191Message(message, privateKey: childKey)
         return "0x" + sig.hexEncodedString
     }
@@ -662,5 +1292,58 @@ public final class RelayTunnelManager: ObservableObject {
         return AgentManager.shared.agents.first { agent in
             agent.agentAddress?.lowercased() == lower
         }
+    }
+
+    private func beginPublicRouteCheck(for agentId: UUID, url: String) {
+        agentStatuses[agentId] = .connecting
+        pendingPublicCheckURLs[agentId] = url
+        publicCheckTasks[agentId]?.cancel()
+
+        let probe = publicURLProbe
+        publicCheckTasks[agentId] = Task { [weak self] in
+            let result = await probe.check(baseURL: url)
+            guard !Task.isCancelled else { return }
+            await MainActor.run {
+                self?.finishPublicRouteCheck(for: agentId, url: url, result: result)
+            }
+        }
+    }
+
+    private func finishPublicRouteCheck(
+        for agentId: UUID,
+        url: String,
+        result: RelayPublicRouteCheckResult
+    ) {
+        publicCheckTasks[agentId] = nil
+
+        guard configuration.isEnabled(for: agentId),
+            pendingPublicCheckURLs[agentId] == url,
+            isConnected,
+            webSocketTask != nil
+        else { return }
+
+        pendingPublicCheckURLs[agentId] = nil
+        if result.reachable {
+            agentStatuses[agentId] = .connected(url: url)
+        } else {
+            let message =
+                result.failureDescription
+                ?? "Public link check failed before the relay could reach the local server."
+            agentStatuses[agentId] = .error(message)
+        }
+    }
+
+    private func cancelPublicCheck(for agentId: UUID) {
+        publicCheckTasks[agentId]?.cancel()
+        publicCheckTasks[agentId] = nil
+        pendingPublicCheckURLs[agentId] = nil
+    }
+
+    private func cancelAllPublicChecks() {
+        for task in publicCheckTasks.values {
+            task.cancel()
+        }
+        publicCheckTasks.removeAll()
+        pendingPublicCheckURLs.removeAll()
     }
 }

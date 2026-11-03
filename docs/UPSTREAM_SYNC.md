@@ -4577,6 +4577,14 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   the owner on the channel may cancel it; `osaurus_session_id` /
   `osaurus_create_session` append the exchange to a Mac chat
   (`RemoteSessionContinuation.appendImageExchange`). Stage 3 is complete.
+- **Stage 4 (2026-11-03):** the real `RelayTunnelManager` (upstream's
+  current file replaced the older excluded copy; the stub is gone), signing
+  with the v1 agent key until stage 7. The tunnel comes up with the server
+  in `AppDelegate` and closes when it stops; a key rotation moves it.
+  **Intel differences (Renée's call):** Reach From Anywhere starts off, and
+  per-agent tunnels saved by another build are turned off once
+  (`IntelNetworkExposure.resetSavedRelaysOnce`). Also upstream's 63-byte
+  Bonjour instance names, and `PairingHardeningTests` enabled.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

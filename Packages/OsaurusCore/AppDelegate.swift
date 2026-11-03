@@ -270,6 +270,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // A saved "Expose to Network" was never in effect before Intel
             // honoured it: turned off once (W-server-api stage 7).
             IntelNetworkExposure.resetSavedExposureOnce()
+            // Saved relay tunnels were never in effect either (stage 4).
+            IntelNetworkExposure.resetSavedRelaysOnce()
             // Upstream: the paired phone's keep-awake assertion and key
             // expiry start with the app (`W-identity-mobile`).
             _ = MobilePairingService.shared
@@ -286,6 +288,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
                     NSLog(
                         "[Osaurus Intel] HTTP server started on \(serverConfig.host):\(config.port)")
                     IntelNetworkExposure.syncBonjour(for: config)
+                    // Upstream: the relay tunnels of agents with Reach From
+                    // Anywhere on come up with the server.
+                    RelayTunnelManager.shared.reconnectIfNeeded(port: config.port)
                     break
                 } catch where AppDelegate.isAddressInUse(error) && attempt < AppDelegate.serverBindAttempts {
                     NSLog("[Osaurus Intel] Port \(config.port) busy, retrying (\(attempt)/\(AppDelegate.serverBindAttempts))")
@@ -565,6 +570,7 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             KnowledgeFolderWatcher.shared.stop()
             await ClaudeCodeProcessRegistry.shared.terminateAll()
             // Quit: bounded 1 s drain, as upstream (the default waits 8 s).
+            RelayTunnelManager.shared.disconnectAll()
             await server.stop(gracefully: false)
             SharedConfigurationService.shared.remove()
             sender.reply(toApplicationShouldTerminate: true)
@@ -877,11 +883,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
     @MainActor
     func applyServerConfiguration(_ config: ServerConfiguration) async {
         ServerConfigurationStore.save(config)
+        RelayTunnelManager.shared.disconnectAll()
         await server.stop()
         let serverConfig = IntelNetworkExposure.serverConfig(for: config)
         do {
             try await server.start(serverConfig, serverConfiguration: config)
             NSLog("[Osaurus Intel] HTTP server restarted on \(serverConfig.host):\(config.port)")
+            RelayTunnelManager.shared.reconnectIfNeeded(port: config.port)
         } catch {
             NSLog("[Osaurus Intel] Server restart failed: \(error)")
         }

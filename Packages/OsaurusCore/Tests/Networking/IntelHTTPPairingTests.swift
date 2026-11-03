@@ -86,7 +86,7 @@ struct IntelHTTPPairingTests {
         let plaintext = try PairingSPAKE2.open(sealed, key: keys.sessionKey, deviceId: "phone-1")
         let payload = try JSONDecoder().decode(MobilePairPayload.self, from: plaintext)
         #expect(payload.apiKey == "osk-v1.test.secret")
-        // No relay URLs on Intel until the relay is real (stage 4).
+        // No relay URLs: Reach From Anywhere starts off on Intel (stage 4).
         #expect(payload.agents.allSatisfy { $0.relayURL == nil })
 
         #expect(service.pairedDevice?.deviceId == "phone-1")

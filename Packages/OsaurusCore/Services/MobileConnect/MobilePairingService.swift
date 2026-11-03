@@ -308,9 +308,7 @@ final class MobilePairingService: ObservableObject {
     }
 
     private func makePayload(_ pending: (fullKey: String, info: AccessKeyInfo)) -> MobilePairPayload {
-        // Intel: no relay URLs until the relay is real (stage 4).
-        let agents = Self.remoteAgents(
-            includeRelay: RelayTunnelManager.isAvailableOnIntel && Self.isReachAnywhereEnabled(in: defaults))
+        let agents = Self.remoteAgents(includeRelay: Self.isReachAnywhereEnabled(in: defaults))
         return MobilePairPayload(
             apiKey: pending.fullKey,
             keyExpiresAt: pending.info.expiresAt.map { Int($0.timeIntervalSince1970) },
@@ -559,8 +557,10 @@ final class MobilePairingService: ObservableObject {
 // MARK: - Reach From Anywhere (relay)
 
 extension MobilePairingService {
+    /// Intel: absent means off (upstream: on). Nothing connects to the
+    /// relay until the user turns Reach From Anywhere on (Renée, 2026-11-03).
     static func isReachAnywhereEnabled(in defaults: UserDefaults = .standard) -> Bool {
-        defaults.object(forKey: reachAnywhereDefaultsKey) as? Bool ?? true
+        defaults.object(forKey: reachAnywhereDefaultsKey) as? Bool ?? false
     }
 
     /// Agent ids whose tunnel this service enabled (see `relayManagedAgentsKey`).

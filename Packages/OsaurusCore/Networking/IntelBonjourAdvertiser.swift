@@ -33,6 +33,15 @@ public final class BonjourAdvertiser: NSObject {
         return result
     }
 
+    /// `Name@<agent UUID>`, the name cut to fit the 63-byte DNS-SD limit
+    /// whole characters at a time, so the UUID browsers key on survives
+    /// (upstream). A longer name failed to publish.
+    static func instanceName(for agent: Agent) -> String {
+        let suffix = "@\(agent.id.uuidString)"
+        let budget = maxInstanceNameBytes - suffix.utf8.count
+        return truncateUTF8(agent.name, maxBytes: max(0, budget)) + suffix
+    }
+
     private var services: [UUID: NetService] = [:]
     private var currentPort: Int = 0
     private var isAdvertising = false
@@ -73,7 +82,7 @@ public final class BonjourAdvertiser: NSObject {
         }
 
         for agent in agents where agent.bonjourEnabled {
-            let expectedName = "\(agent.name)@\(agent.id.uuidString)"
+            let expectedName = Self.instanceName(for: agent)
             if services[agent.id]?.name != expectedName {
                 services[agent.id]?.stop()
                 publish(agent: agent)
@@ -85,7 +94,7 @@ public final class BonjourAdvertiser: NSObject {
         let service = NetService(
             domain: "",
             type: Self.serviceType,
-            name: "\(agent.name)@\(agent.id.uuidString)",
+            name: Self.instanceName(for: agent),
             port: Int32(currentPort)
         )
         var fields: [String: Data] = [

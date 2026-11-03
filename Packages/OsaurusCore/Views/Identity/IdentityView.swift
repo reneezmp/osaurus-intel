@@ -1149,8 +1149,12 @@ private struct AgentAddressesSection: View {
     private func rotateKey(for agent: Agent) {
         errorMessage = nil
         do {
+            let previousAddress = agent.agentAddress
             try agentManager.rotateAddress(of: agent)
             restartServerIfRunning()
+            // The relay pins the OLD address; move it or the agent goes dark
+            // away from home (upstream; `W-identity-mobile` stage 4).
+            RelayTunnelManager.shared.handleAddressRotated(agentId: agent.id, previousAddress: previousAddress)
             onChange()
         } catch {
             errorMessage = error.localizedDescription

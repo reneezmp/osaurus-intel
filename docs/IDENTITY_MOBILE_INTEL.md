@@ -33,9 +33,9 @@ phone and use the feature from it, not only protocol tests.
     copy (`OsaurusKeychainGroup`, about 200 lines of `MasterKey`). The
     phone pins whatever address an agent has, so v1 addresses work for
     pairing.
-- **Relay:** `RelayTunnelManager` is an Intel stub
-  (`IntelAgentConformers.swift`). The Server tab's Relays section shows
-  switches that do nothing.
+- **Relay:** `RelayTunnelManager` was an Intel stub
+  (`IntelAgentConformers.swift`) and the Server tab's Relays section showed
+  switches that did nothing. Real since stage 4 (2026-11-03).
 - **Upstream files (26, about 6.8k lines, classifier `W-identity-mobile`):**
   - pairing: `PairingSPAKE2`, `PairingKeyEnvelope`,
     `PairingChallengeStore`, `PairingRateLimiter`, `PairingCode`,
@@ -401,4 +401,63 @@ the backlog.
     - The temp root was removed. Nothing was written to `~/.osaurus` or
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Paired iPhone: images from the phone" in the Rosy retest
+      checklist.
+- **Stage 4 (2026-11-03): Reach From Anywhere.**
+  - **Ported from upstream:** `RelayTunnelManager` (upstream's current
+    file replaced the older copy that sat excluded in `Networking/`; the
+    stub and its `AgentRelayStatus` are gone). The Server tab's Relays
+    section, the agent page's relay switch, the share sheet and Settings →
+    Mobile now drive a real tunnel to `wss://agent.osaurus.ai`. The pairing
+    payload and `GET /agents` give relay URLs when the tunnel is on.
+  - **Lifecycle:** Intel's `AppDelegate` runs the server, so it does what
+    upstream's `ServerController` does: the tunnels of enabled agents come
+    up after the server starts or restarts (`reconnectIfNeeded`) and close
+    before it stops or the app quits (`disconnectAll`). Rotating an agent's
+    key moves its tunnel to the new address (`handleAddressRotated`, from
+    the Identity page).
+  - **Intel differences:**
+    - **Reach From Anywhere starts off** (Renée, 2026-11-03; upstream starts
+      it on). Pairing a phone no longer opens the relay by itself; the user
+      turns it on in Settings → Mobile.
+    - **Saved tunnels are turned off once**
+      (`IntelNetworkExposure.resetSavedRelaysOnce`, marker
+      `intel-relay-reset.marker`): switches saved by another build were
+      never in effect while the relay was a stub, so they don't open a
+      tunnel by surprise after updating. Same rule as Expose to Network.
+    - Signs the relay challenge with the v1 agent key
+      (`AgentKey.derive(masterKey:index:)`) until stage 7, like the Secure
+      Channel handshake.
+    - A missing agent identity is assigned in place
+      (`AgentManager.assignAddress`, never prompts on Intel), not in the
+      background.
+  - **Found on the way:** Intel's Bonjour advertiser named services
+    `name@<id>` without upstream's 63-byte DNS-SD limit, so an agent with a
+    long name failed to advertise. It now uses upstream's
+    `instanceName(for:)`.
+  - **Left for `W-plugin-reliability` stage 2:** upstream's plugin tunnel
+    tests (`PluginManagerTunnelDedupTests`,
+    `PluginRelayReconnectRedeliveryTests`) need `PluginManager` helpers
+    Intel lacks; they stay excluded (noted in that backlog row).
+  - **Tests:**
+    - Upstream's `RelayPublicURLProbeTests`, `RelayTunnelStreamingTests`,
+      `RelayTunnelSupersededTests` (minus its workspace `SharedAgentStatus`
+      case) and the whole `PairingHardeningTests` (challenge store, rate
+      limiter, key envelope, multi-agent validator, agent scope, relay
+      stream chunking, Bonjour names), which stage 1 left for later.
+    - Upstream's "Reach From Anywhere defaults on" case now checks Intel's
+      off default.
+    - New `IntelRelayTests`: saved tunnels turned off once, a fresh install
+      only writes the marker, a disabled tunnel never connects.
+    - No test opens a tunnel: tests run with the keychain disabled, so the
+      relay can't read the master key, and they only ever disable tunnels.
+
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,338 tests in 541 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 (macOS 13) build with tests compiles.
+    - Classifiers: `W-identity-mobile` 8 files left, UNASSIGNED 0. Guide
+      check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Paired iPhone: Reach From Anywhere" in the Rosy retest
       checklist.

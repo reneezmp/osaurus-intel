@@ -256,11 +256,13 @@ struct MobileConnectRelayTests {
         )
     }
 
-    @Test func reachFromAnywhereDefaultsOn() {
+    /// Intel: Reach From Anywhere starts off (Renée, 2026-11-03; upstream
+    /// starts it on), so nothing connects to the relay until it is turned on.
+    @Test func reachFromAnywhereDefaultsOffOnIntel() {
         let defaults = UserDefaults(suiteName: "MobileConnectRelayTests.\(UUID().uuidString)")!
-        #expect(MobilePairingService.isReachAnywhereEnabled(in: defaults))
-        defaults.set(false, forKey: MobilePairingService.reachAnywhereDefaultsKey)
         #expect(!MobilePairingService.isReachAnywhereEnabled(in: defaults))
+        defaults.set(true, forKey: MobilePairingService.reachAnywhereDefaultsKey)
+        #expect(MobilePairingService.isReachAnywhereEnabled(in: defaults))
     }
 
     @Test func agentEntryWithoutRelayURLDecodes() throws {

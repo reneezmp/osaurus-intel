@@ -15,6 +15,12 @@
 //  off once (`resetSavedExposureOnce`), so no Mac starts listening on the
 //  network by surprise after updating (Renée's call, 2026-11-02).
 //
+//  The relay (`W-identity-mobile` stage 4) gets the same treatment: Intel's
+//  relay was a stub until 2026-11-03, so per-agent tunnel switches saved by
+//  another build were never in effect. `resetSavedRelaysOnce` turns them off
+//  once, and Reach From Anywhere starts off on Intel (Renée's call,
+//  2026-11-03): nothing connects to the relay until the user turns it on.
+//
 
 import Foundation
 
@@ -42,6 +48,26 @@ enum IntelNetworkExposure {
         }
         OsaurusPaths.ensureExistsSilent(marker.deletingLastPathComponent())
         let note = "network_exposure_reset=1\nchanged=\(changed ? 1 : 0)\n"
+        try? Data(note.utf8).write(to: marker, options: .atomic)
+        return changed
+    }
+
+    static let relayResetMarkerName = "intel-relay-reset.marker"
+
+    /// Turns every saved per-agent relay tunnel off, once per install.
+    /// Returns true when it changed the saved setting.
+    @discardableResult
+    static func resetSavedRelaysOnce(fileManager fm: FileManager = .default) -> Bool {
+        let marker = OsaurusPaths.config().appendingPathComponent(relayResetMarkerName)
+        guard !fm.fileExists(atPath: marker.path) else { return false }
+        let saved = RelayConfigurationStore.load()
+        let changed = !saved.enabledAgentIds.isEmpty
+        if changed {
+            RelayConfigurationStore.save(.default)
+            NSLog("[Osaurus Intel] Relay tunnels were saved on but never in effect; turned off once")
+        }
+        OsaurusPaths.ensureExistsSilent(marker.deletingLastPathComponent())
+        let note = "relay_reset=1\nchanged=\(changed ? 1 : 0)\n"
         try? Data(note.utf8).write(to: marker, options: .atomic)
         return changed
     }
