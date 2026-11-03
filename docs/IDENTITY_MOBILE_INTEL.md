@@ -67,14 +67,23 @@ phone and use the feature from it, not only protocol tests.
      request, encrypt buffered and streamed responses.
    - `requestIsSecureChannel` becomes real, so the stage 4–6 owner routes
      open to the phone.
-3. **Phone runs and chats.**
-   - Detached runs (`osaurus_run_id`, `/runs/{id}/events`, `/runs/{id}/stop`)
-     and detached image jobs (`osaurus_job_id`, `/images/jobs/{id}/events`).
-   - Continuing a Mac chat (`osaurus_session_id`, image exchanges,
-     `PhoneChatHandoff`); voice-call turns (`VoiceCallReplies`).
-   - The phone's model options; binding `hasRemoteReviewer` so approvals
-     reach the phone.
-   - The 2026-10 audit items: #3070, #3106, #3135, #3152, #3207.
+3. **Phone runs and chats.** Split in three (2026-11-03): Intel lacks most
+   of the chat hooks continuing a Mac chat needs (`appendHostedTurns`, the
+   held send, `ChatHistoryWriter.turns`, `InjectedContextSpans`), so runs
+   go first.
+   - **3a, phone runs:** detached runs (`osaurus_run_id`,
+     `/runs/{id}/events`, `/runs/{id}/stop`), voice-call turns
+     (`VoiceCallReplies`, #3106), the phone's model options, #3152.
+     `hasRemoteReviewer` was bound in stage 2; #3207 came with
+     `W-server-api`.
+   - **3b, continuing Mac chats:** `osaurus_session_id` and
+     `osaurus_create_session`, the rest of `RemoteSessionContinuation`
+     (history, append, the phone's own chats, the held send),
+     `PhoneChatHandoff` and its Settings → Mobile switch, #3070, the chat
+     part of #3135.
+   - **3c, phone image jobs:** `osaurus_job_id`,
+     `/images/jobs/{id}/events`, `osaurus_session_id` on image requests
+     (image exchanges written into the chat).
 4. **Reach From Anywhere (§6.1, §11.6).** The real `RelayTunnelManager`
    behind the Relays section and Settings → Mobile.
 5. **Peers and other devices.**
@@ -234,3 +243,54 @@ the backlog.
     - The temp root was removed. Nothing was written to `~/.osaurus` or
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Paired iPhone: Secure Channel" in the Rosy retest checklist.
+- **Stage 3a (2026-11-03): phone runs.**
+  - **Ported from upstream:** `DetachedPhoneRuns` and `VoiceCallReplies`
+    verbatim, with their tests.
+  - **Request fields:** `ChatCompletionRequest` decodes `osaurus_run_id`,
+    `osaurus_voice_call`, `osaurus_session_id` and `osaurus_create_session`
+    in a second container and never encodes them (upstream), so they can't
+    reach a provider. Intel's request was synthesized-`Codable`; it now has
+    a hand-written decoder with the same keys. `osaurus_privacy` waits for
+    `W-privacy-filter`.
+  - **Run route** (`IntelHTTPAgentRun`):
+    - For the paired phone (master key inside the channel), a run named
+      with `osaurus_run_id` is registered in `DetachedPhoneRuns`. The same
+      id while it is live follows the running one.
+    - Its SSE writer records every frame (`SSEResponseWriter.recorder`,
+      now in Intel's writer in `IntelHTTPInference.swift`). The end of the
+      stream finishes the run.
+    - Closing the connection no longer cancels it; `/runs/{id}/stop` does.
+    - `/runs/{id}/events?after=N` replays the frames after N, then follows
+      live; `410 run_gone` past the end or over the 16 MB replay budget.
+    - Voice-call turns get the spoken-reply note on the last user message.
+    - The phone's runs use `ModelOptionsStore` options for the model (the
+      picker's Thinking / Reasoning Effort).
+  - **Intel differences:**
+    - Intel's routes write through `stateRef.contextBox`, which is cleared
+      when the connection closes, and would drop every frame after the
+      phone left. A detached run falls back to the context it started on,
+      as upstream writes to it: the recorder still gets the frames and the
+      writes fail harmlessly. Keepalive pings go to a live connection only.
+    - No `LocalReasoningCapability.resolveForDispatch` before loading the
+      options: Intel has no local reasoning models.
+    - Intel's `runRequestTask` never cancelled on close (the run route did
+      it itself), so upstream's `outlivesConnection` flag isn't needed.
+  - **Fix found on the way:** the stage 2 `/secure/call` error replies sent
+    the CORS headers twice (`sendResponse` already adds them).
+  - **Tests:** upstream's `DetachedPhoneRunsTests` and
+    `VoiceCallRepliesTests`; new `IntelPhoneRunTests` over a real channel:
+    a run survives its connection closing and is replayed, `after` past the
+    end is `410`, Stop ends it (and says `finished` the second time), a
+    voice-call turn carries the note, a loopback script's run id doesn't
+    detach, and the phone's fields are decoded but never encoded.
+
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,269 tests in 528 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 build with tests compiles.
+    - Classifiers: `W-identity-mobile` 10 files left, UNASSIGNED 0. Guide
+      check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Paired iPhone: replies in the background, voice calls" in the
+      Rosy retest checklist.

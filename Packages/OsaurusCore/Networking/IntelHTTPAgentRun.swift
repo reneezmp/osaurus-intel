@@ -12,12 +12,15 @@
 //  `osaurus_agent_tool` trace ("started" / "completed"), the iteration-cap
 //  notice, the `complete` / `clarify` text, then finish, usage and `[DONE]`.
 //
-//  The phone-only parts wait for the Secure Channel (`W-identity-mobile`):
-//  detached runs (`osaurus_run_id`, `/runs/{id}/*`), the host workspace
-//  folder, continuing a Mac chat (`osaurus_session_id`), voice-call turns,
-//  the phone's model options and privacy choice. Every remote caller needs
-//  that channel to reach `/run` at all, so until then a run comes from this
-//  Mac: the owner, over loopback.
+//  The owner's paired phone (`W-identity-mobile` stage 3,
+//  docs/IDENTITY_MOBILE_INTEL.md) gets upstream's phone parts:
+//  - a run it names with `osaurus_run_id` outlives the connection, and the
+//    phone rejoins it (`/runs/{id}/events`) or stops it (`/runs/{id}/stop`);
+//  - a voice-call turn (`osaurus_voice_call`) asks for a short spoken answer;
+//  - its runs use the model options it set through the picker.
+//  Still to come: continuing a Mac chat (`osaurus_session_id`, stage 3b),
+//  the host workspace folder, and the call's privacy choice
+//  (`W-privacy-filter`).
 //
 
 import Foundation
@@ -29,7 +32,7 @@ extension HTTPHandler {
     /// upstream's routing order.
     func routeRunRequest(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) -> Bool {
         if head.method == .GET, path.hasPrefix("/runs/"), path.hasSuffix("/events") {
-            serveRunEvents(context: context, path: path)
+            serveRunEvents(context: context, head: head, path: path)
         } else if head.method == .POST, path.hasPrefix("/runs/"), path.hasSuffix("/stop") {
             serveRunStop(context: context, head: head, path: path)
         } else if head.method == .POST, path.hasPrefix("/agents/"), path.hasSuffix("/run") {
@@ -150,26 +153,108 @@ extension HTTPHandler {
 
     // MARK: - GET /runs/{id}/events, POST /runs/{id}/stop
 
-    /// Rejoin a phone run (upstream §6.4). Owner-only. Intel has no detached
-    /// runs until the phone's Secure Channel (`W-identity-mobile`), so every
-    /// id is unknown.
-    private func serveRunEvents(context: ChannelHandlerContext, path: String) {
+    /// `GET /runs/{id}/events?after=N`: rejoin a phone run (upstream §6.4),
+    /// the frames after the first N, then the rest live. Owner-only.
+    private func serveRunEvents(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) {
         guard callerOwnsThisMac(context) else {
             sendOwnerOnlyForbidden(context: context)
             return
         }
-        sendResponse(context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"run_not_found"}"#)
+        let components = path.split(separator: "/")
+        guard components.count == 3, components[2] == "events",
+            let run = DetachedPhoneRuns.shared.run(id: String(components[1]))
+        else {
+            sendResponse(
+                context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"run_not_found"}"#)
+            return
+        }
+        let after = Self.queryItems(from: head.uri)["after"].flatMap { Int($0) } ?? 0
+        streamDetachedRun(run, after: after, context: context, head: head, path: path)
     }
 
-    /// The phone's Stop for a detached run (upstream). Owner-only, Secure
-    /// Channel for a remote owner; no detached runs on Intel yet.
+    /// `POST /runs/{id}/stop`: the phone's Stop, now that its connection
+    /// closing no longer stops the run (upstream). Owner-only.
     private func serveRunStop(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) {
         guard callerOwnsThisMac(context) else {
             sendOwnerOnlyForbidden(context: context)
             return
         }
         if requiresOwnerChannel(head: head, context: context) { return }
-        sendResponse(context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"run_not_found"}"#)
+        let components = path.split(separator: "/")
+        guard components.count == 3, components[2] == "stop",
+            let run = DetachedPhoneRuns.shared.run(id: String(components[1]))
+        else {
+            sendResponse(
+                context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"run_not_found"}"#)
+            return
+        }
+        let wasRunning = run.stop()
+        MobileConnectLog.hostedRun("run \(run.id) stop from the phone (was running=\(wasRunning))")
+        sendResponse(
+            context: context, status: .ok, headers: jsonHeaders(),
+            body: wasRunning ? #"{"ok":true}"# : #"{"ok":true,"finished":true}"#)
+    }
+
+    /// Streams a phone run's frames after the first `after`, then follows it
+    /// live to its end (upstream). The run carries on if this connection
+    /// drops too.
+    func streamDetachedRun(
+        _ run: DetachedPhoneRun,
+        after: Int,
+        context: ChannelHandlerContext,
+        head: HTTPRequestHead,
+        path: String
+    ) {
+        let loop = context.eventLoop
+        let channel = context.channel
+        let ctx = NIOLoopBound(context, eventLoop: loop)
+        let writer = SSEResponseWriter()
+        // Deliveries can arrive on the run's own loop; each hops here, in order.
+        let follower = DetachedPhoneRun.Follower(
+            frames: { frames in
+                loop.execute {
+                    guard channel.isActive else { return }
+                    var buffer = channel.allocator.buffer(capacity: frames.reduce(0) { $0 + $1.utf8.count })
+                    for frame in frames { buffer.writeString(frame) }
+                    SSEResponseWriter.writeBackpressureAware(.body(.byteBuffer(buffer)), context: ctx.value)
+                }
+            },
+            end: {
+                loop.execute {
+                    guard channel.isActive else { return }
+                    writer.writeEnd(ctx.value)
+                }
+            }
+        )
+        // Nothing is delivered for `.gone`, and anything delivered now is
+        // queued behind this call, so the head below still goes out first.
+        guard case .following(let token) = run.follow(after: after, follower) else {
+            sendResponse(
+                context: context, status: .gone, headers: jsonHeaders(),
+                body: #"{"error":"run_gone","message":"This run can no longer be replayed."}"#)
+            return
+        }
+        MobileConnectLog.hostedRun("run \(run.id) followed from frame \(after) of \(run.frameCount)")
+        stateRef.value.routeLogsItself = true
+        stateRef.value.isStreaming = true
+        writer.writeHeaders(context, extraHeaders: stateRef.value.corsHeaders)
+        let keepalive = Task {
+            while !Task.isCancelled {
+                try? await Task.sleep(nanoseconds: 15_000_000_000)
+                if Task.isCancelled { break }
+                loop.execute {
+                    guard channel.isActive else { return }
+                    writer.writePing(ctx.value)
+                }
+            }
+        }
+        channel.closeFuture.whenComplete { _ in
+            keepalive.cancel()
+            run.unfollow(token)
+        }
+        logRequest(
+            method: head.method.rawValue, path: path, userAgent: head.headers.first(name: "User-Agent"),
+            requestBody: nil, responseStatus: 200, startTime: stateRef.value.requestStartedAt ?? Date())
     }
 
     // MARK: - POST /agents/{id}/run
@@ -230,6 +315,28 @@ extension HTTPHandler {
         // loopback script is still owner but has no one polling for cards,
         // so it keeps failing closed.
         let remoteReviewer = stateRef.value.authedScopeIsMaster && requestIsSecureChannel
+
+        // The owner's phone names its run so the reply outlives the
+        // connection (upstream §6.4). The same id while that run is live is
+        // the phone sending the request again on its other route, having
+        // heard nothing back: it follows the running one rather than start a
+        // second.
+        let detachedRun: DetachedPhoneRun?
+        if remoteReviewer, let runId = req.osaurus_run_id, DetachedPhoneRuns.isValidId(runId) {
+            let (run, isNew) = DetachedPhoneRuns.shared.begin(id: runId)
+            guard isNew else {
+                MobileConnectLog.hostedRun("run \(runId) sent again while live; following it")
+                streamDetachedRun(run, after: 0, context: context, head: head, path: path)
+                return
+            }
+            detachedRun = run
+        } else {
+            detachedRun = nil
+        }
+        // A turn of the owner's phone call: ask for a short, spoken reply,
+        // after the conversation so the prompt keeps its cache (§6.5).
+        let voiceCall = includeToolDetail && req.osaurus_voice_call == true
+
         let startTime = stateRef.value.requestStartedAt ?? Date()
         let userAgent = head.headers.first(name: "User-Agent")
         let includeUsage = req.stream_options?.include_usage == true
@@ -241,8 +348,21 @@ extension HTTPHandler {
         let stateRef = self.stateRef
         let engine = makeInferenceEngine()
         let writer = SSEResponseWriter()
+        writer.recorder = detachedRun
         writer.writeHeaders(context, extraHeaders: stateRef.value.corsHeaders)
+        // A detached run keeps writing once the phone is gone (upstream): its
+        // frames still reach the recorder, and the writes themselves fail
+        // harmlessly on the closed channel.
+        let runContext: NIOLoopBound<ChannelHandlerContext>? =
+            detachedRun == nil ? nil : NIOLoopBound(context, eventLoop: eventLoop)
         let onLoop: @Sendable (@escaping @Sendable (ChannelHandlerContext) -> Void) -> Void = { body in
+            eventLoop.execute {
+                guard let ctx = stateRef.value.contextBox ?? runContext?.value else { return }
+                body(ctx)
+            }
+        }
+        // Keepalive pings go to a live connection only.
+        let onLiveLoop: @Sendable (@escaping @Sendable (ChannelHandlerContext) -> Void) -> Void = { body in
             eventLoop.execute {
                 guard let ctx = stateRef.value.contextBox else { return }
                 body(ctx)
@@ -258,13 +378,15 @@ extension HTTPHandler {
         }
 
         let task = runRequestTask {
+            // However the run ends, a phone following it hears the end.
+            defer { detachedRun?.finish() }
             // SSE keepalive (upstream): a run can sit silent through long
             // tool calls.
             let keepalive = Task {
                 while !Task.isCancelled {
                     try? await Task.sleep(nanoseconds: 15_000_000_000)
                     if Task.isCancelled { break }
-                    onLoop { writer.writePing($0) }
+                    onLiveLoop { writer.writePing($0) }
                 }
             }
             defer { keepalive.cancel() }
@@ -298,6 +420,8 @@ extension HTTPHandler {
             }
             let enriched = await Self.enrichWithAgentContext(
                 req, agentId: agentId, executionMode: executionMode, modelOverride: model)
+            var messages = enriched.messages
+            if voiceCall { VoiceCallReplies.addNote(to: &messages) }
             let (temperature, maxTokens) = await MainActor.run {
                 Self.resolveAgentSampling(request: req, agentId: agentId)
             }
@@ -308,7 +432,7 @@ extension HTTPHandler {
             let sessionKey = req.session_id ?? requestId
             var engineRequest = ChatCompletionRequest(
                 model: model,
-                messages: enriched.messages,
+                messages: messages,
                 temperature: temperature.map(Double.init),
                 max_tokens: maxTokens,
                 stream: true,
@@ -325,6 +449,13 @@ extension HTTPHandler {
             engineRequest.reportsUsage = true
             engineRequest.reportsToolStarts = true
             engineRequest.maxToolRounds = maxIterations
+            // The owner's paired phone sets Thinking and Reasoning Effort
+            // through the same per-model store as the Mac composer's picker
+            // (upstream §12.3), so its runs carry those choices as the Mac's
+            // own chat does. Other callers keep the no-GUI-preferences rule.
+            if remoteReviewer {
+                engineRequest.modelOptions = await MainActor.run { ModelOptionsStore.shared.loadOptions(for: model) }
+            }
 
             onLoop { writer.writeRole("assistant", model: model, responseId: responseId, created: created, context: $0) }
 
@@ -446,8 +577,13 @@ extension HTTPHandler {
                 log(model: model, response: loggedResponseText, toolCalls: loggedToolCalls, error: error.localizedDescription)
             }
         }
-        // Closing the connection stops the run (upstream, for runs that are
-        // not detached).
-        context.channel.closeFuture.whenComplete { _ in task.cancel() }
+        if let detachedRun {
+            // Stopped from the phone (§6.4): as if the client had hung up.
+            detachedRun.onStop { task.cancel() }
+        } else {
+            // Closing the connection stops the run (upstream, for runs that
+            // are not detached).
+            context.channel.closeFuture.whenComplete { _ in task.cancel() }
+        }
     }
 }

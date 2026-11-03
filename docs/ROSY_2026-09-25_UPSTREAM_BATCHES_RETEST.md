@@ -2564,3 +2564,29 @@ reply streams.
 - [ ] Unpair on the Mac: the app's next request fails (it asks to pair
       again).
 
+
+## Paired iPhone: replies in the background, voice calls (2026-11-03)
+
+`W-identity-mobile` stage 3a (`IDENTITY_MOBILE_INTEL.md`). Same phone and
+Wi-Fi; pair first. Continuing a Mac chat on the phone is not in this build
+(stage 3b).
+
+- [ ] Background: ask an agent something with a long answer (for example
+      "write a 600-word story"). Once it starts streaming, switch to
+      another app on the phone for about 30 seconds, then come back. The
+      reply has carried on: the text written while you were away is there,
+      and the rest keeps streaming.
+- [ ] Locked phone: same, but lock the phone instead for about a minute.
+      Unlocking shows the finished (or still-streaming) reply, not an
+      error or an empty bubble.
+- [ ] Stop: start another long reply and tap Stop on the phone. It stops
+      within a second or two, and Insights shows a `/runs/…/stop` request.
+- [ ] Voice call: start a voice call with an agent in the app and ask a
+      question ("what's a good name for a cat?"). The spoken answer is one
+      to three plain sentences: no "bullet point" or "asterisk" read out,
+      no long list.
+- [ ] Thinking: pick a reasoning model for the agent, turn its Thinking
+      off in the app's model picker, and send a message: the reply comes
+      without a thinking section. Turn Thinking back on: the next reply
+      shows its thinking again. The Mac's chat picker shows the same
+      choice for that model.

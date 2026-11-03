@@ -159,6 +159,24 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// `maxToolAttempts` for `/agents/{id}/run`); `nil` keeps the engine's
     /// own. Not encoded.
     var maxToolRounds: Int? = nil
+    /// Osaurus Connect: continue one of the Mac's own chat sessions — its
+    /// turns become the model context and the new turns are appended back
+    /// (upstream MOBILE_PROTOCOL §14.5). Owner callers only.
+    var osaurus_session_id: String? = nil
+    /// Osaurus Connect: `osaurus_session_id` names a chat the phone starts
+    /// with this run; the Mac creates it when it has no such chat (§14.5).
+    /// The owner's paired phone only.
+    var osaurus_create_session: Bool? = nil
+    /// Osaurus Connect: the phone's name for this run. The owner's phone run
+    /// keeps going when its connection drops, and the phone rejoins it by
+    /// this id (§6.4). Owner callers only.
+    var osaurus_run_id: String? = nil
+    /// Osaurus Connect: this run is a turn of a voice call on the phone. The
+    /// reply is spoken, so the run asks the model for a short, plain answer,
+    /// placed after the conversation and never saved with it (§6.5).
+    var osaurus_voice_call: Bool? = nil
+    // Upstream's `osaurus_privacy` (a call's Privacy Filter choice) comes
+    // with `W-privacy-filter`.
 
     private enum CodingKeys: String, CodingKey {
         case model, messages, stream, temperature, max_tokens, top_p
@@ -166,7 +184,37 @@ struct ChatCompletionRequest: Codable, Sendable {
         case tools, tool_choice, session_id
     }
 
+    /// Decoded only (upstream): the phone's fields never reach a provider.
+    private enum OsaurusCodingKeys: String, CodingKey {
+        case osaurus_session_id, osaurus_create_session, osaurus_run_id, osaurus_voice_call
+    }
+
     var ttftTrace: TTFTTrace? = nil
+}
+
+extension ChatCompletionRequest {
+    init(from decoder: Decoder) throws {
+        let container = try decoder.container(keyedBy: CodingKeys.self)
+        model = try container.decodeIfPresent(String.self, forKey: .model)
+        messages = try container.decode([ChatMessage].self, forKey: .messages)
+        stream = try container.decodeIfPresent(Bool.self, forKey: .stream)
+        temperature = try container.decodeIfPresent(Double.self, forKey: .temperature)
+        max_tokens = try container.decodeIfPresent(Int.self, forKey: .max_tokens)
+        top_p = try container.decodeIfPresent(Double.self, forKey: .top_p)
+        stream_options = try container.decodeIfPresent(StreamOptions.self, forKey: .stream_options)
+        frequency_penalty = try container.decodeIfPresent(Double.self, forKey: .frequency_penalty)
+        presence_penalty = try container.decodeIfPresent(Double.self, forKey: .presence_penalty)
+        stop = try container.decodeIfPresent([String].self, forKey: .stop)
+        n = try container.decodeIfPresent(Int.self, forKey: .n)
+        tools = try container.decodeIfPresent([Tool].self, forKey: .tools)
+        tool_choice = try container.decodeIfPresent(ToolChoiceOption.self, forKey: .tool_choice)
+        session_id = try container.decodeIfPresent(String.self, forKey: .session_id)
+        let osaurus = try decoder.container(keyedBy: OsaurusCodingKeys.self)
+        osaurus_session_id = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_session_id)
+        osaurus_create_session = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_create_session)
+        osaurus_run_id = try osaurus.decodeIfPresent(String.self, forKey: .osaurus_run_id)
+        osaurus_voice_call = try osaurus.decodeIfPresent(Bool.self, forKey: .osaurus_voice_call)
+    }
 }
 
 struct StreamOptions: Codable, Sendable {

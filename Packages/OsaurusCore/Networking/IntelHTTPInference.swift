@@ -14,8 +14,9 @@
 //
 //  `SSEResponseWriter` is upstream's OpenAI Chat Completions stream writer
 //  (`Models/Chat/ResponseWriters.swift`, excluded on Intel), with the agent
-//  tool trace (stage 4c), minus the phone-run recorder, Router billing relay
-//  and artifacts chunk, which arrive with their routes.
+//  tool trace (stage 4c) and the phone-run recorder (`W-identity-mobile`
+//  stage 3), minus the Router billing relay and artifacts chunk, which
+//  arrive with their routes.
 //
 
 import Foundation
@@ -174,8 +175,14 @@ enum IntelHTTPInference {
 
 // MARK: - OpenAI SSE writer (upstream)
 
-/// Stateless, so it may be used from a request's task and the event loop.
+/// Stateless apart from `recorder`, which is set before the first write, so
+/// it may be used from a request's task and the event loop.
 final class SSEResponseWriter: @unchecked Sendable {
+    /// Set on a phone run that outlives its connection: every data frame is
+    /// kept for the phone to replay when it comes back (upstream
+    /// MOBILE_PROTOCOL §6.4), and the end of the stream ends the run.
+    var recorder: DetachedPhoneRun?
+
     private struct AgentToolTraceChunk: Encodable {
         struct Trace: Encodable {
             var phase: String
@@ -447,6 +454,7 @@ final class SSEResponseWriter: @unchecked Sendable {
             buffer.writeString(type)
             buffer.writeString("\"}}\n\n")
         }
+        recorder?.record(String(buffer: buffer))
         context.write(NIOAny(HTTPServerResponsePart.body(.byteBuffer(buffer))), promise: nil)
         context.flush()
     }
@@ -472,6 +480,7 @@ final class SSEResponseWriter: @unchecked Sendable {
     }
 
     func writeEnd(_ context: ChannelHandlerContext) {
+        recorder?.finish()
         var tail = context.channel.allocator.buffer(capacity: 16)
         tail.writeString("data: [DONE]\n\n")
         context.write(NIOAny(HTTPServerResponsePart.body(.byteBuffer(tail))), promise: nil)
@@ -482,13 +491,18 @@ final class SSEResponseWriter: @unchecked Sendable {
     }
 
     /// One SSE `data:` event holding an already-encoded JSON object (the
-    /// image routes' `ImageStreamEventDTO`). Upstream's, minus the phone's
-    /// detached-run recorder (`W-identity-mobile`).
-    func writeRawJSONData(_ json: String, context: ChannelHandlerContext) {
+    /// image routes' `ImageStreamEventDTO`). `transient`: the recorder keeps
+    /// only the newest such frame (see `DetachedPhoneRun.recordTransient`).
+    func writeRawJSONData(_ json: String, context: ChannelHandlerContext, transient: Bool = false) {
         var buffer = context.channel.allocator.buffer(capacity: json.utf8.count + 8)
         buffer.writeString("data: ")
         buffer.writeString(json)
         buffer.writeString("\n\n")
+        if transient {
+            recorder?.recordTransient(String(buffer: buffer))
+        } else {
+            recorder?.record(String(buffer: buffer))
+        }
         context.write(NIOAny(HTTPServerResponsePart.body(.byteBuffer(buffer))), promise: nil)
         context.flush()
     }
@@ -508,6 +522,7 @@ final class SSEResponseWriter: @unchecked Sendable {
         do {
             try encoder.encodeAndWrite(chunk, into: &buffer)
             buffer.writeString("\n\n")
+            recorder?.record(String(buffer: buffer))
             Self.writeBackpressureAware(HTTPServerResponsePart.body(.byteBuffer(buffer)), context: context)
         } catch {
             print("Error encoding SSE chunk: \(error)")

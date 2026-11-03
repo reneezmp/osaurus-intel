@@ -4553,6 +4553,14 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   encryptor in the server pipeline). Owner routes open to the paired phone;
   sealed bodies stay out of Insights. The handshake signs with the v1
   `agentIndex` key until stage 7.
+- **Stage 3a (2026-11-03):** phone runs (upstream `DetachedPhoneRuns`,
+  `VoiceCallReplies`): a run named with `osaurus_run_id` outlives its
+  connection and is rejoined (`/runs/{id}/events`) or stopped
+  (`/runs/{id}/stop`); voice-call turns ask for a short spoken answer; the
+  phone's runs use its picker's model options. The phone's request fields
+  are decoded, never encoded. Stage 3 is split in three (3a runs, 3b
+  continuing Mac chats, 3c image jobs) because Intel lacks most of the chat
+  hooks 3b needs.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

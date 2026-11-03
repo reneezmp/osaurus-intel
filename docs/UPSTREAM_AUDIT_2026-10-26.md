@@ -48,7 +48,7 @@ overflow) were each first guessed wrong and corrected by reading Intel's code.
 | 24 | `382011839` #3095 | Incompatible | Local image workflow parameters (`ImageGenerationService`, MLX). |
 | 25 | `972cc657e` #3096 | Incompatible | SeedVR2 local upscaling and job cancellation (MLX). |
 | 26 | `3425dcf55` #3098 | Incompatible | Native (local) image batches in the API, tools and galleries. |
-| 27 | `5e905991b` #3106 | **Needs work (`W-identity-mobile`)** | Short spoken replies on a paired phone's voice-call turns. |
+| 27 | `5e905991b` #3106 | **Needs work (`W-identity-mobile`)**; **done 2026-11-03** (stage 3a) | Short spoken replies on a paired phone's voice-call turns. `VoiceCallReplies` verbatim; removing the note before a chat is saved lands with stage 3b (continuing Mac chats). |
 | 28 | `5f66b028a` #3116 | Covered | Intel's `saveAgent` already passes `workingFolderBookmark` / `workingFolderPath` through from the stored agent, so saving the editor never cleared the folder. |
 | 29 | `fc7ef8184` #3115 | **Port** | Gemini reasoning-effort control (`GeminiReasoningContract`, picker item). Intel ships native Gemini presets on its own provider service; adapt the request mapping there. |
 | 30 | `a5cded095` #3113 | **Deferred (`W-channels`)** | Slack: messages posted through apps by allowlisted senders. |
@@ -72,7 +72,7 @@ overflow) were each first guessed wrong and corrected by reading Intel's code.
 | 48 | `2a6eaf5bd` #3147 | Incompatible | vMLX pin. |
 | 49 | `055f071ec` #3149 | Incompatible | Native image composer paste/regeneration (local image models). |
 | 50 | `4f8ba2103` #3151 | Covered | `ChatTurn.contentRevision` for `BlockMemoizer`; Intel has neither (its own turn and no memoizer keyed on content length). |
-| 51 | `0d8ef8a2b` #3152 | **Needs work (`W-identity-mobile`)** | Paired-phone features tied to the phone's access key. |
+| 51 | `0d8ef8a2b` #3152 | **Needs work (`W-identity-mobile`)**; **done 2026-11-03** (stage 3a) | Paired-phone features tied to the phone's access key. Intel's run already required the master key inside the channel (stage 2); stage 3a ties run ids and model options to it too. The Privacy Filter logging and its test wait for `W-privacy-filter`. |
 | 52 | `a48f4dd00` #3150 | Incompatible | Adaptive drafter loading (MTP settings). |
 | 53 | `fdfa925ca` #3154 | Incompatible | SSD cache quotas (local KV cache). |
 | 54 | `7ccdcf08b` #3155 | Incompatible | vMLX pin. |
@@ -120,7 +120,7 @@ overflow) were each first guessed wrong and corrected by reading Intel's code.
 | 96 | `af61ba0ac` #3194 | Incompatible | vMLX pin. |
 | 97 | `2a657f9b3` #3200 | **Port** | A restored chat keeps its model when provider models arrive later. Intel's `refreshPickerItems` prefers the agent's model over the restored one, so the bug exists here; adapt the `restoredWindowModelSelection` intent. |
 | 98 | `c1fce01f7` #3202 | Covered | Initial `ChatHistoryDatabase` open failures surfaced to storage recovery; Intel's chat history is its own JSON store. |
-| 99 | `7664572c8` #3207 | **Needs work (`W-identity-mobile`)** | iPhone images for remote provider models. |
+| 99 | `7664572c8` #3207 | **Needs work (`W-identity-mobile`)**; **done** (with `W-server-api`, found 2026-11-03) | iPhone images for remote provider models. `IntelHTTPAgents` and `IntelHTTPModelPicker` already report vision through upstream's `modelSupportsImages` gate. |
 | 100 | `06b89a1da` #3208 | **Deferred (`W-channels`)** | Queued channel messages kept when the post-turn drain is denied. |
 | 101 | `f0a400095` #3193 | **Port** | Long MCP calls report progress past 120 s and poll without loop nudges (Intel has upstream's MCP provider tools since #2990). |
 | 102 | `fc75a1e06` #3203 | **Split:** Covered + Port (slices) | The typed Responses engine, HTTP protocol adapters, plugin inference and evals are upstream's `ChatEngine` stack (`COV-intel-own`: Intel's `CloudChatEngine`). Port slices on Intel files: `GroundedFileSideEffectCheck` (no false file-write retries after read-only answers, with tests), `ChatToolChoicePolicy`, `StreamingDeltaProcessor`, `RemoteImagePayloadPolicy`, `WireTransportProbe`, running tool cards refreshing (`NativeToolCallGroupView` / `NativeBlockViews`), Anthropic terminal usage. |

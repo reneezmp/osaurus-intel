@@ -142,9 +142,8 @@ extension HTTPHandler {
         func reject(status: HTTPResponseStatus, code: String, message: String) {
             let body = #"{"error":{"code":"\#(code)","message":"\#(message)","type":"secure_channel_error"}}"#
             stateRef.value.routeLogsItself = true
-            var headers = jsonHeaders()
-            headers.append(contentsOf: stateRef.value.corsHeaders)
-            sendResponse(context: context, status: status, headers: headers, body: body)
+            // `sendResponse` adds the request's CORS headers itself.
+            sendResponse(context: context, status: status, headers: jsonHeaders(), body: body)
             logRequest(
                 method: "POST", path: "/secure/call", userAgent: userAgent, requestBody: nil,
                 responseBody: body, responseStatus: Int(status.code), startTime: startTime)
