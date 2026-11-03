@@ -4606,6 +4606,18 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   the group, as upstream ships it). The agent editor now keeps the scope on
   save.
 
+### Rosy candidate 1.0.62 (build 66) — 2026-11-03
+
+Built from `5a5789a05` with `scripts/build/build_rosy.sh` (Debug, thin
+x86_64, macOS 13.0 minimum, SDK 27.2): everything since 1.0.61, that is
+`W-server-api` stages 6–8 and `W-identity-mobile` 1–7. Archive
+`build/rosy-deploy/Osaurus-Intel-RC-1.0.62-66-2026-11-03.zip` in the main
+checkout (87,475,678 bytes, SHA-256 `681db193…64e1`); ZIP valid, six framework
+symlinks kept after unpacking, strict codesign, canonical `~/.osaurus`,
+Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
+26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
+candidate 1.0.62 (build 66)" in the Rosy retest checklist.
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

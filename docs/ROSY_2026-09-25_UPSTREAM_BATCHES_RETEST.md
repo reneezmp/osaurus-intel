@@ -2721,3 +2721,51 @@ their addresses; new and rotated ones get an address tied to this Mac.
       access key stops working (`401`), no drift banner.
 - [ ] Export that agent as a bundle and import it on the M4: the import
       review says the address was created on another device and keeps it.
+
+## Release candidate 1.0.62 (build 66) — smoke pass and new sections (2026-11-03)
+
+Candidate for public release 1.0.62. It carries everything since 1.0.61:
+`W-server-api` stages 6–8 (images and video over the API, admin routes,
+Expose to Network, Use with Codex CLI) and all of `W-identity-mobile` (the
+paired iPhone, stages 1–7).
+
+- Candidate: `1.0.62` build `66` (Debug, thin x86_64, macOS 13.0 minimum,
+  SDK 27.2), from `5a5789a05`.
+- Archive: `build/rosy-deploy/Osaurus-Intel-RC-1.0.62-66-2026-11-03.zip`
+  in the main checkout (87,475,678 bytes), SHA-256
+  `681db193e65e97eb4a295937c5bd51a94836566671621264382d8487614e64e1`.
+- Checked on the build Mac: ZIP valid, six framework symlinks kept, strict
+  codesign passes (stable Intel certificate), canonical `~/.osaurus`,
+  Sparkle key `bYYJJqFx…`. **Not launched there** (macOS 27.2 beta, see
+  `TEST_STORAGE_SAFETY.md`, "2026-10-30 gate crash"). Rosy is the first
+  launch.
+- Rosy's build number becomes `66`; the public release must use `67` or
+  higher.
+
+**On first launch, once:** a saved "Expose to Network" is turned off, and
+every saved per-agent relay tunnel is turned off. Turn them on again if you
+want them. Reach From Anywhere starts off.
+
+Smoke pass first (what would hurt most if a release broke it):
+
+- [ ] **Launch:** opens without a crash; Settings › Storage shows no warning.
+- [ ] **Chat:** a Router model and another provider both answer.
+- [ ] **Identity:** Settings › Identity shows the same master and agent
+      addresses as before, no drift banner, and the Osaurus ID card on top.
+- [ ] **Local API:** `curl -s http://127.0.0.1:1337/health` answers.
+- [ ] **Quit and relaunch:** tabs and the open chat come back.
+
+Then the sections added since 1.0.61, in this order (the iPhone ones need
+the phone on the same Wi-Fi):
+
+1. "Local API server: access-key gate": the **Images and video** (stage 6),
+   **Admin** (stage 7) and **Use with Codex CLI** (stage 8) items.
+2. "Paired iPhone: pairing".
+3. "Paired iPhone: Secure Channel".
+4. "Paired iPhone: replies in the background, voice calls".
+5. "Paired iPhone: continuing Mac chats".
+6. "Paired iPhone: images from the phone" (spends a few credits).
+7. "Paired iPhone: Reach From Anywhere" (connects Rosy to the relay).
+8. "Owner redeem on `/pair-invite`" (expected to refuse on Ventura).
+9. "Osaurus ID" (skip the claim unless you want to keep the handle).
+10. "Agent keys: device-scoped addresses".
