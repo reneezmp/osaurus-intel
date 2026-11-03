@@ -11,8 +11,8 @@
 //  before it passed.
 //
 //  Intel (`W-identity-mobile` stage 5): workspaces are deferred, so the
-//  workspace envelope and redeem message are written out here; the agent is
-//  resolved by its v1 `agentIndex`. Owner redeem is macOS 14+ on Intel (HPKE),
+//  workspace envelope and redeem message are written out here. Owner redeem
+//  is macOS 14+ on Intel (HPKE),
 //  so the host suite skips itself on older systems.
 //
 
@@ -540,7 +540,7 @@ struct OwnerDeviceAccessHostTests {
             guard lower == address.lowercased() else { return nil }
             return .init(
                 id: Agent.defaultId,
-                agentIndex: 0,
+                keyPath: .legacy(index: 0),
                 address: address,
                 name: "Default",
                 description: "",

@@ -41,13 +41,14 @@ public actor OsaurusServer: Sendable {
     public struct Config: Sendable {
         public var host: String
         public var port: Int
-        public var agentIndex: UInt32?
+        public var agentKeyPath: AgentKeyPath?
         public var trustLoopback: Bool
-        public init(host: String = "127.0.0.1", port: Int = 1337, agentIndex: UInt32? = nil, trustLoopback: Bool = true)
-        {
+        public init(
+            host: String = "127.0.0.1", port: Int = 1337, agentKeyPath: AgentKeyPath? = nil, trustLoopback: Bool = true
+        ) {
             self.host = host
             self.port = port
-            self.agentIndex = agentIndex
+            self.agentKeyPath = agentKeyPath
             self.trustLoopback = trustLoopback
         }
     }
@@ -77,7 +78,7 @@ public actor OsaurusServer: Sendable {
         let childChannels = self.childChannels
 
         let validatorSnapshot = LazyAPIKeyValidatorSnapshot {
-            Self.buildValidator(agentIndex: config.agentIndex)
+            Self.buildValidator(agentKeyPath: config.agentKeyPath)
         }
         let trustLoopback = config.trustLoopback
 
@@ -162,7 +163,7 @@ public actor OsaurusServer: Sendable {
 
     /// Build a validator from the current identity, whitelist, and revocation state.
     /// Falls back to `.empty` if the account doesn't exist yet.
-    private static func buildValidator(agentIndex: UInt32?) -> APIKeyValidator {
+    private static func buildValidator(agentKeyPath: AgentKeyPath?) -> APIKeyValidator {
         guard MasterKey.exists() else { return .empty }
 
         let context = LAContext()
@@ -178,13 +179,11 @@ public actor OsaurusServer: Sendable {
             // Accept tokens scoped to ANY of the user's agents (upstream), so
             // agent-scoped keys validate. The agent addresses come from the
             // thread-safe `AgentIdentityRegistry` (mirrored from
-            // `AgentManager`). A specific `agentIndex` (single-agent config)
-            // restricts to that agent. Intel keeps the v1 index here;
-            // upstream's device-scoped `AgentKeyPath` comes with
-            // `W-identity-mobile`.
+            // `AgentManager`). A specific `agentKeyPath` (single-agent
+            // config) restricts to that agent.
             var agentAddresses: Set<OsaurusID> = []
-            if let idx = agentIndex {
-                agentAddresses.insert(try AgentKey.deriveAddress(masterKey: masterKeyData, index: idx))
+            if let path = agentKeyPath {
+                agentAddresses.insert(try AgentKey.deriveAddress(masterKey: masterKeyData, path: path))
             } else {
                 agentAddresses.formUnion(AgentIdentityRegistry.shared.currentAddresses())
             }

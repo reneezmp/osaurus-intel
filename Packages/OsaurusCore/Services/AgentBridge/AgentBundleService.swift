@@ -26,9 +26,10 @@
 //     instead of upstream's StorageFormatConverter/StorageEncryptionPolicy.
 //     The live file is only read.
 //   - Agents are loaded and saved through the Intel `AgentManager`.
-//   - Intel agents carry no device scope, so an imported address is kept
-//     unless another local agent already owns that address or index; then
-//     it is cleared (assign a new one in Identity — no surprise auth prompt).
+//   - An imported address is kept unless another local agent already owns
+//     that address or derivation slot (index and device scope, upstream's
+//     rule since `W-identity-mobile` stage 7); then it is cleared (assign a
+//     new one in Identity — no surprise auth prompt).
 //   - Import refuses symlinks and anything that isn't a plain file or
 //     folder in the unpacked bundle: a crafted archive must not be able to
 //     plant a link that later redirects the agent's database writes.
@@ -194,9 +195,16 @@ public actor AgentBundleService {
 
     /// What activation does to the imported agent's cryptographic address.
     public enum IdentityNote: Equatable, Sendable {
-        /// Another local agent already owns this address or index; the
-        /// imported copy arrives without one.
+        /// The address was minted on another device (different device
+        /// scope) and does not collide locally. It is kept as-is: a move.
+        /// If the source device still serves the address, the relay hands
+        /// it to whichever tunnel authenticated last (upstream).
+        case mintedOnAnotherDevice(scope: String)
+        /// Another local agent already owns this address or derivation slot
+        /// (same index and scope); the imported copy arrives without one.
         case collidesWithLocalAgent(name: String)
+        /// Legacy master-global (v1) address with no collision. Kept as-is.
+        case legacyV1
     }
 
     public struct ImportPreview: Sendable {
@@ -218,7 +226,8 @@ public actor AgentBundleService {
     /// record with the agent's own id never counts as a collision.
     static func resolveImportIdentity(
         agent: Agent,
-        localAgents: [Agent]
+        localAgents: [Agent],
+        currentDeviceScope: String? = nil
     ) -> (agent: Agent, note: IdentityNote?) {
         guard !agent.isBuiltIn, agent.agentAddress != nil || agent.agentIndex != nil else {
             return (agent, nil)
@@ -226,15 +235,28 @@ public actor AgentBundleService {
         let addressLower = agent.agentAddress?.lowercased()
         let collision = localAgents.first { existing in
             guard !existing.isBuiltIn, existing.id != agent.id else { return false }
-            if let index = agent.agentIndex, existing.agentIndex == index { return true }
+            if let index = agent.agentIndex, existing.agentIndex == index,
+                existing.agentDeviceScope == agent.agentDeviceScope
+            {
+                return true
+            }
             if let addressLower, existing.agentAddress?.lowercased() == addressLower { return true }
             return false
         }
-        guard let collision else { return (agent, nil) }
-        var cleared = agent
-        cleared.agentIndex = nil
-        cleared.agentAddress = nil
-        return (cleared, .collidesWithLocalAgent(name: collision.name))
+        if let collision {
+            var cleared = agent
+            cleared.agentIndex = nil
+            cleared.agentDeviceScope = nil
+            cleared.agentAddress = nil
+            return (cleared, .collidesWithLocalAgent(name: collision.name))
+        }
+        guard let scope = agent.agentDeviceScope, !scope.isEmpty else {
+            return (agent, .legacyV1)
+        }
+        if let current = currentDeviceScope, !current.isEmpty, current == scope {
+            return (agent, nil)
+        }
+        return (agent, .mintedOnAnotherDevice(scope: scope))
     }
 
     /// Abilities worth surfacing before activating someone else's agent.
@@ -316,7 +338,9 @@ public actor AgentBundleService {
             throw fail(AgentBundleError.manifestInvalid("manifest agentId mismatch"))
         }
         let locals = await MainActor.run { AgentManager.shared.agents }
-        let note = Self.resolveImportIdentity(agent: staged, localAgents: locals).note
+        let note = Self.resolveImportIdentity(
+            agent: staged, localAgents: locals, currentDeviceScope: try? DeviceKey.currentDeviceId()
+        ).note
         let replaces = locals.first { $0.id == staged.id && !$0.isBuiltIn }?.name
 
         return ImportPreview(
@@ -345,7 +369,9 @@ public actor AgentBundleService {
             throw AgentBundleError.manifestInvalid("manifest agentId mismatch")
         }
         let locals = await MainActor.run { AgentManager.shared.agents }
-        let agent = Self.resolveImportIdentity(agent: bundled, localAgents: locals).agent
+        let agent = Self.resolveImportIdentity(
+            agent: bundled, localAgents: locals, currentDeviceScope: try? DeviceKey.currentDeviceId()
+        ).agent
 
         let fm = FileManager.default
         let stagedDB = staging.appendingPathComponent("db.sqlite").path

@@ -19,8 +19,7 @@
 //  limiter, redaction, and HPKE sealing contract.
 //
 //  Intel (`W-identity-mobile` stage 5, docs/IDENTITY_MOBILE_INTEL.md):
-//  upstream's host with three changes. Keys are minted for the agent's v1
-//  `agentIndex` (upstream's v2 `agentKeyPath` is stage 7). The workspace
+//  upstream's host with two changes. The workspace
 //  constants it shared are inlined (workspaces are deferred). The key is
 //  always HPKE-sealed, which CryptoKit offers from macOS 14, so on Ventura
 //  every request answers `501` before a challenge is issued.
@@ -246,8 +245,7 @@ actor OwnerDeviceAccessHost {
     /// What the host knows about a locally hosted agent, by address.
     struct ResolvedAgent: Sendable {
         let id: UUID
-        /// Intel: the v1 agent index (upstream: `AgentKeyPath`).
-        let agentIndex: UInt32
+        let keyPath: AgentKeyPath
         let address: String
         let name: String
         let description: String
@@ -264,12 +262,12 @@ actor OwnerDeviceAccessHost {
                 let agent = AgentManager.shared.agents.first(where: {
                     ($0.agentAddress?.lowercased() ?? "") == addressLower
                 }),
-                let agentIndex = agent.agentIndex,
+                let keyPath = agent.agentKeyPath,
                 let address = agent.agentAddress
             else { return nil }
             return ResolvedAgent(
                 id: agent.id,
-                agentIndex: agentIndex,
+                keyPath: keyPath,
                 address: address,
                 name: agent.name,
                 description: agent.description,
@@ -440,7 +438,7 @@ actor OwnerDeviceAccessHost {
             (fullKey, keyInfo) = try APIKeyManager.shared.generate(
                 label: OwnerDeviceAccess.labelPrefix + deviceName,
                 expiration: OwnerDeviceAccess.keyExpiration,
-                agentIndex: resolved.agentIndex
+                agentKeyPath: resolved.keyPath
             )
         } catch {
             return .rejected(.mintFailed)

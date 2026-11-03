@@ -125,18 +125,31 @@ public struct OsaurusIdentity: Sendable {
         // for a generated master; without it a restore onto a Mac that never
         // generated an identity installs the master and then reads back as
         // "no identity", dumping the user on the setup screen with no error.
-        _ = try? await DeviceKey.ensureDeviceId()
+        let deviceScope = try? await DeviceKey.ensureDeviceId()
         // Keep the stored phrase in sync with the newly-installed master so
         // "View recovery phrase" reads the store instead of lazily
         // re-deriving from the seed.
         try? MasterMnemonicStore.store(words)
 
         APIKeyManager.shared.reload()
-        let drift = IdentityHealthCheck.diagnose(
+        var drift = IdentityHealthCheck.diagnose(
             masterKey: seed,
             agents: AgentManager.shared.agents,
-            accessKeys: APIKeyManager.shared.listKeys()
+            accessKeys: APIKeyManager.shared.listKeys(),
+            currentDeviceScope: deviceScope
         )
+        // Scope dropped by an older build: restore it in place before the
+        // re-mint pass so those agents keep their addresses and keys
+        // (upstream; stage 7).
+        if let deviceScope, !drift.recoverableScopeAgents.isEmpty {
+            AgentManager.shared.repairDeviceScope(for: drift.recoverableScopeAgents, scope: deviceScope)
+            drift = IdentityHealthCheck.diagnose(
+                masterKey: seed,
+                agents: AgentManager.shared.agents,
+                accessKeys: APIKeyManager.shared.listKeys(),
+                currentDeviceScope: deviceScope
+            )
+        }
 
         var failures: [String] = []
         var rederivedAgentCount = 0
@@ -146,6 +159,7 @@ public struct OsaurusIdentity: Sendable {
                 // index off the restored master.
                 var cleared = agent
                 cleared.agentIndex = nil
+                cleared.agentDeviceScope = nil
                 cleared.agentAddress = nil
                 AgentManager.shared.update(cleared)
                 if let refreshed = AgentManager.shared.agent(for: agent.id) {
@@ -192,6 +206,7 @@ public struct OsaurusIdentity: Sendable {
             guard agent.agentIndex != nil || agent.agentAddress != nil else { continue }
             var cleared = agent
             cleared.agentIndex = nil
+            cleared.agentDeviceScope = nil
             cleared.agentAddress = nil
             AgentManager.shared.update(cleared)
         }

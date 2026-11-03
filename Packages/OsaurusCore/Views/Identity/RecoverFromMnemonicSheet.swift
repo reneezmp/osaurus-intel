@@ -437,11 +437,11 @@ struct RecoverFromMnemonicSheet: View {
         }
 
         for agent in mismatched {
-            guard let storedIndex = agent.agentIndex,
+            guard let storedPath = agent.agentKeyPath,
                 let storedAddress = agent.agentAddress
             else { continue }
             do {
-                let derived = try AgentKey.deriveAddress(masterKey: seed, index: storedIndex)
+                let derived = try AgentKey.deriveAddress(masterKey: seed, path: storedPath)
                 if derived.lowercased() == storedAddress.lowercased() {
                     return nil
                 }

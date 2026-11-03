@@ -96,7 +96,8 @@ phone and use the feature from it, not only protocol tests.
      deferred workspaces before porting.
 6. **Osaurus ID** (`OsaurusIDService`, `OsaurusIDSessionStore`, the
    Identity section), replacing the API client's `idSessionToken` stubs.
-7. **Identity drift:** `AgentKeyPath` v2 and `OsaurusKeychainGroup`. A
+7. **Identity drift:** `AgentKeyPath` v2 and `OsaurusKeychainGroup`. Done
+   2026-11-03 (group dormant, as upstream ships it; see Progress). A
    keychain access group needs a real Apple team ID in the signature, which
    Intel's self-signed builds may not have; check before porting.
 
@@ -536,3 +537,58 @@ the backlog.
       `~/.codex`. The master key and Osaurus ID session `mdat`s are
       unchanged.
     - Rosy: "Osaurus ID" in the Rosy retest checklist.
+- **Stage 7 (2026-11-03): v2 agent keys; the keychain group, dormant.
+  `W-identity-mobile` is complete.**
+  - **Assessment (Renée chose "both, group dormant"):**
+    - Upstream keeps every existing agent on its v1 key; only new and
+      rotated agents get the device-scoped v2 key. No current address
+      (paired iPhone, relay) changes.
+    - Intel's `Agent` had no `agentDeviceScope`, so a v2 agent made by an
+      upstream build lost its scope on Rosy and no longer matched its
+      address. That gap is closed.
+    - Upstream ships the shared keychain group switched off too: it needs a
+      provisioning profile no build carries, and the code is gated on an
+      Info.plist key (`OsaurusKeychainAccessGroup`) no app declares. Intel's
+      app declares none either, so `OsaurusKeychainGroup.shared` is nil and
+      every master-key and recovery-phrase write is exactly the old one
+      (iCloud-synced, falling back to device-only); the mirror never runs.
+  - **Ported from upstream:** `AgentKey` (`AgentKeyPath`, v2 derivation),
+    `Agent.agentDeviceScope` / `agentKeyPath`, `IdentityHealthCheck` (drift
+    along each agent's own path, and `recoverableScopeAgents`: a scope an
+    older build dropped is written back losslessly), `AccessKeyLifecycleService`,
+    `APIKeyManager.generate(agentKeyPath:overrideExpiresAt:)`,
+    `OsaurusKeychainGroup`, and `MasterKey` / `MasterMnemonicStore` with the
+    dual-write. Intel's `AgentManager` mints with `nextUnusedKeyPath()`
+    (v2 under this Mac's device ID), clears the scope on revoke, returns
+    upstream's `AddressRotation`, and gains `repairDeviceScope`.
+  - **Every key site now goes through the path:** access keys (Identity),
+    the server's validator (`OsaurusServer.Config.agentKeyPath`), the Secure
+    Channel handshake, the relay, owner redeem, the recovery-phrase check,
+    the Identity page's drift refresh and the restore flow (both repair
+    dropped scopes first, with upstream's "Restored the device scope…"
+    message), identity reset, and bundle import.
+  - **Saving keeps the scope:** the agent editor rebuilds the record field
+    by field; it now carries `agentDeviceScope`, or every save would have
+    dropped it (Intel's `Agent` encodes synthesized, so the field round-trips
+    once it is a stored property).
+  - **Bundle import:** upstream's rule. A collision needs the same index
+    and scope; a v2 address from another device is kept
+    (`mintedOnAnotherDevice`), a v1 one is reported as `legacyV1`, and the
+    review sheet says which.
+  - **Tests:** upstream's `AgentKeyTests`, `IdentityHealthCheckTests`,
+    `AgentBundleImportIdentityTests`, `OsaurusKeychainGroupTests` and
+    `AuthAccessKeyLifecycleServiceTests` (Intel's older copies replaced);
+    `IntelAgentBundleTests` now expects `legacyV1`; new
+    `IntelAgentKeyPathTests` (the scope survives Intel's JSON round trip,
+    old records stay v1, two devices never share an address).
+
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,438 tests in 552 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 (macOS 13) build with tests compiles.
+    - Classifiers: `W-identity-mobile` 0 files left, UNASSIGNED 0.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The master key and Osaurus ID session `mdat`s are
+      unchanged.
+    - Rosy: "Agent keys: device-scoped addresses" in the Rosy retest
+      checklist.

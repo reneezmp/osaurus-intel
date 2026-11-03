@@ -11,7 +11,7 @@ public protocol AccessKeyLifecycleManaging: AnyObject {
     func generate(
         label: String,
         expiration: AccessKeyExpiration,
-        agentIndex: UInt32?
+        agentKeyPath: AgentKeyPath?
     ) throws -> (fullKey: String, info: AccessKeyInfo)
 
     func delete(id: UUID)
@@ -19,7 +19,22 @@ public protocol AccessKeyLifecycleManaging: AnyObject {
     func reload()
 }
 
-extension APIKeyManager: AccessKeyLifecycleManaging {}
+extension APIKeyManager: AccessKeyLifecycleManaging {
+    // Swift doesn't let a default argument (`overrideExpiresAt`) satisfy a
+    // protocol requirement; forward explicitly.
+    public func generate(
+        label: String,
+        expiration: AccessKeyExpiration,
+        agentKeyPath: AgentKeyPath?
+    ) throws -> (fullKey: String, info: AccessKeyInfo) {
+        try generate(
+            label: label,
+            expiration: expiration,
+            agentKeyPath: agentKeyPath,
+            overrideExpiresAt: nil
+        )
+    }
+}
 
 public final class AccessKeyLifecycleService: @unchecked Sendable {
     public static let shared = AccessKeyLifecycleService()
@@ -35,13 +50,13 @@ public final class AccessKeyLifecycleService: @unchecked Sendable {
     public func create(
         label: String,
         expiration: AccessKeyExpiration,
-        agentIndex: UInt32? = nil
+        agentKeyPath: AgentKeyPath? = nil
     ) throws -> (fullKey: String, info: AccessKeyInfo) {
         let cleanLabel = try Self.validatedLabel(label)
         return try manager.generate(
             label: cleanLabel,
             expiration: expiration,
-            agentIndex: agentIndex
+            agentKeyPath: agentKeyPath
         )
     }
 

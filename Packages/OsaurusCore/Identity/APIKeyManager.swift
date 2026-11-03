@@ -29,12 +29,17 @@ public final class APIKeyManager: @unchecked Sendable {
     /// - Parameters:
     ///   - label: Human-readable label for the key.
     ///   - expiration: When the key expires.
-    ///   - agentIndex: If set, sign with the derived agent key and scope to that agent.
-    ///                 If nil, sign with the master key for all-agent access.
+    ///   - agentKeyPath: If set, sign with the derived agent key at that path
+    ///                 (v1 or device-scoped v2, per the agent's persisted
+    ///                 derivation) and scope to that agent. If nil, sign with
+    ///                 the master key for all-agent access (upstream).
+    ///   - overrideExpiresAt: Exact expiry that beats `expiration`'s relative
+    ///                 date when set (upstream).
     public func generate(
         label: String,
         expiration: AccessKeyExpiration,
-        agentIndex: UInt32? = nil
+        agentKeyPath: AgentKeyPath? = nil,
+        overrideExpiresAt: Date? = nil
     ) throws -> (fullKey: String, info: AccessKeyInfo) {
         ensureLoadedFromKeychain()
 
@@ -48,8 +53,8 @@ public final class APIKeyManager: @unchecked Sendable {
 
         let signerAddress: OsaurusID
         let audienceAddress: OsaurusID
-        if let idx = agentIndex {
-            signerAddress = try AgentKey.deriveAddress(masterKey: masterKeyData, index: idx)
+        if let path = agentKeyPath {
+            signerAddress = try AgentKey.deriveAddress(masterKey: masterKeyData, path: path)
             audienceAddress = signerAddress
         } else {
             signerAddress = masterAddress
@@ -60,7 +65,8 @@ public final class APIKeyManager: @unchecked Sendable {
         let cnt = CounterStore.shared.next()
         let now = Date()
         let iat = Int(now.timeIntervalSince1970)
-        let expTimestamp: Int? = expiration.expirationDate(from: now).map { Int($0.timeIntervalSince1970) }
+        let resolvedExpiresAt = overrideExpiresAt ?? expiration.expirationDate(from: now)
+        let expTimestamp: Int? = resolvedExpiresAt.map { Int($0.timeIntervalSince1970) }
 
         let payload = AccessKeyPayload(
             aud: audienceAddress,
@@ -77,8 +83,8 @@ public final class APIKeyManager: @unchecked Sendable {
         let payloadData = try encoder.encode(payload)
 
         let signature: Data
-        if let idx = agentIndex {
-            signature = try AgentKey.sign(payload: payloadData, masterKey: masterKeyData, index: idx)
+        if let path = agentKeyPath {
+            signature = try AgentKey.sign(payload: payloadData, masterKey: masterKeyData, path: path)
         } else {
             signature = try signAccessPayload(payloadData, privateKey: masterKeyData)
         }
@@ -95,7 +101,7 @@ public final class APIKeyManager: @unchecked Sendable {
             aud: audienceAddress,
             createdAt: now,
             expiration: expiration,
-            expiresAt: expiration.expirationDate(from: now)
+            expiresAt: resolvedExpiresAt
         )
 
         queue.sync(flags: .barrier) {

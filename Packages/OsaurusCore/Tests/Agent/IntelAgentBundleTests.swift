@@ -167,12 +167,13 @@ struct IntelAgentBundleTests {
 
         // The same agent id (a re-import) is an overwrite, not a collision.
         let same = AgentBundleService.resolveImportIdentity(agent: bundled, localAgents: [bundled])
-        #expect(same.note == nil)
+        // Stage 7: a v1 address is reported as legacy (upstream).
+        #expect(same.note == .legacyV1)
         #expect(same.agent.agentAddress == "0xABC")
 
         // An address nobody else holds is kept (moving your own agent).
         let clear = AgentBundleService.resolveImportIdentity(agent: bundled, localAgents: [])
-        #expect(clear.note == nil)
+        #expect(clear.note == .legacyV1)
         #expect(clear.agent.agentIndex == 7)
     }
 

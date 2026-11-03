@@ -257,7 +257,7 @@ struct IdentityView: View {
             // The device and master key reads block on securityd XPC + decrypt,
             // which can take seconds on a slow or legacy keychain, so the load
             // runs off the main actor and only the resulting phase is published.
-            let (newPhase, newDrift): (IdentityPhase, IdentityDrift?) = await Task.detached(
+            let (newPhase, newDrift, repairedScopes): (IdentityPhase, IdentityDrift?, Int) = await Task.detached(
                 priority: .userInitiated
             ) {
                 do {
@@ -274,19 +274,45 @@ struct IdentityView: View {
                     let osaurusId = try deriveOsaurusId(from: masterKeyData)
 
                     let accessKeys = APIKeyManager.shared.listKeys()
-                    let diagnosed = IdentityHealthCheck.diagnose(
+                    var diagnosed = IdentityHealthCheck.diagnose(
                         masterKey: masterKeyData,
                         agents: agents,
-                        accessKeys: accessKeys
+                        accessKeys: accessKeys,
+                        currentDeviceScope: deviceId
                     )
-                    return (.ready(osaurusId: osaurusId, deviceId: deviceId), diagnosed)
+                    // A device scope dropped by an older build is restored
+                    // in place — no re-mint, no revocation — then the
+                    // diagnosis is re-run so the banner reflects real drift
+                    // (upstream; `W-identity-mobile` stage 7).
+                    var repaired = 0
+                    if !diagnosed.recoverableScopeAgents.isEmpty {
+                        let recoverable = diagnosed.recoverableScopeAgents
+                        let refreshedAgents: [Agent] = await MainActor.run {
+                            repaired = AgentManager.shared.repairDeviceScope(for: recoverable, scope: deviceId)
+                            return AgentManager.shared.agents
+                        }
+                        diagnosed = IdentityHealthCheck.diagnose(
+                            masterKey: masterKeyData,
+                            agents: refreshedAgents,
+                            accessKeys: accessKeys,
+                            currentDeviceScope: deviceId
+                        )
+                    }
+                    return (.ready(osaurusId: osaurusId, deviceId: deviceId), diagnosed, repaired)
                 } catch {
-                    return (.noIdentity, nil)
+                    return (.noIdentity, nil, 0)
                 }
             }.value
 
             phase = newPhase
             drift = newDrift
+            if repairedScopes > 0 {
+                lastActionResult = ActionResult(
+                    message:
+                        "Restored the device scope for \(repairedScopes) agent address(es) saved by an older version. No keys were changed.",
+                    isError: false
+                )
+            }
         }
     }
 
@@ -338,6 +364,7 @@ struct IdentityView: View {
                 // off the current master.
                 var cleared = agent
                 cleared.agentIndex = nil
+                cleared.agentDeviceScope = nil
                 cleared.agentAddress = nil
                 agentManager.update(cleared)
                 if let refreshed = agentManager.agent(for: agent.id) {
@@ -1159,8 +1186,8 @@ private struct AgentAddressesSection: View {
     private func rotateKey(for agent: Agent) {
         errorMessage = nil
         do {
-            let previousAddress = agent.agentAddress
-            try agentManager.rotateAddress(of: agent)
+            guard let rotation = try agentManager.rotateAddress(of: agent) else { return }
+            let previousAddress = rotation.previousAddress
             restartServerIfRunning()
             // The relay pins the OLD address; move it or the agent goes dark
             // away from home (upstream; `W-identity-mobile` stage 4).
@@ -1218,7 +1245,7 @@ private struct AgentAddressesSection: View {
 
     private func generateAccessKey(for agent: Agent) {
         let label = generatorLabel.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !label.isEmpty, let agentIndex = agent.agentIndex else { return }
+        guard !label.isEmpty, let agentKeyPath = agent.agentKeyPath else { return }
 
         generatorBusy = true
         generatorError = nil
@@ -1227,7 +1254,7 @@ private struct AgentAddressesSection: View {
             let result = try AccessKeyLifecycleService.shared.create(
                 label: label,
                 expiration: generatorExpiration,
-                agentIndex: agentIndex
+                agentKeyPath: agentKeyPath
             )
             lastGeneratedKey = result.fullKey
             closeGenerator()

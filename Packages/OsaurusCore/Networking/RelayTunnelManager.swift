@@ -7,8 +7,8 @@
 //  HTTP requests to the local server, and handles keepalive + reconnect.
 //
 //  Intel (`W-identity-mobile` stage 4, docs/IDENTITY_MOBILE_INTEL.md):
-//  upstream's file, signing with the v1 agent key (`agentIndex`); upstream's
-//  v2 `agentKeyPath` comes with stage 7. A missing agent identity is
+//  upstream's file, signing along each agent's key path (v1 or v2, stage 7).
+//  A missing agent identity is
 //  assigned in place (`AgentManager.assignAddress`, which never prompts on
 //  Intel) instead of upstream's background assignment.
 //
@@ -503,14 +503,14 @@ public final class RelayTunnelManager: ObservableObject {
             var authAgents: [[String: Any]] = []
 
             for agent in agents {
-                guard let agentIndex = agent.agentIndex, let address = agent.agentAddress else { continue }
+                guard let keyPath = agent.agentKeyPath, let address = agent.agentAddress else { continue }
                 do {
                     let sigHex = try Self.signAgentAuth(
                         address: address,
                         nonce: nonce,
                         timestamp: timestamp,
                         masterKey: signingKey,
-                        agentIndex: agentIndex
+                        agentKeyPath: keyPath
                     )
                     authAgents.append(["address": address, "signature": sigHex])
                 } catch {
@@ -1127,7 +1127,7 @@ public final class RelayTunnelManager: ObservableObject {
         ensureAgentIdentity(agentId)
 
         guard let agent = AgentManager.shared.agent(for: agentId),
-            let agentIndex = agent.agentIndex,
+            let keyPath = agent.agentKeyPath,
             let address = agent.agentAddress
         else {
             agentStatuses[agentId] = .error("No identity")
@@ -1159,7 +1159,7 @@ public final class RelayTunnelManager: ObservableObject {
                     nonce: nonce,
                     timestamp: timestamp,
                     masterKey: signingKey,
-                    agentIndex: agentIndex
+                    agentKeyPath: keyPath
                 )
                 self.sendJSON([
                     "type": "add_agent",
@@ -1266,10 +1266,10 @@ public final class RelayTunnelManager: ObservableObject {
         nonce: String,
         timestamp: Int,
         masterKey: Data,
-        agentIndex: UInt32
+        agentKeyPath: AgentKeyPath
     ) throws -> String {
         let message = "osaurus-tunnel:\(address):\(nonce):\(timestamp)"
-        var childKey = AgentKey.derive(masterKey: masterKey, index: agentIndex)
+        var childKey = AgentKey.derive(masterKey: masterKey, path: agentKeyPath)
         defer { childKey.zeroOut() }
         let sig = try signEIP191Message(message, privateKey: childKey)
         return "0x" + sig.hexEncodedString

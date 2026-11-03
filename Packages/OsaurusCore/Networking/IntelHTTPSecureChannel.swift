@@ -14,8 +14,8 @@
 //    (`decryptSecureCall`) and swaps in the inner request before the access
 //    gate; `SecureChannelResponseEncryptor` seals whatever the route writes.
 //
-//  Upstream's handlers, on Intel's route-extension pattern. Intel agents
-//  carry a v1 `agentIndex`; upstream's v2 `agentKeyPath` is stage 7.
+//  Upstream's handlers, on Intel's route-extension pattern. Signs along the
+//  agent's own key path (v1 or device-scoped v2, stage 7).
 //
 
 import Foundation
@@ -76,8 +76,8 @@ extension HTTPHandler {
             // with only the built-in agent still has a channel.
             let wanted = hello.agentAddress.lowercased()
             let agents = await MainActor.run { AgentManager.shared.agents }
-            let agentIndex = agents.first(where: { $0.agentAddress?.lowercased() == wanted })?.agentIndex
-            if agentIndex == nil {
+            let agentKeyPath = agents.first(where: { $0.agentAddress?.lowercased() == wanted })?.agentKeyPath
+            if agentKeyPath == nil {
                 switch MobileConnectIdentity.matches(wanted) {
                 case true?:
                     break
@@ -97,7 +97,7 @@ extension HTTPHandler {
             let result: (session: SecureChannelSession, serverHello: SecureChannel.ServerHello)
             do {
                 result = try SecureChannel.establishServerSession(hello: hello) { transcript in
-                    guard let agentIndex else {
+                    guard let agentKeyPath else {
                         let signature = try MobileConnectIdentity.withPrivateKey {
                             try signSecureChannelPayload(transcript, privateKey: $0)
                         }
@@ -109,7 +109,7 @@ extension HTTPHandler {
                     signContext.interactionNotAllowed = true
                     var masterKeyData = try MasterKey.getPrivateKey(context: signContext)
                     defer { masterKeyData.zeroOut() }
-                    var childKey = AgentKey.derive(masterKey: masterKeyData, index: agentIndex)
+                    var childKey = AgentKey.derive(masterKey: masterKeyData, path: agentKeyPath)
                     defer { childKey.zeroOut() }
                     return try signSecureChannelPayload(transcript, privateKey: childKey)
                 }

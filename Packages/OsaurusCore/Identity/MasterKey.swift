@@ -50,8 +50,8 @@ public struct MasterKey: Sendable {
     public static func install(seed keyData: Data, allowReplace: Bool = false) throws -> OsaurusID {
         // Hermetic test/proof launches (OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1)
         // must not persist identity material into the user's login Keychain.
-        // Same no-op-write contract every other Keychain wrapper honors
-        // (upstream).
+        // This is the same no-op-write contract every other Keychain wrapper
+        // honors via `KeychainQueryHelpers.disablesKeychainForProcess`.
         if KeychainQueryHelpers.disablesKeychainForProcess {
             throw OsaurusIdentityError.keychainWriteFailed
         }
@@ -71,26 +71,77 @@ public struct MasterKey: Sendable {
             delete()
         }
 
-        let status = addToKeychain(keyData: keyData, synchronizable: true)
-        if status != errSecSuccess {
-            let fallback = addToKeychain(keyData: keyData, synchronizable: false)
-            guard fallback == errSecSuccess else {
-                throw OsaurusIdentityError.keychainWriteFailed
-            }
+        guard addGenericPassword(service: service, account: account, label: label, data: keyData) else {
+            throw OsaurusIdentityError.keychainWriteFailed
         }
-        setCachedExists(true)
 
+        setCachedExists(true)
         return osaurusId
     }
 
-    private static func addToKeychain(keyData: Data, synchronizable: Bool) -> OSStatus {
+    static let label = "Osaurus Master Key"
+
+    // MARK: - Dual-write (shared with `MasterMnemonicStore`)
+
+    /// Write the same bytes into every group this build can reach, per
+    /// `OsaurusKeychainGroup.writeAttemptGroups`: the default group first
+    /// (what every shipped build reads — a Mac still on an older build has
+    /// no entitlement for the shared group and must keep seeing the master),
+    /// then a copy in the shared group when it resolves. Within a group the
+    /// first successful attempt wins (iCloud sync, then device-only); every
+    /// attempt is tried, because an unentitled process (xctest, the CLI, dev
+    /// signing) gets `errSecMissingEntitlement` for the *synchronizable* add
+    /// and must still fall through to the device-only login-keychain write —
+    /// that fall-through is the pre-existing contract this path replaced.
+    /// A shared-group attempt that fails the same way simply leaves that copy
+    /// out. Succeeds when at least one group took the item.
+    ///
+    /// `delete()` queries carry no group, so a Reset removes every copy.
+    static func addGenericPassword(service: String, account: String, label: String, data: Data) -> Bool {
+        var wroteAny = false
+        for attempts in OsaurusKeychainGroup.writeAttemptGroups(sharedGroup: OsaurusKeychainGroup.shared) {
+            for target in attempts {
+                let status = addToKeychain(
+                    service: service,
+                    account: account,
+                    label: label,
+                    data: data,
+                    synchronizable: target.synchronizable,
+                    accessGroup: target.accessGroup
+                )
+                if status == errSecSuccess {
+                    wroteAny = true
+                    break
+                }
+            }
+        }
+        return wroteAny
+    }
+
+    // The Master Key is a synchronizable iCloud Keychain item.
+    private static func addToKeychain(
+        service: String,
+        account: String,
+        label: String,
+        data: Data,
+        synchronizable: Bool,
+        accessGroup: String?
+    ) -> OSStatus {
         var query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
-            kSecValueData as String: keyData,
-            kSecAttrLabel as String: "Osaurus Master Key",
+            kSecValueData as String: data,
+            kSecAttrLabel as String: label,
         ]
+        if let accessGroup {
+            // Access groups only exist in the data-protection keychain on
+            // macOS; a synchronizable item lands there anyway, a device-only
+            // one needs to be told. Reads with `kSecAttrSynchronizableAny`
+            // implicitly search that keychain, so they find either.
+            query[kSecAttrAccessGroup as String] = accessGroup
+            query[kSecUseDataProtectionKeychain as String] = true
+        }
         if synchronizable {
             query[kSecAttrSynchronizable as String] = true
             query[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlocked
@@ -100,12 +151,135 @@ public struct MasterKey: Sendable {
         return SecItemAdd(query as CFDictionary, nil)
     }
 
+    // MARK: - Shared-group mirror
+
+    /// Once per process, after a successful read (so no extra prompt is
+    /// ever raised): make sure a synced master exists in BOTH the default
+    /// group and the shared group. This only ever adds a copy. It never
+    /// deletes — an iCloud delete propagates, and a Mac still on a build
+    /// without the entitlement would watch its only visible master vanish,
+    /// report "no identity", and mint a second one on "Create".
+    private static let migrationLock = NSLock()
+    private nonisolated(unsafe) static var migrationAttempted = false
+
+    private static func migrateToSharedGroupIfNeeded(keyData: Data) {
+        guard let group = OsaurusKeychainGroup.shared else { return }
+        migrationLock.lock()
+        let alreadyTried = migrationAttempted
+        migrationAttempted = true
+        migrationLock.unlock()
+        guard !alreadyTried else { return }
+        Self.mirrorGenericPassword(
+            service: service,
+            account: account,
+            label: label,
+            data: keyData,
+            sharedGroup: group
+        )
+    }
+
+    /// Shared with `MasterMnemonicStore`. Lists every item for the
+    /// `(service, account)` the process can see, asks
+    /// `OsaurusKeychainGroup.mirrorPlan` which copies are missing, and adds
+    /// them as **synced** items (a device-only copy would not reach another
+    /// device, which is the whole point). Each added copy is read back and
+    /// removed again if it does not match; the pre-existing items are never
+    /// touched. A device-only master (including one in the file-based login
+    /// keychain, which has no access groups) is left exactly where it is.
+    static func mirrorGenericPassword(
+        service: String,
+        account: String,
+        label: String,
+        data: Data,
+        sharedGroup: String
+    ) {
+        let listQuery: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: kSecAttrSynchronizableAny,
+            kSecMatchLimit as String: kSecMatchLimitAll,
+            kSecReturnAttributes as String: true,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
+        ]
+        var listResult: AnyObject?
+        let listStatus = SecItemCopyMatching(listQuery as CFDictionary, &listResult)
+        guard listStatus == errSecSuccess, let rows = listResult as? [[String: Any]] else { return }
+        let existing = rows.map {
+            OsaurusKeychainGroup.ExistingItem(
+                accessGroup: $0[kSecAttrAccessGroup as String] as? String,
+                synchronizable: ($0[kSecAttrSynchronizable as String] as? Bool) ?? false
+            )
+        }
+        let plan = OsaurusKeychainGroup.mirrorPlan(existing: existing, sharedGroup: sharedGroup)
+
+        if plan.addShared {
+            addVerifiedSyncedCopy(
+                service: service,
+                account: account,
+                label: label,
+                data: data,
+                accessGroup: sharedGroup
+            )
+        }
+        if plan.addDefault {
+            addVerifiedSyncedCopy(service: service, account: account, label: label, data: data, accessGroup: nil)
+        }
+    }
+
+    /// Add one synced copy in `accessGroup` (nil = default group) and read
+    /// it back through a group-precise query; on mismatch delete only that
+    /// copy. `errSecMissingEntitlement` (dev signing) is a silent no-op.
+    private static func addVerifiedSyncedCopy(
+        service: String,
+        account: String,
+        label: String,
+        data: Data,
+        accessGroup: String?
+    ) {
+        let status = addToKeychain(
+            service: service,
+            account: account,
+            label: label,
+            data: data,
+            synchronizable: true,
+            accessGroup: accessGroup
+        )
+        guard status == errSecSuccess else { return }
+        // Only a grouped copy can be verified precisely; the default-group
+        // query has no distinguishing attribute, and `SecItemAdd` success is
+        // the whole contract there.
+        guard let accessGroup else { return }
+        let verify: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: account,
+            kSecAttrSynchronizable as String: true,
+            kSecAttrAccessGroup as String: accessGroup,
+            kSecReturnData as String: true,
+            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
+        ]
+        var verifyResult: AnyObject?
+        if SecItemCopyMatching(verify as CFDictionary, &verifyResult) == errSecSuccess,
+            let copied = verifyResult as? Data, copied == data
+        {
+            return
+        }
+        var deleteCopy = verify
+        deleteCopy.removeValue(forKey: kSecReturnData as String)
+        deleteCopy.removeValue(forKey: kSecUseAuthenticationUI as String)
+        SecItemDelete(deleteCopy as CFDictionary)
+    }
+
     // MARK: - Existence Check
 
     /// Check if a Master Key exists in Keychain (no biometric prompt).
     public static func exists() -> Bool {
-        // Keychain-disabled processes report "no identity" (upstream), so
-        // identity-gated paths short-circuit before any keychain read.
+        // Keychain-disabled processes report "no identity" so identity-gated
+        // paths (e.g. `AgentManager.assignAddress`) short-circuit before any
+        // legacy login-Keychain read can raise a "wants to use your
+        // confidential information" ACL prompt in a headless/differently-signed
+        // process (the eval CLI).
         if KeychainQueryHelpers.disablesKeychainForProcess { return false }
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
@@ -218,7 +392,11 @@ public struct MasterKey: Sendable {
 
     /// Retrieve the raw Master Key bytes from Keychain (triggers biometric auth).
     static func getPrivateKey(context: LAContext) throws -> Data {
-        // No-op read under the keychain-disable gate (upstream).
+        // No-op read under the keychain-disable gate (hermetic test/proof runs).
+        // The Master Key item lives in the legacy file-based login Keychain,
+        // where `kSecUseAuthenticationUISkip` / `LAContext.interactionNotAllowed`
+        // do NOT suppress the trusted-app ACL prompt — so the only safe headless
+        // behavior is to not read at all.
         if KeychainQueryHelpers.disablesKeychainForProcess {
             throw OsaurusIdentityError.keychainReadFailed
         }
@@ -235,11 +413,11 @@ public struct MasterKey: Sendable {
         }
 
         var result: AnyObject?
-        guard SecItemCopyMatching(query as CFDictionary, &result) == errSecSuccess,
-            let data = result as? Data
-        else {
+        let status = SecItemCopyMatching(query as CFDictionary, &result)
+        guard status == errSecSuccess, let data = result as? Data else {
             throw OsaurusIdentityError.keychainReadFailed
         }
+        migrateToSharedGroupIfNeeded(keyData: data)
         return data
     }
 
@@ -257,7 +435,8 @@ public struct MasterKey: Sendable {
     /// Remove the Master Key from Keychain (irreversible).
     @discardableResult
     public static func delete() -> Bool {
-        // No-op delete under the keychain-disable gate (upstream).
+        // No-op delete under the keychain-disable gate, mirroring the read/write
+        // no-ops above and the documented wrapper contract.
         if KeychainQueryHelpers.disablesKeychainForProcess {
             setCachedExists(false)
             return true

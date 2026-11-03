@@ -4598,6 +4598,13 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   Upstream's newer action button styles (loading spinner, compact size)
   came with it; the regular size is unchanged. The one-argument
   `onChange` keeps it on macOS 13.
+- **Stage 7 (2026-11-03), item complete:** v2 device-scoped agent keys
+  (`AgentKeyPath`, `Agent.agentDeviceScope`) for new and rotated agents,
+  existing v1 addresses unchanged, every derivation site on the path, the
+  lossless scope repair, the bundle import rule; upstream's
+  `OsaurusKeychainGroup` and master-key dual-write, dormant (no app declares
+  the group, as upstream ships it). The agent editor now keeps the scope on
+  save.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

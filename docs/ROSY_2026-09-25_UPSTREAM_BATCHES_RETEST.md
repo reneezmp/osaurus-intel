@@ -2700,3 +2700,24 @@ only claim a handle you want to keep.
       reopen Osaurus: the edits are still there.
 - [ ] Turn the Osaurus Router off: the card shows one quiet line with a way
       to turn it back on, no error.
+
+## Agent keys: device-scoped addresses (2026-11-03)
+
+`W-identity-mobile` stage 7 (`IDENTITY_MOBILE_INTEL.md`). Existing agents keep
+their addresses; new and rotated ones get an address tied to this Mac.
+
+- [ ] Settings › Identity › Agent Addresses lists the same addresses as
+      before the update for every existing agent, and no drift banner
+      appears.
+- [ ] The paired iPhone still lists and chats with your agents, and Reach
+      From Anywhere (if on) still connects: their addresses didn't change.
+- [ ] Create a new agent and give it an address: it gets one. Edit and
+      save the agent (change its description), then reopen Identity: still
+      no drift banner, same address.
+- [ ] Generate an agent-scoped access key for that new agent and use it:
+      `curl -s -o /dev/null -w '%{http_code}' -H "Authorization: Bearer <key>" http://127.0.0.1:1337/agents`
+      prints `200`.
+- [ ] Rotate that agent's key in Identity: it gets a new address, the old
+      access key stops working (`401`), no drift banner.
+- [ ] Export that agent as a bundle and import it on the M4: the import
+      review says the address was created on another device and keeps it.

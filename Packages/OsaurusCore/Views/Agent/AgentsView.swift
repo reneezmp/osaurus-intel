@@ -3578,12 +3578,32 @@ struct AgentDetailView: View {
                 )
                 .foregroundColor(theme.warningColor)
             }
-            if case .collidesWithLocalAgent(let name) = preview.identityNote {
+            switch preview.identityNote {
+            case .collidesWithLocalAgent(let name)?:
                 Label(
                     L("Its address is already used by “\(name)”, so it arrives without one. Assign a new address in Identity."),
                     systemImage: "person.badge.key"
                 )
                 .foregroundColor(theme.secondaryText)
+            case .mintedOnAnotherDevice?:
+                // Upstream (`W-identity-mobile` stage 7).
+                Label(
+                    L(
+                        "This agent's address was created on another device. It keeps that address, so existing pairings keep working — but if the other device is still serving it, the relay will route to whichever device connected last."
+                    ),
+                    systemImage: "laptopcomputer.and.iphone"
+                )
+                .foregroundColor(theme.secondaryText)
+            case .legacyV1?:
+                Label(
+                    L(
+                        "This agent uses a legacy (non device-scoped) address. It is kept as-is; rotate the key later to move it to the current layout."
+                    ),
+                    systemImage: "key"
+                )
+                .foregroundColor(theme.secondaryText)
+            case nil:
+                EmptyView()
             }
             if !preview.capabilityNotes.isEmpty {
                 Text(L("Arrives with: \(preview.capabilityNotes.joined(separator: ", "))."))
@@ -5545,6 +5565,9 @@ struct AgentDetailView: View {
             updatedAt: Date(),
             agentIndex: current.agentIndex,
             agentAddress: current.agentAddress,
+            // Saving must keep the derivation path, or a v2 agent's key no
+            // longer matches its address (upstream; stage 7).
+            agentDeviceScope: current.agentDeviceScope,
             autonomousExec: current.autonomousExec,
             claudeCode: claudeCodeConfig,
             pluginInstructions: effectivePluginInstructions,
