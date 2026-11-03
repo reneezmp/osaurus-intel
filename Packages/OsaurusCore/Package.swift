@@ -395,7 +395,9 @@ let package = Package(
                 "Tool/ConfigurationDomainRegistryTests.swift",
                 "Tool/CapabilitiesSearchDefaultAgentScopeTests.swift",
                 "Tool/CapabilitiesLoadDefaultAgentScopeTests.swift",
-            ]
+            ],
+            // Upstream: Secure Channel test vectors (`W-identity-mobile`).
+            resources: [.copy("Identity/Fixtures")]
         ),
     ]
 )

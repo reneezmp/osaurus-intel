@@ -395,6 +395,14 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     private let _inboundConnection = SendableConnectionBox()
     /// Off-loop-readable mirror of the current request's client address.
     private let _clientIP = SendableClientIPBox()
+    /// Off-loop-readable mirror of `RequestState.isSecureChannel`, for
+    /// `logRequest`, which also runs from request tasks off the event loop.
+    private let _isSecureChannel = SendableBool(false)
+    /// The outbound encryption stage for Secure Channel responses
+    /// (`W-identity-mobile` stage 2). Same pipeline and event loop; armed
+    /// when a `/secure/call` envelope is decrypted, so everything the route
+    /// writes goes out sealed. `nil` in test servers built without it.
+    let responseEncryptor: SecureChannelResponseEncryptor?
 
     private let jsonEncoder: JSONEncoder = {
         let e = JSONEncoder()
@@ -449,6 +457,12 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         /// caller present an agent-scoped key: that caller is held to the
         /// remote contract, so `isLoopbackConnection` reports `false`.
         var loopbackTrustWithdrawn: Bool = false
+        /// Set when the request arrived as an encrypted `/secure/call` and
+        /// was rewritten into its inner request.
+        var isSecureChannel: Bool = false
+        /// The address that Secure Channel was opened with: the agent (or
+        /// the Mac's connect identity) the phone pinned.
+        var secureChannelAgentAddress: String?
     }
 
     /// Paths whose handler logs its own Insights row (see
@@ -495,6 +509,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         eventLoop: EventLoop,
         trustLoopback: Bool = true,
         chatEngine: (any ChatEngineProtocol)? = nil,
+        responseEncryptor: SecureChannelResponseEncryptor? = nil,
         peerInferenceSharingProvider: @escaping @Sendable () -> Bool = { false },
         localKeyRequiredProvider: @escaping @Sendable () -> Bool = { LocalAPIKeyPolicy.isEnabled() }
     ) {
@@ -502,6 +517,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         self.apiKeyValidatorProvider = apiKeyValidatorProvider ?? { apiKeyValidator }
         self.trustLoopback = trustLoopback
         self.injectedChatEngine = chatEngine
+        self.responseEncryptor = responseEncryptor
         self.peerInferenceSharingProvider = peerInferenceSharingProvider
         self.localKeyRequiredProvider = localKeyRequiredProvider
         self.stateRef = NIOLoopBound(RequestState(), eventLoop: eventLoop)
@@ -533,7 +549,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     func runRequestTask(_ operation: @escaping () async -> Void) -> Task<Void, Never> {
         let callerContext = HTTPCallerContext(
             hasVerifiedAccessKey: stateRef.value.callerHasVerifiedAccessKey,
-            isSecureChannel: false
+            isSecureChannel: stateRef.value.isSecureChannel
         )
         let operationBox = RequestTaskOperation(operation)
         // Activity-log double-write guard (upstream): routes that write their
@@ -567,6 +583,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             stateRef.value.callerHasVerifiedAccessKey = false
             stateRef.value.callerAccessKeyIsMaster = false
             stateRef.value.loopbackTrustWithdrawn = false
+            stateRef.value.isSecureChannel = false
+            _isSecureChannel.value = false
+            stateRef.value.secureChannelAgentAddress = nil
             // Clear last request's attribution so a keep-alive connection's
             // next (possibly loopback / public) request can't inherit it.
             _inboundConnection.value = nil
@@ -651,11 +670,29 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                 stateRef.value.requestBodyBuffer = nil
                 return
             }
-            guard let head = stateRef.value.requestHead else {
+            guard var head = stateRef.value.requestHead else {
                 sendBadRequest(context: context)
                 return
             }
-            guard admit(context: context, head: head) else {
+            // Secure Channel (upstream): decrypt an encrypted `/secure/call`
+            // envelope and swap in the inner request BEFORE the access gate,
+            // so the inner Authorization header flows through the validator,
+            // scope checks and routing untouched. The response encryptor is
+            // armed here, so everything the route writes goes out sealed.
+            let outerHead = head
+            if head.method == .POST, normalize(extractPath(from: head.uri)) == "/secure/call" {
+                guard let rewritten = decryptSecureCall(head: head, context: context) else {
+                    // decryptSecureCall already answered.
+                    stateRef.value.requestHead = nil
+                    stateRef.value.requestBodyBuffer = nil
+                    return
+                }
+                head = rewritten
+                stateRef.value.requestHead = head
+                stateRef.value.isSecureChannel = true
+                _isSecureChannel.value = true
+            }
+            guard admit(context: context, head: head, outerHead: outerHead) else {
                 stateRef.value.requestHead = nil
                 stateRef.value.requestBodyBuffer = nil
                 return
@@ -669,7 +706,10 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     /// CORS preflight, `LocalAPIKeyPolicy`, the access-key gate and the
     /// agent-scope confinement, in upstream's order. Returns `false` when it
     /// already answered the request.
-    private func admit(context: ChannelHandlerContext, head: HTTPRequestHead) -> Bool {
+    /// `outerHead` is the request as it arrived: the `/secure/call` envelope
+    /// for a Secure Channel call, else `head` itself. Preflight and the
+    /// browser-origin check read it (upstream).
+    private func admit(context: ChannelHandlerContext, head: HTTPRequestHead, outerHead: HTTPRequestHead) -> Bool {
         let path = normalize(extractPath(from: head.uri))
         stateRef.value.normalizedPath = path
         let startTime = stateRef.value.requestStartedAt ?? Date()
@@ -677,9 +717,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         let userAgent = head.headers.first(name: "User-Agent")
 
         // CORS preflight (OPTIONS): answered here, not logged.
-        if head.method == .OPTIONS {
+        if outerHead.method == .OPTIONS {
             let cors = computeCORSHeaders(
-                for: head,
+                for: outerHead,
                 isPreflight: true,
                 isLoopback: isLoopbackConnection(context),
                 explicitOriginsOnly: localKeyRequired(for: path)
@@ -712,12 +752,12 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         var presentedAppToken = false
         if localKeyRequired {
             stateRef.value.corsHeaders = computeCORSHeaders(
-                for: head,
+                for: outerHead,
                 isPreflight: false,
                 isLoopback: false,
                 explicitOriginsOnly: true
             )
-            if let origin = head.headers.first(name: "Origin"),
+            if let origin = outerHead.headers.first(name: "Origin") ?? head.headers.first(name: "Origin"),
                 !LocalAPIKeyPolicy.isExplicitlyAllowedOrigin(origin, allowedOrigins: configuration.allowedOrigins)
             {
                 let message =
@@ -762,7 +802,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
                     // agent-scoped key gets exactly what it gets remotely.
                     stateRef.value.loopbackTrustWithdrawn = isLoopback && !stateRef.value.authedScopeIsMaster
                     _inboundConnection.value = RequestConnectionInfo(
-                        transport: .direct,
+                        transport: stateRef.value.isSecureChannel ? .secureChannel : .direct,
                         accessKeyId: keyNonce,
                         audience: audience.lowercased()
                     )
@@ -890,6 +930,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/mcp/call"):
             serveMCPCallTool(context: context, head: head)
         default:
+            if routeSecureChannelRequest(context: context, head: head, path: path) { return }
             if routePairingRequest(context: context, head: head, path: path) { return }
             if routeRunRequest(context: context, head: head, path: path) { return }
             if routeAgentRequest(context: context, head: head, path: path) { return }
@@ -908,7 +949,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     // MARK: - Gate helpers (upstream)
 
-    private func extractPath(from uri: String) -> String {
+    func extractPath(from uri: String) -> String {
         if let queryIndex = uri.firstIndex(of: "?") {
             return String(uri[..<queryIndex])
         }
@@ -916,7 +957,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     }
 
     /// Normalize common provider prefixes so we cover /, /v1, /api, /v1/api.
-    private func normalize(_ path: String) -> String {
+    func normalize(_ path: String) -> String {
         Router.normalizeStatic(path)
     }
 
@@ -1065,10 +1106,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     // MARK: - Owner callers and the Secure Channel (upstream)
 
-    /// Whether the request carries Secure Channel encryption. Always false
-    /// on Intel until `W-identity-mobile` ports the channel, so a remote
-    /// owner key can't reach the owner routes yet (they answer 426).
-    var requestIsSecureChannel: Bool { false }
+    /// Whether the request arrived through the Secure Channel (a decrypted
+    /// `/secure/call`). Event loop only.
+    var requestIsSecureChannel: Bool { stateRef.value.isSecureChannel }
 
     /// This Mac's owner: a trusted local caller or a master-scoped key.
     func callerOwnsThisMac(_ context: ChannelHandlerContext) -> Bool {
@@ -1428,14 +1468,23 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         toolCalls: [ToolCallLog]? = nil,
         details: [String: String]? = nil
     ) {
+        // What travelled sealed end to end stays out of the log: a Secure
+        // Channel call keeps only the size of its bodies (upstream). Off the
+        // event loop (a request's task), its own snapshot: the connection's
+        // flag may belong to a later request by now.
+        let sealed = HTTPCallerContext.current?.isSecureChannel ?? _isSecureChannel.value
+        func redacted(_ body: String?) -> String? {
+            guard sealed, let body else { return body }
+            return "[sealed, \(body.utf8.count) bytes]"
+        }
         let durationMs = Date().timeIntervalSince(startTime) * 1000
         InsightsService.logAsync(
             method: method,
             path: path,
             clientIP: _clientIP.value,
             userAgent: userAgent,
-            requestBody: requestBody,
-            responseBody: responseBody,
+            requestBody: redacted(requestBody),
+            responseBody: redacted(responseBody),
             responseStatus: responseStatus,
             durationMs: durationMs,
             model: model,

@@ -87,15 +87,21 @@ public actor OsaurusServer: Sendable {
             .childChannelInitializer { channel in
                 childChannels.track(channel)
                 return channel.pipeline.configureHTTPServerPipeline().flatMap {
-                    channel.pipeline.addHandlers([
+                    // Outbound encryption stage for Secure Channel calls
+                    // (upstream). Must sit between the HTTP encoder and
+                    // HTTPHandler so every response part can be sealed.
+                    let responseEncryptor = SecureChannelResponseEncryptor()
+                    return channel.pipeline.addHandlers([
                         // Connection cap (first handler, upstream): a flood of
                         // idle-held sockets can't exhaust file descriptors.
                         ConnectionLimitHandler(),
+                        responseEncryptor,
                         HTTPHandler(
                             configuration: serverConfiguration,
                             apiKeyValidatorProvider: { validatorSnapshot.value() },
                             eventLoop: channel.eventLoop,
-                            trustLoopback: trustLoopback
+                            trustLoopback: trustLoopback,
+                            responseEncryptor: responseEncryptor
                         ),
                     ])
                 }

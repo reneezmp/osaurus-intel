@@ -42,7 +42,7 @@ Settings → Server → Settings → Connection → **Expose to Network** lets p
 
 ## Pair your iPhone
 
-Settings → **Mobile** pairs the Osaurus iPhone app with this Mac. Turn on **Expose to Network** first (the page offers it), keep the iPhone on the same network, then **Generate Pairing Code** and type the 6-digit code into the app. One iPhone per Mac: pairing a new one unpairs the old one, and **Unpair** under **Paired iPhone** cuts it off at once. **Keep Mac Awake for Paired iPhone** stops idle sleep only while a phone is paired. Using your agents from the iPhone comes with the next steps of this port; on this build the iPhone pairs but can't chat yet.
+Settings → **Mobile** pairs the Osaurus iPhone app with this Mac. Turn on **Expose to Network** first (the page offers it), keep the iPhone on the same network, then **Generate Pairing Code** and type the 6-digit code into the app. One iPhone per Mac: pairing a new one unpairs the old one, and **Unpair** under **Paired iPhone** cuts it off at once. **Keep Mac Awake for Paired iPhone** stops idle sleep only while a phone is paired. Once paired, the iPhone reaches your agents, chats, approvals and models through an end-to-end encrypted channel; only sizes of those requests appear in Insights. Resuming a chat after the app goes to the background, and reaching the Mac away from home, come with the next steps of this port.
 
 ## Access keys
 

@@ -4548,6 +4548,11 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   `_osaurus-mobile._tcp` advertiser). v1 pairing (HPKE) is macOS 14+; no
   relay URLs until the relay is real; `MobileConnectLog` always logs to
   `~/Library/Logs/Osaurus` because Intel ships Debug builds.
+- **Stage 2 (2026-11-03):** the Secure Channel (`/secure/session`, the
+  `/secure/call` decrypt step before the access gate, the response
+  encryptor in the server pipeline). Owner routes open to the paired phone;
+  sealed bodies stay out of Insights. The handshake signs with the v1
+  `agentIndex` key until stage 7.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

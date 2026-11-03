@@ -228,8 +228,7 @@ extension HTTPHandler {
         // always speaks (upstream). Only this caller gets cards relayed
         // (`/approvals`, `/config/approvals`, `/secrets/prompts`); a bare
         // loopback script is still owner but has no one polling for cards,
-        // so it keeps failing closed. Always false on Intel until
-        // `W-identity-mobile` brings the channel.
+        // so it keeps failing closed.
         let remoteReviewer = stateRef.value.authedScopeIsMaster && requestIsSecureChannel
         let startTime = stateRef.value.requestStartedAt ?? Date()
         let userAgent = head.headers.first(name: "User-Agent")

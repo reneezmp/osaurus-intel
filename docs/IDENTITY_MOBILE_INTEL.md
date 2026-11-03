@@ -178,3 +178,59 @@ the backlog.
       (above) and the test-limiter cooldown. Both are fixed.
     - Rosy: pairing the real iPhone is in the Rosy retest checklist
       ("Paired iPhone: pairing").
+- **Stage 2 (2026-11-03): Secure Channel.**
+  - **Ported from upstream:** `SecureChannel`, `SecureSessionStore`,
+    `SecureChannelResponseEncryptor`, and `CryptoHelpers` whole (Intel's
+    copy lacked `signSecureChannelPayload` and three other signing helpers).
+    `SecureChannelClient` came in early: the end-to-end tests decode with
+    it. Nothing in the app calls it until stage 5.
+  - **Routes** (`IntelHTTPSecureChannel.swift`):
+    - `POST /secure/session`, with upstream's own rate limiter (30 a
+      minute).
+    - The `/secure/call` decrypt step. `channelRead` runs it before the
+      access gate, so the inner Bearer goes through the validator and
+      scope checks unchanged.
+  - **Router** (`HTTPHandler`):
+    - Requests carry `isSecureChannel` and the pinned address.
+      `requestIsSecureChannel` is real now, so the stage 4–6 owner routes
+      open to the paired phone.
+    - Preflight and the browser-origin check read the outer request
+      (upstream).
+    - The access key's attribution says `secureChannel`.
+    - `logRequest` keeps only the sizes of sealed bodies.
+    - The server pipeline gained the encryptor between the HTTP codec and
+      the handler.
+  - **Intel differences:**
+    - The handshake signs with `AgentKey.derive(masterKey:index:)`: Intel
+      agents have a v1 `agentIndex`, and upstream's `agentKeyPath` is
+      stage 7.
+    - Intel's `MasterKey` read never prompts, so upstream's
+      `interactionNotAllowed` context is kept as is.
+  - **Remote reviewer:** `IntelHTTPAgentRun`'s remote-reviewer flag already
+    read `requestIsSecureChannel`. Runs from the paired phone now send
+    their approval cards to `/approvals`.
+  - **Still stage 3:** the phone-only run fields (`osaurus_run_id`,
+    `osaurus_session_id`, `osaurus_job_id`, `osaurus_voice_call`) are
+    still ignored. A phone chat streams in one piece and can't be resumed
+    after the app goes to the background.
+  - **Tests:**
+    - Upstream's `SecureChannelTests` and `SecureChannelVectorsTests`, with
+      the vector fixture (`Tests/Identity/Fixtures`, a test resource as
+      upstream).
+    - `SecureChannelE2ETests`, minus the n8n channel case (channels are
+      deferred) and the two `osaurus_privacy` cases (`W-privacy-filter`).
+      Upstream's `MockChatEngine` is excluded on Intel, so a small streaming
+      engine stands in.
+    - Two Intel cases: the handshake route's refusals (bad body, wrong
+      version, unknown address → 404), and a relay-origin owner read of
+      `/sessions` reaching the route through the channel.
+
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,247 tests in 525 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 build with tests compiles.
+    - Classifiers: `W-identity-mobile` 12 files left, UNASSIGNED 0. Guide
+      check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Paired iPhone: Secure Channel" in the Rosy retest checklist.

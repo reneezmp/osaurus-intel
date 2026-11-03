@@ -2531,3 +2531,36 @@ the steps stop at pairing.
 - [ ] With Keep Mac Awake on and a phone paired, `pmset -g assertions`
       lists an Osaurus "keep this Mac reachable" assertion; after Unpair
       (or with the switch off) it's gone.
+
+## Paired iPhone: Secure Channel (2026-11-03)
+
+`W-identity-mobile` stage 2 (`IDENTITY_MOBILE_INTEL.md`). Same phone and
+Wi-Fi as the pairing section above; pair first. Stage 3 adds resuming
+after the app goes to the background, so keep the app in front while a
+reply streams.
+
+- [ ] Agents: the app lists Rosy's agents (or the built-in one) without a
+      "Connection unavailable", "Update Osaurus" or "Upgrade required"
+      message.
+- [ ] Chat: send a message to an agent and watch the reply stream in. The
+      model and the reply match what the same agent gives on the Mac.
+- [ ] Chat history: the app's history lists Rosy's chats, and opening one
+      shows its messages.
+- [ ] Models: the app's model picker lists the same models as the Mac's
+      picker.
+- [ ] Approvals: give an agent a tool that asks first (for example
+      Folder writes set to Ask), ask it from the phone to use the tool,
+      and approve the card on the phone. The run continues. Deny it once
+      too: the run reports the tool was declined.
+- [ ] Insights (Settings › Insights) lists the phone's requests as
+      `/secure/session` and the inner paths (`/agents`, `/sessions`, …)
+      with bodies shown as `[sealed, N bytes]`, never the message text.
+- [ ] With Expose to Network on, from Terminal on another machine,
+      `curl -s -o /dev/null -w '%{http_code}' -X POST http://<Rosy LAN IP>:1337/secure/session -d '{'`
+      prints `400` (the handshake route answers on the network and refuses
+      a bad body), and
+      `curl -s -o /dev/null -w '%{http_code}' http://<Rosy LAN IP>:1337/sessions`
+      prints `401` (no plaintext chat history without a key).
+- [ ] Unpair on the Mac: the app's next request fails (it asks to pair
+      again).
+
