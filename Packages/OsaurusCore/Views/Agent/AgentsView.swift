@@ -6137,6 +6137,10 @@ private struct AgentDetailRelaySection: View {
             Circle()
                 .fill(theme.errorColor)
                 .frame(width: 8, height: 8)
+        case .servedElsewhere:
+            Circle()
+                .fill(theme.warningColor.opacity(0.6))
+                .frame(width: 8, height: 8)
         }
     }
 
@@ -6147,6 +6151,7 @@ private struct AgentDetailRelaySection: View {
             case .connecting: return ("Connecting", theme.warningColor)
             case .connected: return ("Connected", theme.successColor)
             case .error: return ("Error", theme.errorColor)
+            case .servedElsewhere: return (L("Served From Another Device"), theme.warningColor)
             }
         }()
         return Text(label)

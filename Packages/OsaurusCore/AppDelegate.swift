@@ -270,6 +270,9 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             // A saved "Expose to Network" was never in effect before Intel
             // honoured it: turned off once (W-server-api stage 7).
             IntelNetworkExposure.resetSavedExposureOnce()
+            // Upstream: the paired phone's keep-awake assertion and key
+            // expiry start with the app (`W-identity-mobile`).
+            _ = MobilePairingService.shared
             let config = ServerConfigurationStore.load() ?? .default
             ServerController.shared.configuration = config
             let serverConfig = IntelNetworkExposure.serverConfig(for: config)

@@ -15,6 +15,23 @@ import Foundation
 public final class BonjourAdvertiser: NSObject {
     public static let shared = BonjourAdvertiser()
     public static let serviceType = "_osaurus._tcp."
+    /// DNS-SD instance names are capped at 63 bytes of UTF-8 (upstream).
+    static let maxInstanceNameBytes = 63
+
+    /// Truncate a string to at most `maxBytes` of UTF-8 without splitting a
+    /// character (upstream; `MobileConnectAdvertiser` uses it too).
+    static func truncateUTF8(_ string: String, maxBytes: Int) -> String {
+        guard string.utf8.count > maxBytes else { return string }
+        var result = ""
+        var used = 0
+        for char in string {
+            let size = String(char).utf8.count
+            if used + size > maxBytes { break }
+            result.append(char)
+            used += size
+        }
+        return result
+    }
 
     private var services: [UUID: NetService] = [:]
     private var currentPort: Int = 0

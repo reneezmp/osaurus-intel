@@ -40,6 +40,10 @@ Not in this build yet: runs from your phone. Shortcuts and Siri run agents insid
 
 Settings → Server → Settings → Connection → **Expose to Network** lets phones, iPads and other computers on your network reach the server at your Mac's network address (the Server tab shows it). While it's on, every caller needs an access key, including apps on this Mac; Osaurus's own Shortcuts actions keep working. Turning on **Local Network Discovery** for an agent also turns this on. Updating to this version turned the switch off once if it was saved on, because earlier Intel builds never honoured it.
 
+## Pair your iPhone
+
+Settings → **Mobile** pairs the Osaurus iPhone app with this Mac. Turn on **Expose to Network** first (the page offers it), keep the iPhone on the same network, then **Generate Pairing Code** and type the 6-digit code into the app. One iPhone per Mac: pairing a new one unpairs the old one, and **Unpair** under **Paired iPhone** cuts it off at once. **Keep Mac Awake for Paired iPhone** stops idle sleep only while a phone is paired. Using your agents from the iPhone comes with the next steps of this port; on this build the iPhone pairs but can't chat yet.
+
 ## Access keys
 
 Settings → Server → Access Keys: **Generate Key** creates an `osk-v1` key for callers when network exposure is on. The full key is shown once; Revoke takes effect immediately. Agent-scoped keys come from the agent's row in Settings → Identity.

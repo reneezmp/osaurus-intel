@@ -10,8 +10,9 @@
 //  Upstream's handlers and DTOs (docs/MOBILE_PROTOCOL.md §13–§14, §17);
 //  edits go through upstream's `PhoneAgentEditing`.
 //
-//  Intel differences: no phone connect identity yet (`W-identity-mobile`),
-//  so the built-in agent lists no address; the relay URL follows Intel's
+//  Intel differences: the built-in agent carries the Mac's connect identity
+//  for the owner while no custom agent has an address (upstream, since
+//  `W-identity-mobile` stage 1); the relay URL follows Intel's
 //  relay manager (a stub: always off); the Orchestrator sends no
 //  configure-oriented quick actions (Intel's chat shows the ordinary ones);
 //  and image support is judged from Intel's picker items (remote models
@@ -115,7 +116,8 @@ extension HTTPHandler {
 
     @MainActor
     private static func agentListItem(
-        _ agent: Agent, memoryCount: Int, pickerItems: [ModelPickerItem], formatter: ISO8601DateFormatter
+        _ agent: Agent, memoryCount: Int, pickerItems: [ModelPickerItem], formatter: ISO8601DateFormatter,
+        connectAddress: String? = nil
     ) -> AgentListItem {
         let modelId = AgentManager.shared.effectiveModel(for: agent.id) ?? agent.defaultModel
         let relayOn = RelayTunnelManager.shared.isTunnelEnabled(for: agent.id)
@@ -134,7 +136,7 @@ extension HTTPHandler {
             memory_entry_count: memoryCount,
             created_at: formatter.string(from: agent.createdAt),
             updated_at: formatter.string(from: agent.updatedAt),
-            address: agent.id == Agent.defaultId ? nil : agent.agentAddress?.lowercased(),
+            address: agent.id == Agent.defaultId ? connectAddress : agent.agentAddress?.lowercased(),
             relay_url: relayOn ? agent.agentAddress.map(relayPublicURL(forAddress:)) : nil,
             custom_avatar: agent.customAvatarURL != nil ? true : nil,
             system_prompt: nil
@@ -163,12 +165,20 @@ extension HTTPHandler {
                 }
             }
             let counts = memoryCounts
+            // The owner's phone pins the Mac's connect identity under the
+            // built-in agent while no custom agent has an address of its own
+            // (upstream; read off main, it reads the Keychain once).
+            let needsConnectIdentity = await MainActor.run {
+                ownerCaller && !AgentManager.shared.agents.contains { !$0.isBuiltIn && $0.agentAddress != nil }
+            }
+            let connectAddress = needsConnectIdentity ? MobileConnectIdentity.address() : nil
             let items: [AgentListItem] = await MainActor.run {
                 let pickerItems = ModelPickerItemCache.shared.items
                 let formatter = ISO8601DateFormatter()
                 return AgentManager.shared.agents.filter { ownerCaller || !$0.isBuiltIn }.map {
                     Self.agentListItem(
-                        $0, memoryCount: counts[$0.id.uuidString] ?? 0, pickerItems: pickerItems, formatter: formatter)
+                        $0, memoryCount: counts[$0.id.uuidString] ?? 0, pickerItems: pickerItems, formatter: formatter,
+                        connectAddress: connectAddress)
                 }
             }
             let json = Self.encoded(AgentListResponse(agents: items), fallback: #"{"agents":[]}"#)

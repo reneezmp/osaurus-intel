@@ -1,0 +1,78 @@
+//
+//  PairingRateLimiter.swift
+//  osaurus
+//
+//  Per-source-IP rate limiting for the unauthenticated pairing endpoints
+//  (`GET /pair/challenge`, `POST /pair`). Without this an attacker on the LAN
+//  could spam approval prompts on the advertiser's Mac or brute the challenge
+//  store. A short cooldown is applied after a denial so a rejected device
+//  cannot immediately retry in a tight loop.
+//
+
+import Foundation
+
+public final class PairingRateLimiter: @unchecked Sendable {
+    public static let shared = PairingRateLimiter()
+
+    private let lock = NSLock()
+    private var hits: [String: [Date]] = [:]
+    private var cooldownUntil: [String: Date] = [:]
+
+    private let window: TimeInterval
+    private let maxPerWindow: Int
+    private let denialCooldown: TimeInterval
+
+    private convenience init() {
+        self.init(window: 60, maxPerWindow: 5, denialCooldown: 30)
+    }
+
+    /// Dedicated limiter for another unauthenticated surface (for example
+    /// the Agent Channel webhook ingress) whose traffic profile differs from
+    /// pairing. Each instance keeps its own per-source ledger so a chatty
+    /// webhook cannot burn the pairing budget or vice versa.
+    public init(window: TimeInterval, maxPerWindow: Int, denialCooldown: TimeInterval) {
+        self.window = window
+        self.maxPerWindow = max(1, maxPerWindow)
+        self.denialCooldown = denialCooldown
+    }
+
+    /// Record an attempt from `ip`. Returns `false` when the caller is inside a
+    /// denial cooldown or has exceeded `maxPerWindow` attempts in the trailing
+    /// `window`.
+    public func allow(ip: String) -> Bool {
+        let now = Date()
+        lock.lock()
+        defer { lock.unlock() }
+
+        if let until = cooldownUntil[ip] {
+            if until > now { return false }
+            cooldownUntil.removeValue(forKey: ip)
+        }
+
+        var recent = (hits[ip] ?? []).filter { now.timeIntervalSince($0) < window }
+        guard recent.count < maxPerWindow else {
+            hits[ip] = recent
+            return false
+        }
+        recent.append(now)
+        hits[ip] = recent
+        return true
+    }
+
+    /// Apply a cooldown after an explicit denial so a rejected peer backs off.
+    public func penalize(ip: String) {
+        let now = Date()
+        lock.lock()
+        defer { lock.unlock() }
+        cooldownUntil[ip] = now.addingTimeInterval(denialCooldown)
+    }
+
+    /// Intel test seam: route tests share 127.0.0.1, so each starts with an
+    /// empty ledger instead of inheriting another test's cooldown.
+    func resetForTesting() {
+        lock.lock()
+        defer { lock.unlock() }
+        hits.removeAll()
+        cooldownUntil.removeAll()
+    }
+}

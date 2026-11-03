@@ -57,13 +57,16 @@ enum IntelNetworkExposure {
         )
     }
 
-    /// Bonjour agents are advertised only while the server is reachable from
-    /// the network (upstream).
+    /// Bonjour agents, and this Mac itself for the phone's pairing
+    /// (`_osaurus-mobile._tcp`, `W-identity-mobile`), are advertised only
+    /// while the server is reachable from the network (upstream).
     static func syncBonjour(for config: ServerConfiguration) {
         if config.exposeToNetwork {
             BonjourAdvertiser.shared.startAdvertising(port: config.port)
+            MobileConnectAdvertiser.shared.startAdvertising(port: config.port)
         } else {
             BonjourAdvertiser.shared.stopAdvertising()
+            MobileConnectAdvertiser.shared.stopAdvertising()
         }
     }
 

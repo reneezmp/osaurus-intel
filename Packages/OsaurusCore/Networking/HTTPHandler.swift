@@ -890,6 +890,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
         case (.POST, "/mcp/call"):
             serveMCPCallTool(context: context, head: head)
         default:
+            if routePairingRequest(context: context, head: head, path: path) { return }
             if routeRunRequest(context: context, head: head, path: path) { return }
             if routeAgentRequest(context: context, head: head, path: path) { return }
             if routeTaskRequest(context: context, head: head, path: path) { return }
@@ -1026,7 +1027,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
     /// Bucketing key for the client address (upstream). Relay traffic keys on
     /// the first `X-Forwarded-For` hop; it is a hint, never an identity claim.
-    private func remoteIP(_ context: ChannelHandlerContext) -> String {
+    func remoteIP(_ context: ChannelHandlerContext) -> String {
         let socketIP = context.channel.remoteAddress?.ipAddress ?? "unknown"
         guard stateRef.value.isRelayOrigin else { return socketIP }
         return Self.relayRateLimitKey(

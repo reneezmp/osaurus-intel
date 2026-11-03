@@ -182,6 +182,7 @@ struct ShareAgentSheet: View {
             case .connecting: return (theme.accentColor, "arrow.triangle.2.circlepath")
             case .disconnected: return (theme.tertiaryText, "moon.zzz.fill")
             case .error: return (theme.errorColor, "exclamationmark.triangle.fill")
+            case .servedElsewhere: return (theme.warningColor, "laptopcomputer.and.iphone")
             }
         }()
         return Image(systemName: icon)
@@ -197,6 +198,7 @@ struct ShareAgentSheet: View {
         case .connecting: return "Connecting…"
         case .disconnected: return "Relay Off"
         case .error(let msg): return "Relay Error: \(msg)"
+        case .servedElsewhere: return L("Served From Another Device")
         }
     }
 
@@ -210,6 +212,8 @@ struct ShareAgentSheet: View {
             return "Enable the relay tunnel so others can reach this agent."
         case .error:
             return "Open the Sandbox tab to retry the relay connection."
+        case .servedElsewhere:
+            return L("Another Mac with the same identity is serving this agent over the relay.")
         }
     }
 

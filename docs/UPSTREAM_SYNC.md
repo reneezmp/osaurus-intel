@@ -4540,6 +4540,15 @@ verbatim; the doc explains why. Moved ahead of `W-identity-mobile` by
 Renée because the paired phone needs the gate and the routes.
 
 
+### Paired phone (`W-identity-mobile`, in progress) — 2026-11-02
+
+Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
+- **Stage 1:** Settings → Mobile and 6-digit pairing on the LAN (upstream's
+  `MobilePairingService`, SPAKE2 v2, `/pair/*`, the connect identity, the
+  `_osaurus-mobile._tcp` advertiser). v1 pairing (HPKE) is macOS 14+; no
+  relay URLs until the relay is real; `MobileConnectLog` always logs to
+  `~/Library/Logs/Osaurus` because Intel ships Debug builds.
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

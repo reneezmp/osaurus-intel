@@ -3164,6 +3164,14 @@ final class ServerController: ObservableObject, @unchecked Sendable {
     /// happens on Intel).
     func startServer() async {}
 
+    /// Upstream: start the server if it isn't running. Intel's
+    /// `OsaurusServer` runs from launch, so there is nothing to start.
+    static func ensureRunning() async {}
+
+    /// Upstream: why the server can't take requests, or nil. Intel's server
+    /// is always up while the app runs.
+    static func notRunningReason() -> String? { nil }
+
     /// Persists `configuration` and asks `AppDelegate` to stop + restart
     /// the live `OsaurusServer` in place with the new port / CORS /
     /// body-size caps. Also the same path `IdentityView` calls after an

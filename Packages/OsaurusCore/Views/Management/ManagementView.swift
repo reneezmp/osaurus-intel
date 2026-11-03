@@ -220,6 +220,8 @@ private extension ManagementView {
             RemoteProvidersView()
         case .credits:
             CreditsView()
+        case .connect:
+            OsaurusConnectView()
         case .agents:
             AgentsView(deeplinkAgentId: deeplinkAgentId)
         case .orchestrator:

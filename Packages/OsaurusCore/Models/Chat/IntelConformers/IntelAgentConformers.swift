@@ -181,6 +181,8 @@ public enum AgentRelayStatus: Sendable, Equatable {
     case connecting
     case connected(String)
     case error(String)
+    /// Upstream: another Mac with the same identity holds this agent's tunnel.
+    case servedElsewhere
 }
 
 // Agent bundle manifest: the real one (Services/AgentBridge/AgentBundleService.swift).
@@ -201,6 +203,15 @@ final class RelayTunnelManager: ObservableObject, @unchecked Sendable {
     /// call sites invoke it from non-async alert-button closures, so
     /// the Intel surface is synchronous + non-throwing.
     func setTunnelEnabled(_ enabled: Bool, for agentId: UUID) {}
+    /// Upstream's relay URL for an agent address (§6.1).
+    nonisolated static func publicURL(forAddress address: String) -> String {
+        "https://\(address.lowercased()).agent.osaurus.ai"
+    }
+
+    /// False until the relay is real (`W-identity-mobile` stage 4): the
+    /// pairing payload then offers no relay URLs, so the phone is never
+    /// handed a route that can't answer.
+    nonisolated static let isAvailableOnIntel = false
 }
 
 // ScheduleManager is now the real one (Managers/ScheduleManager.swift),

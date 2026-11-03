@@ -46,7 +46,9 @@ public enum ManagementSection: String, CaseIterable, Identifiable, Sendable {
         // Upstream #2950: Conversation follows General; Storage folded into
         // General → Advanced → Data & Storage (the `.storage` case stays for
         // deep links and routes to General).
-        case .general: [.settings, .chat, .voice, .themes, .credits, .identity, .permissions]
+        // `.connect` (Mobile) sits after Credits as upstream orders it
+        // (`W-identity-mobile`, 2026-11-02).
+        case .general: [.settings, .chat, .voice, .themes, .credits, .connect, .identity, .permissions]
         case .models: [.providers]
         case .agents: [.orchestrator, .agents]
         case .capabilities: [.search, .knowledge, .memory, .tools, .skills, .commands, .plugins]
@@ -62,6 +64,9 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
     case models
     case providers
     case credits
+    /// Upstream's "Mobile" tab: pair the Osaurus iPhone app
+    /// (`W-identity-mobile`).
+    case connect
     case agents
     case orchestrator
     case plugins
@@ -103,6 +108,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .models: "cube.box.fill"
         case .providers: "cloud.fill"
         case .credits: "creditcard.fill"
+        case .connect: "iphone.radiowaves.left.and.right"
         case .agents: "person.2.fill"
         case .orchestrator: "point.3.connected.trianglepath.dotted"
         case .plugins: "puzzlepiece.extension.fill"
@@ -133,6 +139,7 @@ public enum ManagementTab: String, CaseIterable, Identifiable, Sendable {
         case .models: L("Local Models")
         case .providers: L("Cloud Models")
         case .credits: L("Credits")
+        case .connect: L("Mobile")
         case .agents: L("Agents")
         case .orchestrator: L("Orchestrator")
         case .plugins: L("Plugins")

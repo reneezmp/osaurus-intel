@@ -1147,6 +1147,10 @@ private struct RelaysSectionView: View {
             Circle()
                 .fill(theme.errorColor)
                 .frame(width: 8, height: 8)
+        case .servedElsewhere:
+            Circle()
+                .fill(theme.warningColor.opacity(0.6))
+                .frame(width: 8, height: 8)
         }
     }
 }

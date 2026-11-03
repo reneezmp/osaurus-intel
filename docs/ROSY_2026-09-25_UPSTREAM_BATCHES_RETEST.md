@@ -2493,3 +2493,41 @@ Qwen's missing Thinking and Venice's persona are Router/model behaviour (see
 `UPSTREAM_SYNC.md`, "Rosy candidate 1.0.61 (build 64): results"). Settings
 layout issues (Behavior overlap, Folder Tool gaps) predate 1.0.61; backlog
 `W-settings-ventura-gaps`.
+
+## Paired iPhone: pairing (2026-11-02)
+
+`W-identity-mobile` stage 1 (`IDENTITY_MOBILE_INTEL.md`). Needs the Osaurus
+iPhone app (TestFlight) on a phone on the same Wi-Fi as Rosy. On this stage
+the phone pairs but **can't chat yet** (that's stage 2, the Secure Channel);
+the steps stop at pairing.
+
+- [ ] Settings shows a **Mobile** tab between Credits and Identity. It has
+      "Pair an iPhone", "Paired iPhone" and "Availability" with only **Keep
+      Mac Awake for Paired iPhone** (no "Reach From Anywhere" yet, and no
+      "On This Mac" section).
+- [ ] With **Expose to Network** off, the page says "This Mac only accepts
+      connections from itself…" with an **Allow** button, and **Generate
+      Pairing Code** is disabled. **Allow** turns it on and the button
+      enables
+      (Server › Settings › Connection now shows it on).
+- [ ] **Generate Pairing Code** shows a 6-digit code (`123 456`) and
+      "Expires in 4:59" counting down. `curl -s http://127.0.0.1:1337/pair/hello` answers
+      `"pairing":true` while it shows, `false` after **Cancel**.
+- [ ] In the iPhone app, find the Mac (Bonjour lists it by Rosy's name; if
+      not, the app probes the network or takes a typed address) and type a
+      **wrong** code: the app says the code is wrong, and the Mac's code
+      stays up. Five wrong tries end the code.
+- [ ] Generate a new code and type it correctly: the app reports it's
+      paired, the Mac's code disappears, and **Paired iPhone** shows the
+      phone's name, the pairing date and "access until" about 90 days out.
+      Settings › Identity › Access Keys lists a "Mobile" key.
+- [ ] `~/Library/Logs/Osaurus/mobile-connect.log` exists and records the
+      code, the pairing and the phone's requests, but never the code
+      digits or the key.
+- [ ] Pair again from the phone with a fresh code: still one paired
+      phone, and the previous "Mobile" key shows as revoked.
+- [ ] **Unpair** (with its confirmation) clears Paired iPhone; the
+      "Mobile" key is revoked.
+- [ ] With Keep Mac Awake on and a phone paired, `pmset -g assertions`
+      lists an Osaurus "keep this Mac reachable" assertion; after Unpair
+      (or with the switch off) it's gone.

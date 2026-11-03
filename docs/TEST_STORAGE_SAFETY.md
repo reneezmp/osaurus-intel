@@ -442,6 +442,22 @@ other gate failures.
   `IntelUpstreamBatch1007Tests` "Memory pressure empties the avatar bitmap
   cache" fails under it (no image to render); every other test passed
   (4,027 tests, 2026-10-30). Use the normal gate again once macOS is fixed.
+- **Keep the Mac awake for the whole gate.** The full run takes a long time
+  on the MacBook Air. On 2026-11-02 the Mac slept partway through and one
+  test "ran" for 6,253 seconds before its one-minute time limit fired on
+  wake. Wrap the test command in `/usr/bin/caffeinate -i -s` (the same
+  `swift test …` arguments). A closed lid still sleeps the Mac, so leave it
+  open.
+- **A log with no `Test run with N tests` line means the test process
+  crashed.** The log just stops after
+  `Note: Some test targets reported failures`. Read the newest
+  `~/Library/Logs/DiagnosticReports/swiftpm-testing-helper-*.ips` (the
+  faulting thread names the culprit), then rerun the suite named last in
+  the log with `--filter` to see whether it fails alone or only after
+  others. Example (2026-11-02): a main-actor Combine sink on
+  `AgentManager.shared.$agents` trapped (`EXC_BREAKPOINT` in
+  `dispatch_assert_queue`) because Intel's `AgentManager` publishes from
+  any thread. Intel subscribers add `.receive(on: RunLoop.main)`.
 - **The gate runs arm64, not Intel.** Found while setting up the interim
   gate: with Xcode 27.2, `arch -x86_64 /usr/bin/swift test` still builds and
   runs the tests as native arm64 (`file` on
