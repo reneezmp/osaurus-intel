@@ -2680,3 +2680,23 @@ expected to refuse. From Terminal on Rosy, with the server running:
       `<redacted>`.
 - [ ] Pairing the iPhone with the 6-digit code (earlier sections) still
       works: owner redeem is an extra way in, not a replacement.
+
+## Osaurus ID (2026-11-03)
+
+`W-identity-mobile` stage 6 (`IDENTITY_MOBILE_INTEL.md`). Needs the Osaurus
+Router on (the card's **Open Router settings** button goes there) and an
+identity. A claim is permanent, so
+only claim a handle you want to keep.
+
+- [ ] Settings › Identity starts with an **OSAURUS ID** card above the
+      master address.
+- [ ] If your account already has an Osaurus ID (claimed on the M4), the
+      card shows that `@handle`, and the page header reads
+      "@handle · Your identity is active".
+- [ ] If not: type a handle. Below the field it says whether it is
+      available, taken, reserved or not allowed as you type. Claiming asks
+      you to confirm first. (Skip the claim itself if you don't want one.)
+- [ ] With a handle: **Edit** the display name and bio, save, quit and
+      reopen Osaurus: the edits are still there.
+- [ ] Turn the Osaurus Router off: the card shows one quiet line with a way
+      to turn it back on, no error.

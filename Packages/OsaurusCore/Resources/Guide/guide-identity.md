@@ -13,6 +13,7 @@ Osaurus gives you and each agent a cryptographic address. Osaurus Cloud credits,
 - **Master address** — your root identity, created on first use (onboarding does it for you) and stored in the Keychain.
 - **Agent addresses** — each agent can have its own address derived from the master. Assign, rotate, or revoke them under Settings… (⌘,) → Identity; rotation and revocation invalidate keys issued for the old address.
 - **Device ID** — an identity for this Mac.
+- **Osaurus ID** — a public `@handle` for your master address, with an optional display name and bio. Claim it in the Osaurus ID card at the top of Settings… (⌘,) → Identity; it needs the Osaurus Router turned on. A claim is permanent and asks you to confirm first. If your account already has one (claimed on another Mac), this Mac shows it instead.
 
 ## Recovery
 
@@ -28,4 +29,4 @@ Osaurus gives you and each agent a cryptographic address. Osaurus Cloud credits,
 
 ## Not in this build
 
-Pairing a phone or another Mac, workspaces, and shared agents across devices.
+Pairing another Mac, workspaces, and shared agents across devices. Pairing your iPhone is in Settings → Mobile (see Server and API).

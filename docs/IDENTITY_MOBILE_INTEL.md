@@ -506,3 +506,33 @@ the backlog.
     - The temp root was removed. Nothing was written to `~/.osaurus` or
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Owner redeem on `/pair-invite`" in the Rosy retest checklist.
+- **Stage 6 (2026-11-03): Osaurus ID.**
+  - **Ported from upstream:** `OsaurusIDService` (the claimed `@handle`,
+    display name and bio, from the router's `/id/*`), `OsaurusIDSessionStore`
+    (the `osk_…` session token in the Keychain, `ai.osaurus.id` /
+    `session-token`) and `OsaurusIDSection` (the Osaurus ID card at the top
+    of Settings → Identity; the header shows `@handle · Your identity is
+    active`), with upstream's `OsaurusIDTests`. Intel already had the
+    router client's `/id/*` calls and types; they now use the stored
+    session token instead of always signing with the wallet.
+  - **Came with it:** upstream's action button styles (`ActionButtonSize`,
+    a loading spinner, `.compact`) replaced Intel's older copy in
+    `AgentSheetChrome`; `.regular` matches the old buttons exactly.
+    `IdentitySection` is shared with the new card, as upstream.
+  - **Intel differences:** the one-argument `onChange` (macOS 13).
+  - **Found on the way:** this development Mac's login keychain already
+    holds an upstream build's Osaurus ID session token (2026-09-24). Tests
+    can't read it (keychain flag); the gate now checks its `mdat` too
+    (`TEST_STORAGE_SAFETY.md`).
+  - **Left elsewhere:** upstream's template export names the author by the
+    claimed handle; templates are `W-agent-templates` (noted there).
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,391 tests in 549 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 (macOS 13) build with tests compiles.
+    - Classifiers: `W-identity-mobile` 1 file left (`OsaurusKeychainGroup`,
+      stage 7), UNASSIGNED 0. Guide check clean (`guide-identity.md`).
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The master key and Osaurus ID session `mdat`s are
+      unchanged.
+    - Rosy: "Osaurus ID" in the Rosy retest checklist.

@@ -25,11 +25,10 @@ actor OsaurusRouterAPIClient {
         searchSession: URLSession? = nil,
         signer: OsaurusRouterAuthSigner = OsaurusRouterAuthSigner(),
         authOverride: (@Sendable (inout URLRequest, Data?) async throws -> Void)? = nil,
-        // Intel: no Osaurus ID session store yet (keychain-backed; it comes
-        // with `W-identity-mobile` / `W-keychain-layer`), so `/id/*`
-        // calls fall back to wallet signing.
-        idSessionToken: @escaping @Sendable () -> String? = { nil },
-        clearIDSession: @escaping @Sendable () -> Void = {}
+        // The Osaurus ID session token (upstream; `W-identity-mobile`
+        // stage 6). Without one, `/id/*` calls fall back to wallet signing.
+        idSessionToken: @escaping @Sendable () -> String? = { OsaurusIDSessionStore.token() },
+        clearIDSession: @escaping @Sendable () -> Void = { OsaurusIDSessionStore.clear() }
     ) {
         self.baseURL = baseURL
         self.signer = signer

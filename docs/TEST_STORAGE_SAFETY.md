@@ -383,6 +383,16 @@ a postflight check now includes the identity item's `mdat`
 (`security find-generic-password -s com.osaurus.account -a master-key | grep mdat`,
 attributes only) before and after a run; it must not change.
 
+**2026-11-03 (`W-identity-mobile` stage 6):** this development Mac's login
+keychain also holds an Osaurus ID session token from an upstream build
+(service `ai.osaurus.id`, account `session-token`, created 2026-09-24). Intel
+now reads that item (`OsaurusIDSessionStore`). Under the keychain flag every
+read answers `.disabled`, so tests never see it; the gate script also
+compares its `mdat` before and after (attributes only, never the value).
+Don't stop a gate by killing its script alone: the `swift test` child keeps
+running and its temp root is never removed. Stop the `swift test` processes
+too, then delete that `osaurus-tests.*` root by hand.
+
 ## 2026-10-30 gate crash: macOS beta older than the Xcode SDK
 
 Not a storage incident, but it stops the gate, so it lives here with the

@@ -4591,6 +4591,13 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   (`BonjourBrowser`), the invite deep link and `/pair` moved to
   `W-workspaces-sharing`; workspace and invite requests on `/pair-invite`
   answer `501`.
+- **Stage 6 (2026-11-03):** Osaurus ID: upstream's `OsaurusIDService`,
+  `OsaurusIDSessionStore` (Keychain `ai.osaurus.id` / `session-token`) and
+  the Identity page's Osaurus ID card. The router client's `/id/*` calls
+  use the stored session token (they fell back to wallet signing).
+  Upstream's newer action button styles (loading spinner, compact size)
+  came with it; the regular size is unchanged. The one-argument
+  `onChange` keeps it on macOS 13.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
