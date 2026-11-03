@@ -556,11 +556,19 @@ private struct ChatTabItemView: View {
     /// via API / channel, delegated…), so a background run's tab reads as
     /// such at a glance. Nil for ordinary chats.
     private var originIconName: String? {
-        session.source == .chat ? nil : session.source.iconName
+        if isFromPairedPhone { return "iphone" }
+        return session.source == .chat ? nil : session.source.iconName
     }
 
-    // Intel: no workspaces or paired iPhone, so no workspace origin.
+    /// A chat the paired iPhone started (upstream #3135), so its tab reads
+    /// as the iPhone's. Intel has no workspace rows to count.
+    private var isFromPairedPhone: Bool {
+        session.source == .chat && session.externalSessionKey == RemoteSessionContinuation.phoneChatKey
+    }
+
+    // Intel: no workspaces, so no workspace origin.
     private var originLabel: String? {
+        if isFromPairedPhone { return "via iPhone" }
         guard session.source != .chat else { return nil }
         let pluginName = session.sourcePluginId.map(PluginDisplayNameResolver.displayName(for:))
         return session.source.originLabel(pluginDisplayName: pluginName)

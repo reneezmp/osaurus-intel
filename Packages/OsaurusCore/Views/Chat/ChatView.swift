@@ -964,6 +964,15 @@ final class ChatSession: ObservableObject {
 
     /// Rebuild `visibleBlocks` and `visibleBlocksGroupHeaderMap` from current turns.
     /// Cheap to call repeatedly — BlockMemoizer fast-paths when nothing changed.
+    /// Append turns a paired phone's run added to this chat (upstream
+    /// `appendHostedTurns`, `W-identity-mobile` stage 3b). The caller saves.
+    func appendHostedTurns(_ data: [ChatTurnData]) {
+        guard !data.isEmpty else { return }
+        turns.append(contentsOf: data.map { ChatTurn(from: $0) })
+        isDirty = true
+        rebuildVisibleBlocks()
+    }
+
     /// Drop `turnId` and every turn after it, for a paired phone retrying a
     /// reply (`POST /sessions/{id}/truncate`; upstream). Returns how many
     /// turns went, or nil when the turn is not in this transcript. The
@@ -1597,6 +1606,12 @@ final class ChatSession: ObservableObject {
 
     func sendCurrent() {
         guard !isStreaming else { return }
+        // The phone is replying in this chat: held until its turns are in
+        // (`sendHeldForPhone`), so the two never interleave (upstream).
+        if let sessionId, RemoteSessionContinuation.isPhoneReplying(sessionId) {
+            enqueueSend(input, attachments: pendingAttachments)
+            return
+        }
         let text = input
         let attachments = pendingAttachments
         input = ""
@@ -2341,6 +2356,7 @@ final class ChatSession: ObservableObject {
 
     /// Edit a user message and regenerate from that point
     func editAndRegenerate(turnId: UUID, newContent: String) {
+        guard !isPhoneReplyingHere else { return }
         guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
         guard turns[index].role == .user else { return }
 
@@ -2450,6 +2466,7 @@ final class ChatSession: ObservableObject {
 
     /// Regenerate an assistant response (removes it and regenerates)
     func regenerate(turnId: UUID) {
+        guard !isPhoneReplyingHere else { return }
         guard let index = turns.firstIndex(where: { $0.id == turnId }) else { return }
         guard turns[index].role == .assistant else { return }
 
@@ -2801,6 +2818,25 @@ final class ChatSession: ObservableObject {
         guard activeRunId == nil, !isStreaming else { return }
         guard folderState.hasActiveFolder else { return }
         send("")
+    }
+
+    /// The paired phone is replying in this chat. Intel's Regenerate and
+    /// Edit cut the transcript before sending, and a held regeneration would
+    /// leave it cut, so they wait for the phone instead (upstream rolls the
+    /// cut back).
+    private var isPhoneReplyingHere: Bool {
+        sessionId.map(RemoteSessionContinuation.isPhoneReplying) ?? false
+    }
+
+    /// The phone's run in this chat ended and its turns are in: the send held
+    /// for it goes now (see `RemoteSessionContinuation.isPhoneReplying`).
+    func sendHeldForPhone() {
+        guard !isStreaming, activeRunId == nil, let pending = queuedSend else { return }
+        queuedSend = nil
+        if let skillId = pending.oneOffSkillId {
+            pendingOneOffSkillId = skillId
+        }
+        send(pending.text, attachments: pending.attachments)
     }
 
     /// Dispatch any queued send when the run ended naturally (no `stop()`
@@ -3280,6 +3316,15 @@ final class ChatSession: ObservableObject {
                     + "sessionId=\(String(describing: sessionId))"
             )
             #endif
+            return
+        }
+        // Every other send path (queued flush, regeneration, voice) waits for
+        // the phone's run in this chat too; a message is held, not lost
+        // (upstream).
+        if let sessionId, RemoteSessionContinuation.isPhoneReplying(sessionId) {
+            if hasContent {
+                queuedSend = QueuedSend(text: trimmed, attachments: attachments, oneOffSkillId: pendingOneOffSkillId)
+            }
             return
         }
 

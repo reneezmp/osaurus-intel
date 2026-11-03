@@ -1102,7 +1102,7 @@ private struct SessionRow: View {
                             // early while empty space sat after the badges.
                             .frame(maxWidth: .infinity, alignment: .leading)
 
-                        if session.source != .chat {
+                        if session.source != .chat || isFromPairedPhone {
                             sourceBadge
                         }
 
@@ -1519,9 +1519,9 @@ private struct SessionRow: View {
 
     /// Compact icon-only badge that surfaces the session's `SessionSource`
     /// (plugin / http / schedule / watcher). Chat-source rows hide it.
-    /// Intel: no paired iPhone, channel, delegation or workspace origins.
+    /// Intel: no channel, delegation or workspace origins.
     private var sourceBadge: some View {
-        Image(systemName: session.source.iconName)
+        Image(systemName: isFromPairedPhone ? "iphone" : session.source.iconName)
             .font(.system(size: 8.5, weight: .semibold))
             .foregroundColor(sourceBadgeColor)
             .frame(width: 14, height: 14)
@@ -1536,6 +1536,12 @@ private struct SessionRow: View {
     /// dimension is glanceable without expanding the row.
     private var metadataLine: String {
         var parts: [String] = [formatRelativeDate(session.updatedAt)]
+        // A phone chat's key is a marker, not something to read, so the row
+        // names the iPhone and stops there (upstream).
+        if isFromPairedPhone {
+            parts.append("via iPhone")
+            return parts.joined(separator: " · ")
+        }
         let pluginName = session.sourcePluginId.map(PluginDisplayNameResolver.displayName(for:))
         if let origin = session.source.originLabel(pluginDisplayName: pluginName) {
             parts.append(origin)
@@ -1563,9 +1569,18 @@ private struct SessionRow: View {
         }
     }
 
+    /// A chat the paired iPhone started (upstream #3135): an ordinary chat,
+    /// shown as the iPhone's.
+    private var isFromPairedPhone: Bool {
+        RemoteSessionContinuation.isFromPairedPhone(session)
+    }
+
     private var sourceBadgeHelp: Text {
         switch session.source {
         case .chat:
+            if isFromPairedPhone {
+                return Text("Mobile", bundle: .module)
+            }
             return Text("Chat", bundle: .module)
         case .plugin:
             if let pid = session.sourcePluginId {

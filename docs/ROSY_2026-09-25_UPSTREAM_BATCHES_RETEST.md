@@ -2590,3 +2590,35 @@ Wi-Fi; pair first. Continuing a Mac chat on the phone is not in this build
       without a thinking section. Turn Thinking back on: the next reply
       shows its thinking again. The Mac's chat picker shows the same
       choice for that model.
+
+## Paired iPhone: continuing Mac chats (2026-11-03)
+
+`W-identity-mobile` stage 3b (`IDENTITY_MOBILE_INTEL.md`). Same phone and
+Wi-Fi; pair first. Sending images from the phone is not in this build
+(stage 3c).
+
+- [ ] Continue a Mac chat: on Rosy, have a short chat with an agent ("my
+      cat is called Miso"). On the phone, open that chat from its history
+      and ask "what's my cat called?". The answer uses the earlier
+      messages (Miso), and the phone's question and the answer appear in
+      the chat on Rosy, in order, without any memory text in the question.
+- [ ] Window open: repeat with that chat open in a Rosy window. The new
+      messages show up in the window as the phone's reply ends.
+- [ ] Tool steps: from the phone, ask something that uses a tool (for
+      example "what time is it?"). On Rosy, the chat shows the tool call as
+      finished with its result, not as still running.
+- [ ] New chat from the phone: start a new chat on the phone and send a
+      message. Rosy's History gains a chat titled from that message, with an
+      iPhone badge and "via iPhone"; opening it shows a tab labelled
+      "via iPhone". Reopen it on the phone and send another message: it
+      stays one chat on both.
+- [ ] Held send: start a long reply from the phone in a chat that is open
+      on Rosy, then send a message in that chat on Rosy straight away. It
+      waits (shown as queued) and goes once the phone's reply is in, below
+      it. History shows the chat as running while the phone replies.
+- [ ] Continue Phone Chats on This Mac (Settings › Mobile, on): lock Rosy,
+      use a chat on the phone, then unlock Rosy. That chat comes to the
+      front. Turn the switch off and repeat: nothing opens.
+- [ ] Voice call in a chat: start a voice call from a chat on the phone,
+      ask one question, end the call. On Rosy the chat shows the question
+      and the short answer, with no "[Voice call]" text in the question.

@@ -8,9 +8,9 @@
 //
 //  Intel (`W-identity-mobile` stage 1, docs/IDENTITY_MOBILE_INTEL.md):
 //  "Reach From Anywhere" and its relay status wait for the real relay
-//  (stage 4), and "Continue Phone Chats on This Mac" for `PhoneChatHandoff`
-//  (stage 3), so both are hidden until then (`intelRelayReady`,
-//  `intelHandoffReady`). `onChange` uses the one-argument form (macOS 13),
+//  (stage 4), so they are hidden until then (`intelRelayReady`).
+//  "Continue Phone Chats on This Mac" is shown since stage 3b.
+//  `onChange` uses the one-argument form (macOS 13),
 //  and turning on network access goes through Intel's `ServerController`.
 //
 
@@ -25,12 +25,9 @@ struct OsaurusConnectView: View {
 
     @AppStorage(MobilePairingService.keepAwakeDefaultsKey) private var keepMacAwake: Bool = true
     @AppStorage(MobilePairingService.reachAnywhereDefaultsKey) private var reachFromAnywhere: Bool = true
-    /// Upstream: `PhoneChatHandoff.defaultsKey` (stage 3 on Intel).
-    @AppStorage("ai.osaurus.connect.continuePhoneChats") private var continuePhoneChats: Bool = true
+    @AppStorage(PhoneChatHandoff.defaultsKey) private var continuePhoneChats: Bool = true
     /// Intel: the relay is a stub until stage 4.
     static let intelRelayReady = RelayTunnelManager.isAvailableOnIntel
-    /// Intel: `PhoneChatHandoff` comes with stage 3.
-    static let intelHandoffReady = false
     @State private var hasAppeared = false
     @State private var isEnablingNetwork = false
     @State private var showRevokeConfirm = false
@@ -51,9 +48,7 @@ struct OsaurusConnectView: View {
                         pairingSection
                         pairedDeviceSection
                         powerSection
-                        if Self.intelHandoffReady {
-                            handoffSection
-                        }
+                        handoffSection
                     }
                     .padding(24)
                     .frame(maxWidth: .infinity)

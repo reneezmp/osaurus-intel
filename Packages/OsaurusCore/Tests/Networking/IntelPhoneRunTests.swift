@@ -48,7 +48,7 @@ struct IntelPhoneRunTests {
         #expect((response as? HTTPURLResponse)?.statusCode == 200)
         let sse = try phone.openStream(data, requestSeq: seq)
         #expect(sse.contains("early"))
-        #expect(sse.contains("late"))
+        #expect(sse.contains("late"), "replayed: \(sse)")
         #expect(sse.hasSuffix("data: [DONE]\n\n"))
 
         // Past the end is gone, not a silent empty stream.
@@ -115,6 +115,73 @@ struct IntelPhoneRunTests {
         #expect(DetachedPhoneRuns.shared.run(id: runId) == nil)
     }
 
+    /// Stage 3b: the phone continues one of the Mac's chats. The chat is the
+    /// run's context, and the run's turns land back in it: the phone's
+    /// message as typed (no memory, no voice-call note), then the reply with
+    /// its tool step, as the Mac's own window would have kept it.
+    @Test func continuingAMacChat_readsItAndAppendsTheRun() async throws {
+        let stored = ChatSessionData(
+            title: "Earlier",
+            turns: [
+                ChatTurnData(id: UUID(), role: .user, content: "earlier question", createdAt: Date()),
+                ChatTurnData(id: UUID(), role: .assistant, content: "earlier reply", createdAt: Date()),
+            ],
+            agentId: Agent.defaultId)
+        await MainActor.run { ChatSessionsManager.shared.save(stored) }
+        defer { Task { @MainActor in ChatSessionsManager.shared.delete(id: stored.id) } }
+        let engine = PhoneRunEngine(early: [
+            "Let me check. ",
+            StreamingToolHint.encodeDone(callId: "c1", name: "get_current_time", arguments: "{}", result: "12:00"),
+            "It's noon.",
+        ])
+        let server = try await startPhoneRunServer(engine: engine)
+        defer { Task { await server.shutdown() } }
+        let phone = try PhoneChannel()
+
+        let (call, seq) = try phone.seal(
+            .run(runId: nil, voiceCall: true, extra: [#""osaurus_session_id":"\#(stored.id.uuidString)""#]))
+        let (data, _) = try await URLSession.shared.data(for: server.secureCall(call, accept: "text/event-stream"))
+        #expect(try phone.openStream(data, requestSeq: seq).contains("noon"))
+
+        // The model saw the chat before the phone's new message.
+        let sent = try #require(await engine.lastRequest)
+        let conversation = sent.messages.filter { $0.role != "system" }
+        #expect(conversation.map(\.role) == ["user", "assistant", "user"])
+        #expect(conversation[0].content == "earlier question")
+        #expect(conversation[1].content == "earlier reply")
+        #expect(sent.session_id == stored.id.uuidString)
+
+        let turns = try await waitFor { () -> [ChatTurnData]? in
+            let turns = ChatSessionsManager.shared.session(for: stored.id)?.turns ?? []
+            return turns.count >= 6 ? turns : nil
+        }
+        #expect(turns.map(\.role) == [.user, .assistant, .user, .assistant, .tool, .assistant])
+        #expect(turns[2].content == "hi")
+        #expect(turns[3].content == "Let me check. ")
+        #expect(turns[3].toolResults["c1"] == "12:00")
+        #expect(turns[4].toolCallId == "c1")
+        #expect(turns[5].content == "It's noon.")
+        let replying = await MainActor.run { RemoteSessionContinuation.isPhoneReplying(stored.id) }
+        #expect(!replying)
+    }
+
+    /// Only the paired phone's own key may start a chat; any other key's
+    /// run goes ahead without one.
+    @Test func startingAChat_needsThePairedKey() async throws {
+        let server = try await startPhoneRunServer(engine: PhoneRunEngine(early: ["ok"]))
+        defer { Task { await server.shutdown() } }
+        let phone = try PhoneChannel()
+        let id = UUID()
+        let (call, seq) = try phone.seal(
+            .run(
+                runId: nil,
+                extra: [#""osaurus_session_id":"\#(id.uuidString)""#, #""osaurus_create_session":true"#]))
+        let (data, _) = try await URLSession.shared.data(for: server.secureCall(call, accept: "text/event-stream"))
+        #expect(try phone.openStream(data, requestSeq: seq).contains("ok"))
+        let created = await MainActor.run { ChatSessionsManager.shared.session(for: id) }
+        #expect(created == nil)
+    }
+
     @Test func phoneFields_areDecodedButNeverEncoded() throws {
         let json =
             #"{"model":"m","messages":[],"osaurus_session_id":"s","osaurus_create_session":true,"osaurus_voice_call":true}"#
@@ -131,7 +198,7 @@ struct IntelPhoneRunTests {
 
 private struct PhoneChannel {
     enum Call {
-        case run(runId: String?, voiceCall: Bool = false)
+        case run(runId: String?, voiceCall: Bool = false, extra: [String] = [])
         case get(String, accept: String = "application/json")
         case post(String)
     }
@@ -155,22 +222,22 @@ private struct PhoneChannel {
             hello: hello, ephemeralKey: clientKey, serverHello: serverHello, expectedAgentAddress: address)
     }
 
-    static func runBody(runId: String?, voiceCall: Bool) -> String {
+    static func runBody(runId: String?, voiceCall: Bool, extra: [String] = []) -> String {
         var fields = [#""model":"fake""#, #""stream":true"#, #""messages":[{"role":"user","content":"hi"}]"#]
         if let runId { fields.append(#""osaurus_run_id":"\#(runId)""#) }
         if voiceCall { fields.append(#""osaurus_voice_call":true"#) }
-        return "{" + fields.joined(separator: ",") + "}"
+        return "{" + (fields + extra).joined(separator: ",") + "}"
     }
 
     func seal(_ call: Call) throws -> (SecureChannel.CallRequest, UInt64) {
         let bearer = "Bearer \(TestAuth.bearerToken)"
         let inner: SecureChannel.InnerRequest
         switch call {
-        case .run(let runId, let voiceCall):
+        case .run(let runId, let voiceCall, let extra):
             inner = SecureChannel.InnerRequest(
                 method: "POST", path: "/agents/default/run", authorization: bearer, accept: "text/event-stream",
                 contentType: "application/json",
-                body: Data(Self.runBody(runId: runId, voiceCall: voiceCall).utf8).base64urlEncoded)
+                body: Data(Self.runBody(runId: runId, voiceCall: voiceCall, extra: extra).utf8).base64urlEncoded)
         case .get(let path, let accept):
             inner = SecureChannel.InnerRequest(method: "GET", path: path, authorization: bearer, accept: accept)
         case .post(let path):

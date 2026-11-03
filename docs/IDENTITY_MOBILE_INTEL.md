@@ -294,3 +294,68 @@ the backlog.
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Paired iPhone: replies in the background, voice calls" in the
       Rosy retest checklist.
+- **Stage 3b (2026-11-03): continuing Mac chats.**
+  - **Ported from upstream:** `PhoneChatHandoff` (one rename: Intel's
+    `ChatWindowManager.openSessionAsTab` is upstream's `openHistorySession`)
+    with its tests; the rest of `RemoteSessionContinuation` (history,
+    append, the paired-key check, phone runs in flight, `startPhoneChat`);
+    `ChatSession.appendHostedTurns` and `sendHeldForPhone`; the held send
+    in `sendCurrent` and `send`; the iPhone badge, "via iPhone" metadata and
+    tab label (#3135); the `share_artifact` wording (#3135).
+  - **Run route:** with `osaurus_session_id` naming a chat this Mac has
+    (owner callers), the chat's turns go between the system prompt and the
+    phone's new messages, the engine's `session_id` is the chat's id, and
+    the run's turns are appended when it ends, however it ends. With
+    `osaurus_create_session` and the paired phone's own key, an unknown id
+    starts a chat of the phone's (`phoneChatKey`). While the run is going,
+    History shows the chat as running and a Mac send in it waits.
+  - **Intel differences:**
+    - Intel's chats live in `ChatSessionsManager` (JSON per chat, all in
+      memory), so upstream's `ChatSessionStore` reads and the
+      `didPersistExternally` notification aren't needed: its published
+      sessions refresh History.
+    - `history` mirrors Intel's chat window (`turnToMessage`): a valid
+      compaction summary stands in for the turns it covers; user images go
+      in when the model takes images.
+    - Upstream appends the loop's final message list. Intel's engine runs
+      the tool loop and only streams, so `PhoneRunTranscript` builds the
+      turns from the stream the way the chat window does: a tool result
+      closes the assistant turn and adds a `.tool` turn; a grounded retry
+      marks the answer excluded.
+    - The phone's messages are saved as it sent them, before the run adds
+      memory or the voice-call note, so upstream's #3070 split
+      (`InjectedContextSpans`) and the note's removal aren't needed.
+    - Regenerate and Edit refuse while the phone replies in the chat.
+      Intel's versions cut the transcript before sending, and upstream's
+      roll-back of a held regeneration (`restoreTurnsRollbackAfterAbortedRegeneration`)
+      doesn't exist here.
+    - No hosted workspace rows (deferred), so `adoptHostedPhoneChat` and the
+      workspace half of `isFromPairedPhone` are left out.
+    - Settings → Mobile shows "Continue Phone Chats on This Mac" now.
+  - **Fix to stage 3a:** a detached run was marked finished from the run's
+    task, while its last frames were still queued on the event loop. A
+    finished run records nothing more, so a replay could miss the end of
+    the reply (the 3a test failed once in five runs). It now finishes on
+    the event loop, behind its frames (0 failures in 12 runs).
+  - **Tests:**
+    - Upstream's `PhoneChatHandoffTests`.
+    - New `IntelRemoteSessionContinuationTests`: upstream's cases that fit
+      Intel's store (turns to messages, excluded turns, the request fields,
+      phone-started chats, the paired key), plus history from the store
+      with a summary, the phone's messages saved as sent (images kept, tool
+      results folded), the stream transcript, starting a chat once,
+      appending without a window, counting phone runs.
+    - `IntelPhoneRunTests` gained two channel cases: continuing a stored
+      chat (the model sees it; the saved turns are the phone's message as
+      typed, then the reply with its tool step) and `osaurus_create_session`
+      refused without the paired key.
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,290 tests in 530 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 build with tests compiles.
+    - Classifiers: `W-identity-mobile` 9 files left, UNASSIGNED 0. Guide
+      check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Paired iPhone: continuing Mac chats" in the Rosy retest
+      checklist.

@@ -4561,6 +4561,15 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   are decoded, never encoded. Stage 3 is split in three (3a runs, 3b
   continuing Mac chats, 3c image jobs) because Intel lacks most of the chat
   hooks 3b needs.
+- **Stage 3b (2026-11-03):** continuing Mac chats (`osaurus_session_id`,
+  `osaurus_create_session`): the rest of upstream's
+  `RemoteSessionContinuation` on Intel's `ChatSessionsManager`, the run's
+  turns built from its stream (`PhoneRunTranscript`), the Mac's send held
+  while the phone replies, `PhoneChatHandoff` and its Settings → Mobile
+  switch, the iPhone badge (#3135), the `share_artifact` wording (#3135).
+  #3070 holds by construction: the phone's messages are saved as sent.
+  Also fixed a race from 3a: a detached run could be marked finished
+  before its last queued frames, which a replay then lacked.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

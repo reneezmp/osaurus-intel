@@ -45,6 +45,14 @@ struct ChatMessage: Codable, Sendable {
 
     var hasMediaParts: Bool { contentParts?.contains(where: \.isMedia) == true }
 
+    /// The bytes of the inline (`data:image/…;base64,`) images (upstream).
+    var imageDataFromParts: [Data] {
+        imageUrls.compactMap { url in
+            guard url.hasPrefix("data:image/"), let comma = url.firstIndex(of: ",") else { return nil }
+            return Data(base64Encoded: String(url[url.index(after: comma)...]))
+        }
+    }
+
     private enum CodingKeys: String, CodingKey {
         case role, content, tool_calls, tool_call_id, reasoning_content
     }

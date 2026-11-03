@@ -17,9 +17,12 @@
 //  - a run it names with `osaurus_run_id` outlives the connection, and the
 //    phone rejoins it (`/runs/{id}/events`) or stops it (`/runs/{id}/stop`);
 //  - a voice-call turn (`osaurus_voice_call`) asks for a short spoken answer;
-//  - its runs use the model options it set through the picker.
-//  Still to come: continuing a Mac chat (`osaurus_session_id`, stage 3b),
-//  the host workspace folder, and the call's privacy choice
+//  - its runs use the model options it set through the picker;
+//  - a run naming one of the Mac's chats (`osaurus_session_id`) continues
+//    it: the chat's turns are the context, and the run's turns are appended
+//    back (stage 3b). With `osaurus_create_session` the phone starts a chat
+//    of its own.
+//  Still to come: the host workspace folder, and the call's privacy choice
 //  (`W-privacy-filter`).
 //
 
@@ -336,6 +339,8 @@ extension HTTPHandler {
         // A turn of the owner's phone call: ask for a short, spoken reply,
         // after the conversation so the prompt keeps its cache (§6.5).
         let voiceCall = includeToolDetail && req.osaurus_voice_call == true
+        // Read now: the connection's attribution is reset for its next request.
+        let callerKeyNonce = inboundConnectionInfo()?.accessKeyId
 
         let startTime = stateRef.value.requestStartedAt ?? Date()
         let userAgent = head.headers.first(name: "User-Agent")
@@ -378,8 +383,13 @@ extension HTTPHandler {
         }
 
         let task = runRequestTask {
-            // However the run ends, a phone following it hears the end.
-            defer { detachedRun?.finish() }
+            // However the run ends, a phone following it hears the end. On
+            // the event loop, behind the run's last queued frames: finishing
+            // from here could overtake them, and a finished run records
+            // nothing more (seen as a replay missing its last words).
+            defer {
+                if let detachedRun { eventLoop.execute { detachedRun.finish() } }
+            }
             // SSE keepalive (upstream): a run can sit silent through long
             // tool calls.
             let keepalive = Task {
@@ -421,7 +431,60 @@ extension HTTPHandler {
             let enriched = await Self.enrichWithAgentContext(
                 req, agentId: agentId, executionMode: executionMode, modelOverride: model)
             var messages = enriched.messages
+            // Osaurus Connect: continuing one of the Mac's own chats. Its
+            // stored turns become the context, and the turns this run adds
+            // are appended back to it below (upstream §14.5).
+            let continuedSessionId: UUID? = await MainActor.run {
+                guard includeToolDetail,  // owner caller (loopback / master key)
+                    let raw = req.osaurus_session_id,
+                    let id = UUID(uuidString: raw)
+                else { return nil }
+                if RemoteSessionContinuation.isContinuable(id) { return id }
+                // A chat the phone starts with this run: the Mac keeps it from
+                // the first message, so it stays one chat however the phone's
+                // copy and the Mac's differ (tool steps, an interrupted reply).
+                guard req.osaurus_create_session == true,
+                    RemoteSessionContinuation.isPairedPhoneKey(callerKeyNonce)
+                else { return nil }
+                return RemoteSessionContinuation.startPhoneChat(id, agentId: agentId, messages: req.messages)
+                    ? id : nil
+            }
+            let transcript: PhoneRunTranscript? = continuedSessionId == nil ? nil : PhoneRunTranscript()
+            if let continuedSessionId {
+                // The composed system prompt first, then the stored
+                // conversation, then this request's new messages.
+                let history = await MainActor.run {
+                    RemoteSessionContinuation.history(for: continuedSessionId, model: model)
+                }
+                let systemCount = messages.prefix(while: { $0.role == "system" }).count
+                messages.insert(contentsOf: history, at: systemCount)
+                // The chat to bring forward when the user is back at the Mac.
+                // Its composer waits for this run (see `isPhoneReplying`).
+                await MainActor.run {
+                    PhoneChatHandoff.shared.notePhoneRun(sessionId: continuedSessionId, keyNonce: callerKeyNonce)
+                    RemoteSessionContinuation.beginPhoneRun(continuedSessionId)
+                }
+            }
             if voiceCall { VoiceCallReplies.addNote(to: &messages) }
+            // Append this run's turns to the continued chat when the request
+            // ends, however it ends (finished, errored, stopped). The phone's
+            // messages as it sent them, so the memory and voice-call note the
+            // run added are never saved.
+            defer {
+                if let continuedSessionId, let transcript {
+                    let appended = RemoteSessionContinuation.turns(from: req.messages) + transcript.finished()
+                    let runModel = model
+                    Task { @MainActor in
+                        if !appended.isEmpty {
+                            await RemoteSessionContinuation.append(appended, to: continuedSessionId, model: runModel)
+                            PhoneChatHandoff.shared.notePhoneRun(
+                                sessionId: continuedSessionId, keyNonce: callerKeyNonce)
+                        }
+                        // After its turns are in, so a send the Mac held goes after them.
+                        RemoteSessionContinuation.endPhoneRun(continuedSessionId)
+                    }
+                }
+            }
             let (temperature, maxTokens) = await MainActor.run {
                 Self.resolveAgentSampling(request: req, agentId: agentId)
             }
@@ -443,7 +506,7 @@ extension HTTPHandler {
                 n: nil,
                 tools: enriched.tools,
                 tool_choice: enriched.toolChoice,
-                session_id: sessionKey
+                session_id: continuedSessionId?.uuidString ?? sessionKey
             )
             engineRequest.samplingParametersAreImplicit = req.temperature == nil
             engineRequest.reportsUsage = true
@@ -500,7 +563,13 @@ extension HTTPHandler {
                             }
                             continue
                         }
+                        if StreamingGroundedRetryHint.isRetry(delta) {
+                            transcript?.groundedRetry()
+                            continue
+                        }
                         if let done = StreamingToolHint.decodeDone(delta) {
+                            transcript?.toolDone(
+                                callId: done.callId, name: done.name, arguments: done.arguments, result: done.result)
                             let isError = ToolEnvelope.isError(done.result) || done.result.hasPrefix("⛔️")
                             let endRun = AgentLoopRunEnd.endsRun(toolName: done.name, result: done.result)
                             if endRun {
@@ -526,11 +595,13 @@ extension HTTPHandler {
                         }
                         switch IntelHTTPInference.classify(delta) {
                         case .content(let text):
+                            transcript?.content(text)
                             loggedResponseText += text
                             onLoop {
                                 writer.writeContent(text, model: model, responseId: responseId, created: created, context: $0)
                             }
                         case .reasoning(let text):
+                            transcript?.reasoning(text)
                             onLoop {
                                 writer.writeReasoning(
                                     text, model: model, responseId: responseId, created: created, context: $0)
