@@ -16,7 +16,7 @@
 //    checks them, then 501, since they need an Apple Silicon Mac.
 //  - `POST /images/cancel` — stops a running streamed cloud image request.
 //  - `GET /images/jobs/{id}/events` — the phone's rejoin of a detached image
-//    job; there are none until the Secure Channel (`W-identity-mobile`).
+//    job (`W-identity-mobile` stage 3c).
 //  - `POST /videos/quote`, `POST /videos/generations`,
 //    `GET /videos/jobs/{id}`, `GET /videos/jobs/{id}/content` — upstream's
 //    quote-then-queue flow with single-use quote receipts.
@@ -26,10 +26,13 @@
 //  holds only `/images/jobs`); the gate refuses them to agent-scoped keys
 //  while the owner doesn't share inference.
 //
-//  Phone-only parts wait for `W-identity-mobile`: `osaurus_session_id` /
-//  `osaurus_create_session` (the exchange appended to a Mac chat) and
-//  `osaurus_job_id` (a job that outlives the connection) are ignored, as
-//  `/agents/{id}/run` ignores its phone fields.
+//  The owner's phone (`W-identity-mobile` stage 3c,
+//  docs/IDENTITY_MOBILE_INTEL.md) gets upstream's phone parts on
+//  `/images/generations`: `osaurus_session_id` / `osaurus_create_session`
+//  append the exchange to a Mac chat, and `osaurus_job_id` names a streamed
+//  job that outlives the connection, rejoined at `/images/jobs/{id}/events`
+//  and stopped with `/images/cancel`. Edits and upscales are on-device only
+//  (501 on Intel), so their phone fields never come into play.
 //
 
 import Foundation
@@ -47,7 +50,7 @@ extension HTTPHandler {
         case (.POST, "/videos/quote"): serveVideoQuote(context: context, head: head)
         case (.POST, "/videos/generations"): serveVideoGeneration(context: context, head: head)
         case (.GET, _) where path.hasPrefix("/images/jobs/") && path.hasSuffix("/events"):
-            serveImageJobEvents(context: context)
+            serveImageJobEvents(context: context, head: head, path: path)
         case (.GET, _) where path.hasPrefix("/videos/jobs/") && path.hasSuffix("/content"):
             serveVideoContent(context: context, head: head, path: path)
         case (.GET, _) where path.hasPrefix("/videos/jobs/"):
@@ -333,7 +336,62 @@ extension HTTPHandler {
                 requestBody: loggedBody)
             return
         }
-        serveRemoteImageGeneration(context: context, head: head, request: req, target: selectedTarget, logged: loggedBody)
+        // Into the Mac chat the phone named; the same owner-and-Secure-Channel
+        // rule applies as for the other owner routes (upstream).
+        let sessionId = phoneImageSession(
+            req.osaurus_session_id,
+            startsUnder: req.osaurus_create_session == true ? req.osaurus_agent_id : nil,
+            context: context)
+        if sessionId != nil, requiresOwnerChannel(head: head, context: context) { return }
+        // A billed job above all must not run twice for one dropped phone.
+        let phoneJob = phoneImageJob(req.osaurus_job_id, streaming: req.stream ?? false, context: context)
+        if case .follow(let job) = phoneJob {
+            MobileConnectLog.hostedRun("image job \(job.id) sent again; following it")
+            streamDetachedRun(job, after: 0, context: context, head: head, path: path)
+            return
+        }
+        serveRemoteImageGeneration(
+            context: context, head: head, request: req, target: selectedTarget, logged: loggedBody,
+            sessionId: sessionId, detached: phoneJob.started)
+    }
+
+    /// A job the owner's phone named with `osaurus_job_id` over the Secure
+    /// Channel (upstream §12.5): it outlives the connection, and the phone
+    /// rejoins it at `GET /images/jobs/{id}/events`. `follow` is the same id
+    /// again, live or recently finished: the phone sent the request again,
+    /// having heard nothing, so it follows rather than start a second,
+    /// billed, job.
+    enum PhoneImageJob {
+        case none
+        case new(DetachedPhoneRun)
+        case follow(DetachedPhoneRun)
+
+        var started: DetachedPhoneRun? {
+            if case .new(let job) = self { return job }
+            return nil
+        }
+    }
+
+    func phoneImageJob(_ id: String?, streaming: Bool, context: ChannelHandlerContext) -> PhoneImageJob {
+        guard streaming, let id, DetachedPhoneRuns.isValidId(id), callerOwnsThisMac(context), requestIsSecureChannel
+        else { return .none }
+        let (job, isNew) = DetachedPhoneRuns.images.begin(id: id, followFinished: true)
+        return isNew ? .new(job) : .follow(job)
+    }
+
+    /// The Mac chat an owner's phone named with `osaurus_session_id` on an
+    /// image request (upstream §12.5); nil for anyone else. `startsUnder` is
+    /// the agent of a chat the phone starts with this image (§14.5): the
+    /// exchange then creates it.
+    func phoneImageSession(_ raw: String?, startsUnder agentRaw: String? = nil, context: ChannelHandlerContext) -> UUID? {
+        guard let raw, let id = UUID(uuidString: raw), callerOwnsThisMac(context) else { return nil }
+        if let agentRaw, let agentId = UUID(uuidString: agentRaw) {
+            let keyNonce = inboundConnectionInfo()?.accessKeyId
+            Task { @MainActor in
+                RemoteSessionContinuation.notePhoneImageChat(id, agentId: agentId, keyNonce: keyNonce)
+            }
+        }
+        return id
     }
 
     private func serveRemoteImageGeneration(
@@ -341,7 +399,9 @@ extension HTTPHandler {
         head: HTTPRequestHead,
         request req: ImageGenerationRequestDTO,
         target: MediaModelTarget,
-        logged: String?
+        logged: String?,
+        sessionId: UUID? = nil,
+        detached: DetachedPhoneRun? = nil
     ) {
         let path = "/images/generations"
         let (width, height) = Self.resolveImageSize(size: req.size, width: req.width, height: req.height)
@@ -369,6 +429,18 @@ extension HTTPHandler {
             kind: "image", operation: "generate", backend: target.backend,
             count: request.count, width: width, height: height,
             aspect: req.aspect_ratio, resolution: req.resolution)
+        // Into the Mac chat the phone named, once the images are in. In the
+        // background, as a run's turns are: the append waits out a reply the
+        // Mac is streaming in that chat, which must not hold the image back.
+        let appendToChat: @Sendable ([URL]) -> Void = { urls in
+            guard let sessionId else { return }
+            let prompt = req.prompt
+            let model = target.modelID
+            Task { @MainActor in
+                await RemoteSessionContinuation.appendImageExchange(
+                    prompt: prompt, sourceImages: [], generated: urls, to: sessionId, model: model)
+            }
+        }
 
         // A provider call doesn't stream, but a client that asked for SSE
         // still gets its answer as SSE: a `completed` or `error` event once
@@ -376,10 +448,15 @@ extension HTTPHandler {
         if req.stream == true {
             stateRef.value.isStreaming = true
             let writer = SSEResponseWriter()
+            writer.recorder = detached
             writer.writeHeaders(context, extraHeaders: stateRef.value.corsHeaders)
+            // Detached: keeps going, and recording, once the phone is gone
+            // (as `/agents/{id}/run` does).
+            let jobContext: NIOLoopBound<ChannelHandlerContext>? =
+                detached == nil ? nil : NIOLoopBound(context, eventLoop: eventLoop)
             let onLoop: @Sendable (@escaping @Sendable (ChannelHandlerContext) -> Void) -> Void = { body in
                 eventLoop.execute {
-                    guard let ctx = stateRef.value.contextBox else { return }
+                    guard let ctx = stateRef.value.contextBox ?? jobContext?.value else { return }
                     body(ctx)
                 }
             }
@@ -389,12 +466,14 @@ extension HTTPHandler {
                     .map { String(decoding: $0, as: UTF8.self) } ?? "{}"
                 onLoop { writer.writeRawJSONData(json, context: $0) }
             }
-            let jobID = Self.shortId(prefix: "img")
+            let jobID = detached?.id ?? Self.shortId(prefix: "img")
             // The job id first, so a client can stop it (Intel addition:
             // upstream's on-device path opens with `queued`, its cloud path
             // doesn't, and its phone names the job itself).
             emit(ImageStreamEventDTO(type: "queued", job_id: jobID, model: target.modelID))
             let task = runRequestTask {
+                // However the task leaves, the stream ends and a detached job
+                // finishes, queued behind the events on the same loop.
                 defer {
                     Self.runningImageJobs.remove(jobID)
                     onLoop { writer.writeEnd($0) }
@@ -404,6 +483,7 @@ extension HTTPHandler {
                 do {
                     let generated = try await MediaGenerationCoordinator.shared.generateImage(request)
                     guard !generated.isEmpty else { throw MediaGenerationError.invalidResponse }
+                    appendToChat(generated.map(\.url))
                     let results = try generated.map { media in
                         ImageResultDTO(
                             url: nil,
@@ -428,6 +508,8 @@ extension HTTPHandler {
                     model: target.modelID, errorMessage: errorMessage, details: details)
             }
             Self.runningImageJobs.insert(jobID, task)
+            // Stop (`/images/cancel` with the phone's job id) ends the wait.
+            detached?.onStop { task.cancel() }
             return
         }
 
@@ -435,6 +517,7 @@ extension HTTPHandler {
             do {
                 let generated = try await MediaGenerationCoordinator.shared.generateImage(request)
                 guard !generated.isEmpty else { throw MediaGenerationError.invalidResponse }
+                appendToChat(generated.map(\.url))
                 let results = try generated.map { media -> ImageResultDTO in
                     if req.response_format == "b64_json" {
                         let bytes = try Data(contentsOf: media.url)
@@ -517,20 +600,36 @@ extension HTTPHandler {
                 path: "/images/cancel", requestBody: String(decoding: data, as: UTF8.self))
             return
         }
-        Self.runningImageJobs.cancel(req.job_id)
+        // A phone's job is the owner's: only the owner, through the Secure
+        // Channel as when it started it, may stop it (upstream).
+        let phoneJob = DetachedPhoneRuns.images.run(id: req.job_id)
+        if phoneJob == nil || (callerOwnsThisMac(context) && requestIsSecureChannel) {
+            Self.runningImageJobs.cancel(req.job_id)
+            phoneJob?.stop()
+        }
         let body = #"{"type":"cancelled","job_id":"\#(Self.escapeJSONString(req.job_id))"}"#
         sendResponse(context: context, status: .ok, headers: jsonHeaders(), body: body)
     }
 
-    /// The phone's rejoin of an image job that outlived its connection
-    /// (upstream §12.5). Owner-only; such jobs start only over the Secure
-    /// Channel (`W-identity-mobile`), so every id is unknown.
-    private func serveImageJobEvents(context: ChannelHandlerContext) {
+    /// `GET /images/jobs/{id}/events?after=N`: the phone's rejoin of an
+    /// image job that outlived its connection (upstream §12.5), the events
+    /// after the first N, then the rest live. Owner-only; gated to the
+    /// Secure Channel with the other owner routes.
+    private func serveImageJobEvents(context: ChannelHandlerContext, head: HTTPRequestHead, path: String) {
         guard callerOwnsThisMac(context) else {
             sendOwnerOnlyForbidden(context: context)
             return
         }
-        sendResponse(context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"job_not_found"}"#)
+        let components = path.split(separator: "/")
+        guard components.count == 4, components[3] == "events",
+            let job = DetachedPhoneRuns.images.run(id: String(components[2]))
+        else {
+            sendResponse(
+                context: context, status: .notFound, headers: jsonHeaders(), body: #"{"error":"job_not_found"}"#)
+            return
+        }
+        let after = Self.queryItems(from: head.uri)["after"].flatMap { Int($0) } ?? 0
+        streamDetachedRun(job, after: after, context: context, head: head, path: path)
     }
 
     // MARK: - POST /videos/quote

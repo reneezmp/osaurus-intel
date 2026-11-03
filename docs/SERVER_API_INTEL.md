@@ -758,12 +758,12 @@ Each stage: gate run, Rosy section, row note in the backlog.
       `job_id` (as upstream's on-device path does), and `/images/cancel`
       with that id stops the request. A provider call already sent may
       still bill.
-    - **Phone-only parts (`W-identity-mobile`):** `osaurus_session_id` /
-      `osaurus_create_session` (appending the exchange to a Mac chat) and
-      `osaurus_job_id` (detached jobs, rejoined at
-      `/images/jobs/{id}/events`) are ignored, as `/agents/{id}/run`
-      ignores its phone fields. `/images/jobs/{id}/events` is owner-only
-      and answers 404 `job_not_found`.
+    - **Phone-only parts:** ported with `W-identity-mobile` stage 3c
+      (2026-11-03, `IDENTITY_MOBILE_INTEL.md`): `osaurus_session_id` /
+      `osaurus_create_session` append the exchange to a Mac chat, and
+      `osaurus_job_id` names a detached job, rejoined at
+      `/images/jobs/{id}/events` (owner-only). A phone job's `queued`
+      event carries the phone's own id.
     - The SSE event writer is upstream's `writeRawJSONData`, in Intel's
       `SSEResponseWriter` (`IntelHTTPInference.swift`). **Trap:** the
       upstream `Models/Chat/ResponseWriters.swift` also defines an

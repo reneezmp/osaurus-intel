@@ -359,3 +359,46 @@ the backlog.
       `~/.codex`. The keychain identity mdat is unchanged.
     - Rosy: "Paired iPhone: continuing Mac chats" in the Rosy retest
       checklist.
+- **Stage 3c (2026-11-03): phone image jobs. Stage 3 is complete.**
+  - **Ported from upstream** (`IntelHTTPMedia`, on Intel's cloud media
+    route):
+    - `phoneImageJob`: a streamed request with `osaurus_job_id` from the
+      owner on the channel registers in `DetachedPhoneRuns.images`. The
+      same id again, live or finished, follows that job: a dropped phone's
+      retry never runs, or bills, a second one.
+    - `GET /images/jobs/{id}/events?after=N` replays and follows a job.
+    - `/images/cancel` of a phone job stops it only for the owner on the
+      channel.
+    - `phoneImageSession` and `RemoteSessionContinuation.appendImageExchange`
+      / `notePhoneImageChat`: the prompt and the generated images are
+      appended to the chat the phone named, or start a chat of the
+      phone's (paired key, an agent this Mac has) once the image is in.
+  - **Intel differences:**
+    - Cloud models only: on-device generation, edits and upscales answer
+      501 on Intel, so their phone fields never come into play (upstream's
+      `runImageJob` path and previews, `recordTransient`, go unused).
+    - Intel's stream opens with a `queued` event; a phone job's carries the
+      phone's own id, and it is the job's first recorded frame.
+    - The job writes through its own context once the phone is gone, as
+      the run route does, and finishes through `writeEnd` on the event
+      loop, behind its events.
+    - The reply is `![prompt](file://…/generated-images/…)` links: Intel's
+      chat draws them, and `SessionTurnImages` already serves them to the
+      phone.
+  - **Tests:** `IntelPhoneRunTests` gained two channel cases (a job kept,
+    rejoined from an index, and replayed rather than run again for the same
+    id; a loopback script's job id not detached, and its cancel not
+    stopping a phone job while the phone's does).
+    `IntelRemoteSessionContinuationTests` gained the image exchange (turns,
+    source images, alt text cleaned) and its refusals (unknown chat, an
+    image chat without the paired key).
+  - **Validation (2026-11-03):**
+    - Interim gate (kept awake): 4,294 tests in 530 suites. The only
+      failure is the known avatar-cache test.
+    - The x86_64 build with tests compiles.
+    - Classifiers: `W-identity-mobile` 9 files left (all for stages 4–7),
+      UNASSIGNED 0. Guide check clean.
+    - The temp root was removed. Nothing was written to `~/.osaurus` or
+      `~/.codex`. The keychain identity mdat is unchanged.
+    - Rosy: "Paired iPhone: images from the phone" in the Rosy retest
+      checklist.

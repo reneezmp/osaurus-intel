@@ -182,6 +182,80 @@ struct IntelPhoneRunTests {
         #expect(created == nil)
     }
 
+    // MARK: Stage 3c: image jobs
+
+    /// A streamed image request from the phone, on a provider this Mac
+    /// doesn't have: it fails at once, which is enough to see the job kept.
+    private static func imageBody(jobId: String) -> String {
+        #"{"prompt":"a cat","stream":true,"allow_remote_media_spend":true,"osaurus_job_id":"\#(jobId)","#
+            + #""target":{"backend":"remote_provider","provider_id":"\#(UUID().uuidString)","model":"m"}}"#
+    }
+
+    @Test func phoneImageJob_isKeptRejoinedAndNeverRunTwice() async throws {
+        let server = try await startPhoneRunServer(engine: PhoneRunEngine(early: []))
+        defer { Task { await server.shutdown() } }
+        let phone = try PhoneChannel()
+        let jobId = "job-\(UUID().uuidString)"
+
+        let (call, seq) = try phone.seal(.post("/images/generations", body: Self.imageBody(jobId: jobId)))
+        let (data, _) = try await URLSession.shared.data(for: server.secureCall(call, accept: "text/event-stream"))
+        let first = try phone.openStream(data, requestSeq: seq)
+        #expect(first.contains(#""type":"queued""#))
+        #expect(first.contains(#""job_id":"\#(jobId)""#), "the phone's own id names the job")
+        #expect(first.contains(#""type":"error""#))
+        let job = try await waitFor { DetachedPhoneRuns.images.run(id: jobId).flatMap { $0.finishedAt != nil ? $0 : nil } }
+        #expect(job.frameCount == 2)
+
+        // The phone comes back for it.
+        let (rejoin, rejoinSeq) = try phone.seal(.get("/images/jobs/\(jobId)/events?after=1", accept: "text/event-stream"))
+        let (rejoinData, _) = try await URLSession.shared.data(for: server.secureCall(rejoin, accept: "text/event-stream"))
+        let replayed = try phone.openStream(rejoinData, requestSeq: rejoinSeq)
+        #expect(!replayed.contains(#""type":"queued""#))
+        #expect(replayed.contains(#""type":"error""#))
+        #expect(replayed.hasSuffix("data: [DONE]\n\n"))
+
+        // The same request again replays the job instead of running (and
+        // billing) a second one.
+        let (again, againSeq) = try phone.seal(.post("/images/generations", body: Self.imageBody(jobId: jobId)))
+        let (againData, _) = try await URLSession.shared.data(for: server.secureCall(again, accept: "text/event-stream"))
+        #expect(try phone.openStream(againData, requestSeq: againSeq) == first)
+        #expect(DetachedPhoneRuns.images.run(id: jobId) === job)
+    }
+
+    /// Only the phone's jobs detach, and only the owner on the channel may
+    /// stop one: a loopback script's cancel leaves it running.
+    @Test func phoneImageJob_onlyThePhoneStartsOrStopsOne() async throws {
+        let server = try await startPhoneRunServer(engine: PhoneRunEngine(early: []))
+        defer { Task { await server.shutdown() } }
+        let plainId = "job-\(UUID().uuidString)"
+        var request = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/images/generations")!)
+        request.httpMethod = "POST"
+        request.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        request.httpBody = Data(Self.imageBody(jobId: plainId).utf8)
+        let (plain, _) = try await URLSession.shared.data(for: request)
+        #expect(!String(decoding: plain, as: UTF8.self).contains(plainId))
+        #expect(DetachedPhoneRuns.images.run(id: plainId) == nil)
+
+        let liveId = "job-\(UUID().uuidString)"
+        let live = DetachedPhoneRuns.images.begin(id: liveId).run
+        defer { live.finish() }
+        let stopped = StopFlag()
+        live.onStop { stopped.set() }
+
+        var cancel = URLRequest(url: URL(string: "http://127.0.0.1:\(server.port)/images/cancel")!)
+        cancel.httpMethod = "POST"
+        cancel.setValue("application/json", forHTTPHeaderField: "Content-Type")
+        cancel.httpBody = Data(#"{"job_id":"\#(liveId)"}"#.utf8)
+        _ = try await URLSession.shared.data(for: cancel)
+        #expect(!stopped.value)
+
+        let phone = try PhoneChannel()
+        let (call, seq) = try phone.seal(.post("/images/cancel", body: #"{"job_id":"\#(liveId)"}"#))
+        let (data, _) = try await URLSession.shared.data(for: server.secureCall(call))
+        #expect(try phone.openBuffered(data, requestSeq: seq).status == 200)
+        #expect(stopped.value)
+    }
+
     @Test func phoneFields_areDecodedButNeverEncoded() throws {
         let json =
             #"{"model":"m","messages":[],"osaurus_session_id":"s","osaurus_create_session":true,"osaurus_voice_call":true}"#
@@ -200,7 +274,7 @@ private struct PhoneChannel {
     enum Call {
         case run(runId: String?, voiceCall: Bool = false, extra: [String] = [])
         case get(String, accept: String = "application/json")
-        case post(String)
+        case post(String, body: String = "{}")
     }
 
     struct Opened {
@@ -240,10 +314,10 @@ private struct PhoneChannel {
                 body: Data(Self.runBody(runId: runId, voiceCall: voiceCall, extra: extra).utf8).base64urlEncoded)
         case .get(let path, let accept):
             inner = SecureChannel.InnerRequest(method: "GET", path: path, authorization: bearer, accept: accept)
-        case .post(let path):
+        case .post(let path, let body):
             inner = SecureChannel.InnerRequest(
                 method: "POST", path: path, authorization: bearer, accept: "application/json",
-                contentType: "application/json", body: Data("{}".utf8).base64urlEncoded)
+                contentType: "application/json", body: Data(body.utf8).base64urlEncoded)
         }
         return try session.sealCall(innerRequest: JSONEncoder().encode(inner))
     }
@@ -261,6 +335,13 @@ private struct PhoneChannel {
         let body = inner.body.flatMap { Data(base64urlEncoded: $0) } ?? Data()
         return Opened(status: inner.status, body: String(decoding: body, as: UTF8.self))
     }
+}
+
+private final class StopFlag: @unchecked Sendable {
+    private let lock = NSLock()
+    private var stopped = false
+    var value: Bool { lock.withLock { stopped } }
+    func set() { lock.withLock { stopped = true } }
 }
 
 /// Polls until `value` is non-nil (the run is registered, has finished…).

@@ -200,6 +200,37 @@ struct IntelRemoteSessionContinuationTests {
         #expect(stored?.selectedModel == "phone-model")
     }
 
+    // MARK: Intel: image exchanges (stage 3c)
+
+    @Test func anImageExchangeLandsInTheChatAsTheMacShowsIt() async {
+        let session = ChatSessionData(turns: [])
+        ChatSessionsManager.shared.save(session)
+        defer { ChatSessionsManager.shared.delete(id: session.id) }
+        let file = OsaurusPaths.generatedImages().appendingPathComponent("phone-test.png")
+        let source = Data([0x89, 0x50, 0x4E, 0x47])
+        await RemoteSessionContinuation.appendImageExchange(
+            prompt: "a [red]\ncat", sourceImages: [source], generated: [file], to: session.id, model: "img-model")
+        let turns = ChatSessionsManager.shared.session(for: session.id)?.turns ?? []
+        #expect(turns.map(\.role) == [.user, .assistant])
+        #expect(turns[0].content == "a [red]\ncat")
+        #expect(turns[0].attachments.images == [source])
+        // Brackets and line breaks would end the alt text early.
+        #expect(turns[1].content == "![a  red  cat](\(file.absoluteString))")
+        #expect(ChatSessionsManager.shared.session(for: session.id)?.selectedModel == "img-model")
+    }
+
+    @Test func anImageExchangeNeedsAChatOrAnImage() async {
+        let unknown = UUID()
+        await RemoteSessionContinuation.appendImageExchange(
+            prompt: "p", sourceImages: [], generated: [URL(fileURLWithPath: "/tmp/x.png")], to: unknown, model: "m")
+        #expect(ChatSessionsManager.shared.session(for: unknown) == nil)
+        // Without the paired key a phone image chat is never started.
+        RemoteSessionContinuation.notePhoneImageChat(unknown, agentId: Agent.defaultId, keyNonce: "other")
+        await RemoteSessionContinuation.appendImageExchange(
+            prompt: "p", sourceImages: [], generated: [URL(fileURLWithPath: "/tmp/x.png")], to: unknown, model: "m")
+        #expect(ChatSessionsManager.shared.session(for: unknown) == nil)
+    }
+
     @Test func phoneRunsAreCountedPerChat() {
         let id = UUID()
         #expect(!RemoteSessionContinuation.isPhoneReplying(id))

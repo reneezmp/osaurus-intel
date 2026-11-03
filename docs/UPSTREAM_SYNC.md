@@ -4570,6 +4570,13 @@ Staged in [`IDENTITY_MOBILE_INTEL.md`](IDENTITY_MOBILE_INTEL.md):
   #3070 holds by construction: the phone's messages are saved as sent.
   Also fixed a race from 3a: a detached run could be marked finished
   before its last queued frames, which a replay then lacked.
+- **Stage 3c (2026-11-03):** phone image jobs on `/images/generations`
+  (cloud models; on-device ones are 501 on Intel): `osaurus_job_id`
+  detaches a streamed job, rejoined at `/images/jobs/{id}/events`, the
+  same id again follows the job instead of billing a second one, and only
+  the owner on the channel may cancel it; `osaurus_session_id` /
+  `osaurus_create_session` append the exchange to a Mac chat
+  (`RemoteSessionContinuation.appendImageExchange`). Stage 3 is complete.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

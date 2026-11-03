@@ -19,7 +19,9 @@
 //    Intel's engine runs the tool loop and only streams the result.
 //  - No hosted workspace rows (workspaces are deferred), so every stored
 //    chat is the owner's and `adoptHostedPhoneChat` has nothing to adopt.
-//  - Image exchanges (`appendImageExchange`) come with stage 3c.
+//  - Image exchanges (`appendImageExchange`, stage 3c) write the reply as
+//    `![prompt](file://…)` links, which Intel's chat renders and
+//    `SessionTurnImages` serves to the phone.
 //
 
 import Foundation
@@ -166,6 +168,50 @@ enum RemoteSessionContinuation {
             session.selectedModel = model
         }
         ChatSessionsManager.shared.save(session)
+    }
+
+    /// Appends an image model's exchange from the phone (upstream §12.5):
+    /// the prompt, with any source images, then a reply holding the
+    /// generated files the way the Mac's chat shows them, so both sides
+    /// render it.
+    static func appendImageExchange(
+        prompt: String,
+        sourceImages: [Data],
+        generated: [URL],
+        to sessionId: UUID,
+        model: String
+    ) async {
+        // A new phone chat whose first message is this image prompt.
+        if let agentId = pendingImageChats.removeValue(forKey: sessionId), !generated.isEmpty,
+            !isContinuable(sessionId)
+        {
+            _ = startPhoneChat(sessionId, agentId: agentId, messages: [ChatMessage(role: "user", content: prompt)])
+        }
+        guard !generated.isEmpty, isContinuable(sessionId) else { return }
+        let now = Date()
+        // The prompt as the link's alt text, minus the brackets and line
+        // breaks that would end it early, or no reader (the Mac's markdown,
+        // `SessionTurnImages`, the phone) would find the image.
+        let alt = prompt.map { "[]\n\r".contains($0) ? " " : String($0) }.joined()
+        let reply = generated.map { "![\(alt)](\($0.absoluteString))" }.joined(separator: "\n\n")
+        let turns = [
+            ChatTurnData(
+                id: UUID(), role: .user, content: prompt, attachments: sourceImages.map(Attachment.image),
+                createdAt: now),
+            ChatTurnData(id: UUID(), role: .assistant, content: reply, createdAt: now, completedAt: now),
+        ]
+        await append(turns, to: sessionId, model: model)
+    }
+
+    /// Image prompts starting a phone chat, by chat id, with the agent to
+    /// start it under. The chat is created once the image is in, with it.
+    private static var pendingImageChats: [UUID: UUID] = [:]
+
+    /// The phone starts chat `sessionId` with an image prompt (§14.5).
+    /// Honoured for the paired phone's key and an agent this Mac has.
+    static func notePhoneImageChat(_ sessionId: UUID, agentId: UUID, keyNonce: String?) {
+        guard isPairedPhoneKey(keyNonce), AgentManager.shared.agent(for: agentId) != nil else { return }
+        pendingImageChats[sessionId] = agentId
     }
 
     // MARK: - Truncate, delete

@@ -2622,3 +2622,22 @@ Wi-Fi; pair first. Sending images from the phone is not in this build
 - [ ] Voice call in a chat: start a voice call from a chat on the phone,
       ask one question, end the call. On Rosy the chat shows the question
       and the short answer, with no "[Voice call]" text in the question.
+
+## Paired iPhone: images from the phone (2026-11-03)
+
+`W-identity-mobile` stage 3c (`IDENTITY_MOBILE_INTEL.md`). Same phone and
+Wi-Fi; pair first. Needs a cloud image model (Osaurus Cloud or Venice)
+picked in the app; it spends credits, so use one image per step.
+
+- [ ] Image in a chat: from a chat on the phone, ask the image model for
+      "a watercolor fox". The image arrives on the phone, and on Rosy the
+      chat shows the prompt and the image below it.
+- [ ] Background: ask for another image and switch to another app on the
+      phone right away for about 30 seconds. Coming back, the image is
+      there (or still generating, then arrives). Rosy's Insights shows one
+      `/images/generations` request for it, not two.
+- [ ] New image chat: start a new chat on the phone whose first message is
+      an image prompt. Once the image is in, Rosy's History has a new chat
+      with an iPhone badge holding the prompt and the image.
+- [ ] Stop: ask for an image and stop it on the phone before it arrives.
+      The phone shows it as stopped; no image is added to the chat.
