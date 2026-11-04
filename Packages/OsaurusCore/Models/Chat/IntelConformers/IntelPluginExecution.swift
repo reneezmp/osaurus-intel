@@ -15,13 +15,17 @@
 //  anyway. So instead of un-excluding that whole web, this file provides a
 //  minimal, honest host:
 //
-//    • Real callbacks (pure Foundation, no amputated deps):
-//        log, log_structured, free_string, config_get/set/delete,
-//        file_read, http_request
-//    • Honest `not_supported` envelopes for the dead ones:
-//        db_exec/query, dispatch*, complete*, embed, list_models,
-//        list_active_tasks, get_active_agent_id
-//    • No-op void trampolines for the fire-and-forget dead ones.
+//    • Real callbacks: log, log_structured, free_string,
+//        config_get/set/delete (per-agent Keychain), db_exec/query,
+//        dispatch, task_status, complete, and upstream's own
+//        http_request / file_read (`PluginHostContext`, stage 2a).
+//    • Honest `not_supported` envelopes or empty lists for the rest:
+//        complete_stream, embed, list_models, list_active_tasks,
+//        dispatch_add_issue, get_active_agent_id.
+//    • No-op void trampolines for the fire-and-forget ones.
+//
+//  `W-plugin-reliability` stage 2 (docs/UPSTREAM_SYNC.md) moves the rest
+//  onto upstream's code a stage at a time.
 //
 //  This is enough to dlopen a natively-built x86_64 plugin, complete the v2
 //  ABI handshake, and invoke its tools. No official arm64 plugin can ever
@@ -178,7 +182,9 @@ private func notSupportedEnvelope(_ name: String) -> String {
 // Host trampolines are global (no plugin arg), so the active plugin id is
 // stashed in thread-local storage around each `invoke` (callbacks run
 // synchronously on that same thread). Used to scope config + the SQLite store.
-let intelPluginThreadKey = "osr.intel.currentPluginId"
+// The keys are upstream's (`PluginHostContext.tlsKey` / `agentTlsKey`), so
+// `PluginHostContext`'s trampolines and these read the same scope.
+let intelPluginThreadKey = "ai.osaurus.plugin.active"
 func intelCurrentPluginId() -> String {
     (Thread.current.threadDictionary[intelPluginThreadKey] as? String) ?? "_shared"
 }
@@ -186,7 +192,7 @@ func intelCurrentPluginId() -> String {
 /// The agent of the chat that called the plugin, stashed the same way
 /// (upstream `PluginHostAPI.activeAgentId()`). Nil outside a chat tool call
 /// (config callbacks, catalog probes).
-let intelPluginAgentThreadKey = "osr.intel.currentAgentId"
+let intelPluginAgentThreadKey = "ai.osaurus.plugin.agent"
 func intelCurrentPluginAgentId() -> UUID? {
     Thread.current.threadDictionary[intelPluginAgentThreadKey] as? UUID
 }
@@ -413,6 +419,14 @@ private func intelDispatch(pluginId: String, requestJSON: String) -> String {
             "message": "Plugin dispatch requires an active chat agent context.",
         ])
     }
+    // Upstream's per-(plugin, agent) limit, 10 a minute.
+    guard let hostContext = PluginHostContext.getContext(for: pluginId),
+        hostContext.checkDispatchRateLimit(agentId: resolvedAgent)
+    else {
+        return jsonStringSafe([
+            "error": "rate_limit_exceeded", "message": "Dispatch rate limit (10/min) exceeded",
+        ])
+    }
     return intelBlockingAsync {
         let request = DispatchRequest(
             prompt: prompt,
@@ -587,80 +601,10 @@ private let intelHostConfigDelete: osr_config_delete_t = { keyPtr in
         pluginId: intelCurrentPluginId(), agentId: intelCurrentPluginAgentId(), key: String(cString: keyPtr))
 }
 
-private let intelHostFileRead: osr_file_read_t = { pathPtr in
-    guard let pathPtr else { return dupCString(#"{"error":"invalid_request","message":"null path"}"#) }
-    let path = String(cString: pathPtr)
-    guard let data = FileManager.default.contents(atPath: path) else {
-        return dupCString(#"{"error":"not_found","message":"file unreadable"}"#)
-    }
-    // Return base64 to stay binary-safe across the C string boundary.
-    let payload: [String: Any] = ["base64": data.base64EncodedString(), "size": data.count]
-    let json = (try? JSONSerialization.data(withJSONObject: payload)).flatMap { String(data: $0, encoding: .utf8) }
-    return dupCString(json ?? #"{"error":"encode_failed"}"#)
-}
-
-/// Synchronous HTTP for plugins. Matches the production request contract
-/// (`{method,url,headers,body,body_encoding,timeout_ms}`) and returns
-/// `{status,body,headers,elapsed_ms}`. No SSRF/rate-limit gates — this is
-/// Renée's own device running her own hand-built plugins (sovereignty).
-private let intelHostHttpRequest: osr_http_request_t = { reqPtr in
-    guard let reqPtr else { return dupCString(#"{"error":"invalid_request"}"#) }
-    let reqJSON = String(cString: reqPtr)
-    guard let data = reqJSON.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let method = json["method"] as? String,
-          let urlStr = json["url"] as? String,
-          let url = URL(string: urlStr)
-    else {
-        return dupCString(#"{"error":"invalid_request","message":"Missing required fields: method, url"}"#)
-    }
-
-    var request = URLRequest(url: url)
-    request.httpMethod = method.uppercased()
-    let timeoutMs = json["timeout_ms"] as? Int ?? 30000
-    request.timeoutInterval = TimeInterval(min(timeoutMs, 300000)) / 1000.0
-    if let headers = json["headers"] as? [String: String] {
-        for (k, v) in headers { request.setValue(v, forHTTPHeaderField: k) }
-    }
-    if let body = json["body"] as? String {
-        if (json["body_encoding"] as? String) == "base64" {
-            request.httpBody = Data(base64Encoded: body)
-        } else {
-            request.httpBody = Data(body.utf8)
-        }
-    }
-
-    let semaphore = DispatchSemaphore(value: 0)
-    let resultBox = IntelBox<String>()
-    let started = Date()
-    let task = URLSession.shared.dataTask(with: request) { respData, response, error in
-        defer { semaphore.signal() }
-        let elapsed = Int(Date().timeIntervalSince(started) * 1000)
-        if let error {
-            resultBox.value = jsonStringSafe(["error": "request_failed", "message": error.localizedDescription, "elapsed_ms": elapsed])
-            return
-        }
-        guard let http = response as? HTTPURLResponse else {
-            resultBox.value = jsonStringSafe(["error": "invalid_response", "message": "Non-HTTP response", "elapsed_ms": elapsed])
-            return
-        }
-        var headers: [String: String] = [:]
-        for (k, v) in http.allHeaderFields {
-            if let ks = k as? String, let vs = v as? String { headers[ks] = vs }
-        }
-        let bodyStr = respData.flatMap { String(data: $0, encoding: .utf8) }
-            ?? respData?.base64EncodedString() ?? ""
-        resultBox.value = jsonStringSafe([
-            "status": http.statusCode,
-            "body": bodyStr,
-            "headers": headers,
-            "elapsed_ms": elapsed,
-        ])
-    }
-    task.resume()
-    semaphore.wait()
-    return dupCString(resultBox.value ?? #"{"error":"unknown"}"#)
-}
+// file_read and http_request are upstream's (`PluginHostContext`,
+// `IntelPluginHostContext.swift`): SSRF checks, rate limits, size caps, and
+// reads limited to the artifacts folder. Until stage 2a Intel's own versions
+// read any path and fetched any address.
 
 /// JSON-encode a `[String: Any]`; never throws (best-effort for trampolines).
 private func jsonStringSafe(_ object: [String: Any]) -> String {
@@ -733,8 +677,8 @@ private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
         complete_stream: intelHostCompleteStream,
         embed: intelHostEmbed,
         list_models: intelHostListModels,
-        http_request: intelHostHttpRequest,
-        file_read: intelHostFileRead,
+        http_request: PluginHostContext.trampolineHttpRequest,
+        file_read: PluginHostContext.trampolineFileRead,
         list_active_tasks: intelHostListActiveTasks,
         send_draft: intelHostSendDraft,
         dispatch_interrupt: intelHostDispatchInterrupt,
@@ -792,6 +736,8 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     private let api: osr_plugin_api
     private let ctx: osr_plugin_ctx_t
     private let hostAPIPtr: UnsafeMutablePointer<osr_host_api>
+    /// Upstream's per-plugin host state (rate limits, registry entry).
+    let hostContext: PluginHostContext
     private let queue: DispatchQueue
     private var isShutDown = false
 
@@ -805,7 +751,8 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         handle: UnsafeMutableRawPointer,
         api: osr_plugin_api,
         ctx: osr_plugin_ctx_t,
-        hostAPIPtr: UnsafeMutablePointer<osr_host_api>
+        hostAPIPtr: UnsafeMutablePointer<osr_host_api>,
+        hostContext: PluginHostContext
     ) {
         self.pluginId = pluginId
         self.displayName = displayName
@@ -817,6 +764,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         self.api = api
         self.ctx = ctx
         self.hostAPIPtr = hostAPIPtr
+        self.hostContext = hostContext
         self.queue = DispatchQueue(label: "com.osaurus.intel.plugin.\(pluginId)")
     }
 
@@ -833,19 +781,18 @@ final class IntelLoadedPlugin: @unchecked Sendable {
                 throw NSError(domain: "IntelLoadedPlugin", code: 2,
                               userInfo: [NSLocalizedDescriptionKey: "Plugin does not implement invoke"])
             }
-            // Scope host callbacks (config, db, dispatch…) to this plugin. The
-            // callbacks run synchronously on this thread inside invokeFn, so a
-            // thread-local id is the cheapest correct scope.
-            Thread.current.threadDictionary[intelPluginThreadKey] = pluginId
-            if let agentId { Thread.current.threadDictionary[intelPluginAgentThreadKey] = agentId }
-            defer {
-                Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey)
-                Thread.current.threadDictionary.removeObject(forKey: intelPluginAgentThreadKey)
-            }
-            let resPtr: UnsafePointer<CChar>? = type.withCString { t in
-                id.withCString { i in
-                    payload.withCString { p in
-                        invokeFn(ctx, t, i, p)
+            // Scope host callbacks (config, db, dispatch…) to this plugin and
+            // the calling agent. The callbacks run synchronously on this
+            // thread inside invokeFn, so thread-local storage is the scope
+            // (upstream `withTLSScope`).
+            let resPtr: UnsafePointer<CChar>? = PluginHostContext.withTLSScope(
+                pluginId: pluginId, agentId: agentId
+            ) {
+                type.withCString { t in
+                    id.withCString { i in
+                        payload.withCString { p in
+                            invokeFn(ctx, t, i, p)
+                        }
                     }
                 }
             }
@@ -864,6 +811,7 @@ final class IntelLoadedPlugin: @unchecked Sendable {
             guard !isShutDown else { return }
             isShutDown = true
             api.destroy?(ctx)
+            hostContext.teardown()
             hostAPIPtr.deinitialize(count: 1)
             hostAPIPtr.deallocate()
             dlclose(handle)
@@ -875,9 +823,9 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     func notifyConfigChanged(key: String, value: String) {
         queue.sync {
             guard !isShutDown, let cb = api.on_config_changed else { return }
-            Thread.current.threadDictionary[intelPluginThreadKey] = pluginId
-            defer { Thread.current.threadDictionary.removeObject(forKey: intelPluginThreadKey) }
-            key.withCString { k in value.withCString { v in cb(ctx, k, v) } }
+            PluginHostContext.withTLSScope(pluginId: pluginId, agentId: nil) {
+                key.withCString { k in value.withCString { v in cb(ctx, k, v) } }
+            }
         }
     }
 }
@@ -905,6 +853,16 @@ enum IntelPluginLoader {
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: "missing entry point (expected osaurus_plugin_entry_v2)"))
         }
+
+        // Upstream: host calls made inside the entry point, `init` or
+        // `get_manifest` resolve through `currentContext`; the context is
+        // registered under the plugin id only once the load succeeds.
+        guard let hostContext = try? PluginHostContext(pluginId: pluginId) else {
+            dlclose(handle)
+            return .failure(IntelPluginLoadError(message: "could not create the plugin host context"))
+        }
+        PluginHostContext.currentContext = hostContext
+        defer { PluginHostContext.currentContext = nil }
 
         let hostAPIPtr = buildIntelHostAPI()
         let entryFn = unsafeBitCast(v2sym, to: osr_plugin_entry_v2_t.self)
@@ -966,8 +924,10 @@ enum IntelPluginLoader {
             handle: handle,
             api: api,
             ctx: ctx,
-            hostAPIPtr: hostAPIPtr
+            hostAPIPtr: hostAPIPtr,
+            hostContext: hostContext
         )
+        PluginHostContext.setContext(hostContext, for: pluginId)
         return .success(loaded)
     }
 

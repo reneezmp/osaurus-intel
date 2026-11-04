@@ -39,7 +39,8 @@ F=[
 ("W-chat-export","W",r"ChatSessionExport|ChatExportOptions"),
 ("W-voice","W",r"Speech|TTSService|OpenAICompatibleTTSClient|Transcription|VAD|LiveVoiceAudio|Models/Voice|Services/Voice"),
 ("W-knowledge-write","W",r"Knowledge(Write|Curation|Diff|FolderWatcher|GitSync|LinkResolver|TypeInference)|KnowledgeWriteLogDatabase|Views/Knowledge/"),
-("W-skills-plugins-import","W",r"Skill|ClaudeMarketplace|ClaudePlugin|GitHubImportSheet|GitHubTokenViews|GitHubAuth|PluginProcessHost|PluginHost/main|ExternalTool"),
+("W-plugin-reliability","W",r"PluginProcessHost|PluginHost/main"),  # 2026-11-04: out-of-process plugin host (#2239), stage 2e
+("W-skills-plugins-import","W",r"Skill|ClaudeMarketplace|ClaudePlugin|GitHubImportSheet|GitHubTokenViews|GitHubAuth|ExternalTool"),
 ("W-media-generation","W",r"MediaGeneration|VideoTool"),
 # 2026-10-28: the `/v1/images` and `/v1/videos` DTOs need the server's auth layer first (billable).
 # 2026-11-02 (W-server-api stage 7): upstream's live inference registry is

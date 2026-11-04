@@ -2769,3 +2769,23 @@ the phone on the same Wi-Fi):
 8. "Owner redeem on `/pair-invite`" (expected to refuse on Ventura).
 9. "Osaurus ID" (skip the claim unless you want to keep the handle).
 10. "Agent keys: device-scoped addresses".
+
+## Plugin host safety (2026-11-04)
+
+`W-plugin-reliability` stage 2a (`UPSTREAM_SYNC.md`, "Plugin host safety").
+Not in candidate 66. Plugins' web requests now go through upstream's checks.
+Needs the `fetch` plugin from Settings › Plugins and a custom agent with its
+tool on.
+
+- [ ] Ask the agent to fetch `https://example.com` with the fetch tool: it
+      returns the page.
+- [ ] Ask it to fetch `http://github.com` (redirects to https): it still
+      returns the page.
+- [ ] Ask it to fetch `http://127.0.0.1:1337/health`: the tool result says
+      `ssrf_blocked` and the request is refused. Same for
+      `http://192.168.1.1/`.
+- [ ] Settings › Insights › **Tools** scope: the fetches appear as plugin
+      call rows (`/host-api/http → <url>`), the refused ones with an error
+      status.
+- [ ] Plugins still load after a relaunch, and the plugin's Configure sheet
+      still shows its saved keys.

@@ -22,13 +22,12 @@ import os
 
 #if OSAURUS_INTEL
 
-/// Intel stub for the amputated plugin host's static event surface.
-///
-/// On Apple Silicon `PluginHostContext` is a `final class` instantiated per
-/// loaded plugin; on Intel no plugin ever loads (PluginManager is gated out),
-/// so only `BackgroundTaskManager`'s static serialize/invalidate calls remain.
-/// Modeled as an `enum` (no instances) returning empty payloads.
-enum PluginHostContext {
+/// Intel stubs for upstream's task-event serializers on `PluginHostContext`
+/// (a real per-plugin class since `W-plugin-reliability` stage 2a,
+/// `Services/Plugin/IntelPluginHostContext.swift`). Intel's plugin host
+/// doesn't deliver task events to plugins yet (stage 2c), so these return
+/// empty payloads.
+extension PluginHostContext {
     static func invalidatePreflightCache(sessionId: String) {
         Task { await SessionToolStateStore.shared.invalidate(sessionId) }
     }

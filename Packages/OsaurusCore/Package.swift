@@ -264,7 +264,6 @@ let package = Package(
                 "Service/SearchServiceTests.swift",
                 "Service/ValidateJANGTQUnsupportedFamilyTests.swift",
                 "Plugin/PluginTests.swift",
-                "Plugin/SSRFTighteningTests.swift",
                 "PrivacyFilter/PostScrubInvariantTests.swift",
                 
                 "Provider/RemoteChatRequestEncodingTests.swift",
@@ -272,7 +271,6 @@ let package = Package(
                 "Provider/RemoteProviderManagerRefreshTests.swift",
                 "Plugin/PluginHostAPITests.swift",
                 "Plugin/PluginHostFreeStringTests.swift",
-                "Plugin/PluginHttpRateLimitTests.swift",
                 "Plugin/PluginLogStructuredTests.swift",
                 "Plugin/PluginManagerMigrationTests.swift",
                 "Plugin/PluginManagerTunnelDedupTests.swift",

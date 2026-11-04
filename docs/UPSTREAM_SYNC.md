@@ -4618,6 +4618,79 @@ Sparkle key `bYYJJqFx…`. Not launched on the build Mac (macOS 27.2 beta
 26B5086k). The public release needs build 67 or higher. Rosy steps: "Release
 candidate 1.0.62 (build 66)" in the Rosy retest checklist.
 
+### Plugin host safety (`W-plugin-reliability` stage 2a) — 2026-11-04
+
+Intel's plugin host (`IntelPluginExecution`) now answers `http_request` and
+`file_read` with upstream's code. Before this, Intel's own versions fetched
+any address (localhost, the LAN, cloud metadata) and read any file path.
+
+- **`PluginHostContext`** (`Services/Plugin/IntelPluginHostContext.swift`):
+  upstream's per-plugin context, copied verbatim from `bce907045` for the
+  parts that only need Foundation. That covers the registry and the
+  thread-local plugin / agent scope, `http_request`, `file_read`, the rate
+  limits, the bounded async bridges and the JSON helpers. Upstream's
+  `PluginHostAPI.swift` stays compiled out; its database, inference and
+  task-event parts come in later stages.
+- **The old stand-in is gone.** `IntelScheduleConformers` had an empty
+  `enum PluginHostContext` for background tasks. Its task-event serializers
+  are now an extension of the real class, still returning `{}` until 2c.
+- **`http_request`:**
+  - The URL and every redirect are checked against upstream's SSRF
+    blocklist: loopback, RFC 1918, CGN, link-local and cloud metadata,
+    multicast, and IPv6 local and IPv4-mapped forms.
+  - Redirects are followed by hand: 20 at most, and credentials are dropped
+    when the origin changes.
+  - 60 requests a minute per plugin and agent. Calls without a chat agent
+    share one anonymous bucket, never the Default agent's.
+  - 50 MB caps on the request and response, an `Osaurus/<version>
+    Plugin/<id>` User-Agent suffix, and the global proxy.
+  - Replies match upstream: lower-case header names, `body_encoding`, and
+    typed errors (`dns_failure`, `tls_error`, …).
+- **`file_read`:** upstream's contract, `{"path": …}` in and
+  `{"data", "size", "mime_type"}` out, limited to `~/.osaurus/artifacts/`
+  with a 50 MB cap. Intel's took a bare path and answered `{"base64",
+  "size"}`. None of the five Intel registry plugins calls `file_read`, and
+  `fetch` and `search` (the `http_request` users) only read `status` and
+  `body`, so they keep working.
+- **Dispatch:** upstream's 10-a-minute limit per plugin and agent.
+- **Scope:** `IntelLoadedPlugin` calls `withTLSScope`. Intel's thread-local
+  keys are now upstream's (`ai.osaurus.plugin.active` / `.agent`), so
+  Intel's config, db and dispatch callbacks and upstream's trampolines read
+  one scope. The loader sets `currentContext` during the handshake and
+  registers the context once the load succeeds; teardown removes it.
+- **Insights:** `http_request` and `file_read` calls are logged as plugin
+  calls, as upstream does. Intel's other callbacks still aren't.
+
+Tests:
+- Upstream's `SSRFTighteningTests` and `PluginHttpRateLimitTests`, now
+  included in the build.
+- `IntelPluginHostSafetyTests`: artifact reads, refusals outside the
+  artifacts folder (including `..`), the bare-path contract change, SSRF
+  and a spent quota answering before any network call, the trampoline
+  resolving the scoped plugin, and the shared scope.
+
+Validation: the full interim gate passed 4,471 tests (only the known avatar
+cache failure); package and tests also build for `x86_64-apple-macosx13.0`.
+Classifiers: UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity
+and `ai.osaurus.id` session-token mdat unchanged.
+
+**Stage 2 plan** (each a short report and push, like `W-identity-mobile`):
+
+| Stage | Scope |
+|---|---|
+| 2a | Host safety (this section) |
+| 2b | Upstream's `PluginDatabase`: SQL guard, 100 MiB cap, teardown gate. Intel's plaintext `Tools/<id>/plugin.db` moves over. |
+| 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
+| 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
+| 2e | Load lifecycle: compatibility enforcement, the crash-loop guard, per-agent config delivery and `PluginConfigView`, the out-of-process host (`PluginProcessHost`, off by default upstream) |
+| 2f | Routes, web mounts and the plugin tunnel |
+| 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
+
+**Found while doing it:** `PluginProcessHost` and `PluginHost/main.swift`
+(upstream #2239, the killable out-of-process plugin host) were filed under
+`W-skills-plugins-import`. They are plugin-host work, so `gap_features.py`
+now files them under `W-plugin-reliability` (stage 2e).
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

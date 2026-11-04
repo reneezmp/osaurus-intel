@@ -3,9 +3,10 @@
 //  osaurus
 //
 //  Upstream's background-task status serialization (`PluginHostAPI.swift`,
-//  which Intel doesn't compile: no plugin host). `GET /tasks/{id}` uses it
-//  (`W-server-api` stage 4b, docs/SERVER_API_INTEL.md). Verbatim, on
-//  Intel's `PluginHostContext` stand-in (`IntelScheduleConformers.swift`).
+//  which Intel doesn't compile). `GET /tasks/{id}` uses it (`W-server-api`
+//  stage 4b, docs/SERVER_API_INTEL.md). Verbatim, on Intel's
+//  `PluginHostContext` (`IntelPluginHostContext.swift`, whose `jsonString` /
+//  `parseJSON` it uses).
 //
 
 import Foundation
@@ -87,20 +88,6 @@ extension PluginHostContext {
         case .success: "success"
         case .error: "error"
         }
-    }
-
-    /// Canonical (sorted-keys) JSON; "{}" on failure.
-    static func jsonString(_ dict: [String: Any]) -> String {
-        guard let data = try? JSONSerialization.data(withJSONObject: dict, options: .osaurusCanonical)
-        else { return "{}" }
-        return String(decoding: data, as: UTF8.self)
-    }
-
-    static func parseJSON(_ string: String) -> [String: Any]? {
-        guard let data = string.data(using: .utf8),
-            let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return obj
     }
 }
 
