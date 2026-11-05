@@ -966,10 +966,18 @@ public final class BackgroundTaskManager: ObservableObject {
             )
         }
         #else
-        // Plugins are amputated on Intel (PluginManager is fully gated out),
-        // so nothing consumes task events. `sourcePluginId` is always nil for
-        // Intel schedule/HTTP dispatches, so this path is unreached anyway.
-        _ = pluginId
+        // Intel's plugin host (`W-plugin-reliability` stage 2c): the
+        // dylib's `IntelLoadedPlugin`, same contract as upstream's above.
+        if let loaded = PluginManager.shared.nativeHandle(for: pluginId),
+            loaded.hasTaskEventHandler
+        {
+            loaded.notifyTaskEvent(
+                taskId: state.id.uuidString,
+                eventType: type,
+                eventJSON: json,
+                agentId: state.agentId
+            )
+        }
         #endif
     }
 

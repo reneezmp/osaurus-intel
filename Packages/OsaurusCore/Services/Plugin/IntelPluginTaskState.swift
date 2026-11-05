@@ -2,9 +2,14 @@
 //  IntelPluginTaskState.swift
 //  osaurus
 //
-//  Upstream's background-task status serialization (`PluginHostAPI.swift`,
-//  which Intel doesn't compile). `GET /tasks/{id}` uses it (`W-server-api`
-//  stage 4b, docs/SERVER_API_INTEL.md). Verbatim, on Intel's
+//  Upstream's background-task status and task-event serialization
+//  (`PluginHostAPI.swift`, which Intel doesn't compile). `GET /tasks/{id}`
+//  (`W-server-api` stage 4b, docs/SERVER_API_INTEL.md), plugin
+//  `task_status` / `list_active_tasks` and the events delivered to plugins'
+//  `on_task_event` (`W-plugin-reliability` stage 2c) use it. The event
+//  serializers are verbatim; `taskStateDict` maps Intel's task states
+//  (no `.queued`, `.completed(success:)` instead of `.failed`) until
+//  `W-background-runs-sync`. Verbatim, on Intel's
 //  `PluginHostContext` (`IntelPluginHostContext.swift`, whose `jsonString` /
 //  `parseJSON` it uses).
 //
@@ -88,6 +93,107 @@ extension PluginHostContext {
         case .success: "success"
         case .error: "error"
         }
+    }
+
+
+    // MARK: - Task Event Serialization
+
+    @MainActor
+    static func serializeStartedEvent(state: BackgroundTaskState) -> String {
+        jsonString([
+            "status": "running",
+            "title": state.taskTitle,
+        ])
+    }
+
+    @MainActor
+    static func serializeActivityEvent(
+        kind: BackgroundTaskActivityItem.Kind,
+        title: String,
+        detail: String?,
+        metadata: [String: Any]? = nil
+    ) -> String {
+        var dict: [String: Any] = [
+            "kind": activityKindString(kind),
+            "title": title,
+            "timestamp": isoFormatter.string(from: Date()),
+        ]
+        if let detail { dict["detail"] = detail }
+        if let metadata, !metadata.isEmpty { dict["metadata"] = metadata }
+        return jsonString(dict)
+    }
+
+    @MainActor
+    static func serializeProgressEvent(progress: Double, currentStep: String?, taskTitle: String) -> String {
+        var dict: [String: Any] = ["progress": progress, "title": taskTitle]
+        if let step = currentStep { dict["current_step"] = step }
+        return jsonString(dict)
+    }
+
+    /// Serialize the payload for `OSR_TASK_EVENT_CLARIFICATION` (type 3).
+    /// Emitted when the agent calls the inline `clarify` tool to pause for
+    /// a user response. `options` is omitted entirely when empty so plugins
+    /// can use key-presence as the "free-form vs choice" signal.
+    @MainActor
+    static func serializeClarificationEvent(payload: ClarifyPayload) -> String {
+        var dict: [String: Any] = [
+            "question": payload.question,
+            "allow_multiple": payload.allowMultiple,
+        ]
+        if !payload.options.isEmpty {
+            dict["options"] = payload.options
+        }
+        return jsonString(dict)
+    }
+
+    @MainActor
+    static func serializeCompletedEvent(
+        success: Bool,
+        summary: String,
+        sessionId: UUID?,
+        taskTitle: String,
+        artifacts: [SharedArtifact] = [],
+        outputText: String? = nil
+    ) -> String {
+        var dict: [String: Any] = ["success": success, "summary": summary, "title": taskTitle]
+        if let sid = sessionId { dict["session_id"] = sid.uuidString }
+        if !artifacts.isEmpty {
+            dict["artifacts"] = artifacts.map { serializeArtifactDict($0) }
+        }
+        if let output = outputText, !output.isEmpty {
+            dict["output"] = output
+        }
+        return jsonString(dict)
+    }
+
+    static func serializeArtifactEvent(artifact: SharedArtifact) -> String {
+        return jsonString(serializeArtifactDict(artifact))
+    }
+
+    private static func serializeArtifactDict(_ artifact: SharedArtifact) -> [String: Any] {
+        var dict: [String: Any] = [
+            "filename": artifact.filename,
+            "mime_type": artifact.mimeType,
+            "size": artifact.fileSize,
+            "host_path": artifact.hostPath,
+            "is_directory": artifact.isDirectory,
+        ]
+        if let desc = artifact.description { dict["description"] = desc }
+        return dict
+    }
+
+    static func serializeCancelledEvent(taskTitle: String) -> String {
+        jsonString(["title": taskTitle])
+    }
+
+    static func serializeOutputEvent(text: String, taskTitle: String) -> String {
+        jsonString(["text": text, "title": taskTitle])
+    }
+
+    static func serializeDraftEvent(draftJSON: String, taskTitle: String) -> String {
+        var dict: [String: Any] = ["title": taskTitle]
+        if let draft = parseJSON(draftJSON) { dict["draft"] = draft }
+        return jsonString(dict)
     }
 }
 

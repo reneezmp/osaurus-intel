@@ -1820,10 +1820,12 @@ final actor SessionToolStateStore {
         _ = trace
     }
 
+    /// `fallbackPreflight` defaults to nil: upstream dropped the parameter,
+    /// so its call sites (and tests) omit it.
     func appendLoadedTools(
         _ key: Any,
         names: [String],
-        fallbackPreflight: Any?,
+        fallbackPreflight: Any? = nil,
         fallbackAlwaysLoadedNames: Any?
     ) {
         let key = stateKey(key)

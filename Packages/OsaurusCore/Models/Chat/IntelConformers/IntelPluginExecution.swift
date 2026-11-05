@@ -15,15 +15,15 @@
 //  anyway. So instead of un-excluding that whole web, this file provides a
 //  minimal, honest host:
 //
-//    • Real callbacks: log, log_structured, free_string,
-//        config_get/set/delete (per-agent Keychain), dispatch,
-//        task_status, complete, and upstream's own http_request /
-//        file_read (stage 2a) and db_exec / db_query (stage 2b) on
-//        `PluginHostContext`.
-//    • Honest `not_supported` envelopes or empty lists for the rest:
-//        complete_stream, embed, list_models, list_active_tasks,
-//        dispatch_add_issue, get_active_agent_id.
-//    • No-op void trampolines for the fire-and-forget ones.
+//    • Intel's own: log, log_structured, free_string,
+//        config_get/set/delete (per-agent Keychain), complete.
+//    • Upstream's, on `PluginHostContext`: http_request / file_read
+//        (stage 2a), db_exec / db_query (2b), dispatch, task_status,
+//        dispatch_cancel / _interrupt / _clarify / _add_issue, send_draft,
+//        list_active_tasks, get_active_agent_id (2c). Task events reach
+//        the plugin's on_task_event (`IntelLoadedPlugin.notifyTaskEvent`).
+//    • `not_supported` / empty for the rest until 2d: complete_stream,
+//        embed, list_models, complete_cancel (no-op).
 //
 //  `W-plugin-reliability` stage 2 (docs/UPSTREAM_SYNC.md) moves the rest
 //  onto upstream's code a stage at a time.
@@ -289,94 +289,8 @@ private func intelBlockingAsync<T: Sendable>(_ body: @escaping @Sendable () asyn
     return box.value!
 }
 
-// --- dispatch / task_status → the Intel BackgroundTaskManager. ----------------
-private func intelDispatch(pluginId: String, requestJSON: String) -> String {
-    guard let data = requestJSON.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let prompt = json["prompt"] as? String, !prompt.isEmpty
-    else {
-        return jsonStringSafe(["error": "invalid_request", "message": "Missing required field 'prompt'"])
-    }
-    let title = json["title"] as? String
-    let folderPath = json["folder_path"] as? String
-    let sessionId = json["session_id"] as? String
-    // Agent scope is host-enforced (upstream `PluginHostAPI.planDispatch`):
-    // the plugin runs work as the agent of the chat that called it, never a
-    // caller-supplied id, and never the built-in Default agent, which is
-    // reachable only from the in-app chat.
-    let activeAgent = intelCurrentPluginAgentId()
-    if let rejection = Agent.rejectBuiltInForExternalSurface(activeAgent, source: "plugin/planDispatch") {
-        return jsonStringSafe(["error": rejection.code, "message": rejection.message])
-    }
-    guard let resolvedAgent = activeAgent else {
-        return jsonStringSafe([
-            "error": "missing_agent_context",
-            "message": "Plugin dispatch requires an active chat agent context.",
-        ])
-    }
-    // Upstream's per-(plugin, agent) limit, 10 a minute.
-    guard let hostContext = PluginHostContext.getContext(for: pluginId),
-        hostContext.checkDispatchRateLimit(agentId: resolvedAgent)
-    else {
-        return jsonStringSafe([
-            "error": "rate_limit_exceeded", "message": "Dispatch rate limit (10/min) exceeded",
-        ])
-    }
-    return intelBlockingAsync {
-        let request = DispatchRequest(
-            prompt: prompt,
-            agentId: resolvedAgent,
-            title: title,
-            folderPath: folderPath,
-            showToast: true,
-            sourcePluginId: pluginId,
-            source: .plugin,
-            externalSessionKey: sessionId
-        )
-        guard let handle = await TaskDispatcher.shared.dispatch(request) else {
-            return jsonStringSafe(["error": "dispatch_rejected",
-                                   "message": "Dispatch rejected (task limit reached or unavailable)"])
-        }
-        // Release the events held during the dispatch (BackgroundTaskManager
-        // buffers them from registerTask because sourcePluginId != nil). Without
-        // this they'd accumulate forever — on Intel nothing consumes them, so
-        // this just clears the buffer.
-        await MainActor.run { BackgroundTaskManager.shared.releaseEventsForDispatch(taskId: handle.id) }
-        return jsonStringSafe(["id": handle.id.uuidString, "status": "running"])
-    }
-}
-
-private func intelStatusString(_ status: BackgroundTaskStatus) -> String {
-    switch status {
-    case .running: return "running"
-    case .awaitingClarification: return "awaiting_clarification"
-    case .completed(let success, _): return success ? "completed" : "failed"
-    case .cancelled: return "cancelled"
-    }
-}
-
-private func intelTaskStatus(pluginId: String, taskIdString: String) -> String {
-    guard let uuid = UUID(uuidString: taskIdString) else {
-        return jsonStringSafe(["error": "invalid_task_id", "message": "Invalid UUID format"])
-    }
-    return intelBlockingAsync {
-        await MainActor.run { () -> String in
-            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
-                  state.sourcePluginId == pluginId
-            else {
-                return jsonStringSafe(["error": "not_found", "message": "Task not found"])
-            }
-            var dict: [String: Any] = [
-                "id": uuid.uuidString,
-                "status": intelStatusString(state.status),
-                "title": state.taskTitle,
-            ]
-            if let step = state.currentStep { dict["step"] = step }
-            if case .completed(_, let summary) = state.status { dict["summary"] = summary }
-            return jsonStringSafe(dict)
-        }
-    }
-}
+// --- dispatch, task_status, cancel, interrupt, draft, list_active_tasks and
+// get_active_agent_id are upstream's (`PluginHostContext`, stage 2c).
 
 // --- complete → the Intel cloud chat engine (DeepSeek / remote). -------------
 private func intelComplete(requestJSON: String) -> String {
@@ -510,16 +424,6 @@ private func jsonStringSafe(_ object: [String: Any]) -> String {
 }
 
 // --- Dispatch, task status, complete, and `not_supported` for the rest. -----
-private let intelHostDispatch: osr_dispatch_t = { reqPtr in
-    let pid = intelCurrentPluginId()
-    let req = reqPtr.map { String(cString: $0) } ?? "{}"
-    return dupCString(intelDispatch(pluginId: pid, requestJSON: req))
-}
-private let intelHostTaskStatus: osr_task_status_t = { idPtr in
-    let pid = intelCurrentPluginId()
-    let idStr = idPtr.map { String(cString: $0) } ?? ""
-    return dupCString(intelTaskStatus(pluginId: pid, taskIdString: idStr))
-}
 private let intelHostComplete: osr_complete_t = { reqPtr in
     let req = reqPtr.map { String(cString: $0) } ?? "{}"
     return dupCString(intelComplete(requestJSON: req))
@@ -527,22 +431,14 @@ private let intelHostComplete: osr_complete_t = { reqPtr in
 private let intelHostCompleteStream: osr_complete_stream_t = { _, _, _ in dupCString(notSupportedEnvelope("complete_stream")) }
 private let intelHostEmbed: osr_embed_t = { _ in dupCString(notSupportedEnvelope("embed")) }
 private let intelHostListModels: osr_list_models_t = { dupCString(#"{"models":[]}"#) }
-private let intelHostListActiveTasks: osr_list_active_tasks_t = { dupCString(#"{"tasks":[]}"#) }
-private let intelHostDispatchAddIssue: osr_dispatch_add_issue_t = { _, _ in dupCString(notSupportedEnvelope("dispatch_add_issue")) }
-private let intelHostGetActiveAgentId: osr_get_active_agent_id_t = { nil }
 
 // --- Void trampolines: safe no-ops. ----------------------------------------
-private let intelHostDispatchCancel: osr_dispatch_cancel_t = { _ in }
-private let intelHostDispatchClarify: osr_dispatch_clarify_t = { _, _ in }
-private let intelHostSendDraft: osr_send_draft_t = { _, _ in }
-private let intelHostDispatchInterrupt: osr_dispatch_interrupt_t = { _, _ in }
 private let intelHostCompleteCancel: osr_complete_cancel_t = { _ in }
 
-/// Build the slim host-API struct passed to a plugin's v2 entry point.
-/// The returned pointer must outlive the plugin (it holds the callback
-/// table the plugin keeps calling), so the loader owns it and frees it
-/// only in `teardown()`.
-private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
+/// Build the host-API struct passed to a plugin's v2 entry point. Called
+/// through `PluginHostContext.buildHostAPI()`, which owns the pointer and
+/// frees it when the context goes away (after the plugin is destroyed).
+func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
     let ptr = UnsafeMutablePointer<osr_host_api>.allocate(capacity: 1)
     ptr.initialize(to: osr_host_api(
         version: 6,
@@ -552,22 +448,22 @@ private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
         db_exec: PluginHostContext.trampolineDbExec,
         db_query: PluginHostContext.trampolineDbQuery,
         log: intelHostLog,
-        dispatch: intelHostDispatch,
-        task_status: intelHostTaskStatus,
-        dispatch_cancel: intelHostDispatchCancel,
-        dispatch_clarify: intelHostDispatchClarify,
+        dispatch: PluginHostContext.trampolineDispatch,
+        task_status: PluginHostContext.trampolineTaskStatus,
+        dispatch_cancel: PluginHostContext.trampolineDispatchCancel,
+        dispatch_clarify: PluginHostContext.trampolineDispatchClarify,
         complete: intelHostComplete,
         complete_stream: intelHostCompleteStream,
         embed: intelHostEmbed,
         list_models: intelHostListModels,
         http_request: PluginHostContext.trampolineHttpRequest,
         file_read: PluginHostContext.trampolineFileRead,
-        list_active_tasks: intelHostListActiveTasks,
-        send_draft: intelHostSendDraft,
-        dispatch_interrupt: intelHostDispatchInterrupt,
-        dispatch_add_issue: intelHostDispatchAddIssue,
+        list_active_tasks: PluginHostContext.trampolineListActiveTasks,
+        send_draft: PluginHostContext.trampolineSendDraft,
+        dispatch_interrupt: PluginHostContext.trampolineDispatchInterrupt,
+        dispatch_add_issue: PluginHostContext.trampolineDispatchAddIssue,
         complete_cancel: intelHostCompleteCancel,
-        get_active_agent_id: intelHostGetActiveAgentId,
+        get_active_agent_id: PluginHostContext.trampolineGetActiveAgentId,
         log_structured: intelHostLogStructured,
         free_string: intelHostFreeString
     ))
@@ -618,8 +514,8 @@ final class IntelLoadedPlugin: @unchecked Sendable {
     private let handle: UnsafeMutableRawPointer
     private let api: osr_plugin_api
     private let ctx: osr_plugin_ctx_t
-    private let hostAPIPtr: UnsafeMutablePointer<osr_host_api>
-    /// Upstream's per-plugin host state (rate limits, registry entry).
+    /// Upstream's per-plugin host state: rate limits, the database, the
+    /// registry entry, and the host-API table the plugin holds.
     let hostContext: PluginHostContext
     private let queue: DispatchQueue
     private var isShutDown = false
@@ -634,7 +530,6 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         handle: UnsafeMutableRawPointer,
         api: osr_plugin_api,
         ctx: osr_plugin_ctx_t,
-        hostAPIPtr: UnsafeMutablePointer<osr_host_api>,
         hostContext: PluginHostContext
     ) {
         self.pluginId = pluginId
@@ -646,7 +541,6 @@ final class IntelLoadedPlugin: @unchecked Sendable {
         self.handle = handle
         self.api = api
         self.ctx = ctx
-        self.hostAPIPtr = hostAPIPtr
         self.hostContext = hostContext
         self.queue = DispatchQueue(label: "com.osaurus.intel.plugin.\(pluginId)")
     }
@@ -695,9 +589,33 @@ final class IntelLoadedPlugin: @unchecked Sendable {
             isShutDown = true
             api.destroy?(ctx)
             hostContext.teardown()
-            hostAPIPtr.deinitialize(count: 1)
-            hostAPIPtr.deallocate()
             dlclose(handle)
+        }
+    }
+
+    /// Upstream `ExternalPlugin.hasTaskEventHandler` (every Intel plugin is
+    /// v2, the only ABI the loader accepts).
+    var hasTaskEventHandler: Bool { api.on_task_event != nil }
+
+    /// Deliver a task lifecycle event to the plugin's `on_task_event`
+    /// (upstream `ExternalPlugin.notifyTaskEvent`). Upstream gives each task
+    /// its own serial queue, concurrent with `invoke`; Intel's host never
+    /// runs a plugin's code concurrently, so events go through the plugin's
+    /// one serial queue, after any tool call in progress. Order within a
+    /// task is kept either way. Async, so a plugin that dispatched from
+    /// inside `invoke` gets its events once that call has returned.
+    func notifyTaskEvent(taskId: String, eventType: TaskEventType, eventJSON: String, agentId: UUID? = nil) {
+        guard let eventFn = api.on_task_event else { return }
+        let rawType = eventType.rawValue
+        queue.async { [self] in
+            guard !isShutDown else { return }
+            PluginHostContext.withTLSScope(pluginId: pluginId, agentId: agentId) {
+                taskId.withCString { taskIdPtr in
+                    eventJSON.withCString { jsonPtr in
+                        eventFn(ctx, taskIdPtr, rawType, jsonPtr)
+                    }
+                }
+            }
         }
     }
 
@@ -747,10 +665,9 @@ enum IntelPluginLoader {
         PluginHostContext.currentContext = hostContext
         defer { PluginHostContext.currentContext = nil }
 
-        let hostAPIPtr = buildIntelHostAPI()
+        let hostAPIPtr = hostContext.buildHostAPI()
         let entryFn = unsafeBitCast(v2sym, to: osr_plugin_entry_v2_t.self)
         guard let apiRaw = entryFn(UnsafeRawPointer(hostAPIPtr)) else {
-            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: "plugin v2 entry returned null API"))
         }
@@ -762,20 +679,17 @@ enum IntelPluginLoader {
         // makes teardown impossible, a nil `invoke` yields tools that can
         // never run.
         if let abiError = abiTableValidationFailure(api) {
-            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: abiError))
         }
 
         guard let initFn = api.`init`, let ctx = initFn() else {
-            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: "plugin init failed"))
         }
 
         guard let getManifest = api.get_manifest, let jsonPtr = getManifest(ctx) else {
             api.destroy?(ctx)
-            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: "plugin returned no manifest"))
         }
@@ -787,7 +701,6 @@ enum IntelPluginLoader {
         // non-empty and unique (duplicates silently overwrite each other).
         if let manifestError = manifestValidationFailure(manifestJSON: manifestJSON, directoryId: pluginId) {
             api.destroy?(ctx)
-            hostAPIPtr.deinitialize(count: 1); hostAPIPtr.deallocate()
             dlclose(handle)
             return .failure(IntelPluginLoadError(message: manifestError))
         }
@@ -807,7 +720,6 @@ enum IntelPluginLoader {
             handle: handle,
             api: api,
             ctx: ctx,
-            hostAPIPtr: hostAPIPtr,
             hostContext: hostContext
         )
         PluginHostContext.setContext(hostContext, for: pluginId)

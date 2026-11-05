@@ -266,12 +266,16 @@ let package = Package(
                 // PluginTests: mostly route matching (`W-plugin-reliability` 2f); its
                 // PluginDatabaseTests suite runs as IntelPluginDatabaseTests.
                 "Plugin/PluginTests.swift",
+                // Need upstream's ExternalPlugin / inference host (`W-plugin-reliability` 2d-2e):
+                "Plugin/PluginAgentScopingTests.swift",
+                "Plugin/PluginClarifyEventTests.swift",
+                // MockChatEngine (upstream's chat engine; `W-background-runs-sync`):
+                "Plugin/BackgroundTaskInterruptTests.swift",
                 "PrivacyFilter/PostScrubInvariantTests.swift",
                 
                 "Provider/RemoteChatRequestEncodingTests.swift",
                 "Provider/RemoteProviderConnectRetryTests.swift",
                 "Provider/RemoteProviderManagerRefreshTests.swift",
-                "Plugin/PluginHostAPITests.swift",
                 "Plugin/PluginHostFreeStringTests.swift",
                 "Plugin/PluginLogStructuredTests.swift",
                 "Plugin/PluginManagerMigrationTests.swift",
@@ -288,14 +292,10 @@ let package = Package(
                 "Model/ModelManagerResolveTests.swift",
                 "Model/ModelManagerSuggestedTests.swift",
                 "Model/ModelManagerTests.swift",
-                "Plugin/PluginDispatchToolSelectionTests.swift",
-                "Plugin/PluginGetActiveAgentIdTests.swift",
                 "Model/ModelRuntimeFallbackTests.swift",
                 "Networking/ErrorBodyShapeTests.swift",
                 "Networking/GlobalProxyConfigurationTests.swift",
                 "Plugin/PluginAccessibilityInvocationTests.swift",
-                "Plugin/PluginAgentScopingTests.swift",
-                "Plugin/PluginClarifyEventTests.swift",
                 "Plugin/PluginCompatibilityEnforcementTests.swift",
                 "Plugin/PluginCompleteCancelTests.swift",
                 "Plugin/PluginCrashLoopGuardTests.swift",
@@ -310,7 +310,6 @@ let package = Package(
                 "Networking/ServerRuntimeSettingsStoreTests.swift",
                 "Onboarding/ConfigureAIStateDownloadTests.swift",
                 "Plugin/AgentManagerLifecycleNotificationTests.swift",
-                "Plugin/BackgroundTaskInterruptTests.swift",
                 "Plugin/BackgroundTaskStreamingObserverTests.swift",
                 "Plugin/PluginAbiHandshakeTests.swift",
                 "Chat/ChatSessionQueuedSendTests.swift",

@@ -22,46 +22,20 @@ import os
 
 #if OSAURUS_INTEL
 
-/// Intel stubs for upstream's task-event serializers on `PluginHostContext`
-/// (a real per-plugin class since `W-plugin-reliability` stage 2a,
-/// `Services/Plugin/IntelPluginHostContext.swift`). Intel's plugin host
-/// doesn't deliver task events to plugins yet (stage 2c), so these return
-/// empty payloads.
+/// Intel's preflight-cache hook on `PluginHostContext` (a real per-plugin
+/// class since `W-plugin-reliability` stage 2a). Upstream's task-event
+/// serializers replaced the empty stubs that lived here in stage 2c
+/// (`IntelPluginTaskState.swift`).
 extension PluginHostContext {
     static func invalidatePreflightCache(sessionId: String) {
         Task { await SessionToolStateStore.shared.invalidate(sessionId) }
     }
-
-    static func serializeStartedEvent(state: BackgroundTaskState) -> String { "{}" }
-
-    static func serializeActivityEvent(
-        kind: BackgroundTaskActivityItem.Kind,
-        title: String,
-        detail: String?,
-        metadata: [String: Any]? = nil
-    ) -> String { "{}" }
-
-    static func serializeClarificationEvent(payload: ClarifyPayload) -> String { "{}" }
-
-    static func serializeCompletedEvent(
-        success: Bool,
-        summary: String,
-        sessionId: UUID?,
-        taskTitle: String,
-        artifacts: [SharedArtifact] = [],
-        outputText: String? = nil
-    ) -> String { "{}" }
-
-    static func serializeCancelledEvent(taskTitle: String) -> String { "{}" }
-
-    static func serializeDraftEvent(draftJSON: String, taskTitle: String) -> String { "{}" }
 }
 
-/// Intel stub for the plugin task-event enum (real one lives in the fully
-/// `#if !OSAURUS_INTEL` `Models/Plugin/ExternalPlugin.swift`). Raw values
-/// mirror upstream so any persisted/serialized ints stay compatible. Only
-/// `BackgroundTaskManager`'s now-gated plugin-notify path references the
-/// cases on Intel; no plugin ever consumes them.
+/// Upstream's plugin task-event enum (it lives in the `#if !OSAURUS_INTEL`
+/// `Models/Plugin/ExternalPlugin.swift`). Raw values are the C ABI's
+/// `OSR_TASK_EVENT_*`: `BackgroundTaskManager` delivers them to Intel
+/// plugins' `on_task_event` since `W-plugin-reliability` stage 2c.
 enum TaskEventType: Int32 {
     case started = 0
     case activity = 1

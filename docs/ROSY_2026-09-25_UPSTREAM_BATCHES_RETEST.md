@@ -2807,3 +2807,17 @@ first item **before** anything else touches memo.
 - [ ] Save a new memo, quit, relaunch, list memos: it's there.
 - [ ] Clear memos with `memo_clear`, then list: empty.
 - [ ] Settings › Storage shows no key-mismatch warning.
+
+## Plugin dispatch and task events (2026-11-05)
+
+`W-plugin-reliability` stage 2c (`UPSTREAM_SYNC.md`, "Plugin dispatch and
+task events"). Not in candidate 66. No Intel registry plugin starts
+background tasks or listens for task events, so there is nothing new to
+see. This is a regression pass:
+
+- [ ] Each installed plugin's tools still run from a chat (`time`, `hello`,
+      `fetch`, `memo`).
+- [ ] A schedule or a background agent run still starts, finishes, and
+      shows its toast and menu-bar row.
+- [ ] Quit while a plugin is loaded: no crash on quit or on the next
+      launch.

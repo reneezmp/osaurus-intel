@@ -18,10 +18,11 @@
 //  - the dispatch rate limit, the bounded async bridges and the JSON
 //    helpers.
 //
-//  Stage 2b added upstream's database callbacks (`PluginDatabase`).
-//  Upstream keeps the dispatch, inference and task-event callbacks on this
-//  class too. On Intel those still live in `IntelPluginExecution` until
-//  their own stages port them.
+//  Stage 2b added upstream's database callbacks (`PluginDatabase`), stage
+//  2c the dispatch and task-control callbacks (`dispatch`, `task_status`,
+//  cancel, interrupt, draft, `list_active_tasks`, `get_active_agent_id`).
+//  Upstream keeps the inference callbacks on this class too; on Intel
+//  `complete` still lives in `IntelPluginExecution` until stage 2d.
 //
 
 #if OSAURUS_INTEL
@@ -80,8 +81,10 @@ final class PluginHostContext: @unchecked Sendable {
     let pluginId: String
     let database: PluginDatabase
 
-    // Intel: the host-API table (`hostAPIPtr` upstream) is owned by
-    // `IntelLoadedPlugin`, which frees it at teardown.
+    /// Heap-allocated host API struct whose pointer is handed to the plugin at
+    /// init. Must outlive the plugin because it may store the pointer rather
+    /// than copying the struct.
+    private(set) var hostAPIPtr: UnsafeMutablePointer<osr_host_api>?
 
     private struct HTTPTransportSessionState {
         let proxyKey: String
@@ -187,7 +190,18 @@ final class PluginHostContext: @unchecked Sendable {
     }
 
     deinit {
+        hostAPIPtr?.deinitialize(count: 1)
+        hostAPIPtr?.deallocate()
         database.close()
+    }
+
+    /// Upstream's `buildHostAPI()`: a heap-allocated table this context owns
+    /// (freed in `deinit`), stable for the plugin's lifetime. Intel's table
+    /// mixes Intel's callbacks with upstream's (`buildIntelHostAPI`).
+    func buildHostAPI() -> UnsafeMutablePointer<osr_host_api> {
+        let ptr = buildIntelHostAPI()
+        hostAPIPtr = ptr
+        return ptr
     }
 
     /// Set after the first `database.open()` failure so we don't
@@ -488,6 +502,441 @@ final class PluginHostContext: @unchecked Sendable {
         isTornDown.withLock { $0 = true }
         inFlightDatabaseCalls.wait()
         database.close()
+    }
+}
+
+// MARK: - Dispatch and task control (stage 2c)
+
+extension PluginHostContext {
+    // MARK: - Dispatch Callbacks
+
+    /// Outcome of `planDispatch`: either an error envelope to return
+    /// straight to the plugin, or a fully-built `DispatchRequest` ready
+    /// for `TaskDispatcher`. Surfaced to tests so the security boundary
+    /// (agent-scope enforcement, prompt validation, request-id parse,
+    /// session_id passthrough) can be pinned without spinning up
+    /// `BackgroundTaskManager` or a real chat engine.
+    enum DispatchPlan {
+        case error(envelope: String)
+        case request(DispatchRequest)
+    }
+
+    /// Parses the plugin's `dispatch(requestJSON:)` payload and applies
+    /// the host-enforced agent scope (`activeAgent`, captured from TLS
+    /// before `blockingAsync`). The returned `DispatchPlan` either
+    /// carries the error envelope to send back, or the
+    /// `DispatchRequest` to hand to `TaskDispatcher`.
+    ///
+    /// Rate limiting is intentionally *not* in this function: it
+    /// requires per-context state (`PluginHostContext.getContext(for:)`
+    /// + `checkDispatchRateLimit`), whereas this helper is a pure
+    /// transform from `(json, pluginId, activeAgent) -> plan`. Keeping
+    /// it pure lets unit tests assert "this JSON + this TLS agent
+    /// produces this DispatchRequest" without singletons.
+    static func planDispatch(
+        requestJSON: String,
+        pluginId: String,
+        activeAgent: UUID?,
+        allowedToolNames: Set<String> = []
+    ) -> DispatchPlan {
+        let data = Data(requestJSON.utf8)
+        guard let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
+            let prompt = json["prompt"] as? String
+        else {
+            return .error(
+                envelope: jsonString([
+                    "error": "invalid_request", "message": "Missing required field: prompt",
+                ])
+            )
+        }
+
+        // Empty/whitespace prompts make `ChatSession.send` no-op (no Task,
+        // no `isStreaming` flip), which would leave the dispatched task
+        // hanging in `.running` until the awaitCompletion watchdog.
+        guard !prompt.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else {
+            return .error(
+                envelope: jsonString(["error": "invalid_request", "message": "Prompt is empty"])
+            )
+        }
+
+        var requestId = UUID()
+        if let idStr = json["id"] as? String, let parsed = UUID(uuidString: idStr) {
+            requestId = parsed
+        }
+
+        // Agent scope is host-enforced — caller-supplied `agent_address`
+        // / `agent_id` is ignored. Plugin dispatch with no active chat
+        // agent (or with the built-in Default agent) is refused outright:
+        // the previous `?? Agent.defaultId` fallback let plugins
+        // anonymously route work onto the Default agent, which is
+        // unreachable by design from external surfaces.
+        auditAgentScope(json: json, pluginId: pluginId, op: "dispatch", activeAgent: activeAgent)
+        if let rejection = Agent.rejectBuiltInForExternalSurface(
+            activeAgent,
+            source: "plugin/planDispatch"
+        ) {
+            return .error(
+                envelope: jsonString([
+                    "error": rejection.code,
+                    "message": rejection.message,
+                ])
+            )
+        }
+        guard let resolvedAgent = activeAgent else {
+            // Unreachable: `rejectBuiltInForExternalSurface(nil, ...)`
+            // already returned an error above. Belt-and-suspenders for
+            // future refactors of the guard.
+            return .error(
+                envelope: jsonString([
+                    "error": "missing_agent_context",
+                    "message": "Plugin dispatch requires an active chat agent context.",
+                ])
+            )
+        }
+
+        let title = json["title"] as? String
+
+        var folderBookmark: Data?
+        if let bookmarkStr = json["folder_bookmark"] as? String {
+            folderBookmark = Data(base64Encoded: bookmarkStr)
+        }
+
+        // v3: only `session_id` is accepted. The legacy `external_session_key`
+        // alias was removed; old plugins passing it will need to migrate.
+        let externalSessionKey = json["session_id"] as? String
+
+        // Optional `tools` array — see `parseRequestedTools` for the
+        // validation contract. Empty when the plugin omits the field
+        // or `allowedToolNames` is empty (e.g. test paths that drive
+        // `planDispatch` directly without the MainActor lookup).
+        let requestedToolNames = parseRequestedTools(
+            json: json,
+            pluginId: pluginId,
+            allowedToolNames: allowedToolNames
+        )
+
+        let request = DispatchRequest(
+            id: requestId,
+            prompt: prompt,
+            agentId: resolvedAgent,
+            title: title,
+            folderBookmark: folderBookmark,
+            showToast: true,
+            sourcePluginId: pluginId,
+            source: .plugin,
+            externalSessionKey: externalSessionKey,
+            requestedToolNames: requestedToolNames
+        )
+        return .request(request)
+    }
+
+    /// Parses the optional `tools` field on a dispatch JSON payload and
+    /// returns the validated, deduplicated subset that survives the
+    /// allowed-set scope check. Pure helper — extracted so unit tests
+    /// can pin the validation table independently of the rest of
+    /// `planDispatch`.
+    ///
+    /// Order is preserved (first occurrence wins). Non-string entries,
+    /// blanks, and duplicates are dropped silently. Names outside the
+    /// allowed set fire one `PluginOnceLogger.warnOnce` per (plugin,
+    /// name) so plugin authors see the drop without flooding the log
+    /// on hot paths.
+    static func parseRequestedTools(
+        json: [String: Any],
+        pluginId: String,
+        allowedToolNames: Set<String>
+    ) -> [String] {
+        guard let raw = json["tools"] as? [Any] else { return [] }
+        var seen = Set<String>()
+        var ordered: [String] = []
+        for entry in raw {
+            guard let name = entry as? String else { continue }
+            let trimmed = name.trimmingCharacters(in: .whitespacesAndNewlines)
+            guard !trimmed.isEmpty, seen.insert(trimmed).inserted else { continue }
+            if allowedToolNames.contains(trimmed) {
+                ordered.append(trimmed)
+            } else {
+                warnDispatchToolScopeOnce(pluginId: pluginId, name: trimmed)
+            }
+        }
+        return ordered
+    }
+
+    /// Tool names a plugin's `dispatch` call is allowed to request:
+    /// the plugin's own manifest tool ids
+    /// (`ExternalTool.name == manifest.tools[].id`) plus host built-in
+    /// always-loaded names (`builtInToolNames` ∪ `runtimeManagedToolNames`).
+    /// Plugins can pin their own tools and host built-ins like
+    /// `share_artifact` / `search_memory`, but cannot smuggle in another
+    /// plugin's tools. A missing loaded-plugin record (e.g. mid-unload)
+    /// collapses to "built-ins only"; `parseRequestedTools` then
+    /// warn-onces any of the plugin's own names that no longer resolve.
+    @MainActor
+    static func dispatchToolAllowedSet(pluginId: String) -> Set<String> {
+        let registry = ToolRegistry.shared
+        var allowed = registry.builtInToolNames.union(registry.runtimeManagedToolNames)
+        // Intel: the loaded plugin is `IntelLoadedPlugin`, whose tools are
+        // registered under their manifest ids (`IntelPluginTool.name`).
+        if let loaded = PluginManager.shared.nativeHandle(for: pluginId) {
+            for name in loaded.toolIds { allowed.insert(name) }
+        }
+        return allowed
+    }
+
+    func dispatch(requestJSON: String) -> (result: String, taskId: UUID?) {
+        // Capture the active agent on the *calling* thread before crossing
+        // into `Self.blockingAsync` — TLS does not survive `Task.detached`.
+        // The host enforces that plugin-initiated dispatches always run
+        // under the agent that invoked the plugin (set by ExternalPlugin's
+        // invoke / handleRoute / notifyConfigBatch / notifyTaskEvent).
+        // Caller-supplied `agent_address` / `agent_id` is stripped below
+        // and a one-shot warning is logged so a deliberate cross-agent
+        // dispatch attempt remains visible in the unified log.
+        let activeAgent = Self.activeAgentId()
+        return Self.blockingAsync(
+            fallback: (Self.pluginHostTimeoutJSON(kind: "dispatch"), UUID?.none)
+        ) { [pluginId, activeAgent] in
+            // PluginManager + ToolRegistry are MainActor-isolated; hop
+            // once and hand `planDispatch` a plain `Set` so the planner
+            // stays a pure transform driveable from tests.
+            let allowedTools: Set<String> = await MainActor.run {
+                Self.dispatchToolAllowedSet(pluginId: pluginId)
+            }
+            let plan = Self.planDispatch(
+                requestJSON: requestJSON,
+                pluginId: pluginId,
+                activeAgent: activeAgent,
+                allowedToolNames: allowedTools
+            )
+            let request: DispatchRequest
+            switch plan {
+            case .error(let envelope):
+                return (envelope, UUID?.none)
+            case .request(let r):
+                request = r
+            }
+
+            // `planDispatch` guarantees `request.agentId` is non-nil and not
+            // `Agent.defaultId` by the time we reach here. Force-unwrap to
+            // avoid resurrecting the old `?? Agent.defaultId` fallback in
+            // the rate-limiter key.
+            guard let ctx = PluginHostContext.getContext(for: pluginId),
+                ctx.checkDispatchRateLimit(agentId: request.agentId!)
+            else {
+                return (
+                    Self.jsonString([
+                        "error": "rate_limit_exceeded", "message": "Dispatch rate limit (10/min) exceeded",
+                    ]),
+                    UUID?.none
+                )
+            }
+
+            // BackgroundTaskManager.dispatchChat now self-holds plugin
+            // events between registerTask and trampoline-return, since
+            // reattach can resolve a different task id than `requestId`.
+            let handle = await TaskDispatcher.shared.dispatch(request)
+            guard let handle else {
+                return (
+                    Self.jsonString([
+                        "error": "task_limit_reached", "message": "Maximum concurrent background tasks reached",
+                    ]), UUID?.none
+                )
+            }
+
+            // Use the resolved task id (may differ from `requestId` if the
+            // dispatcher reattached to an existing session via the
+            // `external_session_key` find-or-create path).
+            let resolvedId = handle.id
+            return (Self.jsonString(["id": resolvedId.uuidString, "status": "running"]), resolvedId)
+        }
+    }
+
+    func taskStatus(taskId: String) -> String {
+        guard let uuid = UUID(uuidString: taskId) else {
+            return Self.jsonString(["error": "invalid_task_id", "message": "Invalid UUID format"])
+        }
+
+        return Self.blockingMainActor(fallback: Self.pluginHostTimeoutJSON(kind: "task_status")) {
+            [pluginId] in
+            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
+                state.sourcePluginId == pluginId
+            else {
+                return Self.jsonString(["error": "not_found", "message": "Task not found"])
+            }
+            return Self.serializeTaskState(id: uuid, state: state)
+        }
+    }
+
+    func dispatchCancel(taskId: String) {
+        guard let uuid = UUID(uuidString: taskId) else {
+            Self.warnInvalidTaskIdOnce(pluginId: pluginId, op: "dispatch_cancel", taskId: taskId)
+            return
+        }
+        Self.blockingMainActor(fallback: ()) { [pluginId] in
+            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
+                state.sourcePluginId == pluginId
+            else {
+                Self.warnUnownedTaskOnce(pluginId: pluginId, op: "dispatch_cancel", taskId: taskId)
+                return
+            }
+            BackgroundTaskManager.shared.cancelTask(uuid)
+        }
+    }
+
+    /// RESERVED — preserved for ABI compatibility. The host returns void
+    /// (the C signature does not allow a JSON response), but the trampoline
+    /// logs the call with HTTP 410 + a `not_supported` body so plugin
+    /// developers see in Insights that the slot has no runtime effect.
+    /// Clarifications are surfaced inline via the `clarify` agent intercept.
+    func dispatchClarify(taskId _: String, response _: String) {}
+
+    func listActiveTasks() -> String {
+        Self.blockingMainActor(fallback: Self.pluginHostTimeoutJSON(kind: "list_active_tasks")) {
+            [pluginId] in
+            let tasks = BackgroundTaskManager.shared.backgroundTasks.values
+                .filter { $0.sourcePluginId == pluginId && $0.status.isActive }
+                .map { PluginHostContext.taskStateDict(id: $0.id, state: $0) }
+            return Self.jsonString(["tasks": tasks])
+        }
+    }
+
+    func sendDraft(taskId: String, draftJSON: String) {
+        guard let uuid = UUID(uuidString: taskId) else {
+            Self.warnInvalidTaskIdOnce(pluginId: pluginId, op: "send_draft", taskId: taskId)
+            return
+        }
+        Self.blockingMainActor(fallback: ()) { [pluginId] in
+            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
+                state.sourcePluginId == pluginId, state.status.isActive
+            else {
+                Self.warnUnownedTaskOnce(pluginId: pluginId, op: "send_draft", taskId: taskId)
+                return
+            }
+            state.draftText = draftJSON
+            BackgroundTaskManager.shared.emitDraftEvent(state, draftJSON: draftJSON)
+        }
+    }
+
+    func dispatchInterrupt(taskId: String, message: String?) {
+        guard let uuid = UUID(uuidString: taskId) else {
+            Self.warnInvalidTaskIdOnce(pluginId: pluginId, op: "dispatch_interrupt", taskId: taskId)
+            return
+        }
+        Self.blockingMainActor(fallback: ()) { [pluginId] in
+            guard let state = BackgroundTaskManager.shared.taskState(for: uuid),
+                state.sourcePluginId == pluginId
+            else {
+                Self.warnUnownedTaskOnce(pluginId: pluginId, op: "dispatch_interrupt", taskId: taskId)
+                return
+            }
+            BackgroundTaskManager.shared.interruptTask(uuid, message: message)
+        }
+    }
+
+    /// Emit a one-shot warning when a plugin passes a task id that does
+    /// not parse as a UUID to a void-returning task op
+    /// (`dispatch_cancel`, `send_draft`, `dispatch_interrupt`). The C ABI
+    /// returns void so we can't surface an envelope; logging keeps the
+    /// signal visible to plugin authors without flooding the unified log.
+    static func warnInvalidTaskIdOnce(pluginId: String, op: String, taskId: String) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|\(op)|invalid",
+            "[PluginHostAPI] Plugin '%@' called %@ with an invalid UUID '%@'. The call was a no-op. "
+                + "This warning is logged once per plugin per op per process.",
+            pluginId,
+            op,
+            taskId
+        )
+    }
+
+    /// Emit a one-shot warning when a plugin passes a task id that parses
+    /// as a UUID but does not belong to (or is no longer active for) the
+    /// calling plugin. Catches stale ids and accidental cross-plugin
+    /// reference.
+    static func warnUnownedTaskOnce(pluginId: String, op: String, taskId: String) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|\(op)|unowned",
+            "[PluginHostAPI] Plugin '%@' called %@ for task '%@' that does not belong to this plugin or "
+                + "is no longer active. The call was a no-op. "
+                + "This warning is logged once per plugin per op per process.",
+            pluginId,
+            op,
+            taskId
+        )
+    }
+
+    /// Single audit pass for the agent-scope security boundary. Called
+    /// from every agent-aware trampoline (`dispatch`, `complete`,
+    /// `complete_stream`, `embed`) right after capturing the TLS active
+    /// agent. Emits at most one warning per (plugin, op) per process for
+    /// each of the two failure modes — caller-supplied agent override
+    /// and missing TLS agent — keeping the call sites a single line.
+    static func auditAgentScope(
+        json: [String: Any],
+        pluginId: String,
+        op: String,
+        activeAgent: UUID?
+    ) {
+        if let supplied = (json["agent_address"] as? String) ?? (json["agent_id"] as? String),
+            !supplied.isEmpty
+        {
+            warnAgentOverrideOnce(pluginId: pluginId, op: op, supplied: supplied)
+        }
+        if activeAgent == nil {
+            warnNoAgentContextOnce(pluginId: pluginId, op: op)
+        }
+    }
+
+    /// One-shot warning when a plugin's `dispatch` JSON requests a tool
+    /// name outside the plugin's allowed surface (own manifest tools or
+    /// host built-in always-loaded names). The name is dropped from the
+    /// dispatch's `requestedToolNames`; the rest of the dispatch
+    /// proceeds normally. Public so tests can pin the dedup behaviour.
+    static func warnDispatchToolScopeOnce(pluginId: String, name: String) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|dispatch|tool_scope|\(name)",
+            "[PluginHostAPI] Plugin '%@' requested tool '%@' on dispatch but it is not in the allowed "
+                + "set (own manifest tools or host built-ins). The name was dropped; the rest of the "
+                + "dispatch proceeds. "
+                + "This warning is logged once per (plugin, name) per process.",
+            pluginId,
+            name
+        )
+    }
+
+    /// One-shot warning when a plugin supplies `agent_address` / `agent_id`
+    /// to an agent-aware trampoline. The host ignores the override and runs
+    /// under the TLS-resolved invoking agent; surfacing the attempt makes
+    /// cross-agent dispatch attempts visible. Public so tests can pin it.
+    static func warnAgentOverrideOnce(pluginId: String, op: String, supplied: String) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|\(op)|agent_override",
+            "[PluginHostAPI] Plugin '%@' supplied an explicit agent identifier '%@' to %@. "
+                + "The host ignores caller-supplied agent_address / agent_id on plugin trampolines "
+                + "and runs the call under the agent that invoked the plugin. "
+                + "This warning is logged once per plugin per op per process.",
+            pluginId,
+            supplied,
+            op
+        )
+    }
+
+    /// One-shot warning when an agent-aware trampoline is called from a
+    /// thread with no TLS-bound active agent (typically a background
+    /// worker the plugin spawned itself at init). The host falls back to
+    /// `Agent.defaultId`; the plugin should originate the call from
+    /// inside `invoke` / `handle_route` / `on_config_changed` /
+    /// `on_task_event` so the agent context propagates.
+    static func warnNoAgentContextOnce(pluginId: String, op: String) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|\(op)|no_agent_context",
+            "[PluginHostAPI] Plugin '%@' called %@ from a thread with no resolvable agent context. "
+                + "No chat-bound agent context is available. Originate plugin calls from a thread that "
+                + "carries the agent (inside invoke / handle_route / on_config_changed / on_task_event). "
+                + "This warning is logged once per plugin per op per process.",
+            pluginId,
+            op
+        )
     }
 }
 
@@ -1153,6 +1602,166 @@ extension PluginHostContext {
         withActiveContext(requestPtr: sqlPtr) { ctx, sql in
             let params = paramsPtr.map { String(cString: $0) }
             return makeCString(ctx.dbQuery(sql: sql, paramsJSON: params))
+        }
+    }
+
+    // MARK: Agent Context Introspection (v4)
+
+    /// Returns the TLS-resolved active agent UUID as a heap-allocated
+    /// C string the plugin owns (free with `free_string`), or NULL when
+    /// no agent context is bound to the calling thread (init, plugin-
+    /// spawned background work). One-line trampoline against the
+    /// existing TLS getter — no new lookup machinery, no race surface
+    /// beyond what `activeAgentId()` already has.
+    static let trampolineGetActiveAgentId: osr_get_active_agent_id_t = {
+        guard let agentId = activeAgentId() else { return nil }
+        return makeCString(agentId.uuidString)
+    }
+
+    // MARK: Dispatch Trampolines
+
+    static let trampolineDispatch: osr_dispatch_t = { requestPtr in
+        withActiveContext(requestPtr: requestPtr) { ctx, json in
+            var result = ""
+            var taskId: UUID?
+            let ms = measureMs { (result, taskId) = ctx.dispatch(requestJSON: json) }
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "POST",
+                path: "/host-api/dispatch",
+                statusCode: errorStatusCode(for: result) ?? 202,
+                durationMs: ms,
+                requestBody: json,
+                responseBody: result
+            )
+            if let taskId {
+                Task { @MainActor in
+                    BackgroundTaskManager.shared.releaseEventsForDispatch(taskId: taskId)
+                }
+            }
+            return makeCString(result)
+        }
+    }
+
+    static let trampolineTaskStatus: osr_task_status_t = { taskIdPtr in
+        withActiveContext(requestPtr: taskIdPtr) { ctx, taskId in
+            var result = ""
+            let ms = measureMs { result = ctx.taskStatus(taskId: taskId) }
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "GET",
+                path: "/host-api/tasks/\(taskId)",
+                statusCode: errorStatusCode(for: result) ?? 200,
+                durationMs: ms,
+                responseBody: result
+            )
+            return makeCString(result)
+        }
+    }
+
+    static let trampolineDispatchCancel: osr_dispatch_cancel_t = { taskIdPtr in
+        guard let taskIdPtr, let ctx = activeContext() else { return }
+        let taskId = String(cString: taskIdPtr)
+        let ms = measureMs { ctx.dispatchCancel(taskId: taskId) }
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "DELETE",
+            path: "/host-api/tasks/\(taskId)",
+            statusCode: 204,
+            durationMs: ms
+        )
+    }
+
+    /// RESERVED slot — preserved for ABI compatibility. The C signature
+    /// returns void, so we cannot return a `not_supported` envelope to the
+    /// plugin. Insights logs the call with HTTP 410 so the plugin developer
+    /// sees that the call had no effect. Clarification is now handled inline
+    /// via the `clarify` agent intercept.
+    static let trampolineDispatchClarify: osr_dispatch_clarify_t = { taskIdPtr, responsePtr in
+        guard let taskIdPtr, let responsePtr, let ctx = activeContext() else { return }
+        let taskId = String(cString: taskIdPtr)
+        let response = String(cString: responsePtr)
+        ctx.dispatchClarify(taskId: taskId, response: response)
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "POST",
+            path: "/host-api/tasks/\(taskId)/clarify",
+            statusCode: 410,
+            durationMs: 0,
+            requestBody: response,
+            responseBody:
+                #"{"error":"not_supported","message":"dispatch_clarify is reserved. Clarification is handled inline via the clarify agent intercept."}"#
+        )
+    }
+
+    // MARK: Extended Dispatch Trampolines
+
+    static let trampolineListActiveTasks: osr_list_active_tasks_t = {
+        withActiveContext { ctx in
+            var result = ""
+            let ms = measureMs { result = ctx.listActiveTasks() }
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "GET",
+                path: "/host-api/tasks",
+                statusCode: 200,
+                durationMs: ms,
+                responseBody: result
+            )
+            return makeCString(result)
+        }
+    }
+
+    static let trampolineSendDraft: osr_send_draft_t = { taskIdPtr, draftPtr in
+        guard let taskIdPtr, let draftPtr, let ctx = activeContext() else { return }
+        let taskId = String(cString: taskIdPtr)
+        let draftJSON = String(cString: draftPtr)
+        let ms = measureMs { ctx.sendDraft(taskId: taskId, draftJSON: draftJSON) }
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "POST",
+            path: "/host-api/tasks/\(taskId)/draft",
+            statusCode: 200,
+            durationMs: ms,
+            requestBody: draftJSON
+        )
+    }
+
+    static let trampolineDispatchInterrupt: osr_dispatch_interrupt_t = { taskIdPtr, messagePtr in
+        guard let taskIdPtr, let ctx = activeContext() else { return }
+        let taskId = String(cString: taskIdPtr)
+        let message: String? = messagePtr.map { String(cString: $0) }
+        let ms = measureMs { ctx.dispatchInterrupt(taskId: taskId, message: message) }
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "POST",
+            path: "/host-api/tasks/\(taskId)/interrupt",
+            statusCode: 200,
+            durationMs: ms,
+            requestBody: message
+        )
+    }
+
+    /// RESERVED slot — preserved for ABI compatibility. Returns a
+    /// structured `not_supported` envelope: nested issues are no longer a
+    /// concept, so plugins should call `dispatch` to start a fresh task
+    /// instead.
+    static let trampolineDispatchAddIssue: osr_dispatch_add_issue_t = { taskIdPtr, _ in
+        withActiveContext(requestPtr: taskIdPtr) { ctx, taskId in
+            let result = jsonString([
+                "error": "not_supported",
+                "message":
+                    "dispatch_add_issue is no longer supported. Call dispatch() to start a fresh task.",
+            ])
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "POST",
+                path: "/host-api/tasks/\(taskId)/issues",
+                statusCode: 501,
+                durationMs: 0,
+                responseBody: result
+            )
+            return makeCString(result)
         }
     }
 

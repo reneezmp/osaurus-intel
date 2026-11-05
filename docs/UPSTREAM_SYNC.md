@@ -4760,6 +4760,84 @@ cache failure); package and tests also build for `x86_64-apple-macosx13.0`.
 Classifiers: UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity
 and `ai.osaurus.id` session-token mdat unchanged.
 
+### Plugin dispatch and task events (`W-plugin-reliability` stage 2c) — 2026-11-05
+
+Plugins' background-task callbacks are now upstream's, on
+`PluginHostContext`, and Intel plugins receive task events. Before this,
+Intel's host had its own minimal `dispatch` and `task_status`. It handed
+plugins no-ops for cancel, interrupt, draft and clarify, an empty list for
+`list_active_tasks`, and NULL for `get_active_agent_id`. Its task-event
+serializers returned `{}`, and nothing delivered them.
+
+- **`dispatch`** (upstream's `planDispatch` / `dispatch`):
+  - Runs as the calling chat's agent, never the Default agent, and never a
+    caller-supplied `agent_id` (warned once).
+  - Empty prompts are refused. It honours an optional request `id`,
+    `session_id` and `folder_bookmark`.
+  - An optional `tools` list is limited to the plugin's own tools plus
+    built-ins (`dispatchToolAllowedSet`; on Intel the plugin's tools come
+    from `PluginManager.nativeHandle(for:)`).
+  - 10 a minute per plugin and agent. A full queue answers
+    `task_limit_reached`.
+  - Logged in Insights. Held task events are released once the call
+    returns.
+  - Intel's own `folder_path` field and `dispatch_rejected` error are gone
+    (upstream has neither). No Intel registry plugin calls `dispatch`.
+- **`task_status` / `list_active_tasks`:** upstream's
+  `serializeTaskState`: title, status, current step, the last 20 activity
+  items, partial or final output, draft, summary and session id. Only the
+  plugin's own tasks are visible. `taskStateDict` keeps Intel's state
+  mapping (Intel has no `.queued`; `.completed(success:)` stands in for
+  `.failed`) until `W-background-runs-sync`.
+- **Cancel, interrupt, send-draft** act on the plugin's own tasks, as
+  upstream. `dispatch_clarify` and `dispatch_add_issue` are upstream's
+  reserved slots: logged, and `not_supported` for add-issue.
+- **`get_active_agent_id`** returns the calling chat's agent, or NULL
+  outside one.
+- **Task events:**
+  - `BackgroundTaskManager.emitPluginEvent` delivers started, activity,
+    progress, clarification, completed, failed, cancelled, output and
+    draft events to the plugin's `on_task_event`
+    (`IntelLoadedPlugin.notifyTaskEvent`), with the task's agent in scope.
+    The payloads are upstream's serializers, verbatim.
+  - **Intel difference:** upstream gives each task its own serial queue,
+    running alongside tool calls. Intel's host never runs a plugin's code
+    concurrently, so events go through the plugin's one serial queue,
+    after any tool call in progress. Order within a task is the same, and
+    nothing is delivered after teardown.
+- **Host table ownership:** the context owns the table again, through
+  upstream's `buildHostAPI()` (freed with the context, after the plugin is
+  destroyed). `buildIntelHostAPI` builds it.
+
+Tests:
+- **Now included:** upstream's `PluginHostAPITests` (SSRF, JSON, dispatch
+  requests, task status, event serialization, dispatch rate limit, TLS,
+  agent resolution, struct layout), `PluginGetActiveAgentIdTests` and
+  `PluginDispatchToolSelectionTests`. Intel's copy of `TaskStateDictTests`
+  is gone, since it lives in `PluginHostAPITests`. Intel's
+  `appendLoadedTools` gained a default for its extra `fallbackPreflight`
+  argument so upstream's calls compile.
+- **Two upstream tests disabled** in `PluginDispatchToolSelectionTests`
+  (`nonEmptyRequestedToolsLandInSessionStore`,
+  `emptyRequestedToolsLeavesStoreUntouched`). They dispatch as
+  `Agent.defaultId`, which `dispatchChat` refuses on upstream too
+  (`BuiltInAgentGuard`), so they fail on both builds. This is an upstream
+  test bug; report it with `W-report-issue`.
+- **Still excluded:** `PluginAgentScopingTests` and
+  `PluginClarifyEventTests` (they need `ExternalPlugin` and upstream's
+  inference host, 2d/2e), and `BackgroundTaskInterruptTests`
+  (`MockChatEngine`, `W-background-runs-sync`).
+- **`IntelPluginTaskEventTests`:** events reach `on_task_event` in order
+  with the task's agent in scope, none after teardown; the host table
+  carries upstream's task control (called through the table); dispatch
+  without an agent is refused.
+
+Validation: the full interim gate passed 4,587 tests (only the known avatar
+cache failure; the two upstream-bug tests above are disabled, not failing);
+package and tests also build for `x86_64-apple-macosx13.0`. Classifiers:
+UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity and
+`ai.osaurus.id` session-token mdat unchanged.
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

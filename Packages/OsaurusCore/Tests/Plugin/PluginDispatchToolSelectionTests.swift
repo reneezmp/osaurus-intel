@@ -333,7 +333,11 @@ struct PluginDispatchToolStorePopulationTests {
         return handle?.id
     }
 
-    @Test
+    // Intel (`W-plugin-reliability` 2c, docs/UPSTREAM_SYNC.md): disabled.
+    // Upstream bug at bce907045: `dispatch` uses `Agent.defaultId`, which
+    // `BackgroundTaskManager.dispatchChat` refuses upstream too
+    // (`BuiltInAgentGuard`), so `#require` fails on both builds.
+    @Test(.disabled("Upstream test bug: dispatches as the built-in Default agent, which dispatchChat refuses"))
     func nonEmptyRequestedToolsLandInSessionStore() async throws {
         await reset()
         let mgr = BackgroundTaskManager.shared
@@ -350,7 +354,11 @@ struct PluginDispatchToolStorePopulationTests {
         )
     }
 
-    @Test
+    // Intel (`W-plugin-reliability` 2c, docs/UPSTREAM_SYNC.md): disabled.
+    // Upstream bug at bce907045: `dispatch` uses `Agent.defaultId`, which
+    // `BackgroundTaskManager.dispatchChat` refuses upstream too
+    // (`BuiltInAgentGuard`), so `#require` fails on both builds.
+    @Test(.disabled("Upstream test bug: dispatches as the built-in Default agent, which dispatchChat refuses"))
     func emptyRequestedToolsLeavesStoreUntouched() async throws {
         // Whatever `composeChatContext` may have created via `setInitial`,
         // an empty `requestedToolNames` must not seed `loadedToolNames`.
