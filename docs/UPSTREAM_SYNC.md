@@ -4691,6 +4691,75 @@ and `ai.osaurus.id` session-token mdat unchanged.
 `W-skills-plugins-import`. They are plugin-host work, so `gap_features.py`
 now files them under `W-plugin-reliability` (stage 2e).
 
+### Plugin database (`W-plugin-reliability` stage 2b) — 2026-11-05
+
+Plugins' `db_exec` / `db_query` now use upstream's `PluginDatabase`
+(`Storage/PluginDatabase.swift`, upstream's file) through
+`PluginHostContext.dbExec` / `dbQuery`. Before this, Intel's host kept
+each plugin's data in a **plaintext** SQLite file,
+`~/.osaurus/Tools/<id>/plugin.db`, with no SQL guard and no size cap.
+
+- **Where and how:** `~/.osaurus/Tools/<id>/data/data.db`, encrypted with
+  the storage key like every other Intel database. It opens lazily on the
+  plugin's first SQL call. `ATTACH`, `DETACH` and `LOAD_EXTENSION` are
+  refused, and the file is capped at 100 MiB (`PRAGMA max_page_count`; past
+  it, writes fail with "database or disk is full"). Teardown waits for
+  in-flight SQL before closing, so a straggling plugin thread can't reopen
+  it.
+- **Replies are upstream's:**
+  - `db_exec` answers `{"changes", "last_insert_rowid"}`. Intel's answered
+    `{"ok", "rows_affected", "last_insert_rowid"}`.
+  - `db_query` answers `{"columns": [...], "rows": [[...]]}`. Intel's
+    answered row objects, capped at 1,000.
+  - Parameters are a positional JSON array. Intel also took named objects.
+  - The `memo` plugin, the only Intel registry plugin that uses the
+    database, passes replies to the model without parsing them, so it keeps
+    working.
+- **The one-time move** (`Storage/IntelPluginDatabaseMigration.swift`), on
+  a plugin's first open:
+  1. `sqlcipher_export` of the old file into a temporary encrypted file
+     (`StorageMigrator`'s recipe).
+  2. Every table's row count compared after reading the copy back with the
+     storage key.
+  3. A rename into place, then removal of the plaintext file and its
+     journal.
+
+  Any failure leaves the plaintext file untouched and fails the open: the
+  plugin gets "Database not open" instead of an empty database, and the
+  move is retried on its next call. If both files exist, the encrypted one
+  wins and the old one is left alone, never merged.
+- **Key rotation:** Intel already listed `Tools/<id>/data/data.db` in
+  `StorageMigrator.databaseTargets()`, so rotation, the key-mismatch check,
+  the orphan cleanup and plaintext export now cover plugin data. Intel has
+  no `StorageMutationGate`, so two Intel adaptations replace upstream's
+  epoch check:
+  - `StorageExportService.performRotation` runs inside
+    `PluginDatabase.withStorageMutation`. That closes every open plugin
+    database and holds `storageMutationLock` until the new key is
+    installed.
+  - `PluginDatabase.open()` takes the same lock, so no plugin database
+    reopens with the old key while files are rekeyed.
+- **Gone from `IntelPluginExecution`:** the plaintext handles and Intel's
+  own SQL binding.
+
+Tests:
+- Upstream's `PluginDatabaseSizeCapTests` and, from `PluginTests.swift`,
+  its `PluginDatabaseTests` suite (in `IntelPluginDatabaseTests.swift`).
+  The rest of `PluginTests.swift` is route matching and stays excluded
+  until 2f.
+- `IntelPluginDatabaseMoveTests`:
+  - an old `memo` table moves in, encrypted, and is listed for rotation;
+  - the outcome counts;
+  - an existing encrypted file wins;
+  - a broken old file stays untouched and fails the open;
+  - the host context opens lazily and refuses SQL after teardown;
+  - rotation's lock closes and the next call reopens.
+
+Validation: the full interim gate passed 4,492 tests (only the known avatar
+cache failure); package and tests also build for `x86_64-apple-macosx13.0`.
+Classifiers: UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity
+and `ai.osaurus.id` session-token mdat unchanged.
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

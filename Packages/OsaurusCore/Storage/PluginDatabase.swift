@@ -5,7 +5,16 @@
 //  Sandboxed per-plugin SQLite database.
 //  Each plugin gets its own isolated database for structured data storage.
 //
+//  Intel (`W-plugin-reliability` stage 2b, docs/UPSTREAM_SYNC.md, "Plugin
+//  database"): upstream's file. `open()` differs where Intel lacks
+//  upstream's storage layer: it waits on Intel's launch storage gate, holds
+//  `storageMutationLock` (which key rotation also holds) instead of
+//  upstream's `StorageMutationGate` epoch check, opens with the storage key
+//  like every Intel database, and first moves an Intel plugin's old
+//  plaintext `Tools/<id>/plugin.db` in (`IntelPluginDatabaseMigration`).
+//
 
+import CryptoKit
 import Foundation
 import OsaurusSQLCipher
 
@@ -55,6 +64,43 @@ final class PluginDatabase: @unchecked Sendable {
         close()
     }
 
+    // MARK: - Open-connection registry (quiesce support)
+    //
+    // Plugin DBs are intentionally not `OsaurusDatabaseHandle`s (see `open()`),
+    // so convergence/rotation can't find them to close before they swap or
+    // rekey the on-disk file — and an open fd over a swapped/rekeyed file
+    // corrupts the store. This weak registry lets those paths close every live
+    // plugin connection; each reopens lazily on its next `dbExec`/`dbQuery`.
+    //
+    // Lock ordering: register/deregister run OUTSIDE the per-DB `queue`, and
+    // `closeAllOpen()` drops `registryLock` before touching any DB queue, so no
+    // thread holds both locks at once (no inversion to deadlock on).
+    private static let registryLock = NSLock()
+    nonisolated(unsafe) private static let openInstances = NSHashTable<PluginDatabase>.weakObjects()
+
+    private func registerOpen() {
+        Self.registryLock.lock()
+        Self.openInstances.add(self)
+        Self.registryLock.unlock()
+    }
+
+    private func deregisterOpen() {
+        Self.registryLock.lock()
+        Self.openInstances.remove(self)
+        Self.registryLock.unlock()
+    }
+
+    /// Close every currently-open plugin database. Called by storage
+    /// convergence and key rotation while the mutation gate is held so the
+    /// on-disk file can be swapped/rekeyed with no live fd attached. Each
+    /// plugin reopens lazily on its next SQL call.
+    static func closeAllOpen() {
+        registryLock.lock()
+        let snapshot = openInstances.allObjects
+        registryLock.unlock()
+        for db in snapshot { db.close() }
+    }
+
     // MARK: - Lifecycle
 
     /// Opens an in-memory SQLite database (for tests). **Plaintext** —
@@ -75,6 +121,9 @@ final class PluginDatabase: @unchecked Sendable {
     }
 
     func open() throws {
+        #if OSAURUS_INTEL
+            try openIntel()
+        #else
         // Plugin SQL can fire very early in launch (a plugin's
         // `loadAll()` registration may exec startup queries before
         // the AppDelegate's gate has fully cleared on slower
@@ -92,29 +141,135 @@ final class PluginDatabase: @unchecked Sendable {
         // their own `close()`, which is sufficient. Key rotation
         // still works against plugin DBs because
         // `StorageExportService.rotateStorageKey` enumerates
-        // `StorageMigrator.databaseTargets()`, which independently
-        // walks `~/.osaurus/Tools/<plugin>/data/data.db` from disk.
-        StorageMigrationCoordinator.blockingAwaitReady()
+        // `StorageDatabaseCatalog.databaseTargets()`, which
+        // independently walks `~/.osaurus/Tools/<plugin>/data/data.db`
+        // from disk.
+        while true {
+            // TOCTOU guard (production crash APPLE-MACOS-18J): a storage
+            // mutation (converge / rekey / recovery quarantine) can begin
+            // *between* the gate check below and the open. Its
+            // `closeAllOpen()` snapshot would miss this instance, leaving a
+            // live fd over a file the mutation then swaps or rekeys — and
+            // the next `sqlite3_step` over the stale WAL mapping dies with
+            // KERN_PROTECTION_FAILURE. Snapshot the mutation epoch BEFORE
+            // the gate wait (a mutation that runs entirely inside the wait
+            // still moves the epoch), register BEFORE opening (so a
+            // mutation that starts mid-open can still find and close this
+            // connection), and after opening verify no mutation began. If
+            // one did, close and retry once the gate clears.
+            let epoch = StorageMutationGate.mutationEpoch
 
-        try queue.sync {
-            guard db == nil else { return }
+            StorageMutationGate.blockingAwaitNotMutating()
 
-            OsaurusPaths.ensureExistsSilent(OsaurusPaths.pluginDataDirectory(for: pluginId))
-            let path = OsaurusPaths.pluginDatabaseFile(for: pluginId).path
-            let key = try StorageKeyManager.shared.currentKey()
+            // Registered outside the `queue.sync` below so we never hold the
+            // DB queue and `registryLock` together (see the registry note).
+            // Idempotent when the connection was already open; harmless when
+            // the open below fails (closing a never-opened DB is a no-op).
+            registerOpen()
+
             do {
-                db = try EncryptedSQLiteOpener.open(path: path, key: key)
-            } catch let error as EncryptedSQLiteError {
-                throw PluginDatabaseError.failedToOpen(error.localizedDescription)
+                try queue.sync {
+                    guard db == nil else { return }
+
+                    OsaurusPaths.ensureExistsSilent(OsaurusPaths.pluginDataDirectory(for: pluginId))
+                    let path = OsaurusPaths.pluginDatabaseFile(for: pluginId).path
+                    do {
+                        db = try OsaurusStorageOpener.open(path: path)
+                    } catch let error as EncryptedSQLiteError {
+                        throw PluginDatabaseError.failedToOpen(error.localizedDescription)
+                    }
+                    try configurePragmas()
+                }
+            } catch {
+                deregisterOpen()
+                throw error
             }
-            try configurePragmas()
+
+            // When the blocking gate is bypassed (tests, keychain-disabled
+            // processes) the epoch/in-flight signals may be stale mirrors
+            // from other suites; retrying would spin because the gate never
+            // parks. Match the gate's own bypass semantics and accept the
+            // open as-is.
+            if StorageMutationGate.blockingGateIsBypassed {
+                return
+            }
+            if StorageMutationGate.mutationEpoch == epoch,
+                !StorageMutationGate.isRotationInFlight
+            {
+                return
+            }
+            // A mutation began while we were opening; the connection may
+            // span the file swap. Close (deregisters too) and retry.
+            close()
         }
+        #endif
     }
 
+    #if OSAURUS_INTEL
+        /// Held by `open()` and by storage-key rotation
+        /// (`StorageExportService.performRotation`), so no plugin database
+        /// opens with the old key while files are being rekeyed. Intel's
+        /// stand-in for upstream's `StorageMutationGate` epoch check.
+        static let storageMutationLock = NSLock()
+
+        /// Rotation's side of the lock: close every open plugin database,
+        /// then run `body` with no plugin database able to (re)open.
+        static func withStorageMutation<T>(_ body: () throws -> T) rethrows -> T {
+            storageMutationLock.lock()
+            defer { storageMutationLock.unlock() }
+            closeAllOpen()
+            return try body()
+        }
+
+        private func openIntel() throws {
+            // Intel's launch storage gate (upstream: `StorageMutationGate`).
+            StorageMigrationCoordinator.blockingAwaitReady()
+            Self.storageMutationLock.lock()
+            defer { Self.storageMutationLock.unlock() }
+            // Same registry ordering as upstream: outside the DB queue.
+            registerOpen()
+            do {
+                try queue.sync {
+                    guard db == nil else { return }
+                    let key: SymmetricKey
+                    do {
+                        key = try StorageKeyManager.shared.currentKey()
+                    } catch {
+                        throw PluginDatabaseError.failedToOpen(
+                            "storage key unavailable: \(error.localizedDescription)")
+                    }
+                    OsaurusPaths.ensureExistsSilent(OsaurusPaths.pluginDataDirectory(for: pluginId))
+                    do {
+                        try IntelPluginDatabaseMigration.migrateLegacyIfNeeded(pluginId: pluginId, key: key)
+                    } catch {
+                        throw PluginDatabaseError.failedToOpen(error.localizedDescription)
+                    }
+                    let path = OsaurusPaths.pluginDatabaseFile(for: pluginId).path
+                    do {
+                        db = try EncryptedSQLiteOpener.open(path: path, key: key)
+                    } catch let error as EncryptedSQLiteError {
+                        throw PluginDatabaseError.failedToOpen(error.localizedDescription)
+                    }
+                    try configurePragmas()
+                }
+            } catch {
+                deregisterOpen()
+                throw error
+            }
+        }
+    #endif
+
     func close() {
+        // Deregister before taking the DB queue to preserve the registry lock
+        // ordering. Safe to call when never registered (a no-op remove).
+        deregisterOpen()
         queue.sync {
             guard let connection = db else { return }
-            sqlite3_close(connection)
+            // `sqlite3_close_v2` never leaves the handle half-closed: if a
+            // statement is somehow still unfinalized it marks the connection
+            // as a zombie and frees it once the last statement finishes,
+            // instead of failing with SQLITE_BUSY and leaking a live fd.
+            sqlite3_close_v2(connection)
             db = nil
         }
     }
@@ -263,8 +418,14 @@ final class PluginDatabase: @unchecked Sendable {
                 case SQLITE_FLOAT:
                     value = "\(sqlite3_column_double(stmt, i))"
                 case SQLITE_TEXT:
-                    let text = String(cString: sqlite3_column_text(stmt, i))
-                    value = "\"\(escapeJSON(text))\""
+                    // `sqlite3_column_text` returns NULL under OOM (or a
+                    // failed conversion); `String(cString:)` on NULL is a
+                    // crash, not an error.
+                    if let textPtr = sqlite3_column_text(stmt, i) {
+                        value = "\"\(escapeJSON(String(cString: textPtr)))\""
+                    } else {
+                        value = "null"
+                    }
                 case SQLITE_BLOB:
                     let bytes = sqlite3_column_bytes(stmt, i)
                     if let blob = sqlite3_column_blob(stmt, i) {

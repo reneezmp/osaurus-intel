@@ -16,9 +16,10 @@
 //  minimal, honest host:
 //
 //    • Real callbacks: log, log_structured, free_string,
-//        config_get/set/delete (per-agent Keychain), db_exec/query,
-//        dispatch, task_status, complete, and upstream's own
-//        http_request / file_read (`PluginHostContext`, stage 2a).
+//        config_get/set/delete (per-agent Keychain), dispatch,
+//        task_status, complete, and upstream's own http_request /
+//        file_read (stage 2a) and db_exec / db_query (stage 2b) on
+//        `PluginHostContext`.
 //    • Honest `not_supported` envelopes or empty lists for the rest:
 //        complete_stream, embed, list_models, list_active_tasks,
 //        dispatch_add_issue, get_active_agent_id.
@@ -45,7 +46,6 @@
 
 import Foundation
 import os
-import OsaurusSQLCipher  // sqlite3_* C API (same module the Intel DBs use)
 
 // MARK: - C ABI Mirror (Intel-only; mirrors osaurus_plugin.h v6)
 
@@ -197,115 +197,10 @@ func intelCurrentPluginAgentId() -> UUID? {
     Thread.current.threadDictionary[intelPluginAgentThreadKey] as? UUID
 }
 
-// --- Per-plugin SQLite (db_exec / db_query). Plaintext file per plugin. ------
-private let intelDbLock = NSLock()
-private nonisolated(unsafe) var intelDbHandles: [String: OpaquePointer] = [:]
-private let intelSqliteTransient = unsafeBitCast(
-    OpaquePointer(bitPattern: -1), to: sqlite3_destructor_type.self)
-
-/// Open (once) and return the per-plugin DB handle at
-/// `~/.osaurus-intel/Tools/<pluginId>/plugin.db`. Caller must NOT hold
-/// `intelDbLock` (this takes it).
-private func intelOpenPluginDB(_ pluginId: String) -> OpaquePointer? {
-    intelDbLock.lock(); defer { intelDbLock.unlock() }
-    if let h = intelDbHandles[pluginId] { return h }
-    let dir = OsaurusPaths.root()
-        .appendingPathComponent("Tools", isDirectory: true)
-        .appendingPathComponent(pluginId, isDirectory: true)
-    try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
-    let path = dir.appendingPathComponent("plugin.db").path
-    var db: OpaquePointer?
-    if sqlite3_open(path, &db) == SQLITE_OK, let db {
-        intelDbHandles[pluginId] = db
-        return db
-    }
-    if let db { sqlite3_close(db) }
-    return nil
-}
-
-private func intelBindValue(_ stmt: OpaquePointer, _ idx: Int32, _ v: Any) {
-    switch v {
-    case is NSNull:
-        sqlite3_bind_null(stmt, idx)
-    case let s as String:
-        sqlite3_bind_text(stmt, idx, s, -1, intelSqliteTransient)
-    case let num as NSNumber:
-        if CFNumberIsFloatType(num) { sqlite3_bind_double(stmt, idx, num.doubleValue) }
-        else { sqlite3_bind_int64(stmt, idx, num.int64Value) }
-    default:
-        sqlite3_bind_text(stmt, idx, "\(v)", -1, intelSqliteTransient)
-    }
-}
-
-/// Bind `params_json` (a JSON array for positional `?`, or an object for named
-/// `:name` / `@name` / `$name` placeholders) onto a prepared statement.
-private func intelBindParams(_ stmt: OpaquePointer, _ paramsJSON: String?) {
-    guard let paramsJSON, !paramsJSON.isEmpty,
-          let data = paramsJSON.data(using: .utf8),
-          let obj = try? JSONSerialization.jsonObject(with: data) else { return }
-    if let arr = obj as? [Any] {
-        for (i, v) in arr.enumerated() { intelBindValue(stmt, Int32(i + 1), v) }
-    } else if let dict = obj as? [String: Any] {
-        for (k, v) in dict {
-            for name in [":\(k)", "@\(k)", "$\(k)"] {
-                let idx = sqlite3_bind_parameter_index(stmt, name)
-                if idx > 0 { intelBindValue(stmt, idx, v); break }
-            }
-        }
-    }
-}
-
-private func intelDbExec(pluginId: String, sql: String, paramsJSON: String?) -> String {
-    guard let db = intelOpenPluginDB(pluginId) else {
-        return jsonStringSafe(["error": "db_open_failed", "message": "could not open plugin database"])
-    }
-    intelDbLock.lock(); defer { intelDbLock.unlock() }
-    var stmt: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
-    }
-    defer { sqlite3_finalize(stmt) }
-    intelBindParams(stmt, paramsJSON)
-    let rc = sqlite3_step(stmt)
-    guard rc == SQLITE_DONE || rc == SQLITE_ROW else {
-        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
-    }
-    return jsonStringSafe([
-        "ok": true,
-        "rows_affected": Int(sqlite3_changes(db)),
-        "last_insert_rowid": Int(sqlite3_last_insert_rowid(db)),
-    ])
-}
-
-private func intelDbQuery(pluginId: String, sql: String, paramsJSON: String?) -> String {
-    guard let db = intelOpenPluginDB(pluginId) else {
-        return jsonStringSafe(["error": "db_open_failed", "message": "could not open plugin database"])
-    }
-    intelDbLock.lock(); defer { intelDbLock.unlock() }
-    var stmt: OpaquePointer?
-    guard sqlite3_prepare_v2(db, sql, -1, &stmt, nil) == SQLITE_OK, let stmt else {
-        return jsonStringSafe(["error": "sql_error", "message": String(cString: sqlite3_errmsg(db))])
-    }
-    defer { sqlite3_finalize(stmt) }
-    intelBindParams(stmt, paramsJSON)
-    let colCount = sqlite3_column_count(stmt)
-    var rows: [[String: Any]] = []
-    while sqlite3_step(stmt) == SQLITE_ROW {
-        var row: [String: Any] = [:]
-        for c in 0..<colCount {
-            let name = sqlite3_column_name(stmt, c).map { String(cString: $0) } ?? "col\(c)"
-            switch sqlite3_column_type(stmt, c) {
-            case SQLITE_INTEGER: row[name] = Int(sqlite3_column_int64(stmt, c))
-            case SQLITE_FLOAT: row[name] = sqlite3_column_double(stmt, c)
-            case SQLITE_NULL: row[name] = NSNull()
-            default: row[name] = sqlite3_column_text(stmt, c).map { String(cString: $0) } ?? ""
-            }
-        }
-        rows.append(row)
-        if rows.count >= 1000 { break }  // safety cap
-    }
-    return jsonStringSafe(["ok": true, "rows": rows])
-}
+// --- db_exec / db_query: upstream's (`PluginHostContext.dbExec` / `dbQuery`
+// over `PluginDatabase`, stage 2b): encrypted `Tools/<id>/data/data.db`, SQL
+// guard, 100 MiB cap. Intel's old plaintext `Tools/<id>/plugin.db` moves in
+// on first open (`IntelPluginDatabaseMigration`).
 
 // --- Config: the plugin's per-agent Keychain namespace (upstream). ----------
 // Config values are credentials (manifest `secrets`), so they live in
@@ -614,19 +509,7 @@ private func jsonStringSafe(_ object: [String: Any]) -> String {
     return s
 }
 
-// --- Amputated subsystems: honest `not_supported`, never null. --------------
-private let intelHostDbExec: osr_db_exec_t = { sqlPtr, paramsPtr in
-    let pid = intelCurrentPluginId()
-    let sql = sqlPtr.map { String(cString: $0) } ?? ""
-    let params = paramsPtr.map { String(cString: $0) }
-    return dupCString(intelDbExec(pluginId: pid, sql: sql, paramsJSON: params))
-}
-private let intelHostDbQuery: osr_db_query_t = { sqlPtr, paramsPtr in
-    let pid = intelCurrentPluginId()
-    let sql = sqlPtr.map { String(cString: $0) } ?? ""
-    let params = paramsPtr.map { String(cString: $0) }
-    return dupCString(intelDbQuery(pluginId: pid, sql: sql, paramsJSON: params))
-}
+// --- Dispatch, task status, complete, and `not_supported` for the rest. -----
 private let intelHostDispatch: osr_dispatch_t = { reqPtr in
     let pid = intelCurrentPluginId()
     let req = reqPtr.map { String(cString: $0) } ?? "{}"
@@ -666,8 +549,8 @@ private func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
         config_get: intelHostConfigGet,
         config_set: intelHostConfigSet,
         config_delete: intelHostConfigDelete,
-        db_exec: intelHostDbExec,
-        db_query: intelHostDbQuery,
+        db_exec: PluginHostContext.trampolineDbExec,
+        db_query: PluginHostContext.trampolineDbQuery,
         log: intelHostLog,
         dispatch: intelHostDispatch,
         task_status: intelHostTaskStatus,

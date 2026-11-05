@@ -210,6 +210,10 @@ public actor StorageExportService {
         // don't fight us for exclusive access. They're reopened on
         // the way out (with the new key, which we install before
         // the reopen).
+        // Intel: plugin databases aren't registered handles (upstream), so
+        // close them and keep them from reopening with the old key until
+        // the new key is installed (`W-plugin-reliability` stage 2b).
+        try PluginDatabase.withStorageMutation {
         try OsaurusDatabaseHandle.withAllHandlesQuiesced {
             for target in StorageMigrator.databaseTargets() {
                 do {
@@ -230,6 +234,7 @@ public actor StorageExportService {
             } catch {
                 throw StorageExportError.rekeyFailed("Keychain install failed: \(error.localizedDescription)")
             }
+        }
         }
         return newKey
     }

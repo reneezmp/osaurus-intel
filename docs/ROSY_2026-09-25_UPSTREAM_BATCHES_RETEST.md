@@ -2789,3 +2789,21 @@ tool on.
       status.
 - [ ] Plugins still load after a relaunch, and the plugin's Configure sheet
       still shows its saved keys.
+
+## Plugin database (2026-11-05)
+
+`W-plugin-reliability` stage 2b (`UPSTREAM_SYNC.md`, "Plugin database").
+Not in candidate 66. Plugin data moves from a plaintext file into an
+encrypted one on the plugin's first use. Needs the `memo` plugin and a
+custom agent with its tools on. If memo was already used on Rosy, do the
+first item **before** anything else touches memo.
+
+- [ ] Before updating, if memo has saved memos: note what `memo_list`
+      returns. After updating, ask the agent to list memos: the same memos
+      come back.
+- [ ] Finder › `~/.osaurus/Tools/memo-intel/`: `plugin.db` is gone and
+      `data/data.db` exists. (If memo was never used, there is no
+      `plugin.db` and `data/data.db` appears after the first memo.)
+- [ ] Save a new memo, quit, relaunch, list memos: it's there.
+- [ ] Clear memos with `memo_clear`, then list: empty.
+- [ ] Settings › Storage shows no key-mismatch warning.
