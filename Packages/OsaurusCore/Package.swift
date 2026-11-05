@@ -242,7 +242,6 @@ let package = Package(
                 "Sandbox/DiagnosticWarningsTests.swift",
                 "Model/ModelProfileRegistryTests.swift",
                 "Chat/SandboxImportContractTests.swift",
-                "Plugin/PluginDispatchInstructionsInjectionTests.swift",
                 "Chat/FolderContextRenderTests.swift",
                 "Service/StreamingReasoningHintTests.swift",
                 "Service/ExternalModelLocatorTests.swift",
@@ -297,7 +296,6 @@ let package = Package(
                 "Networking/GlobalProxyConfigurationTests.swift",
                 "Plugin/PluginAccessibilityInvocationTests.swift",
                 "Plugin/PluginCompatibilityEnforcementTests.swift",
-                "Plugin/PluginCompleteCancelTests.swift",
                 "Plugin/PluginCrashLoopGuardTests.swift",
                 
                 "Networking/HTTPHandlerChatStreamingTests.swift",

@@ -170,7 +170,9 @@ extension PluginHostContext {
         return jsonString(serializeArtifactDict(artifact))
     }
 
-    private static func serializeArtifactDict(_ artifact: SharedArtifact) -> [String: Any] {
+    /// Intel: internal (upstream private) for the inference callbacks in
+    /// `IntelPluginInference.swift`.
+    static func serializeArtifactDict(_ artifact: SharedArtifact) -> [String: Any] {
         var dict: [String: Any] = [
             "filename": artifact.filename,
             "mime_type": artifact.mimeType,

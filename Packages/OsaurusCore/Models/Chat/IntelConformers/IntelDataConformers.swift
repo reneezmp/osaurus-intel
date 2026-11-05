@@ -963,7 +963,25 @@ final class ModelRuntime: @unchecked Sendable {
     }
 }
 
-final class PluginInstructionsResolver: @unchecked Sendable { static let shared = PluginInstructionsResolver(); static func instructions(pluginId: String, agentId: Any? = nil) -> String? { nil } }
+/// Upstream's resolver (Services/Plugin/PluginInstructionsResolver.swift,
+/// excluded on Intel because it reads upstream's `LoadedPlugin`): the
+/// agent's override for the plugin first, then the plugin's manifest
+/// `instructions`. Used by plugin `complete` / `complete_stream` and by the
+/// chat send of a plugin-dispatched task (`W-plugin-reliability` stage 2d;
+/// until then this always returned nil).
+@MainActor
+enum PluginInstructionsResolver {
+    static func instructions(pluginId: String, agentId: UUID?) -> String? {
+        if let agentId,
+            let agent = AgentManager.shared.agent(for: agentId),
+            let override = agent.pluginInstructions?[pluginId],
+            !override.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+        {
+            return override
+        }
+        return PluginManager.shared.nativeHandle(for: pluginId)?.instructions
+    }
+}
 
 final class SandboxAgentProvisioner: @unchecked Sendable { static let shared = SandboxAgentProvisioner(); static func linuxName(for agentId: String) -> String { "agent" } }
 final class SandboxToolRegistrar: @unchecked Sendable {

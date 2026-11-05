@@ -2821,3 +2821,24 @@ see. This is a regression pass:
       shows its toast and menu-bar row.
 - [ ] Quit while a plugin is loaded: no crash on quit or on the next
       launch.
+
+## Plugin inference (2026-11-05)
+
+`W-plugin-reliability` stage 2d (`UPSTREAM_SYNC.md`, "Plugin inference").
+Not in candidate 66. Only the `memo` plugin calls a model (its `ask_model`
+tool). Needs `memo` installed and a chat agent with a working model.
+
+- [ ] In a chat, ask: "Use memo's ask_model to ask the model what the
+      capital of France is." The tool card's result is a JSON reply with
+      `"object":"chat.completion"` and the answer in `choices`; the chat's
+      reply uses it.
+- [ ] A new chat appears in the sidebar with the memo badge, holding that
+      question and the model's answer. It does not include the agent's
+      system prompt or a `[Memory]` block.
+- [ ] Settings → Insights → Tools: a `POST /host-api/chat/completions` row
+      for memo, with the request and reply.
+- [ ] While `ask_model` runs, the notch shows memo's activity, and it
+      clears when the call ends.
+- [ ] Regression: `memo_save`, `memo_list`, `time`, `hello` and `fetch`
+      still work from a chat.
+

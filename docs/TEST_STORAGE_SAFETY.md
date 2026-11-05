@@ -214,6 +214,9 @@ After the run:
   key's `mdat` was unchanged. These are the app's Insights activity log and
   Knowledge index. Use `lsof` on any in-window hit before concluding; if the
   test helper (or nothing) holds the file, treat it as a failed run.
+  **2026-11-05 (plugin 2d gate):** the same three `activity/` files, held
+  only by the app pid; that run had also stopped early (no summary line),
+  so it was rerun: complete, no live writes.
   **2026-10-28 (agent detail gate):** the app relaunched at 17:26:59 (new
   pid; `ps -o lstart= -p $(pgrep -f /Applications/osaurus.app)`) during
   the build, and its launch wrote ~20 files (`last-exit-verdict.json`,

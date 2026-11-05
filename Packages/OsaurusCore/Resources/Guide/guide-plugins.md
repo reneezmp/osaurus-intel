@@ -14,6 +14,7 @@ Plugins add new tools to Osaurus. This Intel build loads native plugins compiled
 - A plugin may need your approval before it loads, macOS permissions (**Grant** opens the right System Settings pane), or API keys: **Configure** stores them in the Keychain, per agent, never through chat.
 - A plugin's page shows its tools, capabilities, HTTP routes, README, and changelog. **Open Web App** opens a plugin's web UI with the agent id it needs.
 - Plugin calls appear in Settings → Insights under the **Tools** scope.
+- When a plugin talks to a model (a chat bot, for example), the conversation is saved as a chat with the plugin's badge in the sidebar; a plugin that names its conversation keeps adding to one chat.
 - Plugins can't reach your Mac itself or your local network (localhost, 192.168.x.x and similar addresses are refused), make at most 60 web requests a minute per agent, and can only read files Osaurus saved as artifacts.
 
 ## Built into Osaurus

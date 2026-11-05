@@ -4824,8 +4824,8 @@ Tests:
   (`BuiltInAgentGuard`), so they fail on both builds. This is an upstream
   test bug; report it with `W-report-issue`.
 - **Still excluded:** `PluginAgentScopingTests` and
-  `PluginClarifyEventTests` (they need `ExternalPlugin` and upstream's
-  inference host, 2d/2e), and `BackgroundTaskInterruptTests`
+  `PluginClarifyEventTests` (they need `ExternalPlugin`, 2e; 2d checked),
+  and `BackgroundTaskInterruptTests`
   (`MockChatEngine`, `W-background-runs-sync`).
 - **`IntelPluginTaskEventTests`:** events reach `on_task_event` in order
   with the task's agent in scope, none after teardown; the host table
@@ -4837,6 +4837,117 @@ cache failure; the two upstream-bug tests above are disabled, not failing);
 package and tests also build for `x86_64-apple-macosx13.0`. Classifiers:
 UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity and
 `ai.osaurus.id` session-token mdat unchanged.
+
+### Plugin inference (`W-plugin-reliability` stage 2d) — 2026-11-05
+
+Plugins' model callbacks — `complete`, `complete_stream`, `complete_cancel`,
+`embed`, `list_models` — now follow upstream's contract, on
+`PluginHostContext` (`Services/Plugin/IntelPluginInference.swift`). Before
+this, Intel's `complete` sent the plugin's messages straight to the engine
+as a single model call (no agent prompt, no tools, its own `{"ok","content"}`
+reply); `complete_stream` and `embed` answered `not_supported`,
+`list_models` an empty list, and `complete_cancel` did nothing.
+
+- **What plugins get (upstream's):**
+  - `complete` answers a Chat Completions object (`chat.completion`, the
+    model, `finish_reason`, `usage` when both counts are known,
+    `generation_metrics`), plus `tool_calls_executed` and
+    `shared_artifacts` when tools ran.
+  - `complete_stream` sends upstream's chunks: `content`,
+    `reasoning_content`, a `tool_calls` chunk (finish `tool_calls`) before
+    each tool runs, a `role: tool` chunk with its result, `usage`, and a
+    final finish chunk; it returns the aggregated result.
+  - Endings: `max_iterations_reached` (with what ran), `clarify_requested`
+    with the question (`complete`) or finish `clarify` (stream), the
+    `complete` tool's summary as the answer, `output_token_limit`,
+    `cancelled` (stream, with `stream_id` and `partial_content`), and
+    `inference_error`.
+  - `complete_cancel(stream_id)` stops a stream that passed that
+    `stream_id`, through upstream's registry and cancellation handle.
+  - At most two inference calls per plugin at once; the next answers
+    `plugin_busy`.
+  - The request's `agent_id` / `agent_address` are ignored (warned once);
+    the call runs as the calling chat's agent. With an agent, its prompt
+    and memory are added, its model, temperature and max tokens fill
+    unset values, and `"tools": true` adds its tools (never the Default
+    agent's). Without one: no prompt, only the request's own tools.
+  - The plugin's instructions (the agent's override, or the manifest's)
+    are appended to the system prompt.
+  - Calls show in Insights (`/host-api/chat/completions`, `/embeddings`,
+    `/models`, `DELETE /host-api/streams/<id>`) and in the notch's plugin
+    activity.
+  - The conversation is saved as a sidebar chat with the plugin's badge:
+    one chat per `session_id`, updated each call; a new chat per call
+    without one.
+- **Intel differences:**
+  - Upstream runs its own agent loop (`AgentToolLoop`) over its Responses
+    engine. Intel's `ChatEngine` runs the tool loop itself, so the run
+    reads its in-band markers, as `/agents/{id}/run` does. Context
+    trimming and upstream's `context_overflow` /
+    `empty_tool_task_completion` endings are the engine's; an engine
+    failure is `inference_error`.
+  - Upstream freezes the composed prompt and tools per `session_id`
+    (`SessionToolStateStore`, not on Intel); Intel composes them each call,
+    and memory rides the latest user message only.
+  - `embed` runs Intel's CPU embedder, `potion-base-8M` (256 dimensions),
+    the one the API's `/embeddings` serves. Upstream's is `potion-base-4M`
+    (128) on MLX. `list_models` lists that embedder and the exposed remote
+    models; Intel has no MLX models.
+  - The saved chat is the plugin's messages as sent plus the run's turns,
+    so the system prompt and memory block are never saved (upstream strips
+    them with `InjectedContextSpans`). A call without a chat agent is saved
+    under the Default agent (upstream: no agent). Intel's
+    `ChatHistoryWriter` (`Storage/IntelChatHistoryWriter.swift`) writes to
+    `ChatSessionsManager`.
+  - Streamed tool arguments are not scrubbed: upstream's
+    `SecretArgumentScrubber` only changes `sandbox_secret_set`, which
+    Intel doesn't have.
+- **Intel registry plugins:** `memo`'s `ask_model` tool is the only one
+  that calls `complete`. It sends no model, so the call now uses the chat
+  agent's model (Intel's old `complete` used `deepseek-v4-pro`) with the
+  agent's prompt and memory. memo passes the reply to the model as it is,
+  so it now relays upstream's `chat.completion` object instead of Intel's
+  `{"ok","content"}`. It sends no `session_id`, so each call adds a sidebar
+  chat with the memo badge, as on upstream.
+- **Found while doing it (2c gap):** Intel's `PluginInstructionsResolver`
+  was a stub that always returned nil, so the chat of a plugin-dispatched
+  task never got the plugin's instructions, though `ChatView.send` asks
+  for them. It is now upstream's resolver, reading Intel's loaded plugin.
+- **Found while doing it (stale test copies):** this repo's copies of
+  upstream's `PluginCompleteCancelTests` and
+  `PluginDispatchInstructionsInjectionTests` predate `bce907045`; the old
+  cancel test expects an unregistered stream id to be marked, which
+  upstream's registry no longer does. Both now match `bce907045`. Other
+  excluded upstream test files also differ from `bce907045`
+  (`PluginAgentScopingTests`, `PluginClarifyEventTests`); refresh them
+  from upstream when they are enabled. `PluginHostAPITests` differs on
+  purpose (Intel's task states).
+
+Tests:
+- **Now included:** upstream's `PluginCompleteCancelTests` and
+  `PluginDispatchInstructionsInjectionTests`.
+- **`IntelPluginInferenceTests`** (a scripted engine): the `complete`
+  object and usage; the engine request (stream, iteration cap of 120,
+  tool starts, usage, extension fields stripped, no prompt without an
+  agent); tool calls reported with the last text as the answer; the
+  iteration cap; `clarify` and `complete` endings; engine failure;
+  malformed requests; `plugin_busy`; stream chunk order; cancelling by
+  `stream_id`; the stream's iteration cap; one growing sidebar chat per
+  `session_id`; `embed` input checks; `list_models`; plugin instructions
+  reaching the request.
+- **Still excluded:** `PluginAgentScopingTests` and
+  `PluginClarifyEventTests` (they need `ExternalPlugin`, 2e).
+
+Validation: the full interim gate passed 4,619 tests (only the known avatar
+cache failure); package and tests also build for `x86_64-apple-macosx13.0`.
+Classifiers: UNASSIGNED 0. Keychain identity and `ai.osaurus.id`
+session-token mdat unchanged. The first full run stopped partway (no
+summary line, no crash report, in the unrelated `LoginShellPathTests`,
+which passed in the 2c gate and on the rerun) and showed writes to
+`~/.osaurus/activity/`: the installed Osaurus app was running and is the
+only process holding those files, so the writes were its own activity log.
+The rerun was complete, with no live writes. When the app is running
+during a gate, check `lsof +D ~/.osaurus` before blaming the tests.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

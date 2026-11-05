@@ -16,14 +16,14 @@
 //  minimal, honest host:
 //
 //    • Intel's own: log, log_structured, free_string,
-//        config_get/set/delete (per-agent Keychain), complete.
+//        config_get/set/delete (per-agent Keychain).
 //    • Upstream's, on `PluginHostContext`: http_request / file_read
 //        (stage 2a), db_exec / db_query (2b), dispatch, task_status,
 //        dispatch_cancel / _interrupt / _clarify / _add_issue, send_draft,
-//        list_active_tasks, get_active_agent_id (2c). Task events reach
+//        list_active_tasks, get_active_agent_id (2c), complete,
+//        complete_stream, complete_cancel, embed, list_models (2d, on
+//        Intel's engines: `IntelPluginInference.swift`). Task events reach
 //        the plugin's on_task_event (`IntelLoadedPlugin.notifyTaskEvent`).
-//    • `not_supported` / empty for the rest until 2d: complete_stream,
-//        embed, list_models, complete_cancel (no-op).
 //
 //  `W-plugin-reliability` stage 2 (docs/UPSTREAM_SYNC.md) moves the rest
 //  onto upstream's code a stage at a time.
@@ -174,10 +174,6 @@ private func dupCString(_ s: String) -> UnsafePointer<CChar>? {
     return s.withCString { UnsafePointer(strdup($0)) }
 }
 
-private func notSupportedEnvelope(_ name: String) -> String {
-    #"{"error":"not_supported","message":"\#(name) is unavailable on the Osaurus Intel fork (amputated subsystem)."}"#
-}
-
 // --- Per-plugin scoping: which plugin is currently calling a host callback? --
 // Host trampolines are global (no plugin arg), so the active plugin id is
 // stashed in thread-local storage around each `invoke` (callbacks run
@@ -277,48 +273,10 @@ enum IntelPluginConfigMigration {
     }
 }
 
-// --- Blocking bridge: run async / MainActor work from a sync C trampoline. ---
-// Safe because plugin callbacks run on a background thread (IntelPluginTool
-// invokes off the main actor), so the main actor stays free to finish the work.
-private final class IntelBox<T>: @unchecked Sendable { var value: T? }
-private func intelBlockingAsync<T: Sendable>(_ body: @escaping @Sendable () async -> T) -> T {
-    let sem = DispatchSemaphore(value: 0)
-    let box = IntelBox<T>()
-    Task.detached { box.value = await body(); sem.signal() }
-    sem.wait()
-    return box.value!
-}
-
 // --- dispatch, task_status, cancel, interrupt, draft, list_active_tasks and
-// get_active_agent_id are upstream's (`PluginHostContext`, stage 2c).
-
-// --- complete → the Intel cloud chat engine (DeepSeek / remote). -------------
-private func intelComplete(requestJSON: String) -> String {
-    guard let data = requestJSON.data(using: .utf8),
-          let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any],
-          let rawMessages = json["messages"] as? [[String: Any]], !rawMessages.isEmpty
-    else {
-        return jsonStringSafe(["error": "invalid_request", "message": "Missing required field 'messages'"])
-    }
-    let messages: [ChatMessage] = rawMessages.map { m in
-        ChatMessage(role: (m["role"] as? String) ?? "user", content: m["content"] as? String)
-    }
-    let model = json["model"] as? String
-    let temperature = json["temperature"] as? Double
-    let maxTokens = json["max_tokens"] as? Int
-    return intelBlockingAsync {
-        let engine = ChatEngine(model: model ?? "deepseek-v4-pro")
-        let req = ChatCompletionRequest(
-            model: model ?? "deepseek-v4-pro", messages: messages, temperature: temperature, max_tokens: maxTokens)
-        do {
-            let resp = try await engine.completeChat(request: req)
-            let content = resp.choices.first?.message?.content ?? ""
-            return jsonStringSafe(["ok": true, "content": content])
-        } catch {
-            return jsonStringSafe(["error": "completion_failed", "message": "\(error)"])
-        }
-    }
-}
+// get_active_agent_id are upstream's (`PluginHostContext`, stage 2c);
+// complete, complete_stream, complete_cancel, embed and list_models too
+// (stage 2d, `IntelPluginInference.swift`).
 
 // MARK: - Trampolines (global @convention(c) closures)
 
@@ -415,26 +373,6 @@ private let intelHostConfigDelete: osr_config_delete_t = { keyPtr in
 // reads limited to the artifacts folder. Until stage 2a Intel's own versions
 // read any path and fetched any address.
 
-/// JSON-encode a `[String: Any]`; never throws (best-effort for trampolines).
-private func jsonStringSafe(_ object: [String: Any]) -> String {
-    guard let data = try? JSONSerialization.data(withJSONObject: object),
-          let s = String(data: data, encoding: .utf8)
-    else { return #"{"error":"encode_failed"}"# }
-    return s
-}
-
-// --- Dispatch, task status, complete, and `not_supported` for the rest. -----
-private let intelHostComplete: osr_complete_t = { reqPtr in
-    let req = reqPtr.map { String(cString: $0) } ?? "{}"
-    return dupCString(intelComplete(requestJSON: req))
-}
-private let intelHostCompleteStream: osr_complete_stream_t = { _, _, _ in dupCString(notSupportedEnvelope("complete_stream")) }
-private let intelHostEmbed: osr_embed_t = { _ in dupCString(notSupportedEnvelope("embed")) }
-private let intelHostListModels: osr_list_models_t = { dupCString(#"{"models":[]}"#) }
-
-// --- Void trampolines: safe no-ops. ----------------------------------------
-private let intelHostCompleteCancel: osr_complete_cancel_t = { _ in }
-
 /// Build the host-API struct passed to a plugin's v2 entry point. Called
 /// through `PluginHostContext.buildHostAPI()`, which owns the pointer and
 /// frees it when the context goes away (after the plugin is destroyed).
@@ -452,17 +390,17 @@ func buildIntelHostAPI() -> UnsafeMutablePointer<osr_host_api> {
         task_status: PluginHostContext.trampolineTaskStatus,
         dispatch_cancel: PluginHostContext.trampolineDispatchCancel,
         dispatch_clarify: PluginHostContext.trampolineDispatchClarify,
-        complete: intelHostComplete,
-        complete_stream: intelHostCompleteStream,
-        embed: intelHostEmbed,
-        list_models: intelHostListModels,
+        complete: PluginHostContext.trampolineComplete,
+        complete_stream: PluginHostContext.trampolineCompleteStream,
+        embed: PluginHostContext.trampolineEmbed,
+        list_models: PluginHostContext.trampolineListModels,
         http_request: PluginHostContext.trampolineHttpRequest,
         file_read: PluginHostContext.trampolineFileRead,
         list_active_tasks: PluginHostContext.trampolineListActiveTasks,
         send_draft: PluginHostContext.trampolineSendDraft,
         dispatch_interrupt: PluginHostContext.trampolineDispatchInterrupt,
         dispatch_add_issue: PluginHostContext.trampolineDispatchAddIssue,
-        complete_cancel: intelHostCompleteCancel,
+        complete_cancel: PluginHostContext.trampolineCompleteCancel,
         get_active_agent_id: PluginHostContext.trampolineGetActiveAgentId,
         log_structured: intelHostLogStructured,
         free_string: intelHostFreeString

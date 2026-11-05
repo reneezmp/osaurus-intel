@@ -20,9 +20,11 @@
 //
 //  Stage 2b added upstream's database callbacks (`PluginDatabase`), stage
 //  2c the dispatch and task-control callbacks (`dispatch`, `task_status`,
-//  cancel, interrupt, draft, `list_active_tasks`, `get_active_agent_id`).
-//  Upstream keeps the inference callbacks on this class too; on Intel
-//  `complete` still lives in `IntelPluginExecution` until stage 2d.
+//  cancel, interrupt, draft, `list_active_tasks`, `get_active_agent_id`),
+//  stage 2d the inference callbacks (`complete`, `complete_stream`,
+//  `complete_cancel`, `embed`, `list_models`): the in-flight cap and stream
+//  registry here, the callbacks on Intel's engines in
+//  `IntelPluginInference.swift`.
 //
 
 #if OSAURUS_INTEL
@@ -80,6 +82,7 @@ final class PluginHostContext: @unchecked Sendable {
 
     let pluginId: String
     let database: PluginDatabase
+    let inferenceEngineFactory: @Sendable () -> any ChatEngineProtocol
 
     /// Heap-allocated host API struct whose pointer is handed to the plugin at
     /// init. Must outlive the plugin because it may store the pointer rather
@@ -150,6 +153,98 @@ final class PluginHostContext: @unchecked Sendable {
     static let httpRateLimit = 60
     static let httpRateWindow: TimeInterval = 60
 
+    // MARK: - Per-Plugin In-Flight Inference Cap
+
+    // Intel: the three helpers below are internal rather than private because
+    // the inference callbacks live in `IntelPluginInference.swift`.
+
+    /// Maximum simultaneous inference calls (`complete` + `completeStream` + `embed`)
+    /// per plugin. Bursts above this fail fast with `plugin_busy` instead of
+    /// piling up blocked plugin worker threads — every `blockingAsync` parks
+    /// a thread on a semaphore for the entire MLX serialization wait, and
+    /// without a cap a single misbehaving plugin can starve the host.
+    static let maxInflightPerPlugin = 2
+
+    private let inflightLock = NSLock()
+    private var inflightInferenceCount = 0
+
+    /// Try to take one inflight slot. Returns `false` if the plugin is already
+    /// at the per-plugin cap; the caller should reject with `plugin_busy`.
+    func tryEnterInflightInference() -> Bool {
+        inflightLock.withLock {
+            guard inflightInferenceCount < Self.maxInflightPerPlugin else { return false }
+            inflightInferenceCount += 1
+            return true
+        }
+    }
+
+    /// Release one inflight slot. Floors at zero so a buggy double-release
+    /// can never poison the count.
+    func exitInflightInference() {
+        inflightLock.withLock {
+            inflightInferenceCount = max(0, inflightInferenceCount - 1)
+        }
+    }
+
+    /// Reusable JSON for the "plugin already at concurrency cap" response.
+    static func pluginBusyJSON(kind: String) -> String {
+        jsonString([
+            "error": "plugin_busy",
+            "message":
+                "Plugin already has \(maxInflightPerPlugin) concurrent \(kind) calls in flight. Retry after a previous call returns.",
+            "max_inflight": maxInflightPerPlugin,
+        ])
+    }
+
+    // MARK: - Streaming Cancellation Registry
+
+    private struct RegisteredStream {
+        var cancelled = false
+        let cancel: @Sendable () -> Void
+    }
+    private let streamLock = NSLock()
+    private var activeStreams: [String: [UUID: RegisteredStream]] = [:]
+
+    /// Each invocation owns a registration. Reusing an opaque ID groups the
+    /// currently active invocations for cancellation without sharing cleanup.
+    func registerStream(_ streamId: String, owner: UUID, cancel: @escaping @Sendable () -> Void) {
+        streamLock.withLock {
+            guard activeStreams[streamId]?[owner] == nil else { return }
+            activeStreams[streamId, default: [:]][owner] = RegisteredStream(cancel: cancel)
+        }
+    }
+
+    func markStreamCancelled(_ streamId: String) {
+        let callbacks: [@Sendable () -> Void] = streamLock.withLock {
+            guard var streams = activeStreams[streamId] else { return [] }
+            var callbacks: [@Sendable () -> Void] = []
+            for (owner, var stream) in streams where !stream.cancelled {
+                stream.cancelled = true
+                streams[owner] = stream
+                callbacks.append(stream.cancel)
+            }
+            activeStreams[streamId] = streams
+            return callbacks
+        }
+        // Task cancellation may invoke termination callbacks that reenter the
+        // registry. Never invoke them while holding its lock.
+        callbacks.forEach { $0() }
+    }
+
+    func isStreamCancelled(_ streamId: String, owner: UUID? = nil) -> Bool {
+        streamLock.withLock {
+            if let owner { return activeStreams[streamId]?[owner]?.cancelled == true }
+            return activeStreams[streamId]?.values.contains { $0.cancelled } == true
+        }
+    }
+
+    func unregisterStream(_ streamId: String, owner: UUID) {
+        streamLock.withLock {
+            activeStreams[streamId]?.removeValue(forKey: owner)
+            if activeStreams[streamId]?.isEmpty == true { activeStreams.removeValue(forKey: streamId) }
+        }
+    }
+
     // MARK: - Per-Request Agent Context
 
     /// Resolved agent ID for the current thread, or `nil` when no chat agent
@@ -176,11 +271,15 @@ final class PluginHostContext: @unchecked Sendable {
         uuidString: "ffffffff-ffff-ffff-ffff-fffffffffff0"
     )!
 
-    /// Intel: upstream's init also takes an inference engine factory;
-    /// Intel's `complete` still lives in `IntelPluginExecution` (stage 2d).
-    init(pluginId: String) throws {
+    /// Intel: the factory makes Intel's `ChatEngine` (upstream's makes its
+    /// Responses engine); tests inject a scripted engine.
+    init(
+        pluginId: String,
+        inferenceEngineFactory: @escaping @Sendable () -> any ChatEngineProtocol = { ChatEngine(source: .plugin) }
+    ) throws {
         self.pluginId = pluginId
         self.database = PluginDatabase(pluginId: pluginId)
+        self.inferenceEngineFactory = inferenceEngineFactory
         // NOTE: deliberately do NOT call `database.open()` here.
         // Most plugins never call `db.exec` / `db.query`, so eagerly
         // opening every plugin's SQLCipher database at host-api init
@@ -1759,6 +1858,98 @@ extension PluginHostContext {
                 path: "/host-api/tasks/\(taskId)/issues",
                 statusCode: 501,
                 durationMs: 0,
+                responseBody: result
+            )
+            return makeCString(result)
+        }
+    }
+
+    /// Cancel an in-flight `complete_stream` call by stream id. Non-blocking;
+    /// the streaming task observes the cancellation flag between deltas and
+    /// unwinds with `finish_reason: "cancelled"`. Logs the call to Insights
+    /// so the developer can correlate cancel intent with stream completion.
+    static let trampolineCompleteCancel: osr_complete_cancel_t = { streamIdPtr in
+        guard let streamIdPtr, let ctx = activeContext() else { return }
+        let streamId = String(cString: streamIdPtr)
+        ctx.completeCancel(streamId: streamId)
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "DELETE",
+            path: "/host-api/streams/\(streamId)",
+            statusCode: 204,
+            durationMs: 0
+        )
+    }
+
+    // MARK: Inference Trampolines
+
+    static let trampolineComplete: osr_complete_t = { requestPtr in
+        withActiveContext(requestPtr: requestPtr) { ctx, json in
+            var result = ""
+            let ms = measureMs { result = ctx.complete(requestJSON: json) }
+            let model = extractJSONStringValue(from: json, key: "model")
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "POST",
+                path: "/host-api/chat/completions",
+                statusCode: errorStatusCode(for: result) ?? 200,
+                durationMs: ms,
+                requestBody: json,
+                responseBody: result,
+                model: model
+            )
+            return makeCString(result)
+        }
+    }
+
+    static let trampolineCompleteStream: osr_complete_stream_t = { requestPtr, onChunk, userData in
+        withActiveContext(requestPtr: requestPtr) { ctx, json in
+            var result = ""
+            let ms = measureMs { result = ctx.completeStream(requestJSON: json, onChunk: onChunk, userData: userData) }
+            let model = extractJSONStringValue(from: json, key: "model")
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "POST",
+                path: "/host-api/chat/completions",
+                statusCode: errorStatusCode(for: result) ?? 200,
+                durationMs: ms,
+                requestBody: json,
+                responseBody: result,
+                model: model
+            )
+            return makeCString(result)
+        }
+    }
+
+    static let trampolineEmbed: osr_embed_t = { requestPtr in
+        withActiveContext(requestPtr: requestPtr) { ctx, json in
+            var result = ""
+            let ms = measureMs { result = ctx.embed(requestJSON: json) }
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "POST",
+                path: "/host-api/embeddings",
+                statusCode: errorStatusCode(for: result) ?? 200,
+                durationMs: ms,
+                requestBody: json,
+                responseBody: result
+            )
+            return makeCString(result)
+        }
+    }
+
+    // MARK: Models Trampoline
+
+    static let trampolineListModels: osr_list_models_t = {
+        withActiveContext { ctx in
+            var result = ""
+            let ms = measureMs { result = ctx.listModels() }
+            logPluginCall(
+                pluginId: ctx.pluginId,
+                method: "GET",
+                path: "/host-api/models",
+                statusCode: 200,
+                durationMs: ms,
                 responseBody: result
             )
             return makeCString(result)
