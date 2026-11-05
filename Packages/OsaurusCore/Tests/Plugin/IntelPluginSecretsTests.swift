@@ -4,12 +4,15 @@
 //
 //  W-plugin-reliability stage 1 (2026-10-10): Intel's plugin host keeps
 //  config in `ToolSecretsKeychain` under upstream's resolution policy
-//  (#2061), injects `_secrets` / `_context` like upstream's `ExternalTool`,
-//  validates the ABI table and manifest at load, and migrates the old
-//  plaintext config file. `ToolSecretsKeychain` uses its in-memory store in
-//  test processes, so nothing here reaches the Keychain.
+//  (#2061) and migrates the old plaintext config file. Since stage 2e the
+//  config callbacks are upstream's (`PluginHostContext.configGet` …), tools
+//  are upstream's `ExternalTool` (`_secrets` / `_context` injection) and
+//  load validation is upstream's (`PluginManager`'s static checks).
+//  `ToolSecretsKeychain` uses its in-memory store in test processes, so
+//  nothing here reaches the Keychain.
 //
 
+import Darwin
 import Foundation
 import Testing
 
@@ -51,38 +54,54 @@ struct IntelPluginSecretsTests {
 
     // MARK: - Host config callbacks (upstream PluginHostAPI.config*)
 
-    @Test func hostConfigIsScopedToTheCallingAgent() {
+    /// Runs `body` as the plugin's host callback would: its context, scoped
+    /// to `agentId`.
+    private func asPlugin<T>(_ pluginId: String, agentId: UUID?, _ body: (PluginHostContext) -> T) throws -> T {
+        let ctx = try PluginHostContext(pluginId: pluginId)
+        defer { ctx.teardown() }
+        return PluginHostContext.withTLSScope(pluginId: pluginId, agentId: agentId) { body(ctx) }
+    }
+
+    @Test func hostConfigIsScopedToTheCallingAgent() throws {
         let pluginId = Self.freshPluginId()
         let agent = UUID()
         defer { ToolSecretsKeychain.deleteAllSecretsAllAgents(for: pluginId) }
 
-        intelHostConfigSetValue(pluginId: pluginId, agentId: agent, key: "token", value: "abc")
-        #expect(intelHostConfigGetValue(pluginId: pluginId, agentId: agent, key: "token") == "abc")
+        try asPlugin(pluginId, agentId: agent) { $0.configSet(key: "token", value: "abc") }
+        #expect(try asPlugin(pluginId, agentId: agent) { $0.configGet(key: "token") } == "abc")
         // Another agent doesn't see it (no Default-agent value to fall back to).
-        #expect(intelHostConfigGetValue(pluginId: pluginId, agentId: UUID(), key: "token") == nil)
+        #expect(try asPlugin(pluginId, agentId: UUID()) { $0.configGet(key: "token") } == nil)
 
-        intelHostConfigDeleteValue(pluginId: pluginId, agentId: agent, key: "token")
-        #expect(intelHostConfigGetValue(pluginId: pluginId, agentId: agent, key: "token") == nil)
+        try asPlugin(pluginId, agentId: agent) { $0.configDelete(key: "token") }
+        #expect(try asPlugin(pluginId, agentId: agent) { $0.configGet(key: "token") } == nil)
     }
 
-    @Test func hostConfigWithoutAnAgentNeverTouchesTheDefaultNamespace() {
+    /// Upstream: a call with no agent, or as the Default agent, is anonymous;
+    /// it reads nothing and writes nothing. (Intel's own callback, before
+    /// stage 2e, read and wrote the Default agent's namespace for a
+    /// Default-agent chat.)
+    @Test func hostConfigWithoutANamedAgentNeverTouchesTheDefaultNamespace() throws {
         let pluginId = Self.freshPluginId()
         defer { ToolSecretsKeychain.deleteAllSecretsAllAgents(for: pluginId) }
         intelPluginConfigSet(pluginId: pluginId, key: "token", value: "global")
 
-        #expect(intelHostConfigGetValue(pluginId: pluginId, agentId: nil, key: "token") == nil)
-        intelHostConfigSetValue(pluginId: pluginId, agentId: nil, key: "token", value: "overwrite")
-        intelHostConfigDeleteValue(pluginId: pluginId, agentId: nil, key: "token")
+        for agentId in [nil, Agent.defaultId] {
+            #expect(try asPlugin(pluginId, agentId: agentId) { $0.configGet(key: "token") } == nil)
+            try asPlugin(pluginId, agentId: agentId) { $0.configSet(key: "token", value: "overwrite") }
+            try asPlugin(pluginId, agentId: agentId) { $0.configDelete(key: "token") }
+        }
         #expect(intelPluginConfigGet(pluginId: pluginId, key: "token") == "global")
+        // A named agent falls back to it.
+        #expect(try asPlugin(pluginId, agentId: UUID()) { $0.configGet(key: "token") } == "global")
     }
 
-    @Test func hostConfigRejectsOversizedValues() {
+    @Test func hostConfigRejectsOversizedValues() throws {
         let pluginId = Self.freshPluginId()
         let agent = UUID()
         defer { ToolSecretsKeychain.deleteAllSecretsAllAgents(for: pluginId) }
-        let big = String(repeating: "x", count: intelPluginConfigValueMaxBytes + 1)
-        intelHostConfigSetValue(pluginId: pluginId, agentId: agent, key: "blob", value: big)
-        #expect(intelHostConfigGetValue(pluginId: pluginId, agentId: agent, key: "blob") == nil)
+        let big = String(repeating: "x", count: PluginHostContext.configValueMaxBytes + 1)
+        try asPlugin(pluginId, agentId: agent) { $0.configSet(key: "blob", value: big) }
+        #expect(try asPlugin(pluginId, agentId: agent) { $0.configGet(key: "blob") } == nil)
     }
 
     @Test func settingsSheetWritesTheDefaultAgentNamespace() {
@@ -96,35 +115,72 @@ struct IntelPluginSecretsTests {
 
     // MARK: - Payload injection (upstream ExternalTool)
 
-    @Test func secretsAreInjectedForANamedAgentOnly() throws {
+    /// A tool whose plugin echoes the payload it was invoked with.
+    private func echoTool(pluginId: String) throws -> ExternalTool {
+        let api = osr_plugin_api(
+            free_string: { ptr in free(UnsafeMutableRawPointer(mutating: ptr)) },
+            init: { nil },
+            destroy: { _ in },
+            get_manifest: { _ in nil },
+            invoke: { _, _, _, payload in payload.map { UnsafePointer(strdup($0)) } ?? nil },
+            version: 2, handle_route: nil, on_config_changed: nil, on_task_event: nil)
+        let spec = PluginManifest.ToolSpec(
+            id: "echo", description: "echo", parameters: nil, requirements: nil, permission_policy: nil)
+        let manifest = PluginManifest(
+            plugin_id: pluginId, description: nil,
+            capabilities: .init(tools: [spec], routes: nil, config: nil, web: nil, artifact_handler: nil),
+            instructions: nil, name: nil, version: nil, license: nil, authors: nil,
+            min_macos: nil, min_osaurus: nil, secrets: nil, docs: nil)
+        let plugin = ExternalPlugin(
+            handle: try #require(dlopen(nil, RTLD_NOW)), api: api,
+            ctx: UnsafeMutableRawPointer(bitPattern: 0x1)!, manifest: manifest,
+            path: "/tmp/\(pluginId).dylib", abiVersion: 2)
+        return ExternalTool(plugin: plugin, spec: spec)
+    }
+
+    private func object(_ json: String) throws -> [String: Any] {
+        try #require(try JSONSerialization.jsonObject(with: Data(json.utf8)) as? [String: Any])
+    }
+
+    @Test func secretsAreInjectedForANamedAgentOnly() async throws {
         let pluginId = Self.freshPluginId()
         let agent = UUID()
         defer { ToolSecretsKeychain.deleteAllSecretsAllAgents(for: pluginId) }
         ToolSecretsKeychain.saveSecret("global", id: "a", for: pluginId, agentId: Agent.defaultId)
         ToolSecretsKeychain.saveSecret("mine", id: "b", for: pluginId, agentId: agent)
+        let tool = try echoTool(pluginId: pluginId)
 
-        let injected = IntelPluginTool.injectSecrets(into: #"{"q":1}"#, pluginId: pluginId, agentId: agent)
-        let object = try #require(
-            try JSONSerialization.jsonObject(with: Data(injected.utf8)) as? [String: Any])
-        #expect(object["q"] as? Int == 1)
-        #expect(object["_secrets"] as? [String: String] == ["a": "global", "b": "mine"])
+        let injected = try await ChatExecutionContext.$currentAgentId.withValue(agent) {
+            try await tool.execute(argumentsJSON: #"{"q":1}"#)
+        }
+        let echoed = try object(injected)
+        #expect(echoed["q"] as? Int == 1)
+        #expect(echoed["_secrets"] as? [String: String] == ["a": "global", "b": "mine"])
 
         // Anonymous and Default-agent calls get nothing (upstream).
-        #expect(IntelPluginTool.injectSecrets(into: #"{"q":1}"#, pluginId: pluginId, agentId: nil) == #"{"q":1}"#)
-        #expect(
-            IntelPluginTool.injectSecrets(into: #"{"q":1}"#, pluginId: pluginId, agentId: Agent.defaultId)
-                == #"{"q":1}"#)
-        // A non-object payload is passed through untouched.
-        #expect(IntelPluginTool.injectSecrets(into: "[1]", pluginId: pluginId, agentId: agent) == "[1]")
+        #expect(try await tool.execute(argumentsJSON: #"{"q":1}"#) == #"{"q":1}"#)
+        let asDefault = try await ChatExecutionContext.$currentAgentId.withValue(Agent.defaultId) {
+            try await tool.execute(argumentsJSON: #"{"q":1}"#)
+        }
+        #expect(asDefault == #"{"q":1}"#)
     }
 
-    @Test func folderContextCarriesTheWorkingDirectory() throws {
+    @Test func folderContextCarriesTheWorkingDirectory() async throws {
         let folder = URL(fileURLWithPath: "/tmp/intel-plugin-folder", isDirectory: true)
-        let injected = IntelPluginTool.injectFolderContext(into: "{}", folderRoot: folder)
-        let object = try #require(
-            try JSONSerialization.jsonObject(with: Data(injected.utf8)) as? [String: Any])
-        #expect((object["_context"] as? [String: String])?["working_directory"] == folder.path)
-        #expect(IntelPluginTool.injectFolderContext(into: "{}", folderRoot: nil) == "{}")
+        let tool = try echoTool(pluginId: Self.freshPluginId())
+        let injected = try await ChatExecutionContext.$currentFolderRoot.withValue(folder) {
+            try await tool.execute(argumentsJSON: "{}")
+        }
+        #expect((try object(injected)["_context"] as? [String: String])?["working_directory"] == folder.path)
+        #expect(try await tool.execute(argumentsJSON: "{}") == "{}")
+    }
+
+    /// Upstream's default: a plugin tool asks before it runs unless its
+    /// manifest says otherwise. (Intel's own wrapper, before stage 2e, ran
+    /// every plugin tool without asking.)
+    @Test func pluginToolsAskByDefault() throws {
+        let tool = try echoTool(pluginId: Self.freshPluginId())
+        #expect(tool.defaultPermissionPolicy == .ask)
     }
 
     // MARK: - Load validation (upstream #2061)
@@ -133,19 +189,20 @@ struct IntelPluginSecretsTests {
         let empty = osr_plugin_api(
             free_string: nil, init: nil, destroy: nil, get_manifest: nil, invoke: nil,
             version: 2, handle_route: nil, on_config_changed: nil, on_task_event: nil)
-        let message = IntelPluginLoader.abiTableValidationFailure(empty)
+        let message = PluginManager.abiTableValidationFailure(empty)
         #expect(message?.contains("free_string, init, destroy, get_manifest, invoke") == true)
     }
 
-    @Test func manifestIdentityAndToolIdsAreChecked() {
-        func failure(_ json: String) -> String? {
-            IntelPluginLoader.manifestValidationFailure(manifestJSON: json, directoryId: "time-intel")
+    @Test func manifestIdentityIsCheckedAgainstTheFolder() throws {
+        func manifest(_ json: String) throws -> PluginManifest {
+            try JSONDecoder().decode(PluginManifest.self, from: Data(json.utf8))
         }
-        #expect(failure(#"{"plugin_id":"time-intel","capabilities":{"tools":[{"id":"get_current_time"}]}}"#) == nil)
-        #expect(failure(#"{"capabilities":{"tools":[{"id":"a"}]}}"#) == nil)
-        #expect(failure(#"{"plugin_id":"other","capabilities":{"tools":[]}}"#)?.contains("installed as 'time-intel'") == true)
-        #expect(failure(#"{"plugin_id":"time-intel","capabilities":{"tools":[{"id":"a"},{"id":"a"}]}}"#)?.contains("duplicate tool id 'a'") == true)
-        #expect(failure(#"{"plugin_id":"time-intel","capabilities":{"tools":[{"id":"  "}]}}"#)?.contains("empty id") == true)
+        let mine = try manifest(#"{"plugin_id":"time-intel","capabilities":{"tools":[]}}"#)
+        #expect(PluginManager.manifestIdentityValidationFailure(manifest: mine, directoryId: "time-intel") == nil)
+        let other = try manifest(#"{"plugin_id":"other","capabilities":{"tools":[]}}"#)
+        #expect(
+            PluginManager.manifestIdentityValidationFailure(manifest: other, directoryId: "time-intel")?
+                .contains("installed as 'time-intel'") == true)
     }
 
     // MARK: - Plaintext file migration

@@ -979,7 +979,7 @@ enum PluginInstructionsResolver {
         {
             return override
         }
-        return PluginManager.shared.nativeHandle(for: pluginId)?.instructions
+        return PluginManager.shared.loadedPlugin(for: pluginId)?.plugin.manifest.instructions
     }
 }
 
@@ -1150,6 +1150,36 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         skill.updatedAt = Date()
         await SkillStore.save(skill)
         await refresh()
+    }
+
+    // MARK: - Plugin Skills (upstream, `W-plugin-reliability` stage 2e)
+    //
+    // Upstream's bodies minus `SkillSearchService` indexing, which Intel
+    // doesn't compile.
+
+    /// Register a skill from a plugin. If a skill with the same pluginId and name already exists, update it.
+    func registerPluginSkill(_ skill: Skill) async {
+        // Check if we already have a skill from this plugin with the same name
+        if let existing = skills.first(where: { $0.pluginId == skill.pluginId && $0.name == skill.name }) {
+            // Update existing skill but preserve enabled state
+            var updated = skill
+            updated.enabled = existing.enabled
+            await SkillStore.save(updated)
+        } else {
+            await SkillStore.save(skill)
+        }
+        await refresh()
+    }
+
+    /// Remove all skills associated with a plugin
+    func unregisterPluginSkills(pluginId: String) async {
+        let pluginSkillIds = skills.filter { $0.pluginId == pluginId }.map { $0.id }
+        for id in pluginSkillIds {
+            _ = await SkillStore.delete(id: id)
+        }
+        if !pluginSkillIds.isEmpty {
+            await refresh()
+        }
     }
 
     // Import / export paths.
@@ -2706,7 +2736,7 @@ final class SystemPromptComposer: @unchecked Sendable {
         if !tools.isEmpty {
             let activeNames = Set(tools.map { $0.function.name })
             let pluginInstructions = await MainActor.run {
-                PluginManager.shared.instructions(forActiveToolNames: activeNames)
+                PluginManager.shared.instructions(forActiveToolNames: activeNames, agentId: id)
             }
             if !pluginInstructions.isEmpty {
                 let block = "\n\n## Plugin Instructions\n" + pluginInstructions.joined(separator: "\n\n")

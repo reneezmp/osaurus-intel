@@ -1103,8 +1103,10 @@ extension PluginHostContext {
 
     @MainActor
     private static func pluginDisplayName(for pluginId: String) -> String {
-        if let name = PluginManager.shared.nativeHandle(for: pluginId)?.displayName, !name.isEmpty {
-            return name
+        if let manifestName = PluginManager.shared.loadedPlugin(for: pluginId)?.plugin
+            .manifest.name, !manifestName.isEmpty
+        {
+            return manifestName
         }
         return pluginId
     }

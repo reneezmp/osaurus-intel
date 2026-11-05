@@ -1712,11 +1712,10 @@ private struct PluginDetailView: View {
     /// so the registry detail page is as informative as the native one.
     @ViewBuilder
     private var intelToolDetailsSection: some View {
-        if let handle = PluginManager.shared.nativeHandle(for: plugin.pluginId),
-            !handle.toolSpecs.isEmpty {
-            detailSection(title: "Tools (\(handle.toolSpecs.count))", icon: "wrench.and.screwdriver") {
+        if let tools = loadedPlugin?.plugin.manifest.capabilities.tools, !tools.isEmpty {
+            detailSection(title: "Tools (\(tools.count))", icon: "wrench.and.screwdriver") {
                 VStack(alignment: .leading, spacing: 10) {
-                    ForEach(handle.toolSpecs) { tool in
+                    ForEach(tools, id: \.id) { tool in
                         VStack(alignment: .leading, spacing: 3) {
                             Text(tool.id)
                                 .font(.subheadline.weight(.medium))

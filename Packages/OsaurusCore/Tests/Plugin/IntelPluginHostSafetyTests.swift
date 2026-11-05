@@ -128,7 +128,7 @@ struct IntelPluginHostSafetyTests {
     // MARK: - Trampolines and scope
 
     /// The C trampoline resolves the plugin from the thread-local scope that
-    /// `IntelLoadedPlugin.invoke` sets.
+    /// `ExternalPlugin.invoke` sets.
     @Test func trampoline_resolvesTheScopedPlugin() throws {
         let ctx = try makeContext()
         PluginHostContext.setContext(ctx, for: ctx.pluginId)
@@ -149,16 +149,33 @@ struct IntelPluginHostSafetyTests {
         #expect(PluginHostContext.getContext(for: ctx.pluginId) == nil)
     }
 
-    /// Intel's config / db / dispatch callbacks and upstream's trampolines
-    /// read one scope, so a plugin's agent is the same for all of them.
-    @Test func intelCallbacks_shareUpstreamsScope() {
-        let agent = UUID()
-        PluginHostContext.withTLSScope(pluginId: "com.test.scope", agentId: agent) {
-            #expect(intelCurrentPluginId() == "com.test.scope")
-            #expect(intelCurrentPluginAgentId() == agent)
-            #expect(PluginHostContext.activeAgentId() == agent)
+    /// Since stage 2e every slot of the host table is upstream's, config
+    /// included: `config_set` / `config_get` through the table land in the
+    /// scoped agent's namespace, and an anonymous call reads nothing.
+    @Test func configThroughTheTable_usesTheScopedAgent() throws {
+        let ctx = try makeContext()
+        PluginHostContext.setContext(ctx, for: ctx.pluginId)
+        defer {
+            ctx.teardown()
+            ToolSecretsKeychain.deleteAllSecretsAllAgents(for: ctx.pluginId)
         }
-        #expect(intelCurrentPluginAgentId() == nil)
-        #expect(PluginHostContext.activeAgentId() == nil)
+        let api = ctx.buildHostAPI().pointee
+        let agent = UUID()
+
+        func get(_ agentId: UUID?) -> String? {
+            PluginHostContext.withTLSScope(pluginId: ctx.pluginId, agentId: agentId) {
+                "token".withCString { key -> String? in
+                    guard let result = api.config_get?(key) else { return nil }
+                    defer { api.free_string?(result) }
+                    return String(cString: result)
+                }
+            }
+        }
+        PluginHostContext.withTLSScope(pluginId: ctx.pluginId, agentId: agent) {
+            "token".withCString { key in "abc".withCString { value in api.config_set?(key, value) } }
+        }
+        #expect(get(agent) == "abc")
+        #expect(get(nil) == nil)
+        #expect(ToolSecretsKeychain.getSecret(id: "token", for: ctx.pluginId, agentId: agent) == "abc")
     }
 }

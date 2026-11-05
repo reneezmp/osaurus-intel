@@ -32,22 +32,6 @@ extension PluginHostContext {
     }
 }
 
-/// Upstream's plugin task-event enum (it lives in the `#if !OSAURUS_INTEL`
-/// `Models/Plugin/ExternalPlugin.swift`). Raw values are the C ABI's
-/// `OSR_TASK_EVENT_*`: `BackgroundTaskManager` delivers them to Intel
-/// plugins' `on_task_event` since `W-plugin-reliability` stage 2c.
-enum TaskEventType: Int32 {
-    case started = 0
-    case activity = 1
-    case progress = 2
-    case clarification = 3
-    case completed = 4
-    case failed = 5
-    case cancelled = 6
-    case output = 7
-    case draft = 8
-}
-
 /// Intel stand-in for the storage-migration gate (real one lives in the
 /// `#if !OSAURUS_INTEL` `Views/Storage/StorageMigrationOverlay.swift`, a
 /// `@MainActor` `ObservableObject` driving the "Securing your data" panel).

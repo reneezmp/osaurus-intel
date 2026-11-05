@@ -927,6 +927,10 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             let dir = OsaurusPaths.pluginDirectory(for: pluginId)
             let fm = FileManager.default
             try? fm.createDirectory(at: dir, withIntermediateDirectories: true, attributes: nil)
+            // Nothing may run from the dylib being replaced
+            // (`W-plugin-reliability` stage 2e): unload it first, and write
+            // the new files atomically (a new file, never the open one).
+            await PluginManager.shared.unloadForReinstall(pluginId: pluginId)
 
             // Download dylib
             guard let dylibRemote = URL(string: entry.download_url) else {
@@ -940,7 +944,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             guard actualSHA.caseInsensitiveCompare(entry.sha256) == .orderedSame else {
                 throw PluginInstallError.sha256Mismatch(expected: entry.sha256, actual: actualSHA)
             }
-            try dylibData.write(to: dylibURL)
+            try dylibData.write(to: dylibURL, options: .atomic)
 
             // Download manifest
             guard let manifestRemote = URL(string: entry.manifest_url) else {
@@ -948,7 +952,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             }
             let manifestURL = dir.appendingPathComponent("manifest.json")
             let (manifestData, _) = try await GlobalProxySettings.makeSession().data(from: manifestRemote)
-            try manifestData.write(to: manifestURL)
+            try manifestData.write(to: manifestURL, options: .atomic)
 
             // Load the plugin
             await PluginManager.shared.loadAll()

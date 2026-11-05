@@ -7,13 +7,14 @@
 //  `PluginDispatchToolSelectionTests` pin dispatch planning, the
 //  serializers and the trampolines. These pin the Intel half:
 //
-//    * `IntelLoadedPlugin.notifyTaskEvent` reaches the plugin's
-//      `on_task_event`, in order, with the task's agent in scope, and stops
-//      after teardown;
+//    * a loaded plugin's `notifyTaskEvent` reaches its `on_task_event`, in
+//      order, with the task's agent in scope, and stops after shutdown
+//      (since stage 2e the loaded plugin is upstream's `ExternalPlugin`);
 //    * the host table hands plugins upstream's task-control callbacks
 //      instead of Intel's old no-ops and empty lists;
-//    * dispatch without a chat agent is refused, and an unloaded plugin's
-//      dispatch allowed set is built-ins only.
+//    * dispatch without a chat agent is refused; a plugin's dispatch
+//      allowed set holds its own tools, and an unloaded plugin's is
+//      built-ins only.
 //
 //  No dylib is loaded: the plugin table is built in the test, the way
 //  `PluginLoaderAbiValidationTests` does.
@@ -46,7 +47,24 @@ private final class TaskEventRecorder: @unchecked Sendable {
 @Suite(.serialized)
 struct IntelPluginTaskEventTests {
 
-    private func makePlugin(pluginId: String) throws -> IntelLoadedPlugin {
+    private func manifest(pluginId: String, tools: [PluginManifest.ToolSpec]? = nil) -> PluginManifest {
+        PluginManifest(
+            plugin_id: pluginId,
+            description: nil,
+            capabilities: .init(tools: tools, routes: nil, config: nil, web: nil, artifact_handler: nil),
+            instructions: nil,
+            name: "Events",
+            version: nil,
+            license: nil,
+            authors: nil,
+            min_macos: nil,
+            min_osaurus: nil,
+            secrets: nil,
+            docs: nil
+        )
+    }
+
+    private func makePlugin(pluginId: String, tools: [PluginManifest.ToolSpec]? = nil) throws -> ExternalPlugin {
         let api = osr_plugin_api(
             free_string: { _ in },
             init: { nil },
@@ -64,30 +82,18 @@ struct IntelPluginTaskEventTests {
             }
         )
         let handle = try #require(dlopen(nil, RTLD_NOW))
-        let hostContext = try PluginHostContext(pluginId: pluginId)
-        _ = hostContext.buildHostAPI()
-        return IntelLoadedPlugin(
-            pluginId: pluginId,
-            displayName: "Events",
-            toolSpecs: [IntelPluginToolSpec(id: "\(pluginId).tool", description: "t", parameters: nil)],
-            instructions: nil,
-            configFields: [],
-            manifestJSON: "{}",
+        return ExternalPlugin(
             handle: handle,
             api: api,
             ctx: UnsafeMutableRawPointer(bitPattern: 0x1)!,
-            hostContext: hostContext
+            manifest: manifest(pluginId: pluginId, tools: tools),
+            path: "/tmp/\(pluginId).dylib",
+            abiVersion: 2
         )
     }
 
-    /// Waits for the plugin's serial queue to drain past earlier deliveries.
-    private func settle(_ plugin: IntelLoadedPlugin) {
-        _ = try? plugin.invoke(type: "tool", id: "noop", payload: "{}")
-    }
-
-    @Test func eventsReachOnTaskEvent_inOrder_withTheTaskAgent() throws {
+    @Test func eventsReachOnTaskEvent_inOrder_withTheTaskAgent() async throws {
         let plugin = try makePlugin(pluginId: "com.test.events.\(UUID().uuidString)")
-        defer { plugin.teardown() }
         #expect(plugin.hasTaskEventHandler)
 
         let taskId = UUID().uuidString
@@ -98,21 +104,22 @@ struct IntelPluginTaskEventTests {
             taskId: taskId, eventType: .activity, eventJSON: #"{"kind":"tool"}"#, agentId: agent)
         plugin.notifyTaskEvent(
             taskId: taskId, eventType: .completed, eventJSON: #"{"success":true}"#, agentId: agent)
-        settle(plugin)
+        plugin.drainEventQueuesForTesting()
 
         let events = TaskEventRecorder.shared.events(for: taskId)
         #expect(events.map(\.type) == [0, 1, 4])
         #expect(events.first?.json == #"{"status":"running"}"#)
         #expect(events.allSatisfy { $0.agent == agent }, "the task's agent is in scope inside on_task_event")
         #expect(PluginHostContext.activeAgentId() == nil, "and cleared afterwards")
+        await plugin.shutdown()
     }
 
-    @Test func noEventsAfterTeardown() throws {
+    @Test func noEventsAfterShutdown() async throws {
         let plugin = try makePlugin(pluginId: "com.test.events.down.\(UUID().uuidString)")
-        plugin.teardown()
+        await plugin.shutdown()
         let taskId = UUID().uuidString
         plugin.notifyTaskEvent(taskId: taskId, eventType: .cancelled, eventJSON: "{}", agentId: nil)
-        settle(plugin)
+        plugin.drainEventQueuesForTesting()
         #expect(TaskEventRecorder.shared.events(for: taskId).isEmpty)
     }
 
@@ -150,9 +157,28 @@ struct IntelPluginTaskEventTests {
     }
 
     @MainActor
-    @Test func dispatchAllowedSetIncludesThePluginsOwnTools() throws {
+    @Test func dispatchAllowedSetIncludesThePluginsOwnTools() async throws {
         let pluginId = "com.test.allowed.\(UUID().uuidString)"
-        let allowed = PluginHostContext.dispatchToolAllowedSet(pluginId: pluginId)
-        #expect(!allowed.contains("\(pluginId).tool"), "an unknown plugin gets built-ins only")
+        #expect(
+            !PluginHostContext.dispatchToolAllowedSet(pluginId: pluginId).contains("\(pluginId).tool"),
+            "an unknown plugin gets built-ins only")
+
+        let spec = PluginManifest.ToolSpec(
+            id: "\(pluginId).tool", description: "t", parameters: nil, requirements: nil, permission_policy: nil)
+        let plugin = try makePlugin(pluginId: pluginId, tools: [spec])
+        let handle = try #require(dlopen(nil, RTLD_NOW))
+        PluginManager.shared.injectLoadedPluginForTesting(
+            PluginManager.LoadedPlugin(
+                plugin: plugin,
+                handle: handle,
+                tools: [ExternalTool(plugin: plugin, spec: spec)],
+                skills: [],
+                routes: [],
+                webConfig: nil,
+                readmePath: nil,
+                changelogPath: nil
+            ))
+        defer { PluginManager.shared.removeLoadedPluginForTesting(pluginId: pluginId) }
+        #expect(PluginHostContext.dispatchToolAllowedSet(pluginId: pluginId).contains("\(pluginId).tool"))
     }
 }

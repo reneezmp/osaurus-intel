@@ -8,5 +8,5 @@
 import Foundation
 
 protocol PluginManagerProtocol: AnyObject {
-    func notifyArtifactHandlers(artifact: Any) async
+    func notifyArtifactHandlers(artifact: SharedArtifact) async
 }

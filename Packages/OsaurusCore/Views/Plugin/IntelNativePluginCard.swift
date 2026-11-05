@@ -134,7 +134,7 @@ struct IntelNativePluginDetailView: View {
     @State private var name = ""
     @State private var version = ""
     @State private var detailText = ""
-    @State private var tools: [IntelPluginToolSpec] = []
+    @State private var tools: [PluginManifest.ToolSpec] = []
     @State private var configFields: [IntelPluginConfigField] = []
 
     var body: some View {
@@ -188,7 +188,7 @@ struct IntelNativePluginDetailView: View {
                     VStack(alignment: .leading, spacing: 12) {
                         Text("Tools (\(tools.count))")
                             .font(.headline).foregroundColor(theme.primaryText)
-                        ForEach(tools) { tool in
+                        ForEach(tools, id: \.id) { tool in
                             VStack(alignment: .leading, spacing: 3) {
                                 Text(tool.id)
                                     .font(.subheadline.weight(.medium))
@@ -222,15 +222,13 @@ struct IntelNativePluginDetailView: View {
     }
 
     private func load() {
-        guard let handle = PluginManager.shared.nativeHandle(for: pluginId) else { return }
-        name = handle.displayName
-        tools = handle.toolSpecs
-        configFields = handle.configFields
-        if let data = handle.manifestJSON.data(using: .utf8),
-           let obj = try? JSONSerialization.jsonObject(with: data) as? [String: Any] {
-            version = obj["version"] as? String ?? ""
-            detailText = obj["description"] as? String ?? ""
-        }
+        guard let loaded = PluginManager.shared.loadedPlugin(for: pluginId) else { return }
+        let manifest = loaded.plugin.manifest
+        name = manifest.name ?? pluginId
+        tools = manifest.capabilities.tools ?? []
+        configFields = (manifest.secrets ?? []).map(IntelPluginConfigField.init(secret:))
+        version = manifest.version ?? ""
+        detailText = manifest.description ?? ""
     }
 }
 

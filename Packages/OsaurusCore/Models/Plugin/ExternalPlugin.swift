@@ -1,4 +1,3 @@
-#if !OSAURUS_INTEL
 //
 //  ExternalPlugin.swift
 //  osaurus
@@ -198,6 +197,40 @@ struct osr_plugin_api {
     var on_task_event: osr_on_task_event_t?
 }
 
+/// Historical v1 layout: plugins compiled against the original header
+/// exported a static struct containing ONLY the five required function
+/// pointers — no `version` field, no optional callbacks. The v1 entry
+/// path must decode through this prefix instead of the full
+/// `osr_plugin_api`, otherwise the loader reads past the end of the
+/// plugin's static struct (out-of-bounds read into whatever the plugin
+/// binary placed after it).
+struct osr_plugin_api_v1 {
+    var free_string: osr_free_string_t?
+    var `init`: osr_init_t?
+    var destroy: osr_destroy_t?
+    var get_manifest: osr_get_manifest_t?
+    var invoke: osr_invoke_t?
+}
+
+extension osr_plugin_api {
+    /// Widens a legacy v1 prefix into the current layout with every
+    /// optional v2+ slot zeroed (`version == 0` matches the header's
+    /// "0 (or absent) for v1 plugins" contract).
+    init(v1 prefix: osr_plugin_api_v1) {
+        self.init(
+            free_string: prefix.free_string,
+            init: prefix.`init`,
+            destroy: prefix.destroy,
+            get_manifest: prefix.get_manifest,
+            invoke: prefix.invoke,
+            version: 0,
+            handle_route: nil,
+            on_config_changed: nil,
+            on_task_event: nil
+        )
+    }
+}
+
 // Entry point types
 typealias osr_plugin_entry_t = @convention(c) () -> UnsafeRawPointer?
 typealias osr_plugin_entry_v2_t = @convention(c) (UnsafeRawPointer?) -> UnsafeRawPointer?
@@ -219,13 +252,6 @@ public struct PluginManifest: Decodable, Sendable {
     public let authors: [String]?
     public let min_macos: String?
     public let min_osaurus: String?
-
-    /// Host capabilities the plugin REQUIRES. If any are missing, the plugin is not loaded.
-    /// JSON key: "host_capabilities_required". nil means no requirements (optimistic default).
-    public let host_capabilities_required: [String]?
-    /// Host capabilities the plugin would LIKE to have. Missing optional caps result in
-    /// a "degraded" load rather than a skip. JSON key: "host_capabilities_optional".
-    public let host_capabilities_optional: [String]?
 
     public struct Capabilities: Decodable, Sendable {
         public let tools: [ToolSpec]?
@@ -425,6 +451,40 @@ public struct PluginManifest: Decodable, Sendable {
 
         /// Computed convenience: treats nil as the default (false).
         public var isTunnelExposed: Bool { tunnel_exposed == true }
+
+        // MARK: Mount matching (shared by load-time validation and dispatch)
+
+        /// Canonical mount shape: leading `/`, no trailing `/` (except the
+        /// root mount `/` itself).
+        public static func normalizedMount(_ mount: String) -> String {
+            var m = mount.trimmingCharacters(in: .whitespaces)
+            if !m.hasPrefix("/") { m = "/" + m }
+            while m.count > 1 && m.hasSuffix("/") { m.removeLast() }
+            return m
+        }
+
+        /// Segment-boundary mount matching: mount `/ui` captures `/ui` and
+        /// `/ui/...` but NOT `/ui-other`. A bare prefix check disagreed with
+        /// the load-time overlap validation and let one plugin's static
+        /// branch swallow sibling paths. The root mount `/` captures
+        /// everything. Both `PluginManager`'s web/route overlap validation
+        /// and `HTTPHandler`'s static dispatch call this single helper so
+        /// they can never diverge again.
+        public static func mountCaptures(subpath: String, mount: String) -> Bool {
+            let m = normalizedMount(mount)
+            if m == "/" { return true }
+            return subpath == m || subpath.hasPrefix(m + "/")
+        }
+
+        /// Remainder of `subpath` after the mount: `""` for the mount root,
+        /// otherwise a `/`-prefixed path (`/ui/x` under mount `/ui` → `/x`).
+        /// Only meaningful when `mountCaptures` is true.
+        public static func relativeSubpath(subpath: String, mount: String) -> String {
+            let m = normalizedMount(mount)
+            if m == "/" { return subpath == "/" ? "" : subpath }
+            guard mountCaptures(subpath: subpath, mount: mount) else { return subpath }
+            return String(subpath.dropFirst(m.count))
+        }
     }
 
     // MARK: - Docs Spec
@@ -541,10 +601,87 @@ public struct PluginManifest: Decodable, Sendable {
     }
 }
 
+/// Timer queue for the route-handler wall-clock race. A dedicated GCD queue
+/// (not `Task.sleep`) so a saturated Swift executor cannot delay the timeout
+/// behind unrelated async work — same rationale as `ToolRegistry`'s
+/// tool-body timeout queue.
+private let routeHandlerTimeoutQueue = DispatchQueue(label: "com.osaurus.plugin.route-timeout")
+
+/// One-shot race between a route-handler body and its timeout, mirroring
+/// `ToolBodyRaceState` in `ToolRegistry`. Whichever side completes first
+/// resumes the continuation; the loser is cancelled/ignored. Crucially the
+/// caller is resumed WITHOUT waiting for the body task to finish — a
+/// blocking C callback that ignores cancellation keeps running on the
+/// plugin's invoke queue, but the HTTP request gets its timeout response.
+private final class RouteHandlerRaceState: @unchecked Sendable {
+    private let lock = NSLock()
+    private var didResume = false
+    private var pendingResult: Result<String, Error>?
+    private var continuation: CheckedContinuation<String, Error>?
+    private var bodyTask: Task<Void, Never>?
+    private var timeoutTimer: DispatchSourceTimer?
+
+    func install(continuation: CheckedContinuation<String, Error>) {
+        lock.lock()
+        if didResume, let pendingResult {
+            self.pendingResult = nil
+            lock.unlock()
+            continuation.resume(with: pendingResult)
+            return
+        }
+        self.continuation = continuation
+        lock.unlock()
+    }
+
+    func setTasks(bodyTask: Task<Void, Never>, timeoutTimer: DispatchSourceTimer) {
+        lock.lock()
+        if didResume {
+            lock.unlock()
+            bodyTask.cancel()
+            timeoutTimer.cancel()
+            return
+        }
+        self.bodyTask = bodyTask
+        self.timeoutTimer = timeoutTimer
+        lock.unlock()
+    }
+
+    func complete(_ result: Result<String, Error>) {
+        lock.lock()
+        guard !didResume else {
+            lock.unlock()
+            return
+        }
+        didResume = true
+        let continuation = self.continuation
+        if continuation == nil {
+            pendingResult = result
+        }
+        self.continuation = nil
+        let bodyTask = self.bodyTask
+        let timeoutTimer = self.timeoutTimer
+        self.bodyTask = nil
+        self.timeoutTimer = nil
+        lock.unlock()
+
+        bodyTask?.cancel()
+        timeoutTimer?.cancel()
+        continuation?.resume(with: result)
+    }
+}
+
 final class ExternalPlugin: @unchecked Sendable {
     enum InvocationIsolation: Sendable, Equatable {
         case pluginQueue
-        case mainActor
+        /// Serialize on `AccessibilityManager.serialQueue` — the same
+        /// off-main queue the native Computer Use driver uses for all AX
+        /// IPC and input synthesis. Accessibility/automation plugins need
+        /// one-at-a-time execution so UI-element references can't be
+        /// mutated out from under a write action; they do NOT need the
+        /// main thread (AX APIs are thread-safe), and running arbitrary
+        /// plugin C code synchronously on the main actor blocked the UI
+        /// for the full duration of every click/type/press-key call.
+        case accessibilityQueue
     }
 
     let id: String
@@ -570,6 +707,25 @@ final class ExternalPlugin: @unchecked Sendable {
     /// attempts (PluginManager hot reload, etc.) each drain and await, but only
     /// the winner of this latch frees `ctx`.
     private let didDestroy = OSAllocatedUnfairLock<Bool>(initialState: false)
+
+    /// Tracks plugin callbacks that can run OUTSIDE the queues `shutdown()`
+    /// drains: accessibility-queue invocations (which run on the shared
+    /// `AccessibilityManager.serialQueue`, never `invokeQueue`) and
+    /// task-event deliveries whose per-task queue was created after
+    /// `shutdown()` took its snapshot (or whose body read
+    /// `isShutDown == false` just before the mid-drain flip). Either could
+    /// still be executing plugin code when the drain group completed, so
+    /// `destroy(ctx)` freed the context under a live callback — the
+    /// use-after-free behind production crash APPLE-MACOS-9T (EXC_BAD_ACCESS
+    /// inside the plugin's destroy/teardown path).
+    ///
+    /// Contract: callers `enter()` BEFORE reading the `isShutDown` latch and
+    /// `leave()` when the callback returns. `shutdown()` flips the latch
+    /// (inside the drain), then waits on this group before `destroy`. The
+    /// enter-before-check ordering makes that sound: a callback either
+    /// entered before the wait began (so the wait covers it) or observes the
+    /// flipped latch and bails without touching `ctx`.
+    private let inFlightCallbacks = DispatchGroup()
 
     /// Per-plugin concurrent queue for C ABI calls. Each plugin gets its own
     /// queue so that long-running operations (e.g. agentic inference) in one
@@ -654,6 +810,13 @@ final class ExternalPlugin: @unchecked Sendable {
     var hasTaskEventHandler: Bool { abiVersion >= 2 && api.on_task_event != nil }
 
     #if DEBUG
+        /// Test-only: flipped once `shutdown()` has captured its task-event
+        /// queue snapshot. Lets `PluginShutdownRaceTests` deterministically
+        /// deliver a task event on a queue created AFTER the snapshot — the
+        /// exact window where only `inFlightCallbacks` (not the drain group)
+        /// keeps `destroy(ctx)` from freeing the context under the callback.
+        let shutdownSnapshotTakenForTesting = OSAllocatedUnfairLock<Bool>(initialState: false)
+
         /// Test-only: synchronously drains every per-task event queue and the
         /// config event queue, then returns. Intended to be called from the
         /// matched `removeLoadedPluginForTesting` cleanup so that any
@@ -698,9 +861,16 @@ final class ExternalPlugin: @unchecked Sendable {
     /// (which may call host API trampolines like httpRequest) never runs on
     /// the main thread, avoiding deadlocks with `blockingAsync`.
     func shutdown() async {
+        // Tear down the out-of-process helper (if any) first: it holds its
+        // own copy of the plugin and must not outlive an unload/reload.
+        await PluginProcessHostManager.shared.shutdownClient(pluginId: self.id)
+
         let queues: [DispatchQueue] = taskEventQueuesLock.withLock {
             Array(taskEventQueues.values)
         }
+        #if DEBUG
+            shutdownSnapshotTakenForTesting.withLock { $0 = true }
+        #endif
 
         await withCheckedContinuation { (continuation: CheckedContinuation<Void, Never>) in
             let group = DispatchGroup()
@@ -726,6 +896,16 @@ final class ExternalPlugin: @unchecked Sendable {
                 group.leave()
             }
             group.notify(flags: .barrier, queue: self.invokeQueue) { [self] in
+                // Wait for callbacks the drain above cannot see: main-actor
+                // invocations and task-event deliveries on queues created
+                // after the snapshot. `isShutDown` is already true here (the
+                // configEventQueue marker flipped it before the group
+                // completed), so no NEW callback can pass its latch check —
+                // this wait only covers ones already inside plugin code.
+                // Safe to block: we're on an invokeQueue worker (never the
+                // main thread), and the waited-on callbacks never dispatch
+                // to invokeQueue themselves.
+                self.inFlightCallbacks.wait()
                 // Destroy exactly once. Concurrent shutdown attempts (re-entry
                 // from PluginManager hot reload, etc.) all drain and await here,
                 // but only the winner of `didDestroy` frees `ctx`.
@@ -742,7 +922,17 @@ final class ExternalPlugin: @unchecked Sendable {
                 // same plugin path does not see stale "already delivered"
                 // entries against a fresh ctx pointer.
                 self.lastDeliveredConfig.withLock { $0.removeAll(keepingCapacity: false) }
-                self.api.destroy?(self.ctx)
+                // Scope TLS to this plugin for the duration of `destroy`:
+                // plugin teardown code routinely calls host trampolines
+                // (config_get("api_key"), http_request for a final webhook
+                // delete, ...) and without TLS those resolve through the
+                // global `lastDispatchedPluginId` fallback — potentially a
+                // DIFFERENT plugin's context, or none at all — giving the
+                // dying plugin values it never wrote (or nil where it always
+                // saw a value), which some plugins dereference and crash on.
+                PluginHostContext.withTLSScope(pluginId: self.id, agentId: nil) {
+                    self.api.destroy?(self.ctx)
+                }
                 continuation.resume()
             }
         }
@@ -759,21 +949,37 @@ final class ExternalPlugin: @unchecked Sendable {
         isolation: InvocationIsolation = .pluginQueue,
         _ call: @Sendable @escaping (osr_plugin_ctx_t) -> UnsafePointer<CChar>?
     ) async throws -> String {
-        if isolation == .mainActor {
-            return try await dispatchPluginCallOnMainActor(
-                agentId: agentId,
-                errorCode: errorCode,
-                errorMessage: errorMessage,
-                call
-            )
-        }
-
         let freeString = api.free_string
         nonisolated(unsafe) let ctx = self.ctx
         let pluginId = self.id
 
+        // Accessibility/automation calls run on the driver's shared serial
+        // queue instead of `invokeQueue` (see `InvocationIsolation`).
+        // Those callbacks are invisible to `shutdown()`'s invoke-queue
+        // barrier drain, so they must enter the in-flight group BEFORE the
+        // latch check (see `inFlightCallbacks`) so `destroy(ctx)` waits for
+        // them instead of freeing the context under a live callback.
+        let queue: DispatchQueue
+        let escapesShutdownDrain: Bool
+        switch isolation {
+        case .pluginQueue:
+            queue = invokeQueue
+            escapesShutdownDrain = false
+        case .accessibilityQueue:
+            queue = AccessibilityManager.serialQueue
+            escapesShutdownDrain = true
+        }
+
         return try await withCheckedThrowingContinuation { continuation in
-            self.invokeQueue.async { [self] in
+            queue.async { [self] in
+                if escapesShutdownDrain {
+                    self.inFlightCallbacks.enter()
+                }
+                defer {
+                    if escapesShutdownDrain {
+                        self.inFlightCallbacks.leave()
+                    }
+                }
                 guard !self.isShutDown.withLock({ $0 }) else {
                     continuation.resume(
                         throwing: NSError(
@@ -806,41 +1012,6 @@ final class ExternalPlugin: @unchecked Sendable {
         }
     }
 
-    @MainActor
-    private func dispatchPluginCallOnMainActor(
-        agentId: UUID? = nil,
-        errorCode: Int,
-        errorMessage: String,
-        _ call: @Sendable (osr_plugin_ctx_t) -> UnsafePointer<CChar>?
-    ) throws -> String {
-        guard !isShutDown.withLock({ $0 }) else {
-            throw NSError(
-                domain: "ExternalPlugin",
-                code: errorCode,
-                userInfo: [NSLocalizedDescriptionKey: "Plugin has been shut down"]
-            )
-        }
-
-        let freeString = api.free_string
-        let ctx = self.ctx
-        let pluginId = self.id
-        let resPtr = PluginHostContext.withTLSScope(pluginId: pluginId, agentId: agentId) {
-            call(ctx)
-        }
-        guard let resPtr else {
-            throw NSError(
-                domain: "ExternalPlugin",
-                code: errorCode,
-                userInfo: [NSLocalizedDescriptionKey: errorMessage]
-            )
-        }
-
-        let result = String(cString: resPtr)
-        freeString?(resPtr)
-        withExtendedLifetime(self) {}
-        return result
-    }
-
     func invoke(
         type: String,
         id: String,
@@ -853,6 +1024,29 @@ final class ExternalPlugin: @unchecked Sendable {
                 domain: "ExternalPlugin",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "Invoke not implemented"]
+            )
+        }
+
+        // Identify the call on the Sentry scope so an app hang during a plugin invoke (which
+        // otherwise symbolicates with no plugin frame) points at the responsible plugin/tool.
+        CrashReportingService.recordBreadcrumb(
+            category: "plugin.invoke",
+            message: "plugin=\(self.id) type=\(type) id=\(id) isolation=\(isolation)"
+        )
+
+        // Staged out-of-process execution (feature-flagged, default off):
+        // accessibility/automation plugins run synchronous C the app cannot
+        // cancel. When the process host is enabled, route those calls to a
+        // killable helper so a wedged AX call is recovered by killing the
+        // helper instead of wedging the shared accessibility queue until
+        // the app restarts. Other isolations stay in-process.
+        if isolation == .accessibilityQueue,
+            let hostClient = PluginProcessHostManager.shared.client(
+                pluginId: self.id, dylibPath: self.bundlePath
+            )
+        {
+            return try await hostClient.invoke(
+                type: type, id: id, payload: payload, agentId: agentId
             )
         }
 
@@ -902,29 +1096,47 @@ final class ExternalPlugin: @unchecked Sendable {
             }
         }
 
-        return try await withThrowingTaskGroup(of: String?.self) { group in
-            group.addTask { try await work() }
-            group.addTask {
-                try await Task.sleep(nanoseconds: UInt64(timeoutSeconds * 1_000_000_000))
-                return nil
+        // Unstructured task + GCD timer race (mirrors `ToolRegistry.runToolBody`).
+        // A `withThrowingTaskGroup` here would drain its children before
+        // returning, so a blocking C route callback that ignores cancellation
+        // held the caller for the FULL duration of the call — the 30s timeout
+        // never actually fired from the request's point of view. The race
+        // resumes the caller as soon as the timer wins; the abandoned body
+        // task keeps running on the plugin's invoke queue until the C call
+        // returns, but the HTTP request is no longer held hostage.
+        let timeoutError = NSError(
+            domain: "ExternalPlugin",
+            code: 5,
+            userInfo: [
+                NSLocalizedDescriptionKey:
+                    "Plugin route handler timed out after \(Int(timeoutSeconds))s"
+            ]
+        )
+        let race = RouteHandlerRaceState()
+
+        return try await withTaskCancellationHandler {
+            try await withCheckedThrowingContinuation { continuation in
+                race.install(continuation: continuation)
+                let timeoutTimer = DispatchSource.makeTimerSource(queue: routeHandlerTimeoutQueue)
+                let timeoutNanoseconds = max(0, Int(timeoutSeconds * 1_000_000_000))
+                timeoutTimer.schedule(deadline: .now() + .nanoseconds(timeoutNanoseconds))
+                timeoutTimer.setEventHandler {
+                    race.complete(.failure(timeoutError))
+                }
+                timeoutTimer.resume()
+
+                let bodyTask = Task {
+                    do {
+                        let result = try await work()
+                        race.complete(.success(result))
+                    } catch {
+                        race.complete(.failure(error))
+                    }
+                }
+                race.setTasks(bodyTask: bodyTask, timeoutTimer: timeoutTimer)
             }
-            for try await first in group {
-                group.cancelAll()
-                if let value = first { return value }
-                throw NSError(
-                    domain: "ExternalPlugin",
-                    code: 5,
-                    userInfo: [
-                        NSLocalizedDescriptionKey:
-                            "Plugin route handler timed out after \(Int(timeoutSeconds))s"
-                    ]
-                )
-            }
-            throw NSError(
-                domain: "ExternalPlugin",
-                code: 5,
-                userInfo: [NSLocalizedDescriptionKey: "Plugin route handler returned without result"]
-            )
+        } onCancel: {
+            race.complete(.failure(CancellationError()))
         }
     }
 
@@ -947,6 +1159,21 @@ final class ExternalPlugin: @unchecked Sendable {
         agentId: UUID? = nil,
         force: Bool = false
     ) {
+        // Mirror config events to a live out-of-process helper (if one was
+        // spawned for this plugin) so its copy of the plugin sees the same
+        // `on_config_changed` stream as the in-process instance. Never
+        // spawns a helper; a fresh helper reads config lazily via the
+        // host-API bridge on load.
+        if let hostClient = PluginProcessHostManager.shared.existingClient(pluginId: self.id) {
+            let forwarded = changes
+            Task.detached {
+                for change in forwarded {
+                    await hostClient.notifyConfigChanged(
+                        key: change.key, value: change.value, agentId: agentId
+                    )
+                }
+            }
+        }
         guard
             let prep = prepareConfigDelivery(changes: changes, agentId: agentId, force: force)
         else { return }
@@ -1078,6 +1305,12 @@ final class ExternalPlugin: @unchecked Sendable {
         let isTerminal = eventType == .completed || eventType == .failed || eventType == .cancelled
 
         eventQueue(for: taskId).async { [self] in
+            // Enter BEFORE the latch check (see `inFlightCallbacks`): this
+            // queue may not be in `shutdown()`'s drain snapshot (created
+            // after it), so the group is what keeps `destroy(ctx)` from
+            // running while this delivery is inside plugin code.
+            self.inFlightCallbacks.enter()
+            defer { self.inFlightCallbacks.leave() }
             guard !self.isShutDown.withLock({ $0 }) else { return }
             PluginHostContext.withTLSScope(pluginId: pluginId, agentId: agentId) {
                 taskId.withCString { taskIdPtr in
@@ -1107,4 +1340,3 @@ final class ExternalPlugin: @unchecked Sendable {
         return ToolSecretsKeychain.hasAllRequiredSecrets(specs: specs, for: manifest.plugin_id, agentId: agentId)
     }
 }
-#endif

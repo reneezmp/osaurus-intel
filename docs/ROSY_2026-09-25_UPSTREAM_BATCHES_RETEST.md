@@ -2842,3 +2842,34 @@ tool). Needs `memo` installed and a chat agent with a working model.
 - [ ] Regression: `memo_save`, `memo_list`, `time`, `hello` and `fetch`
       still work from a chat.
 
+## Plugin loading, step 1 (2026-11-05)
+
+`W-plugin-reliability` stage 2e-1 (`UPSTREAM_SYNC.md`, "Plugin loading,
+step 1"). Not in candidate 66. Plugins now load as upstream's plugin
+object. Needs the Intel registry plugins (`time`, `hello`, `fetch`,
+`memo`) installed.
+
+- [ ] Settings… → Plugins → Installed: the four plugins are listed as
+      before; opening one shows its version, description and tools.
+- [ ] In a chat, ask for the time. The `get_current_time` call shows an
+      **approval card** first (new: upstream asks before a plugin tool
+      runs). Approve it; the answer arrives. Choose **Always Allow** and
+      ask again: no card.
+- [ ] `memo_save` then `memo_list` from a chat (approve each): the saved
+      note is listed. `hello` and `fetch` still work.
+- [ ] Settings → Agents → a custom agent: a **Memo** tab is new. It
+      shows memo's instructions; edit them for this agent and save. In a
+      chat with that agent where memo's tools are used, Prompt Inspector
+      (or the system prompt view) shows the edited text under "Plugin
+      Instructions"; another agent still gets memo's own text.
+- [ ] Settings → Plugins: no plugin shows a load error. If one does, the
+      message says why (for example a wrong `plugin_id` or a newer
+      Osaurus needed); note it.
+- [ ] Uninstall `hello` and reinstall it: its tool disappears from the
+      Tools tab after the uninstall and comes back after the reinstall,
+      without restarting, and still answers in a chat. Same for
+      **Update** on any plugin that offers one: no crash, and the new
+      version answers.
+- [ ] Regression: the Apple app tools and web search still work (the
+      retired `search-intel` plugin stays unloaded).
+

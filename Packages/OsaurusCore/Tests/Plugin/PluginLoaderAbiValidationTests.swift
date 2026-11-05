@@ -2,17 +2,17 @@
 //  PluginLoaderAbiValidationTests.swift
 //  OsaurusCoreTests
 //
-//  Intel: upstream #3079's slot checks (Sentry APPLE-MACOS-337) against
-//  `IntelPluginLoader`, which replaces upstream's `PluginManager` loader. A
-//  populated ABI slot must point at code in a loaded image, or the table is
-//  rejected before `init` runs. Intel's `osaurus_plugin.h` predates
-//  upstream's per-slot typedefs (`osr_free_string_t`, …), so slot types are
-//  inferred from `osr_plugin_api`. Upstream's manifest and v1-prefix tests
-//  in the same file exercise upstream's manifest model and are covered for
-//  Intel by `IntelPluginSecretsTests`.
+//  Pins the loader's load-time validation:
+//  - a plugin ABI table missing any required function pointer is rejected
+//    BEFORE `init` is called (previously only `init`/`get_manifest` were
+//    checked, so nil `free_string`/`destroy`/`invoke` leaked or broke tools);
+//  - the legacy v1 entry path decodes through the explicit
+//    `osr_plugin_api_v1` prefix instead of the full struct (out-of-bounds
+//    read on historical v1 plugins otherwise);
+//  - manifest plugin_id must equal the install-directory-derived ID;
+//  - tool and route IDs must be non-empty and unique.
 //
 
-import Darwin
 import Foundation
 import Testing
 
@@ -20,13 +20,21 @@ import Testing
 
 struct PluginLoaderAbiValidationTests {
 
+    // MARK: - Fixtures
+
+    private static let dummyFree: osr_free_string_t = { _ in }
+    private static let dummyInit: osr_init_t = { nil }
+    private static let dummyDestroy: osr_destroy_t = { _ in }
+    private static let dummyManifest: osr_get_manifest_t = { _ in nil }
+    private static let dummyInvoke: osr_invoke_t = { _, _, _, _ in nil }
+
     private func completeAPI() -> osr_plugin_api {
         osr_plugin_api(
-            free_string: { _ in },
-            init: { nil },
-            destroy: { _ in },
-            get_manifest: { _ in nil },
-            invoke: { _, _, _, _ in nil },
+            free_string: Self.dummyFree,
+            init: Self.dummyInit,
+            destroy: Self.dummyDestroy,
+            get_manifest: Self.dummyManifest,
+            invoke: Self.dummyInvoke,
             version: 2,
             handle_route: nil,
             on_config_changed: nil,
@@ -34,61 +42,300 @@ struct PluginLoaderAbiValidationTests {
         )
     }
 
-    /// A C function-pointer value built from a raw integer, the way a
+    private func makeManifest(
+        pluginId: String = "com.test.loader",
+        tools: [PluginManifest.ToolSpec]? = nil,
+        routes: [PluginManifest.RouteSpec]? = nil
+    ) -> PluginManifest {
+        PluginManifest(
+            plugin_id: pluginId,
+            description: nil,
+            capabilities: .init(tools: tools, routes: routes, config: nil, web: nil, artifact_handler: nil),
+            instructions: nil,
+            name: nil,
+            version: nil,
+            license: nil,
+            authors: nil,
+            min_macos: nil,
+            min_osaurus: nil,
+            secrets: nil,
+            docs: nil
+        )
+    }
+
+    private func tool(_ id: String) -> PluginManifest.ToolSpec {
+        PluginManifest.ToolSpec(
+            id: id,
+            description: "test tool",
+            parameters: nil,
+            requirements: nil,
+            permission_policy: nil
+        )
+    }
+
+    private func route(_ id: String, path: String = "/x") -> PluginManifest.RouteSpec {
+        PluginManifest.RouteSpec(id: id, path: path, methods: ["GET"])
+    }
+
+    // MARK: - ABI table validation
+
+    @Test func completeTablePassesValidation() {
+        #expect(PluginManager.abiTableValidationFailure(completeAPI()) == nil)
+    }
+
+    @Test func missingFreeStringIsRejected() throws {
+        var api = completeAPI()
+        api.free_string = nil
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        #expect(msg.contains("free_string"))
+    }
+
+    @Test func missingDestroyIsRejected() throws {
+        var api = completeAPI()
+        api.destroy = nil
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        #expect(msg.contains("destroy"))
+    }
+
+    @Test func missingInvokeIsRejected() throws {
+        var api = completeAPI()
+        api.invoke = nil
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        #expect(msg.contains("invoke"))
+    }
+
+    @Test func missingInitIsRejected() throws {
+        var api = completeAPI()
+        api.`init` = nil
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        #expect(msg.contains("init"))
+    }
+
+    @Test func missingGetManifestIsRejected() throws {
+        var api = completeAPI()
+        api.get_manifest = nil
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        #expect(msg.contains("get_manifest"))
+    }
+
+    @Test func allMissingFunctionsAreListed() throws {
+        let api = osr_plugin_api(
+            free_string: nil,
+            init: nil,
+            destroy: nil,
+            get_manifest: nil,
+            invoke: nil,
+            version: 0,
+            handle_route: nil,
+            on_config_changed: nil,
+            on_task_event: nil
+        )
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
+        for name in ["free_string", "init", "destroy", "get_manifest", "invoke"] {
+            #expect(msg.contains(name))
+        }
+    }
+
+    @Test func nilOptionalV2CallbacksAreStillAccepted() {
+        // Optional v2+ callbacks (handle_route / on_config_changed /
+        // on_task_event) remain optional; only the required prefix is gated.
+        var api = completeAPI()
+        api.handle_route = nil
+        api.on_config_changed = nil
+        api.on_task_event = nil
+        #expect(PluginManager.abiTableValidationFailure(api) == nil)
+    }
+
+    // MARK: - Slot values that are not code (Sentry APPLE-MACOS-337)
+
+    /// Builds a C function-pointer value out of a raw integer, the way a
     /// struct-layout mismatch lands an int/bool field of the plugin's own
     /// struct in one of our function-pointer slots.
-    private static func bogus<F>(_ value: UInt) -> F {
+    private static func bogus<F>(_ value: UInt, as _: F.Type) -> F {
         unsafeBitCast(UnsafeRawPointer(bitPattern: value)!, to: F.self)
     }
 
-    @Test func completeTableWithRealFunctionsPasses() {
-        #expect(IntelPluginLoader.abiTableValidationFailure(completeAPI()) == nil)
-    }
-
     @Test func freeStringSlotHoldingASmallIntegerIsRejected() throws {
+        // The production table: init/get_manifest were real functions and
+        // ran; free_string was 0x1 (0x2 on the next launch) and passed the
+        // nil check, so the host branched to address 0x1 while freeing the
+        // manifest string. Must be rejected before init is called.
         var api = completeAPI()
-        api.free_string = Self.bogus(0x1)
-        let msg = try #require(IntelPluginLoader.abiTableValidationFailure(api))
+        api.free_string = Self.bogus(0x1, as: osr_free_string_t.self)
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
         #expect(msg.contains("free_string=0x1"))
         #expect(msg.contains("osaurus_plugin.h"))
     }
 
     @Test func secondLaunchValueIsRejectedToo() throws {
         var api = completeAPI()
-        api.free_string = Self.bogus(0x2)
-        let msg = try #require(IntelPluginLoader.abiTableValidationFailure(api))
+        api.free_string = Self.bogus(0x2, as: osr_free_string_t.self)
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
         #expect(msg.contains("free_string=0x2"))
     }
 
     @Test func garbageInAnOptionalSlotIsRejected() throws {
+        // Optional slots may be nil, but when populated they are called
+        // later (route dispatch, config pushes, task events) without any
+        // further check, so a non-code value there is just as fatal.
         var api = completeAPI()
-        api.on_task_event = Self.bogus(0xDEAD_BEEF)
-        let msg = try #require(IntelPluginLoader.abiTableValidationFailure(api))
+        api.on_task_event = Self.bogus(0xDEAD_BEEF, as: osr_on_task_event_t.self)
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
         #expect(msg.contains("on_task_event=0xdeadbeef"))
         #expect(!msg.contains("free_string"))
     }
 
     @Test func everyBadSlotIsNamed() throws {
         var api = completeAPI()
-        api.destroy = Self.bogus(0x10)
-        api.invoke = Self.bogus(0x20)
-        api.handle_route = Self.bogus(0x30)
-        let msg = try #require(IntelPluginLoader.abiTableValidationFailure(api))
+        api.destroy = Self.bogus(0x10, as: osr_destroy_t.self)
+        api.invoke = Self.bogus(0x20, as: osr_invoke_t.self)
+        api.handle_route = Self.bogus(0x30, as: osr_handle_route_t.self)
+        let msg = try #require(PluginManager.abiTableValidationFailure(api))
         #expect(msg.contains("destroy=0x10"))
         #expect(msg.contains("invoke=0x20"))
         #expect(msg.contains("handle_route=0x30"))
     }
 
     @Test func realFunctionsInAnyLoadedImagePass() {
-        // Plugin code and system library code both live in loaded images: a
-        // plugin that sets free_string to libc's free() must still load.
+        // Plugin code and system library code both live in loaded images:
+        // a plugin that sets free_string to libc's free() must still load.
         var api = completeAPI()
-        api.free_string = unsafeBitCast(dlsym(dlopen(nil, RTLD_NOW), "free"), to: type(of: api.free_string))
+        api.free_string = unsafeBitCast(
+            dlsym(dlopen(nil, RTLD_NOW), "free"), to: osr_free_string_t.self)
         #expect(api.free_string != nil)
-        #expect(IntelPluginLoader.abiTableValidationFailure(api) == nil)
+        #expect(PluginManager.abiTableValidationFailure(api) == nil)
+        #expect(PluginManager.isCodePointerInLoadedImage(unsafeBitCast(api.free_string!, to: UnsafeRawPointer.self)))
+        #expect(!PluginManager.isCodePointerInLoadedImage(UnsafeRawPointer(bitPattern: 0x1)!))
+    }
+
+    // MARK: - v1 prefix decode
+
+    @Test func v1PrefixLayoutIsExactlyTheFiveRequiredPointers() {
+        // The v1 entry path reads plugin memory through this struct — its
+        // size must be exactly five function pointers so the loader never
+        // reads past the end of a historical v1 plugin's static table.
+        #expect(MemoryLayout<osr_plugin_api_v1>.size == 5 * MemoryLayout<UnsafeRawPointer?>.size)
+        #expect(MemoryLayout<osr_plugin_api_v1>.size < MemoryLayout<osr_plugin_api>.size)
+    }
+
+    @Test func v1PrefixWidensWithOptionalFieldsZeroed() {
+        let prefix = osr_plugin_api_v1(
+            free_string: Self.dummyFree,
+            init: Self.dummyInit,
+            destroy: Self.dummyDestroy,
+            get_manifest: Self.dummyManifest,
+            invoke: Self.dummyInvoke
+        )
+
+        let widened = osr_plugin_api(v1: prefix)
+
+        #expect(widened.free_string != nil)
+        #expect(widened.`init` != nil)
+        #expect(widened.destroy != nil)
+        #expect(widened.get_manifest != nil)
+        #expect(widened.invoke != nil)
+        #expect(widened.version == 0)
+        #expect(widened.handle_route == nil)
+        #expect(widened.on_config_changed == nil)
+        #expect(widened.on_task_event == nil)
+    }
+
+    @Test func v1PrefixWideningPassesAbiValidationWhenComplete() {
+        let prefix = osr_plugin_api_v1(
+            free_string: Self.dummyFree,
+            init: Self.dummyInit,
+            destroy: Self.dummyDestroy,
+            get_manifest: Self.dummyManifest,
+            invoke: Self.dummyInvoke
+        )
+        #expect(PluginManager.abiTableValidationFailure(osr_plugin_api(v1: prefix)) == nil)
+    }
+
+    @Test func v1PrefixWideningStillRejectsIncompleteTable() throws {
+        let prefix = osr_plugin_api_v1(
+            free_string: nil,
+            init: Self.dummyInit,
+            destroy: nil,
+            get_manifest: Self.dummyManifest,
+            invoke: nil
+        )
+        let msg = try #require(
+            PluginManager.abiTableValidationFailure(osr_plugin_api(v1: prefix))
+        )
+        #expect(msg.contains("free_string"))
+        #expect(msg.contains("destroy"))
+        #expect(msg.contains("invoke"))
+    }
+
+    // MARK: - Manifest identity validation
+
+    @Test func matchingManifestAndDirectoryIdPasses() {
+        let manifest = makeManifest(pluginId: "com.test.match")
         #expect(
-            IntelPluginLoader.isCodePointerInLoadedImage(
-                unsafeBitCast(api.free_string!, to: UnsafeRawPointer.self)))
-        #expect(!IntelPluginLoader.isCodePointerInLoadedImage(UnsafeRawPointer(bitPattern: 0x1)!))
+            PluginManager.manifestIdentityValidationFailure(
+                manifest: manifest,
+                directoryId: "com.test.match"
+            ) == nil
+        )
+    }
+
+    @Test func mismatchedManifestIdIsRejected() throws {
+        let manifest = makeManifest(pluginId: "com.test.impostor")
+        let msg = try #require(
+            PluginManager.manifestIdentityValidationFailure(
+                manifest: manifest,
+                directoryId: "com.test.victim"
+            )
+        )
+        #expect(msg.contains("com.test.impostor"))
+        #expect(msg.contains("com.test.victim"))
+    }
+
+    // MARK: - Tool / route ID validation
+
+    @Test func absentCapabilitiesPass() {
+        #expect(PluginManager.manifestCapabilityValidationFailure(makeManifest()) == nil)
+    }
+
+    @Test func uniqueToolAndRouteIdsPass() {
+        let manifest = makeManifest(
+            tools: [tool("a"), tool("b")],
+            routes: [route("r1"), route("r2", path: "/y")]
+        )
+        #expect(PluginManager.manifestCapabilityValidationFailure(manifest) == nil)
+    }
+
+    @Test func emptyToolIdIsRejected() throws {
+        let manifest = makeManifest(tools: [tool("")])
+        let msg = try #require(PluginManager.manifestCapabilityValidationFailure(manifest))
+        #expect(msg.contains("empty"))
+        #expect(msg.contains("tool"))
+    }
+
+    @Test func whitespaceOnlyToolIdIsRejected() throws {
+        let manifest = makeManifest(tools: [tool("   ")])
+        let msg = try #require(PluginManager.manifestCapabilityValidationFailure(manifest))
+        #expect(msg.contains("empty"))
+    }
+
+    @Test func duplicateToolIdIsRejected() throws {
+        let manifest = makeManifest(tools: [tool("dup"), tool("dup")])
+        let msg = try #require(PluginManager.manifestCapabilityValidationFailure(manifest))
+        #expect(msg.contains("duplicate"))
+        #expect(msg.contains("dup"))
+    }
+
+    @Test func emptyRouteIdIsRejected() throws {
+        let manifest = makeManifest(routes: [route("")])
+        let msg = try #require(PluginManager.manifestCapabilityValidationFailure(manifest))
+        #expect(msg.contains("empty"))
+        #expect(msg.contains("route"))
+    }
+
+    @Test func duplicateRouteIdIsRejected() throws {
+        let manifest = makeManifest(routes: [route("dup"), route("dup", path: "/other")])
+        let msg = try #require(PluginManager.manifestCapabilityValidationFailure(manifest))
+        #expect(msg.contains("duplicate"))
+        #expect(msg.contains("dup"))
     }
 }

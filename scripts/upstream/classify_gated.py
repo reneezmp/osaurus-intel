@@ -64,7 +64,6 @@ GATED = {
     "Views/Sandbox/SandboxView.swift": ("INC-containers", "I", ""),
     # --- Needs work: a feature Intel lacks, not hardware-bound ---
     "AppIntents/OsaurusLocalClient.swift": ("W-app-intents", "C", "Intel in-process client in the #else body (no /agents routes on Intel)"),
-    "Models/Plugin/ExternalPlugin.swift": ("W-plugin-reliability", "W", "upstream plugin host"),
     "Views/Plugin/PluginConfigView.swift": ("W-plugin-reliability", "W", "per-agent plugin config sections"),
     "Services/Chat/DefaultAgentSystemPromptBuilder.swift": ("W-declarative-config", "W", "Default-agent guide addendum (#2268)"),
     "Tools/Configuration/ConfigurationDomain.swift": ("W-declarative-config", "W", ""),

@@ -1582,9 +1582,26 @@ final class PluginManager {
 }
 #else
 
-// MARK: - Intel fork (M9 Phase 2): capability-aware PluginManager
+// MARK: - Intel fork: upstream's plugin types on Intel's plugin folders
+//
+// `W-plugin-reliability` stage 2e (docs/UPSTREAM_SYNC.md, "Plugin
+// loading"). A loaded plugin is upstream's `ExternalPlugin` with upstream's
+// `ExternalTool`s, held in upstream's `LoadedPlugin` / `FailedPlugin` /
+// `PluginLoadError`, and `loadPluginWithError(at:directoryId:)` is upstream's
+// `loadPluginWithError` (ABI table, manifest identity and capability
+// checks, `min_osaurus` / `min_macos`, web-mount shadowing). Intel keeps:
+//  - its folder layout, `Tools/<id>/` with `manifest.json` and the dylib
+//    (upstream's is `Tools/<id>/<version>/`, with a receipt and consent
+//    marker; the installer is stage 2g);
+//  - the Apple Silicon capability check on `manifest.json` before any
+//    dlopen (`PluginCompatibilityChecker`), and its capability buckets for
+//    the Plugins tab;
+//  - its superseded-plugin list.
+// Upstream's crash-loop guard, quarantine and first config delivery come
+// next (stage 2e, step 2).
 
 import Foundation
+import Darwin
 
 @MainActor
 public final class PluginManager: ObservableObject {
@@ -1629,11 +1646,80 @@ public final class PluginManager: ObservableObject {
         return installed
     }
 
-    /// Successfully loaded (compatible) plugins.
-    @Published public private(set) var loadedPlugins: [LoadedPluginInfo] = []
+    // MARK: - Upstream types
 
-    /// Plugins that failed to load for non-capability reasons.
-    @Published public private(set) var failedPlugins: [String: FailedPluginInfo] = [:]
+    struct LoadedPlugin: @unchecked Sendable {
+        let plugin: ExternalPlugin
+        let handle: UnsafeMutableRawPointer
+        let tools: [ExternalTool]
+        let skills: [Skill]
+        let routes: [PluginManifest.RouteSpec]
+        let webConfig: PluginManifest.WebSpec?
+        let readmePath: URL?
+        let changelogPath: URL?
+    }
+
+    /// Represents a plugin that failed to load
+    struct FailedPlugin: Sendable {
+        let pluginId: String
+        let error: String
+        /// Last manifest the host successfully decoded for this plugin
+        /// before the failure. Populated for failures that happen AFTER
+        /// `get_manifest` (compatibility check, web/route conflict,
+        /// first-delivery handshake), nil for failures that happen
+        /// before (dlopen / init / parse manifest / quarantine). Lets
+        /// the agent detail view filter failed plugins the same way it
+        /// filters loaded ones (routes / secrets / instructions /
+        /// config / web), and surface a meaningful name.
+        let lastKnownManifest: PluginManifest?
+
+        init(pluginId: String, error: String, lastKnownManifest: PluginManifest? = nil) {
+            self.pluginId = pluginId
+            self.error = error
+            self.lastKnownManifest = lastKnownManifest
+        }
+    }
+
+    /// Error type for plugin loading failures
+    struct PluginLoadError: Error, CustomStringConvertible, Sendable {
+        let message: String
+        /// Manifest that was successfully decoded before the failure was
+        /// raised, if any. Surfaced through `FailedPlugin.lastKnownManifest`
+        /// so the UI can show the plugin's display name and filter it the
+        /// same way loaded plugins are filtered.
+        let manifest: PluginManifest?
+        var description: String { message }
+
+        init(message: String, manifest: PluginManifest? = nil) {
+            self.message = message
+            self.manifest = manifest
+        }
+
+        static let consentRequiredPrefix = "consent_required:"
+    }
+
+    /// Loaded plugins (upstream's list: tools, routes, manifest).
+    @Published private(set) var plugins: [LoadedPlugin] = []
+    private var loadedPluginPaths: Set<String> = []
+
+    /// Plugins that failed to load, keyed by plugin ID
+    @Published private(set) var failedPlugins: [String: FailedPlugin] = [:]
+
+    /// Serializes reload operations to prevent concurrent `performPluginScan`
+    /// calls from overwriting and deallocating each other's host contexts.
+    private var activeReloadTask: Task<Void, Never>?
+
+    /// True while PluginManager, ToolRegistry, and SkillManager expose one
+    /// complete catalog snapshot. A reload clears it until registry mutation
+    /// finishes. Prompt composition uses this readiness boundary so a
+    /// persisted KV prefix can never depend on launch/reload task timing.
+    private var isPromptCatalogReady = false
+
+    // MARK: - Intel capability buckets (Plugins tab)
+
+    /// Plugins whose `manifest.json` passed the capability check
+    /// (compatible or degraded), loaded or not.
+    @Published public private(set) var loadedPlugins: [LoadedPluginInfo] = []
 
     /// Plugins skipped because they require Apple Silicon capabilities.
     @Published public private(set) var incompatiblePlugins: [IncompatiblePluginInfo] = []
@@ -1649,20 +1735,6 @@ public final class PluginManager: ObservableObject {
         public let toolNames: [String]
     }
 
-    public struct FailedPluginInfo: Sendable {
-        public let pluginId: String
-        public let error: String
-        /// AgentDetailView's failed-plugin tab displays the last known
-        /// manifest name. Always nil on Intel (no manifest cache).
-        public var lastKnownManifest: PluginManifest? { nil }
-    }
-
-    /// AgentDetailView refers to failed plugins as `FailedPlugin`.
-    /// Alias to the M9 bucket type so `failedPlugins.values` (a
-    /// `[FailedPluginInfo]`) assigns to `[PluginManager.FailedPlugin]`
-    /// without a copy.
-    public typealias FailedPlugin = FailedPluginInfo
-
     public struct IncompatiblePluginInfo: Identifiable, Sendable {
         public let pluginId: String
         public let name: String
@@ -1671,104 +1743,202 @@ public final class PluginManager: ObservableObject {
         public var id: String { pluginId }
     }
 
-    /// M9 Phase C: live dlopen'd x86_64 plugins, keyed by plugin id. Only
-    /// compatible/degraded plugins that successfully complete the v2 ABI
-    /// handshake land here; this is what `invoke(pluginId:...)` runs against.
-    private var nativePlugins: [String: IntelLoadedPlugin] = [:]
-
     private init() {}
 
-    /// Scans the plugin directory, checks capabilities, and loads compatible plugins.
-    public func loadAll(forceReload: Bool = false) async {
-        let pluginsDir = OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
+    /// Returns the load error for a specific plugin, if any
+    func loadError(for pluginId: String) -> String? {
+        return failedPlugins[pluginId]?.error
+    }
 
+    /// Look up a loaded plugin by its ID (used by HTTP route dispatch)
+    func loadedPlugin(for pluginId: String) -> LoadedPlugin? {
+        return plugins.first { $0.plugin.id == pluginId }
+    }
+
+    #if DEBUG
+        /// Test-only: insert a pre-built `LoadedPlugin` so regression tests
+        /// can exercise the `BackgroundTaskManager` → `emitPluginEvent` →
+        /// `ExternalPlugin.notifyTaskEvent` chain without going through
+        /// dlopen + the full scan pipeline. The matched `removeLoadedPluginForTesting`
+        /// must be called in `defer` so the singleton is left clean.
+        func injectLoadedPluginForTesting(_ loaded: LoadedPlugin) {
+            plugins.append(loaded)
+        }
+
+        /// Test-only: matched cleanup for `injectLoadedPluginForTesting`.
+        /// Removes the plugin without touching `ToolRegistry` / `SkillManager`
+        /// (the fake plugin never registered with either). Synchronously
+        /// drains the plugin's event queues first (upstream's note in
+        /// `ExternalPlugin.drainEventQueuesForTesting()`).
+        func removeLoadedPluginForTesting(pluginId: String) {
+            if let plugin = plugins.first(where: { $0.plugin.id == pluginId })?.plugin {
+                plugin.drainEventQueuesForTesting()
+            }
+            plugins.removeAll { $0.plugin.id == pluginId }
+        }
+    #endif
+
+    // MARK: - Loading
+
+    /// Wait for the process's initial plugin catalog snapshot without turning
+    /// every prompt into a rescan. Concurrent launch/warmup/send callers join
+    /// the same `activeReloadTask`; later install/uninstall paths still call
+    /// `loadAll()` directly to refresh the catalog.
+    func ensurePromptCatalogReady() async {
+        if isPromptCatalogReady { return }
+        if let task = activeReloadTask {
+            await task.value
+            return
+        }
+        await loadAll()
+    }
+
+    /// Result of heavy plugin scanning performed on a background thread.
+    private struct PluginScanResult: @unchecked Sendable {
+        let allURLs: [URL]
+        let compatible: [LoadedPluginInfo]
+        let incompatible: [IncompatiblePluginInfo]
+        let degraded: Set<String>
+        let loadResults: [(url: URL, pluginId: String, result: Result<LoadedPlugin, PluginLoadError>)]
+    }
+
+    /// Scans the tools directory and loads all plugins found (upstream's
+    /// `loadAll`). Heavy work (filesystem scanning, dlopen) runs on a
+    /// background thread. When `forceReload` is true, all existing plugins
+    /// are unloaded first so every dylib is re-opened from disk.
+    public func loadAll(forceReload: Bool = false) async {
+        if let task = activeReloadTask {
+            await task.value
+            if !forceReload { return }
+            // If another task was queued by a concurrent caller while we waited,
+            // just wait for that one to finish instead of starting a third.
+            if let newTask = activeReloadTask {
+                await newTask.value
+                return
+            }
+        }
+
+        isPromptCatalogReady = false
+        let task = Task {
+            await _loadAll(forceReload: forceReload)
+        }
+        activeReloadTask = task
+        await task.value
+
+        if activeReloadTask == task {
+            activeReloadTask = nil
+        }
+    }
+
+    private func _loadAll(forceReload: Bool = false) async {
         // Plugin config moved from a plaintext file to the Keychain
         // (2026-10-10); move any values left in the old file first.
         IntelPluginConfigMigration.runIfNeeded()
 
-        // Reset bucket state and tear down any live handles before re-scanning,
-        // so repeated calls don't duplicate entries or leak dlopen'd dylibs.
-        // Unregister the previous run's plugin tools from the agent ToolRegistry
-        // first, then tear down the dylibs.
-        let priorToolNames = nativePlugins.values.flatMap { $0.toolIds }
-        if !priorToolNames.isEmpty {
-            ToolRegistry.shared.unregister(names: priorToolNames)
-        }
-        for (_, p) in nativePlugins { p.teardown() }
-        nativePlugins.removeAll()
-        loadedPlugins.removeAll()
-        incompatiblePlugins.removeAll()
-        degradedPluginIds.removeAll()
+        // Clear previous failures before scanning
+        failedPlugins.removeAll()
 
-        guard FileManager.default.fileExists(atPath: pluginsDir.path) else { return }
-
-        guard let entries = try? FileManager.default.contentsOfDirectory(at: pluginsDir, includingPropertiesForKeys: nil) else {
-            return
-        }
-
-        for pluginURL in entries {
-            let manifestURL = pluginURL.appendingPathComponent("manifest.json")
-            guard FileManager.default.fileExists(atPath: manifestURL.path),
-                  let data = try? Data(contentsOf: manifestURL),
-                  let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any] else {
-                continue
+        if forceReload {
+            for loaded in plugins {
+                await unload(loaded)
             }
+            plugins.removeAll()
+            loadedPluginPaths.removeAll()
+        }
 
-            let pluginId = json["plugin_id"] as? String ?? pluginURL.lastPathComponent
-            let name = json["name"] as? String ?? pluginId
-            let version = json["version"] as? String ?? "0.0.0"
+        // Capture current state needed for background work
+        let alreadyLoadedPaths = self.loadedPluginPaths
+        let toolsRoot = Self.toolsRootDirectory()
 
-            let required = json["host_capabilities_required"] as? [String]
-            let optional = json["host_capabilities_optional"] as? [String]
+        // Heavy work on background thread: filesystem scan, dlopen, plugin init
+        let scanResult = await Task.detached(priority: .userInitiated) {
+            Self.performPluginScan(toolsRoot: toolsRoot, alreadyLoadedPaths: alreadyLoadedPaths)
+        }.value
 
-            let compatibility = PluginCompatibilityChecker.check(required: required, optional: optional)
+        // --- Everything below runs on main thread (registry & state mutations) ---
 
-            switch compatibility {
-            case .compatible:
-                let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
-                let toolNames = tools.compactMap { $0["id"] as? String }
+        loadedPlugins = scanResult.compatible
+        incompatiblePlugins = scanResult.incompatible
+        degradedPluginIds = scanResult.degraded
 
-                loadedPlugins.append(LoadedPluginInfo(
-                    id: pluginId,
-                    pluginId: pluginId,
-                    name: name,
-                    version: version,
-                    toolNames: toolNames
-                ))
-                loadNative(pluginId: pluginId, pluginDir: pluginURL)
+        let currentPaths = Set(scanResult.allURLs.map { $0.path })
 
-            case .degraded(let missing):
-                _ = missing
-                let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
-                let toolNames = tools.compactMap { $0["id"] as? String }
+        // Unload removed plugins
+        var remaining: [LoadedPlugin] = []
+        var removedSomething = false
 
-                loadedPlugins.append(LoadedPluginInfo(
-                    id: pluginId,
-                    pluginId: pluginId,
-                    name: name,
-                    version: version,
-                    toolNames: toolNames
-                ))
-                degradedPluginIds.insert(pluginId)
-                loadNative(pluginId: pluginId, pluginDir: pluginURL)
-
-            case .incompatible(let missing):
-                incompatiblePlugins.append(IncompatiblePluginInfo(
-                    pluginId: pluginId,
-                    name: name,
-                    version: version,
-                    missingRequired: missing
-                ))
+        for loaded in plugins {
+            if currentPaths.contains(loaded.plugin.bundlePath) {
+                remaining.append(loaded)
+            } else {
+                await unload(loaded)
+                loadedPluginPaths.remove(loaded.plugin.bundlePath)
+                removedSomething = true
             }
         }
+        plugins = remaining
 
-        // Opt-in end-to-end proof: when OSAURUS_INTEL_PLUGIN_SELFTEST is set,
-        // invoke each live plugin's first tool and log the result. This is the
-        // Phase D verification path (visible in the terminal Renée launches from).
+        // Register newly loaded plugins
+        var loadedNew = false
+        for entry in scanResult.loadResults {
+            switch entry.result {
+            case .success(let loaded):
+                // Loaded plugin IDs must be unique: tools, routes, host
+                // contexts, and secrets are all keyed by plugin ID, so a
+                // second instance would silently shadow (or corrupt) the
+                // first. Keep the already-loaded instance and reject the
+                // newcomer.
+                if let existing = plugins.first(where: { $0.plugin.id == loaded.plugin.id }) {
+                    let pluginId = loaded.plugin.id
+                    let errorMsg =
+                        "Duplicate plugin id '\(pluginId)': already loaded from \(existing.plugin.bundlePath); ignoring \(entry.url.path)"
+                    NSLog("[Osaurus] %@", errorMsg)
+                    failedPlugins[pluginId] = FailedPlugin(
+                        pluginId: pluginId,
+                        error: errorMsg,
+                        lastKnownManifest: loaded.plugin.manifest
+                    )
+                    await loaded.plugin.shutdown()
+                    continue
+                }
+                plugins.append(loaded)
+                loadedPluginPaths.insert(entry.url.path)
+                loadedNew = true
+
+                // Intel's registry groups plugin tools under the plugin's
+                // display name (Tools tab, capability picker).
+                let group = loaded.plugin.manifest.name ?? loaded.plugin.id
+                for tool in loaded.tools {
+                    ToolRegistry.shared.registerPluginTool(tool, group: group)
+                }
+                for skill in loaded.skills {
+                    await SkillManager.shared.registerPluginSkill(skill)
+                }
+
+                // Clear any previous failure for this plugin
+                failedPlugins.removeValue(forKey: loaded.plugin.id)
+                NSLog("[Osaurus Intel] loaded native plugin '\(loaded.plugin.id)' — tools: \(loaded.tools.map(\.name))")
+
+            case .failure(let error):
+                failedPlugins[entry.pluginId] = FailedPlugin(
+                    pluginId: entry.pluginId,
+                    error: error.message,
+                    lastKnownManifest: error.manifest
+                )
+                NSLog("[Osaurus Intel] plugin '\(entry.pluginId)' failed to load: \(error.message)")
+            }
+        }
+
+        if loadedNew || removedSomething || !failedPlugins.isEmpty {
+            NotificationCenter.default.post(name: .toolsListChanged, object: nil)
+        }
+
+        isPromptCatalogReady = true
+
+        // Opt-in diagnostics (the terminal Renée launches from).
         if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
-            runNativeSelfTest()
+            await runNativeSelfTest()
         }
-
         // Set a plugin config value through the real path (setConfig →
         // on_config_changed). Format: "pluginId|key|value". Runs before the
         // test call so config-dependent tools see it.
@@ -1779,14 +1949,47 @@ public final class PluginManager: ObservableObject {
                 NSLog("[Osaurus Intel] setconfig \(parts[0]).\(parts[1]) = \(parts[2])")
             }
         }
-
         // Targeted tool test through the REAL agent path (ToolRegistry.execute →
-        // IntelPluginTool → plugin.invoke). Format: OSAURUS_INTEL_PLUGIN_TESTCALL
-        // = "toolName|{json payload}". Lets fetch/search be verified with real
-        // arguments (the self-test only sends "{}").
+        // ExternalTool → plugin.invoke). Format: OSAURUS_INTEL_PLUGIN_TESTCALL
+        // = "toolName|{json payload}".
         if let testcall = ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_TESTCALL"] {
             await runToolTestCall(testcall)
         }
+    }
+
+    /// Unregisters a loaded plugin's tools and skills and shuts it down
+    /// (upstream's unload steps).
+    private func unload(_ loaded: LoadedPlugin) async {
+        ToolRegistry.shared.unregister(names: loaded.tools.map { $0.name })
+        if !loaded.skills.isEmpty {
+            await SkillManager.shared.unregisterPluginSkills(pluginId: loaded.plugin.id)
+        }
+        await loaded.plugin.shutdown()
+        PluginHostContext.getContext(for: loaded.plugin.id)?.teardown()
+        // Upstream never dlcloses: on Apple Silicon, dlclose causes stale
+        // PAC signatures if the same path is ever reloaded, and upstream
+        // installs every version in its own folder, so a path never comes
+        // back with new code. Intel's installer rewrites
+        // `Tools/<id>/plugin.dylib` in place (until stage 2g), and dyld
+        // hands back an image that is still open instead of reading the
+        // new file, so an upgrade or reinstall would keep the old code.
+        // x86_64 has no pointer authentication: close the image there.
+        // `shutdown()` has drained every call and run `destroy`; a late
+        // call through a stale tool fails on the shutdown latch first.
+        #if arch(x86_64)
+            dlclose(loaded.handle)
+        #endif
+    }
+
+    /// Intel's installer replaces a plugin's files in place: unload the
+    /// plugin first so nothing runs from the file being replaced, and the
+    /// next `loadAll()` opens the new one.
+    func unloadForReinstall(pluginId: String) async {
+        guard let loaded = loadedPlugin(for: pluginId) else { return }
+        plugins.removeAll { $0.plugin.id == pluginId }
+        loadedPluginPaths.remove(loaded.plugin.bundlePath)
+        await unload(loaded)
+        NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
     /// Invoke a registered tool by name through ToolRegistry (the same path the
@@ -1806,100 +2009,771 @@ public final class PluginManager: ObservableObject {
         }
     }
 
-    /// Invoke the first tool of every live native plugin and log the result.
-    /// Gated behind OSAURUS_INTEL_PLUGIN_SELFTEST (see loadAll).
-    private func runNativeSelfTest() {
-        guard !nativePlugins.isEmpty else {
+    /// Invoke the first tool of every loaded plugin and log the result.
+    /// Gated behind OSAURUS_INTEL_PLUGIN_SELFTEST (see `_loadAll`).
+    private func runNativeSelfTest() async {
+        guard !plugins.isEmpty else {
             NSLog("[Osaurus Intel] self-test: no native plugins loaded")
             return
         }
-        for (pid, plugin) in nativePlugins {
-            guard let tool = plugin.toolIds.first else {
+        for loaded in plugins {
+            let pid = loaded.plugin.id
+            guard let tool = loaded.tools.first else {
                 NSLog("[Osaurus Intel] self-test: '\(pid)' exposes no tools")
                 continue
             }
             do {
-                let result = try plugin.invoke(type: "tool", id: tool, payload: "{}")
-                NSLog("[Osaurus Intel] self-test ✅ \(pid)/\(tool) → \(result)")
+                let result = try await loaded.plugin.invoke(type: "tool", id: tool.name, payload: "{}")
+                NSLog("[Osaurus Intel] self-test ✅ \(pid)/\(tool.name) → \(result)")
             } catch {
-                NSLog("[Osaurus Intel] self-test ❌ \(pid)/\(tool): \(error.localizedDescription)")
+                NSLog("[Osaurus Intel] self-test ❌ \(pid)/\(tool.name): \(error.localizedDescription)")
             }
         }
     }
 
-    /// dlopen + v2 ABI handshake for a capability-compatible plugin. Failures
-    /// are logged but don't abort the scan — the plugin still shows in the
-    /// (capability) bucket; it just won't be invocable.
-    private func loadNative(pluginId: String, pluginDir: URL) {
-        // Retired by built-ins (search provider cascade, native Apple apps).
-        // Refuse the dylib so it cannot overwrite a first-party tool.
-        guard !Self.supersededPluginIds.contains(pluginId) else {
-            NSLog("[Osaurus Intel] skipped superseded native plugin '\(pluginId)' (now built in)")
-            return
-        }
-        guard let dylib = IntelPluginLoader.findDylib(in: pluginDir) else {
-            NSLog("[Osaurus Intel] plugin '\(pluginId)': no .dylib found in \(pluginDir.lastPathComponent) (browse-only)")
-            return
-        }
-        switch IntelPluginLoader.load(dylibURL: dylib, pluginId: pluginId) {
-        case .success(let loaded):
-            nativePlugins[pluginId] = loaded
-            // Bridge each tool into the agent ToolRegistry so chat agents can
-            // call it (openAISpecs() → model; execute() → plugin.invoke), grouped
-            // under the plugin's display name so it shows as a selectable
-            // capability + in the Tools tab.
-            for spec in loaded.toolSpecs {
-                ToolRegistry.shared.registerPluginTool(
-                    IntelPluginTool(pluginId: pluginId, spec: spec),
-                    group: loaded.displayName)
+    // MARK: - Scanning (nonisolated)
+
+    nonisolated static func toolsRootDirectory() -> URL {
+        OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
+    }
+
+    /// Intel's scan: every `Tools/<id>/` with a `manifest.json` goes through
+    /// the capability check; compatible and degraded plugins that aren't
+    /// superseded and have a dylib are loaded with upstream's checks.
+    nonisolated private static func performPluginScan(
+        toolsRoot: URL,
+        alreadyLoadedPaths: Set<String>
+    ) -> PluginScanResult {
+        let fm = FileManager.default
+        var allURLs: [URL] = []
+        var compatible: [LoadedPluginInfo] = []
+        var incompatible: [IncompatiblePluginInfo] = []
+        var degraded: Set<String> = []
+        var loadResults: [(url: URL, pluginId: String, result: Result<LoadedPlugin, PluginLoadError>)] = []
+
+        let entries =
+            (try? fm.contentsOfDirectory(
+                at: toolsRoot, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for pluginURL in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+            let manifestURL = pluginURL.appendingPathComponent("manifest.json")
+            guard fm.fileExists(atPath: manifestURL.path),
+                let data = try? Data(contentsOf: manifestURL),
+                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+            else {
+                continue
             }
-            NSLog("[Osaurus Intel] loaded native plugin '\(pluginId)' — tools: \(loaded.toolIds)")
-        case .failure(let err):
-            NSLog("[Osaurus Intel] plugin '\(pluginId)' dlopen failed: \(err.message)")
+
+            // The folder name is the id the plugin is installed (and its
+            // secrets stored) under; upstream's identity check holds the
+            // dylib's manifest to it.
+            let directoryId = pluginURL.lastPathComponent
+            let name = json["name"] as? String ?? directoryId
+            let version = json["version"] as? String ?? "0.0.0"
+            let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
+            let toolNames = tools.compactMap { $0["id"] as? String }
+
+            let compatibility = PluginCompatibilityChecker.check(
+                required: json["host_capabilities_required"] as? [String],
+                optional: json["host_capabilities_optional"] as? [String]
+            )
+            switch compatibility {
+            case .incompatible(let missing):
+                incompatible.append(
+                    IncompatiblePluginInfo(
+                        pluginId: directoryId, name: name, version: version, missingRequired: missing))
+                continue
+            case .degraded:
+                degraded.insert(directoryId)
+            case .compatible:
+                break
+            }
+            compatible.append(
+                LoadedPluginInfo(
+                    id: directoryId, pluginId: directoryId, name: name, version: version, toolNames: toolNames))
+
+            // Retired by built-ins (search provider cascade, native Apple
+            // apps). Refuse the dylib so it cannot overwrite a first-party tool.
+            if supersededPluginIds.contains(directoryId) {
+                NSLog("[Osaurus Intel] skipped superseded native plugin '\(directoryId)' (now built in)")
+                continue
+            }
+            guard let dylib = findDylib(in: pluginURL) else {
+                NSLog("[Osaurus Intel] plugin '\(directoryId)': no .dylib found (browse-only)")
+                continue
+            }
+            allURLs.append(dylib)
+            if alreadyLoadedPaths.contains(dylib.path) { continue }
+            loadResults.append(
+                (url: dylib, pluginId: directoryId, result: loadPluginWithError(at: dylib, directoryId: directoryId)))
         }
+
+        return PluginScanResult(
+            allURLs: allURLs,
+            compatible: compatible,
+            incompatible: incompatible,
+            degraded: degraded,
+            loadResults: loadResults
+        )
     }
 
-    /// The live native plugin handle for `pluginId`, or nil if not loaded.
-    /// Used by `IntelPluginTool.execute` to route a tool call to the dylib.
-    func nativeHandle(for pluginId: String) -> IntelLoadedPlugin? {
-        nativePlugins[pluginId]
+    /// Locate the dylib inside a plugin directory. Prefers `plugin.dylib`,
+    /// then any `*.dylib` (top level, then one level down for the official
+    /// `<id>/<version>/plugin.dylib` layout).
+    nonisolated static func findDylib(in pluginDir: URL) -> URL? {
+        let fm = FileManager.default
+        let direct = pluginDir.appendingPathComponent("plugin.dylib")
+        if fm.fileExists(atPath: direct.path) { return direct }
+
+        guard
+            let entries = try? fm.contentsOfDirectory(
+                at: pluginDir, includingPropertiesForKeys: [.isDirectoryKey])
+        else { return nil }
+
+        if let topDylib = entries.first(where: { $0.pathExtension == "dylib" }) {
+            return topDylib
+        }
+        // One level down (version subdir).
+        for sub in entries {
+            let isDir = (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
+            guard isDir else { continue }
+            let nested = sub.appendingPathComponent("plugin.dylib")
+            if fm.fileExists(atPath: nested.path) { return nested }
+            if let nestedEntries = try? fm.contentsOfDirectory(at: sub, includingPropertiesForKeys: nil),
+                let anyDylib = nestedEntries.first(where: { $0.pathExtension == "dylib" })
+            {
+                return anyDylib
+            }
+        }
+        return nil
     }
 
-    /// Plugins that actually dlopen'd (have a live x86_64 handle) — the subset
-    /// of `loadedPlugins` backed by a real dylib, for the Installed-tab UI.
-    /// Excludes manifest-only dirs (e.g. cached arm64 registry plugins).
+    /// Synthetic config key the host pushes once per plugin at load time
+    /// to exercise the plugin's view of `host->get_active_agent_id` +
+    /// `host->free_string` round-trip BEFORE the first real config push.
+    /// Plugins should treat any unknown key as a no-op (per
+    /// `osaurus_plugin.h`), but most plugins call `host->get_active_agent_id`
+    /// at the top of `on_config_changed` to resolve the active agent —
+    /// so a misaligned `osr_host_api` mirror trips the libmalloc abort
+    /// here, INSIDE the loading marker, which then quarantines the
+    /// plugin on the next launch instead of crash-looping.
+    ///
+    /// Plugins that explicitly want to opt out of the probe can match
+    /// `key == "__osaurus_abi_probe__"` and early-return; the value is
+    /// always a fresh UUID with no semantic meaning. Documented under
+    /// `docs/plugins/HOST_API.md` so authors know to ignore it.
+    ///
+    /// `nonisolated` because the constant is a literal string — safe
+    /// to read from any actor / queue, including plugin-author tests
+    /// that match against it from a non-MainActor context.
+    nonisolated static let abiProbeKey = "__osaurus_abi_probe__"
+
+    // MARK: - Manifest Compatibility Enforcement
+
+    /// Reads the host's `CFBundleShortVersionString` for `min_osaurus`
+    /// comparison. Falls back to a sentinel that compares as 0.0.0 so
+    /// Returns the empty string when bundle metadata is absent —
+    /// `compatibilityFailure` interprets that as "host version
+    /// unknown" and fails *open* with a one-shot warning rather than
+    /// rejecting every plugin that declares `min_osaurus`. Erroring
+    /// closed (the previous behavior) bricked dev builds where
+    /// `Bundle.main` is the swiftpm helper or an Xcode build that
+    /// only sets `MARKETING_VERSION = 1.0`.
+    nonisolated static func currentHostVersionString() -> String {
+        Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? ""
+    }
+
+    /// Lenient semver parser for the *host* version. The strict
+    /// `SemanticVersion.parse` requires `M.m.p`, but Xcode's default
+    /// `MARKETING_VERSION` is often `1.0` (or even `1`). Treat missing
+    /// components as zero so `"1.0"` → `1.0.0`, matching how Apple
+    /// itself expresses bundle versions. Returns nil only when the
+    /// leading component isn't an integer.
+    nonisolated static func parseHostVersion(_ s: String) -> SemanticVersion? {
+        if let strict = SemanticVersion.parse(s) { return strict }
+        let core = s.split(separator: "-", maxSplits: 1).first.map(String.init) ?? s
+        let parts = core.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard let major = parts.first.flatMap(Int.init) else { return nil }
+        let minor = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+        let patch = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+        return SemanticVersion(major: major, minor: minor, patch: patch)
+    }
+
+    /// Returns a `PluginLoadError` when the manifest declares a
+    /// `min_osaurus` or `min_macos` constraint that the running host
+    /// does not satisfy. Returns nil when both constraints are met
+    /// (or absent). Unparseable declarations on *either* side are not
+    /// treated as a hard failure — we log a one-off warning so the
+    /// developer sees it but the plugin still loads. This matters for
+    /// dev builds where the host's bundle metadata may be missing or
+    /// shaped like `1.0` instead of `1.0.0`. Pure function: takes
+    /// injected host / OS versions so unit tests can drive every
+    /// branch without touching real bundle metadata.
+    nonisolated static func compatibilityFailure(
+        manifest: PluginManifest,
+        hostVersion: String,
+        osVersion: OperatingSystemVersion
+    ) -> PluginLoadError? {
+        if let minHost = manifest.min_osaurus, !minHost.isEmpty {
+            if let required = SemanticVersion.parse(minHost) {
+                if let current = parseHostVersion(hostVersion) {
+                    if current < required {
+                        return PluginLoadError(
+                            message:
+                                "Plugin \(manifest.plugin_id) requires Osaurus \(required) or later; "
+                                + "this host is \(current). Update Osaurus to load this plugin."
+                        )
+                    }
+                } else {
+                    // Unknown host version (no bundle metadata, or a
+                    // shape we can't make sense of). Fail open so dev
+                    // builds aren't blocked, but make it visible.
+                    NSLog(
+                        "[Osaurus] Cannot enforce min_osaurus='%@' for %@ — host version "
+                            + "'%@' is empty or unparseable. Allowing load (dev build?).",
+                        minHost,
+                        manifest.plugin_id,
+                        hostVersion
+                    )
+                }
+            } else {
+                NSLog(
+                    "[Osaurus] Plugin %@ has unparseable min_osaurus '%@' — ignoring constraint.",
+                    manifest.plugin_id,
+                    minHost
+                )
+            }
+        }
+
+        if let minOS = manifest.min_macos, !minOS.isEmpty {
+            if let required = parseOSVersion(minOS) {
+                if !osVersionAtLeast(current: osVersion, required: required) {
+                    let req = "\(required.majorVersion).\(required.minorVersion).\(required.patchVersion)"
+                    let cur =
+                        "\(osVersion.majorVersion).\(osVersion.minorVersion).\(osVersion.patchVersion)"
+                    return PluginLoadError(
+                        message:
+                            "Plugin \(manifest.plugin_id) requires macOS \(req) or later; "
+                            + "this Mac is on \(cur). Update macOS to load this plugin."
+                    )
+                }
+            } else {
+                NSLog(
+                    "[Osaurus] Plugin %@ has unparseable min_macos '%@' — ignoring constraint.",
+                    manifest.plugin_id,
+                    minOS
+                )
+            }
+        }
+
+        return nil
+    }
+
+    /// Parses a "MAJOR[.MINOR[.PATCH]]" macOS version string into an
+    /// `OperatingSystemVersion`. Trailing components default to zero,
+    /// matching how Apple expresses min-required SDK versions
+    /// (`"14"` / `"14.5"` / `"14.5.1"` are all valid). Returns nil
+    /// when no leading integer can be parsed.
+    nonisolated static func parseOSVersion(_ s: String) -> OperatingSystemVersion? {
+        let parts = s.split(separator: ".", omittingEmptySubsequences: false).map(String.init)
+        guard let major = parts.first.flatMap(Int.init) else { return nil }
+        let minor = parts.count > 1 ? Int(parts[1]) ?? 0 : 0
+        let patch = parts.count > 2 ? Int(parts[2]) ?? 0 : 0
+        return OperatingSystemVersion(majorVersion: major, minorVersion: minor, patchVersion: patch)
+    }
+
+    /// `OperatingSystemVersion` doesn't conform to `Comparable`, so we
+    /// roll a small lexicographic comparison rather than pulling in
+    /// `Foundation`'s `isOperatingSystemAtLeast(_:)` which always reads
+    /// the live system version (untestable).
+    nonisolated static func osVersionAtLeast(
+        current: OperatingSystemVersion,
+        required: OperatingSystemVersion
+    ) -> Bool {
+        if current.majorVersion != required.majorVersion {
+            return current.majorVersion > required.majorVersion
+        }
+        if current.minorVersion != required.minorVersion {
+            return current.minorVersion > required.minorVersion
+        }
+        return current.patchVersion >= required.patchVersion
+    }
+
+    // MARK: - Load-time validation (pure helpers)
+
+    /// Returns a message when the plugin's ABI table is missing any of the
+    /// five required function pointers, or when any populated slot does not
+    /// point at code in a loaded image. Every plugin — v1 or v2+ — must
+    /// provide the full required prefix; optional v2 callbacks stay optional.
+    ///
+    /// The second check is what stops a struct-layout mismatch from
+    /// crashing the host. Sentry APPLE-MACOS-337: a plugin's table passed
+    /// the nil checks, `init` and `get_manifest` ran, and the host then
+    /// called `free_string` on the 997-byte manifest it had just copied —
+    /// with `free_string == 0x1` (next launch `0x2`). The register dump has
+    /// `pc == x28 == 0x1`, i.e. a `blr` through a slot that held a small
+    /// integer, not a function. A field that is really an int or a bool in
+    /// the plugin's own struct lands in a function-pointer slot of ours when
+    /// the two layouts disagree; it is non-nil, so the nil checks cannot see
+    /// it. `dladdr` can: a C function pointer handed to us by a dylib we
+    /// just `dlopen`ed must live inside *some* loaded image (the plugin, a
+    /// system library such as `free`, or a dependency it links). Anything
+    /// else is not callable and is rejected here, before the first call.
+    nonisolated static func abiTableValidationFailure(_ api: osr_plugin_api) -> String? {
+        var missing: [String] = []
+        if api.free_string == nil { missing.append("free_string") }
+        if api.`init` == nil { missing.append("init") }
+        if api.destroy == nil { missing.append("destroy") }
+        if api.get_manifest == nil { missing.append("get_manifest") }
+        if api.invoke == nil { missing.append("invoke") }
+        if !missing.isEmpty {
+            return "Plugin ABI table is missing required function(s): \(missing.joined(separator: ", "))"
+        }
+
+        var invalid: [String] = []
+        func check<F>(_ fn: F?, _ name: String) {
+            guard let fn else { return }
+            let raw = unsafeBitCast(fn, to: UnsafeRawPointer.self)
+            if !isCodePointerInLoadedImage(raw) {
+                invalid.append("\(name)=0x\(String(UInt(bitPattern: raw), radix: 16))")
+            }
+        }
+        check(api.free_string, "free_string")
+        check(api.`init`, "init")
+        check(api.destroy, "destroy")
+        check(api.get_manifest, "get_manifest")
+        check(api.invoke, "invoke")
+        check(api.handle_route, "handle_route")
+        check(api.on_config_changed, "on_config_changed")
+        check(api.on_task_event, "on_task_event")
+        guard !invalid.isEmpty else { return nil }
+        return
+            "Plugin ABI table slot(s) do not point at code in any loaded image: "
+            + invalid.joined(separator: ", ")
+            + ". The plugin's osr_plugin_api layout does not match osaurus_plugin.h; rebuild it against the current header."
+    }
+
+    /// True when `pointer` falls inside a Mach-O image currently mapped in
+    /// this process. `dladdr` returns non-zero exactly in that case; it does
+    /// not require a symbol to cover the address, so stripped plugin code
+    /// still passes while `0x1`, stack garbage, or a freed heap address do
+    /// not.
+    nonisolated static func isCodePointerInLoadedImage(_ pointer: UnsafeRawPointer) -> Bool {
+        var info = Dl_info()
+        return dladdr(pointer, &info) != 0
+    }
+
+    /// Returns a message when the manifest's `plugin_id` does not match the
+    /// install-directory-derived ID the receipt/consent/quarantine machinery
+    /// is keyed by.
+    nonisolated static func manifestIdentityValidationFailure(
+        manifest: PluginManifest,
+        directoryId: String
+    ) -> String? {
+        guard manifest.plugin_id != directoryId else { return nil }
+        return
+            "Plugin manifest declares plugin_id '\(manifest.plugin_id)' but is installed as '\(directoryId)'. Reinstall the plugin under its canonical ID."
+    }
+
+    /// Returns a message when the manifest declares an empty or duplicate
+    /// tool ID, or an empty or duplicate route ID.
+    nonisolated static func manifestCapabilityValidationFailure(_ manifest: PluginManifest) -> String? {
+        var seenToolIds = Set<String>()
+        for tool in manifest.capabilities.tools ?? [] {
+            let id = tool.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            if id.isEmpty {
+                return "Plugin \(manifest.plugin_id) declares a tool with an empty id"
+            }
+            if !seenToolIds.insert(id).inserted {
+                return "Plugin \(manifest.plugin_id) declares duplicate tool id '\(id)'"
+            }
+        }
+        var seenRouteIds = Set<String>()
+        for route in manifest.capabilities.routes ?? [] {
+            let id = route.id.trimmingCharacters(in: .whitespacesAndNewlines)
+            if id.isEmpty {
+                return "Plugin \(manifest.plugin_id) declares a route with an empty id"
+            }
+            if !seenRouteIds.insert(id).inserted {
+                return "Plugin \(manifest.plugin_id) declares duplicate route id '\(id)'"
+            }
+        }
+        return nil
+    }
+
+    /// Loads a single plugin from a dylib URL via dlopen + C ABI handshake.
+    /// Tries v2 entry point first (with host API injection), then falls back to v1.
+    /// Intel: the directory id comes from the scan (Intel's layout is
+    /// `Tools/<id>/plugin.dylib`, upstream's `Tools/<id>/<version>/…`).
+    nonisolated static func loadPluginWithError(at url: URL, directoryId: String) -> Result<LoadedPlugin, PluginLoadError> {
+        let flags = RTLD_NOW | RTLD_LOCAL
+        guard let handle = dlopen(url.path, Int32(flags)) else {
+            let errorMsg: String
+            if let err = dlerror() {
+                errorMsg = "Failed to load library: \(String(cString: err))"
+            } else {
+                errorMsg = "Failed to load library (unknown error)"
+            }
+            print("[Osaurus] dlopen failed for \(url.path): \(errorMsg)")
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        // Try v2 entry point first, then fall back to v1
+        let api: osr_plugin_api
+        let abiVersion: UInt32
+        var hostContext: PluginHostContext?
+
+        if let v2sym = dlsym(handle, "osaurus_plugin_entry_v2") {
+            // v2 path: create host context and pass to plugin
+            // We need the plugin ID to scope the host context. We'll use the
+            // directory name as a preliminary ID, then confirm from the manifest.
+            let preliminaryId = directoryId
+
+            let ctx: PluginHostContext
+            do {
+                ctx = try PluginHostContext(pluginId: preliminaryId)
+            } catch {
+                let errorMsg = "Failed to create host context: \(error.localizedDescription)"
+                print("[Osaurus] \(errorMsg) for \(url.lastPathComponent)")
+                dlclose(handle)
+                return .failure(PluginLoadError(message: errorMsg))
+            }
+
+            PluginHostContext.currentContext = ctx
+            PluginHostContext.setActivePlugin(preliminaryId)
+            let hostAPIPtr = ctx.buildHostAPI()
+            let entryFn = unsafeBitCast(v2sym, to: osr_plugin_entry_v2_t.self)
+            let apiRawPtr = entryFn(UnsafeRawPointer(hostAPIPtr))
+            PluginHostContext.clearActivePlugin()
+            PluginHostContext.currentContext = nil
+
+            guard let apiRawPtr else {
+                let errorMsg = "Plugin v2 entry returned null API"
+                print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+                ctx.teardown()
+                dlclose(handle)
+                return .failure(PluginLoadError(message: errorMsg))
+            }
+
+            let apiPtr = apiRawPtr.assumingMemoryBound(to: osr_plugin_api.self)
+            api = apiPtr.pointee
+            abiVersion = max(api.version, 2)
+            hostContext = ctx
+
+            PluginHostContext.setContext(ctx, for: preliminaryId)
+            print("[Osaurus] Loaded plugin from \(url.lastPathComponent) (entry=v2, abi=v\(abiVersion))")
+        } else if let v1sym = dlsym(handle, "osaurus_plugin_entry") {
+            let entryFn = unsafeBitCast(v1sym, to: osr_plugin_entry_t.self)
+            guard let apiRawPtr = entryFn() else {
+                let errorMsg = "Plugin entry returned null API"
+                print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+                dlclose(handle)
+                return .failure(PluginLoadError(message: errorMsg))
+            }
+
+            // Historical v1 structs contain ONLY the required prefix — reading
+            // the full `osr_plugin_api` here would read past the end of the
+            // plugin's static struct. Decode via the explicit prefix layout.
+            let prefixPtr = apiRawPtr.assumingMemoryBound(to: osr_plugin_api_v1.self)
+            api = osr_plugin_api(v1: prefixPtr.pointee)
+            abiVersion = 1
+            print(
+                "[Osaurus] Loaded plugin from \(url.lastPathComponent) (entry=v1 legacy). "
+                    + "v1 plugins cannot call host APIs. Consider rebuilding against the v3 surface "
+                    + "(export osaurus_plugin_entry_v2 with api.version >= 2) for richer functionality."
+            )
+        } else {
+            let errorMsg = "Missing plugin entry point (osaurus_plugin_entry_v2 or osaurus_plugin_entry)"
+            print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        // Reject incomplete ABI tables BEFORE calling init. Accepting a nil
+        // `free_string` leaks every returned string, a nil `destroy` makes
+        // teardown impossible, and a nil `invoke` produces tools that can
+        // never run — none of which the plugin can fix after init has
+        // already handed out a live context.
+        if let abiError = abiTableValidationFailure(api) {
+            let errorMsg = "\(abiError) in \(url.lastPathComponent)"
+            print("[Osaurus] \(errorMsg)")
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        // Initialize Plugin
+        guard let initFn = api.`init` else {
+            let errorMsg = "Plugin missing init function"
+            print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        if let hostContext {
+            PluginHostContext.currentContext = hostContext
+            PluginHostContext.setActivePlugin(hostContext.pluginId)
+        }
+        defer {
+            PluginHostContext.clearActivePlugin()
+            PluginHostContext.currentContext = nil
+        }
+        let ctx = initFn()
+
+        guard let ctx else {
+            let errorMsg = "Plugin initialization failed"
+            print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        // Get Manifest
+        guard let getManifest = api.get_manifest, let jsonPtr = getManifest(ctx) else {
+            let errorMsg = "Plugin failed to return manifest"
+            print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+            api.destroy?(ctx)
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+        let jsonString = String(cString: jsonPtr)
+        api.free_string?(jsonPtr)
+
+        // Parse Manifest
+        guard let data = jsonString.data(using: String.Encoding.utf8),
+            let manifest = try? JSONDecoder().decode(PluginManifest.self, from: data)
+        else {
+            let errorMsg = "Failed to parse plugin manifest"
+            print("[Osaurus] \(errorMsg) in \(url.lastPathComponent)")
+            api.destroy?(ctx)
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: errorMsg))
+        }
+
+        // The install layout (`Tools/<plugin_id>/<version>/`) and the receipt
+        // are keyed by the directory-derived ID; verification, consent,
+        // quarantine, and secrets all use it. A manifest that declares a
+        // different ID would let a plugin masquerade under another plugin's
+        // identity (and previously just re-keyed the host context to the
+        // manifest's claim). Fail the load instead.
+        if let identityError = manifestIdentityValidationFailure(
+            manifest: manifest,
+            directoryId: directoryId
+        ) {
+            print("[Osaurus] \(identityError)")
+            api.destroy?(ctx)
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: identityError, manifest: manifest))
+        }
+
+        // Reject empty or duplicate tool/route IDs up front — duplicate tool
+        // IDs would silently overwrite each other in the tool registry, and
+        // empty/duplicate route IDs break route dispatch and diagnostics.
+        if let capabilityError = manifestCapabilityValidationFailure(manifest) {
+            print("[Osaurus] \(capabilityError)")
+            api.destroy?(ctx)
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(PluginLoadError(message: capabilityError, manifest: manifest))
+        }
+
+        // Enforce manifest-declared compatibility constraints. Authors
+        // declare `min_osaurus` and `min_macos` so they can opt into ABI
+        // surfaces that older hosts don't have (e.g. the v4
+        // `get_active_agent_id` callback). Without enforcement the
+        // declarations were purely advisory and the plugin would crash
+        // at the first call to a missing slot. Fail the load with a
+        // structured message instead — surfaced in `failedPlugins` and
+        // visible in the UI.
+        if let compatError = compatibilityFailure(
+            manifest: manifest,
+            hostVersion: currentHostVersionString(),
+            osVersion: ProcessInfo.processInfo.operatingSystemVersion
+        ) {
+            print("[Osaurus] \(compatError.message)")
+            api.destroy?(ctx)
+            hostContext?.teardown()
+            dlclose(handle)
+            return .failure(
+                PluginLoadError(message: compatError.message, manifest: manifest)
+            )
+        }
+
+        // Validate that web mount paths don't silently shadow dynamic routes.
+        // The runtime checks the static branch first, so any overlap means
+        // the plugin's `handle_route` for that path can never fire.
+        if let mount = manifest.capabilities.web?.mount,
+            let routes = manifest.capabilities.routes
+        {
+            for route in routes {
+                let routePath = route.path.hasPrefix("/") ? route.path : "/\(route.path)"
+                // Same segment-boundary helper HTTPHandler uses for static
+                // dispatch, so validation and runtime can never disagree
+                // about which paths the mount captures.
+                let isShadowed = PluginManifest.WebSpec.mountCaptures(
+                    subpath: routePath, mount: mount)
+                if isShadowed {
+                    let errorMsg =
+                        "Plugin \(manifest.plugin_id) declares route '\(route.path)' under web mount '\(mount)'; the static web branch would shadow this route. Move the route outside the web mount or remove the web mount overlap."
+                    print("[Osaurus] \(errorMsg)")
+                    api.destroy?(ctx)
+                    hostContext?.teardown()
+                    dlclose(handle)
+                    return .failure(PluginLoadError(message: errorMsg, manifest: manifest))
+                }
+            }
+        }
+
+        let plugin = ExternalPlugin(
+            handle: handle,
+            api: api,
+            ctx: ctx,
+            manifest: manifest,
+            path: url.path,
+            abiVersion: abiVersion
+        )
+        let tools = (manifest.capabilities.tools ?? []).map { ExternalTool(plugin: plugin, spec: $0) }
+        let skills = loadPluginSkills(from: url, pluginId: manifest.plugin_id)
+        let routes = manifest.capabilities.routes ?? []
+        let webConfig = manifest.capabilities.web
+
+        let versionDir = url.deletingLastPathComponent()
+        let readmePath = resolveDocFile(named: "README.md", in: versionDir)
+        let changelogPath = resolveDocFile(named: "CHANGELOG.md", in: versionDir)
+
+        return .success(
+            LoadedPlugin(
+                plugin: plugin,
+                handle: handle,
+                tools: tools,
+                skills: skills,
+                routes: routes,
+                webConfig: webConfig,
+                readmePath: readmePath,
+                changelogPath: changelogPath
+            )
+        )
+    }
+
+    /// Finds a documentation file (case-insensitive) in the plugin's version directory.
+    nonisolated private static func resolveDocFile(named filename: String, in directory: URL) -> URL? {
+        let path = directory.appendingPathComponent(filename)
+        if FileManager.default.fileExists(atPath: path.path) {
+            return path
+        }
+        let lower = directory.appendingPathComponent(filename.lowercased())
+        if FileManager.default.fileExists(atPath: lower.path) {
+            return lower
+        }
+        return nil
+    }
+
+    /// Scans the plugin install directory for SKILL.md files and parses them into Skills
+    nonisolated private static func loadPluginSkills(from dylibURL: URL, pluginId: String) -> [Skill] {
+        let versionDir = dylibURL.deletingLastPathComponent()
+        let skillsDir = versionDir.appendingPathComponent("skills", isDirectory: true)
+
+        var results: [Skill] = []
+
+        // Check for skills/ directory
+        let fm = FileManager.default
+        var isDirectory: ObjCBool = false
+        guard fm.fileExists(atPath: skillsDir.path, isDirectory: &isDirectory), isDirectory.boolValue else {
+            return results
+        }
+
+        guard
+            let files = try? fm.contentsOfDirectory(
+                at: skillsDir,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            )
+        else {
+            return results
+        }
+
+        for file in files {
+            guard file.lastPathComponent.uppercased().hasSuffix("SKILL.MD") else { continue }
+            do {
+                let content = try String(contentsOf: file, encoding: .utf8)
+                var skill = try Skill.parseAnyFormat(from: content)
+                // Set the pluginId to link the skill to its plugin
+                skill = Skill(
+                    id: skill.id,
+                    name: skill.name,
+                    description: skill.description,
+                    version: skill.version,
+                    author: skill.author,
+                    category: skill.category,
+                    keywords: skill.keywords,
+                    instructions: skill.instructions,
+                    isBuiltIn: false,
+                    createdAt: skill.createdAt,
+                    updatedAt: skill.updatedAt,
+                    references: skill.references,
+                    assets: skill.assets,
+                    directoryName: skill.directoryName,
+                    pluginId: pluginId
+                )
+                results.append(skill)
+                NSLog("[Osaurus] Loaded skill '\(skill.name)' from plugin \(pluginId)")
+            } catch {
+                NSLog("[Osaurus] Failed to parse SKILL.md from plugin \(pluginId): \(error)")
+            }
+        }
+
+        return results
+    }
+
+    // MARK: - Intel Plugins tab surface
+
+    /// Plugins that actually loaded — the subset of `loadedPlugins` backed by
+    /// a live dylib, for the Installed tab. Excludes manifest-only folders.
     public func nativelyLoadedPlugins() -> [LoadedPluginInfo] {
-        loadedPlugins.filter { nativePlugins[$0.pluginId] != nil }
+        loadedPlugins.filter { info in plugins.contains { $0.plugin.id == info.pluginId } }
     }
 
-    /// Manifest `instructions` for every loaded plugin that has at least one
-    /// tool in `activeToolNames`. The chat context composer appends these to
-    /// the system prompt so a plugin can shape how the model uses its tools.
-    func instructions(forActiveToolNames activeToolNames: Set<String>) -> [String] {
+    /// Instructions for every loaded plugin that has at least one tool in
+    /// `activeToolNames`: the agent's override (Agents → agent → plugin tab)
+    /// or the manifest's, through upstream's `PluginInstructionsResolver`.
+    /// Intel's chat context composer appends these to the system prompt so a
+    /// plugin can shape how the model uses its tools (upstream adds them
+    /// only to plugin-started runs).
+    func instructions(forActiveToolNames activeToolNames: Set<String>, agentId: UUID?) -> [String] {
         var result: [String] = []
-        for (_, plugin) in nativePlugins {
-            guard let instr = plugin.instructions else { continue }
-            if plugin.toolIds.contains(where: { activeToolNames.contains($0) }) {
-                result.append(instr)
-            }
+        for loaded in plugins where loaded.tools.contains(where: { activeToolNames.contains($0.name) }) {
+            guard
+                let instr = PluginInstructionsResolver.instructions(pluginId: loaded.plugin.id, agentId: agentId),
+                !instr.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+            else { continue }
+            result.append(instr)
         }
         return result
     }
 
-    // MARK: - Plugin config (Intel config UI)
-
-    /// A loaded native plugin that declares user-settable config fields.
+    /// A loaded plugin that declares user-settable fields (manifest
+    /// `secrets`), for Intel's config sheet.
     public struct ConfigurablePlugin: Identifiable, Sendable {
         public let id: String
         public let name: String
         public let fields: [IntelPluginConfigField]
     }
 
-    /// Loaded native plugins that declare config fields, for the settings UI.
+    /// Loaded plugins that declare config fields, for the settings UI.
     public func configurablePlugins() -> [ConfigurablePlugin] {
-        nativePlugins.values
-            .filter { !$0.configFields.isEmpty }
-            .map { ConfigurablePlugin(id: $0.pluginId, name: $0.displayName, fields: $0.configFields) }
+        plugins
+            .compactMap { loaded -> ConfigurablePlugin? in
+                let fields = (loaded.plugin.manifest.secrets ?? []).map(IntelPluginConfigField.init(secret:))
+                guard !fields.isEmpty else { return nil }
+                return ConfigurablePlugin(
+                    id: loaded.plugin.id,
+                    name: loaded.plugin.manifest.name ?? loaded.plugin.id,
+                    fields: fields
+                )
+            }
             .sorted { $0.name < $1.name }
     }
 
@@ -1911,27 +2785,12 @@ public final class PluginManager: ObservableObject {
     /// Persist a plugin config value and notify the plugin (on_config_changed).
     public func setConfig(pluginId: String, key: String, value: String) {
         intelPluginConfigSet(pluginId: pluginId, key: key, value: value)
-        nativePlugins[pluginId]?.notifyConfigChanged(key: key, value: value)
+        loadedPlugin(for: pluginId)?.plugin.notifyConfigChanged(key: key, value: value)
     }
 
-    /// True when a plugin is dlopen'd and ready to invoke (not just bucketed).
+    /// True when a plugin is loaded and ready to invoke (not just bucketed).
     public func isNativelyLoaded(pluginId: String) -> Bool {
-        nativePlugins[pluginId] != nil
-    }
-
-    /// Tool ids exposed by a live plugin's manifest (empty if not loaded).
-    public func nativeToolIds(pluginId: String) -> [String] {
-        nativePlugins[pluginId]?.toolIds ?? []
-    }
-
-    /// Invoke a tool on a live native plugin. Throws if the plugin isn't
-    /// loaded or the invocation fails. `type` defaults to "tool".
-    public func invoke(pluginId: String, toolId: String, payload: String, type: String = "tool") throws -> String {
-        guard let plugin = nativePlugins[pluginId] else {
-            throw NSError(domain: "PluginManager", code: 404,
-                          userInfo: [NSLocalizedDescriptionKey: "Plugin '\(pluginId)' is not loaded on the Intel fork"])
-        }
-        return try plugin.invoke(type: type, id: toolId, payload: payload)
+        loadedPlugin(for: pluginId) != nil
     }
 
     public func plugin(withId id: String) -> LoadedPluginInfo? {
@@ -1942,180 +2801,82 @@ public final class PluginManager: ObservableObject {
         degradedPluginIds.contains(pluginId)
     }
 
-    public func notifyArtifactHandlers(artifact: Any) async {}
+    // MARK: - Artifact Handler Notifications
 
-    // MARK: - AgentDetailView surface (M11 Phase 11.A.4)
-    //
-    // AgentDetailView renders per-agent plugin tabs and needs a richer
-    // surface than the M9 capability-bucket UI: a `plugins` list whose
-    // elements expose `.plugin.manifest.name/.instructions`, a
-    // `failedPlugins` map whose values expose `.lastKnownManifest`, plus
-    // lookup + quarantine helpers. Plugin RUNTIME is amputated on Intel
-    // (no sandbox execution), so these surfaces are intentionally inert:
-    // `plugins` is empty, lookups return nil, quarantine ops no-op.
-
-    /// A loaded plugin as AgentDetailView expects it: a wrapper exposing
-    /// the manifest + materialized routes/web config. Distinct from
-    /// `LoadedPluginInfo` (the M9 bucket type) — the agent view reads
-    /// `loaded.plugin.manifest.name`, `loaded.routes`, `loaded.webConfig`.
-    public struct LoadedPlugin: Identifiable, Sendable {
-        public struct PluginRef: Sendable {
-            public let id: String
-            public let manifest: PluginManifest
+    /// Notifies all plugins that declared `artifact_handler: true` about a shared artifact.
+    /// Invocations run concurrently but are awaited so they complete before the caller
+    /// returns -- this keeps the originating request context (e.g. active chat) alive.
+    func notifyArtifactHandlers(artifact: SharedArtifact) async {
+        let payload = PluginHostContext.serializeArtifactEvent(artifact: artifact)
+        let handlers = plugins.filter {
+            $0.plugin.manifest.capabilities.artifact_handler == true && $0.plugin.abiVersion >= 2
         }
-        public let plugin: PluginRef
-        public let routes: [PluginManifest.RouteSpec]
-        public let webConfig: PluginManifest.WebConfig?
-        public var id: String { plugin.id }
-        /// PluginsView's detail pane reads these (as file URLs) for the
-        /// README / changelog content. Nil on Intel (no installed dirs).
-        public var readmePath: URL? { nil }
-        public var changelogPath: URL? { nil }
+        guard !handlers.isEmpty else {
+            NSLog(
+                "[PluginManager] No artifact handler plugins for '%@' (%d loaded)",
+                artifact.filename,
+                plugins.count
+            )
+            return
+        }
+
+        await withTaskGroup(of: Void.self) { group in
+            for loaded in handlers {
+                let pluginId = loaded.plugin.id
+                group.addTask {
+                    do {
+                        _ = try await loaded.plugin.invoke(
+                            type: "artifact",
+                            id: "share",
+                            payload: payload
+                        )
+                        NSLog(
+                            "[PluginManager] Artifact '%@' delivered to '%@'",
+                            artifact.filename,
+                            pluginId
+                        )
+                    } catch {
+                        NSLog(
+                            "[PluginManager] Artifact '%@' delivery to '%@' failed: %@",
+                            artifact.filename,
+                            pluginId,
+                            error.localizedDescription
+                        )
+                    }
+                }
+            }
+        }
     }
 
-    /// Agent-view plugin list. Empty on Intel (runtime amputated).
-    public var plugins: [LoadedPlugin] { [] }
+    // MARK: - Quarantine and consent (stage 2e step 2, 2g)
 
-    /// Lookup used by `pluginTabContent(for:)`. Returns nil on Intel.
-    public func loadedPlugin(for pluginId: String) -> LoadedPlugin? { nil }
+    /// Quarantine release. No-op until the crash-loop guard lands.
+    nonisolated static func removeFromQuarantine(_ pluginId: String) {}
 
-    /// Load-error lookup for the failed-plugin tab. Nil on Intel.
-    public func loadError(for pluginId: String) -> String? { nil }
-
-    /// Quarantine release. No-op on Intel (nothing is quarantined).
-    nonisolated public static func removeFromQuarantine(_ pluginId: String) {}
-
-    /// Load-error sentinels PluginsView matches against the stored
-    /// `loadError` string. Mirrors the upstream nested type.
-    public enum PluginLoadError {
-        public static let consentRequiredPrefix = "CONSENT_REQUIRED:"
-    }
-
-    /// Grant a plugin's consent gate (the "this plugin wants X" prompt).
-    /// No-op on Intel — plugins don't load at runtime, so there's
-    /// nothing to consent to. Throwing signature preserved for the
-    /// call site.
-    public func grantConsent(pluginId: String) throws {}
+    /// Intel's folders carry no consent marker (upstream's arrives with the
+    /// installer, stage 2g), so there is nothing to grant.
+    func grantConsent(pluginId: String) throws {}
 }
 
-/// Plugin manifest surface AgentDetailView reads. The full upstream
-/// manifest lives in the excluded plugin runtime; Intel mirrors only
-/// the fields the agent-detail plugin tabs render (name, instructions,
-/// capability routes/web/config, secrets). Everything is populated as
-/// empty/nil on Intel because no plugins load at runtime.
-public struct PluginManifest: Sendable {
-    public enum RouteAuth: String, Sendable, Equatable {
-        case none
-        case verify
-        case owner
-    }
+/// A user-settable config field, from the manifest's `secrets`, for Intel's
+/// config sheet (`IntelPluginConfigView`).
+public struct IntelPluginConfigField: Sendable, Identifiable {
+    public let id: String
+    public let label: String
+    public let detail: String?
+    public let required: Bool
+    public let url: String?
+    public let isSecret: Bool
 
-    public struct RouteSpec: Identifiable, Sendable {
-        public let id: String
-        public let path: String
-        public let methods: [String]
-        public let auth: RouteAuth
-        public let description: String?
-        public init(
-            id: String,
-            path: String,
-            methods: [String],
-            auth: RouteAuth,
-            description: String? = nil
-        ) {
-            self.id = id
-            self.path = path
-            self.methods = methods
-            self.auth = auth
-            self.description = description
-        }
-    }
-
-    public struct WebConfig: Sendable {
-        public let mount: String
-        public init(mount: String = "") { self.mount = mount }
-    }
-
-    public struct ConfigSpec: Sendable {
-        public init() {}
-    }
-
-    public struct Capabilities: Sendable {
-        public let routes: [RouteSpec]?
-        public let web: WebConfig?
-        public let config: ConfigSpec?
-        public init(routes: [RouteSpec]? = nil, web: WebConfig? = nil, config: ConfigSpec? = nil) {
-            self.routes = routes
-            self.web = web
-            self.config = config
-        }
-    }
-
-    // Surfaces the PluginsView secrets sheet + docs links read (M11
-    // Phase 11.B.2). Mirrors the real ExternalPlugin.SecretSpec /
-    // DocsSpec / DocLink (which are gated `#if !OSAURUS_INTEL`).
-    public struct SecretSpec: Sendable {
-        public let id: String
-        public let label: String
-        public let description: String?
-        public let required: Bool
-        public let url: String?
-        public init(
-            id: String,
-            label: String,
-            description: String? = nil,
-            required: Bool = true,
-            url: String? = nil
-        ) {
-            self.id = id
-            self.label = label
-            self.description = description
-            self.required = required
-            self.url = url
-        }
-    }
-
-    public struct DocLink: Sendable {
-        public let label: String
-        public let url: String
-        public init(label: String, url: String) {
-            self.label = label
-            self.url = url
-        }
-    }
-
-    public struct DocsSpec: Sendable {
-        public let readme: String?
-        public let changelog: String?
-        public let links: [DocLink]?
-        public init(readme: String? = nil, changelog: String? = nil, links: [DocLink]? = nil) {
-            self.readme = readme
-            self.changelog = changelog
-            self.links = links
-        }
-    }
-
-    public let name: String?
-    public let instructions: String?
-    public let capabilities: Capabilities
-    public let secrets: [SecretSpec]?
-    public let version: String?
-    public let docs: DocsSpec?
-
-    public init(
-        name: String? = nil,
-        instructions: String? = nil,
-        capabilities: Capabilities = Capabilities(),
-        secrets: [SecretSpec]? = nil,
-        version: String? = nil,
-        docs: DocsSpec? = nil
-    ) {
-        self.name = name
-        self.instructions = instructions
-        self.capabilities = capabilities
-        self.secrets = secrets
-        self.version = version
-        self.docs = docs
+    /// Upstream's `SecretSpec` has no "secret" flag: every field is a
+    /// secret, stored in the Keychain.
+    init(secret: PluginManifest.SecretSpec) {
+        self.id = secret.id
+        self.label = secret.label
+        self.detail = secret.description
+        self.required = secret.required
+        self.url = secret.url
+        self.isSecret = true
     }
 }
 #endif

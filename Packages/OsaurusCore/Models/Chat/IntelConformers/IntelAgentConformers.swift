@@ -49,7 +49,10 @@ extension Notification.Name {
 // `PluginState` (the Plugins-tab row model) reads them. Plugin install/
 // update is amputated on Intel, so versions are nil and capabilities
 // empty — these exist only so the full `PluginState` shape compiles.
-public struct SemanticVersion: Comparable, Sendable, Equatable {
+// It shadows `OsaurusRepository.SemanticVersion` inside OsaurusCore, so it
+// keeps that type's `CustomStringConvertible` ("0.20.0"): upstream's plugin
+// load errors interpolate it (`W-plugin-reliability` stage 2e).
+public struct SemanticVersion: Comparable, Sendable, Equatable, CustomStringConvertible {
     public let major: Int
     public let minor: Int
     public let patch: Int

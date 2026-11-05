@@ -436,7 +436,7 @@ public final class BackgroundTaskManager: ObservableObject {
         // self-scheduled wakes, plugins): built-in agents (the Default agent)
         // are only reachable from the in-app Chat (upstream
         // `BuiltInAgentGuard`). Plugins dispatch as the calling chat's agent
-        // (`IntelPluginExecution`), so they get no exemption.
+        // (`PluginHostContext.dispatch`), so they get no exemption.
         if !request.allowsBuiltInAgent,
             Agent.rejectBuiltInForExternalSurface(request.agentId, source: "background/dispatchChat") != nil
         {
@@ -954,7 +954,6 @@ public final class BackgroundTaskManager: ObservableObject {
             return
         }
 
-        #if !OSAURUS_INTEL
         if let loaded = PluginManager.shared.loadedPlugin(for: pluginId),
             loaded.plugin.hasTaskEventHandler
         {
@@ -965,20 +964,6 @@ public final class BackgroundTaskManager: ObservableObject {
                 agentId: state.agentId
             )
         }
-        #else
-        // Intel's plugin host (`W-plugin-reliability` stage 2c): the
-        // dylib's `IntelLoadedPlugin`, same contract as upstream's above.
-        if let loaded = PluginManager.shared.nativeHandle(for: pluginId),
-            loaded.hasTaskEventHandler
-        {
-            loaded.notifyTaskEvent(
-                taskId: state.id.uuidString,
-                eventType: type,
-                eventJSON: json,
-                agentId: state.agentId
-            )
-        }
-        #endif
     }
 
     // MARK: - Dispatch Event Gating

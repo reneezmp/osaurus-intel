@@ -44,6 +44,12 @@ final class ExternalTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     }
 
     func execute(argumentsJSON: String) async throws -> String {
+        if let refusal = XLSXPreservation.pluginOverwriteRefusal(
+            pluginId: pluginId, toolName: name, argumentsJSON: argumentsJSON,
+            folderRoot: ChatExecutionContext.currentFolderRoot)
+        {
+            return refusal
+        }
         let agentId = ChatExecutionContext.currentAgentId
         let payloadWithSecrets = injectSecrets(into: argumentsJSON, agentId: agentId)
         let payloadWithContext = injectFolderContext(into: payloadWithSecrets)
@@ -56,15 +62,19 @@ final class ExternalTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
         )
     }
 
-    /// Native plugins that touch macOS automation APIs often hold
-    /// AppKit/Accessibility objects whose lifetime is tied to the main
-    /// thread. Dispatching those C ABI calls on the plugin's concurrent
-    /// queue can turn a valid UI element reference into a dangling ObjC
-    /// pointer during write actions such as click/type/press-key.
+    /// Native plugins that touch macOS automation APIs hold Accessibility
+    /// objects that must not be mutated concurrently: dispatching those
+    /// C ABI calls on the plugin's concurrent queue can turn a valid
+    /// UI-element reference into a dangling ObjC pointer during write
+    /// actions such as click/type/press-key. They get one-at-a-time
+    /// execution on the driver's off-main AX serial queue — the same queue
+    /// the native Computer Use driver uses — NOT the main actor: a plugin
+    /// legitimately driving another app for seconds must never occupy the
+    /// UI run loop for that duration.
     private static func invocationIsolation(for requirements: [String]) -> ExternalPlugin.InvocationIsolation {
         let normalized = Set(requirements.map { $0.lowercased() })
         if normalized.contains("accessibility") || normalized.contains("automation") {
-            return .mainActor
+            return .accessibilityQueue
         }
         return .pluginQueue
     }
@@ -73,7 +83,12 @@ final class ExternalTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     /// - Parameter payload: Original JSON payload
     /// - Returns: Payload with secrets injected, or original payload if no secrets or parsing fails
     private func injectSecrets(into payload: String, agentId: UUID? = nil) -> String {
-        let agentId = agentId ?? Agent.defaultId
+        // No agent context (or Default-agent context) means the tool is being
+        // invoked anonymously. Return the payload unchanged rather than
+        // injecting the Default agent's secrets — the previous
+        // `?? Agent.defaultId` fallback leaked the built-in agent's secret
+        // namespace to anonymous tool paths.
+        guard let agentId = agentId, agentId != Agent.defaultId else { return payload }
         let secrets = plugin.resolvedSecrets(agentId: agentId)
         guard !secrets.isEmpty else { return payload }
 
@@ -102,9 +117,10 @@ final class ExternalTool: OsaurusTool, PermissionedTool, @unchecked Sendable {
     /// - Parameter payload: Original JSON payload
     /// - Returns: Payload with folder context injected, or original payload if no folder context active
     private func injectFolderContext(into payload: String) -> String {
-        // Read from the thread-safe cache to avoid hopping to MainActor,
-        // which can deadlock when the main thread is busy with SwiftUI layout.
-        guard let rootPath = FolderContextService.cachedRootPath else { return payload }
+        // The EXECUTING chat's folder root, read from the TaskLocal execution
+        // scope bound by the send/run surface — no MainActor hop, and no
+        // cross-chat leakage when two sessions use different folders.
+        guard let rootPath = ChatExecutionContext.currentFolderRoot else { return payload }
 
         // Parse the original payload
         guard let payloadData = payload.data(using: .utf8),

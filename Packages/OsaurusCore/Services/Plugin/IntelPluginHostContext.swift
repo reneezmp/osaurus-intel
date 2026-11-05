@@ -3,8 +3,8 @@
 //  osaurus
 //
 //  `W-plugin-reliability` stage 2a (docs/UPSTREAM_SYNC.md, "Plugin host
-//  safety"): upstream's `PluginHostContext` for Intel's slim plugin host
-//  (`IntelPluginExecution`). Upstream's `PluginHostAPI.swift` stays
+//  safety"): upstream's `PluginHostContext` for Intel's plugin host (since
+//  stage 2e, upstream's `ExternalPlugin`). Upstream's `PluginHostAPI.swift` stays
 //  compiled out (its inference half needs upstream's chat engine), so this
 //  file carries the parts that only need Foundation, copied verbatim from
 //  upstream `bce907045`:
@@ -24,13 +24,20 @@
 //  stage 2d the inference callbacks (`complete`, `complete_stream`,
 //  `complete_cancel`, `embed`, `list_models`): the in-flight cap and stream
 //  registry here, the callbacks on Intel's engines in
-//  `IntelPluginInference.swift`.
+//  `IntelPluginInference.swift`. Stage 2e brought the last ones over:
+//  `config_get` / `config_set` / `config_delete`, `log`, `log_structured`
+//  and `free_string`, so `buildHostAPI()` is upstream's and every callback
+//  in the table is upstream's code.
 //
 
 #if OSAURUS_INTEL
 
 import Foundation
 import os
+
+extension Notification.Name {
+    static let pluginConfigDidChange = Notification.Name("PluginConfigDidChange")
+}
 
 // MARK: - Per-Plugin Host Context
 
@@ -294,11 +301,51 @@ final class PluginHostContext: @unchecked Sendable {
         database.close()
     }
 
-    /// Upstream's `buildHostAPI()`: a heap-allocated table this context owns
-    /// (freed in `deinit`), stable for the plugin's lifetime. Intel's table
-    /// mixes Intel's callbacks with upstream's (`buildIntelHostAPI`).
+    /// Builds a heap-allocated C-compatible host API struct with trampoline
+    /// function pointers. The returned pointer is stable for the lifetime of
+    /// this context, so plugins may store it directly.
     func buildHostAPI() -> UnsafeMutablePointer<osr_host_api> {
-        let ptr = buildIntelHostAPI()
+        let ptr = UnsafeMutablePointer<osr_host_api>.allocate(capacity: 1)
+        ptr.initialize(
+            to: osr_host_api(
+                // v6 surface — frozen layout. Two trampoline slots
+                // (`dispatch_clarify`, `dispatch_add_issue`) remain wired
+                // for ABI compat but return structured `not_supported` JSON.
+                // `get_active_agent_id` (v4) lets plugins key per-agent
+                // state without caching across callbacks. `log_structured`
+                // (v5) attaches searchable JSON fields to log entries.
+                // `free_string` (v6) is the host-controlled `free()`
+                // pair for every host-returned `const char*` — added so
+                // plugins don't accidentally route host-allocated
+                // pointers through their own `free_string` callback,
+                // which can corrupt the heap if it isn't plain `free`.
+                version: 6,
+                config_get: PluginHostContext.trampolineConfigGet,
+                config_set: PluginHostContext.trampolineConfigSet,
+                config_delete: PluginHostContext.trampolineConfigDelete,
+                db_exec: PluginHostContext.trampolineDbExec,
+                db_query: PluginHostContext.trampolineDbQuery,
+                log: PluginHostContext.trampolineLog,
+                dispatch: PluginHostContext.trampolineDispatch,
+                task_status: PluginHostContext.trampolineTaskStatus,
+                dispatch_cancel: PluginHostContext.trampolineDispatchCancel,
+                dispatch_clarify: PluginHostContext.trampolineDispatchClarify,
+                complete: PluginHostContext.trampolineComplete,
+                complete_stream: PluginHostContext.trampolineCompleteStream,
+                embed: PluginHostContext.trampolineEmbed,
+                list_models: PluginHostContext.trampolineListModels,
+                http_request: PluginHostContext.trampolineHttpRequest,
+                file_read: PluginHostContext.trampolineFileRead,
+                list_active_tasks: PluginHostContext.trampolineListActiveTasks,
+                send_draft: PluginHostContext.trampolineSendDraft,
+                dispatch_interrupt: PluginHostContext.trampolineDispatchInterrupt,
+                dispatch_add_issue: PluginHostContext.trampolineDispatchAddIssue,
+                complete_cancel: PluginHostContext.trampolineCompleteCancel,
+                get_active_agent_id: PluginHostContext.trampolineGetActiveAgentId,
+                log_structured: PluginHostContext.trampolineLogStructured,
+                free_string: PluginHostContext.trampolineHostFreeString
+            )
+        )
         hostAPIPtr = ptr
         return ptr
     }
@@ -358,6 +405,90 @@ final class PluginHostContext: @unchecked Sendable {
                 print("[PluginHostAPI:\(pluginId)] Failed to open plugin database: \(error)")
             }
         }
+    }
+
+    // MARK: - Config Callbacks
+
+    func configGet(key: String) -> String? {
+        // Anonymous reads (no chat-bound agent) must not silently fall back
+        // to the Default agent's secret namespace. Warn-once and return nil
+        // so the plugin reads no value rather than the Default agent's.
+        guard let agentId = resolvedAgentIdOrNil else {
+            Self.warnNoAgentContextOnce(pluginId: pluginId, op: "config_get")
+            return nil
+        }
+        // Shared resolution policy (exact agent, then default-agent
+        // fallback) so `config_get` agrees with tool payload injection —
+        // a `bot_token` saved as a Plugins-tab global default must be
+        // readable here, not only via the injected payload.
+        return ToolSecretsKeychain.resolvedSecret(id: key, for: pluginId, agentId: agentId)
+    }
+
+    /// Maximum config value byte size accepted by `config_set`. The
+    /// keychain is for credentials and small state, not blob storage;
+    /// values larger than this are silently rejected with a one-shot
+    /// warning (the plugin is expected to use `db_exec` / `db_query`
+    /// for larger payloads). The cap is documented under `config_set`
+    /// in `osaurus_plugin.h`.
+    static let configValueMaxBytes = 1 * 1024 * 1024  // 1 MiB
+
+    func configSet(key: String, value: String) {
+        // Reject oversized values up front — silently, since the C ABI
+        // is `void`-returning and there's no envelope channel back to
+        // the plugin. The one-shot warning surfaces the bug to the
+        // plugin author the first time they trigger it.
+        if value.utf8.count > Self.configValueMaxBytes {
+            Self.warnConfigValueTooLargeOnce(
+                pluginId: pluginId,
+                key: key,
+                size: value.utf8.count
+            )
+            return
+        }
+        // Anonymous writes (no chat-bound agent) must not silently land in
+        // the Default agent's secret namespace. No-op + warn-once instead.
+        guard let agentId = resolvedAgentIdOrNil else {
+            Self.warnNoAgentContextOnce(pluginId: pluginId, op: "config_set")
+            return
+        }
+        ToolSecretsKeychain.saveSecret(value, id: key, for: pluginId, agentId: agentId)
+        postConfigChange(key: key, value: value)
+    }
+
+    func configDelete(key: String) {
+        guard let agentId = resolvedAgentIdOrNil else {
+            Self.warnNoAgentContextOnce(pluginId: pluginId, op: "config_delete")
+            return
+        }
+        ToolSecretsKeychain.deleteSecret(id: key, for: pluginId, agentId: agentId)
+        postConfigChange(key: key, value: nil)
+    }
+
+    private func postConfigChange(key: String, value: String?) {
+        DispatchQueue.main.async { [pluginId] in
+            var userInfo: [String: String] = ["pluginId": pluginId, "key": key]
+            if let value { userInfo["value"] = value }
+            NotificationCenter.default.post(
+                name: .pluginConfigDidChange,
+                object: nil,
+                userInfo: userInfo
+            )
+        }
+    }
+
+    /// Emit a one-shot warning when a plugin tries to store an
+    /// oversized value via `config_set`. The C ABI is void-returning
+    /// so the plugin author won't see the rejection otherwise.
+    static func warnConfigValueTooLargeOnce(pluginId: String, key: String, size: Int) {
+        PluginOnceLogger.warnOnce(
+            key: "\(pluginId)|config_set|too_large|\(key)",
+            "[PluginHostAPI] Plugin '%@' called config_set('%@', ...) with a %d-byte value, "
+                + "exceeding the 1 MiB config-value cap. The write was dropped. Use db_exec / "
+                + "db_query for larger payloads. This warning is logged once per plugin per key per process.",
+            pluginId,
+            key,
+            size
+        )
     }
 
     // MARK: - Database Callbacks
@@ -774,10 +905,8 @@ extension PluginHostContext {
     static func dispatchToolAllowedSet(pluginId: String) -> Set<String> {
         let registry = ToolRegistry.shared
         var allowed = registry.builtInToolNames.union(registry.runtimeManagedToolNames)
-        // Intel: the loaded plugin is `IntelLoadedPlugin`, whose tools are
-        // registered under their manifest ids (`IntelPluginTool.name`).
-        if let loaded = PluginManager.shared.nativeHandle(for: pluginId) {
-            for name in loaded.toolIds { allowed.insert(name) }
+        if let loaded = PluginManager.shared.loadedPlugin(for: pluginId) {
+            for tool in loaded.tools { allowed.insert(tool.name) }
         }
         return allowed
     }
@@ -1686,6 +1815,106 @@ extension PluginHostContext {
         default:
             return 500
         }
+    }
+
+    // MARK: Config Trampolines
+
+    static let trampolineConfigGet: osr_config_get_t = { keyPtr in
+        guard let keyPtr, let ctx = activeContext() else { return nil }
+        let key = String(cString: keyPtr)
+        guard let value = ctx.configGet(key: key) else { return nil }
+        return makeCString(value)
+    }
+
+    static let trampolineConfigSet: osr_config_set_t = { keyPtr, valuePtr in
+        guard let keyPtr, let valuePtr, let ctx = activeContext() else { return }
+        let key = String(cString: keyPtr)
+        let value = String(cString: valuePtr)
+        ctx.configSet(key: key, value: value)
+    }
+
+    static let trampolineConfigDelete: osr_config_delete_t = { keyPtr in
+        guard let keyPtr, let ctx = activeContext() else { return }
+        let key = String(cString: keyPtr)
+        ctx.configDelete(key: key)
+    }
+
+    // MARK: Logging Trampoline
+
+    /// Maps the integer log level to the human-readable label and the
+    /// synthetic HTTP status used by Insights filters. Levels mirror
+    /// the documented contract in `osaurus_plugin.h`:
+    /// `0=trace, 1=debug, 2=info, 3=warn, 4=error`. Shared between
+    /// `trampolineLog` and `trampolineLogStructured` so the two log
+    /// sources stay consistent in the dashboard.
+    static func levelMetadata(for level: Int32) -> (name: String, statusCode: Int) {
+        switch level {
+        case 0: return ("TRACE", 200)
+        case 1: return ("DEBUG", 200)
+        case 2: return ("INFO", 200)
+        case 3: return ("WARN", 299)
+        case 4: return ("ERROR", 500)
+        default: return ("LOG", 200)
+        }
+    }
+
+    static let trampolineLog: osr_log_t = { level, msgPtr in
+        guard let msgPtr, let ctx = activeContext() else { return }
+        let message = String(cString: msgPtr)
+        let (levelName, statusCode) = levelMetadata(for: level)
+        NSLog("[Plugin:%@] [%@] %@", ctx.pluginId, levelName, message)
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "LOG",
+            path: "[\(levelName)] \(message)",
+            statusCode: statusCode,
+            durationMs: 0,
+            requestBody: message
+        )
+    }
+
+    /// Frees a string the host previously returned to a plugin (v6).
+    /// Internally `libc free()` — which pairs with the `strdup` every
+    /// host trampoline uses to allocate its return value. NULL is a
+    /// no-op so the plugin can wire it into a generic defer block
+    /// without an explicit guard. See `osr_host_free_string_fn` in
+    /// `osaurus_plugin.h` for the contract rationale (plugins should
+    /// never use their own `free_string` callback for host-allocated
+    /// strings — that direction is reversed and may corrupt heap if
+    /// the plugin's `free_string` does anything besides plain `free`).
+    static let trampolineHostFreeString: osr_host_free_string_t = { ptr in
+        guard let ptr else { return }
+        Darwin.free(UnsafeMutableRawPointer(mutating: ptr))
+    }
+
+    /// Structured-log trampoline (v5). The plugin attaches a JSON
+    /// payload that surfaces in Insights as searchable fields. NULL
+    /// payload degrades gracefully to the same shape `trampolineLog`
+    /// produces. Invalid JSON is treated as opaque text — the host
+    /// doesn't reject the call (the plugin author would have no way
+    /// to learn) but the payload appears as-is in the log row.
+    static let trampolineLogStructured: osr_log_structured_t = { level, msgPtr, payloadPtr in
+        guard let msgPtr, let ctx = activeContext() else { return }
+        let message = String(cString: msgPtr)
+        let payload = payloadPtr.map { String(cString: $0) }
+        let (levelName, statusCode) = levelMetadata(for: level)
+
+        // Console line keeps the structured payload visible alongside
+        // the message. Operators reading the unified log want both.
+        if let payload {
+            NSLog("[Plugin:%@] [%@] %@ %@", ctx.pluginId, levelName, message, payload)
+        } else {
+            NSLog("[Plugin:%@] [%@] %@", ctx.pluginId, levelName, message)
+        }
+
+        logPluginCall(
+            pluginId: ctx.pluginId,
+            method: "LOG",
+            path: "[\(levelName)] \(message)",
+            statusCode: statusCode,
+            durationMs: 0,
+            requestBody: payload ?? message
+        )
     }
 
     // MARK: Database Trampolines

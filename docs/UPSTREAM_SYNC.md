@@ -4682,7 +4682,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2b | Upstream's `PluginDatabase`: SQL guard, 100 MiB cap, teardown gate. Intel's plaintext `Tools/<id>/plugin.db` moves over. |
 | 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
-| 2e | Load lifecycle: compatibility enforcement, the crash-loop guard, per-agent config delivery and `PluginConfigView`, the out-of-process host (`PluginProcessHost`, off by default upstream) |
+| 2e | Load lifecycle, in four steps (2026-11-05): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel |
 | 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
 
@@ -4936,7 +4936,9 @@ Tests:
   `session_id`; `embed` input checks; `list_models`; plugin instructions
   reaching the request.
 - **Still excluded:** `PluginAgentScopingTests` and
-  `PluginClarifyEventTests` (they need `ExternalPlugin`, 2e).
+  `PluginClarifyEventTests` (they need `ExternalPlugin`, 2e). 2e-1
+  included `PluginAgentScopingTests`; `PluginClarifyEventTests` waits on
+  `W-background-runs-sync` (`MockChatEngine`).
 
 Validation: the full interim gate passed 4,619 tests (only the known avatar
 cache failure); package and tests also build for `x86_64-apple-macosx13.0`.
@@ -4948,6 +4950,132 @@ which passed in the 2c gate and on the rerun) and showed writes to
 only process holding those files, so the writes were its own activity log.
 The rerun was complete, with no live writes. When the app is running
 during a gate, check `lsof +D ~/.osaurus` before blaming the tests.
+
+### Plugin loading, step 1 (`W-plugin-reliability` stage 2e-1) — 2026-11-05
+
+A loaded plugin on Intel is now upstream's `ExternalPlugin`
+(`Models/Plugin/ExternalPlugin.swift`, `bce907045`, no longer compiled out),
+its tools are upstream's `ExternalTool`, and `PluginManager` (the `#else`
+half of `Managers/Plugin/PluginManager.swift`) holds upstream's
+`LoadedPlugin` / `FailedPlugin` / `PluginLoadError` and loads each dylib
+with upstream's `loadPluginWithError`. Before this Intel had its own loader
+(`IntelPluginLoader`, `IntelLoadedPlugin`, `IntelPluginTool`, its own copy
+of the ABI structs and its own config / log callbacks in
+`IntelPluginExecution.swift`), and `PluginManager.plugins` was always empty,
+so every upstream screen that reads it showed nothing.
+
+- **Load checks (upstream's):** v2 and legacy v1 entry points (v1 through
+  the `osr_plugin_api_v1` prefix), the ABI table (required slots, every
+  slot inside a loaded image), the manifest's `plugin_id` against the
+  folder, empty / duplicate tool and route ids, `min_osaurus` and
+  `min_macos` (compatibility enforcement), and routes shadowed by the web
+  mount. A failure lands in `failedPlugins` with the decoded manifest, so
+  the Plugins tab and the agent page's failed-plugin tab show it (Intel
+  only logged it).
+- **Load cycle (upstream's):** one reload at a time
+  (`activeReloadTask`, `ensurePromptCatalogReady`), scan and `dlopen` off
+  the main thread, only new dylibs opened on a plain reload, removed
+  folders unloaded (`ExternalPlugin.shutdown()`, context teardown, tools
+  and skills unregistered), duplicate ids refused, no `dlclose` (Intel
+  used to `dlclose` everything and reload all plugins on every scan).
+  Plugin skills (`skills/*SKILL.md`) register through upstream's
+  `registerPluginSkill`, added to Intel's `SkillManager` without search
+  indexing.
+- **Host table:** the last Intel callbacks (`config_get` / `config_set` /
+  `config_delete`, `log`, `log_structured`, `free_string`) are upstream's,
+  so `PluginHostContext.buildHostAPI()` is upstream's table. Behaviour
+  change: a call from a Default-agent chat is now anonymous for config,
+  as upstream (`resolvedAgentIdOrNil`): it reads and writes nothing.
+  Intel's callback used the Default agent's namespace. Only the retired
+  `search-intel` plugin reads config, so no Intel plugin is affected.
+- **Tools:** upstream's `ExternalTool` (XLSX overwrite refusal,
+  `_secrets` / `_context`, accessibility isolation). Its default policy
+  is upstream's: a plugin tool **asks before it runs** unless the manifest
+  sets `permission_policy`. None of the Intel registry's manifests does,
+  so `time`, `hello`, `fetch` and `memo` tools now show an approval card
+  until the user allows them. Intel's `IntelPluginTool` ran them without
+  asking.
+- **Newly visible upstream UI:** with `plugins` filled, an agent's page
+  shows a tab for each plugin with instructions, secrets, config, routes
+  or a web app (`memo` has instructions), with upstream's per-agent
+  instructions override; the Plugins tab's detail reads the manifest
+  (secrets, tools); the chat history filter and `/sessions` list loaded
+  plugins. Intel's own system-prompt "Plugin Instructions" block (upstream
+  adds plugin instructions only to plugin-started runs) now uses that
+  override through `PluginInstructionsResolver`.
+- **Unloading on Intel:** upstream never `dlclose`s (stale pointer
+  authentication on Apple Silicon when a path is reloaded) and never needs
+  to, because each version gets its own folder. Intel's installer rewrites
+  `Tools/<id>/plugin.dylib` in place, and dyld returns a still-open image
+  instead of reading the new file, so Intel `dlclose`s after
+  `shutdown()` on x86_64 only (no pointer authentication there; the
+  arm64 test build keeps upstream's behaviour). The installer
+  (`PluginRepositoryService`, Intel's) now unloads the plugin
+  (`PluginManager.unloadForReinstall`) before writing, and writes the
+  dylib and manifest atomically, so nothing runs from a file being
+  replaced. Before this the old file was overwritten while still mapped.
+- **Intel keeps:** its folder layout (`Tools/<id>/manifest.json` and the
+  dylib; upstream's `Tools/<id>/<version>/` with receipt and consent comes
+  with the installer, 2g), the Apple Silicon capability check on
+  `manifest.json` before any `dlopen`, its capability buckets for the
+  Plugins tab, its superseded list, and the `OSAURUS_INTEL_PLUGIN_*`
+  launch diagnostics.
+- **Shims** (`Services/Plugin/IntelPluginShims.swift`): `ExternalPlugin`
+  names `AccessibilityManager.serialQueue` (the Computer Use driver,
+  `W-computer-use`) and `CrashReportingService.recordBreadcrumb` (Sentry,
+  not shipped on Intel). The shim gives the queue upstream's label and
+  drops breadcrumbs. Delete each when its upstream file is ported.
+- **`PluginProcessHost.swift`** (upstream's) is compiled now because
+  `ExternalPlugin` calls it; it stays off (no helper binary, flag off)
+  until 2e-4.
+- **`PluginManagerProtocol`** (Intel-only) now takes a `SharedArtifact`,
+  and `notifyArtifactHandlers` is upstream's (Intel's was a no-op).
+
+**Found while doing it:**
+- Intel's stand-in `SemanticVersion` (`IntelAgentConformers.swift`)
+  shadows `OsaurusRepository.SemanticVersion` inside OsaurusCore and had
+  no `CustomStringConvertible`, so upstream's `min_osaurus` error printed
+  `SemanticVersion(major: 0, …)`. It now has the string form; merging the
+  two types is a follow-up (the Intel one also parses `"1"` and `"v1.2"`).
+- `ToolsPaths.toolsRootDirectory()` (OsaurusRepository) resolves to the
+  live `~/.osaurus/Tools` unless `ToolsPaths.overrideRoot` is set; it
+  ignores `OSAURUS_TEST_ROOT`. Upstream's crash-loop guard writes its
+  marker and quarantine files through it, so 2e-2 must route them through
+  Intel's `OsaurusPaths` (as `PluginManager.toolsRootDirectory()` does
+  now) or tests would write to the live folder
+  (`TEST_STORAGE_SAFETY.md`).
+- Upstream's `PluginClarifyEventTests` needs `MockChatEngine` and the
+  `waitingForInput` task status; it stays excluded with
+  `BackgroundTaskInterruptTests` (`W-background-runs-sync`).
+
+Tests:
+- **Now included:** upstream's `PluginAgentScopingTests` (config dedup,
+  TLS scope, secret merging, config cap), `PluginAbiHandshakeTests`,
+  `PluginCompatibilityEnforcementTests`, `PluginHostFreeStringTests`,
+  `PluginLogStructuredTests`, `PluginShutdownRaceTests`,
+  `PluginMainThreadResponsivenessTests`, and upstream's full
+  `PluginLoaderAbiValidationTests` (Intel's trimmed copy is gone).
+- **Intel tests moved to upstream's types:** `IntelPluginTaskEventTests`
+  (an `ExternalPlugin`; a plugin's own tools in its dispatch allowed set),
+  `IntelPluginSecretsTests` (config through `PluginHostContext`, the
+  Default agent anonymous, injection through a real `ExternalTool`,
+  plugin tools ask by default, load checks through `PluginManager`),
+  `IntelPluginHostSafetyTests` (config through the host table).
+- One-off check (not committed): the real `time`, `hello`, `memo` and
+  `fetch` sources built for the build Mac's arch, copied into a test root,
+  loaded through `PluginManager.loadAll`: all four loaded with their
+  tools, `get_current_time` and `hello` answered through `ToolRegistry`,
+  `memo_save` / `memo_list` round-tripped through the plugin database,
+  removing a folder unloaded that plugin and its tools; an in-place
+  reinstall (`unloadForReinstall`, atomic write, `loadAll`) brought
+  `hello` back working; a copy under the wrong folder name failed with
+  upstream's identity message and kept its manifest name.
+
+Validation: the full interim gate passed 4,720 tests in 592 suites (only
+the known avatar cache failure); package and tests also build for
+`x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0 (`ExternalPlugin.swift`
+dropped from `classify_gated.py`, no longer gated). No live `~/.osaurus`
+writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
