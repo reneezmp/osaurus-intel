@@ -27,7 +27,7 @@ Web search and the Apple app tools (Calendar, Reminders, Contacts, Notes, Mail, 
 
 ## Not in this build
 
-Claude plugin import (skills, commands, and MCP servers bundled from a GitHub repo) and the out-of-process plugin host.
+Claude plugin import (skills, commands, and MCP servers bundled from a GitHub repo).
 
 ## Troubleshooting
 

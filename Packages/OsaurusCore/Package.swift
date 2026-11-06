@@ -6,7 +6,13 @@ let package = Package(
     defaultLocalization: "en",
     platforms: [.macOS(.v13)],
     products: [
-        .library(name: "OsaurusCore", targets: ["OsaurusCore"])
+        .library(name: "OsaurusCore", targets: ["OsaurusCore"]),
+        // Out-of-process native plugin host: loads one plugin dylib via the
+        // frozen C ABI and executes it over stdio JSON-RPC so the app can
+        // kill/restart wedged accessibility/automation plugin code instead
+        // of hanging in-process. See `PluginHost/main.swift` and
+        // `Services/Plugin/PluginProcessHost.swift`.
+        .executable(name: "osaurus-plugin-host", targets: ["osaurus-plugin-host"]),
     ],
     dependencies: [
         .package(url: "https://github.com/apple/swift-nio.git", from: "2.88.0"),
@@ -162,6 +168,7 @@ let package = Package(
             exclude: [
                 "Tests",
                 "SQLCipher",
+                "PluginHost",
                 "Managers/Model/ModelManager.swift",
                 "Models/Chat/LiveVoiceAudioInputRegistry.swift",
                 "Models/Configuration/ServerRuntimeSettingsStore.swift",
@@ -194,11 +201,22 @@ let package = Package(
                 .define("OSAURUS_INTEL")
             ]
         ),
+        // Dependency-free (Foundation-only) helper executable: it must never
+        // link the app graph, so a wedged app subsystem can't wedge the
+        // helper and the binary stays small enough to respawn instantly.
+        .executableTarget(
+            name: "osaurus-plugin-host",
+            path: "PluginHost"
+        ),
         .testTarget(
             name: "OsaurusCoreTests",
             dependencies: [
                 "OsaurusCore",
                 "OsaurusSQLCipher",
+                // Ensures the helper binary is built into the products
+                // directory for every test lane (swift test AND xcodebuild),
+                // so PluginProcessHostTests can spawn the real executable.
+                "osaurus-plugin-host",
                 .product(name: "NIOEmbedded", package: "swift-nio"),
                 .product(name: "VMLXJinja", package: "IntelStubs"),
                 .product(name: "VecturaKit", package: "IntelStubs"),

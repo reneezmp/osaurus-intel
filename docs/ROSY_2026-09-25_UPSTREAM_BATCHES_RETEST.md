@@ -2912,3 +2912,16 @@ regression check.
       only, no "Configuration" section and no "Apple Silicon only"
       placeholder.
 
+## Plugin loading, step 4 (2026-11-06)
+
+`W-plugin-reliability` stage 2e-4 (`UPSTREAM_SYNC.md`, "Plugin loading,
+step 4"). Not in candidate 66. The out-of-process plugin host is off by
+default and no Intel plugin uses it, so this is a packaging check.
+
+- [ ] The build script's summary shows `helper:` with an x86_64 binary
+      (not "not embedded"), and
+      `ls osaurus.app/Contents/Helpers` lists `osaurus-plugin-host`.
+- [ ] The app launches normally (the helper is inside the signed bundle;
+      `codesign --verify --deep osaurus.app` reports nothing).
+- [ ] Regression: `time`, `hello`, `fetch` and `memo` tools still work.
+

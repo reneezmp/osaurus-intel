@@ -4682,7 +4682,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2b | Upstream's `PluginDatabase`: SQL guard, 100 MiB cap, teardown gate. Intel's plaintext `Tools/<id>/plugin.db` moves over. |
 | 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
-| 2e | Load lifecycle, in four steps (2026-11-05; 2e-1 to 2e-3 done): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
+| 2e | Load lifecycle, in four steps (2026-11-05; all done 2026-11-06): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel |
 | 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
 
@@ -5206,6 +5206,60 @@ the known avatar cache failure); package and tests also build for
 (`PluginConfigView.swift` dropped from `classify_gated.py`, no longer
 gated). No live `~/.osaurus` writes, Keychain identity and
 `ai.osaurus.id` session-token mdat unchanged.
+
+### Plugin loading, step 4 (`W-plugin-reliability` stage 2e-4) — 2026-11-06
+
+Upstream's killable out-of-process plugin host (#2239), from `bce907045`:
+the `osaurus-plugin-host` helper (`Packages/OsaurusCore/PluginHost/main.swift`,
+Foundation only, its own ABI mirror) as an executable product and target
+of the OsaurusCore package, and `Services/Plugin/PluginProcessHost.swift`
+(compiled since 2e-1, because `ExternalPlugin` calls it).
+
+- **What it does:** with the hidden setting on, an `ExternalPlugin` call
+  whose tool requires `accessibility` or `automation` runs in a helper
+  process (one per plugin, JSON-RPC over stdin/stdout) instead of on the
+  shared accessibility queue. A call that passes its deadline (150 s;
+  load 30 s, config 15 s) gets the helper killed (SIGTERM, then SIGKILL)
+  and respawned on the next call, instead of wedging the queue until
+  Osaurus restarts. The helper's host callbacks (config, db, http, log)
+  come back to the app and run on the same `PluginHostContext` under the
+  same plugin / agent scope. Config changes are mirrored to a live
+  helper; unloading a plugin shuts its helper down.
+- **Off by default, as upstream:** `PluginProcessHostMode.isEnabled` reads
+  the `pluginProcessHostEnabled` default
+  (`defaults write com.dinoki.osaurus pluginProcessHostEnabled -bool YES`)
+  or `OSAURUS_PLUGIN_PROCESS_HOST=1`; upstream has no UI for it. Without
+  the helper binary (`Contents/Helpers/osaurus-plugin-host`, or
+  `OSAURUS_PLUGIN_HOST_PATH`) it stays in-process either way. None of the
+  Intel registry plugins declares `accessibility` / `automation`, so they
+  never use it.
+- **Packaging:** upstream's `make app` builds the `osaurus-plugin-host`
+  scheme and copies it into `Contents/Helpers`. Intel's builds go through
+  `scripts/build/build_rosy.sh` (also used by `cut_intel_release.sh`),
+  which now builds the scheme for x86_64 and embeds it before the
+  `codesign --deep` re-sign. A failure there warns and continues (the
+  feature is off by default); the script prints `helper:` with the
+  binary's arch or "not embedded". `xcodebuild -list` shows the scheme in
+  `osaurus.xcworkspace`; the embed step runs for the first time with the
+  next Rosy build.
+- **Intel note:** Intel's Rosy build doesn't embed the CLI
+  (`Contents/Helpers/osaurus`) either; upstream's Makefile does. Out of
+  scope here.
+
+Tests:
+- **Now included:** upstream's `PluginProcessHostTests` (the test target
+  depends on the helper, as upstream): a toy plugin compiled with `clang`
+  at test time, loaded by the real helper through the real client; a
+  round trip, a wedged call killed on its deadline and the next call
+  respawning the helper, and a host callback from inside the helper. No
+  helper process is left running after the suite.
+
+Validation: the full interim gate passed 4,760 tests in 599 suites (only
+the known avatar cache failure); package, tests and the helper also build
+for `x86_64-apple-macosx13.0` (`osaurus-plugin-host`: Mach-O x86_64
+executable). Classifiers: UNASSIGNED 0. No live `~/.osaurus` writes,
+Keychain identity and `ai.osaurus.id` session-token mdat unchanged. The
+in-app guide no longer lists the out-of-process host as missing.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

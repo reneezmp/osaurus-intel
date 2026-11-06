@@ -53,6 +53,32 @@ APP="$DERIVED/Build/Products/$CONFIG/osaurus.app"
 [ -d "$APP" ] || { echo "✗ build product not found at $APP"; exit 1; }
 PLIST="$APP/Contents/Info.plist"
 
+# Killable out-of-process plugin host (`W-plugin-reliability` stage 2e-4;
+# Services/Plugin/PluginProcessHost.swift), embedded in Contents/Helpers as
+# upstream's Makefile does. Osaurus only uses it when the hidden
+# `pluginProcessHostEnabled` setting is on (off by default, as upstream), so a
+# failure here warns instead of stopping the build: plugins then simply stay
+# in-process. Must run before the re-sign below (`--deep` signs the helper).
+echo "→ Building plugin host helper (osaurus-plugin-host)…"
+HELPER="$DERIVED/Build/Products/$CONFIG/osaurus-plugin-host"
+if xcodebuild \
+     -workspace osaurus.xcworkspace \
+     -scheme osaurus-plugin-host \
+     -configuration "$CONFIG" \
+     -arch x86_64 \
+     -skipPackagePluginValidation \
+     -skipMacroValidation \
+     -derivedDataPath "$DERIVED" \
+     ONLY_ACTIVE_ARCH=NO \
+     CODE_SIGN_IDENTITY="-" CODE_SIGNING_REQUIRED=NO CODE_SIGNING_ALLOWED=NO \
+     build | tail -3 && [ -x "$HELPER" ]; then
+  mkdir -p "$APP/Contents/Helpers"
+  cp "$HELPER" "$APP/Contents/Helpers/osaurus-plugin-host"
+  chmod +x "$APP/Contents/Helpers/osaurus-plugin-host"
+else
+  echo "⚠ plugin host helper not built; plugins stay in-process (the default)."
+fi
+
 echo "→ Baking OsaurusCanonicalData = true (use ~/.osaurus on Rosy)…"
 /usr/libexec/PlistBuddy -c "Set :OsaurusCanonicalData true" "$PLIST" 2>/dev/null \
   || /usr/libexec/PlistBuddy -c "Add :OsaurusCanonicalData bool true" "$PLIST"
@@ -72,6 +98,7 @@ echo ""
 echo "✅ Rosy deploy build ready:"
 echo "   $APP"
 echo "   arch:      $(file "$APP/Contents/MacOS/osaurus" | sed 's/.*: //')"
+echo "   helper:    $( [ -x "$APP/Contents/Helpers/osaurus-plugin-host" ] && file "$APP/Contents/Helpers/osaurus-plugin-host" | sed 's/.*: //' || echo "not embedded")"
 echo "   canonical: $(/usr/libexec/PlistBuddy -c 'Print :OsaurusCanonicalData' "$PLIST")"
 echo ""
 echo "Next: copy osaurus.app to Rosy's /Applications and launch it."
