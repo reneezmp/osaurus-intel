@@ -66,7 +66,7 @@ Incompatible 20 · already ported 1.
 | Upstream | What Intel got |
 |---|---|
 | #2977 `cce2803d4` | The reply footer's "files changed" button is created with `NSButton(frame:)`; `NSButton(title:target:action:)` hung the main thread. |
-| #3003 `4d506c990` | Tab layout is saved off the main thread (a busy cfprefsd hung the app). **Intel difference:** the quit path (`stopAllSessions`) saves synchronously, so the record can't be lost at exit. |
+| #3003 `4d506c990` | Tab layout is saved off the main thread (a busy cfprefsd hung the app). **Intel difference:** the quit path (`stopAllSessions`) saves synchronously, so the record can't be lost at exit. (2026-11-06: nothing called `stopAllSessions` at quit until `W-background-runs-sync` 2-2 wired it into `applicationShouldTerminate`.) |
 | #3007 `1cc8d44dc` | `DispatchRequest.reattachSession`; schedules pass `false`, so every run is a fresh chat even once reattach exists on Intel. |
 | #2999 `8af73f9f0` (part) | `/compact` explains itself: already running, wait for the reply, or nothing to compact yet. |
 | #3018 `12f67c83c` (part) | The local API server retries a busy port six times, a second apart, at launch (an Osaurus still quitting held it, and Intel ran with no API). **Intel:** a failed bind now shuts down its event loop group (Intel's server makes one per start). |

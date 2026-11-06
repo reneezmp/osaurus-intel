@@ -61,14 +61,18 @@ since it shipped the agent pill lives in the navigator, as upstream.
   saved chat in `ChatSessionsManager`'s memory, so waking is a synchronous
   copy (upstream reads the disk asynchronously and shows a loading state).
   Running, clarify-paused, queued-send and blank tabs never hibernate.
-- **Closing a tab or window that is still replying:**
-  `DetachedChatRunRegistry` holds the session until the run ends. The run
-  needs nothing else: `ChatSession.send` keeps the session alive and saves
-  when it finishes. Reopening that chat (sidebar, ⇧⌘T, Open in New Tab)
-  attaches the same live instance, so the reply keeps rendering and no
-  stale copy races its saves. This is Intel's stand-in for upstream's
-  `BackgroundTaskManager.adoptSession` / `liveTask(forSessionId:)`. Intel's
-  `BackgroundTaskManager` only runs dispatched work (schedules, watchers).
+- **Closing a tab or window that is still replying (or paused on a
+  question):** upstream's `BackgroundTaskManager.adoptSession` takes the
+  session as a background run (source `.chat`, so it isn't pushed back
+  into a tab right away, and no menu-bar card). Reopening that chat
+  (sidebar, ⇧⌘T, Open in New Tab) finds it with `liveTask(forSessionId:)`
+  and attaches the same live instance, bound to the window
+  (`bindWindow`), so the reply keeps rendering and no stale copy races its
+  saves. As upstream, once it finishes it stays as a retained run tab:
+  the next window that opens (or the next launch) shows it until its tab
+  is closed. The sidebar's Stop cancels it through the manager. Until
+  2026-11-06 (`W-background-runs-sync` 2-2) Intel used its own
+  `DetachedChatRunRegistry` for this, which held the session silently.
 - **One owner per saved chat** (upstream 979d53b40):
   `ChatWindowManager.revealOpenSession` checks every tab of every window and
   focuses the owning tab.
@@ -100,7 +104,8 @@ the inspector toggle and Pin Window.
 
 - New: `Managers/Chat/ChatTabLayoutStore.swift` (upstream, verbatim),
   `Models/Chat/ThreadScrollPositionStore.swift` (upstream, verbatim),
-  `Managers/Chat/DetachedChatRunRegistry.swift` (Intel),
+  `Managers/Chat/DetachedChatRunRegistry.swift` (Intel; removed
+  2026-11-06 for upstream's `adoptSession`),
   `Views/Chat/ChatTabStripView.swift` (upstream; Intel edits marked
   "Intel:": no tour anchor yet, no workspace identity, single-value
   `onChange`, no registry task to cancel on Delete).

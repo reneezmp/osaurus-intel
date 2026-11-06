@@ -173,7 +173,10 @@ struct IntelChatWindowLayoutTests {
             window.closeTab(id: runTab.id)
             #expect(manager.taskState(for: running.id) === running, "the run stays registered")
             #expect(running.chatSession?.windowState == nil, "view link severed")
-            #expect(DetachedChatRunRegistry.shared.sessions.isEmpty, "the registry owns it, not the detached holder")
+            #expect(
+                manager.backgroundTasks.values.filter { $0.chatSession === running.chatSession }.count == 1,
+                "the registry already owns it; closing the tab doesn't adopt it a second time"
+            )
 
             let done = makeRegistryTask(
                 agentId: Agent.defaultId, title: "Done job", status: .completed(summary: "ok"))

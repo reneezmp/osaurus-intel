@@ -2435,7 +2435,8 @@ calling a sync complete.
   [`CHAT_TABS_INTEL.md`](CHAT_TABS_INTEL.md).
 - **New Intel piece:** `DetachedChatRunRegistry` keeps a closed tab's (or
   window's) still-running chat reachable, so reopening it attaches the live
-  instance. Before this, a window closed mid-reply finished headless and
+  instance. (Replaced 2026-11-06 by upstream's `adoptSession`, "Background
+  runs, stage 2-2".) Before this, a window closed mid-reply finished headless and
   reopening it loaded a stale copy that could race its final save.
 - **Re-sync notes:** `ChatTabStripView.swift` is upstream's file with
   Intel edits (leading accessory, no inspector inset or tour, single-value
@@ -5644,6 +5645,50 @@ Tests:
 - The test target has no `OSAURUS_INTEL` define: Intel test adaptations are
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
+
+### Background runs, stage 2-2 (`W-background-runs-sync`) — 2026-11-06
+
+Chat windows hand running chats to `BackgroundTaskManager` the way
+upstream does, replacing Intel's `DetachedChatRunRegistry` (removed). This
+finishes the item's non-deferred work.
+
+- **Tab or window close (`teardownTabSession`):** a chat still replying or
+  paused on a clarify question is adopted (`adoptSession`, source `.chat`)
+  instead of held by the registry. `.chat` runs aren't surfaced back into
+  a tab by `taskRegistered` and raise no menu-bar card.
+- **Reopen (`loadSession`, ⇧⌘T):** `liveTask(forSessionId:)` finds the run;
+  `attachLive` (upstream `attachSession`) shows the same instance and binds
+  the window to the task.
+- **Binding follows the visible tab (`adoptTabSession`, upstream):** bound
+  while an active registry run is on screen, unbound otherwise; window
+  close (`closeWindow`, `windowWillClose`) unbinds.
+- **Window manager:** `isAnySessionStreaming` counts the registry's active
+  sessions (upstream).
+- **Behaviour change, as upstream:** a closed tab's run, once finished,
+  stays as a retained run tab. The next window that opens, or the next
+  launch, shows it until its tab is closed. The sidebar's Stop on such a
+  chat goes through `cancelTask` (it used to stop the session directly).
+- **Quit (found while doing it):** Intel's `applicationShouldTerminate`
+  never called `ChatWindowManager.stopAllSessions()` or
+  `BackgroundTaskManager.cancelAllTasks()`, upstream's first quit step. A
+  schedule running at quit left its `agent_runs` row "running", and the
+  synchronous tab-layout save at quit (`UPSTREAM_AUDIT_2026-10-07.md`, #3003)
+  never ran. Both are now called first, as upstream. Not launch-tested on
+  the build Mac (macOS beta); Rosy checks it.
+- **Intel difference:** `ChatWindowManager.session(forSessionId:)` still
+  falls back to the registry's live run (upstream returns nil), so the
+  phone handoff (`RemoteSessionContinuation`) waits for a closed tab's
+  reply before appending its turns, as it did with the old registry.
+
+Tests:
+- **New from upstream:** `ChatWindowSessionDetachTests` (new chat, loading
+  another chat, and switching agent while streaming keep the run in its
+  tab; reopening a running chat focuses its tab; closing one window never
+  stops another's stream). Intel has no session test-routing overrides,
+  and its `ChatTurnData` init takes an id and a date.
+- **`IntelChatTabsTests`, `IntelChatWindowLayoutTests`:** the running-tab
+  cases check the manager (adopted task, window binding, a registry run
+  isn't adopted twice).
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

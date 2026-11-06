@@ -5,8 +5,9 @@
 //  Browser-style chat tabs on Intel (upstream #2630, #2740, #2911;
 //  docs/CHAT_TABS_INTEL.md). Ports upstream's scoped-tab and remembered-tab
 //  cases that do not depend on the background-task registry, plus the
-//  Intel pieces: running tabs held by `DetachedChatRunRegistry`, in-memory
-//  hibernation, ⇧⌘T, the window shortcuts and the pre-tabs migration.
+//  Intel pieces: running tabs adopted by `BackgroundTaskManager` (upstream
+//  `adoptSession`, `W-background-runs-sync` 2-2), in-memory hibernation,
+//  ⇧⌘T, the window shortcuts and the pre-tabs migration.
 //
 
 import AppKit
@@ -46,11 +47,7 @@ struct IntelChatTabsTests {
     private func withStorage(_ body: @MainActor @Sendable () async throws -> Void) async throws {
         try await ChatHistoryTestStorage.run {
             ChatSessionsManager.shared.refresh()
-            DetachedChatRunRegistry.shared.removeAllForTesting()
-            defer {
-                DetachedChatRunRegistry.shared.removeAllForTesting()
-                ChatSessionsManager.shared.refresh()
-            }
+            defer { ChatSessionsManager.shared.refresh() }
             try await body()
         }
     }
@@ -278,7 +275,7 @@ struct IntelChatTabsTests {
         }
     }
 
-    // MARK: Running tabs (DetachedChatRunRegistry)
+    // MARK: Running tabs (adopted by BackgroundTaskManager)
 
     @Test func closingARunningTabKeepsItAlive_andReopeningAttachesTheSameInstance() async throws {
         try await withStorage {
@@ -292,18 +289,23 @@ struct IntelChatTabsTests {
 
             let runningTab = try #require(window.tabs.first { $0.session === running })
             window.closeTab(id: runningTab.id)
-            #expect(DetachedChatRunRegistry.shared.liveSession(forSessionId: a.id) === running)
+            let task = try #require(BackgroundTaskManager.shared.liveTask(forSessionId: a.id))
+            defer { BackgroundTaskManager.shared.finalizeTask(task.id) }
+            #expect(task.chatSession === running)
+            #expect(task.source == .chat)
             #expect(running.windowState == nil)
+            #expect(!BackgroundTaskManager.shared.isTaskAttachedToWindow(task.id))
 
             window.loadSession(a)
             #expect(window.session === running, "the live run, not a copy from disk")
             #expect(running.windowState === window)
-            #expect(DetachedChatRunRegistry.shared.liveSession(forSessionId: a.id) == nil)
+            #expect(BackgroundTaskManager.shared.taskId(forWindowId: window.windowId) == task.id)
+            #expect(window.tabs.filter { $0.session === running }.count == 1)
             running.isStreaming = false
         }
     }
 
-    @Test func aDetachedRunLeavesTheRegistryWhenItEnds() async throws {
+    @Test func aClosedTabsRunCompletesInTheRegistry() async throws {
         try await withStorage {
             let a = storedSession("Ending")
             let window = ChatWindowState(windowId: UUID(), agentId: Agent.defaultId)
@@ -313,12 +315,19 @@ struct IntelChatTabsTests {
             running.isStreaming = true
             window.newTab()
             window.closeTab(id: try #require(window.tabs.first { $0.session === running }).id)
-            #expect(DetachedChatRunRegistry.shared.sessions.count == 1)
+            let task = try #require(BackgroundTaskManager.shared.liveTask(forSessionId: a.id))
+            defer { BackgroundTaskManager.shared.finalizeTask(task.id) }
 
             running.isStreaming = false
             await flushMainQueue()
             await flushMainQueue()
-            #expect(DetachedChatRunRegistry.shared.sessions.isEmpty)
+            #expect(BackgroundTaskManager.shared.liveTask(forSessionId: a.id) == nil)
+            // Terminal, not necessarily `completed`: this test flips
+            // `isStreaming` by hand after `load()` (which stops the session),
+            // so the run reads as stopped. Real runs start through `send`,
+            // which clears `stopRequested`; `BackgroundTaskStreamingObserverTests`
+            // covers completion.
+            #expect(task.status.isTerminal)
         }
     }
 

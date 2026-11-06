@@ -1171,7 +1171,11 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
                 return match
             }
         }
-        return DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionId)
+        // Intel difference: a closed tab's still-running chat (now owned by
+        // `BackgroundTaskManager`) is found too, so callers such as the phone
+        // handoff (`RemoteSessionContinuation`) wait for its reply instead of
+        // splicing turns ahead of it. Upstream returns nil here.
+        return BackgroundTaskManager.shared.liveTask(forSessionId: sessionId)?.chatSession
     }
 
     /// The window whose tabs include `sessionId`, if any.
@@ -1566,6 +1570,9 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         }
         // VAD Mode resumes once the last chat window is gone (IntelVoiceLaunch).
         NotificationCenter.default.post(name: .chatViewClosed, object: id)
+        // No view shows the task any more: drop the window→task binding; the
+        // still-running work stays in the registry (upstream).
+        BackgroundTaskManager.shared.unbindWindow(id)
     }
 
     // MARK: - NSWindowDelegate (Intel chat windows)
@@ -1593,6 +1600,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         }
         // VAD Mode resumes once the last chat window is gone (IntelVoiceLaunch).
         NotificationCenter.default.post(name: .chatViewClosed, object: id)
+        BackgroundTaskManager.shared.unbindWindow(id)
     }
 
     // MARK: Full screen (upstream)
@@ -1661,7 +1669,7 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
 
     public var isAnySessionStreaming: Bool {
         windowStates.values.contains { $0.tabSessions.contains { $0.isStreaming } }
-            || DetachedChatRunRegistry.shared.sessions.contains { $0.isStreaming }
+            || BackgroundTaskManager.shared.activeTaskSessions().contains { $0.isStreaming }
     }
 
     /// Pin Window: float above other apps' windows (upstream).

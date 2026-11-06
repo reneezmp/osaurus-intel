@@ -603,7 +603,7 @@ final class ChatWindowState: ObservableObject {
     /// Browser-style tabs, each holding its own `ChatSession`. Inactive tabs
     /// keep their sessions alive (a reply keeps streaming there); closing a
     /// tab saves and stops its session, or hands a running one to
-    /// `DetachedChatRunRegistry`.
+    /// `BackgroundTaskManager` (upstream `adoptSession`).
     @Published private(set) var tabs: [ChatTab] = [] {
         didSet { onTabLayoutChanged?() }
     }
@@ -1285,10 +1285,10 @@ final class ChatWindowState: ObservableObject {
         // a schedule/watcher run): attach that live instance (the stream
         // keeps rendering) instead of a stale copy from disk that would race
         // its saves.
-        if let live = DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionData.id)
-            ?? BackgroundTaskManager.shared.liveTask(forSessionId: sessionData.id)?.chatSession
+        if let liveTask = BackgroundTaskManager.shared.liveTask(forSessionId: sessionData.id),
+            let live = liveTask.chatSession
         {
-            attachDetached(live)
+            attachLive(live, registryTaskId: liveTask.id)
             return
         }
         // Some UI surfaces may hand us a metadata-only row. Resolve the full
@@ -1326,10 +1326,11 @@ final class ChatWindowState: ObservableObject {
         loadSession(sessionData)
     }
 
-    /// Replace the active tab's (blank) session with a running instance
-    /// handed back by `DetachedChatRunRegistry`.
-    private func attachDetached(_ live: ChatSession) {
-        DetachedChatRunRegistry.shared.take(live)
+    /// Replace the active tab's (blank) session with a registry-owned
+    /// running instance (upstream `attachSession`). Execution stays with
+    /// `BackgroundTaskManager`; the window is only a view, and the
+    /// window→task binding makes closing it detach instead of stop.
+    private func attachLive(_ live: ChatSession, registryTaskId: UUID) {
         let outgoing = session
         outgoing.stashDraft()
         link(live)
@@ -1337,6 +1338,7 @@ final class ChatWindowState: ObservableObject {
         session = live
         adoptAgent(live.agentId ?? Agent.defaultId)
         if outgoing !== live { teardownTabSession(outgoing) }
+        BackgroundTaskManager.shared.bindWindow(windowId, toTask: registryTaskId)
         refreshSessions()
     }
 
@@ -1565,6 +1567,14 @@ final class ChatWindowState: ObservableObject {
         // `input`; surface the tab's unsent keystrokes there first (#2708).
         target.promoteComposerDraft()
         session = target
+        // Window→task binding follows the visible session (upstream): a
+        // registry-owned run on screen makes closing this window detach
+        // (not stop) it.
+        if let task = BackgroundTaskManager.shared.task(owning: target), task.status.isActive {
+            BackgroundTaskManager.shared.bindWindow(windowId, toTask: task.id)
+        } else {
+            BackgroundTaskManager.shared.unbindWindow(windowId)
+        }
         refreshSessions()
     }
 
@@ -1575,13 +1585,15 @@ final class ChatWindowState: ObservableObject {
         if !session.turns.isEmpty { session.save() }
     }
 
+    /// Whether a session still has work in flight: a reply streaming, or a
+    /// run paused on a clarify question.
     static func hasWorkInFlight(_ s: ChatSession) -> Bool {
-        DetachedChatRunRegistry.hasWorkInFlight(s)
+        s.isStreaming || s.awaitingClarify != nil
     }
 
     /// Dispose of a session whose tab (or window) closed. A running or
-    /// clarify-paused one is handed to `DetachedChatRunRegistry` and keeps
-    /// going; an idle one is saved and stopped.
+    /// clarify-paused one is adopted by `BackgroundTaskManager` and keeps
+    /// going (upstream); an idle one is saved and stopped.
     private func teardownTabSession(_ closingSession: ChatSession) {
         closingSession.onSessionChanged = nil
         closingSession.windowState = nil
@@ -1596,7 +1608,14 @@ final class ChatWindowState: ObservableObject {
             }
             return
         }
-        if DetachedChatRunRegistry.shared.adopt(closingSession) { return }
+        // A mid-run (or clarify-paused) session survives its tab closing the
+        // same way it survives its window closing: adopted into the
+        // background registry, execution untouched (upstream).
+        if Self.hasWorkInFlight(closingSession),
+            BackgroundTaskManager.shared.adoptSession(closingSession) != nil
+        {
+            return
+        }
         if !closingSession.turns.isEmpty { closingSession.save() }
         closingSession.stop()
     }
@@ -1641,7 +1660,7 @@ final class ChatWindowState: ObservableObject {
             if ChatWindowManager.shared.revealOpenSession(
                 sessionId, excludingWindowId: windowId
             ) != nil { return }
-            let live = DetachedChatRunRegistry.shared.liveSession(forSessionId: sessionId)
+            let live = BackgroundTaskManager.shared.liveTask(forSessionId: sessionId)?.chatSession
             guard let data = live.map({ $0.toSessionData() })
                 ?? ChatSessionsManager.shared.session(for: sessionId)
             else { continue }
@@ -1854,8 +1873,8 @@ final class ChatWindowState: ObservableObject {
     func confirmCloseAndStop() { showCloseConfirmation = false }
     func refreshPairedRelayAgents(discoveredAgents: [DiscoveredAgent]? = nil) {}
 
-    /// Window close: every tab's session is saved and stopped, or handed to
-    /// `DetachedChatRunRegistry` while it still runs.
+    /// Window close: every tab's session is saved and stopped, or adopted by
+    /// `BackgroundTaskManager` while it still runs.
     func cleanup() {
         if let observer = themeObserver {
             NotificationCenter.default.removeObserver(observer)

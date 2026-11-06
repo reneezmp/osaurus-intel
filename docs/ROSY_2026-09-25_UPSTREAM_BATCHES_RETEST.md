@@ -3018,3 +3018,30 @@ parts.
 - [ ] Close a chat window while its reply is still streaming and choose
       **Continue in Background**: the reply finishes, and the conversation
       comes back as a tab with the full answer.
+
+## Background runs, stage 2-2 (2026-11-06)
+
+`W-background-runs-sync` stage 2-2 (`UPSTREAM_SYNC.md`, "Background runs,
+stage 2-2"). Not in candidate 66. Running chats that lose their tab are now
+kept by the same manager as schedules.
+
+- [ ] Ask a long question, and while it is still replying, close its tab
+      (keep the window). In the sidebar the chat still shows as working.
+      Click it: it opens in a tab with the reply still arriving.
+- [ ] Do the same, but click the sidebar's Stop on that chat instead: the
+      reply stops, and the chat keeps what had arrived.
+- [ ] Close a tab mid-reply and wait for the reply to finish. Open a new
+      chat window (or quit and relaunch): the finished chat comes back as
+      a tab. Close that tab: it stays closed after another relaunch.
+- [ ] Ask something that makes the agent ask you a question, then close the
+      tab before answering. Reopen the chat from the sidebar: the question
+      is still there, and answering it continues the run.
+- [ ] Quit while a closed tab's chat is still replying: Osaurus quits
+      normally (no hang), and after relaunch the chat has what arrived
+      before the quit.
+- [ ] Quit while a custom agent's schedule is running (Run Now, then quit
+      right away). After relaunch, the agent's run history (Agents → the
+      agent → Database → History) shows that run as cancelled, not still
+      running.
+- [ ] Open three tabs, rearrange them, and quit right away (⌘Q). After
+      relaunch, the window opens with the same tabs in the same order.

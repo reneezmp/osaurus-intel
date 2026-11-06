@@ -564,6 +564,13 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
 
     public func applicationShouldTerminate(_ sender: NSApplication) -> NSApplication.TerminateReply {
         Task { @MainActor in
+            // Upstream's phase 0: stop every chat (the tab layout is saved
+            // synchronously first) and cancel background runs (queued ones
+            // first), so nothing starts new work during the drain and a
+            // schedule's run record ends as cancelled instead of staying
+            // "running". Intel never called these at quit before 2026-11-06.
+            ChatWindowManager.shared.stopAllSessions()
+            BackgroundTaskManager.shared.cancelAllTasks()
             // Stop the microphone and playback first (bounded by nothing
             // slow: engine stops are quick; see IntelVoiceLaunch.shutdown).
             await IntelVoiceLaunch.shutdown()
