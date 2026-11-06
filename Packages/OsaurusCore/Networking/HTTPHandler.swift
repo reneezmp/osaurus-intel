@@ -439,9 +439,9 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
     typealias InboundIn = HTTPServerRequestPart
     typealias OutboundOut = HTTPServerResponsePart
 
-    private let configuration: ServerConfiguration
+    let configuration: ServerConfiguration
     private let apiKeyValidatorProvider: @Sendable () -> APIKeyValidator
-    private var apiKeyValidator: APIKeyValidator { apiKeyValidatorProvider() }
+    var apiKeyValidator: APIKeyValidator { apiKeyValidatorProvider() }
     private let trustLoopback: Bool
     /// Engine override for tests (upstream injects `chatEngine` the same way).
     private let injectedChatEngine: (any ChatEngineProtocol)?
@@ -831,15 +831,19 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
 
         // Access key authentication gate. Loopback connections (CLI / local
         // tools) are trusted without a token unless `LocalAPIKeyPolicy` asks
-        // for one. Upstream's plugin, channel and harness exemptions arrive
-        // with those routes (`W-plugin-reliability`, channels, harnesses).
+        // for one. Plugin routes handle their own auth per route, so they
+        // skip the global gate (upstream). Upstream's channel and harness
+        // exemptions arrive with those routes.
         let publicPaths: Set<String> = [
             "/", "/health", "/pair", "/pair/hello", "/pair/challenge", "/pair/code", "/pair/confirm", "/pair-invite",
             "/secure/session",
         ]
+        let isPluginRoute = path.hasPrefix("/plugins/")
         let isLoopback = isLoopbackConnection(context)
 
-        if !publicPaths.contains(path) && (!isLoopback || (localKeyRequired && !presentedAppToken)) {
+        if !publicPaths.contains(path) && !isPluginRoute
+            && (!isLoopback || (localKeyRequired && !presentedAppToken))
+        {
             let authHeader = head.headers.first(name: "Authorization") ?? ""
             let token = authHeader.hasPrefix("Bearer ") ? String(authHeader.dropFirst(7)) : ""
 
@@ -926,8 +930,10 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             }
         }
 
-        // Simple HEAD (upstream answers it before routing).
-        if head.method == .HEAD {
+        // Simple HEAD for non-plugin paths only (upstream answers it before
+        // routing). Plugin routes need the same matching/auth pipeline as
+        // GET, so HEAD falls through to `handlePluginRoute`.
+        if head.method == .HEAD && !path.hasPrefix("/plugins/") {
             var headers = [("Content-Type", "text/plain; charset=utf-8")]
             headers.append(contentsOf: stateRef.value.corsHeaders)
             sendGateResponse(context: context, head: head, status: .noContent, headers: headers, body: "")
@@ -998,6 +1004,7 @@ final class HTTPHandler: ChannelInboundHandler, Sendable {
             if routeModelPickerRequest(context: context, head: head, path: path) { return }
             if routeMediaRequest(context: context, head: head, path: path) { return }
             if routeAdminRequest(context: context, head: head, path: path) { return }
+            if routePluginRequest(context: context, head: head, path: path) { return }
             // Upstream answers unknown routes 404 (Intel's old router
             // answered every path 200 "ok").
             sendResponse(context: context, status: .notFound, headers: textHeaders(), body: "Not Found")

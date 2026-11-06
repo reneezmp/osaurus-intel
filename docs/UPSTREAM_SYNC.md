@@ -4683,7 +4683,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
 | 2e | Load lifecycle, in four steps (2026-11-05; all done 2026-11-06): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
-| 2f | Routes, web mounts and the plugin tunnel |
+| 2f | Routes, web mounts and the plugin tunnel (done 2026-11-06) |
 | 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
 
 **Found while doing it:** `PluginProcessHost` and `PluginHost/main.swift`
@@ -5260,6 +5260,77 @@ for `x86_64-apple-macosx13.0` (`osaurus-plugin-host`: Mach-O x86_64
 executable). Classifiers: UNASSIGNED 0. No live `~/.osaurus` writes,
 Keychain identity and `ai.osaurus.id` session-token mdat unchanged. The
 in-app guide no longer lists the out-of-process host as missing.
+
+### Plugin routes, web apps and the tunnel (`W-plugin-reliability` stage 2f) — 2026-11-06
+
+Intel's local server now serves `/plugins/<id>/<subpath>` with upstream's
+plugin route handler, and routed plugins get each agent's relay tunnel URL,
+from `bce907045`. Before this Intel answered `/plugins/…` with 404 and
+never told a plugin its tunnel URL.
+
+- **Routes (`Networking/IntelHTTPPlugins.swift`):** upstream's
+  `handlePluginRoute` and helpers. An agent is required
+  (`X-Osaurus-Agent-Id`, or `osr_agent` in the query for a browser
+  page); route matching with `:name` parameters and `/*` wildcards; per
+  route `auth` (`owner` needs a valid access key; `none` / `verify` share
+  upstream's per-plugin rate limit); the request JSON
+  (`OsaurusHTTPRequest`, with `base_url` / `plugin_url` / the agent's
+  address) goes to the plugin's `handle_route` on its queue, with
+  upstream's 30-second timeout; binary bodies both ways (`body_encoding`
+  base64).
+- **Web apps:** a manifest `web` spec serves `static_dir` under its mount
+  (symlink-safe containment, SPA fallback to `entry`), injects
+  `window.__osaurus` (plugin id, base / API URLs, the agent id and a
+  fetch wrapper) into HTML, and supports upstream's dev proxy
+  (`config/dev-proxy.json`).
+- **Access gate (in `HTTPHandler.admit`):** `/plugins/` skips the global
+  access-key gate (each route has its own auth, as upstream), and a HEAD
+  request reaches the plugin instead of the generic 204. Relay traffic
+  (`X-Osaurus-Relay-Origin`) and LAN callers (Expose to Network) are not
+  loopback, so they reach only routes and web apps the manifest marks
+  `tunnel_exposed`; everything else answers 404, as upstream. Nothing
+  here turns the relay or network exposure on.
+- **Intel differences:** the request runs in Intel's `runRequestTask` (no
+  per-connection task registry, so a client disconnect doesn't cancel
+  the plugin call; the route timeout still bounds it), synchronous
+  errors go through Intel's `sendResponse` (which adds CORS itself), and
+  `executeOnLoop` checks Intel's stored channel context.
+  `HTTPHandler.configuration` and `apiKeyValidator` became internal for
+  the extension.
+- **Tunnel (`PluginManager`, upstream's):** `observeTunnelStatus` watches
+  `RelayTunnelManager.agentStatuses`; a connected agent's URL is pushed
+  to every plugin with routes as `tunnel_url` (stored in the agent's
+  plugin keys, delivered through `on_config_changed`, deduped per plugin
+  and agent), `""` when it disconnects, and a reconnect re-delivers the
+  agent's whole config. The first-delivery sweep and a new agent push the
+  current URL too. Step 2e-2 had left these out.
+- **`PluginHTTP.swift`** updated to `bce907045` (the rate limiter now
+  sweeps idle buckets).
+- **UI:** upstream's plugin detail (Browse → plugin) shows HTTP routes,
+  README / changelog and **Open Web App** for a loaded plugin; the
+  per-agent settings' connect button now has a route to open. Intel's
+  own native detail page (Installed → plugin) has no routes or web app
+  section yet; no Intel registry plugin declares routes or a web app.
+
+Tests:
+- **Now included:** upstream's `PluginRoutingTests`, `PluginTests`
+  (route matching and precedence, query and path parameters, manifest and
+  route-auth decoding, MIME types, the rate limiter, static file
+  containment, tunnel exposure, the web API mount, and the database suite,
+  whose copy in `IntelPluginDatabaseTests` is gone),
+  `PluginRouteReliabilityTests`, `PluginManagerTunnelDedupTests`,
+  `PluginRelayReconnectRedeliveryTests`.
+- **`IntelHTTPPluginRoutesTests`:** a fake plugin served through Intel's
+  real `HTTPHandler`: no agent → 401; path parameters and the agent reach
+  `handle_route`; an owner route without a key → 401; unknown route or
+  plugin → 404; the web app with `window.__osaurus`; relay traffic
+  refused on unexposed routes and the web app, allowed on a
+  `tunnel_exposed` route.
+
+Validation: the full interim gate passed 4,868 tests in 616 suites (only
+the known avatar cache failure); package and tests also build for
+`x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live `~/.osaurus`
+writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

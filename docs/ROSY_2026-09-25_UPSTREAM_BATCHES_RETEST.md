@@ -2925,3 +2925,19 @@ default and no Intel plugin uses it, so this is a packaging check.
       `codesign --verify --deep osaurus.app` reports nothing).
 - [ ] Regression: `time`, `hello`, `fetch` and `memo` tools still work.
 
+## Plugin routes, web apps and the tunnel (2026-11-06)
+
+`W-plugin-reliability` stage 2f (`UPSTREAM_SYNC.md`, "Plugin routes, web
+apps and the tunnel"). Not in candidate 66. No Intel plugin has routes or
+a web app yet, so this is mostly a regression and safety check.
+
+- [ ] Terminal: `curl -s -o /dev/null -w '%{http_code}\n'
+      http://127.0.0.1:1337/plugins/time-intel/x` (use the port from
+      Settings → Server) prints `401` (no agent). With
+      `-H "X-Osaurus-Agent-Id: <any agent id>"` it prints `404` (Time has
+      no routes).
+- [ ] The relay and Expose to Network stay off unless you turned them
+      on; nothing in this change turns them on.
+- [ ] Regression: the local API (`/health`, `/models`, chat completions
+      with a key) and the four plugins' tools work as before.
+

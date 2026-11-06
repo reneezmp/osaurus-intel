@@ -28,7 +28,7 @@ GATED = {
     # --- Intel's own implementation lives in the #else body (content may drift) ---
     "Managers/Chat/ChatWindowManager.swift": ("COV-intel-own", "C", "Intel window manager"),
     "Managers/Chat/ChatWindowState.swift": ("COV-intel-own", "C", "Intel window state"),
-    "Managers/Plugin/PluginManager.swift": ("W-plugin-reliability", "C", "Intel half on upstream types and load checks (2e); tunnel 2f, installer 2g"),
+    "Managers/Plugin/PluginManager.swift": ("W-plugin-reliability", "C", "Intel half on upstream types, load lifecycle and tunnel (2e-2f); installer 2g"),
     "Views/Memory/MemoryComponents.swift": ("COV-intel-own", "C", "Intel Memory UI"),
     "Views/Memory/MemoryDiagnosticsViews.swift": ("COV-intel-own", "C", "Intel Memory UI"),
     "Views/Memory/MemoryView.swift": ("COV-intel-own", "C", "Intel Memory UI"),

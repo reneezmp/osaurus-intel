@@ -274,15 +274,13 @@ let package = Package(
                 "Service/LocalGenerationDefaultsTests.swift",
                 "Skill/ClaudePluginInstallerTests.swift",
                 "Skill/ClaudePluginSpecTests.swift",
-                "Plugin/PluginRoutingTests.swift",
+                
                 "Service/ModelRuntimeFindDirectoryTests.swift",
                 "Service/ModelRuntimeIsHybridTests.swift",
                 "Service/MultiTurnGenConfigToolsAbortTests.swift",
                 "Service/SearchServiceTests.swift",
                 "Service/ValidateJANGTQUnsupportedFamilyTests.swift",
-                // PluginTests: mostly route matching (`W-plugin-reliability` 2f); its
-                // PluginDatabaseTests suite runs as IntelPluginDatabaseTests.
-                "Plugin/PluginTests.swift",
+                
                 // MockChatEngine (upstream's chat engine; `W-background-runs-sync`);
                 // PluginClarifyEventTests also needs upstream's `waitingForInput` task status:
                 "Plugin/BackgroundTaskInterruptTests.swift",
@@ -295,8 +293,8 @@ let package = Package(
                 
                 
                 "Plugin/PluginManagerMigrationTests.swift",
-                "Plugin/PluginManagerTunnelDedupTests.swift",
-                "Plugin/PluginRelayReconnectRedeliveryTests.swift",
+                
+                
                 "Memory/DistillationCoordinatorTests.swift",
                 "Memory/MemorySearchServiceTests.swift",
                 "Memory/PrefixHashTests.swift",

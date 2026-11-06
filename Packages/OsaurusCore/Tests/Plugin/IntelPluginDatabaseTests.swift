@@ -3,9 +3,9 @@
 //  OsaurusCoreTests
 //
 //  `W-plugin-reliability` stage 2b (docs/UPSTREAM_SYNC.md, "Plugin
-//  database"). `PluginDatabaseTests` is upstream's suite from
-//  `PluginTests.swift` (the rest of that file covers plugin routes, stage
-//  2f, so it stays excluded). `IntelPluginDatabaseMoveTests` pins the
+//  database"). Upstream's `PluginDatabaseTests` runs from
+//  `PluginTests.swift` (included since stage 2f; until then a copy lived
+//  here). `IntelPluginDatabaseMoveTests` pins the
 //  one-time move of Intel's old plaintext `Tools/<id>/plugin.db` into the
 //  encrypted `Tools/<id>/data/data.db`, the host context's lifecycle, and
 //  key rotation's lock.
@@ -21,133 +21,6 @@ import OsaurusSQLCipher
 import Testing
 
 @testable import OsaurusCore
-
-struct PluginDatabaseTests {
-
-    private func makeInMemoryDB() throws -> PluginDatabase {
-        let db = PluginDatabase(pluginId: "com.test.db.\(UUID().uuidString)")
-        try db.openInMemory()
-        return db
-    }
-
-    @Test func openAndClose() throws {
-        let db = try makeInMemoryDB()
-        db.close()
-    }
-
-    @Test func createTableAndInsert() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        let createResult = db.exec(sql: "CREATE TABLE items (id TEXT PRIMARY KEY, name TEXT)", paramsJSON: nil)
-        #expect(!createResult.contains("error"))
-
-        let insertResult = db.exec(
-            sql: "INSERT INTO items (id, name) VALUES (?1, ?2)",
-            paramsJSON: "[\"item-1\", \"Test Item\"]"
-        )
-        #expect(insertResult.contains("\"changes\":1"))
-    }
-
-    @Test func queryRows() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        _ = db.exec(sql: "CREATE TABLE kv (key TEXT, value TEXT)", paramsJSON: nil)
-        _ = db.exec(sql: "INSERT INTO kv VALUES (?1, ?2)", paramsJSON: "[\"a\", \"1\"]")
-        _ = db.exec(sql: "INSERT INTO kv VALUES (?1, ?2)", paramsJSON: "[\"b\", \"2\"]")
-
-        let result = db.query(sql: "SELECT * FROM kv ORDER BY key", paramsJSON: nil)
-        #expect(result.contains("\"columns\""))
-        #expect(result.contains("\"rows\""))
-        #expect(result.contains("\"a\""))
-        #expect(result.contains("\"b\""))
-    }
-
-    @Test func parameterizedQuery() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        _ = db.exec(sql: "CREATE TABLE items (id INTEGER, name TEXT)", paramsJSON: nil)
-        _ = db.exec(sql: "INSERT INTO items VALUES (?1, ?2)", paramsJSON: "[1, \"alpha\"]")
-        _ = db.exec(sql: "INSERT INTO items VALUES (?1, ?2)", paramsJSON: "[2, \"beta\"]")
-
-        let result = db.query(sql: "SELECT name FROM items WHERE id = ?1", paramsJSON: "[2]")
-        #expect(result.contains("\"beta\""))
-        #expect(!result.contains("\"alpha\""))
-    }
-
-    @Test func forbiddenAttach() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        let result = db.exec(sql: "ATTACH DATABASE '/tmp/evil.db' AS evil", paramsJSON: nil)
-        #expect(result.contains("Forbidden"))
-    }
-
-    @Test func forbiddenDetach() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        let result = db.exec(sql: "DETACH DATABASE main", paramsJSON: nil)
-        #expect(result.contains("Forbidden"))
-    }
-
-    @Test func forbiddenLoadExtension() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        let result = db.exec(sql: "SELECT LOAD_EXTENSION('/tmp/evil.so')", paramsJSON: nil)
-        #expect(result.contains("Forbidden"))
-    }
-
-    @Test func invalidSQL_returnsError() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        let result = db.exec(sql: "NOT VALID SQL AT ALL", paramsJSON: nil)
-        #expect(result.contains("error"))
-    }
-
-    @Test func nullParameterBinding() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        _ = db.exec(sql: "CREATE TABLE t (id INTEGER, val TEXT)", paramsJSON: nil)
-        let result = db.exec(sql: "INSERT INTO t VALUES (?1, ?2)", paramsJSON: "[1, null]")
-        #expect(result.contains("\"changes\":1"))
-
-        let queryResult = db.query(sql: "SELECT val FROM t WHERE id = 1", paramsJSON: nil)
-        #expect(queryResult.contains("null"))
-    }
-
-    @Test func boolParameterBinding() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        _ = db.exec(sql: "CREATE TABLE t (id INTEGER, flag INTEGER)", paramsJSON: nil)
-        _ = db.exec(sql: "INSERT INTO t VALUES (?1, ?2)", paramsJSON: "[1, true]")
-        _ = db.exec(sql: "INSERT INTO t VALUES (?1, ?2)", paramsJSON: "[2, false]")
-
-        let result = db.query(sql: "SELECT flag FROM t ORDER BY id", paramsJSON: nil)
-        #expect(result.contains("1"))
-        #expect(result.contains("0"))
-    }
-
-    @Test func lastInsertRowid() throws {
-        let db = try makeInMemoryDB()
-        defer { db.close() }
-
-        _ = db.exec(sql: "CREATE TABLE t (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT)", paramsJSON: nil)
-        let r1 = db.exec(sql: "INSERT INTO t (name) VALUES (?1)", paramsJSON: "[\"first\"]")
-        #expect(r1.contains("\"last_insert_rowid\":1"))
-
-        let r2 = db.exec(sql: "INSERT INTO t (name) VALUES (?1)", paramsJSON: "[\"second\"]")
-        #expect(r2.contains("\"last_insert_rowid\":2"))
-    }
-}
-
-// MARK: - Manifest Decoding
 
 @Suite(.serialized)
 struct IntelPluginDatabaseMoveTests {
