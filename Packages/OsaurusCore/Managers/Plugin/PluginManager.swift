@@ -3480,35 +3480,8 @@ public final class PluginManager: ObservableObject {
         return result
     }
 
-    /// A loaded plugin that declares user-settable fields (manifest
-    /// `secrets`), for Intel's config sheet.
-    public struct ConfigurablePlugin: Identifiable, Sendable {
-        public let id: String
-        public let name: String
-        public let fields: [IntelPluginConfigField]
-    }
-
-    /// Loaded plugins that declare config fields, for the settings UI.
-    public func configurablePlugins() -> [ConfigurablePlugin] {
-        plugins
-            .compactMap { loaded -> ConfigurablePlugin? in
-                let fields = (loaded.plugin.manifest.secrets ?? []).map(IntelPluginConfigField.init(secret:))
-                guard !fields.isEmpty else { return nil }
-                return ConfigurablePlugin(
-                    id: loaded.plugin.id,
-                    name: loaded.plugin.manifest.name ?? loaded.plugin.id,
-                    fields: fields
-                )
-            }
-            .sorted { $0.name < $1.name }
-    }
-
-    /// Current stored value for a plugin config key ("" if unset).
-    public func configValue(pluginId: String, key: String) -> String {
-        intelPluginConfigGet(pluginId: pluginId, key: key) ?? ""
-    }
-
     /// Persist a plugin config value and notify the plugin (on_config_changed).
+    /// Used by the `OSAURUS_INTEL_PLUGIN_SETCONFIG` launch diagnostic.
     public func setConfig(pluginId: String, key: String, value: String) {
         intelPluginConfigSet(pluginId: pluginId, key: key, value: value)
         loadedPlugin(for: pluginId)?.plugin.notifyConfigChanged(key: key, value: value)
@@ -3581,25 +3554,4 @@ public final class PluginManager: ObservableObject {
     func grantConsent(pluginId: String) throws {}
 }
 
-/// A user-settable config field, from the manifest's `secrets`, for Intel's
-/// config sheet (`IntelPluginConfigView`).
-public struct IntelPluginConfigField: Sendable, Identifiable {
-    public let id: String
-    public let label: String
-    public let detail: String?
-    public let required: Bool
-    public let url: String?
-    public let isSecret: Bool
-
-    /// Upstream's `SecretSpec` has no "secret" flag: every field is a
-    /// secret, stored in the Keychain.
-    init(secret: PluginManifest.SecretSpec) {
-        self.id = secret.id
-        self.label = secret.label
-        self.detail = secret.description
-        self.required = secret.required
-        self.url = secret.url
-        self.isSecret = true
-    }
-}
 #endif

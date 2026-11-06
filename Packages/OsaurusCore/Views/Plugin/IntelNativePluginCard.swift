@@ -135,7 +135,7 @@ struct IntelNativePluginDetailView: View {
     @State private var version = ""
     @State private var detailText = ""
     @State private var tools: [PluginManifest.ToolSpec] = []
-    @State private var configFields: [IntelPluginConfigField] = []
+    @State private var secrets: [PluginManifest.SecretSpec] = []
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -205,9 +205,9 @@ struct IntelNativePluginDetailView: View {
                         }
                     }
 
-                    if !configFields.isEmpty {
+                    if !secrets.isEmpty {
                         Button(action: onOpenSettings) {
-                            Label("Settings (\(configFields.count))", systemImage: "gearshape")
+                            Label("Settings (\(secrets.count))", systemImage: "gearshape")
                                 .foregroundColor(theme.accentColor)
                         }
                         .buttonStyle(.plain)
@@ -226,7 +226,7 @@ struct IntelNativePluginDetailView: View {
         let manifest = loaded.plugin.manifest
         name = manifest.name ?? pluginId
         tools = manifest.capabilities.tools ?? []
-        configFields = (manifest.secrets ?? []).map(IntelPluginConfigField.init(secret:))
+        secrets = manifest.secrets ?? []
         version = manifest.version ?? ""
         detailText = manifest.description ?? ""
     }

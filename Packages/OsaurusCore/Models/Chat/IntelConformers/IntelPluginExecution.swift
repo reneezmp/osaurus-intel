@@ -17,7 +17,7 @@
 //    until 2026-10-10; this moves any values left in it into the Keychain;
 //  - `intelPluginConfigGet` / `intelPluginConfigSet`: the Plugins tab's
 //    global values (the Default agent's Keychain namespace), for Intel's
-//    config sheet until upstream's `PluginConfigView` replaces it.
+//    launch diagnostic (`OSAURUS_INTEL_PLUGIN_SETCONFIG`) and tests.
 //
 
 #if OSAURUS_INTEL

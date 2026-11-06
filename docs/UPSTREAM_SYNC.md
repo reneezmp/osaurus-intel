@@ -4682,7 +4682,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2b | Upstream's `PluginDatabase`: SQL guard, 100 MiB cap, teardown gate. Intel's plaintext `Tools/<id>/plugin.db` moves over. |
 | 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
-| 2e | Load lifecycle, in four steps (2026-11-05; 2e-1 and 2e-2 done): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
+| 2e | Load lifecycle, in four steps (2026-11-05; 2e-1 to 2e-3 done): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel |
 | 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
 
@@ -5153,6 +5153,59 @@ Validation: the full interim gate passed 4,755 tests in 598 suites (only
 the known avatar cache failure); package and tests also build for
 `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live `~/.osaurus`
 writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
+
+### Plugin loading, step 3 (`W-plugin-reliability` stage 2e-3) — 2026-11-06
+
+Upstream's per-agent plugin settings screen, `PluginConfigView`
+(`Views/Plugin/PluginConfigView.swift`, `bce907045`, verbatim), replaces
+the "Apple Silicon only" stub. An agent's page (Settings → Agents →
+*agent* → the plugin's tab) shows it for any plugin whose manifest has a
+`capabilities.config` spec: text, secret, toggle, select, multiselect,
+number, read-only and status fields with upstream's validation, saved
+per agent in `ToolSecretsKeychain` and delivered through
+`notifyConfigBatch` (deduped), with upstream's disconnect action and
+`{{plugin_url}}` / `{{tunnel_url}}` templates. The repo's old copy
+predated two upstream fixes (template inputs cached once instead of a
+Keychain read per render; no crash on a malformed connect URL).
+
+- **The connect button** (`connect_action.url_route`) opens
+  `http://127.0.0.1:<port>/plugins/<id>/<route>` (or the tunnel URL),
+  which Intel serves from stage 2f (routes). Until then a plugin's OAuth
+  connect flow can't complete.
+- **Plugins tab:** Intel's own settings sheet (`IntelPluginConfigView`:
+  one sheet listing every plugin's manifest `secrets`, plus a header gear
+  button) is gone. A native card's **Settings** and the native detail
+  page now open upstream's key sheet (`ToolSecretsSheet`, ported in
+  stage 1) for that plugin, as upstream's Plugins tab does. Upstream's
+  sheet stores keys without calling `on_config_changed`; Intel's sheet
+  called it. Plugins read keys through `config_get` or `_secrets`, so
+  nothing depends on the call (no Intel plugin implements it).
+  `PluginManager.configurablePlugins()` / `configValue` and
+  `IntelPluginConfigField` went with the sheet.
+- **Found while doing it (2e-2 gap):** Intel's Installed tab lists only
+  loaded plugins (Intel's native cards; upstream's registry grid is
+  compiled out there), so a plugin that failed to load or was
+  quarantined vanished from Installed; its error and Retry only showed
+  under Browse. Installed now also lists failed plugins with upstream's
+  registry card (error, Retry, Uninstall), and counts them in the tab
+  badge.
+- **No Intel registry plugin declares `config`** (`time`, `hello`,
+  `fetch`, `memo` declare none; only the retired `search-intel` has
+  `secrets`), so on Rosy the per-agent screen and the Settings button
+  have nothing to show yet. A test plugin with a config spec in
+  `reneezmp/osaurus-intel-plugins` would exercise them.
+
+Tests: upstream has no tests for `PluginConfigView`; per-agent config
+resolution and delivery are covered by upstream's
+`AgentLifecycleConfigResolutionTests` and `PluginAgentScopingTests`
+(config dedup), included in 2e-1 / 2e-2.
+
+Validation: the full interim gate passed 4,755 tests in 598 suites (only
+the known avatar cache failure); package and tests also build for
+`x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0
+(`PluginConfigView.swift` dropped from `classify_gated.py`, no longer
+gated). No live `~/.osaurus` writes, Keychain identity and
+`ai.osaurus.id` session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

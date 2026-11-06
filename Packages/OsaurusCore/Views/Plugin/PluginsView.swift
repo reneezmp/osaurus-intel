@@ -45,7 +45,6 @@ struct PluginsView: View {
 
     @State private var showSecretsSheet: Bool = false
     #if OSAURUS_INTEL
-    @State private var showIntelPluginConfig: Bool = false
     @State private var selectedNativePlugin: PluginManager.LoadedPluginInfo?
     #endif
     @State private var secretsSheetPluginId: String?
@@ -89,7 +88,7 @@ struct PluginsView: View {
                     },
                     onOpenSettings: {
                         selectedNativePlugin = nil
-                        showIntelPluginConfig = true
+                        showSecretsSheetForPlugin(pluginId: np.pluginId)
                     },
                     onUninstall: {
                         let pid = np.pluginId
@@ -193,12 +192,6 @@ struct PluginsView: View {
                 )
             }
         }
-        #if OSAURUS_INTEL
-        .sheet(isPresented: $showIntelPluginConfig) {
-            IntelPluginConfigView()
-                .environment(\.theme, themeManager.currentTheme)
-        }
-        #endif
     }
 
     /// Honor a pending `osaurus://plugins-install?tool=<id>` deeplink request.
@@ -274,12 +267,19 @@ struct PluginsView: View {
         #endif
     }
 
+    /// Intel: installed plugins that failed to load (quarantined included).
+    /// The native section lists only loaded plugins, so these get upstream's
+    /// registry card, with its error, Retry and Uninstall.
+    private var failedInstalledPlugins: [PluginState] {
+        installedPlugins.filter(\.hasLoadError)
+    }
+
     /// Count for the "Installed" tab badge. On Intel every installed plugin is
     /// rendered by the native section, so the badge is just that count (not
     /// native + registry, which would double-count the index plugins).
     private var installedTabCount: Int {
         #if OSAURUS_INTEL
-        return nativePlugins.count
+        return nativePlugins.count + failedInstalledPlugins.count
         #else
         return installedPlugins.count
         #endif
@@ -311,15 +311,6 @@ struct PluginsView: View {
                 isRefreshButtonLoading = false
             }
         }
-        #if OSAURUS_INTEL
-        // Settings for natively-loaded x86_64 plugins that declare config.
-        HeaderIconButton(
-            "gearshape",
-            help: "Native plugin settings"
-        ) {
-            showIntelPluginConfig = true
-        }
-        #endif
     }
 
     private var pluginTabsRow: some View {
@@ -366,6 +357,9 @@ struct PluginsView: View {
                         #if OSAURUS_INTEL
                         if !nativePlugins.isEmpty {
                             nativePluginsSection
+                        }
+                        if !failedInstalledPlugins.isEmpty {
+                            failedPluginsSection
                         }
                         #endif
 
@@ -417,6 +411,37 @@ struct PluginsView: View {
     // MARK: - Native (this-fork) plugins
 
     #if OSAURUS_INTEL
+    /// Upstream's registry cards for installed plugins that failed to load.
+    private var failedPluginsSection: some View {
+        LazyVGrid(
+            columns: [
+                GridItem(.flexible(minimum: 300), spacing: 20),
+                GridItem(.flexible(minimum: 300), spacing: 20),
+            ],
+            spacing: 20
+        ) {
+            ForEach(Array(failedInstalledPlugins.enumerated()), id: \.element.id) { index, plugin in
+                PluginCard(
+                    plugin: plugin,
+                    missingPermissions: missingPermissionsPerPlugin[plugin.pluginId] ?? [],
+                    animationDelay: Double(index) * 0.05,
+                    hasAppeared: hasAppeared,
+                    onSelect: {
+                        withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
+                            selectedPlugin = plugin
+                        }
+                    },
+                    onUpgrade: { try await repoService.upgrade(pluginId: plugin.pluginId) },
+                    onUninstall: {
+                        try await repoService.uninstall(pluginId: plugin.pluginId)
+                        reload()
+                    },
+                    onChange: { reload() }
+                )
+            }
+        }
+    }
+
     private var nativePluginsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
             LazyVGrid(
@@ -431,7 +456,7 @@ struct PluginsView: View {
                         plugin: plugin,
                         isConfigurable: configurablePluginIds.contains(plugin.pluginId),
                         hasUpdate: nativeUpdatablePluginIds.contains(plugin.pluginId),
-                        onOpenSettings: { showIntelPluginConfig = true },
+                        onOpenSettings: { showSecretsSheetForPlugin(pluginId: plugin.pluginId) },
                         onSelect: {
                             withAnimation(.spring(response: 0.35, dampingFraction: 0.85)) {
                                 selectedNativePlugin = plugin
@@ -635,7 +660,11 @@ struct PluginsView: View {
         // card + detail, and no first-paint flicker (this list comes straight
         // from PluginManager and doesn't wait on the repo refresh).
         nativePlugins = PluginManager.shared.nativelyLoadedPlugins()
-        configurablePluginIds = Set(PluginManager.shared.configurablePlugins().map { $0.id })
+        // Plugins with keys open upstream's key sheet (`ToolSecretsSheet`).
+        configurablePluginIds = Set(
+            PluginManager.shared.plugins
+                .filter { !($0.plugin.manifest.secrets ?? []).isEmpty }
+                .map { $0.plugin.id })
         nativeUpdatablePluginIds = Set(currentPlugins.filter { $0.hasUpdate }.map { $0.pluginId })
         #endif
 

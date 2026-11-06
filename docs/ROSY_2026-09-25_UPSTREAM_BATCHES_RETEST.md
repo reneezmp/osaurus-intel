@@ -2894,3 +2894,21 @@ is set aside on the next launch.
 - [ ] Regression: the retired search plugin stays unloaded; web search
       and the Apple app tools still work.
 
+## Plugin loading, step 3 (2026-11-06)
+
+`W-plugin-reliability` stage 2e-3 (`UPSTREAM_SYNC.md`, "Plugin loading,
+step 3"). Not in candidate 66. Upstream's per-agent plugin settings
+screen. No Intel plugin declares settings yet, so most of this is a
+regression check.
+
+- [ ] Settings… → Plugins: the header has no gear button any more (it
+      opened Intel's old settings sheet). The four plugin cards have no
+      **Settings** button (none of them has keys).
+- [ ] With the fake crash from "Plugin loading, step 2" (quarantined
+      `time-intel`): **Installed** now lists Time with a red error and
+      the failure message; opening it shows **Retry** and **Uninstall**.
+      Retry brings it back to a normal card.
+- [ ] Settings → Agents → a custom agent → **Memo** tab: instructions
+      only, no "Configuration" section and no "Apple Silicon only"
+      placeholder.
+
