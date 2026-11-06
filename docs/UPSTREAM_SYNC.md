@@ -4682,7 +4682,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2b | Upstream's `PluginDatabase`: SQL guard, 100 MiB cap, teardown gate. Intel's plaintext `Tools/<id>/plugin.db` moves over. |
 | 2c | Dispatch and task events: `planDispatch` (requested tools), task events to plugins, `list_active_tasks`, cancel, interrupt, draft, `get_active_agent_id` |
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
-| 2e | Load lifecycle, in four steps (2026-11-05): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
+| 2e | Load lifecycle, in four steps (2026-11-05; 2e-1 and 2e-2 done): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel |
 | 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
 
@@ -5075,6 +5075,83 @@ Validation: the full interim gate passed 4,720 tests in 592 suites (only
 the known avatar cache failure); package and tests also build for
 `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0 (`ExternalPlugin.swift`
 dropped from `classify_gated.py`, no longer gated). No live `~/.osaurus`
+writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
+
+### Plugin loading, step 2 (`W-plugin-reliability` stage 2e-2) — 2026-11-06
+
+Upstream's crash-loop guard, superseded-plugin skip and first config
+delivery, in Intel's `PluginManager` (the `#else` half of
+`Managers/Plugin/PluginManager.swift`), copied from `bce907045`.
+
+- **Crash-loop guard (upstream's):** every new dylib is opened inside the
+  `Tools/.currently_loading` marker (durable write: tmp, fsync, rename,
+  directory fsync), and so is the first-delivery probe below. A marker
+  left by a crash is promoted to `Tools/.quarantine` at the next scan; a
+  quarantined plugin is not opened and fails with upstream's "Plugin
+  quarantined after a crash during load" message. A row records the
+  plugin version and host build (`CFBundleVersion`); when either changed,
+  the scan releases the row for one try, and a second crash re-quarantines
+  with the new stamp. Retry (`removeFromQuarantine`) clears one row.
+- **Intel layout:** the version a row is stamped with is upstream's
+  version folder when there is one, else `manifest.json`'s `version`
+  (`installedVersion(forPluginId:)`), so updating a flat Intel plugin
+  releases its row. `extractPluginId` reads both `Tools/<id>/plugin.dylib`
+  and `Tools/<id>/<version>/plugin.dylib`. The scan stays Intel's
+  (`scanToolsDirectory`: `manifest.json`, capability check, then upstream's
+  quarantine check and dylib); `toolsDirectoryURLsWithFailures` is
+  upstream's signature over it. Every path goes through
+  `PluginManager.toolsRootDirectory()` (`OsaurusPaths`), never
+  `ToolsPaths` (`TEST_STORAGE_SAFETY.md` rule 11).
+- **Superseded plugins (upstream's):** `excludeSupersededPlugins` drops
+  them before any `dlopen`; the list is upstream's (`osaurus.search`,
+  `osaurus.browser`, the eight Apple app plugins) plus Intel's retired
+  `search-intel`; `nativeSettingsTab` points at the native replacement
+  (`search-intel` → Search).
+- **First delivery (upstream's `runFirstDeliverySweep`):** off the main
+  thread after each load, per plugin: the ABI probe
+  (`__osaurus_abi_probe__`) inside the marker, then each agent's config
+  (`deliverInitialConfig`: agent value over the Default agent's, then the
+  field default, filtered to the manifest's `config` keys). None of the
+  Intel registry plugins implements `on_config_changed`, so for them both
+  are no-ops.
+- **Agent lifecycle:** Intel's `AgentManager` now posts upstream's
+  `.agentAdded` (from `add`) and `.agentRemoved` (from `delete`), with
+  `userInfo["agentId"]`. `PluginManager` delivers config to every plugin
+  for a new agent, and `delete` awaits
+  `tearDownPluginsForRemovedAgent` (routed plugins get
+  `tunnel_url=""` while the agent's keys still exist) before sweeping the
+  agent's plugin keys, as upstream. Intel's `delete` is not main-actor
+  isolated, so `.agentRemoved` may arrive off the main thread; upstream's
+  observers use the main queue.
+- **Plugins tab:** a plugin that failed to load (quarantined included) is
+  shown as installed with its error and upstream's Retry / Uninstall
+  buttons. Intel's registry list showed any plugin that wasn't loaded as
+  not installed.
+- **Left for stage 2f:** the relay tunnel half of the sweep and agent
+  snapshot (pushing a connected tunnel URL to routed plugins,
+  `observeTunnelStatus`, reconnect redelivery). `lastPushedTunnelURL` and
+  `pushTunnelURL` are in, for the agent-removed teardown.
+
+Tests:
+- **Now included:** upstream's `PluginCrashLoopGuardTests`,
+  `PluginQuarantineUpgradeTests`, `PluginSupersededSkipTests`,
+  `AgentLifecycleConfigResolutionTests` (teardown before the key sweep,
+  resolution policy).
+- **Still excluded:** `AgentManagerLifecycleNotificationTests` (it also
+  tests restoring a legacy agent backup, which Intel's `AgentManager`
+  doesn't have).
+- **`IntelPluginCrashLoopTests`:** quarantine and Retry on the flat
+  layout, an update releasing a row, `extractPluginId` for both layouts,
+  `search-intel` superseded, `.agentAdded` / `.agentRemoved` posted.
+- One-off check (not committed): the real Intel plugins built for the
+  build Mac in a test root; after a clean load no marker or quarantine
+  remained; a stale marker for `time-intel` quarantined it on the next
+  load (its tool gone, the other three loaded); Retry brought it back and
+  `get_current_time` answered.
+
+Validation: the full interim gate passed 4,755 tests in 598 suites (only
+the known avatar cache failure); package and tests also build for
+`x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live `~/.osaurus`
 writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01

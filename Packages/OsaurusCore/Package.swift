@@ -295,7 +295,7 @@ let package = Package(
                 "Networking/GlobalProxyConfigurationTests.swift",
                 "Plugin/PluginAccessibilityInvocationTests.swift",
                 
-                "Plugin/PluginCrashLoopGuardTests.swift",
+                
                 
                 "Networking/HTTPHandlerChatStreamingTests.swift",
                 "Networking/HTTPStreamingWriterTests.swift",

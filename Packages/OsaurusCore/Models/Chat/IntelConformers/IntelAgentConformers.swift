@@ -31,6 +31,18 @@ extension Notification.Name {
     /// Posted by AgentManager when an agent's config changes (capability
     /// picker writes). M12 follow-up — AgentCapabilityManagerView observes it.
     static let agentUpdated = Notification.Name("agentUpdated")
+    /// Posted from `AgentManager.add(_:)` after the new agent is persisted
+    /// and an address has been assigned (best effort). `userInfo["agentId"]`
+    /// is the new agent's UUID. Subscribed by `PluginManager` so plugins
+    /// receive an initial config + tunnel-URL push for the new agent
+    /// (otherwise plugins only see the agent on the next force-reload).
+    static let agentAdded = Notification.Name("agentAdded")
+    /// Posted from `AgentManager.delete(id:)` after the agent record is
+    /// removed. `userInfo["agentId"]` is the deleted agent's UUID.
+    /// Subscribed by `PluginManager` to push `tunnel_url=""` (so plugins
+    /// like Telegram can deregister webhooks) and to clean up per-agent
+    /// keychain secrets that would otherwise be orphaned.
+    static let agentRemoved = Notification.Name("agentRemoved")
     /// Edge-triggered by `AgentDatabase` when an agent's database crosses its
     /// storage soft-warning threshold (userInfo: agentId, percent, usedBytes,
     /// limitBytes). Upstream declares it in the excluded AgentManager.swift.

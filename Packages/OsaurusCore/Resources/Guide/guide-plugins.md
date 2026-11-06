@@ -15,6 +15,7 @@ Plugins add new tools to Osaurus. This Intel build loads native plugins compiled
 - A plugin's page shows its tools, capabilities, HTTP routes, README, and changelog. **Open Web App** opens a plugin's web UI with the agent id it needs.
 - A plugin's tools ask before they run, like other tools that act for you; choose **Always Allow** on the approval card (or set the tool's permission in the Tools tab) to stop asking.
 - If a plugin can't load, the Plugins tab says why (for example, it needs a newer Osaurus or macOS).
+- A plugin that crashed Osaurus while loading is set aside on the next launch instead of crashing it again. Its card offers **Retry** and **Uninstall**; updating the plugin (or Osaurus) gives it one fresh try.
 - Plugins with instructions get a tab on each agent's page (Settings… → Agents → *agent*), where you can rewrite those instructions for that agent.
 - Plugin calls appear in Settings → Insights under the **Tools** scope.
 - When a plugin talks to a model (a chat bot, for example), the conversation is saved as a chat with the plugin's badge in the sidebar; a plugin that names its conversation keeps adding to one chat.
@@ -30,5 +31,5 @@ Claude plugin import (skills, commands, and MCP servers bundled from a GitHub re
 
 ## Troubleshooting
 
-- "Failed to load plugin": the card shows the error; **Retry** reloads it.
+- "Failed to load plugin" or "Plugin quarantined": the card shows the error; **Retry** reloads it.
 - New plugin tools not offered mid-chat: start a new chat.

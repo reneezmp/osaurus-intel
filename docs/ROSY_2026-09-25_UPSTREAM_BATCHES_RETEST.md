@@ -2873,3 +2873,24 @@ object. Needs the Intel registry plugins (`time`, `hello`, `fetch`,
 - [ ] Regression: the Apple app tools and web search still work (the
       retired `search-intel` plugin stays unloaded).
 
+## Plugin loading, step 2 (2026-11-06)
+
+`W-plugin-reliability` stage 2e-2 (`UPSTREAM_SYNC.md`, "Plugin loading,
+step 2"). Not in candidate 66. A plugin that crashes Osaurus while loading
+is set aside on the next launch.
+
+- [ ] Launch with the four Intel plugins installed: all load as before
+      (Settings… → Plugins → Installed), and `~/.osaurus/Tools` holds no
+      `.currently_loading` or `.quarantine` file afterwards
+      (`ls -a ~/.osaurus/Tools`).
+- [ ] Simulated crash: quit Osaurus, run
+      `printf time-intel > ~/.osaurus/Tools/.currently_loading`, launch.
+      Time shows "Plugin quarantined after a crash during load" with
+      **Retry** and **Uninstall**; asking for the time in a chat has no
+      plugin tool. The other plugins work.
+- [ ] Click **Retry**, confirm: Time loads again and answers in a chat.
+- [ ] Create a custom agent, then delete it: no error, and the other
+      agents' plugins still work.
+- [ ] Regression: the retired search plugin stays unloaded; web search
+      and the Apple app tools still work.
+

@@ -1026,8 +1026,11 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
             intelIndexEntries = index.plugins
             intelMapped = index.plugins.map { entry in
                 let semver = parseSemver(entry.version)
-                // Check if this plugin is already installed locally
-                let installed = PluginManager.shared.isNativelyLoaded(pluginId: entry.id)
+                // Installed: loaded, or on disk with a load error (upstream
+                // shows a failed plugin as installed, with its error and
+                // the Retry / Uninstall buttons).
+                let loadError = PluginManager.shared.loadError(for: entry.id)
+                let installed = PluginManager.shared.isNativelyLoaded(pluginId: entry.id) || loadError != nil
                 return PluginState(
                     pluginId: entry.id,
                     name: entry.name,
@@ -1047,7 +1050,7 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
                         ? (installedManifestVersion(for: entry.id) ?? semver) : nil,
                     latestVersion: semver,
                     isInstalling: false,
-                    loadError: nil,
+                    loadError: loadError,
                     requiresAppleSilicon: false,
                     downloadURL: entry.download_url,
                     manifestURL: entry.manifest_url,
@@ -1082,15 +1085,17 @@ final class PluginRepositoryService: ObservableObject, @unchecked Sendable {
         await MainActor.run {
             for i in plugins.indices {
                 let pid = plugins[i].pluginId
-                if PluginManager.shared.isNativelyLoaded(pluginId: pid) {
+                let loadError = PluginManager.shared.loadError(for: pid)
+                if PluginManager.shared.isNativelyLoaded(pluginId: pid) || loadError != nil {
                     // Read the genuine installed version off disk so an upgrade
                     // (which overwrites the manifest) correctly clears hasUpdate,
                     // and a still-outdated install keeps showing it.
                     plugins[i].installedVersion =
                         installedManifestVersion(for: pid) ?? plugins[i].latestVersion
-                    plugins[i].loadError = nil
+                    plugins[i].loadError = loadError
                 } else {
                     plugins[i].installedVersion = nil
+                    plugins[i].loadError = nil
                 }
             }
             updatesAvailableCount = plugins.filter { $0.hasUpdate }.count

@@ -1606,16 +1606,26 @@ import Darwin
 @MainActor
 public final class PluginManager: ObservableObject {
     public static let shared = PluginManager()
-    /// Plugins replaced by built-ins: the retired Intel search dylib, and the
-    /// osaurus-tools Apple app plugins whose app ships natively on Intel
-    /// (docs/APPLE_APPS_INTEL_PLAN.md). Apple plugins for apps not shipped
-    /// yet keep loading.
-    public nonisolated static let supersededPluginIds: Set<String> =
-        Set(["search-intel"]).union(supersededAppleAppPluginIds)
+    /// Plugins whose functionality has been absorbed into Osaurus itself
+    /// (upstream's list, plus Intel's retired `search-intel` dylib). Their
+    /// dylibs are skipped entirely at the scan stage (see
+    /// `excludeSupersededPlugins`): the native implementation owns the tool
+    /// names, and never dlopen-ing them removes the ABI probe / config-push
+    /// crash surface for code that will never serve a tool again.
+    nonisolated static let supersededPluginIds: Set<String> = [
+        "osaurus.search", "osaurus.browser",
+        // Apple app plugins → built-in `AppleApps/` tool families, toggled per
+        // custom agent under Abilities → Tools (one picker group per app).
+        "osaurus.calendar", "osaurus.reminders", "osaurus.contacts", "osaurus.notes",
+        "osaurus.mail", "osaurus.messages", "osaurus.maps", "osaurus.music",
+        // Intel: the retired x86_64 search plugin (search provider cascade).
+        "search-intel",
+    ]
 
-    /// Apple app plugin ids superseded on Intel (subset of the above).
-    public nonisolated static var supersededAppleAppPluginIds: Set<String> {
-        Set(AppleApp.availableOnIntel.compactMap(\.supersededPluginId))
+    /// Apple app plugin ids specifically (subset of `supersededPluginIds`),
+    /// derived from `AppleApp.supersededPluginId` so the two lists cannot drift.
+    nonisolated static var supersededAppleAppPluginIds: Set<String> {
+        Set(AppleApp.allCases.compactMap(\.supersededPluginId))
     }
 
     /// Superseded Apple app plugins whose folder is still installed.
@@ -1704,6 +1714,19 @@ public final class PluginManager: ObservableObject {
 
     /// Plugins that failed to load, keyed by plugin ID
     @Published private(set) var failedPlugins: [String: FailedPlugin] = [:]
+
+    /// NotificationCenter tokens for `.agentAdded` / `.agentRemoved`. Held for
+    /// the lifetime of the singleton so the closures stay live.
+    private var agentLifecycleObservers: [NSObjectProtocol] = []
+
+    /// Last `tunnel_url` value we pushed to each `(pluginId, agentId)` pair.
+    /// Used to dedup `pushTunnelURL` calls *against the host's own delivery
+    /// history* rather than against the keychain entry — which the plugin
+    /// can mutate via `config_delete`, defeating the dedup and causing
+    /// repeated webhook setups during launch races. The inner Optional
+    /// stores `String?` (nil = "tunnel down was the last thing we pushed").
+    /// Internal so unit tests can inspect the cache structure.
+    var lastPushedTunnelURL: [String: [UUID: String?]] = [:]
 
     /// Serializes reload operations to prevent concurrent `performPluginScan`
     /// calls from overwriting and deallocating each other's host contexts.
@@ -1796,6 +1819,7 @@ public final class PluginManager: ObservableObject {
     /// Result of heavy plugin scanning performed on a background thread.
     private struct PluginScanResult: @unchecked Sendable {
         let allURLs: [URL]
+        let verificationFailures: [String: String]
         let compatible: [LoadedPluginInfo]
         let incompatible: [IncompatiblePluginInfo]
         let degraded: Set<String>
@@ -1831,6 +1855,7 @@ public final class PluginManager: ObservableObject {
     }
 
     private func _loadAll(forceReload: Bool = false) async {
+        Self.ensureToolsDirectoryExists()
         // Plugin config moved from a plaintext file to the Keychain
         // (2026-10-10); move any values left in the old file first.
         IntelPluginConfigMigration.runIfNeeded()
@@ -1848,11 +1873,10 @@ public final class PluginManager: ObservableObject {
 
         // Capture current state needed for background work
         let alreadyLoadedPaths = self.loadedPluginPaths
-        let toolsRoot = Self.toolsRootDirectory()
 
         // Heavy work on background thread: filesystem scan, dlopen, plugin init
         let scanResult = await Task.detached(priority: .userInitiated) {
-            Self.performPluginScan(toolsRoot: toolsRoot, alreadyLoadedPaths: alreadyLoadedPaths)
+            Self.performPluginScan(alreadyLoadedPaths: alreadyLoadedPaths)
         }.value
 
         // --- Everything below runs on main thread (registry & state mutations) ---
@@ -1860,6 +1884,9 @@ public final class PluginManager: ObservableObject {
         loadedPlugins = scanResult.compatible
         incompatiblePlugins = scanResult.incompatible
         degradedPluginIds = scanResult.degraded
+        for (pluginId, error) in scanResult.verificationFailures {
+            failedPlugins[pluginId] = FailedPlugin(pluginId: pluginId, error: error)
+        }
 
         let currentPaths = Set(scanResult.allURLs.map { $0.path })
 
@@ -1933,7 +1960,19 @@ public final class PluginManager: ObservableObject {
             NotificationCenter.default.post(name: .toolsListChanged, object: nil)
         }
 
+        observeAgentLifecycle()
+        // Every model-facing tool/skill registry mutation is complete here.
+        // Publish readiness before first-delivery callbacks: a plugin is
+        // allowed to invoke host inference from a callback, and making that
+        // nested request await its own active reload task would deadlock.
         isPromptCatalogReady = true
+        // Per-plugin first-delivery sweep, each step bracketed by the
+        // `.currently_loading` marker. A SIGABRT inside the plugin's
+        // `on_config_changed` (e.g. misaligned ABI mirror calling
+        // `host->free_string` on a non-malloc pointer) leaves the marker
+        // on disk; the next launch reads it via `promoteStaleLoadingMarker`
+        // and quarantines the plugin instead of crash-looping the host.
+        runFirstDeliverySweep(from: scanResult)
 
         // Opt-in diagnostics (the terminal Renée launches from).
         if ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_SELFTEST"] != nil {
@@ -1954,6 +1993,344 @@ public final class PluginManager: ObservableObject {
         // = "toolName|{json payload}".
         if let testcall = ProcessInfo.processInfo.environment["OSAURUS_INTEL_PLUGIN_TESTCALL"] {
             await runToolTestCall(testcall)
+        }
+    }
+
+    /// Per-plugin first-delivery sweep. The synthetic ABI probe is
+    /// delivered SYNCHRONOUSLY inside a `.currently_loading` marker so
+    /// that a misaligned `osr_host_api` mirror — the production
+    /// crash-loop signature where `host->free_string` resolves to the
+    /// wrong slot and `libc free()` aborts on a non-malloc pointer —
+    /// quarantines the plugin on the next launch instead of crash-
+    /// looping the host. The real per-agent config snapshot and the
+    /// relay tunnel URL push run AFTER the probe via the existing
+    /// async path so a plugin's expensive `on_config_changed` work
+    /// (Telegram `setupWebhook`, OAuth refresh, etc.) does not block
+    /// the launch sequence.
+    ///
+    /// The probe is fast (a single `(__osaurus_abi_probe__, <UUID>)`
+    /// pair through the plugin's serial `configEventQueue`) and runs
+    /// the same code path the first real config push would: top of
+    /// `on_config_changed` → `host->get_active_agent_id()` →
+    /// `host->free_string(ptr)`. Plugins that resolve the agent at
+    /// the top of `on_config_changed` (the documented pattern) will
+    /// trip the misalignment here. Plugins that short-circuit unknown
+    /// keys before the host call avoid the probe but also avoid the
+    /// production crash signature, so the trade-off is acceptable.
+    ///
+    /// Sequenced per plugin (not interleaved) so the marker file —
+    /// which holds at most one plugin id at a time — always reflects
+    /// the plugin currently inside the danger zone.
+    private func runFirstDeliverySweep(from scanResult: PluginScanResult) {
+        let agents = AgentManager.shared.agents
+        let agentIds = agents.map(\.id)
+        let probeAgentId = agents.first?.id ?? Agent.defaultId
+
+        let loadedPlugins: [LoadedPlugin] = scanResult.loadResults.compactMap { entry in
+            guard case .success(let loaded) = entry.result else { return nil }
+            return loaded
+        }
+        guard !loadedPlugins.isEmpty else { return }
+
+        // Intel: tunnel URL pushes for routed plugins arrive with routes and
+        // the tunnel (`W-plugin-reliability` stage 2f).
+
+        // The whole sweep runs off the main actor: the ABI handshake probe
+        // (`notifyConfigBatchSync`) blocks until the plugin's C
+        // `on_config_changed` returns, and a plugin doing heavy work there
+        // (HTTP, OAuth refresh) used to stall the main thread for seconds at
+        // launch — one plugin at a time. The secret reads behind the config
+        // delivery also round-trip to the authentication daemon over
+        // blocking XPC. Nothing on this path needs the main thread; the
+        // per-plugin ordering (marker → probe → clear → config → tunnel)
+        // is preserved because the sweep stays sequential inside one task,
+        // keeping the crash-loop quarantine contract: a SIGABRT inside the
+        // probe leaves the marker on disk for the next launch to read.
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            for loaded in loadedPlugins {
+                let pluginId = loaded.plugin.id
+                Self.writeLoadingMarker(pluginId: pluginId)
+                // Deliberately no `defer`: the marker must persist on the
+                // SIGABRT path. It is cleared only after the probe returns
+                // cleanly below.
+                Self.runAbiHandshakeProbe(loaded: loaded, agentId: probeAgentId)
+                Self.clearLoadingMarker()
+
+                // Real per-agent config delivery. The probe above already
+                // exercised the misalignment-prone host call pattern, so
+                // this fan-out runs outside the marker window.
+                for agentId in agentIds {
+                    self.deliverInitialConfig(to: loaded, agentId: agentId)
+                }
+
+            }
+        }
+    }
+
+    /// One-shot synthetic `on_config_changed` push that exercises the
+    /// plugin's view of the host vtable on the same code path the first
+    /// real config push would take. The plugin's body is invoked via
+    /// `notifyConfigBatchSync` so the call returns inside the loading
+    /// marker window — a SIGABRT here writes the quarantine marker
+    /// instead of crash-looping the host on every subsequent launch.
+    ///
+    /// No-op for v1 plugins (no `on_config_changed` slot to dispatch to).
+    /// `nonisolated static`: runs from the off-main first-delivery sweep
+    /// (blocking until plugin C code returns must never happen on main).
+    private nonisolated static func runAbiHandshakeProbe(loaded: LoadedPlugin, agentId: UUID) {
+        guard loaded.plugin.abiVersion >= 2 else { return }
+        loaded.plugin.notifyConfigBatchSync(
+            [(key: abiProbeKey, value: UUID().uuidString)],
+            agentId: agentId
+        )
+    }
+
+    /// Push the resolved config for `(plugin, agent)` to the plugin via
+    /// `notifyConfigBatch`. Reads agent-scoped secrets, falls back to
+    /// per-key keychain entries and field defaults, and filters by the
+    /// plugin's declared config field keys. No-op when the plugin has no
+    /// config spec, no host context, or yields zero changes.
+    ///
+    /// `sync == true` routes through `notifyConfigBatchSync` so the call
+    /// returns inside the load-time `.currently_loading` marker window
+    /// — used by `runFirstDeliverySweep` so a plugin abort during initial
+    /// delivery quarantines the plugin on the next launch instead of
+    /// crash-looping the host. Runtime callers (agent added,
+    /// PluginConfigView save) leave `sync == false` to keep the existing
+    /// fire-and-forget semantics.
+    nonisolated private func deliverInitialConfig(
+        to loaded: LoadedPlugin,
+        agentId: UUID,
+        sync: Bool = false,
+        force: Bool = false
+    ) {
+        let pluginId = loaded.plugin.id
+        guard let configSpec = loaded.plugin.manifest.capabilities.config,
+            PluginHostContext.getContext(for: pluginId) != nil
+        else { return }
+
+        let allFieldKeys = Set(configSpec.sections.flatMap { $0.fields.map { $0.key } })
+        // Shared resolution policy (exact agent overlaid on default-agent
+        // globals) so initial delivery matches tool payload injection —
+        // a key saved once on the Plugins tab reaches every agent's
+        // `on_config_changed`, not just the Default agent's.
+        var values = ToolSecretsKeychain.resolvedSecretsWithDefaults(
+            pluginId: pluginId, agentId: agentId)
+
+        for section in configSpec.sections {
+            for field in section.fields {
+                if values[field.key] == nil, field.type != .readonly, field.type != .status,
+                    let val = ToolSecretsKeychain.resolvedSecret(
+                        id: field.key, for: pluginId, agentId: agentId)
+                {
+                    values[field.key] = val
+                }
+                if values[field.key] == nil, let def = field.default {
+                    values[field.key] = def.stringValue
+                }
+                if let connKey = field.connected_when, values[connKey] == nil,
+                    let val = ToolSecretsKeychain.resolvedSecret(
+                        id: connKey, for: pluginId, agentId: agentId)
+                {
+                    values[connKey] = val
+                }
+            }
+        }
+
+        let changes: [(key: String, value: String)] = values.compactMap { key, value in
+            allFieldKeys.contains(key) ? (key: key, value: value) : nil
+        }
+        guard !changes.isEmpty else { return }
+        if sync {
+            loaded.plugin.notifyConfigBatchSync(changes, agentId: agentId, force: force)
+        } else {
+            loaded.plugin.notifyConfigBatch(changes, agentId: agentId, force: force)
+        }
+    }
+
+    // MARK: - Agent lifecycle
+
+    /// Upstream's `observeTunnelStatus()` without the relay sink (stage 2f):
+    /// subscribes to agent lifecycle notifications so newly added / removed
+    /// agents trigger a per-agent config push (or webhook deregister) on
+    /// every loaded plugin. Idempotent.
+    private func observeAgentLifecycle() {
+        if agentLifecycleObservers.isEmpty {
+            agentLifecycleObservers.append(
+                subscribeAgentLifecycle(.agentAdded) { $0.handleAgentAdded($1) }
+            )
+            agentLifecycleObservers.append(
+                subscribeAgentLifecycle(.agentRemoved) { $0.handleAgentRemoved($1) }
+            )
+        }
+    }
+
+    /// Wires a `NotificationCenter` observer for `name` that decodes
+    /// `userInfo["agentId"]` and hops to the main actor before invoking
+    /// `handler` against the live `PluginManager` instance. Collapses
+    /// the two near-identical observer blocks for `.agentAdded` /
+    /// `.agentRemoved` and keeps both behind a single weak self capture.
+    private func subscribeAgentLifecycle(
+        _ name: Notification.Name,
+        _ handler: @escaping @MainActor (PluginManager, UUID) -> Void
+    ) -> NSObjectProtocol {
+        NotificationCenter.default.addObserver(
+            forName: name,
+            object: nil,
+            queue: .main
+        ) { [weak self] note in
+            guard let self, let agentId = note.userInfo?["agentId"] as? UUID else { return }
+            Task { @MainActor in handler(self, agentId) }
+        }
+    }
+
+    /// Deliver the full per-agent config + current tunnel URL to every
+    /// loaded plugin for a freshly added agent. Mirrors what `_loadAll`
+    /// does at startup, scoped to a single agent.
+    private func handleAgentAdded(_ agentId: UUID) {
+        deliverFullAgentSnapshot(agentId: agentId, force: false)
+    }
+
+    /// Tear down per-agent state on every loaded plugin when an agent is
+    /// deleted: push `tunnel_url=""` so plugins can deregister their
+    /// webhooks. `AgentManager.delete(id:)` already ran the awaitable
+    /// `tearDownPluginsForRemovedAgent` before sweeping keychain secrets;
+    /// this notification-driven pass is a belt-and-braces repeat for any
+    /// other `.agentRemoved` poster — the plugin-side delivery dedup
+    /// filters the duplicate `tunnel_url=""` so `on_config_changed`
+    /// doesn't re-fire.
+    private func handleAgentRemoved(_ agentId: UUID) {
+        for loaded in plugins where !loaded.routes.isEmpty {
+            pushTunnelURL(nil, to: loaded, agentId: agentId)
+        }
+        // Drop the dedup entry for this agent across every plugin slot
+        // so a future agent re-using this UUID (extremely unlikely, but
+        // possible if a user restores from backup) gets a fresh push.
+        for pluginId in lastPushedTunnelURL.keys {
+            lastPushedTunnelURL[pluginId]?.removeValue(forKey: agentId)
+        }
+    }
+
+    /// Awaitable per-agent plugin teardown for agent deletion. Pushes
+    /// `tunnel_url=""` to every routed plugin through the SYNCHRONOUS
+    /// config-delivery path and returns only after each plugin's
+    /// `on_config_changed` has run.
+    ///
+    /// Ordering contract: `AgentManager.delete(id:)` must call this
+    /// BEFORE `ToolSecretsKeychain.deleteAllSecrets(forAgent:)`. Plugins
+    /// deregister webhooks inside this callback and read their config
+    /// (e.g. Telegram's `bot_token`) while doing so — sweeping the
+    /// keychain first made those reads return nothing, leaving the
+    /// webhook registered upstream forever.
+    func tearDownPluginsForRemovedAgent(agentId: UUID) async {
+        // Drop the host-side tunnel-push dedup entries regardless of
+        // whether any plugin needs a delivery.
+        for pluginId in lastPushedTunnelURL.keys {
+            lastPushedTunnelURL[pluginId]?.removeValue(forKey: agentId)
+        }
+
+        let routed = plugins.filter { !$0.routes.isEmpty }
+        guard !routed.isEmpty else { return }
+
+        // Off the main actor: the keychain write blocks on security-daemon
+        // XPC and `notifyConfigBatchSync` blocks until the plugin's C
+        // callback returns.
+        await Task.detached(priority: .userInitiated) {
+            for loaded in routed {
+                Self.persistTunnelURLSecret(nil, pluginId: loaded.plugin.id, agentId: agentId)
+                loaded.plugin.notifyConfigBatchSync(
+                    [(key: "tunnel_url", value: "")],
+                    agentId: agentId
+                )
+            }
+        }.value
+    }
+
+    /// Push the full per-agent config snapshot to every loaded plugin.
+    /// Shared body for `handleAgentAdded` (force=false) and, with the
+    /// tunnel (stage 2f), the relay-reconnect branch (force=true), where
+    /// upstream also pushes the connected tunnel URL to plugins that
+    /// declare routes. With `force: true` the dedup is bypassed so plugins
+    /// re-fire `on_config_changed` on identical values.
+    private func deliverFullAgentSnapshot(
+        agentId: UUID,
+        force: Bool
+    ) {
+        // Resolve and deliver each plugin's config off the main actor;
+        // the secret reads behind it block on authentication-daemon XPC
+        // and must not stall the main thread when an agent is added or a
+        // relay reconnects.
+        let loadedPlugins = plugins
+        Task.detached(priority: .userInitiated) { [weak self] in
+            guard let self else { return }
+            for loaded in loadedPlugins {
+                self.deliverInitialConfig(to: loaded, agentId: agentId, force: force)
+            }
+        }
+    }
+
+    /// `sync == true` routes through `notifyConfigBatchSync` so the call
+    /// returns inside the load-time loading marker window, matching the
+    /// crash-loop-guard contract `runFirstDeliverySweep` relies on.
+    /// Runtime callers (`handleAgentAdded`, `handleTunnelStatusChange`)
+    /// leave `sync == false` to preserve the existing fire-and-forget
+    /// semantics.
+    private func pushTunnelURL(
+        _ url: String?,
+        to loaded: LoadedPlugin,
+        agentId: UUID,
+        sync: Bool = false,
+        force: Bool = false
+    ) {
+        let pluginId = loaded.plugin.id
+
+        // Record the value we pushed so `handleTunnelStatusChange` can
+        // dedup. Setting `[agentId] = nil` removes the entry; that's
+        // intentional — an absent entry is treated as "last pushed = nil"
+        // by the dedup, which preserves correctness.
+        lastPushedTunnelURL[pluginId, default: [:]][agentId] = url
+
+        NotificationCenter.default.post(
+            name: .pluginConfigDidChange,
+            object: nil,
+            userInfo: ["pluginId": pluginId, "key": "tunnel_url", "value": url ?? ""]
+        )
+
+        if sync {
+            Self.persistTunnelURLSecret(url, pluginId: pluginId, agentId: agentId)
+            loaded.plugin.notifyConfigBatchSync(
+                [(key: "tunnel_url", value: url ?? "")],
+                agentId: agentId,
+                force: force
+            )
+        } else {
+            // The keychain write blocks on security-daemon XPC and has
+            // hung the main thread for seconds on relay reconnects, so the
+            // fire-and-forget path persists and notifies off the main
+            // actor. The write lands before the notify so plugins that
+            // read the secret back see the new value.
+            Task.detached(priority: .userInitiated) {
+                Self.persistTunnelURLSecret(url, pluginId: pluginId, agentId: agentId)
+                loaded.plugin.notifyConfigChanged(
+                    key: "tunnel_url",
+                    value: url ?? "",
+                    agentId: agentId,
+                    force: force
+                )
+            }
+        }
+    }
+
+    private nonisolated static func persistTunnelURLSecret(
+        _ url: String?,
+        pluginId: String,
+        agentId: UUID
+    ) {
+        if let url {
+            ToolSecretsKeychain.saveSecret(url, id: "tunnel_url", for: pluginId, agentId: agentId)
+        } else {
+            ToolSecretsKeychain.deleteSecret(id: "tunnel_url", for: pluginId, agentId: agentId)
         }
     }
 
@@ -2034,27 +2411,59 @@ public final class PluginManager: ObservableObject {
     // MARK: - Scanning (nonisolated)
 
     nonisolated static func toolsRootDirectory() -> URL {
+        // Intel: `OsaurusPaths`, which honours `OSAURUS_TEST_ROOT`.
+        // Upstream reads `ToolsPaths.toolsRootDirectory()`, which resolves to
+        // the live `~/.osaurus` in tests unless `ToolsPaths.overrideRoot` is
+        // set (docs/TEST_STORAGE_SAFETY.md).
         OsaurusPaths.root().appendingPathComponent("Tools", isDirectory: true)
     }
 
-    /// Intel's scan: every `Tools/<id>/` with a `manifest.json` goes through
-    /// the capability check; compatible and degraded plugins that aren't
-    /// superseded and have a dylib are loaded with upstream's checks.
-    nonisolated private static func performPluginScan(
-        toolsRoot: URL,
-        alreadyLoadedPaths: Set<String>
-    ) -> PluginScanResult {
+    nonisolated static func ensureToolsDirectoryExists() {
+        let root = toolsRootDirectory()
         let fm = FileManager.default
-        var allURLs: [URL] = []
+        if !fm.fileExists(atPath: root.path) {
+            try? fm.createDirectory(at: root, withIntermediateDirectories: true)
+        }
+    }
+
+    nonisolated static func toolsDirectoryURLs() -> [URL] {
+        return toolsDirectoryURLsWithFailures().urls
+    }
+
+    /// What one pass over the tools folder found (Intel: the capability
+    /// buckets ride along with upstream's dylib list and failures).
+    struct ToolsDirectoryScan: Sendable {
+        var candidates: [(url: URL, pluginId: String)] = []
+        var failures: [String: String] = [:]
         var compatible: [LoadedPluginInfo] = []
         var incompatible: [IncompatiblePluginInfo] = []
         var degraded: Set<String> = []
-        var loadResults: [(url: URL, pluginId: String, result: Result<LoadedPlugin, PluginLoadError>)] = []
+    }
+
+    /// Returns dylib URLs to load and a dictionary of verification failures (pluginId -> error message)
+    nonisolated static func toolsDirectoryURLsWithFailures() -> (urls: [URL], failures: [String: String]) {
+        let scan = scanToolsDirectory()
+        return (scan.candidates.map(\.url), scan.failures)
+    }
+
+    /// Upstream's `toolsDirectoryURLsWithFailures` over Intel's layout:
+    /// promote a stale loading marker, then for every `Tools/<id>/` with a
+    /// `manifest.json`: the capability check (Intel), the quarantine check
+    /// (upstream, releasing a row when the plugin or the host changed), and
+    /// the dylib.
+    nonisolated static func scanToolsDirectory() -> ToolsDirectoryScan {
+        promoteStaleLoadingMarker()
+
+        let fm = FileManager.default
+        let root = toolsRootDirectory()
+        var scan = ToolsDirectoryScan()
+        let quarantined = quarantinedPluginIds()
 
         let entries =
             (try? fm.contentsOfDirectory(
-                at: toolsRoot, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        for pluginURL in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent }) {
+                at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for pluginURL in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        where pluginURL.hasDirectoryPath {
             let manifestURL = pluginURL.appendingPathComponent("manifest.json")
             guard fm.fileExists(atPath: manifestURL.path),
                 let data = try? Data(contentsOf: manifestURL),
@@ -2078,42 +2487,359 @@ public final class PluginManager: ObservableObject {
             )
             switch compatibility {
             case .incompatible(let missing):
-                incompatible.append(
+                scan.incompatible.append(
                     IncompatiblePluginInfo(
                         pluginId: directoryId, name: name, version: version, missingRequired: missing))
                 continue
             case .degraded:
-                degraded.insert(directoryId)
+                scan.degraded.insert(directoryId)
             case .compatible:
                 break
             }
-            compatible.append(
+            scan.compatible.append(
                 LoadedPluginInfo(
                     id: directoryId, pluginId: directoryId, name: name, version: version, toolNames: toolNames))
 
-            // Retired by built-ins (search provider cascade, native Apple
-            // apps). Refuse the dylib so it cannot overwrite a first-party tool.
-            if supersededPluginIds.contains(directoryId) {
-                NSLog("[Osaurus Intel] skipped superseded native plugin '\(directoryId)' (now built in)")
+            if quarantined.contains(directoryId),
+                !releaseQuarantineIfUpgraded(
+                    pluginId: directoryId,
+                    installedVersion: installedVersion(forPluginId: directoryId)
+                )
+            {
+                // Surfaced verbatim in PluginsView and the AgentsView
+                // "Failed" tab — point users at the in-app Retry /
+                // Uninstall buttons.
+                scan.failures[directoryId] =
+                    "Plugin quarantined after a crash during load — use the Retry or Uninstall button below to recover."
                 continue
             }
+
             guard let dylib = findDylib(in: pluginURL) else {
                 NSLog("[Osaurus Intel] plugin '\(directoryId)': no .dylib found (browse-only)")
                 continue
             }
-            allURLs.append(dylib)
-            if alreadyLoadedPaths.contains(dylib.path) { continue }
-            loadResults.append(
-                (url: dylib, pluginId: directoryId, result: loadPluginWithError(at: dylib, directoryId: directoryId)))
+            scan.candidates.append((url: dylib, pluginId: directoryId))
+        }
+        return scan
+    }
+
+    /// Performs the heavy plugin scanning work on a background thread
+    /// (upstream's `performPluginScan`): each new dylib is opened inside the
+    /// `.currently_loading` marker, so a crash in `dlopen` / entry / `init`
+    /// quarantines that plugin on the next launch.
+    nonisolated private static func performPluginScan(
+        alreadyLoadedPaths: Set<String>
+    ) -> PluginScanResult {
+        let scan = scanToolsDirectory()
+        let (urls, verificationFailures) = excludeSupersededPlugins(
+            urls: scan.candidates.map(\.url),
+            failures: scan.failures
+        )
+
+        var loadResults: [(url: URL, pluginId: String, result: Result<LoadedPlugin, PluginLoadError>)] = []
+        for url in urls {
+            if alreadyLoadedPaths.contains(url.path) { continue }
+            let pluginId = extractPluginId(from: url)
+            writeLoadingMarker(pluginId: pluginId)
+            let result = loadPluginWithError(at: url, directoryId: pluginId)
+            clearLoadingMarker()
+            loadResults.append((url: url, pluginId: pluginId, result: result))
         }
 
         return PluginScanResult(
-            allURLs: allURLs,
-            compatible: compatible,
-            incompatible: incompatible,
-            degraded: degraded,
+            allURLs: urls,
+            verificationFailures: verificationFailures,
+            compatible: scan.compatible,
+            incompatible: scan.incompatible,
+            degraded: scan.degraded,
             loadResults: loadResults
         )
+    }
+
+    /// The plugin id a dylib URL belongs to. Upstream's layout is
+    /// `.../Tools/{pluginId}/{version}/plugin.dylib`; Intel's is
+    /// `.../Tools/{pluginId}/plugin.dylib`.
+    nonisolated static func extractPluginId(from url: URL) -> String {
+        let parent = url.deletingLastPathComponent()
+        if parent.deletingLastPathComponent().lastPathComponent == "Tools" {
+            return parent.lastPathComponent
+        }
+        // Go up from dylib -> version dir -> plugin dir
+        return parent.deletingLastPathComponent().lastPathComponent
+    }
+
+    /// The installed version a quarantine row is stamped with and compared
+    /// against: upstream's version directory, or (Intel's flat layout) the
+    /// `version` in `manifest.json`.
+    nonisolated static func installedVersion(forPluginId pluginId: String) -> String? {
+        let pluginDir = toolsRootDirectory().appendingPathComponent(pluginId, isDirectory: true)
+        if let versionDir = resolveVersionDirectory(pluginDir) {
+            return versionDir.lastPathComponent
+        }
+        let manifestURL = pluginDir.appendingPathComponent("manifest.json")
+        guard let data = try? Data(contentsOf: manifestURL),
+            let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return json["version"] as? String
+    }
+
+    /// Drops superseded plugins from a scan result BEFORE any dlopen. Also
+    /// removes their verification failures (e.g. a missing consent marker)
+    /// so the Plugins UI keeps showing the "Built into Osaurus" banner
+    /// instead of a load error for a plugin that will never load again.
+    /// Removing them from `urls` also means `_loadAll`'s removed-plugin
+    /// sweep unloads any instance a previous scan loaded (hot-reload
+    /// transition). Pure function so the skip contract is unit-testable
+    /// without real dylibs.
+    nonisolated static func excludeSupersededPlugins(
+        urls: [URL],
+        failures: [String: String]
+    ) -> (urls: [URL], failures: [String: String]) {
+        var filteredFailures = failures
+        for pluginId in supersededPluginIds {
+            filteredFailures.removeValue(forKey: pluginId)
+        }
+        return (
+            urls: urls.filter { !supersededPluginIds.contains(extractPluginId(from: $0)) },
+            failures: filteredFailures
+        )
+    }
+
+    /// The settings tab that owns a superseded plugin's native replacement,
+    /// for Plugins-UI deep links ("Built into Osaurus" banner / dead Browse
+    /// cards).
+    nonisolated static func nativeSettingsTab(forSupersededPlugin pluginId: String)
+        -> ManagementTab?
+    {
+        switch pluginId {
+        case "osaurus.search", "search-intel": return .search
+        case "osaurus.browser": return .browser
+        default:
+            // Apple app plugins live on as per-agent groups in the Tools picker.
+            return supersededAppleAppPluginIds.contains(pluginId) ? .agents : nil
+        }
+    }
+
+    // MARK: - Plugin Quarantine
+
+    private nonisolated static func currentlyLoadingURL() -> URL {
+        toolsRootDirectory().appendingPathComponent(".currently_loading", isDirectory: false)
+    }
+
+    private nonisolated static func quarantineURL() -> URL {
+        toolsRootDirectory().appendingPathComponent(".quarantine", isDirectory: false)
+    }
+
+    /// One `.quarantine` row.
+    ///
+    /// The file started life as a bare `[String]` of plugin ids, which made a
+    /// quarantine permanent: a plugin that aborted once stayed skipped after the
+    /// user upgraded the plugin *or* the app, with nothing to signal that the
+    /// cause was gone. Observed on a real install — `osaurus.calendar` sat
+    /// quarantined across app rebuilds and loaded cleanly the moment the row was
+    /// dropped. Rows now record which plugin version crashed and under which
+    /// host build, so upgrading either releases the row for one fresh attempt.
+    /// Legacy bare-string rows decode with nil stamps and stay permanent,
+    /// matching how they were written.
+    struct QuarantineEntry: Codable, Sendable, Equatable {
+        let id: String
+        var version: String?
+        var build: String?
+    }
+
+    /// The running host build, compared against `QuarantineEntry.build`.
+    nonisolated static func hostBuildIdentifier() -> String? {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String
+    }
+
+    nonisolated static func quarantineEntries() -> [QuarantineEntry] {
+        guard let data = try? Data(contentsOf: quarantineURL()) else { return [] }
+        if let entries = try? JSONDecoder().decode([QuarantineEntry].self, from: data) {
+            return entries
+        }
+        // Pre-stamp file: a JSON array of bare ids.
+        if let ids = try? JSONDecoder().decode([String].self, from: data) {
+            return ids.map { QuarantineEntry(id: $0, version: nil, build: nil) }
+        }
+        return []
+    }
+
+    nonisolated static func quarantinedPluginIds() -> Set<String> {
+        Set(quarantineEntries().map(\.id))
+    }
+
+    /// Writes `entries`, deleting the file outright when empty —
+    /// ``quarantineEntries()`` treats a missing file and `[]` alike, but the
+    /// Retry path's contract is that emptying removes the file.
+    private nonisolated static func writeQuarantineEntries(_ entries: [QuarantineEntry]) {
+        let url = quarantineURL()
+        guard !entries.isEmpty else {
+            try? FileManager.default.removeItem(at: url)
+            return
+        }
+        if let data = try? JSONEncoder().encode(entries) {
+            try? data.write(to: url)
+        }
+    }
+
+    private nonisolated static func addToQuarantine(_ pluginId: String) {
+        var entries = quarantineEntries().filter { $0.id != pluginId }
+        entries.append(
+            QuarantineEntry(
+                id: pluginId,
+                version: installedVersion(forPluginId: pluginId),
+                build: hostBuildIdentifier()
+            )
+        )
+        writeQuarantineEntries(entries)
+        NSLog("[Osaurus] Quarantined plugin '%@' after crash during load", pluginId)
+    }
+
+    /// Consumes the quarantine row for `pluginId` when what crashed is no longer
+    /// what is installed, returning `true` when the caller should attempt the
+    /// load.
+    ///
+    /// The row is **removed** rather than merely ignored: if this attempt
+    /// crashes too, `.currently_loading` re-quarantines with the new stamp, so
+    /// the crash-loop guard still holds and the same (plugin version, host
+    /// build) pair is never retried twice.
+    nonisolated static func releaseQuarantineIfUpgraded(
+        pluginId: String,
+        installedVersion: String?,
+        hostBuild: String? = hostBuildIdentifier()
+    ) -> Bool {
+        let entries = quarantineEntries()
+        guard let entry = entries.first(where: { $0.id == pluginId }) else { return true }
+        // A legacy row records nothing about what crashed, so there is nothing
+        // to compare against — leave it for the explicit Retry button.
+        guard entry.version != nil || entry.build != nil else { return false }
+        let versionChanged = entry.version != nil && entry.version != installedVersion
+        let buildChanged = entry.build != nil && entry.build != hostBuild
+        guard versionChanged || buildChanged else { return false }
+        writeQuarantineEntries(entries.filter { $0.id != pluginId })
+        NSLog(
+            "[Osaurus] Releasing quarantined plugin '%@' for one retry (crashed at version %@ under build %@)",
+            pluginId, entry.version ?? "unknown", entry.build ?? "unknown"
+        )
+        return true
+    }
+
+    nonisolated static func clearQuarantine() {
+        try? FileManager.default.removeItem(at: quarantineURL())
+        try? FileManager.default.removeItem(at: currentlyLoadingURL())
+    }
+
+    /// Removes a single plugin from the quarantine list. Used by the
+    /// per-plugin "Retry" button surfaced in `AgentDetailView` for
+    /// failed plugins. Whole-list `clearQuarantine()` would unhide
+    /// every other quarantined plugin too, which surprises users who
+    /// only intended to retry one.
+    nonisolated static func removeFromQuarantine(_ pluginId: String) {
+        let entries = quarantineEntries()
+        guard entries.contains(where: { $0.id == pluginId }) else { return }
+        writeQuarantineEntries(entries.filter { $0.id != pluginId })
+        // Wipe the loading marker too — it's the matched cause for
+        // most quarantine entries (a SIGABRT inside init or
+        // `on_config_changed`), and leaving it would re-quarantine
+        // this plugin on the next launch even though we just cleared.
+        try? FileManager.default.removeItem(at: currentlyLoadingURL())
+    }
+
+    /// If a `.currently_loading` marker was left behind by a crash during
+    /// dlopen/init, quarantine that plugin so it is skipped on future launches.
+    private nonisolated static func promoteStaleLoadingMarker() {
+        let markerURL = currentlyLoadingURL()
+        guard let data = try? Data(contentsOf: markerURL),
+            let pluginId = String(data: data, encoding: .utf8)?.trimmingCharacters(in: .whitespacesAndNewlines),
+            !pluginId.isEmpty
+        else { return }
+        addToQuarantine(pluginId)
+        try? FileManager.default.removeItem(at: markerURL)
+    }
+
+    /// Writes the `.currently_loading` marker so that if the plugin
+    /// crashes the host inside `runFirstDeliverySweep`, the next launch
+    /// can quarantine it. Durability matters here: a SIGABRT may fire
+    /// milliseconds after the write, well before the page cache is
+    /// naturally flushed. We tmp-write → fsync the bytes → atomic
+    /// rename → fsync the parent directory so the marker survives a
+    /// hard process abort. Falls back to a plain `Data.write` if the
+    /// durable path fails for any reason — partial protection beats
+    /// none.
+    private nonisolated static func writeLoadingMarker(pluginId: String) {
+        // `sync` (not direct execution) so a still-running async clear from
+        // the previous plugin can't be reordered after this write and delete
+        // the fresh marker. The write itself must complete before the caller
+        // enters the dlopen/init danger zone, so it cannot be async.
+        markerQueue.sync {
+            let url = currentlyLoadingURL()
+            let data = Data(pluginId.utf8)
+            let fm = FileManager.default
+            let tmpURL = url.appendingPathExtension("tmp-\(UUID().uuidString)")
+            do {
+                try data.write(to: tmpURL, options: [.atomic])
+                if let handle = try? FileHandle(forUpdating: tmpURL) {
+                    try? handle.synchronize()
+                    try? handle.close()
+                }
+                if fm.fileExists(atPath: url.path) {
+                    _ = try fm.replaceItemAt(url, withItemAt: tmpURL)
+                } else {
+                    try fm.moveItem(at: tmpURL, to: url)
+                }
+                fsyncDirectory(url.deletingLastPathComponent())
+            } catch {
+                try? data.write(to: url)
+            }
+        }
+    }
+
+    /// Serializes loading-marker file operations. Clearing is fire-and-forget
+    /// off the caller's thread — the `unlink` stalled for 3+ seconds on slow
+    /// disks and hung the UI when the sweep ran on the main actor — while
+    /// writes stay synchronous for crash durability.
+    private nonisolated static let markerQueue = DispatchQueue(
+        label: "ai.osaurus.plugin-loading-marker", qos: .utility)
+
+    private nonisolated static func clearLoadingMarker() {
+        markerQueue.async {
+            try? FileManager.default.removeItem(at: currentlyLoadingURL())
+        }
+    }
+
+    /// `fsync()`s the directory containing `url` so a preceding atomic
+    /// rename is durable across a hard abort. macOS does not flush
+    /// directory metadata implicitly when the contained file is
+    /// fsynced, so this needs to be done as a separate step.
+    private nonisolated static func fsyncDirectory(_ url: URL) {
+        let fd = open(url.path, O_RDONLY)
+        guard fd >= 0 else { return }
+        _ = fsync(fd)
+        close(fd)
+    }
+
+    /// The version directory a plugin id currently resolves to: the `current`
+    /// symlink when present, else the highest SemVer directory. Shared by the
+    /// load scan and the quarantine stamp so both agree on "what is installed".
+    nonisolated static func resolveVersionDirectory(_ pluginDir: URL) -> URL? {
+        let fm = FileManager.default
+        let currentLink = pluginDir.appendingPathComponent("current", isDirectory: false)
+        if let dest = try? fm.destinationOfSymbolicLink(atPath: currentLink.path) {
+            return pluginDir.appendingPathComponent(dest, isDirectory: true)
+        }
+        guard
+            let entries = try? fm.contentsOfDirectory(
+                at: pluginDir,
+                includingPropertiesForKeys: nil,
+                options: [.skipsHiddenFiles]
+            )
+        else { return nil }
+        let versions: [(SemanticVersion, URL)] = entries.compactMap { url in
+            guard url.hasDirectoryPath else { return nil }
+            guard let v = SemanticVersion.parse(url.lastPathComponent) else { return nil }
+            return (v, url)
+        }
+        return versions.sorted(by: { $0.0 > $1.0 }).first?.1
     }
 
     /// Locate the dylib inside a plugin directory. Prefers `plugin.dylib`,
@@ -2848,10 +3574,7 @@ public final class PluginManager: ObservableObject {
         }
     }
 
-    // MARK: - Quarantine and consent (stage 2e step 2, 2g)
-
-    /// Quarantine release. No-op until the crash-loop guard lands.
-    nonisolated static func removeFromQuarantine(_ pluginId: String) {}
+    // MARK: - Consent (stage 2g)
 
     /// Intel's folders carry no consent marker (upstream's arrives with the
     /// installer, stage 2g), so there is nothing to grant.

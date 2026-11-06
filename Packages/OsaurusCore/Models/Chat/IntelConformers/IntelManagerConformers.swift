@@ -514,6 +514,14 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         persist(agent)
         reload()
         bumpCapabilityRevision()
+        // Notify subscribers (e.g. PluginManager) so plugins get an
+        // initial config / tunnel-URL push for the new agent without
+        // needing to wait for the next plugin force-reload.
+        NotificationCenter.default.post(
+            name: .agentAdded,
+            object: nil,
+            userInfo: ["agentId": agent.id]
+        )
         let id = agent.id
         Task { @MainActor in AgentDescriptionBackfill.shared.scheduleIfNeeded(id) }
     }
@@ -578,11 +586,14 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         // Drop the bridge's cached handle/queue so a later agent with the
         // same id can't re-attach to a stale connection.
         LocalAgentBridge.shared.forget(agentId: id)
-        // Upstream sweeps the agent's plugin secrets (`config_set` values,
-        // per-agent keys) so they don't sit in Keychain Access forever.
-        // Upstream first tears down routed plugins (webhook deregister);
-        // Intel's plugin host serves no routes, so there is nothing to tear
-        // down before the sweep.
+        // Tear down plugin state FIRST and wait for it to finish (upstream).
+        // Plugins deregister webhooks inside `on_config_changed(tunnel_url="")`
+        // and read their per-agent config (e.g. Telegram's `bot_token`)
+        // while doing so — the secrets must still exist at that point.
+        await PluginManager.shared.tearDownPluginsForRemovedAgent(agentId: id)
+        // Sweep every plugin's per-agent secrets for this agent (`config_set`
+        // values, per-agent keys) so they don't sit in Keychain Access
+        // forever. Done only AFTER plugin teardown completed (see above).
         ToolSecretsKeychain.deleteAllSecrets(forAgent: id)
         // Upstream wipes the agent's own browser profile. On Ventura the
         // profile is shared by every agent, so only its record goes.
@@ -598,6 +609,15 @@ public final class AgentManager: ObservableObject, @unchecked Sendable {
         if activeAgentId == id { activeAgentId = Agent.defaultId }
         reload()
         bumpCapabilityRevision()
+        // Notify remaining subscribers. Plugin webhook deregistration
+        // already happened synchronously above; PluginManager's own
+        // `.agentRemoved` handler only performs an idempotent repeat
+        // (deduped plugin-side).
+        NotificationCenter.default.post(
+            name: .agentRemoved,
+            object: nil,
+            userInfo: ["agentId": id]
+        )
         return AgentDeleteResult(deleted: true)
     }
 
