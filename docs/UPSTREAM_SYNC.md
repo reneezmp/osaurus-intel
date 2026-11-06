@@ -4684,7 +4684,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
 | 2e | Load lifecycle, in four steps (2026-11-05; all done 2026-11-06): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel (done 2026-11-06) |
-| 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index |
+| 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index. Renée chose upstream's **signed** path (2026-11-06), in three steps: **2g-1** the package at upstream, installing the build's own architecture; **2g-2** a script in `intel-plugins/` that zips, minisign-signs and writes the spec files (Renée holds the key and publishes `reneezmp/osaurus-intel-plugins`); **2g-3** the app on upstream's installer and registry, and existing flat installs moved to `Tools/<id>/<version>/` |
 
 **Found while doing it:** `PluginProcessHost` and `PluginHost/main.swift`
 (upstream #2239, the killable out-of-process plugin host) were filed under
@@ -5331,6 +5331,60 @@ Validation: the full interim gate passed 4,868 tests in 616 suites (only
 the known avatar cache failure); package and tests also build for
 `x86_64-apple-macosx13.0`. Classifiers: UNASSIGNED 0. No live `~/.osaurus`
 writes, Keychain identity and `ai.osaurus.id` session-token mdat unchanged.
+
+### Plugin installer, step 1 (`W-plugin-reliability` stage 2g-1) — 2026-11-06
+
+`Packages/OsaurusRepository` brought to `bce907045`. Intel's copy dated
+from before upstream's installer hardening: no bounded archive extraction,
+no TOFU key pinning, `CentralRepositoryManager` without upstream's archive
+safety checks and diagnostics, `ToolsPaths` ignoring `OSAURUS_TEST_ROOT`.
+
+- **Verbatim from upstream:** every file, including the new
+  `BoundedArchiveExtractor` (zip extraction with size / ratio / entry
+  limits, no symlinks or path escapes), `RepositoryGlobalProxySettings`
+  (registry downloads through the validated global proxy, over
+  `OsaurusNetworking` as Intel already had), `ImportQueue`,
+  `OsaurusBundle` and `BundleSettings` (bundle import, used by
+  `W-declarative-config` / `W-skills-plugins-import`; compiled, not
+  wired), and all of upstream's package tests. The package now links
+  `libz`.
+- **Intel differences:** the platform floor stays `.macOS(.v13)`
+  (Ventura). `CPUArch` gains `x86_64` and `CPUArch.host` (the build's own
+  architecture); `PluginInstallManager.install` targets `.host` instead of
+  upstream's hard-coded arm64, so the Intel build resolves and installs
+  x86_64 artifacts and an arm64 build behaves as upstream.
+- **Test safety:** upstream's `ToolsPaths.root()` honours
+  `OSAURUS_TEST_ROOT`, which removes the trap noted in 2e-1
+  (`TEST_STORAGE_SAFETY.md` rule 11 updated).
+- **Upstream example:** `docs/examples/osaurus-bundle-example/` (read by
+  `OsaurusBundleTests.testShippedExampleBundleLoads`) copied from
+  upstream.
+- **No visible change yet:** the app still installs Intel plugins through
+  its own `PluginRepositoryService` (2g-3 switches it); upstream's
+  registry list (Browse, arm64 only) now refreshes through upstream's
+  hardened archive path.
+- **Found while doing it:** `Packages/OsaurusCLI` doesn't compile:
+  Wave C (`52cf68cea`) fast-forwarded upstream's `Serve.swift` without
+  `ServerSupervisor.swift` / `InstallationDiagnostics`. Unrelated to this
+  package; offered as a separate task.
+
+Tests:
+- **The repository package's own tests** (XCTest, not in the OsaurusCore
+  gate), run in a fresh test root:
+  `OSAURUS_TEST_ROOT="$TEST_STORAGE_ROOT" OSAURUS_DISABLE_KEYCHAIN_FOR_TESTS=1
+  swift test --package-path Packages/OsaurusRepository --no-parallel`
+  (plus the SDK flags), without `--disable-xctest`. 111 tests pass,
+  including `PluginInstallIntegrityTests` (checksums, signature
+  required, key rotation refused, archive limits),
+  `PluginInstallManagerTests`, `CentralRepositoryManagerTests` (network
+  stubbed through `downloadFileOverride`) and `BoundedArchiveExtractorTests`.
+
+Validation: the full interim gate passed 4,868 tests in 616 suites (only
+the known avatar cache failure); the repository package's 111 tests pass;
+package and tests also build for `x86_64-apple-macosx13.0` (which compiles
+`OsaurusRepository` at the macOS 13 floor). Classifiers: UNASSIGNED 0. No
+live `~/.osaurus` writes, Keychain identity and `ai.osaurus.id`
+session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

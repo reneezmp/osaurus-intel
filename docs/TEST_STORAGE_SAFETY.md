@@ -105,17 +105,16 @@ the shared storage-path lock.
    the postflight checks pass, `rm -rf "$TEST_STORAGE_ROOT"`. Every run works
    in a brand-new folder and leaves nothing behind. 72 leftover
    `/tmp/osaurus-tests.*` folders (69 MB) were cleared on 2026-10-10.
-11. **`ToolsPaths` ignores `OSAURUS_TEST_ROOT` (found 2026-11-05).**
-   `OsaurusRepository.ToolsPaths.root()` / `toolsRootDirectory()` resolve to
-   the live `~/.osaurus` unless `ToolsPaths.overrideRoot` is set; only
-   `OsaurusPaths` honours `OSAURUS_TEST_ROOT`. Upstream's `PluginManager`
-   writes its crash-loop files (`Tools/.currently_loading`,
-   `Tools/.quarantine`) and reads plugin folders through `ToolsPaths`.
-   Intel's `PluginManager.toolsRootDirectory()` uses `OsaurusPaths`; keep
-   every plugin path on it when porting upstream code (`W-plugin-reliability`
-   2e-2, 2g), and have tests that touch `ToolsPaths` set
-   `ToolsPaths.overrideRoot` the way upstream's `PluginCrashLoopGuardTests`
-   does.
+11. **`ToolsPaths` and `OSAURUS_TEST_ROOT` (2026-11-05, fixed 2026-11-06).**
+   Intel's old `OsaurusRepository.ToolsPaths.root()` ignored
+   `OSAURUS_TEST_ROOT` and resolved to the live `~/.osaurus` unless
+   `ToolsPaths.overrideRoot` was set. Upstream's version (taken in
+   `W-plugin-reliability` 2g-1) honours the variable. Keep it that way
+   when re-syncing the package, keep Intel's plugin paths on
+   `PluginManager.toolsRootDirectory()` (`OsaurusPaths`), and run the
+   repository package's XCTest suite (`swift test --package-path
+   Packages/OsaurusRepository`, no `--disable-xctest`) with the same
+   temp-root prefix as the main gate.
 12. **Never write the system pasteboard.** `NSPasteboard.general` is the
    user's real clipboard; a test that calls a view's `copy(_:)` or
    `ChatCrossSelection.copyIfActive` replaces it (happened once on
