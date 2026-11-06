@@ -5386,6 +5386,33 @@ package and tests also build for `x86_64-apple-macosx13.0` (which compiles
 live `~/.osaurus` writes, Keychain identity and `ai.osaurus.id`
 session-token mdat unchanged.
 
+### Plugin installer, step 2 (`W-plugin-reliability` stage 2g-2) — 2026-11-06
+
+`intel-plugins/publish-signed.sh` publishes the Intel plugins in upstream's
+signed registry format; how to set up the key and run it is in
+[`INTEL_PLUGIN_PUBLISHING.md`](INTEL_PLUGIN_PUBLISHING.md). Renée holds the
+minisign key and pushes `reneezmp/osaurus-intel-plugins`; no session
+touches either.
+
+- **What it writes:** per plugin, a zip (`dist/<name>/<id>-<version>.zip`)
+  signed with minisign (legacy Ed25519; the script refuses a prehashed
+  signature, which `MinisignVerifier` can't check), and the spec's
+  `public_keys.minisign` plus one x86_64 artifact with URL, SHA-256, size,
+  `min_macos` 13.0 and the signature. It also refreshes the raw
+  `dist/<name>/plugin.dylib` and its `plugins.json` checksum for Intel
+  builds up to 1.0.62.
+- **Found while doing it:** every published Intel plugin dylib is built for
+  `minos 26.0` (no deployment target on a macOS 26 SDK), so none can load
+  on Rosy's Ventura; the plugin repo's `build.sh` has no
+  `-mmacosx-version-min`. The script builds with
+  `-mmacosx-version-min=13.0` and checks `vtool`. Until Renée publishes,
+  Rosy's Plugins tab shows each plugin's load error (since 2e-1).
+- **The plugin repo's `generate-index.sh` must not run again:** it derives
+  `plugins.json` from the spec artifact URL, which is now the zip.
+- Checked on a scratch copy with a stand-in `minisign` and a throwaway key,
+  then with upstream's installer code (details in the publishing doc). No
+  app code changed in this step.
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.

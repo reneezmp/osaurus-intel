@@ -2941,3 +2941,18 @@ a web app yet, so this is mostly a regression and safety check.
 - [ ] Regression: the local API (`/health`, `/models`, chat completions
       with a key) and the four plugins' tools work as before.
 
+## Plugin publishing, signed (2026-11-06)
+
+`W-plugin-reliability` stage 2g-2 (`INTEL_PLUGIN_PUBLISHING.md`). Do this
+after Renée has run `intel-plugins/publish-signed.sh` and pushed the plugin
+repo. Works with the current build (66): it still installs the raw dylibs,
+which are now built for macOS 13.
+
+- [ ] Before reinstalling: Settings… → Plugins shows whether `time`,
+      `hello`, `fetch` and `memo` loaded. A load error mentioning
+      "macOS 26" (or a newer macOS) confirms the old dylibs couldn't load
+      on Ventura; note what it says.
+- [ ] Uninstall and reinstall each of the four. They load with no error.
+- [ ] In a chat: the time (approve the card), `hello`, `fetch` on a page,
+      `memo_save` then `memo_list`. All answer.
+
