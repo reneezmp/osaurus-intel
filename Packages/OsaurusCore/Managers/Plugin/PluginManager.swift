@@ -1603,6 +1603,9 @@ final class PluginManager {
 import Foundation
 import Darwin
 import Combine
+import CryptoKit
+import Security
+import OsaurusRepository
 
 @MainActor
 public final class PluginManager: ObservableObject {
@@ -1999,6 +2002,20 @@ public final class PluginManager: ObservableObject {
                 )
                 NSLog("[Osaurus Intel] plugin '\(entry.pluginId)' failed to load: \(error.message)")
             }
+        }
+
+        // Intel's Installed cards: name, version and tools from the loaded
+        // plugin (upstream installs ship no `manifest.json` to scan).
+        loadedPlugins = loadedPlugins.map { info in
+            guard let loaded = loadedPlugin(for: info.pluginId) else { return info }
+            let manifest = loaded.plugin.manifest
+            return LoadedPluginInfo(
+                id: info.id,
+                pluginId: info.pluginId,
+                name: manifest.name ?? info.name,
+                version: manifest.version ?? info.version,
+                toolNames: loaded.tools.map(\.name)
+            )
         }
 
         if loadedNew || removedSomething || !failedPlugins.isEmpty {
@@ -2474,29 +2491,16 @@ public final class PluginManager: ObservableObject {
         await loaded.plugin.shutdown()
         PluginHostContext.getContext(for: loaded.plugin.id)?.teardown()
         // Upstream never dlcloses: on Apple Silicon, dlclose causes stale
-        // PAC signatures if the same path is ever reloaded, and upstream
-        // installs every version in its own folder, so a path never comes
-        // back with new code. Intel's installer rewrites
-        // `Tools/<id>/plugin.dylib` in place (until stage 2g), and dyld
-        // hands back an image that is still open instead of reading the
-        // new file, so an upgrade or reinstall would keep the old code.
-        // x86_64 has no pointer authentication: close the image there.
+        // PAC signatures if the same path is ever reloaded. Upstream installs
+        // every version in its own folder, but reinstalling the same version
+        // reuses the path, and dyld hands back an image that is still open
+        // instead of reading the new file. x86_64 has no pointer
+        // authentication: close the image there.
         // `shutdown()` has drained every call and run `destroy`; a late
         // call through a stale tool fails on the shutdown latch first.
         #if arch(x86_64)
             dlclose(loaded.handle)
         #endif
-    }
-
-    /// Intel's installer replaces a plugin's files in place: unload the
-    /// plugin first so nothing runs from the file being replaced, and the
-    /// next `loadAll()` opens the new one.
-    func unloadForReinstall(pluginId: String) async {
-        guard let loaded = loadedPlugin(for: pluginId) else { return }
-        plugins.removeAll { $0.plugin.id == pluginId }
-        loadedPluginPaths.remove(loaded.plugin.bundlePath)
-        await unload(loaded)
-        NotificationCenter.default.post(name: .toolsListChanged, object: nil)
     }
 
     /// Invoke a registered tool by name through ToolRegistry (the same path the
@@ -2589,68 +2593,231 @@ public final class PluginManager: ObservableObject {
         var scan = ToolsDirectoryScan()
         let quarantined = quarantinedPluginIds()
 
-        let entries =
+        let pluginDirs =
             (try? fm.contentsOfDirectory(
                 at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
-        for pluginURL in entries.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
-        where pluginURL.hasDirectoryPath {
-            let manifestURL = pluginURL.appendingPathComponent("manifest.json")
-            guard fm.fileExists(atPath: manifestURL.path),
-                let data = try? Data(contentsOf: manifestURL),
-                let json = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else {
-                continue
+        for pluginDir in pluginDirs.sorted(by: { $0.lastPathComponent < $1.lastPathComponent })
+        where pluginDir.hasDirectoryPath {
+            let pluginId = pluginDir.lastPathComponent
+            // Resolved before the quarantine check so the row's recorded
+            // version can be compared against what is installed right now.
+            let versionDir = resolveVersionDirectory(pluginDir)
+
+            // Intel: the Apple Silicon capability check reads the version's
+            // `manifest.json` when there is one (Intel's flat installs moved
+            // theirs in; upstream's installer ships none, its registry
+            // already resolved this Mac's architecture).
+            if let versionDir {
+                let json =
+                    (try? Data(contentsOf: versionDir.appendingPathComponent("manifest.json")))
+                    .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] } ?? [:]
+                let name = json["name"] as? String ?? pluginId
+                let version = json["version"] as? String ?? versionDir.lastPathComponent
+                let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
+                let compatibility = PluginCompatibilityChecker.check(
+                    required: json["host_capabilities_required"] as? [String],
+                    optional: json["host_capabilities_optional"] as? [String]
+                )
+                if case .incompatible(let missing) = compatibility {
+                    scan.incompatible.append(
+                        IncompatiblePluginInfo(
+                            pluginId: pluginId, name: name, version: version, missingRequired: missing))
+                    continue
+                }
+                if case .degraded = compatibility { scan.degraded.insert(pluginId) }
+                scan.compatible.append(
+                    LoadedPluginInfo(
+                        id: pluginId, pluginId: pluginId, name: name, version: version,
+                        toolNames: tools.compactMap { $0["id"] as? String }))
             }
 
-            // The folder name is the id the plugin is installed (and its
-            // secrets stored) under; upstream's identity check holds the
-            // dylib's manifest to it.
-            let directoryId = pluginURL.lastPathComponent
-            let name = json["name"] as? String ?? directoryId
-            let version = json["version"] as? String ?? "0.0.0"
-            let tools = (json["capabilities"] as? [String: Any])?["tools"] as? [[String: Any]] ?? []
-            let toolNames = tools.compactMap { $0["id"] as? String }
-
-            let compatibility = PluginCompatibilityChecker.check(
-                required: json["host_capabilities_required"] as? [String],
-                optional: json["host_capabilities_optional"] as? [String]
-            )
-            switch compatibility {
-            case .incompatible(let missing):
-                scan.incompatible.append(
-                    IncompatiblePluginInfo(
-                        pluginId: directoryId, name: name, version: version, missingRequired: missing))
-                continue
-            case .degraded:
-                scan.degraded.insert(directoryId)
-            case .compatible:
-                break
-            }
-            scan.compatible.append(
-                LoadedPluginInfo(
-                    id: directoryId, pluginId: directoryId, name: name, version: version, toolNames: toolNames))
-
-            if quarantined.contains(directoryId),
+            if quarantined.contains(pluginId),
                 !releaseQuarantineIfUpgraded(
-                    pluginId: directoryId,
-                    installedVersion: installedVersion(forPluginId: directoryId)
+                    pluginId: pluginId,
+                    installedVersion: versionDir?.lastPathComponent
                 )
             {
                 // Surfaced verbatim in PluginsView and the AgentsView
                 // "Failed" tab — point users at the in-app Retry /
                 // Uninstall buttons.
-                scan.failures[directoryId] =
+                scan.failures[pluginId] =
                     "Plugin quarantined after a crash during load — use the Retry or Uninstall button below to recover."
                 continue
             }
 
-            guard let dylib = findDylib(in: pluginURL) else {
-                NSLog("[Osaurus Intel] plugin '\(directoryId)': no .dylib found (browse-only)")
+            guard let vdir = versionDir else {
+                // No valid version directory found
+                scan.failures[pluginId] = "No valid version directory found"
                 continue
             }
-            scan.candidates.append((url: dylib, pluginId: directoryId))
+
+            var foundDylib = false
+            if let enumerator = fm.enumerator(
+                at: vdir,
+                includingPropertiesForKeys: [.isRegularFileKey],
+                options: [.skipsHiddenFiles]
+            ) {
+                for case let fileURL as URL in enumerator where fileURL.pathExtension == "dylib" {
+                    foundDylib = true
+                    switch verifyDylibBeforeLoadWithError(fileURL) {
+                    case .success:
+                        scan.candidates.append((url: fileURL, pluginId: pluginId))
+                    case .failure(let error):
+                        scan.failures[pluginId] = error.message
+                    }
+                }
+            }
+
+            if !foundDylib {
+                scan.failures[pluginId] = "No dylib file found in plugin directory"
+            }
         }
         return scan
+    }
+
+    /// Verifies a dylib's integrity, code signature (release only), and user consent
+    /// before allowing it to load. DEBUG builds skip all verification for dev convenience.
+    /// (Upstream's, verbatim. Intel's Rosy builds are Debug.)
+    nonisolated private static func verifyDylibBeforeLoadWithError(_ dylibURL: URL) -> Result<Void, PluginLoadError> {
+        #if DEBUG
+            return .success(())
+        #else
+            let fm = FileManager.default
+            let versionDir = dylibURL.deletingLastPathComponent()
+            let receiptURL = versionDir.appendingPathComponent("receipt.json", isDirectory: false)
+
+            guard fm.fileExists(atPath: receiptURL.path) else {
+                return .failure(PluginLoadError(message: "Missing receipt.json - plugin cannot be verified"))
+            }
+
+            guard let data = try? Data(contentsOf: receiptURL) else {
+                return .failure(PluginLoadError(message: "Failed to read receipt.json"))
+            }
+
+            guard let receipt = try? JSONDecoder().decode(PluginReceipt.self, from: data) else {
+                return .failure(PluginLoadError(message: "Failed to parse receipt.json"))
+            }
+
+            guard let dylibData = try? Data(contentsOf: dylibURL) else {
+                return .failure(PluginLoadError(message: "Failed to read plugin library file"))
+            }
+
+            let digest = CryptoKit.SHA256.hash(data: dylibData)
+            let sha = Data(digest).map { String(format: "%02x", $0) }.joined()
+
+            if sha.lowercased() != receipt.dylib_sha256.lowercased() {
+                return .failure(
+                    PluginLoadError(
+                        message: "Checksum verification failed - plugin file may be corrupted or tampered with"
+                    )
+                )
+            }
+
+            if let codesignError = verifyCodeSignature(of: dylibURL) {
+                return .failure(codesignError)
+            }
+
+            let consentURL = versionDir.appendingPathComponent(".user_consent", isDirectory: false)
+            guard fm.fileExists(atPath: consentURL.path) else {
+                return .failure(
+                    PluginLoadError(
+                        message: "\(PluginLoadError.consentRequiredPrefix) Plugin has not been approved for loading"
+                    )
+                )
+            }
+
+            return .success(())
+        #endif
+    }
+
+    /// Checks the Apple code signature of a dylib using the Security framework.
+    /// Returns nil on success or a PluginLoadError describing the failure.
+    nonisolated private static func verifyCodeSignature(of url: URL) -> PluginLoadError? {
+        var staticCode: SecStaticCode?
+        let createStatus = SecStaticCodeCreateWithPath(url as CFURL, SecCSFlags(), &staticCode)
+        guard createStatus == errSecSuccess, let code = staticCode else {
+            return PluginLoadError(
+                message: "Failed to create code reference for signature verification (OSStatus \(createStatus))"
+            )
+        }
+
+        let checkStatus = SecStaticCodeCheckValidity(code, SecCSFlags(), nil)
+        guard checkStatus == errSecSuccess else {
+            return PluginLoadError(
+                message:
+                    "Plugin code signature is invalid or missing - plugins must be signed with a Developer ID (OSStatus \(checkStatus))"
+            )
+        }
+
+        return nil
+    }
+
+    /// Intel's installer before stage 2g-3 put a plugin at
+    /// `Tools/<id>/plugin.dylib` + `manifest.json`; upstream's layout (which
+    /// the scan, the installer and `InstalledPluginsStore` read) is
+    /// `Tools/<id>/<version>/` with a `receipt.json`, a `.user_consent`
+    /// marker and a `current` link. Moves each flat install there once:
+    /// the dylib and `manifest.json` go into the version folder named by the
+    /// manifest's `version`; the plugin's data (`data/`, the old `plugin.db`)
+    /// stays where it is. The receipt records the dylib's SHA-256 and no
+    /// signing key, so the first signed install from the registry pins its
+    /// key. Idempotent; returns the ids moved. `root` is a test seam.
+    @discardableResult
+    nonisolated static func migrateFlatInstalls(toolsRoot root: URL? = nil) -> [String] {
+        let fm = FileManager.default
+        let root = root ?? toolsRootDirectory()
+        var moved: [String] = []
+        let pluginDirs =
+            (try? fm.contentsOfDirectory(
+                at: root, includingPropertiesForKeys: nil, options: [.skipsHiddenFiles])) ?? []
+        for pluginDir in pluginDirs where pluginDir.hasDirectoryPath {
+            guard resolveVersionDirectory(pluginDir) == nil else { continue }
+            let entries = (try? fm.contentsOfDirectory(at: pluginDir, includingPropertiesForKeys: nil)) ?? []
+            let dylibs = entries.filter { $0.pathExtension == "dylib" }
+            guard !dylibs.isEmpty else { continue }
+            let pluginId = pluginDir.lastPathComponent
+            let manifestURL = pluginDir.appendingPathComponent("manifest.json")
+            let manifestVersion =
+                (try? Data(contentsOf: manifestURL))
+                .flatMap { try? JSONSerialization.jsonObject(with: $0) as? [String: Any] }
+                .flatMap { $0["version"] as? String }
+            let version =
+                manifestVersion.flatMap(SemanticVersion.parse) ?? SemanticVersion(major: 0, minor: 0, patch: 0)
+            let versionDir = pluginDir.appendingPathComponent(version.description, isDirectory: true)
+            do {
+                try fm.createDirectory(at: versionDir, withIntermediateDirectories: true)
+                for file in dylibs + [manifestURL] where fm.fileExists(atPath: file.path) {
+                    try fm.moveItem(at: file, to: versionDir.appendingPathComponent(file.lastPathComponent))
+                }
+                let dylib = versionDir.appendingPathComponent(
+                    (dylibs.first { $0.lastPathComponent == "plugin.dylib" } ?? dylibs[0]).lastPathComponent)
+                let bytes = try Data(contentsOf: dylib)
+                let receipt = PluginReceipt(
+                    plugin_id: pluginId,
+                    version: version,
+                    installed_at: Date(),
+                    dylib_filename: dylib.lastPathComponent,
+                    dylib_sha256: Data(CryptoKit.SHA256.hash(data: bytes)).map { String(format: "%02x", $0) }
+                        .joined(),
+                    platform: Platform.macos.rawValue,
+                    arch: CPUArch.host.rawValue,
+                    public_keys: nil,
+                    artifact: .init(url: "", sha256: "")
+                )
+                try JSONEncoder().encode(receipt).write(
+                    to: versionDir.appendingPathComponent("receipt.json"), options: .atomic)
+                try Data().write(to: versionDir.appendingPathComponent(".user_consent"))
+                let current = pluginDir.appendingPathComponent("current", isDirectory: false)
+                try? fm.removeItem(at: current)
+                try fm.createSymbolicLink(atPath: current.path, withDestinationPath: version.description)
+                moved.append(pluginId)
+                NSLog("[Osaurus Intel] moved plugin '%@' to %@/", pluginId, version.description)
+            } catch {
+                NSLog("[Osaurus Intel] could not move plugin '%@' to the versioned layout: %@",
+                      pluginId, error.localizedDescription)
+            }
+        }
+        return moved
     }
 
     /// Performs the heavy plugin scanning work on a background thread
@@ -2660,6 +2827,8 @@ public final class PluginManager: ObservableObject {
     nonisolated private static func performPluginScan(
         alreadyLoadedPaths: Set<String>
     ) -> PluginScanResult {
+        // Intel's pre-2g-3 flat installs move to upstream's layout first.
+        migrateFlatInstalls()
         let scan = scanToolsDirectory()
         let (urls, verificationFailures) = excludeSupersededPlugins(
             urls: scan.candidates.map(\.url),
@@ -2970,37 +3139,6 @@ public final class PluginManager: ObservableObject {
             return (v, url)
         }
         return versions.sorted(by: { $0.0 > $1.0 }).first?.1
-    }
-
-    /// Locate the dylib inside a plugin directory. Prefers `plugin.dylib`,
-    /// then any `*.dylib` (top level, then one level down for the official
-    /// `<id>/<version>/plugin.dylib` layout).
-    nonisolated static func findDylib(in pluginDir: URL) -> URL? {
-        let fm = FileManager.default
-        let direct = pluginDir.appendingPathComponent("plugin.dylib")
-        if fm.fileExists(atPath: direct.path) { return direct }
-
-        guard
-            let entries = try? fm.contentsOfDirectory(
-                at: pluginDir, includingPropertiesForKeys: [.isDirectoryKey])
-        else { return nil }
-
-        if let topDylib = entries.first(where: { $0.pathExtension == "dylib" }) {
-            return topDylib
-        }
-        // One level down (version subdir).
-        for sub in entries {
-            let isDir = (try? sub.resourceValues(forKeys: [.isDirectoryKey]))?.isDirectory ?? false
-            guard isDir else { continue }
-            let nested = sub.appendingPathComponent("plugin.dylib")
-            if fm.fileExists(atPath: nested.path) { return nested }
-            if let nestedEntries = try? fm.contentsOfDirectory(at: sub, includingPropertiesForKeys: nil),
-                let anyDylib = nestedEntries.first(where: { $0.pathExtension == "dylib" })
-            {
-                return anyDylib
-            }
-        }
-        return nil
     }
 
     /// Synthetic config key the host pushes once per plugin at load time

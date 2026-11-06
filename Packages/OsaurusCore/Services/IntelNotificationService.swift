@@ -66,6 +66,28 @@ final class NotificationService: NSObject, UNUserNotificationCenterDelegate, @un
         }
     }
 
+    /// Upstream's plugin-update notification (`PluginRepositoryService`,
+    /// `W-plugin-reliability` stage 2g-3).
+    func postPluginUpdatesAvailable(count: Int, pluginNames: [String]) {
+        guard count > 0, let center else { return }
+
+        let content = UNMutableNotificationContent()
+        content.title = L("Plugin updates available")
+        if count == 1 {
+            content.body = L("\(pluginNames.first ?? "1 plugin") has an update available.")
+        } else {
+            content.body = L("\(count) plugins have updates available.")
+        }
+        content.userInfo = ["pluginCount": count]
+
+        let request = UNNotificationRequest(
+            identifier: "plugin-updates-\(UUID().uuidString)",
+            content: content,
+            trigger: nil
+        )
+        center.add(request, withCompletionHandler: nil)
+    }
+
     // MARK: - UNUserNotificationCenterDelegate
 
     nonisolated func userNotificationCenter(

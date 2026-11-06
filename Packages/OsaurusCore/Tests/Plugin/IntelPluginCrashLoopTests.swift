@@ -5,9 +5,10 @@
 //  `W-plugin-reliability` stage 2e-2 (docs/UPSTREAM_SYNC.md, "Plugin
 //  loading, step 2"). Upstream's `PluginCrashLoopGuardTests` and
 //  `PluginQuarantineUpgradeTests` pin the guard on upstream's
-//  `Tools/<id>/<version>/` layout. These pin it on Intel's
-//  `Tools/<id>/manifest.json` + dylib layout, and the agent lifecycle
-//  notifications Intel's `AgentManager` now posts.
+//  `Tools/<id>/<version>/` layout. These pin Intel's parts: the version's
+//  `manifest.json` (the capability check and the stamp), the one-time move
+//  of Intel's old flat installs into that layout (stage 2g-3), and the
+//  agent lifecycle notifications Intel's `AgentManager` now posts.
 //
 
 import Foundation
@@ -42,7 +43,7 @@ struct IntelPluginCrashLoopTests {
         }
     }
 
-    /// An Intel-layout plugin folder: `manifest.json` and a (fake) dylib.
+    /// An old Intel flat install: `manifest.json` and a (fake) dylib.
     private func installFlatPlugin(_ id: String, version: String, in toolsRoot: URL) throws {
         let dir = toolsRoot.appendingPathComponent(id, isDirectory: true)
         try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -51,40 +52,102 @@ struct IntelPluginCrashLoopTests {
         try Data("not a real dylib".utf8).write(to: dir.appendingPathComponent("plugin.dylib"))
     }
 
-    @Test func quarantinedFlatPluginIsHeldBackUntilRetry() async throws {
+    /// A plugin in upstream's layout, with Intel's `manifest.json` beside it.
+    private func installVersionedPlugin(_ id: String, version: String, in toolsRoot: URL) throws {
+        let dir = toolsRoot.appendingPathComponent(id, isDirectory: true)
+            .appendingPathComponent(version, isDirectory: true)
+        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let manifest = #"{"plugin_id":"\#(id)","name":"Versioned","version":"\#(version)","capabilities":{"tools":[]}}"#
+        try Data(manifest.utf8).write(to: dir.appendingPathComponent("manifest.json"))
+        try Data("not a real dylib".utf8).write(to: dir.appendingPathComponent("plugin.dylib"))
+    }
+
+    @Test func flatInstallsMoveToTheVersionedLayoutOnce() async throws {
         try await withTempToolsRoot { toolsRoot in
-            try installFlatPlugin("flat-intel", version: "1.0.0", in: toolsRoot)
-            #expect(PluginManager.toolsDirectoryURLs().map(\.lastPathComponent) == ["plugin.dylib"])
+            try installFlatPlugin("flat-intel", version: "1.2.0", in: toolsRoot)
+            let dataDir = toolsRoot.appendingPathComponent("flat-intel/data", isDirectory: true)
+            try FileManager.default.createDirectory(at: dataDir, withIntermediateDirectories: true)
+            try Data("db".utf8).write(to: dataDir.appendingPathComponent("data.db"))
+            // Not a plugin install: no dylib.
+            try FileManager.default.createDirectory(
+                at: toolsRoot.appendingPathComponent("notes", isDirectory: true), withIntermediateDirectories: true)
 
-            // A crash while loading it left the marker behind.
-            try Data("flat-intel".utf8).write(to: toolsRoot.appendingPathComponent(".currently_loading"))
-            let scan = PluginManager.scanToolsDirectory()
-            #expect(scan.candidates.isEmpty)
-            #expect(scan.failures["flat-intel"]?.contains("quarantined") == true)
-            #expect(scan.compatible.map(\.pluginId) == ["flat-intel"], "still listed as installed")
-            // Stamped with the manifest's version (Intel has no version folder).
-            #expect(PluginManager.quarantineEntries().first?.version == "1.0.0")
-
-            PluginManager.removeFromQuarantine("flat-intel")
+            #expect(PluginManager.migrateFlatInstalls() == ["flat-intel"])
+            let version = toolsRoot.appendingPathComponent("flat-intel/1.2.0", isDirectory: true)
+            let fm = FileManager.default
+            #expect(fm.fileExists(atPath: version.appendingPathComponent("plugin.dylib").path))
+            #expect(fm.fileExists(atPath: version.appendingPathComponent("manifest.json").path))
+            #expect(fm.fileExists(atPath: version.appendingPathComponent(".user_consent").path))
+            #expect(!fm.fileExists(atPath: toolsRoot.appendingPathComponent("flat-intel/plugin.dylib").path))
+            #expect(fm.fileExists(atPath: dataDir.appendingPathComponent("data.db").path), "data stays put")
+            #expect(
+                try fm.destinationOfSymbolicLink(atPath: toolsRoot.appendingPathComponent("flat-intel/current").path)
+                    == "1.2.0")
+            let receipt = try JSONDecoder().decode(
+                PluginReceipt.self, from: Data(contentsOf: version.appendingPathComponent("receipt.json")))
+            #expect(receipt.plugin_id == "flat-intel")
+            #expect(receipt.version.description == "1.2.0")
+            #expect(receipt.public_keys == nil, "the first signed install pins the key")
+            // Upstream's store sees it installed; the scan finds its dylib.
+            #expect(InstalledPluginsStore.shared.snapshot().latestVersion(for: "flat-intel")?.description == "1.2.0")
             #expect(PluginManager.scanToolsDirectory().candidates.map(\.pluginId) == ["flat-intel"])
+            #expect(PluginManager.migrateFlatInstalls().isEmpty, "idempotent")
         }
     }
 
-    @Test func updatingAFlatPluginReleasesItsQuarantine() async throws {
+    @Test func quarantinedPluginIsHeldBackUntilRetry() async throws {
         try await withTempToolsRoot { toolsRoot in
-            try installFlatPlugin("flat-intel", version: "1.0.0", in: toolsRoot)
-            try Data("flat-intel".utf8).write(to: toolsRoot.appendingPathComponent(".currently_loading"))
-            #expect(PluginManager.scanToolsDirectory().candidates.isEmpty)
+            try installVersionedPlugin("ver-intel", version: "1.0.0", in: toolsRoot)
+            #expect(PluginManager.toolsDirectoryURLs().map(\.lastPathComponent) == ["plugin.dylib"])
 
+            // A crash while loading it left the marker behind.
+            try Data("ver-intel".utf8).write(to: toolsRoot.appendingPathComponent(".currently_loading"))
+            let scan = PluginManager.scanToolsDirectory()
+            #expect(scan.candidates.isEmpty)
+            #expect(scan.failures["ver-intel"]?.contains("quarantined") == true)
+            #expect(scan.compatible.map(\.pluginId) == ["ver-intel"], "still listed as installed")
+            #expect(PluginManager.quarantineEntries().first?.version == "1.0.0")
+
+            PluginManager.removeFromQuarantine("ver-intel")
+            #expect(PluginManager.scanToolsDirectory().candidates.map(\.pluginId) == ["ver-intel"])
+        }
+    }
+
+    @Test func updatingAPluginReleasesItsQuarantine() async throws {
+        try await withTempToolsRoot { toolsRoot in
+            try installVersionedPlugin("ver-intel", version: "1.0.0", in: toolsRoot)
+            try Data("ver-intel".utf8).write(to: toolsRoot.appendingPathComponent(".currently_loading"))
+            #expect(PluginManager.scanToolsDirectory().candidates.isEmpty)
             // Same version: stays out.
             #expect(PluginManager.scanToolsDirectory().candidates.isEmpty)
 
-            // The update rewrites manifest.json with a new version.
-            try installFlatPlugin("flat-intel", version: "1.0.1", in: toolsRoot)
-            #expect(PluginManager.installedVersion(forPluginId: "flat-intel") == "1.0.1")
-            #expect(PluginManager.scanToolsDirectory().candidates.map(\.pluginId) == ["flat-intel"])
+            // The update installs a newer version folder.
+            try installVersionedPlugin("ver-intel", version: "1.0.1", in: toolsRoot)
+            #expect(PluginManager.installedVersion(forPluginId: "ver-intel") == "1.0.1")
+            #expect(PluginManager.scanToolsDirectory().candidates.map(\.pluginId) == ["ver-intel"])
             #expect(PluginManager.quarantinedPluginIds().isEmpty)
         }
+    }
+
+    @Test func appleSiliconOnlyManifestIsSkipped() async throws {
+        try await withTempToolsRoot { toolsRoot in
+            let dir = toolsRoot.appendingPathComponent("arm-only/1.0.0", isDirectory: true)
+            try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+            try Data(#"{"plugin_id":"arm-only","name":"Arm","version":"1.0.0","host_capabilities_required":["apple.silicon.only.test"]}"#.utf8)
+                .write(to: dir.appendingPathComponent("manifest.json"))
+            try Data("x".utf8).write(to: dir.appendingPathComponent("plugin.dylib"))
+            let scan = PluginManager.scanToolsDirectory()
+            #expect(scan.candidates.isEmpty)
+            #expect(scan.incompatible.map(\.pluginId) == ["arm-only"])
+        }
+    }
+
+    @MainActor
+    @Test func registryIsTheIntelPluginRepo() {
+        _ = PluginRepositoryService.shared
+        #expect(CentralRepositoryManager.shared.central.url == "https://github.com/reneezmp/osaurus-intel-plugins.git")
+        #expect(CentralRepositoryManager.shared.central.branch == "main")
+        #expect(CPUArch.host == .arm64 || CPUArch.host == .x86_64)
     }
 
     @Test func pluginIdComesFromBothLayouts() {

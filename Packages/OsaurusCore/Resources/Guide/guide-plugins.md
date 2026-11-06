@@ -10,7 +10,7 @@ Plugins add new tools to Osaurus. This Intel build loads native plugins compiled
 
 ## Native plugins
 
-- Settings… (⌘,) → Plugins: browse the repository, Install, update, and Uninstall.
+- Settings… (⌘,) → Plugins: browse the repository, Install, update, and Uninstall. Every plugin is signed by its publisher; Osaurus checks the signature before installing, and refuses an update signed with a different key until you uninstall the plugin and install it again.
 - A plugin may need your approval before it loads, macOS permissions (**Grant** opens the right System Settings pane), or API keys: **Configure** stores them in the Keychain, per agent, never through chat.
 - A plugin's page shows its tools, capabilities, HTTP routes, README, and changelog. **Open Web App** opens a plugin's web UI with the agent id it needs.
 - A plugin's tools ask before they run, like other tools that act for you; choose **Always Allow** on the approval card (or set the tool's permission in the Tools tab) to stop asking.

@@ -2956,3 +2956,23 @@ which are now built for macOS 13.
 - [ ] In a chat: the time (approve the card), `hello`, `fetch` on a page,
       `memo_save` then `memo_list`. All answer.
 
+## Plugin installer on upstream's code (2026-11-06)
+
+`W-plugin-reliability` stage 2g-3 (`UPSTREAM_SYNC.md`, "Plugin installer,
+step 3"). Not in candidate 66. Needs the signed plugin repo published
+first (`INTEL_PLUGIN_PUBLISHING.md`).
+
+- [ ] First launch with plugins installed by an older build: Settings… →
+      Plugins → Installed still lists them. In Terminal,
+      `ls ~/.osaurus/Tools/time-intel` shows a `1.0.0` folder, a `current`
+      link and (if Time had data) `data/`; the old `plugin.dylib` is no
+      longer at the top.
+- [ ] Browse lists the Intel plugins (no Apple Silicon-only catalog).
+      Uninstall `hello`, then Install it: it installs without an error and
+      answers in a chat. `ls ~/.osaurus/Tools/hello-intel/1.0.0` shows
+      `plugin.dylib`, `receipt.json`.
+- [ ] Settings… → Plugins: no plugin shows "No valid version directory
+      found" or "requires a minisign signature".
+- [ ] Regression: memo's notes saved before the update are still listed
+      (`memo_list`).
+

@@ -4117,7 +4117,7 @@ struct AgentDetailView: View {
     private func confirmUninstallFailedPlugin(_ pid: String) {
         PluginManager.removeFromQuarantine(pid)
         Task {
-            await PluginRepositoryService.shared.uninstall(pluginId: pid)
+            try? await PluginRepositoryService.shared.uninstall(pluginId: pid)
         }
     }
 

@@ -4684,7 +4684,7 @@ and `ai.osaurus.id` session-token mdat unchanged.
 | 2d | Inference: `complete` on upstream's contract, `complete_stream` / `complete_cancel`, `embed`, `list_models` |
 | 2e | Load lifecycle, in four steps (2026-11-05; all done 2026-11-06): **2e-1** upstream's `ExternalPlugin` / `ExternalTool` / `PluginManifest` and load checks (compatibility enforcement included); **2e-2** the crash-loop guard, quarantine, superseded-plugin skip and first config delivery (ABI probe, per-agent config, agent add / remove); **2e-3** upstream's per-agent `PluginConfigView`; **2e-4** the out-of-process host (`PluginProcessHost` + `PluginHost/main.swift`, off by default upstream) |
 | 2f | Routes, web mounts and the plugin tunnel (done 2026-11-06) |
-| 2g | The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index. Renée chose upstream's **signed** path (2026-11-06), in three steps: **2g-1** the package at upstream, installing the build's own architecture; **2g-2** a script in `intel-plugins/` that zips, minisign-signs and writes the spec files (Renée holds the key and publishes `reneezmp/osaurus-intel-plugins`); **2g-3** the app on upstream's installer and registry, and existing flat installs moved to `Tools/<id>/<version>/` |
+| 2g | (done 2026-11-06) The repository installer (`OsaurusRepository`: install integrity, TOFU key pinning) against the Intel plugin index. Renée chose upstream's **signed** path (2026-11-06), in three steps: **2g-1** the package at upstream, installing the build's own architecture; **2g-2** a script in `intel-plugins/` that zips, minisign-signs and writes the spec files (Renée holds the key and publishes `reneezmp/osaurus-intel-plugins`); **2g-3** the app on upstream's installer and registry, and existing flat installs moved to `Tools/<id>/<version>/` |
 
 **Found while doing it:** `PluginProcessHost` and `PluginHost/main.swift`
 (upstream #2239, the killable out-of-process plugin host) were filed under
@@ -5412,6 +5412,84 @@ touches either.
 - Checked on a scratch copy with a stand-in `minisign` and a throwaway key,
   then with upstream's installer code (details in the publishing doc). No
   app code changed in this step.
+
+### Plugin installer, step 3 (`W-plugin-reliability` stage 2g-3) — 2026-11-06
+
+The app installs, updates and lists plugins with upstream's code: upstream's
+`PluginRepositoryService` (`Services/Plugin/PluginRepositoryService.swift`,
+`bce907045`, no longer excluded) over `CentralRepositoryManager` and
+`PluginInstallManager` (2g-1), and the plugin loader reads upstream's
+`Tools/<id>/<version>/` layout. Intel's stand-in service (in
+`IntelStubConformers.swift`: a `plugins.json` fetch, a raw dylib download
+checked only against a SHA-256, files written in place) and its stand-in
+`SemanticVersion` / `RegistryCapabilities` are gone.
+
+- **Registry (`Services/Plugin/IntelPluginRepository.swift`):** the
+  service points upstream's manager at
+  `https://github.com/reneezmp/osaurus-intel-plugins.git` (branch `main`),
+  read through upstream's source-archive refresh, with upstream's
+  4-hour background refresh and update notification
+  (`postPluginUpdatesAvailable`, added to Intel's `NotificationService`).
+  Upstream's `osaurus-ai/osaurus-tools` (arm64 builds only) is no longer
+  listed under Browse; a spec with no artifact for this Mac's architecture
+  keeps the "Apple Silicon" badge (`PluginState.requiresAppleSilicon`,
+  recorded at refresh). Until the first successful refresh, an offline
+  launch shows the previous cached spec list, which on an existing install
+  is upstream's arm64 catalog.
+- **Install:** upstream's: spec resolution for `CPUArch.host`, download
+  with size limits through the validated proxy, SHA-256, a **required
+  minisign signature**, TOFU key pinning (a changed key is refused until the
+  plugin is uninstalled), bounded zip extraction, then
+  `Tools/<id>/<version>/` with `receipt.json`, `.user_consent` and an
+  atomic `current` link. Uninstall removes `Tools/<id>/` (data included),
+  the plugin's keys and skills, as upstream.
+- **Layout migration (`PluginManager.migrateFlatInstalls`):** at each
+  scan, an old Intel flat install (`Tools/<id>/plugin.dylib` +
+  `manifest.json`) moves into `Tools/<id>/<manifest version>/` with a
+  receipt (the dylib's SHA-256, no signing key, so the first signed install
+  pins one), the consent marker and `current`; `data/` and any old
+  `plugin.db` stay put. Idempotent.
+- **Scan:** upstream's `toolsDirectoryURLsWithFailures` shape: version
+  folder (`current`, else the highest SemVer), the quarantine check, every
+  dylib in it through upstream's `verifyDylibBeforeLoadWithError` (receipt
+  SHA-256, code signature and consent in Release builds; skipped in Debug,
+  which is how Rosy builds are made). Intel keeps its Apple Silicon
+  capability check, now on the version folder's `manifest.json` when there
+  is one (migrated installs have it; upstream installs ship none). A
+  plugin folder with no version folder fails with upstream's "No valid
+  version directory found". `findDylib` and `unloadForReinstall` went with
+  the flat layout; the x86_64 `dlclose` on unload stays (a same-version
+  reinstall reuses the path).
+- **Plugins tab:** Intel's cards now get name, version and tools from the
+  loaded plugin. Intel keeps its own Plugins tab layout; upstream's has
+  since grown Claude plugin import and more (`W-skills-plugins-import`,
+  `W-tools-tab-sync`).
+- **Release order:** until Renée publishes with
+  `intel-plugins/publish-signed.sh` (2g-2), the Intel registry's specs carry
+  unsigned raw-dylib artifacts, which upstream's installer refuses
+  ("requires a minisign signature"). Publish before shipping a build with
+  this change. Plugins already installed keep loading (migrated).
+
+Tests:
+- **`IntelPluginCrashLoopTests`** moved to upstream's layout, plus: the
+  flat-install migration (version folder, receipt with no key, consent,
+  `current`, data left in place, seen by `InstalledPluginsStore`, found by
+  the scan, idempotent), an Apple Silicon-only manifest skipped, and the
+  registry URL.
+- One-off check (not committed), the real plugins built for the build
+  Mac in a test root: three flat installs migrated to `Tools/<id>/1.0.0/`
+  and loaded (tools answered); `hello` installed through
+  `installVerifiedArtifact` from a zip, loaded and answered; the service
+  listed all four as installed; uninstalling `hello` through the service
+  unloaded it, removed its folder and its tool. (The signed download path
+  was checked in 2g-2.)
+
+Validation: the full interim gate passed 4,871 tests in 616 suites (only
+the known avatar cache failure); the repository package's 111 tests pass;
+package and tests also build for `x86_64-apple-macosx13.0`. Classifiers:
+UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity and
+`ai.osaurus.id` session-token mdat unchanged. The in-app guide says
+plugins are signed and a key change is refused.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

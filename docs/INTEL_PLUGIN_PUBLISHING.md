@@ -12,6 +12,13 @@ Renée owns the signing key and the plugin repo. Sessions write scripts and
 app code; they never create, read or move the secret key, and never push to
 the plugin repo.
 
+## Release order
+
+Since stage 2g-3 the app installs only signed plugins from the spec files.
+Publish with the script **before** shipping a build that has 2g-3: until
+then the specs list unsigned raw dylibs and the new installer refuses them.
+Builds up to 1.0.62 keep installing from `plugins.json`.
+
 ## One-time setup
 
 1. Install minisign: `brew install minisign`.
