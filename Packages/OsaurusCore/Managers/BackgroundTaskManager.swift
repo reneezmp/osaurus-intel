@@ -14,8 +14,7 @@ import Foundation
 /// `RetainedActivityTabRecord`). The live chat session is deliberately not
 /// encoded; chat history stays the canonical transcript store and is loaded
 /// when the tab is selected. Intel: no `contextPreview` / inbound-run fields
-/// (`W-channels`, `W-workspaces-sharing`), and Intel's status enum
-/// (`completed(success:summary:)`) maps onto upstream's three kinds.
+/// (`W-channels`, `W-workspaces-sharing`).
 private struct RetainedActivityTabRecord: Codable {
     enum TerminalKind: String, Codable {
         case completed
@@ -36,13 +35,16 @@ private struct RetainedActivityTabRecord: Codable {
     @MainActor
     init?(state: BackgroundTaskState) {
         switch state.status {
-        case .completed(let success, let summary):
-            kind = success ? .completed : .failed
-            self.summary = summary
+        case .completed(let value):
+            kind = .completed
+            summary = value
+        case .failed(let value):
+            kind = .failed
+            summary = value
         case .cancelled:
             kind = .cancelled
             summary = nil
-        case .running, .awaitingClarification:
+        case .queued, .running, .waitingForInput:
             return nil
         }
         id = state.id
@@ -56,8 +58,8 @@ private struct RetainedActivityTabRecord: Codable {
 
     var status: BackgroundTaskStatus {
         switch kind {
-        case .completed: return .completed(success: true, summary: summary ?? "Chat completed")
-        case .failed: return .completed(success: false, summary: summary ?? "Chat failed")
+        case .completed: return .completed(summary: summary ?? "Chat completed")
+        case .failed: return .failed(summary: summary ?? "Chat failed")
         case .cancelled: return .cancelled
         }
     }
@@ -117,6 +119,15 @@ public final class BackgroundTaskManager: ObservableObject {
     /// skip `cleanup()` (which would otherwise call `session.stop()` and
     /// kill the in-flight stream).
     private var taskIdByWindow: [UUID: UUID] = [:]
+
+    /// FIFO admission queue: task ids accepted while the configured
+    /// concurrency limits were saturated, in submission order. Each id has a
+    /// matching deferred start closure in `pendingStarts`. Promoted by
+    /// `pumpQueue()` whenever a running task stops consuming its slot.
+    private var queuedOrder: [UUID] = []
+
+    /// Deferred start work for queued tasks, keyed by task id.
+    private var pendingStarts: [UUID: @MainActor () async -> Void] = [:]
 
     /// Subject for batching view updates with throttling
     private let viewUpdateSubject = PassthroughSubject<Void, Never>()
@@ -307,17 +318,27 @@ public final class BackgroundTaskManager: ObservableObject {
         // Drop any window→task bindings pointing here so a still-open
         // window's close path stops thinking the task is alive.
         taskIdByWindow = taskIdByWindow.filter { $0.value != backgroundId }
+        // Drop any deferred start so a finalized queued task can't launch.
+        queuedOrder.removeAll { $0 == backgroundId }
+        pendingStarts.removeValue(forKey: backgroundId)
 
         state.releaseReferences()
 
         backgroundTasks.removeValue(forKey: backgroundId)
         persistRetainedTabs()
         refreshPowerAssertion()
+        pumpQueue()
     }
 
     /// Cancel all active background tasks. Called during app termination.
+    /// Queued requests are cancelled FIRST: cancelling a running task frees
+    /// its slot and pumps the queue, so doing it the other way around would
+    /// briefly promote (and start) queued work mid-shutdown.
     public func cancelAllTasks() {
-        for id in backgroundTasks.keys {
+        for queuedId in queuedOrder {
+            cancelTask(queuedId)
+        }
+        for (id, state) in backgroundTasks where state.status.isActive {
             cancelTask(id)
         }
     }
@@ -347,12 +368,19 @@ public final class BackgroundTaskManager: ObservableObject {
         }
     }
 
-    /// Cancel a background task
+    /// Cancel a background task (queued or running)
     public func cancelTask(_ backgroundId: UUID) {
         guard let state = backgroundTasks[backgroundId] else { return }
 
-        state.chatSession?.stop()
+        // A queued task never started — drop its deferred start so a later
+        // pump can't resurrect it.
+        queuedOrder.removeAll { $0 == backgroundId }
+        pendingStarts.removeValue(forKey: backgroundId)
+
+        // stop() synchronously publishes isStreaming=false. Mark cancellation
+        // first so the streaming observer cannot complete the run (upstream).
         state.status = .cancelled
+        state.chatSession?.stop()
         refreshPowerAssertion()
         // Mirror the markCompleted finalisation for the agent_runs row
         // so cancelled runs don't sit in `running` forever in the
@@ -387,6 +415,7 @@ public final class BackgroundTaskManager: ObservableObject {
             json: PluginHostContext.serializeCancelledEvent(taskTitle: state.taskTitle)
         )
         scheduleAutoFinalize(backgroundId)
+        pumpQueue()
     }
 
     /// Soft-stop a running task by cancelling its current stream.
@@ -442,7 +471,7 @@ public final class BackgroundTaskManager: ObservableObject {
         {
             return nil
         }
-        guard canDispatchNewTask(source: request.source, agentId: request.agentId) else { return nil }
+        guard isDispatchRequestValid(source: request.source, agentId: request.agentId) else { return nil }
 
         // The reattach lookup below opens the chat-history DB, which needs the
         // storage key. On a cold-start race the launch prewarm may not have
@@ -465,38 +494,21 @@ public final class BackgroundTaskManager: ObservableObject {
         } else {
             context = createContext(for: request)
         }
-        await context.prepare()
+        // Admission (upstream): capacity available → start immediately;
+        // saturated → register as `.queued` and defer the start until
+        // `pumpQueue()` promotes it (FIFO). Either way the request is
+        // registered before execution so `awaitCompletion` always finds the
+        // task.
+        let startsImmediately = hasExecutionCapacity(agentId: request.agentId)
 
-        // Plugin-supplied tool whitelist (already host-validated in
-        // `planDispatch`) lands in the same `additionalToolNames`
-        // channel `capabilities_load` uses, so the dispatched
-        // `ChatSession.send -> composeChatContext` picks it up on
-        // turn 1. Reattach reuses `existing.id` as `context.id`, so
-        // successive dispatches into the same conversation accumulate
-        // via the store's underlying `Set`.
-        #if !OSAURUS_INTEL
-        // `requestedToolNames` is populated only for plugin-sourced dispatches
-        // (validated against the calling plugin's manifest). Plugins are
-        // amputated on Intel, so this is always empty there; gated out because
-        // `PreflightResult.empty` lives in the amputated preflight subsystem.
-        if !request.requestedToolNames.isEmpty {
-            await SessionToolStateStore.shared.appendLoadedTools(
-                context.id.uuidString,
-                names: request.requestedToolNames,
-                fallbackAlwaysLoadedNames: nil
-            )
-        }
-        #endif
-
-        // Register state before starting so awaitCompletion always finds the task
         let state = BackgroundTaskState(
             id: context.id,
             taskTitle: context.title ?? "Chat",
             agentId: context.agentId,
             chatSession: context.chatSession,
             executionContext: context,
-            status: .running,
-            currentStep: "Running...",
+            status: startsImmediately ? .running : .queued,
+            currentStep: startsImmediately ? "Running..." : "Queued",
             source: request.source,
             sourcePluginId: request.sourcePluginId,
             externalSessionKey: request.externalSessionKey,
@@ -514,71 +526,106 @@ public final class BackgroundTaskManager: ObservableObject {
         registerTask(state)
         observeChatTask(state, session: context.chatSession)
 
-        // Agent DB run logging (spec §1.4 + §8). Only DB-enabled agents
-        // get an `agent_runs` row + a bound `currentRunId`; for the
-        // default agent and any user-created agent that hasn't opted
-        // in, this is a no-op so the existing dispatch surface keeps
-        // the same behavior and the same overhead.
-        let agentMgr = AgentManager.shared
-        let dbEnabled = agentMgr.effectiveDBEnabled(for: context.agentId)
         // Pre-seed the per-run budget caps from `Agent.settings.limits`
         // (spec §11.3). `tokensIn/Out` and `costUSD` start at 0 and are
         // updated mid-stream by `recordUsage(...)`; the dispatcher
         // cancels the task once either threshold is crossed.
-        if let agent = agentMgr.agent(for: context.agentId) {
+        if let agent = AgentManager.shared.agent(for: context.agentId) {
             state.runTokensLimit = agent.settings.limits.runTokensLimit
             state.runCostUSDLimit = agent.settings.limits.runCostUSDLimit
         }
-        var boundRunId: UUID? = nil
-        var boundActor: String = "user"
-        if dbEnabled {
-            let triggerKind = Self.triggerKind(for: request.source)
-            // `triggerPayload` is intentionally minimal: persisting the
-            // full prompt here would duplicate ChatHistoryDatabase data
-            // and inflate the scheduler DB. We surface the dispatch
-            // source + external key so the Activity tab can tag the
-            // row with what woke it.
-            let triggerPayload = Self.triggerPayload(for: request)
-            do {
-                try SchedulerDatabase.shared.open()
-                let runId = try SchedulerDatabase.shared.recordRunStart(
-                    agentId: context.agentId,
-                    triggerKind: triggerKind,
-                    triggerPayload: triggerPayload,
-                    instructions: request.prompt
-                )
-                boundRunId = runId
-                state.agentRunId = runId
-                boundActor = "agent"
-            } catch {
-                print(
-                    "[BackgroundTaskManager] recordRunStart failed for agent "
-                        + "\(context.agentId): \(error)"
+
+        // The actual execution start (upstream). Runs immediately when a slot
+        // is available, or later from `pumpQueue()` when queued. Everything
+        // that marks a run as "started" (folder preparation, the
+        // `agent_runs` row, the task-local bindings, `context.start`) lives
+        // here so a queued request has no execution side effects until
+        // promoted. A queued closure runs in pumpQueue's task, not the
+        // invoker's.
+        let startWork: @MainActor () async -> Void = { [weak state] in
+            guard let state, state.status.isActive else { return }
+            await context.prepare()
+            guard state.status.isActive else { return }
+
+            #if !OSAURUS_INTEL
+            // `requestedToolNames` is populated only for plugin-sourced
+            // dispatches (validated against the calling plugin's manifest).
+            // Gated out on Intel: `SessionToolStateStore.appendLoadedTools`
+            // lives in the excluded preflight subsystem.
+            if !request.requestedToolNames.isEmpty {
+                await SessionToolStateStore.shared.appendLoadedTools(
+                    context.id.uuidString,
+                    names: request.requestedToolNames,
+                    fallbackAlwaysLoadedNames: nil
                 )
             }
-        }
+            #endif
 
-        // Bind the run-id + actor + background-task id for the entire
-        // chat task. `chatSession.send` creates an unstructured
-        // `Task { @MainActor in ... }` inside `ExecutionContext.start`
-        // — unstructured Tasks inherit task locals captured at the
-        // moment of creation, so any `db_*` tool call or streaming
-        // producer dispatched from the inference loop picks these up
-        // without needing per-call wiring. `currentBackgroundId` is
-        // the same `BackgroundTaskState.id` we just registered, so
-        // streaming layers can call `recordUsage(backgroundId:)` for
-        // mid-stream budget enforcement (spec §11.3).
-        // Upstream: `isExternalSurface` is rebound from the request so the
-        // external tool policy holds for the whole run. Widen-only.
-        let externalSurface = Self.resolvedExternalSurface(for: request)
-        await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
-            await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
-                await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
-                    await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
-                        await context.start(prompt: request.prompt)
+            // Agent DB run logging (spec §1.4 + §8). Only DB-enabled agents
+            // get an `agent_runs` row + a bound `currentRunId`; for the
+            // default agent and any user-created agent that hasn't opted
+            // in, this is a no-op so the existing dispatch surface keeps
+            // the same behavior and the same overhead.
+            var boundRunId: UUID? = nil
+            var boundActor: String = "user"
+            if AgentManager.shared.effectiveDBEnabled(for: context.agentId) {
+                let triggerKind = Self.triggerKind(for: request.source)
+                // `triggerPayload` is intentionally minimal: persisting the
+                // full prompt here would duplicate ChatHistoryDatabase data
+                // and inflate the scheduler DB. We surface the dispatch
+                // source + external key so the Activity tab can tag the
+                // row with what woke it.
+                let triggerPayload = Self.triggerPayload(for: request)
+                do {
+                    try SchedulerDatabase.shared.open()
+                    let runId = try SchedulerDatabase.shared.recordRunStart(
+                        agentId: context.agentId,
+                        triggerKind: triggerKind,
+                        triggerPayload: triggerPayload,
+                        instructions: request.prompt
+                    )
+                    boundRunId = runId
+                    state.agentRunId = runId
+                    boundActor = "agent"
+                } catch {
+                    print(
+                        "[BackgroundTaskManager] recordRunStart failed for agent "
+                            + "\(context.agentId): \(error)"
+                    )
+                }
+            }
+
+            // Bind the run-id + actor + background-task id for the entire
+            // chat task. `chatSession.send` creates an unstructured
+            // `Task { @MainActor in ... }` inside `ExecutionContext.start`
+            // — unstructured Tasks inherit task locals captured at the
+            // moment of creation, so any `db_*` tool call or streaming
+            // producer dispatched from the inference loop picks these up
+            // without needing per-call wiring. `currentBackgroundId` is
+            // the same `BackgroundTaskState.id` we just registered, so
+            // streaming layers can call `recordUsage(backgroundId:)` for
+            // mid-stream budget enforcement (spec §11.3).
+            // Upstream: `isExternalSurface` is rebound from the request so the
+            // external tool policy holds for the whole run. Widen-only.
+            let externalSurface = Self.resolvedExternalSurface(for: request)
+            await ChatExecutionContext.$isExternalSurface.withValue(externalSurface) {
+                await ChatExecutionContext.$currentRunId.withValue(boundRunId) {
+                    await ChatExecutionContext.$currentRunActor.withValue(boundActor) {
+                        await ChatExecutionContext.$currentBackgroundId.withValue(context.id) {
+                            await context.start(prompt: request.prompt)
+                        }
                     }
                 }
             }
+        }
+
+        if startsImmediately {
+            await startWork()
+        } else {
+            queuedOrder.append(context.id)
+            pendingStarts[context.id] = startWork
+            state.appendActivity(kind: .info, title: "Queued — waiting for a free slot")
+            print("[BackgroundTaskManager] Queued chat task \(context.id) (capacity saturated)")
         }
 
         let reattachNote = reattach == nil ? "" : " (reattached to session \(context.id))"
@@ -667,39 +714,72 @@ public final class BackgroundTaskManager: ObservableObject {
 
     private static let maxTasksPerAgent = 5
 
-    /// Check whether a new task can be dispatched without exceeding the global
-    /// limit or the per-agent limit. The global limit is user-configurable via
-    /// settings; the per-agent limit prevents a single agent from monopolizing
-    /// all slots in multi-agent scenarios.
-    private func canDispatchNewTask(source: SessionSource, agentId: UUID?) -> Bool {
+    /// Structural validity of a dispatch request. Capacity is NOT checked
+    /// here — a valid request that arrives while the limits are saturated is
+    /// accepted and queued rather than rejected.
+    private func isDispatchRequestValid(source: SessionSource, agentId: UUID?) -> Bool {
         // Plugin / sandbox callers must supply an agentId. Without one, the
-        // per-agent cap below would be silently skipped — letting a single
+        // per-agent cap would be silently skipped — letting a single
         // sandboxed plugin saturate every slot. The bridge always provides
         // an id post-fix, so a nil here is a programmer error.
         if source == .plugin, agentId == nil {
             print("[BackgroundTaskManager] Refusing plugin dispatch without agentId")
             return false
         }
+        return true
+    }
 
-        let globalLimit = ToastConfigurationStore.load().maxConcurrentTasks
-        let activeTasks = backgroundTasks.values.filter { $0.status.isActive }
+    /// Whether an execution slot is free under both the user-configurable
+    /// global limit and the per-agent limit. Only slot-consuming statuses
+    /// count: queued tasks haven't started, and tasks waiting for input
+    /// released their slot. (Upstream also skips subagent mirrors and
+    /// inbound shared runs, which Intel doesn't have yet.)
+    private func hasExecutionCapacity(agentId: UUID?) -> Bool {
+        let globalLimit = ToastManager.shared.configuration.maxConcurrentTasks
+        let slotted = backgroundTasks.values.filter { $0.status.consumesExecutionSlot }
 
-        guard activeTasks.count < globalLimit else {
-            print("[BackgroundTaskManager] Global task limit reached (\(globalLimit)), rejecting dispatch")
-            return false
-        }
+        guard slotted.count < globalLimit else { return false }
 
         if let agentId {
-            let agentCount = activeTasks.filter { $0.agentId == agentId }.count
-            guard agentCount < Self.maxTasksPerAgent else {
-                print(
-                    "[BackgroundTaskManager] Per-agent task limit reached (\(Self.maxTasksPerAgent)) for agent \(agentId), rejecting dispatch"
-                )
-                return false
-            }
+            let agentCount = slotted.filter { $0.agentId == agentId }.count
+            guard agentCount < Self.maxTasksPerAgent else { return false }
         }
 
         return true
+    }
+
+    /// Promote queued tasks into free execution slots, oldest first. A task
+    /// whose agent is still at its per-agent cap is skipped so it doesn't
+    /// head-of-line block work for other agents; it stays queued in place.
+    private func pumpQueue() {
+        while true {
+            // Drop stale entries (cancelled/finalized while queued).
+            queuedOrder.removeAll { backgroundTasks[$0]?.status != .queued }
+
+            guard
+                let nextId = queuedOrder.first(where: { id in
+                    guard let state = backgroundTasks[id] else { return false }
+                    return hasExecutionCapacity(agentId: state.agentId)
+                }),
+                let state = backgroundTasks[nextId],
+                let startWork = pendingStarts.removeValue(forKey: nextId)
+            else { return }
+
+            queuedOrder.removeAll { $0 == nextId }
+            // Claim the slot synchronously so a second pump in the same
+            // runloop tick can't over-admit past the limit.
+            state.status = .running
+            state.currentStep = "Running..."
+            state.appendActivity(kind: .info, title: "Started")
+            refreshPowerAssertion()
+            #if OSAURUS_INTEL
+            IntelTaskBanner.shared.promoted(id: nextId)
+            #endif
+            print("[BackgroundTaskManager] Promoted queued task \(nextId)")
+            Task { @MainActor in
+                await startWork()
+            }
+        }
     }
 
     /// Register a new task state and log an initial activity entry.
@@ -721,12 +801,15 @@ public final class BackgroundTaskManager: ObservableObject {
         // status-card row tracks it through completion. `.chat` is a detached
         // interactive window the user already sees, so skip those.
         if state.source != .chat {
-            IntelTaskBanner.shared.started(id: state.id, title: state.taskTitle)
+            let queued = state.status == .queued
+            IntelTaskBanner.shared.started(id: state.id, title: state.taskTitle, queued: queued)
             let agentName = AgentManager.shared.agents.first { $0.id == state.agentId }?.name
             let who = (agentName?.isEmpty == false) ? agentName! : "An agent"
             _ = ToastManager.shared.info(
-                "\(who) started a task",
-                message: "\(state.taskTitle) — track it in the menu-bar card",
+                queued ? "\(who) queued a task" : "\(who) started a task",
+                message: queued
+                    ? "\(state.taskTitle) starts when a run slot frees up — track it in the menu-bar card"
+                    : "\(state.taskTitle) — track it in the menu-bar card",
                 timeout: 8
             )
         }
@@ -740,6 +823,46 @@ public final class BackgroundTaskManager: ObservableObject {
         func registerTaskForTesting(_ state: BackgroundTaskState) {
             backgroundTasks[state.id] = state
             refreshPowerAssertion()
+        }
+
+        /// Test-only (upstream): register a task through the same admission
+        /// gate `dispatchChat` uses — it starts immediately when capacity is
+        /// available, or lands in the FIFO queue with its start deferred
+        /// until `pumpQueue()` promotes it.
+        func admitTaskForTesting(
+            _ state: BackgroundTaskState,
+            start: @escaping @MainActor () async -> Void
+        ) {
+            if hasExecutionCapacity(agentId: state.agentId) {
+                state.status = .running
+                backgroundTasks[state.id] = state
+                refreshPowerAssertion()
+                Task { @MainActor in await start() }
+            } else {
+                state.status = .queued
+                state.currentStep = "Queued"
+                backgroundTasks[state.id] = state
+                queuedOrder.append(state.id)
+                pendingStarts[state.id] = start
+                refreshPowerAssertion()
+            }
+        }
+
+        /// Test-only (upstream): run a queue promotion pass.
+        func pumpQueueForTesting() {
+            pumpQueue()
+        }
+
+        /// Test-only (upstream): whether a dispatch for `agentId` would be
+        /// admitted right now (global + per-agent slot limits).
+        func hasExecutionCapacityForTesting(agentId: UUID?) -> Bool {
+            hasExecutionCapacity(agentId: agentId)
+        }
+
+        /// Test-only (upstream): an isolated manager with no power manager and
+        /// no retained-tab persistence.
+        static func makeForTesting() -> BackgroundTaskManager {
+            BackgroundTaskManager(persistsRetainedTabs: false, powerManager: nil)
         }
 
         /// Test-only (upstream): an isolated manager with an injected power
@@ -784,6 +907,8 @@ public final class BackgroundTaskManager: ObservableObject {
         switch state.status {
         case .completed:
             return .completed(sessionId: state.executionContext?.chatSession.sessionId)
+        case .failed(let summary):
+            return .failed(summary)
         case .cancelled:
             return .cancelled
         default:
@@ -828,7 +953,7 @@ public final class BackgroundTaskManager: ObservableObject {
     /// Mark a task as completed and signal callers.
     /// The toast persists until the user views it or dismisses manually.
     private func markCompleted(_ state: BackgroundTaskState, success: Bool, summary: String) {
-        state.status = .completed(success: success, summary: summary)
+        state.status = success ? .completed(summary: summary) : .failed(summary: summary)
         state.currentStep = nil
         state.executionContext?.chatSession.save()
 
@@ -886,6 +1011,7 @@ public final class BackgroundTaskManager: ObservableObject {
         // this for completions, so finished runs held their session until a
         // tab closed.
         scheduleAutoFinalize(state.id)
+        pumpQueue()
     }
 
     // MARK: - Private: Run-Trace Persistence
@@ -1131,6 +1257,7 @@ public final class BackgroundTaskManager: ObservableObject {
             state.status = .running
             state.currentStep = "Running..."
         } else if state.status == .running, streamingObserved.contains(taskId) {
+            defer { pumpQueue() }
             // Belt-and-suspenders: if the streaming-end tick somehow
             // races ahead of the clarify sink, inspect the live session
             // before tripping the terminal branch. The `.running` guard
@@ -1146,18 +1273,21 @@ public final class BackgroundTaskManager: ObservableObject {
 
     /// Bridge `ChatSession.awaitingClarify` into the per-task plugin event
     /// surface. Setting a payload transitions the task to
-    /// `.awaitingClarification` and emits `OSR_TASK_EVENT_CLARIFICATION`.
+    /// `.waitingForInput` and emits `OSR_TASK_EVENT_CLARIFICATION`.
     /// Clearing it is a no-op here — the next streaming tick is the
     /// single writer for the `.running` transition.
     private func handleChatClarifyChange(taskId: UUID, payload: ClarifyPayload?) {
         guard let state = backgroundTasks[taskId], let payload else { return }
-        state.status = .awaitingClarification
+        state.status = .waitingForInput
         state.currentStep = "Waiting for clarification"
         emitPluginEvent(
             state,
             type: .clarification,
             json: PluginHostContext.serializeClarificationEvent(payload: payload)
         )
+        // Waiting requests stay alive but release their execution slot so
+        // queued work isn't starved by a task idling on the user.
+        pumpQueue()
     }
 
     /// Scan newly added turns for tool calls and record them as activity.

@@ -975,6 +975,10 @@ struct IntelStatusPanelView: View {
             } label: {
                 HStack(spacing: 8) {
                     switch entry.status {
+                    case .queued:
+                        Image(systemName: "clock")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.tertiaryText)
                     case .running:
                         ProgressView()
                             .controlSize(.small)
@@ -1043,6 +1047,7 @@ struct IntelStatusPanelView: View {
 
     private func taskStatusText(_ status: IntelTaskBanner.Status) -> String {
         switch status {
+        case .queued: return "Queued — waiting for a free slot"
         case .running: return "Running…"
         case .completed: return "Finished"
         case .failed: return "Failed"

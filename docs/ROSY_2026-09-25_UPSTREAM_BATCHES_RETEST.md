@@ -2976,3 +2976,23 @@ first (`INTEL_PLUGIN_PUBLISHING.md`).
 - [ ] Regression: memo's notes saved before the update are still listed
       (`memo_list`).
 
+## Background runs queue (2026-11-06)
+
+`W-background-runs-sync` stage 1 (`UPSTREAM_SYNC.md`, "Background runs,
+stage 1"). Not in candidate 66. Runs over the concurrency limit now wait
+in line instead of being dropped.
+
+- [ ] Settings… → General, Notifications section: note the current
+      **Max Concurrent Tasks** value, then set it to 1.
+- [ ] Create two schedules for a custom agent a minute apart, or run one
+      schedule twice with Run Now. The second shows a toast "… queued a
+      task" and the menu-bar card says "Queued — waiting for a free
+      slot". When the first finishes, the second starts on its own and
+      finishes.
+- [ ] Cancel a queued run from its tab: it shows Cancelled and never
+      starts, even after the running one finishes.
+- [ ] A run that fails (for example a schedule on a model that errors)
+      shows Failed on the menu-bar card and in its tab, not Completed.
+- [ ] Set **Max Concurrent Tasks** back to the value you noted (empty
+      uses the default).
+

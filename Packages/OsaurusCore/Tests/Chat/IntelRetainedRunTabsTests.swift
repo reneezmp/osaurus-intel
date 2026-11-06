@@ -46,7 +46,7 @@ struct IntelRetainedRunTabsTests {
             try withDefaults { defaults in
                 let first = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
                 let state = makeRegistryTask(
-                    title: "Keep across restart", status: .completed(success: false, summary: "boom"))
+                    title: "Keep across restart", status: .failed(summary: "boom"))
                 let session = try #require(state.chatSession)
                 session.turns = [ChatTurn(role: .user, content: "What did we decide?")]
                 session.save()
@@ -58,7 +58,7 @@ struct IntelRetainedRunTabsTests {
                 let relaunched = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
                 let restored = try #require(relaunched.taskState(for: state.id))
                 #expect(restored.taskTitle == "Keep across restart")
-                #expect(restored.status == .completed(success: false, summary: "boom"))
+                #expect(restored.status == .failed(summary: "boom"))
                 #expect(restored.source == .schedule)
                 #expect(relaunched.isTaskDehydratedForTesting(state.id))
                 #expect(relaunched.tasksForTabs().contains { $0.id == state.id })
@@ -77,7 +77,7 @@ struct IntelRetainedRunTabsTests {
                 let first = BackgroundTaskManager.makeForTestingRetaining(defaults: defaults)
                 let running = makeRegistryTask(title: "Still going", status: .running)
                 let headless = makeRegistryTask(
-                    title: "Headless", status: .completed(success: true, summary: "ok"), showToast: false)
+                    title: "Headless", status: .completed(summary: "ok"), showToast: false)
                 let done = makeRegistryTask(title: "Done", status: .cancelled)
                 for task in [running, headless, done] { first.registerTaskForTesting(task) }
                 first.dehydrateTaskForTesting(done.id)
@@ -93,7 +93,7 @@ struct IntelRetainedRunTabsTests {
     @Test func aRetainedRunComesBackAsAHibernatedTab_andClosingItDismissesIt() async throws {
         try await ChatHistoryTestStorage.run {
             let manager = BackgroundTaskManager.shared
-            let task = makeRegistryTask(title: "Overnight", status: .completed(success: true, summary: "ok"))
+            let task = makeRegistryTask(title: "Overnight", status: .completed(summary: "ok"))
             let session = try #require(task.chatSession)
             session.turns = [ChatTurn(role: .user, content: "summarize the night")]
             session.save()

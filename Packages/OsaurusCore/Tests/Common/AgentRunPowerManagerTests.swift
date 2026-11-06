@@ -4,9 +4,6 @@
 //
 
 import Foundation
-// Intel: upstream's cases mapped onto Intel's status enum (no `.queued` /
-// `.failed` / `.waitingForInput` until `W-background-runs-sync`):
-// waitingForInput -> awaitingClarification, failed -> completed(success: false).
 import Testing
 
 @testable import OsaurusCore
@@ -23,7 +20,7 @@ struct AgentRunPowerManagerTests {
         )
         #expect(
             AgentRunPowerManager.shouldPreventIdleSystemSleep(
-                statuses: [.running, .awaitingClarification],
+                statuses: [.queued, .waitingForInput],
                 preferenceEnabled: true
             )
         )
@@ -32,15 +29,15 @@ struct AgentRunPowerManagerTests {
     @Test func policyAllowsSleepWhileWaitingOrTerminal() {
         #expect(
             !AgentRunPowerManager.shouldPreventIdleSystemSleep(
-                statuses: [.awaitingClarification],
+                statuses: [.waitingForInput],
                 preferenceEnabled: true
             )
         )
         #expect(
             !AgentRunPowerManager.shouldPreventIdleSystemSleep(
                 statuses: [
-                    .completed(success: true, summary: "Done"),
-                    .completed(success: false, summary: "Failed"),
+                    .completed(summary: "Done"),
+                    .failed(summary: "Failed"),
                     .cancelled,
                 ],
                 preferenceEnabled: true
@@ -87,14 +84,14 @@ struct AgentRunPowerManagerTests {
         #expect(capturedOptions.contains(.userInitiated))
         #expect(capturedOptions.contains(.idleSystemSleepDisabled))
 
-        manager.update(for: [.running, .running])
+        manager.update(for: [.running, .queued])
         #expect(beginCount == 1)
 
-        manager.update(for: [.awaitingClarification])
+        manager.update(for: [.waitingForInput])
         #expect(!manager.isPreventingIdleSystemSleep)
         #expect(endCount == 1)
 
-        manager.update(for: [.completed(success: true, summary: "Done")])
+        manager.update(for: [.completed(summary: "Done")])
         #expect(endCount == 1)
     }
 
@@ -142,6 +139,8 @@ struct AgentRunPowerManagerTests {
             source: .chat,
             sourcePluginId: nil,
             externalSessionKey: nil
+            // Intel: no `contextPreview` on the retained record yet (channel
+            // quick replies, `W-channels`).
         )
 
         taskManager.registerTaskForTesting(state)

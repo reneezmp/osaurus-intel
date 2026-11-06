@@ -62,13 +62,10 @@ final class AgentRunPowerManager {
     ) -> Bool {
         guard preferenceEnabled else { return false }
         return statuses.contains { status in
-            // Intel: no `.queued` / `.failed` / `.waitingForInput` yet
-            // (`W-background-runs-sync`); a clarify-paused run doesn't hold
-            // power, as upstream's waiting-for-input doesn't.
             switch status {
-            case .running:
+            case .running, .queued:
                 return true
-            case .awaitingClarification, .completed, .cancelled:
+            case .waitingForInput, .completed, .failed, .cancelled:
                 return false
             }
         }

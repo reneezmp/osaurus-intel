@@ -176,7 +176,7 @@ struct IntelChatWindowLayoutTests {
             #expect(DetachedChatRunRegistry.shared.sessions.isEmpty, "the registry owns it, not the detached holder")
 
             let done = makeRegistryTask(
-                agentId: Agent.defaultId, title: "Done job", status: .completed(success: true, summary: "ok"))
+                agentId: Agent.defaultId, title: "Done job", status: .completed(summary: "ok"))
             manager.registerTaskForTesting(done)
             window.attachBackgroundTab(for: done)
             let doneTab = try #require(window.tabs.first { $0.session === done.chatSession })

@@ -6,10 +6,9 @@
 //  (`PluginHostAPI.swift`, which Intel doesn't compile). `GET /tasks/{id}`
 //  (`W-server-api` stage 4b, docs/SERVER_API_INTEL.md), plugin
 //  `task_status` / `list_active_tasks` and the events delivered to plugins'
-//  `on_task_event` (`W-plugin-reliability` stage 2c) use it. The event
-//  serializers are verbatim; `taskStateDict` maps Intel's task states
-//  (no `.queued`, `.completed(success:)` instead of `.failed`) until
-//  `W-background-runs-sync`. Verbatim, on Intel's
+//  `on_task_event` (`W-plugin-reliability` stage 2c) use it. All verbatim
+//  (`taskStateDict` since `W-background-runs-sync` stage 1 brought
+//  upstream's `queued` / `failed` statuses), on Intel's
 //  `PluginHostContext` (`IntelPluginHostContext.swift`, whose `jsonString` /
 //  `parseJSON` it uses).
 //
@@ -43,9 +42,16 @@ extension PluginHostContext {
         }
 
         switch state.status {
-        case .running, .awaitingClarification:
-            // Chat tasks always serialize as "running"; clarification is
-            // handled inline through the `clarify` agent intercept.
+        case .queued:
+            result["status"] = "queued"
+            if let step = state.currentStep { result["current_step"] = step }
+
+        case .running, .waitingForInput:
+            // v3: chat tasks always serialize as "running". The
+            // `.waitingForInput` enum case is still used internally
+            // for UI hints (toast, Activity section) but never exposed via task_status,
+            // because clarification is handled inline through the `clarify`
+            // agent intercept rather than as an out-of-band state.
             result["status"] = "running"
             if let step = state.currentStep { result["current_step"] = step }
 
@@ -60,9 +66,17 @@ extension PluginHostContext {
             }
             if !activity.isEmpty { result["activity"] = activity }
 
-        case .completed(let success, let summary):
-            result["status"] = success ? "completed" : "failed"
-            result["success"] = success
+        case .completed(let summary):
+            result["status"] = "completed"
+            result["success"] = true
+            result["summary"] = summary
+            if let execCtx = state.executionContext {
+                result["session_id"] = execCtx.id.uuidString
+            }
+
+        case .failed(let summary):
+            result["status"] = "failed"
+            result["success"] = false
             result["summary"] = summary
             if let execCtx = state.executionContext {
                 result["session_id"] = execCtx.id.uuidString

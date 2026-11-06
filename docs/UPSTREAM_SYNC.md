@@ -3768,10 +3768,11 @@ an explicit Sleep still win. The preference
   Test processes get no power manager.
 - **Settings.** Settings › Chat › **Agent Sessions** has the switch and a
   live status line; it is also in the Settings search index.
-- **Intel difference.** No `.queued` / `.waitingForInput` statuses yet
-  (`W-background-runs-sync`). `.running` holds power; clarify-paused,
-  completed and cancelled runs don't. Upstream's tests are mapped onto
-  Intel's enum.
+- **Intel difference (until 2026-11-06).** No `.queued` /
+  `.waitingForInput` statuses yet (`W-background-runs-sync`). `.running`
+  holds power; clarify-paused, completed and cancelled runs don't. Since
+  `W-background-runs-sync` stage 1 the statuses and the power manager are
+  upstream's, and so are its tests.
 
 ### Public release 1.0.60 (build 61) — 2026-10-11
 
@@ -5490,6 +5491,74 @@ package and tests also build for `x86_64-apple-macosx13.0`. Classifiers:
 UNASSIGNED 0. No live `~/.osaurus` writes, Keychain identity and
 `ai.osaurus.id` session-token mdat unchanged. The in-app guide says
 plugins are signed and a key change is refused.
+
+### Background runs, stage 1 (`W-background-runs-sync`) — 2026-11-06
+
+Upstream's run lifecycle states and FIFO admission queue on Intel's
+`BackgroundTaskManager`, from `bce907045`. Plan (each a report and push):
+**stage 1** statuses and the queue (this section); **stage 2** the rest of
+upstream's manager that needs no channels, workspaces or subagents (task
+renames, quick replies and steering, window adoption and binding, toast
+ordering, a fresh chat per scheduled run #3007, upstream's tests with
+`MockChatEngine` adapted). Subagent mirrors (`W-subagents`), inbound shared
+runs and workspace dispatch (`W-workspaces-sharing`, deferred) and channel
+steering (`W-channels`, deferred) stay with their items.
+
+- **Statuses (`Models/BackgroundTaskModels.swift`, upstream's enum):**
+  `queued`, `running`, `waitingForInput`, `completed(summary:)`,
+  `failed(summary:)`, `cancelled`, with `consumesExecutionSlot` and
+  `isTerminal`. Intel had `awaitingClarification` and
+  `completed(success:summary:)`. A status change reports `queued` to the
+  sidebar's `SessionActivityMonitor`, as upstream.
+- **Admission queue (upstream's):** `dispatchChat` no longer refuses a
+  run when the global limit (Settings › Notifications › **Max Concurrent
+  Tasks**, `ToastManager.configuration`) or the 5-per-agent limit is full:
+  the run registers as `queued` and its start (folder preparation, the
+  `agent_runs` row, the task-local bindings, `context.start`) waits in a
+  FIFO until `pumpQueue()` promotes it. Promotion happens when a run
+  completes, fails, is cancelled or finalized, or pauses for input
+  (`waitingForInput` releases its slot and resumes straight to `running`).
+  An agent at its cap doesn't block other agents' queued runs.
+  `cancelAllTasks` cancels queued runs first, then running ones. Before
+  this Intel returned nil, so a schedule, watcher, plugin or HTTP dispatch
+  over the limit was dropped.
+- **Consumers:** `AgentRunPowerManager` (upstream's: queued runs keep the
+  Mac awake, waiting ones don't), the plugin / HTTP task serializer
+  (`taskStateDict`, now verbatim: `"queued"`, `"failed"`), the retained
+  tab record, Intel's menu-bar card (`IntelTaskBanner` gains `queued`,
+  "Queued — waiting for a free slot", promoted to running) and the start
+  toast ("queued a task … starts when a run slot frees up"). Upstream's
+  notch and toast views stay compiled out on Intel.
+- **Found while doing it:** Intel's `resultFromState` matched
+  `.completed` for both outcomes, so a failed background run resolved its
+  waiters (schedules, `/agents/{id}/run`-style callers, plugins) as
+  completed. Now upstream's: `failed` carries its summary.
+- **Still Intel's:** the plugin dispatch tool whitelist
+  (`requestedToolNames` → `SessionToolStateStore.appendLoadedTools`) stays
+  compiled out (Intel's store lacks it); the start closure keeps Intel's
+  task-local set (no `isUnattendedDispatch` / `inferenceSourceOverride` /
+  `taskIntent` yet, stage 2).
+
+Tests:
+- **`IntelBackgroundRunQueueTests`:** upstream's seven queue-scheduling
+  tests from `AgentRequestLifecycleTests` (queue instead of reject, FIFO
+  promotion, waiting releases the slot, completion promotes, cancelled
+  queued work never starts, no head-of-line blocking, shutdown cancels
+  both), without the toast-list check (stage 2) and with a minimal engine
+  in place of `MockChatEngine`.
+- **Now upstream's:** `AgentRunPowerManagerTests` (minus the retained
+  record's `contextPreview`) and `PluginHostAPITests` (Intel's copy had
+  mapped task states).
+- **Updated:** `IntelRetainedRunTabsTests`, `IntelChatWindowLayoutTests`
+  for the new statuses.
+- **Still excluded:** `BackgroundTaskStreamingObserverTests`,
+  `BackgroundTaskInterruptTests`, `PluginClarifyEventTests` (stage 2,
+  `MockChatEngine`).
+
+Validation: the full interim gate passed 4,880 tests in 617 suites (only
+the known avatar cache failure); package and tests also build for
+`x86_64-apple-macosx13.0`. No live `~/.osaurus` writes, Keychain identity
+and `ai.osaurus.id` session-token mdat unchanged.
 
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 

@@ -136,7 +136,9 @@ enum StorageMigrationCoordinator {
 final class IntelTaskBanner: ObservableObject {
     static let shared = IntelTaskBanner()
 
-    enum Status: Equatable { case running, completed, failed }
+    /// `queued` (`W-background-runs-sync`): accepted while every run slot
+    /// was busy; becomes `running` when the manager promotes it.
+    enum Status: Equatable { case queued, running, completed, failed }
 
     struct Entry: Identifiable, Equatable {
         let id: UUID
@@ -149,13 +151,19 @@ final class IntelTaskBanner: ObservableObject {
 
     private init() {}
 
-    func started(id: UUID, title: String) {
+    func started(id: UUID, title: String, queued: Bool = false) {
         entry = Entry(
             id: id,
             title: title.isEmpty ? "Task" : title,
-            status: .running,
+            status: queued ? .queued : .running,
             startedAt: Date()
         )
+    }
+
+    /// A queued run got its slot.
+    func promoted(id: UUID) {
+        guard entry?.id == id, entry?.status == .queued else { return }
+        entry?.status = .running
     }
 
     func finished(id: UUID, success: Bool) {
