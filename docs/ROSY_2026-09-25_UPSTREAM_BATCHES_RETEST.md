@@ -2996,3 +2996,25 @@ in line instead of being dropped.
 - [ ] Set **Max Concurrent Tasks** back to the value you noted (empty
       uses the default).
 
+
+## Background runs, stage 2-1 (2026-11-06)
+
+`W-background-runs-sync` stage 2-1 (`UPSTREAM_SYNC.md`, "Background runs,
+stage 2-1"). Not in candidate 66. Mostly internal; these are the visible
+parts.
+
+- [ ] Before updating: leave at least one finished schedule run open as a
+      tab. After updating and relaunching, the tab is still there and opens
+      its conversation.
+- [ ] Start a schedule with Run Now, open its tab, and press Stop in the
+      chat while it runs. The menu-bar card says "Stopped" (it used to stay
+      on "Running…"), and the run's tab shows Cancelled.
+- [ ] Start another run and close its tab's × (or cancel it from the
+      sidebar) while it runs: the card says "Stopped".
+- [ ] A schedule whose prompt makes the agent ask a clarifying question
+      (for example "Ask me which file to summarize, then summarize it"):
+      the card says "Waiting for your answer". Answer in the run's tab: the
+      card goes back to "Running…", then "Finished".
+- [ ] Close a chat window while its reply is still streaming and choose
+      **Continue in Background**: the reply finishes, and the conversation
+      comes back as a tab with the full answer.

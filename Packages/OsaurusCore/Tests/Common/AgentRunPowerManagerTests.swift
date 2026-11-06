@@ -138,9 +138,8 @@ struct AgentRunPowerManagerTests {
             createdAt: Date(),
             source: .chat,
             sourcePluginId: nil,
-            externalSessionKey: nil
-            // Intel: no `contextPreview` on the retained record yet (channel
-            // quick replies, `W-channels`).
+            externalSessionKey: nil,
+            contextPreview: []
         )
 
         taskManager.registerTaskForTesting(state)

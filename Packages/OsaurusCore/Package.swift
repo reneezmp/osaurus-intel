@@ -281,10 +281,6 @@ let package = Package(
                 "Service/SearchServiceTests.swift",
                 "Service/ValidateJANGTQUnsupportedFamilyTests.swift",
                 
-                // MockChatEngine (upstream's chat engine; `W-background-runs-sync`);
-                // PluginClarifyEventTests also needs upstream's `waitingForInput` task status:
-                "Plugin/BackgroundTaskInterruptTests.swift",
-                "Plugin/PluginClarifyEventTests.swift",
                 "PrivacyFilter/PostScrubInvariantTests.swift",
                 
                 "Provider/RemoteChatRequestEncodingTests.swift",
@@ -323,7 +319,6 @@ let package = Package(
                 "Networking/ServerRuntimeSettingsStoreTests.swift",
                 "Onboarding/ConfigureAIStateDownloadTests.swift",
                 "Plugin/AgentManagerLifecycleNotificationTests.swift",
-                "Plugin/BackgroundTaskStreamingObserverTests.swift",
                 
                 "Chat/ChatSessionQueuedSendTests.swift",
                 "Chat/ChatSessionResetForAgentTests.swift",
@@ -332,7 +327,6 @@ let package = Package(
                 "Agent/AgentReorderPersistenceTests.swift",
                 "Chat/ChatAttachmentSecurityTests.swift",
                 "Chat/ChatConfigurationDefaultsTests.swift",
-                "Chat/ChatEngineTestDoubles.swift",
                 "Chat/ChatEngineTests.swift",
                 "Chat/ChatHistoryDatabaseTests.swift",
                 "Chat/ChatViewSandboxTests.swift",

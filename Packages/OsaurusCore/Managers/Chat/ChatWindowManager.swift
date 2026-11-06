@@ -945,6 +945,10 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
     @Published public private(set) var lastFocusedWindowId: UUID?
 
     public var windowCount: Int { windows.count }
+
+    /// Whether a window with this id is open (upstream).
+    public func windowExists(id: UUID) -> Bool { windows[id] != nil }
+
     public var hasVisibleWindows: Bool { !windows.isEmpty }
 
     private var nsWindows: [UUID: NSWindow] = [:]

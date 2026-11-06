@@ -23,69 +23,23 @@ struct MockChatEngine: ChatEngineProtocol {
     }
 
     func completeChat(request: ChatCompletionRequest) async throws -> ChatCompletionResponse {
-        let created = Int(Date().timeIntervalSince1970)
-        let responseId =
-            "chatcmpl-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))"
-        let choice = ChatChoice(
-            index: 0,
-            message: ChatMessage(
-                role: "assistant",
-                content: completeText,
-                tool_calls: nil,
-                tool_call_id: nil
-            ),
-            finish_reason: "stop"
-        )
-        let usage = Usage(prompt_tokens: 0, completion_tokens: 0, total_tokens: 0)
-        return ChatCompletionResponse(
-            id: responseId,
-            created: created,
+        // Intel: the completion response (`CloudChatEngine.swift`) nests its
+        // own choice/message types instead of upstream's `ChatChoice` /
+        // `ChatMessage`.
+        ChatCompletionResponse(
+            id: "chatcmpl-\(UUID().uuidString.replacingOccurrences(of: "-", with: "").prefix(12))",
+            object: nil,
+            created: Int(Date().timeIntervalSince1970),
             model: model,
-            choices: [choice],
-            usage: usage,
-            system_fingerprint: nil
+            choices: [.init(
+                index: 0,
+                message: .init(role: "assistant", content: completeText, tool_calls: nil, reasoning_content: nil),
+                finish_reason: "stop"
+            )],
+            usage: .init(prompt_tokens: 0, completion_tokens: 0, total_tokens: 0)
         )
     }
 }
 
-// MARK: - ModelService fake
-
-struct FakeModelService: ModelService {
-    var id: String { "fake" }
-
-    var available: Bool = true
-    var supportedModel: String = "fake"
-    var deltas: [String] = []
-    var completeText: String = "hello"
-
-    func isAvailable() -> Bool { available }
-
-    func handles(requestedModel: String?) -> Bool {
-        let t = (requestedModel ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
-        return t == supportedModel
-    }
-
-    func generateOneShot(
-        messages: [ChatMessage],
-        parameters: GenerationParameters,
-        requestedModel: String?
-    ) async throws -> String {
-        return completeText
-    }
-
-    func streamDeltas(
-        messages: [ChatMessage],
-        parameters: GenerationParameters,
-        requestedModel: String?,
-        stopSequences: [String]
-    ) async throws -> AsyncThrowingStream<String, Error> {
-        AsyncThrowingStream { continuation in
-            if deltas.isEmpty {
-                continuation.yield(completeText)
-            } else {
-                for d in deltas { continuation.yield(d) }
-            }
-            continuation.finish()
-        }
-    }
-}
+// Intel: upstream's `FakeModelService` is left out — `ModelService` isn't
+// compiled on Intel (`Services/Inference/ModelService.swift` is excluded).

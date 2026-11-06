@@ -47,6 +47,50 @@ struct BackgroundTaskStreamingObserverTests {
 
     // MARK: - Tests
 
+    @Test
+    func childChatStop_resumesPendingDelegateAsCancelledNotCompleted() async throws {
+        let (state, mgr) = makeObservedState()
+        defer { mgr.finalizeTask(state.id) }
+        state.chatSession?.turns = [
+            ChatTurn(role: .user, content: "Check the result"),
+            ChatTurn(role: .assistant, content: "I am still checking"),
+        ]
+        state.chatSession?.isStreaming = true
+        let waiter = Task { @MainActor in
+            await mgr.awaitCompletion(state.id, timeoutSeconds: 5)
+        }
+        await Task.yield()
+        // The visible child chat calls stop() directly, bypassing cancelTask.
+        state.chatSession?.stop()
+        guard case .cancelled = await waiter.value else {
+            Issue.record("The child chat's Stop reported its partial answer as success")
+            return
+        }
+        #expect(state.status == .cancelled)
+        #expect(mgr.hasPendingAutoFinalizeForTesting(state.id))
+    }
+
+    @Test
+    func cancelTask_resumesPendingDelegateAsCancelledNotCompleted() async throws {
+        let (state, mgr) = makeObservedState()
+        defer { mgr.finalizeTask(state.id) }
+        state.chatSession?.isStreaming = true
+        let waiter = Task { @MainActor in
+            await mgr.awaitCompletion(state.id, timeoutSeconds: 5)
+        }
+        // Let awaitCompletion register its continuation before the synchronous
+        // streaming-end publication from stop(). Checking only final status
+        // misses the old race: cancelTask overwrote it after resuming success.
+        await Task.yield()
+        mgr.cancelTask(state.id)
+        let result = await waiter.value
+        guard case .cancelled = result else {
+            Issue.record("A stopped child resumed its waiter as \(result)")
+            return
+        }
+        #expect(state.status == .cancelled)
+    }
+
     /// Subscribing must NOT synchronously fire `markCompleted`, even though
     /// CombineLatest delivers `(isStreaming: false, lastStreamError: nil)`
     /// the instant the sink attaches.
@@ -71,11 +115,31 @@ struct BackgroundTaskStreamingObserverTests {
         state.chatSession?.isStreaming = false
         try await Task.sleep(for: .milliseconds(10))
 
-        #expect(state.status == .completed(success: true, summary: "Chat completed"))
+        #expect(state.status == .completed(summary: "Chat completed"))
+    }
+
+    /// A completed headless task must schedule its own eviction (mirroring
+    /// the cancel path) so it doesn't linger in the registry. Without this a
+    /// later schedule reattaching by `externalSessionKey` collides with the
+    /// stale `.completed` state: `awaitCompletion` short-circuits on old data
+    /// and leaked runs eventually saturate the execution slots — the "runs
+    /// forever" bug.
+    @Test
+    func observeChatTask_schedulesAutoFinalizeAfterCompletion() async throws {
+        let (state, mgr) = makeObservedState()
+        defer { mgr.finalizeTask(state.id) }
+
+        state.chatSession?.isStreaming = true
+        try await Task.sleep(for: .milliseconds(10))
+        state.chatSession?.isStreaming = false
+        try await Task.sleep(for: .milliseconds(10))
+
+        #expect(state.status == .completed(summary: "Chat completed"))
+        #expect(mgr.hasPendingAutoFinalizeForTesting(state.id))
     }
 
     /// A stream error before completion must transition the task to
-    /// `.completed(success: false, summary: <error>)`.
+    /// `.failed(summary: <error>)`.
     @Test
     func observeChatTask_marksFailedWhenStreamErrorPresent() async throws {
         let (state, mgr) = makeObservedState()
@@ -87,6 +151,6 @@ struct BackgroundTaskStreamingObserverTests {
         state.chatSession?.isStreaming = false
         try await Task.sleep(for: .milliseconds(10))
 
-        #expect(state.status == .completed(success: false, summary: "boom"))
+        #expect(state.status == .failed(summary: "boom"))
     }
 }

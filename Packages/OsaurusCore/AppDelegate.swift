@@ -983,6 +983,14 @@ struct IntelStatusPanelView: View {
                         ProgressView()
                             .controlSize(.small)
                             .frame(width: 16, height: 16)
+                    case .waiting:
+                        Image(systemName: "questionmark.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.accentColor)
+                    case .cancelled:
+                        Image(systemName: "stop.circle")
+                            .font(.system(size: 14))
+                            .foregroundColor(theme.tertiaryText)
                     case .completed:
                         Image(systemName: "checkmark.circle.fill")
                             .font(.system(size: 14))
@@ -1049,8 +1057,10 @@ struct IntelStatusPanelView: View {
         switch status {
         case .queued: return "Queued — waiting for a free slot"
         case .running: return "Running…"
+        case .waiting: return "Waiting for your answer"
         case .completed: return "Finished"
         case .failed: return "Failed"
+        case .cancelled: return "Stopped"
         }
     }
 

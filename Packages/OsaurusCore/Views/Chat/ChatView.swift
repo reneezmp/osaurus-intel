@@ -429,7 +429,7 @@ final class ChatSession: ObservableObject {
     /// Set to true at the start of `stop()` so `completeRunCleanup` knows the
     /// run was cancelled by the user (or by `sendNowInterrupting`) and must
     /// not auto-flush a queued send. Reset to false at the top of `send(...)`.
-    private var stopRequested: Bool = false
+    private(set) var stopRequested: Bool = false
     /// Set by the `prompt_working_folder` intercept after a mid-run pick;
     /// `completeRunCleanup` then continues with `send("")`. Cleared by every
     /// fresh send and by stop, so it can never continue an unrelated run.
@@ -814,6 +814,31 @@ final class ChatSession: ObservableObject {
         }
         loadActiveModelOptions(for: selectedModel)
         applyImageModelDefaults(for: selectedModel)
+        isLoadingModel = false
+    }
+
+    /// For headless dispatched runs (schedule / HTTP / plugin / watcher),
+    /// make the agent's CURRENT default model win over whatever the session
+    /// had persisted. Reattached conversations otherwise pin the model that
+    /// was selected when the session was first created, so changing an
+    /// agent's default model never took effect on ongoing conversations —
+    /// and a cold-start fallback pick became permanent. The persisted model
+    /// stays as the fallback when the agent's default isn't available yet
+    /// (remote catalog still loading, model uninstalled). Never touches
+    /// window chats (`source == .chat`), where a manual pick must survive.
+    /// Upstream #2232; Intel: no delegated-model admission (`W-subagents`),
+    /// and Intel's `resolvePickerModel` stands in for `resolvePickerModelId`.
+    func applyAgentDefaultModelForDispatch() {
+        guard source != .chat else { return }
+        guard
+            let configured = AgentManager.shared.effectiveModel(for: agentId ?? Agent.defaultId),
+            let model = Self.resolvePickerModel(configured, among: pickerItems),
+            selectedModel != model
+        else { return }
+        isLoadingModel = true
+        selectedModel = model
+        loadActiveModelOptions(for: model)
+        applyImageModelDefaults(for: model)
         isLoadingModel = false
     }
 

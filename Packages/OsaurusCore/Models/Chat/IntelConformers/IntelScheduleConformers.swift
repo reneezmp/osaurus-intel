@@ -137,8 +137,10 @@ final class IntelTaskBanner: ObservableObject {
     static let shared = IntelTaskBanner()
 
     /// `queued` (`W-background-runs-sync`): accepted while every run slot
-    /// was busy; becomes `running` when the manager promotes it.
-    enum Status: Equatable { case queued, running, completed, failed }
+    /// was busy; becomes `running` when the manager promotes it. `waiting`:
+    /// paused on a clarify question. `cancelled`: stopped by the user or a
+    /// budget.
+    enum Status: Equatable { case queued, running, waiting, completed, failed, cancelled }
 
     struct Entry: Identifiable, Equatable {
         let id: UUID
@@ -166,9 +168,26 @@ final class IntelTaskBanner: ObservableObject {
         entry?.status = .running
     }
 
+    /// The run paused on a clarify question.
+    func waiting(id: UUID) {
+        guard entry?.id == id, entry?.status == .running else { return }
+        entry?.status = .waiting
+    }
+
+    /// The run is streaming again (a clarify answer, or a follow-up reply).
+    func resumed(id: UUID) {
+        guard entry?.id == id, entry?.status != .running else { return }
+        entry?.status = .running
+    }
+
     func finished(id: UUID, success: Bool) {
         guard entry?.id == id else { return }
         entry?.status = success ? .completed : .failed
+    }
+
+    func cancelled(id: UUID) {
+        guard entry?.id == id else { return }
+        entry?.status = .cancelled
     }
 
     func dismiss() { entry = nil }

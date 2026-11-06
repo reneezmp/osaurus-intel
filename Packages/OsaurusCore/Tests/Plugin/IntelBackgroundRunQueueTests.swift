@@ -17,12 +17,13 @@
 //  - cancelling a queued request drops its deferred start permanently;
 //  - `cancelAllTasks` (app shutdown) cancels running AND queued work.
 //
-//  Intel differences: the toast-ordering and window-binding tests, and the
-//  toast-list check in the first test, wait for stage 2 (`sortedToastTasks`,
-//  window binding); upstream's agent-loop hook suite in the same file needs
-//  upstream's `AgentLoopHooks`, which Intel doesn't have; a minimal engine
-//  stands in for upstream's `MockChatEngine` (whose file needs upstream's
-//  response types).
+//  Stage 2 added upstream's toast-ordering and stale-window-binding tests.
+//
+//  Intel differences: upstream's agent-loop hook suite in the same file
+//  (`simultaneousBatches_stayOwnedByTheirRequest`) needs upstream's
+//  `AgentLoopHooks`, which Intel doesn't have; a minimal engine stands in
+//  for upstream's `MockChatEngine` (kept from stage 1, when the mock didn't
+//  compile on Intel).
 //
 
 import Foundation
@@ -121,7 +122,8 @@ struct AgentRequestQueueSchedulingTests {
         #expect(queued.status == .queued)
         #expect(mgr.taskState(for: queued.id) != nil, "queued request must be registered, not dropped")
         #expect(probe.started == false, "queued request must have no execution side effects")
-        // (Upstream also checks the toast list here: `sortedToastTasks`, stage 2.)
+        // Queued requests surface globally like any other lifecycle state.
+        #expect(mgr.sortedToastTasks.contains { $0.id == queued.id })
     }
 
     @Test func slotFree_promotesQueuedInFIFOOrder() async throws {
@@ -320,5 +322,40 @@ struct AgentRequestQueueSchedulingTests {
         #expect(probe.started == false)
 
         ([running, queued] + fillers).forEach { mgr.finalizeTask($0.id) }
+    }
+
+    @Test func toastOrdering_waitingBeforeRunningBeforeQueued() async throws {
+        let agent = UUID()
+        let running = makeTaskState(agentId: agent, title: "t-running", status: .running)
+        let waiting = makeTaskState(agentId: agent, title: "t-waiting", status: .waitingForInput)
+        let queued = makeTaskState(agentId: agent, title: "t-queued", status: .queued)
+        // Register in the "wrong" order to prove the sort is by status.
+        mgr.registerTaskForTesting(queued)
+        mgr.registerTaskForTesting(running)
+        mgr.registerTaskForTesting(waiting)
+        defer {
+            [running, waiting, queued].forEach { mgr.finalizeTask($0.id) }
+        }
+
+        let ourIds: Set<UUID> = [running.id, waiting.id, queued.id]
+        let ours = mgr.sortedToastTasks.filter { ourIds.contains($0.id) }
+        #expect(ours.map(\.id) == [waiting.id, running.id, queued.id])
+    }
+
+    /// A window binding whose window no longer exists must not suppress a
+    /// task from the global toast surface — otherwise a crashed / torn-down
+    /// window would permanently hide a still-running request.
+    @Test func staleWindowBinding_doesNotHideTaskFromToasts() async throws {
+        let agent = UUID()
+        let state = makeTaskState(agentId: agent, title: "stale-bind")
+        mgr.registerTaskForTesting(state)
+        defer { mgr.finalizeTask(state.id) }
+
+        let ghostWindowId = UUID()
+        mgr.bindWindow(ghostWindowId, toTask: state.id)
+        defer { mgr.unbindWindow(ghostWindowId) }
+
+        #expect(mgr.isTaskAttachedToWindow(state.id) == false)
+        #expect(mgr.sortedToastTasks.contains { $0.id == state.id })
     }
 }

@@ -5560,6 +5560,91 @@ the known avatar cache failure); package and tests also build for
 `x86_64-apple-macosx13.0`. No live `~/.osaurus` writes, Keychain identity
 and `ai.osaurus.id` session-token mdat unchanged.
 
+### Background runs, stage 2-1 (`W-background-runs-sync`) — 2026-11-06
+
+The rest of upstream's `BackgroundTaskManager` API that needs no channels,
+workspaces or subagents, and upstream's run tests. Stage 2 is split: **2-1**
+the manager (this section); **2-2** chat windows on `adoptSession` /
+`bindWindow` in place of Intel's `DetachedChatRunRegistry`. #3007 (a fresh
+chat per scheduled run) was already in (batch 2026-10-07).
+
+- **Manager (upstream's):** `sortedToastTasks` with `statusSortPriority`
+  (waiting, running, queued, then terminal) and `recomputeSortedToastTasks`,
+  which every state change now calls (it also refreshes the power
+  assertion); `renameTask` (task, live session and chat history);
+  `bindWindow` / `unbindWindow` / `isTaskAttachedToWindow` (a stale binding
+  to a closed window never hides a run); `adoptSession`, with
+  `detachChatWindow` on it, so a chat paused on a clarify question can be
+  adopted too, not only a streaming one; `finishChatCancellation`, so the
+  chat's own Stop on a registry run (`ChatSession.stopRequested`, now
+  readable) reports **cancelled** to waiters, not completed;
+  `closeAgentTaskGroup`; `submitQuickReply` with `hydrateRetainedTask` and
+  `executionContextForReveal`; `registerTask` clears a reused id's old
+  observers and cleanup timer first; the retained record and terminal tabs
+  keep a `contextPreview` (last four user/assistant messages). No Intel view
+  calls the quick-reply, rename or group-close API yet (upstream calls them
+  from channels and its Activity rows).
+- **#2232 (`7f39220f6`, never ported before):** `ChatSession.
+  applyAgentDefaultModelForDispatch()`, called from `ExecutionContext.
+  prepare()` and quick replies: a headless run follows the agent's current
+  default model over the model a reattached session saved; window chats are
+  untouched. Inert on Intel today: Intel's reattach lookup reads
+  `ChatHistoryDatabase.loadSession`, a stub that returns nil, so dispatches
+  never reattach. Without the delegated-model admission (`W-subagents`).
+- **Found and fixed:**
+  - the tool-activity scan (`handleChatTurnCountChange`) could trap when a
+    session load replaced a long history with a shorter one (upstream's
+    clamp);
+  - Intel's menu-bar card (`IntelTaskBanner`) stayed on "Running…" after a
+    cancel and during a clarify pause. It now shows **Stopped** and
+    **Waiting for your answer**, and goes back to running when the run
+    resumes.
+- **Intel differences:**
+  - Chat history on Intel is `ChatSessionsManager` (per-session JSON, full
+    transcripts in memory); `hydrateRetainedTask` reads it instead of
+    `ChatSessionStore`. Intel's `ChatHistoryDatabase.loadSession` is a stub.
+  - The retained record's `contextPreview` is optional, so records written
+    by 1.0.61/1.0.62 (no preview) still decode and their tabs survive the
+    update.
+  - `ChatWindowManager`'s Intel half gains upstream's `windowExists(id:)`.
+  - No subagent-mirror or inbound-run branches (`W-subagents`,
+    `W-workspaces-sharing`); no `releaseResidencyAndRearmChatWarmup` and no
+    detached local-model checks (`isAnyDetachedTaskStreamingLocalModel`,
+    `detachedTaskStreamingLocalModel`, from #1481 / #2363): Intel has no
+    local model runtime, so "one local generation at a time" doesn't apply.
+  - Left for their items: steering (`steerTask`, `takeRemoteSteers`,
+    `runningTaskId`, `replyableTaskId`, `ChatSession.remoteSteers`; only
+    channel callers upstream, #3010, `W-channels`);
+    `awaitCompletionWithToolFailure` (`DelegatedToolFailure`, `W-subagents`).
+  - The start closure keeps Intel's task-locals. Upstream also binds
+    `currentSessionSource` (#2190, channel publishing, `W-channels`),
+    `isUnattendedDispatch` (#1815: `.ask` auto-approval for unattended
+    schedules and watchers), and `inferenceSourceOverride` / `taskIntent`
+    (#3203, helper inference). Intel has none of their consumers.
+
+Tests:
+- **Now compiled:** upstream's `ChatEngineTestDoubles` (`MockChatEngine`
+  builds Intel's `ChatCompletionResponse`; `FakeModelService` left out
+  because `ModelService` isn't compiled on Intel),
+  `BackgroundTaskStreamingObserverTests` (upstream's again, with the
+  cancel/stop and completed-run cleanup tests Intel had cut),
+  `BackgroundTaskInterruptTests`, `PluginClarifyEventTests`.
+- **New from upstream:** `BackgroundTaskAgentActionsTests` (group close,
+  quick replies, rehydration, rename, retained tabs across a relaunch;
+  history read through `ChatSessionsManager`),
+  `BackgroundTaskRegistrationSignalTests` (without the mirror and inbound
+  cases).
+- **`IntelBackgroundRunQueueTests`:** gains upstream's toast-ordering and
+  stale-window-binding tests and the toast check; batch isolation still
+  needs upstream's `AgentLoopHooks`.
+- **`IntelDispatchModelTests`:** #2232's dispatch cases. Upstream's
+  `ChatSessionDispatchModelTests` also covers window model restore
+  (`applyPickerItems`, the channel source), which Intel doesn't have.
+- `AgentRunPowerManagerTests` is upstream's verbatim again.
+- The test target has no `OSAURUS_INTEL` define: Intel test adaptations are
+  written directly, never `#if`-fenced (a fenced Intel branch never
+  compiles).
+
 ### Rosy candidate 1.0.61 (build 62): results and fixes — 2026-11-01
 
 Rosy (Ventura 13.7.8) ran the smoke pass in `ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST.md`.
