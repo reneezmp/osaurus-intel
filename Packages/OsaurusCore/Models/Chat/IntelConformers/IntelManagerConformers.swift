@@ -1265,6 +1265,11 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                                 description: provider.name,
                                 contextLength: manager.customProviderContextLength(
                                     providerId: provider.id, modelId: modelId
+                                ) ?? ModelPickerItem.knownProviderContextWindow(
+                                    providerType: provider.providerType,
+                                    authType: provider.authType,
+                                    host: provider.host,
+                                    modelId: modelId
                                 )
                             )
                         )

@@ -241,6 +241,48 @@ extension ModelPickerItem {
     // MARK: - Media models (upstream `W-media-generation`)
 
     /// Upstream's media row: catalog name, privacy and starting price.
+    /// Context window (tokens) for known `api.openai.com` model families,
+    /// keyed by the documented slug prefix (longest match wins so dated
+    /// snapshots still resolve). OpenAI's `/v1/models` never reports a
+    /// window, so this is the only source for the official API-key route
+    /// (upstream #2464). Scoped to the official host only: never applied to
+    /// OpenAI-compatible proxies, whose ids aren't OpenAI's to trust.
+    private static let officialOpenAIContextWindows: [(prefix: String, tokens: Int)] = [
+        ("gpt-6", 1_050_000),
+        ("gpt-5.6", 1_050_000),
+        ("gpt-5.5", 1_050_000),
+        ("gpt-5.4", 1_050_000),
+        ("gpt-5.2", 400_000),
+        ("gpt-5", 400_000),
+        ("gpt-4.1", 1_047_576),
+        ("gpt-4o", 128_000),
+        ("o4-mini", 200_000),
+        ("o3", 200_000),
+        ("gpt-3.5-turbo", 16_385),
+    ]
+
+    static func officialOpenAIContextWindow(forModelId modelId: String) -> Int? {
+        let bare = (modelId.split(separator: "/").last.map(String.init) ?? modelId).lowercased()
+        return officialOpenAIContextWindows
+            .filter { bare.hasPrefix($0.prefix) }
+            .max { $0.prefix.count < $1.prefix.count }?
+            .tokens
+    }
+
+    /// The window a provider is known to give `modelId` when its `/models`
+    /// doesn't say: Codex's live catalog (#2416), the xAI OAuth catalog's
+    /// documented windows (#2463), the official OpenAI table (#2464).
+    /// Intel: one helper for the picker builder (upstream resolves these in
+    /// per-provider factories).
+    static func knownProviderContextWindow(
+        providerType: RemoteProviderType, authType: RemoteProviderAuthType?, host: String, modelId: String
+    ) -> Int? {
+        if providerType == .openAICodex { return OpenAICodexOAuthService.lastContextWindows[modelId] }
+        if authType == .xaiOAuth { return XAIOAuthService.contextWindows[modelId] }
+        if host.lowercased() == "api.openai.com" { return officialOpenAIContextWindow(forModelId: modelId) }
+        return nil
+    }
+
     static func fromMediaModel(_ model: MediaModelInfo, providerId: UUID) -> ModelPickerItem {
         let details = [
             model.privacy,

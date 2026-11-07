@@ -27,8 +27,8 @@ ones whose code is mostly absent (presence < 50%). A doc mention means the
 commit was examined, not that it was ported: the 0.24.3 triage marked #2388
 and #2392 PORT, and neither reached Intel. A listed commit is fine when its
 doc verdict was skip/defer/omit; a PORT verdict with absent code is a gap.
-Ones re-checked are recorded in docs/COV_REAUDIT.md ("Examined but absent")
-by hash, prefixed `re-checked`, which takes them off this list.
+Any commit with a row in docs/COV_REAUDIT.md's tables has a verdict and is
+left off this list.
 """
 import collections, glob, os, re, subprocess, sys
 
@@ -74,8 +74,9 @@ def meaningful(n):
 
 
 docs = "".join(open(p).read() for p in glob.glob("docs/*.md"))
-rechecked = set(re.findall(r"re-checked[^`]*`([0-9a-f]{7,12})`", docs))
-rechecked = {h[:7] for h in rechecked}
+# Every commit with a row in this audit's tables already has a verdict there.
+audit_doc = open("docs/COV_REAUDIT.md").read() if os.path.exists("docs/COV_REAUDIT.md") else ""
+rechecked = {h[:7] for h in re.findall(r"^\|[^|]*\| (?:re-checked )?`([0-9a-f]{7,12})`", audit_doc, re.M)}
 doc_prs = set(re.findall(r"#(\d{3,5})\b", docs))
 doc_hashes = {h[:7] for h in re.findall(r"\b[0-9a-f]{7,12}\b", docs)}
 

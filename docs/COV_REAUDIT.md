@@ -137,24 +137,24 @@ its code absent is a candidate gap.
 | Check:prompt | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | UPSTREAM_SYNC |
 | Check:prompt | re-checked `849bc4837` | #2862 | 0/5 | Stop quoting a settings shortcut that is not bound | UPSTREAM_AUDIT_2026-09-25 |
 | Check:prompt | re-checked `86ed14d91` | #3033 | 0/9 | Clarify judge polarity and ScreenContext rubric while preserving verdict gating | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-08, UPSTREAM_SYNC |
-| Check:providers | re-checked `03de9e23b` | #2427 | 1/7 | Video attachments were silently dropped at send for bundles whose name lacks -vl | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `0a8c50086` | #2415 | 5/11 | fix external providers stuck disconnected after an update relaunch | SYNC_0.24.3_PLAN, UPSTREAM_SYNC |
-| Check:providers | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | UPSTREAM_AUDIT_2026-10-08, UPSTREAM_SYNC |
-| Check:providers | re-checked `31dd9f260` | #1954 | 15/68 | Fix ChatGPT/Codex test-button model count mismatch; add grok-4.5 to xAI catalog | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `3877f5e99` | #2416 | 1/13 | fix openai codex models reporting a fallback context window | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `40031d8e1` | #1879 | 10/37 | fixed image attachments being blocked or silently dropped for remote provider model | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `4137884fa` | #2562 | 111/459 | Recover media rejections and harden OpenAI Responses | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `4569b76f7` | #1530 | 0/4 | Route OAuth requests through global proxy | UPSTREAM_SYNC |
-| Check:providers | re-checked `563f91746` | #1968 | 7/28 | Fix Router 409 IDEMPOTENCY_CONFLICT on refunded agent-loop iterations | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `577a3eeec` | #2304 | 17/86 | honor context windows advertised by custom provider /models endpoints | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `5f12d260f` | #1961 | 265/665 | Remote provider hardening: crash/hang fixes, endpoint trust, Router spend safety, streaming perf | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `7bdb440f4` | #1983 | 42/110 | fix: support Codex Responses Lite for GPT-5.6 models | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `bce51e0f1` | #2464 | 1/18 | hardcode openai context windows as api never returns them | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `c81491b4b` | #2235 | 49/240 | Fix four reported runtime and model metadata issues | UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `f01e5d44a` | #2463 | 2/29 | fix xai oauth models reporting a stale catalog and fallback context window | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:providers | re-checked `f52fc9a32` | #3068 | 1/11 | read nested metadata.context_length so DeepInfra context windows resolve | FEATURE_PARITY, UPSTREAM_AUDIT_2026-10-26 |
-| Check:providers | re-checked `f9478c0f1` | #2205 | 3/25 | fall back to lenient decode for nonstandard streaming chunks during tool calls | SYNC_0.24.3_PLAN, UPSTREAM_SYNC |
+| I | re-checked `03de9e23b` | #2427 | 1/7 | Video attachments were silently dropped at send for bundles whose name lacks -vl | 3a: local bundle video capability (MLX). |
+| Done (3a) | re-checked `0a8c50086` | #2415 | 5/11 | fix external providers stuck disconnected after an update relaunch | Intel had no recovery at all: discovery swallowed transport errors as "0 models". Now thrown, classified, and retried on the network's up edge. |
+| In | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | 3a: Intel's compaction sends `disableThinking`, and non-strict hosts get `chat_template_kwargs.enable_thinking=false`. |
+| Done (3a) | re-checked `31dd9f260` | #1954 | 15/68 | Fix ChatGPT/Codex test-button model count mismatch; add grok-4.5 to xAI catalog | Codex Test/discovery already use the live catalog; grok-4.5 (and grok-4.6) came with upstream's `XAIOAuthService`. |
+| Done (3a) | re-checked `3877f5e99` | #2416 | 1/13 | fix openai codex models reporting a fallback context window | `OpenAICodexOAuthService.lastContextWindows` from the live catalog's `context_window`. |
+| Check:model-picker | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | 3a: catalog-driven reasoning controls in the picker; moved to 3b. |
+| In | re-checked `40031d8e1` | #1879 | 10/37 | fixed image attachments being blocked or silently dropped for remote provider model | 3a: remote models count as image-capable and Intel's Anthropic adapter sends image blocks. |
+| In | re-checked `4137884fa` | #2562 | 111/459 | Recover media rejections and harden OpenAI Responses | 3a: media rejections are remembered (`IntelImageInputFallback`); keeping Responses-native output items across turns goes to stage 5 (ChatEngine audit). |
+| In | re-checked `4569b76f7` | #1530 | 0/4 | Route OAuth requests through global proxy | 3a: Intel's OAuth services use `GlobalProxySettings` sessions. |
+| NA | re-checked `563f91746` | #1968 | 7/28 | Fix Router 409 IDEMPOTENCY_CONFLICT on refunded agent-loop iterations | 3a: Intel sends no idempotency key on chat requests, so the 409 can't occur. |
+| Done (3a) | re-checked `577a3eeec` | #2304 | 17/86 | honor context windows advertised by custom provider /models endpoints | The picker already had advertised windows; the chat budget now reads them (`IntelContextBudget.providerContextWindow`). |
+| Check:stage5 | re-checked `5f12d260f` | #1961 | 265/665 | Remote provider hardening: crash/hang fixes, endpoint trust, Router spend safety, streaming perf | 3a: spread across upstream's `RemoteProviderService` (streaming producer, watchdog, trust gates); compared in stage 5's engine audit. |
+| In | re-checked `7bdb440f4` | #1983 | 42/110 | fix: support Codex Responses Lite for GPT-5.6 models | 3a: `OpenAICodexOAuthService.usesResponsesLite` from the live catalog. |
+| Done (3a) | re-checked `bce51e0f1` | #2464 | 1/18 | hardcode openai context windows as api never returns them | `ModelPickerItem.officialOpenAIContextWindow` for the official host. |
+| Check:capabilities | re-checked `c81491b4b` | #2235 | 49/240 | Fix four reported runtime and model metadata issues | 3a: MLX and Seatbelt parts are incompatible / `W-seatbelt-sandbox`; the agent-loop terminal-failure and iteration-cap wrap-up part goes to 3c. |
+| Done (3a) | re-checked `f01e5d44a` | #2463 | 2/29 | fix xai oauth models reporting a stale catalog and fallback context window | The xAI OAuth catalog's documented windows (upstream `XAIOAuthService.contextWindows`). |
+| In | re-checked `f52fc9a32` | #3068 | 1/11 | read nested metadata.context_length so DeepInfra context windows resolve | 3a: `RemoteProviderManager.advertisedContextLength` reads DeepInfra's `metadata.context_length`. |
+| In | re-checked `f9478c0f1` | #2205 | 3/25 | fall back to lenient decode for nonstandard streaming chunks during tool calls | 3a: Intel parses stream frames with `JSONSerialization` (already lenient) and skips unparseable ones. |
 | Check:server | re-checked `7664572c8` | #3207 | 0/7 | fix iphone rejecting images for remote provider models | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
 | Check:settings | re-checked `04e763bf7` | #2859 | 23/163 | Decide Automation permission probes from the error code, not the localized text | UPSTREAM_AUDIT_2026-09-25 |
 | Check:settings | re-checked `12c6de27b` | #2191 | 55/137 | fix factory reset hanging indefinitely and add reset progress ui | UPSTREAM_TRIAGE_0.24.3 |
@@ -327,9 +327,9 @@ follow-up); rerun this tool with the new ref after it.
 | Check:misc | `1a4c25542` | #1297 | 24/42 | minor improvements | "minor improvements" #1297. |
 | Check:misc | `e2eec4a9e` | #1362 | 8/10 | disable generative greetings globally and moved to per agent configuration | Generative greetings per agent. |
 | Check:prompt | `76614779f` | #1317 | 31/48 | improve prompt for better guidance | Prompt guidance (#1317). |
-| Check:providers | `390eb33e2` | #1594 | 68/139 | anthropic compaction fix | Anthropic tool_use/tool_result pairing on the wire and duplicate-result merge; Intel keeps pairs together when trimming (`IntelContextBudgetManager`) but has no wire-level pairing pass. |
-| Check:providers | `76c1f6ae8` | #2108 | 21/76 | Fix truncated remote tool arguments | Truncated remote tool-call arguments on `finish_reason=length`; Intel's `CloudChatEngine` has its own output-limit error for text only. |
-| Check:providers | `b3472ce02` | #1428 | 20/26 | moved remote provider diagnostics to edit | Remote provider diagnostics moved to the edit sheet. |
+| In | `390eb33e2` | #1594 | 68/139 | anthropic compaction fix | 3a: Intel's `sanitizeToolSequence` pairs every call with a result, fills unanswered calls and demotes orphan results; a duplicate same-id result is demoted rather than merged. |
+| Done (3a) | `76c1f6ae8` | #2108 | 21/76 | Fix truncated remote tool arguments | A round that ends on `finish_reason=length` with tool calls pending throws upstream's output-limit message; Anthropic's `max_tokens` stop now reaches the engine as `length`. |
+| In | `b3472ce02` | #1428 | 20/26 | moved remote provider diagnostics to edit | 3a: the UI part is in (20/26); the missing lines are MLX disk-cache stats. |
 | Check:server | `6948489e0` | #2399 | superseded | Reserve answer room on API requests so thinking cannot eat the whole max_tokens | Reserve answer room on API requests so thinking can't use all of `max_tokens`. |
 | Check:server | `b51ef1ad8` | #1247 | 164/251 | added OpenAI compatible /v1/completions endpoint for FIM autocomplete | `/v1/completions` (FIM); upstream runs it on local MLX. |
 | Check:voice | `6d25337b4` | #2321 | 55/106 | fix tts drift on long text with per sentence synthesis | TTS drift on long text (per-sentence synthesis). |

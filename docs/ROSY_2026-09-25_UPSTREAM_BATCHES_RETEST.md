@@ -3064,3 +3064,19 @@ Not in candidate 66.
 - [ ] If you have a second display: move a chat window and Settings onto
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
+
+## Providers re-audit (2026-11-07)
+
+`W-cov-reaudit` stage 3a (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage 3a").
+Not in candidate 66.
+
+- [ ] In a chat on a Router model, open the context ring's popover: the
+      limit row says "Provider model maximum" with the model's real window
+      (not 128K or your Context Length setting).
+- [ ] Turn Wi-Fi off, quit and relaunch Osaurus, wait a few seconds, then
+      turn Wi-Fi back on. Within a few seconds the providers' models appear
+      in the picker without opening Settings → Providers.
+- [ ] With Wi-Fi off, Settings → Providers shows the providers with an
+      error (not "connected" with 0 models).
+- [ ] If you use Grok sign-in: the picker offers grok-4.6 (default),
+      grok-4.5, grok-4.3, grok-build-0.1 and the grok-4.20 models.

@@ -1023,6 +1023,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return prefixes.contains(where: { bare.hasPrefix($0) })
     }
 
+    /// Upstream `RemoteProviderService.outputLimitToolCallError` (#2108).
+    nonisolated static func outputLimitToolCallMessage(_ calls: [(name: String, argumentBytes: Int)]) -> String {
+        let names = calls.map(\.name).filter { !$0.isEmpty }.joined(separator: "', '")
+        let received = calls.reduce(0) { $0 + $1.argumentBytes }
+        let label = names.isEmpty ? "tool call" : "tool call '\(names)'"
+        return "Provider reached the output token limit while generating \(label) "
+            + "arguments (finish_reason=length, received \(received) bytes). "
+            + "Increase the agent's Max Tokens setting and retry."
+    }
+
     nonisolated static func wireToolChoice(_ choice: ToolChoiceOption?) -> Any {
         switch choice {
         case nil, .some(.auto): return "auto"
@@ -1421,6 +1431,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                         var assistantContent = ""
                         var partials: [Int: PartialToolCall] = [:]
+                        // The round's finish reason (upstream #2108): `length`
+                        // with tool calls pending means the arguments were cut.
+                        var roundFinishReason: String?
                         var announcedNames: Set<Int> = []
 
                         // Router billing (upstream `RemoteProviderService`):
@@ -1764,6 +1777,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     continue
                                 }
 
+                                if let reason = (json["choices"] as? [[String: Any]])?.first?["finish_reason"] as? String {
+                                    roundFinishReason = reason
+                                }
                                 guard let choices = json["choices"] as? [[String: Any]],
                                     let delta = choices.first?["delta"] as? [String: Any]
                                 else {
@@ -1818,6 +1834,16 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     }
                                 }
                             }
+                        }
+
+                        // Upstream #2108: the output cap ended the round while
+                        // tool arguments were still streaming. Running the call
+                        // would hand the tool truncated (or empty) arguments.
+                        if roundFinishReason == "length", !partials.isEmpty {
+                            throw EngineError(
+                                message: Self.outputLimitToolCallMessage(partials.values.map {
+                                    (name: $0.name, argumentBytes: $0.arguments.utf8.count)
+                                }))
                         }
 
                         // No tools requested this round → the assistant's final

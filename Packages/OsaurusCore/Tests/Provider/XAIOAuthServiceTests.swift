@@ -80,11 +80,22 @@ struct XAIOAuthServiceTests {
         #expect(!XAIOAuthService.isTrustedEndpoint("not a url"))
     }
 
-    @Test func supportedModels_provideOAuthCatalogWithGrok43Default() {
+    @Test func supportedModels_provideOAuthCatalogWithGrok46Default() {
         let models = XAIOAuthService.supportedModels
-        #expect(models.first == "grok-4.3")
+        #expect(models.first == "grok-4.6")
+        #expect(models.contains("grok-4.5"))
+        #expect(models.contains("grok-4.3"))
         #expect(models.contains("grok-build-0.1"))
         #expect(Set(models).count == models.count, "static catalog has duplicate slugs")
+    }
+
+    @Test func contextWindows_coverEveryModelInSupportedCatalog() {
+        for model in XAIOAuthService.supportedModels {
+            #expect(
+                XAIOAuthService.contextWindows[model] != nil,
+                "\(model) is missing a documented context window"
+            )
+        }
     }
 
     @Test func makeProvider_usesOpenAICompatibleXAIShape() {
@@ -118,7 +129,10 @@ struct XAIOAuthServiceTests {
         let error = XAIOAuthError.loopbackBindFailed("Address already in use")
         let message = XAIOAuthService.diagnosticMessage(for: error)
 
-        #expect(message.contains("56121"))
+        // Port number may be locale-formatted with a thousands separator
+        // when interpolated inside a localized string.
+        let digitsOnly = String(message.filter(\.isNumber))
+        #expect(digitsOnly.contains("56121"))
         #expect(message.contains("Close any other in-progress sign-in"))
         #expect(message.contains("Address already in use"))
     }

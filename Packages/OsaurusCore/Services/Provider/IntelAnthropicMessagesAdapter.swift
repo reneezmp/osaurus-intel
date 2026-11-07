@@ -264,6 +264,11 @@ struct IntelAnthropicSSETranslator {
             if let usage = event["usage"] as? [String: Any], let output = usage["output_tokens"] as? Int {
                 outputTokens = output
             }
+            // The output cap ended the message: say so in the OpenAI shape, so
+            // a tool call cut off mid-arguments is refused (upstream #2108).
+            if (event["delta"] as? [String: Any])?["stop_reason"] as? String == "max_tokens" {
+                return [Self.line(["choices": [["index": 0, "delta": [String: Any](), "finish_reason": "length"]]])]
+            }
             return []
         case "message_stop":
             return [

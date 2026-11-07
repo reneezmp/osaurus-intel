@@ -35,29 +35,33 @@ public enum XAIOAuthError: LocalizedError, Sendable {
         switch self {
         case .invalidAuthorizationCallback:
             return
-                "Grok sign-in did not return a valid authorization code. Try the sign-in again from the same browser window."
+                L(
+                    "Grok sign-in did not return a valid authorization code. Try the sign-in again from the same browser window."
+                )
         case .invalidPKCE:
-            return "Could not create a secure login challenge"
+            return L("Could not create a secure login challenge")
         case .invalidTokenResponse:
-            return "xAI returned an invalid token response during Grok sign-in"
+            return L("xAI returned an invalid token response during Grok sign-in")
         case .missingSignInTokens:
-            return "Missing Grok sign-in tokens. Sign in with Grok again, then retry the provider."
+            return L("Missing Grok sign-in tokens. Sign in with Grok again, then retry the provider.")
         case .discoveryFailed(let message):
-            return "Could not load xAI OAuth configuration: \(XAIOAuthService.safeDiagnosticFragment(message))"
+            return L("Could not load xAI OAuth configuration: \(XAIOAuthService.safeDiagnosticFragment(message))")
         case .untrustedEndpoint(let label):
-            return "xAI OAuth discovery returned an untrusted \(label)"
+            return L("xAI OAuth discovery returned an untrusted \(label)")
         case .tokenRequestFailed(let message):
-            return "xAI token request failed: \(XAIOAuthService.safeDiagnosticFragment(message))"
+            return L("xAI token request failed: \(XAIOAuthService.safeDiagnosticFragment(message))")
         case .loopbackBindFailed(let message):
             return
-                "Could not start the Grok sign-in callback server on 127.0.0.1:\(XAIOAuthService.callbackPort). Close any other in-progress sign-in or app using that port, then retry. Details: \(XAIOAuthService.safeDiagnosticFragment(message))"
+                L(
+                    "Could not start the Grok sign-in callback server on 127.0.0.1:\(XAIOAuthService.callbackPort). Close any other in-progress sign-in or app using that port, then retry. Details: \(XAIOAuthService.safeDiagnosticFragment(message))"
+                )
         case .browserOpenFailed:
             return
-                "Could not open the browser for Grok sign-in. Check the macOS default browser setting, then retry."
+                L("Could not open the browser for Grok sign-in. Check the macOS default browser setting, then retry.")
         case .authorizationCallbackFailed(let message):
-            return "Grok sign-in callback failed: \(XAIOAuthService.safeDiagnosticFragment(message))"
+            return L("Grok sign-in callback failed: \(XAIOAuthService.safeDiagnosticFragment(message))")
         case .authorizationCallbackRejected(let message):
-            return "xAI rejected the sign-in callback: \(XAIOAuthService.safeDiagnosticFragment(message))"
+            return L("xAI rejected the sign-in callback: \(XAIOAuthService.safeDiagnosticFragment(message))")
         }
     }
 }
@@ -92,13 +96,33 @@ public enum XAIOAuthService {
     /// Models reachable through the xAI OAuth ("Grok Build" / SuperGrok / X
     /// Premium+) entitlement. The OAuth access token is denied access to the
     /// `/models` endpoint (HTTP 403), so — like Codex — model discovery uses
-    /// this built-in catalog rather than a live query. Mirrors OpenClaw's
-    /// selectable xAI model set; `grok-4.3` is the default.
+    /// this built-in catalog rather than a live query. `grok-4.6` is the
+    /// default, matching xAI (it is the current Grok Build default on the
+    /// API and CLI); `-latest` aliases are intentionally not listed
+    /// separately.
     public static let supportedModels: [String] = [
+        "grok-4.6",
+        "grok-4.5",
         "grok-4.3",
         "grok-build-0.1",
-        "grok-4.20-beta-latest-reasoning",
-        "grok-4.20-beta-latest-non-reasoning",
+        "grok-4.20-0309-reasoning",
+        "grok-4.20-0309-non-reasoning",
+        "grok-4.20-multi-agent-0309",
+    ]
+
+    /// Documented context windows (docs.x.ai) for the OAuth catalog above,
+    /// keyed by slug. Since the OAuth `/models` endpoint 403s, there is no
+    /// live source for this — these are the vendor-published window sizes,
+    /// used in place of a live per-model discovery response the way Codex's
+    /// `lastContextWindows` is used for its (reachable) live catalog.
+    public static let contextWindows: [String: Int] = [
+        "grok-4.6": 500_000,
+        "grok-4.5": 500_000,
+        "grok-4.3": 1_000_000,
+        "grok-build-0.1": 256_000,
+        "grok-4.20-0309-reasoning": 1_000_000,
+        "grok-4.20-0309-non-reasoning": 1_000_000,
+        "grok-4.20-multi-agent-0309": 1_000_000,
     ]
 
     // MARK: - Provider Factory
@@ -253,7 +277,7 @@ public enum XAIOAuthService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await GlobalProxySettings.makeSession().data(for: request)
+            (data, response) = try await GlobalProxySettings.sharedSession().data(for: request)
         } catch {
             throw XAIOAuthError.discoveryFailed("Network error: \(error.localizedDescription)")
         }
@@ -355,7 +379,7 @@ public enum XAIOAuthService {
         let data: Data
         let response: URLResponse
         do {
-            (data, response) = try await GlobalProxySettings.makeSession().data(for: request)
+            (data, response) = try await GlobalProxySettings.sharedSession().data(for: request)
         } catch {
             throw XAIOAuthError.tokenRequestFailed("Network error: \(error.localizedDescription)")
         }
@@ -413,7 +437,11 @@ public enum XAIOAuthService {
         }
 
         do {
-            return try await server.waitForCallback(timeout: OAuthLoopbackServer.defaultSignInTimeout)
+            // Bounded wait: an abandoned browser tab must not pin this task
+            // (and the bound loopback port) forever.
+            return try await server.waitForCallback(
+                timeout: OAuthLoopbackServer.defaultSignInTimeout
+            )
         } catch let error as OAuthLoopbackError {
             throw mapLoopbackError(error)
         } catch {
@@ -435,7 +463,7 @@ public enum XAIOAuthService {
         case .invalidCallback:
             return .authorizationCallbackFailed("invalid callback path or request")
         case .callbackTimeout:
-            return .authorizationCallbackFailed("timed out waiting for the browser callback")
+            return .authorizationCallbackFailed("timed out waiting for browser callback")
         }
     }
 }

@@ -4413,6 +4413,8 @@ private struct ContextBreakdownPopover: View {
         switch modelLimitSource {
         case .modelCatalog:
             return L("Model maximum")
+        case .providerMetadata:
+            return L("Provider model maximum")
         case .userSetting:
             // Intel: the catalog doesn't know this model, so the window is
             // Settings › Conversation › Context Length (upstream's label for a

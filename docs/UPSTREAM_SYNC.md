@@ -5649,6 +5649,46 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3a: providers (`W-cov-reaudit`) — 2026-11-07
+
+Stage 3 first triaged the 164 examined-but-absent commits
+([`COV_REAUDIT.md`](COV_REAUDIT.md), second table), then compares the Check
+rows by area. 3a, providers (21 rows): 9 already in, in Intel's own form;
+6 ported; 1 not applicable; 1 incompatible; 4 moved (3b, 3c, stage 5).
+
+- **Context windows (#2304, #2416, #2463, #2464):** the chat budget
+  (`IntelContextBudget.resolveWindow`, which also drives compaction and the
+  history trim) now uses the window the model picker holds for a cloud
+  model before falling back to Settings › Context Length or 128k. Before,
+  cloud models always used the fallback, even when the provider, the Router
+  catalog or `/models` reported the real window. New window sources:
+  `ModelPickerItem.officialOpenAIContextWindow` (official `api.openai.com`
+  only), the xAI OAuth catalog's documented windows, and the Codex live
+  catalog's `context_window` (`OpenAICodexOAuthService.lastContextWindows`).
+  The popover labels it "Provider model maximum".
+- **xAI catalog:** `XAIOAuthService.swift` is upstream's again (grok-4.6
+  default, grok-4.5, the current grok-4.20 ids, localized errors).
+  Intel's copy listed `grok-4.20-beta-latest-*` and defaulted to grok-4.3.
+- **Output-limited tool calls (#2108):** a streamed round ending on
+  `finish_reason=length` with tool calls pending throws upstream's message
+  ("Provider reached the output token limit while generating tool call …;
+  increase the agent's Max Tokens") instead of running the call with cut
+  arguments. Intel's Anthropic adapter now maps `stop_reason=max_tokens`
+  to `finish_reason: length`.
+- **Providers offline at launch (#2415):** Intel's `/models` discovery
+  swallowed transport errors (`try?`) and reported "connected, 0 models",
+  and nothing retried. Now the error is thrown (the provider shows it and
+  keeps the models it had), classified transient or not, and an
+  `NWPathMonitor` sweep re-probes transiently failed providers on the first
+  "network up" reading and on each recovery edge (2 s settle).
+- New helpers: `scripts/upstream/copy_strings.py` (insert named keys from
+  upstream's string catalog, insert-only, Xcode format) and
+  `scripts/upstream/set_verdict.py` (update rows in `COV_REAUDIT.md`).
+
+Tests: upstream's `XAIOAuthServiceTests` again; `IntelProviderReauditTests`
+(window tables and scoping, the output-limit message and the Anthropic
+mapping, transient classification).
+
 ### Coverage re-audit, stage 2 (`W-cov-reaudit`) — 2026-11-07
 
 Five of the six gaps the commit audit found

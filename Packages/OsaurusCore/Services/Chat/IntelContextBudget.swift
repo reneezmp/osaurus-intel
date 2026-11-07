@@ -11,7 +11,8 @@
 //  (window × 85%), the chip turns amber at ≥85% of that, and red when the
 //  part compaction can't trim (system prompt, tools, memory, input) plus the
 //  response reservation no longer fits. Intel differences: the window comes
-//  from the model catalog, else Settings › Conversation › Context Length
+//  from the model catalog, then the provider window the model picker holds
+//  (`W-cov-reaudit` 3a), else Settings › Conversation › Context Length
 //  (the same resolution Intel's compaction suggestion uses), and a red chip
 //  never blocks a send (see `isUserSetting`).
 //
@@ -27,6 +28,10 @@ enum IntelContextBudget {
     enum WindowSource: Equatable, Sendable {
         /// The model catalog reported the model's maximum.
         case modelCatalog
+        /// The provider reported (or is known to give) this cloud model's
+        /// window: its `/models` entry, the Router catalog, Codex's catalog,
+        /// the xAI / OpenAI tables (upstream `.providerMetadata`).
+        case providerMetadata
         /// Settings › Conversation › Context Length, because the catalog
         /// doesn't know this model (most cloud models). Upstream labels its
         /// user cap the same way: "Your context limit".
@@ -64,10 +69,29 @@ enum IntelContextBudget {
         if let modelId, let ctx = ModelInfo.load(modelId: modelId)?.model.contextLength, ctx > 0 {
             return WindowResolution(tokens: ctx, source: .modelCatalog)
         }
+        // Upstream `AgentLoopBudget.providerContextWindow`: the window the
+        // model picker already holds for a cloud model.
+        if let modelId, let ctx = providerContextWindow(modelId: modelId) {
+            return WindowResolution(tokens: ctx, source: .providerMetadata)
+        }
         if let setting = ChatConfiguration.shared.contextLength, setting > 0 {
             return WindowResolution(tokens: setting, source: .userSetting)
         }
         return nil
+    }
+
+    @MainActor
+    static func providerContextWindow(modelId: String) -> Int? {
+        let trimmed = modelId.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !trimmed.isEmpty else { return nil }
+        guard
+            let item = ModelPickerItemCache.shared.items.first(where: {
+                guard case .remote = $0.source else { return false }
+                return $0.id == trimmed
+            }),
+            let ctx = item.contextLength, ctx > 0
+        else { return nil }
+        return ctx
     }
 
     static func effectiveBudget(contextWindow: Int) -> Int {

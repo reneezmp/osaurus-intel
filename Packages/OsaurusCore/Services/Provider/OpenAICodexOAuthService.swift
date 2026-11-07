@@ -75,6 +75,15 @@ public enum OpenAICodexOAuthService {
     public static let codexClientVersion = "0.155.1"
 
     private static let responsesLiteModels = OSAllocatedUnfairLock<Set<String>>(initialState: [])
+    private static let contextWindowsBox = OSAllocatedUnfairLock<[String: Int]>(initialState: [:])
+
+    /// Slug -> advertised context window from the latest catalog (upstream
+    /// #2416). Only slugs whose entry carried a positive `context_window`
+    /// appear; empty before the first successful discovery, so callers fall
+    /// back to their own window resolution.
+    public static var lastContextWindows: [String: Int] {
+        contextWindowsBox.withLock { $0 }
+    }
 
     public static func usesResponsesLite(modelId: String) -> Bool {
         responsesLiteModels.withLock { $0.contains(modelId) }
@@ -191,6 +200,11 @@ public enum OpenAICodexOAuthService {
             .sorted { ($0.priority ?? .max) < ($1.priority ?? .max) }
         responsesLiteModels.withLock { state in
             state = Set(compatible.filter { $0.use_responses_lite == true }.map(\.slug))
+        }
+        contextWindowsBox.withLock { state in
+            state = compatible.reduce(into: [:]) { map, entry in
+                if let window = entry.context_window, window > 0 { map[entry.slug] = window }
+            }
         }
         return compatible.map(\.slug).uniqued()
     }
@@ -353,6 +367,8 @@ public enum OpenAICodexOAuthService {
         let priority: Int?
         let shell_type: String?
         let use_responses_lite: Bool?
+        /// Total context window in tokens (upstream #2416).
+        let context_window: Int?
     }
 
     private struct TokenResponse: Decodable {

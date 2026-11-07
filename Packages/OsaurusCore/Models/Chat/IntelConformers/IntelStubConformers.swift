@@ -11,6 +11,7 @@
 
 import CryptoKit
 import Foundation
+import Network
 import OsaurusRepository
 
 // MARK: - Live voice audio (Intel stub)
@@ -222,6 +223,79 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         // Discover each enabled provider's models in the background so the
         // chat picker + the "N models available" counter populate at launch.
         Task { await refreshAllModels() }
+        startNetworkRecoveryMonitor()
+    }
+
+    // MARK: - Network-recovery auto-reconnect (upstream #2415)
+
+    /// When connectivity returns (or on the first "network up" reading at
+    /// launch), providers whose last discovery failed *transiently* (offline,
+    /// timeout, DNS/TLS) are probed again, so a provider that was offline at
+    /// launch doesn't stay empty until the Providers tab is opened. Terminal
+    /// failures (bad key, bad URL) are left alone.
+    private nonisolated(unsafe) var networkPathMonitor: NWPathMonitor?
+    private var lastNetworkPathWasSatisfied: Bool?
+    private var networkRecoveryTask: Task<Void, Never>?
+
+    private func startNetworkRecoveryMonitor() {
+        guard !OsaurusPaths.isTestProcess else { return }
+        let monitor = NWPathMonitor()
+        networkPathMonitor = monitor
+        monitor.pathUpdateHandler = { [weak self] path in
+            let satisfied = path.status == .satisfied
+            Task { @MainActor [weak self] in
+                self?.handleNetworkPathUpdate(satisfied: satisfied)
+            }
+        }
+        monitor.start(queue: DispatchQueue(label: "ai.osaurus.provider.pathmonitor"))
+    }
+
+    /// Internal so tests can drive connectivity edges without a real path.
+    func handleNetworkPathUpdate(satisfied: Bool, settleDelay: TimeInterval = 2.0) {
+        defer { lastNetworkPathWasSatisfied = satisfied }
+        guard satisfied, lastNetworkPathWasSatisfied != true else { return }
+        networkRecoveryTask?.cancel()
+        networkRecoveryTask = Task { [weak self] in
+            // Let routing/DNS settle after the path flips.
+            try? await Task.sleep(nanoseconds: UInt64(settleDelay * 1_000_000_000))
+            guard !Task.isCancelled else { return }
+            await self?.reconnectTransientlyFailedProviders()
+        }
+    }
+
+    func _testAwaitNetworkRecoverySweep() async {
+        await networkRecoveryTask?.value
+    }
+
+    private func reconnectTransientlyFailedProviders() async {
+        for provider in configuration.providers where provider.enabled {
+            guard let state = providerStates[provider.id], !state.isConnected, state.lastFailureWasTransient
+            else { continue }
+            if provider.providerType == .osaurusRouter {
+                await connectOsaurusRouterIfPossible()
+            } else {
+                await refreshModels(for: provider.id)
+            }
+        }
+    }
+
+    static func isTransientURLErrorCode(_ code: URLError.Code) -> Bool {
+        switch code {
+        case .notConnectedToInternet, .timedOut, .networkConnectionLost,
+            .cannotConnectToHost, .cannotFindHost, .dnsLookupFailed,
+            .secureConnectionFailed, .resourceUnavailable, .badServerResponse:
+            return true
+        default:
+            return false
+        }
+    }
+
+    /// Upstream's classification, for the errors Intel's discovery throws.
+    static func isTransientConnectError(_ error: Error) -> Bool {
+        if let urlError = error as? URLError { return isTransientURLErrorCode(urlError.code) }
+        let ns = error as NSError
+        if ns.domain == NSURLErrorDomain { return isTransientURLErrorCode(URLError.Code(rawValue: ns.code)) }
+        return false
     }
 
     /// Mark every enabled provider as "connected" so the Providers tab
@@ -316,9 +390,11 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
         req.httpMethod = "GET"
         req.timeoutInterval = 20
         for (k, v) in headers { req.setValue(v, forHTTPHeaderField: k) }
-        guard let (data, response) = try? await GlobalProxySettings.makeSession().data(for: req),
-            let http = response as? HTTPURLResponse
-        else { return ([], [:]) }
+        // A transport failure (offline, DNS, timeout) is thrown, as upstream:
+        // the provider shows the error instead of "connected, 0 models", and
+        // a transient one is retried when the network returns (#2415).
+        let (data, response) = try await GlobalProxySettings.makeSession().data(for: req)
+        guard let http = response as? HTTPURLResponse else { return ([], [:]) }
         guard (200...299).contains(http.statusCode) else {
             // Upstream: an MCP server URL pasted as an API provider 404s on
             // `/models`; say so instead of showing a connected provider with
@@ -370,6 +446,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
             state.isConnected = true
             state.lastError = nil
+            state.lastFailureWasTransient = false
             state.discoveredModels = models
             state.lastConnectedAt = Date()
             providerStates[providerId] = state
@@ -380,6 +457,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
             var state = providerStates[providerId] ?? RemoteProviderState(providerId: providerId)
             state.isConnected = false
             state.lastError = error.localizedDescription
+            state.lastFailureWasTransient = Self.isTransientConnectError(error)
             providerStates[providerId] = state
             notifyModelsChanged()
         }
@@ -407,6 +485,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
                 state.isConnected = true
                 state.lastError = nil
+                state.lastFailureWasTransient = false
                 state.discoveredModels = models
                 state.lastConnectedAt = Date()
                 providerStates[provider.id] = state
@@ -416,6 +495,7 @@ final class RemoteProviderManager: ObservableObject, @unchecked Sendable {
                 var state = providerStates[provider.id] ?? RemoteProviderState(providerId: provider.id)
                 state.isConnected = false
                 state.lastError = error.localizedDescription
+                state.lastFailureWasTransient = Self.isTransientConnectError(error)
                 providerStates[provider.id] = state
             }
         }
