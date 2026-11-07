@@ -74,6 +74,182 @@ tool drops them:
 - re-checked `ccd310ed0` (#2388): ported in stage 2.
 - re-checked `b9b8b7fc8` (#2392): ported in stage 2.
 
+Stage 3 triage (2026-11-07) of the other 164: 15 are in after all
+(the ledger records them covered or shipped in Intel's own form),
+22 incompatible, 3 not applicable, 2 no behaviour, 44 belong to
+backlog items, and **78 need a comparison** with Intel's own code, by
+area. Most Check rows come from the 0.24.3 triage
+(`UPSTREAM_TRIAGE_0.24.3.md`), whose PORT verdicts were a plan: that sync
+ported selected commits, often by replacing whole files, so a PORT row with
+its code absent is a candidate gap.
+
+| Verdict | Commit | PR | Presence | Subject | Ledger |
+|---|---|---|---|---|---|
+| Check:agents | re-checked `3085b242a` | #2870 | 4/19 | Keep agent purpose metadata current across remote and voice consumers | UPSTREAM_AUDIT_2026-09-25 |
+| Check:agents | re-checked `81d201c4a` | #1756 | 1/17 | Make built-in Default agent non-configurable; fix sub-agent toggle persistence | UPSTREAM_TRIAGE_0.24.3 |
+| Check:agents | re-checked `cf01aa146` | #3121 | 3/13 | Avoid repeated @Published agents lookups in liveAgentSources | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| Check:capabilities | re-checked `2d238592c` | #1725 | 28/97 | Fix same-turn capability tool activation | UPSTREAM_TRIAGE_0.24.3 |
+| Check:capabilities | re-checked `554ace8e2` | #2157 | 28/150 | Redact secret tool arguments across agent surfaces | UPSTREAM_TRIAGE_0.24.3 |
+| Check:capabilities | re-checked `7ec54935b` | #2171 | 88/349 | Fix tracked tool completion and prompt cache stability | UPSTREAM_TRIAGE_0.24.3 |
+| Check:capabilities | re-checked `bc6146f1a` | #2344 | 0/3 | Fix #2327: a reasoning-only turn with tools offered was classified as a finished answer | UPSTREAM_TRIAGE_0.24.3 |
+| Check:capabilities | re-checked `c05947f02` | #1681 | 16/81 | Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat | re-checked `5bb946f7f` | #2144 | 92/249 | auto generate chat titles | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat | re-checked `bda1c895d` | #2170 | 9/19 | Add connectivity-driven offline mode for chat | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-import | re-checked `098cbd4ed` | #2650 | 13/29 | recognize claude's export index and point users at the batch zips | MEMORY_PLAN, UPSTREAM_TRIAGE_0.24.7 |
+| Check:chat-ui | re-checked `0129221a0` | #2538 | 24/79 | Warn when switching models mid-conversation | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `13d04eb83` | #2365 | 2/9 | minor UI polish | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `18bfc8563` | #1939 | 38/77 | added timestamps to user message cells | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `234e3bc20` | #3067 | 2/6 | make copy button copy only the response | FEATURE_PARITY, ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST, UPSTREAM_AUDIT_2026-10- |
+| Check:chat-ui | re-checked `286c4a9a4` | #2020 | 0/2 | fixed find bar crash when scrolling to a match in a partially rendered message | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `3a17bc04d` | #2730 | 16/55 | Fix Orchestrator row selection and fit the chat window to small screens | UPSTREAM_AUDIT_2026-09-25 |
+| Check:chat-ui | re-checked `435426db4` | #1894 | 9/27 | Show live tool-call progress card during buffered tool generation | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `4b96ae0ab` | #2074 | 82/215 | Fix singular and plural count labels | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `8bd7106cc` | #2038 | 54/144 | make the chat window responsive down to narrow widths | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `a82aa1447` | #2381 | 12/56 | added full screen preview for generated images | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `d0b9502b8` | #2256 | 11/32 | Add optional shadow style for chat input | UPSTREAM_TRIAGE_0.24.3 |
+| Check:chat-ui | re-checked `dbfc3420a` | #1969 | 63/311 | fixed in-chat search bar focus, per occurrence navigation, and current match highlighting | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `161e6ca57` | #1699 | 2/21 | fix app hang watchdog stalls across folder, tool listing, permissions, and launch | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `18367d94b` | #1754 | 8/30 | fixed main thread freezes | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `1fd695a68` | #1672 | 11/28 | fixed app hangs | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `4bfc9bb85` | #1920 | 17/52 | fixed sentry hangs & crashes | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `973c771fa` | #1948 | 18/44 | fixed main thread hangs | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `995376800` | #2307 | 60/186 | fixed main thread hangs | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `ad5a2c5f9` | #1598 | 10/24 | fix app hang render path | UPSTREAM_TRIAGE_0.24.3 |
+| Check:crashes | re-checked `cc1823517` | #2817 | 18/53 | fixed main thread hangs in the composer, markdown parsing and sidebar rows | CHAT_UX_INTEL, UPSTREAM_AUDIT_2026-09-25 |
+| Check:crashes | re-checked `f6b9c984a` | #1781 | 13/29 | triage and fix sentry app hangs and crashes | UPSTREAM_TRIAGE_0.24.3 |
+| Check:folders | re-checked `3034800ef` | #2765 | 87/194 | add recent folders to the + menu and agent working folder setting | UPSTREAM_AUDIT_2026-09-25 |
+| Check:folders | re-checked `438b01222` | #2675 | 13/33 | apply project working folder by turning the agent sandbox off | UPSTREAM_AUDIT_2026-09-25 |
+| Check:folders | re-checked `97498c331` | #2701 | 28/162 | Make the chat folder chip persist as the agent's working folder | UPSTREAM_AUDIT_2026-09-25 |
+| Check:folders | re-checked `99ce8bd52` | #1900 | 2/10 | Fix folder file-write bugs: firmlinked-root rejection + new-file diff count | UPSTREAM_TRIAGE_0.24.3 |
+| Check:i18n | re-checked `392954aa7` | #1437 | 47/144 | updated chinese translations | UPSTREAM_SYNC |
+| Check:i18n | re-checked `50c2fb70e` | #1782 | 0/6 | Add Russian localization | UPSTREAM_TRIAGE_0.24.3 |
+| Check:i18n | re-checked `54d650bad` | #1553 | 17/40 | updated chinese translations | UPSTREAM_SYNC |
+| Check:i18n | re-checked `8a5606d0c` | #1633 | 0/38 | updated chinese translations | UPSTREAM_TRIAGE_0.24.3 |
+| Check:mcp | re-checked `0901780cc` | #2805 | 38/89 | Preserve typed MCP image results in Chat and agent history | UPSTREAM_AUDIT_2026-09-25 |
+| Check:memory | re-checked `79cc7dfe4` | #1834 | 20/113 | Clarify memory ingestion diagnostics | UPSTREAM_TRIAGE_0.24.3 |
+| Check:mobile | re-checked `6673ecf0b` | #3070 | 1/20 | stop showing injected memory in user bubbles for chats continued from the phone | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| Check:model-picker | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | UPSTREAM_TRIAGE_0.24.3 |
+| Check:model-picker | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | UPSTREAM_SYNC |
+| Check:model-picker | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | UPSTREAM_TRIAGE_0.24.3 |
+| Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
+| Check:prompt | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | UPSTREAM_TRIAGE_0.24.3 |
+| Check:prompt | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | UPSTREAM_TRIAGE_0.24.3 |
+| Check:prompt | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | UPSTREAM_SYNC |
+| Check:prompt | re-checked `849bc4837` | #2862 | 0/5 | Stop quoting a settings shortcut that is not bound | UPSTREAM_AUDIT_2026-09-25 |
+| Check:prompt | re-checked `86ed14d91` | #3033 | 0/9 | Clarify judge polarity and ScreenContext rubric while preserving verdict gating | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-08, UPSTREAM_SYNC |
+| Check:providers | re-checked `03de9e23b` | #2427 | 1/7 | Video attachments were silently dropped at send for bundles whose name lacks -vl | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `0a8c50086` | #2415 | 5/11 | fix external providers stuck disconnected after an update relaunch | SYNC_0.24.3_PLAN, UPSTREAM_SYNC |
+| Check:providers | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | UPSTREAM_AUDIT_2026-10-08, UPSTREAM_SYNC |
+| Check:providers | re-checked `31dd9f260` | #1954 | 15/68 | Fix ChatGPT/Codex test-button model count mismatch; add grok-4.5 to xAI catalog | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `3877f5e99` | #2416 | 1/13 | fix openai codex models reporting a fallback context window | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `40031d8e1` | #1879 | 10/37 | fixed image attachments being blocked or silently dropped for remote provider model | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `4137884fa` | #2562 | 111/459 | Recover media rejections and harden OpenAI Responses | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `4569b76f7` | #1530 | 0/4 | Route OAuth requests through global proxy | UPSTREAM_SYNC |
+| Check:providers | re-checked `563f91746` | #1968 | 7/28 | Fix Router 409 IDEMPOTENCY_CONFLICT on refunded agent-loop iterations | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `577a3eeec` | #2304 | 17/86 | honor context windows advertised by custom provider /models endpoints | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `5f12d260f` | #1961 | 265/665 | Remote provider hardening: crash/hang fixes, endpoint trust, Router spend safety, streaming perf | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `7bdb440f4` | #1983 | 42/110 | fix: support Codex Responses Lite for GPT-5.6 models | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `bce51e0f1` | #2464 | 1/18 | hardcode openai context windows as api never returns them | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `c81491b4b` | #2235 | 49/240 | Fix four reported runtime and model metadata issues | UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `f01e5d44a` | #2463 | 2/29 | fix xai oauth models reporting a stale catalog and fallback context window | UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:providers | re-checked `f52fc9a32` | #3068 | 1/11 | read nested metadata.context_length so DeepInfra context windows resolve | FEATURE_PARITY, UPSTREAM_AUDIT_2026-10-26 |
+| Check:providers | re-checked `f9478c0f1` | #2205 | 3/25 | fall back to lenient decode for nonstandard streaming chunks during tool calls | SYNC_0.24.3_PLAN, UPSTREAM_SYNC |
+| Check:server | re-checked `7664572c8` | #3207 | 0/7 | fix iphone rejecting images for remote provider models | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| Check:settings | re-checked `04e763bf7` | #2859 | 23/163 | Decide Automation permission probes from the error code, not the localized text | UPSTREAM_AUDIT_2026-09-25 |
+| Check:settings | re-checked `12c6de27b` | #2191 | 55/137 | fix factory reset hanging indefinitely and add reset progress ui | UPSTREAM_TRIAGE_0.24.3 |
+| Check:settings | re-checked `af68b0641` | #2220 | 1/7 | Fix plugin layout at compact widths | UPSTREAM_TRIAGE_0.24.3 |
+| Check:settings | re-checked `e06996e3e` | #2295 | 44/119 | surface specific keychain errors and recover from acl denied credential saves | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:storage | re-checked `311d90959` | #1600 | 370/958 | Make at-rest storage encryption opt-in (plaintext by default, FileVault-gated migration) | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| Check:storage | re-checked `3172aae24` | #1830 | 17/98 | Persist user turns before chat streaming | UPSTREAM_TRIAGE_0.24.3 |
+| Check:storage | re-checked `9ddb49b01` | #1615 | 51/107 | added additional migration hardening | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `092e81cf7` | #2395 | 11/146 | Constrain reasoning_effort to the bundle's declared set so Qwen3.8 cannot hard-fail the render | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `0ef3d8335` | #2819 | 49/321 | Sandbox: attribute provisioning failures and stop the quit-time VM re-boot behind vmnet_in_use | UPSTREAM_AUDIT_2026-09-25 |
+| I | re-checked `1d17e9e02` | #2194 | 5/33 | Fix settings prompt warmup cache invalidation | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `2ab74c0fd` | #2836 | 38/545 | Fix SSD cache sizing and current-chat capacity notices | UPSTREAM_AUDIT_2026-09-25 |
+| I | re-checked `3d680ba07` | #1806 | 33/145 | Onboarding model step: explicit resource costs, one pick per family, low-disk preflight | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `3f73c480d` | #2231 | 8/73 | Make the model-selector dot reflect true model residency | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `417da91f0` | #2783 | 27/156 | Notify when SSD cache reaches its quota and clear indexed cache safely | UPSTREAM_AUDIT_2026-09-25 |
+| I | re-checked `4be798d87` | #1963 | 10/52 | Flush pending stream text before tool-call frames; repin vmlx (stall + prose-cut fixes) | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `56b3eb502` | #2822 | 51/105 | Preserve reasoning choices on cold sends and delegated steps | UPSTREAM_AUDIT_2026-09-25 |
+| I | re-checked `576e202c9` | #2868 | 44/245 | Add full DMG build with bundled Raptor 0.6 (light + full releases) | UPSTREAM_AUDIT_2026-09-25 |
+| I | re-checked `6b6bd6e53` | #2444 | 5/26 | An audio-capable model could not be given audio | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `7969bc0e1` | #2260 | 16/72 | Add DeepSeek V4 Flash 0731 app support | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `86ddcdd31` | #2467 | 0/4 | keep cross-chat prefill reusable by stabilizing the injected time block | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `98459196d` | #2537 | 10/66 | Preserve explicit reasoning on the first cold send | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `a9d2a150c` | #2507 | 48/272 | Swap-pressure warning banner + designer emulation controls | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `b12a646eb` | #2293 | 0/4 | Fix DSV4 thinking default, duplicate pre-send warmups, and 1M context resolution | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `b6863d77f` | #2253 | 6/27 | Stabilize execution modes, prompts, and cache warmup | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `c654abc1e` | #1593 | 1/8 | Laguna-M.1 + VibeThinker-3B serving: fix Laguna chat garbage (missing-BOS) + drop rep-penalty special-case | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `cc0898026` | #2167 | 141/412 | Fix Gemma and Qwen post-tool completion | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `ec38ab2a4` | #2310 | 25/177 | Clarify model memory estimates and fit guidance | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `f3d776096` | #1793 | 16/40 | Generation params: wire seed into the sampler, accept string stop, native penalties, min_p | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `f6b872371` | #2752 | 47/276 | Fix RAM admission measurement, capacity and token-budget contracts | UPSTREAM_AUDIT_2026-09-25 |
+| In | re-checked `11aaf4954` | #2156 | 0/3 | Report MCP tool envelope failures | UPSTREAM_TRIAGE_0.24.3 |
+| In | re-checked `210685eb9` | #2764 | 28/90 | fit the settings window to small screens | FEATURE_PARITY, UPSTREAM_AUDIT_2026-09-25 |
+| In | re-checked `2365e126a` | #1811 | 60/179 | added favourite tab in the model selector | INTEL_MISSING_FEATURES_BACKLOG, MODEL_PICKER_INTEL, UPSTREAM_AUDIT_2026-10-01, U |
+| In | re-checked `4f8ba2103` | #3151 | 0/9 | Refresh image progress on equal-length status updates | UPSTREAM_AUDIT_2026-10-26 |
+| In | re-checked `541a1b559` | #2916 | 12/63 | show total response time in the assistant stats footer | UPSTREAM_AUDIT_2026-09-29, UPSTREAM_SYNC |
+| In | re-checked `5f66b028a` | #3116 | 0/5 | fix agent working folder getting cleared when saving the agent editor | UPSTREAM_AUDIT_2026-10-26 |
+| In | re-checked `612c48626` | #2912 | 29/103 | cap chat minimap height and make the expanded list scrollable | UPSTREAM_AUDIT_2026-09-29, UPSTREAM_SYNC |
+| In | re-checked `6322c3705` | #2614 | 4/25 | keep the main window hidden on login item and cli launches | UPSTREAM_TRIAGE_0.24.7 |
+| In | re-checked `888d8a55a` | #2671 | 19/71 | persist memory consolidator last run and catch up on launch | FEATURE_PARITY, UPSTREAM_AUDIT_2026-09-25 |
+| In | re-checked `97f5cc190` | #2619 | 82/195 | fixed main thread hangs | UPSTREAM_TRIAGE_0.24.7 |
+| In | re-checked `9af6f53dc` | #2658 | 0/2 | Reopened sessions: a window opened from a history row loads the stored transcript instead of erasing it on the next send | UPSTREAM_TRIAGE_0.24.7 |
+| In | re-checked `b02aaad40` | #3011 | 4/13 | Pin PromptSection token estimation main thread hang fix | UPSTREAM_AUDIT_2026-10-07 |
+| In | re-checked `c9e2d61a9` | #2900 | 7/46 | Preserve generation metrics across chat history reloads | UPSTREAM_AUDIT_2026-09-29 |
+| In | re-checked `e53ae1106` | #2984 | 5/34 | Avoid storage-unlock scheduler waits and stale starts | UPSTREAM_AUDIT_2026-10-07 |
+| In | re-checked `fb3d06a58` | #2889 | 2/16 | Preserve streamed tool names and align agent execution contracts | UPSTREAM_AUDIT_2026-09-29 |
+| N | re-checked `6cf600fce` | #2778 | 23/58 | fixed xcode 27 build errors | UPSTREAM_AUDIT_2026-09-25 |
+| N | re-checked `d264b231b` | #1639 | 0/3 | make plain-text answers the primary agent-loop exit | UPSTREAM_TRIAGE_0.24.3 |
+| NA | re-checked `219640c82` | #2753 | 2/33 | Repair incomplete chat-history schemas so later turns persist | FEATURE_PARITY, UPSTREAM_AUDIT_2026-09-25 |
+| NA | re-checked `96b05d20c` | #2566 | 0/6 | Hide local memory warnings for cloud models | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| NA | re-checked `a2c020188` | #1481 | 3/22 | prevent switching chat windows from interrupting an in-flight chat | UPSTREAM_SYNC |
+| W-agent-templates | re-checked `b4c9324b0` | #3172 | 1157/4280 | Add agent templates (file export/import) | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-channels | re-checked `338425936` | #2775 | 271/1095 | Guide n8n setup so pairing codes only issue when they can work | INTEL_AGENT_SETTINGS_BACKLOG, UPSTREAM_AUDIT_2026-09-25 |
+| W-channels | re-checked `94af9d41a` | #2762 | 106/361 | Add n8n pairing code for remote Secure Channel setup | INTEL_AGENT_SETTINGS_BACKLOG, UPSTREAM_AUDIT_2026-09-25 |
+| W-channels | re-checked `a5cded095` | #3113 | 3/35 | accept slack messages posted through apps from allowlisted senders | UPSTREAM_AUDIT_2026-10-26 |
+| W-channels | re-checked `a609acdb5` | #2748 | 360/2177 | Add first-party n8n agent channel with secret-verified webhook ingress | FEATURE_PARITY, INTEL_AGENT_SETTINGS_BACKLOG, UPSTREAM_AUDIT_2026-09-25 |
+| W-channels | re-checked `e118cea31` | #2290 | 532/3241 | Add native WhatsApp agent channel (WhatsApp Web bridge) | UPSTREAM_AUDIT_2026-10-01 |
+| W-computer-use | re-checked `246609942` | #2731 | 72/301 | Computer Use audit: telemetry funnel, readiness gate, verified done, loop evals | UPSTREAM_AUDIT_2026-09-25 |
+| W-computer-use | re-checked `51ee70e3e` | #2797 | 121/247 | fix computer use failing with the privacy filter on and losing its step log | UPSTREAM_AUDIT_2026-09-25 |
+| W-computer-use | re-checked `e6fb7a63d` | #3084 | 24/154 | Propagate screenshot scrubbing failures before cloud attachment | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-declarative-config | re-checked `53c24678a` | #2750 | 68/303 | Make settings discoverable to the Orchestrator and Management search | UPSTREAM_AUDIT_2026-09-25 |
+| W-declarative-config | re-checked `5e79d3304` | #2936 | 112/603 | Orchestrator audit remediation: truthful addendum, apply-first config, pool guard, default new-chat agent, compact spawn envelope | INTEL_MISSING_FEATURES_BACKLOG, ORCHESTRATOR_INTEL_PLAN, UPSTREAM_AUDIT_2026-09- |
+| W-description-backfill | re-checked `c9021e91c` | #2869 | 19/49 | Generate missing agent descriptions from system prompts | FEATURE_PARITY, UPSTREAM_AUDIT_2026-09-25 |
+| W-diagnostics-telemetry | re-checked `129e37729` | #1609 | 0/3 | fixed main thread hangs | UPSTREAM_TRIAGE_0.24.3 |
+| W-diagnostics-telemetry | re-checked `3ba84c384` | #2081 | 1/10 | Fix management-window sheet-swap crash and wire Sentry release telemetry | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| W-diagnostics-telemetry | re-checked `72c0f9e1f` | #1739 | 28/115 | Add model tool-use diagnostics | UPSTREAM_TRIAGE_0.24.3 |
+| W-diagnostics-telemetry | re-checked `78b7ff8dd` | #2401 | 12/57 | Attribute silent restarts: exit markers + a launch-time verdict file | UPSTREAM_TRIAGE_0.24.3 |
+| W-diagnostics-telemetry | re-checked `79b25d6b1` | #2284 | 5/74 | Improve activation telemetry: brain_source coverage, capability dimension, settings engagement | UPSTREAM_TRIAGE_0.24.3 |
+| W-harness-runtimes | re-checked `0f7a4ed83` | #3180 | 83/710 | Harness runtimes in the model picker, config documents, and bundles | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-harness-runtimes | re-checked `993c12f8e` | #3175 | 586/2592 | Add pluggable harness runtimes: Claude Code and Pi | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-osaurus-bundles | re-checked `7ec27289f` | #3174 | 168/1030 | Add `osaurus import` for Osaurus bundles | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26, UPSTREAM_SYNC |
+| W-privacy-filter | re-checked `0d8ef8a2b` | #3152 | 0/6 | tie paired phone features to the phone's access key | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-privacy-filter | re-checked `217c8c7d3` | #1545 | 0/4 | Route privacy model downloads through global proxy | UPSTREAM_SYNC |
+| W-privacy-filter | re-checked `621912788` | #1449 | 1/35 | fixed fatal crashes | UPSTREAM_SYNC |
+| W-privacy-filter | re-checked `bd0e196d5` | #1519 | 10/41 | [codex] Fix scrub-leaked localization fallback | UPSTREAM_SYNC |
+| W-privacy-filter | re-checked `d9a1a0669` | #2474 | 345/792 | add bulk edit and on-device redaction tools for folder chats | UPSTREAM_TRIAGE_0.24.3 |
+| W-seatbelt-sandbox | re-checked `02bcd1009` | #3094 | 0/1 | Seatbelt: cache isSupported check to prevent main-thread hangs (APPLE-MACOS-37V) | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-seatbelt-sandbox | re-checked `d5b60ddf4` | #3105 | 0/1 | Use cached sandbox availability in effectiveAutonomousExec to fix main-thread hang | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| W-skills-plugins-import | re-checked `40be05cb8` | #2737 | 14/30 | restore import claude plugin from github after tools and plugins refactor | UPSTREAM_AUDIT_2026-09-25 |
+| W-skills-plugins-import | re-checked `c06428046` | #1477 | 60/316 | Harden skill archive imports | INTEL_MISSING_FEATURES_BACKLOG |
+| W-skills-plugins-import | re-checked `e16fad2f3` | #1840 | 94/431 | Bound skill archive subprocesses | INTEL_MISSING_FEATURES_BACKLOG |
+| W-subagents | re-checked `00486cc80` | #2688 | 6/24 | Honor admitted model overrides in delegated agent sessions | ORCHESTRATOR_INTEL_PLAN, UPSTREAM_AUDIT_2026-09-25 |
+| W-subagents | re-checked `33d3c6812` | #2033 | 9/24 | Fix spawn_model target contract | ORCHESTRATOR_INTEL_PLAN |
+| W-subagents | re-checked `3fb975f4e` | #1976 | 1/13 | spawn_agent: carry the target agent's own tool policy into the child run | ORCHESTRATOR_INTEL_PLAN |
+| W-subagents | re-checked `9222379e3` | #2796 | 125/481 | Unify invoking-parent handoffs across local subagent kinds | UPSTREAM_AUDIT_2026-09-25 |
+| W-subagents | re-checked `99a87c20f` | #2798 | 103/360 | Share parent handoff policy with images and compaction | UPSTREAM_AUDIT_2026-09-25 |
+| W-subagents | re-checked `a48a58cf4` | #2707 | 0/26 | Let delegated agents write files in their own Working Folder | UPSTREAM_AUDIT_2026-09-25 |
+| W-subagents | re-checked `fa706a5de` | #2790 | 3/15 | Explain warning-pressure delegation refusals and qualify RAM opt-out | UPSTREAM_AUDIT_2026-09-25 |
+| W-workspaces-sharing | re-checked `16ec3a7a3` | #2811 | 159/613 | Embed the Workspaces explainer in the tab's empty state; drop the intro dialog | UPSTREAM_AUDIT_2026-09-25 |
+| W-workspaces-sharing | re-checked `2ad1d93dc` | #2763 | 17/39 | disable add folder for shared agent chats | UPSTREAM_AUDIT_2026-09-25 |
+| W-workspaces-sharing | re-checked `694efa53a` | #2915 | 9/113 | Bill the workspace pool by default for own shared agents; show pool chip on local tabs | UPSTREAM_AUDIT_2026-09-29, UPSTREAM_SYNC |
+| W-workspaces-sharing | re-checked `940d86a31` | #2683 | 3548/9478 | Workspaces: shared agents, team-billed inference, single-plan trial billing | FEATURE_PARITY, INTEL_AGENT_SETTINGS_BACKLOG, ORCHESTRATOR_INTEL_PLAN, UPSTREAM_ |
+| W-workspaces-sharing | re-checked `a4cb24b65` | #2692 | 738/1863 | Workspace agents as orchestration and dispatch targets | ORCHESTRATOR_INTEL_PLAN, UPSTREAM_AUDIT_2026-09-25 |
+| W-workspaces-sharing | re-checked `d8e9cd60c` | #2687 | 22/136 | workspace improvements | UPSTREAM_AUDIT_2026-09-25 |
+| W-workspaces-sharing | re-checked `fc48e4f0b` | #3111 | 1/9 | Chat sidebar: snapshot orphaned workspace pairings once per render | UPSTREAM_AUDIT_2026-10-26 |
+
 ## Plan (each stage a report and push)
 
 1. **Stage 1 (this doc):** the tool and the triage.
@@ -84,13 +260,13 @@ tool drops them:
    (#2516, with upstream's `stop(preservesCancelledMarker:)` /
    `terminalStopReason`); the Data Visualizer skill loading `render_chart`
    (#2084); the Abilities context-impact readout (#2306, #2323).
-3. **Stage 3, the Check groups and the 166 examined-but-absent commits**
-   by area: providers (#1594, #2108, #1428),
-   capabilities (#1679, #2393, #2308), knowledge (#2067, #2117, #2132,
-   #2338, #2383), chat UI (#1259, #1272, #1283, #1352, #1468, #2486),
-   context preview (#1324), crashes and hangs (#1337, #1353, #1359, #1431),
-   voice (#2016, #2321), memory (#1613), agents (#1837), the rest (folders,
-   server, flags, prompt, AppleScript, windows, misc).
+3. **Stage 3, the Check rows of both tables (125), by area** (each a report
+   and push): **3a** providers (21); **3b** chat display and the model
+   picker (21); **3c** capabilities, the agent loop and prompts (14);
+   **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
+   (folders, storage, settings, agents, memory, voice, MCP, server, chat,
+   chat import, onboarding, mobile, windows, flags, misc). Translations
+   (Check:i18n) go to stage 4.
 4. **Stage 4, translations:** bring upstream's translations for keys Intel
    shows.
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
