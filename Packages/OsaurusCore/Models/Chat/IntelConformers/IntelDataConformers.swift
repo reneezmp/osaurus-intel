@@ -107,6 +107,10 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// Upstream: kept visible in the transcript but left out of model
     /// history (an ungrounded answer the model then corrected). Persisted.
     var modelContextExcluded: Bool = false
+    /// Why the turn ended, when known (upstream #2388): `cancelled` for a
+    /// user Stop. Persisted, and kept through the trailing-blank trim so a
+    /// Stop before the first delta still leaves a record (#2392).
+    var terminalStopReason: String?
     /// Ledger rows written for this turn during the live run, finalized with
     /// the rendered outcome at run cleanup. Transient (upstream).
     var billingEntryIds: Set<String> = []
@@ -163,6 +167,8 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         self.routerBilling = (turn as? ChatTurnData)?.routerBilling ?? (turn as? ChatTurn)?.routerBilling
         self.modelContextExcluded =
             (turn as? ChatTurnData)?.modelContextExcluded ?? (turn as? ChatTurn)?.modelContextExcluded ?? false
+        self.terminalStopReason =
+            (turn as? ChatTurnData)?.terminalStopReason ?? (turn as? ChatTurn)?.terminalStopReason
     }
 
     func appendContent(_ s: String) {
@@ -605,6 +611,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var preflightCapabilities: Any? = nil
     var routerBilling: RouterBillingSummary?
     var modelContextExcluded: Bool = false
+    var terminalStopReason: String?
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -635,6 +642,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
         self.routerBilling = (turn as? ChatTurn)?.routerBilling ?? (turn as? ChatTurnData)?.routerBilling
         self.modelContextExcluded =
             (turn as? ChatTurn)?.modelContextExcluded ?? (turn as? ChatTurnData)?.modelContextExcluded ?? false
+        self.terminalStopReason =
+            (turn as? ChatTurn)?.terminalStopReason ?? (turn as? ChatTurnData)?.terminalStopReason
     }
 
     static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
@@ -696,6 +705,7 @@ extension ChatTurnData: Codable {
         case timeToFirstToken, generationTokensPerSecond
         case routerBilling
         case modelContextExcluded
+        case terminalStopReason
     }
 
     init(from decoder: Decoder) throws {
@@ -719,6 +729,7 @@ extension ChatTurnData: Codable {
         )
         self.routerBilling = try? c.decodeIfPresent(RouterBillingSummary.self, forKey: .routerBilling)
         self.modelContextExcluded = (try? c.decodeIfPresent(Bool.self, forKey: .modelContextExcluded)) ?? false
+        self.terminalStopReason = try? c.decodeIfPresent(String.self, forKey: .terminalStopReason)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -739,6 +750,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(generationTokensPerSecond, forKey: .generationTokensPerSecond)
         try c.encodeIfPresent(routerBilling, forKey: .routerBilling)
         if modelContextExcluded { try c.encode(true, forKey: .modelContextExcluded) }
+        try c.encodeIfPresent(terminalStopReason, forKey: .terminalStopReason)
     }
 }
 
@@ -2127,6 +2139,25 @@ final class BlockMemoizer: @unchecked Sendable {
                         outputTokens: billing.outputTokens,
                         costMicro: billing.costMicro,
                         status: billing.status
+                    )
+                ))
+            } else if !isUser, !isStreaming, turn.terminalStopReason == "cancelled",
+                turn.visibleContent.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty,
+                turn.sharedArtifacts.isEmpty, (turn.toolCalls ?? []).isEmpty, turn.pendingToolName == nil
+            {
+                // Upstream #2516: a cancelled turn with no visible answer used
+                // to render nothing (or only its thinking), reading as still
+                // in flight or quietly complete. Show what the record says.
+                blocks.append(ContentBlock(
+                    id: "interrupted-\(turn.id.uuidString)",
+                    turnId: turn.id,
+                    kind: .paragraph(
+                        index: blocks.count,
+                        text: String(
+                            localized: "Interrupted — stopped before a response was produced.",
+                            bundle: .module),
+                        isStreaming: false,
+                        role: .assistant
                     )
                 ))
             }

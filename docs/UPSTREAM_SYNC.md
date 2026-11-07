@@ -5649,6 +5649,53 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 2 (`W-cov-reaudit`) — 2026-11-07
+
+Five of the six gaps the commit audit found
+([`COV_REAUDIT.md`](COV_REAUDIT.md)); the Abilities context-impact readout
+(#2306) moved to stage 5, where Intel's prompt composer is audited.
+
+- **Skill file containment (#1275, security):** Intel's `SkillStore` wrote
+  reference/asset files by name and read/removed by relative path with no
+  checks, so `../` or an absolute path reached outside the skill folder.
+  Now upstream's: `SkillStoreFileError`, `..`/absolute paths refused,
+  parent folders created inside the skill only, symlinks refused; file
+  listing walks subfolders and skips symlinks.
+- **`tool_choice` (#1940, #3051):** `ChatEngine.sanitizedToolChoice`, after
+  the reasoning switch: a forced choice (`required` / a named function) to
+  DeepSeek becomes `auto` unless `thinking: disabled` is on the wire
+  (DeepSeek returns HTTP 400 otherwise), and newer Claude generations
+  (`claude-opus-5-5`, `claude-sonnet-5-5`, `claude-fable-5`,
+  `claude-mythos-5`) always get `auto`. Forced choices reach Intel from
+  local API clients.
+- **Window frames (#2154):** `IntelWindowFrameRecovery` (upstream's
+  thresholds: 200×200, 100×50 visible) resets a chat window's restored
+  frame, or the reused Settings window, to the default size, centred, when
+  it isn't usably on any screen.
+- **Cancelled turns (#2388, #2392, #2516):** `ChatTurn.terminalStopReason`
+  (saved with the chat); a user Stop stamps the reply to the latest user
+  message `cancelled` (Intel guard: never the previous, completed reply); a
+  Stop before the reply appears appends an empty cancelled turn; the
+  trailing-blank trim keeps a stamped turn; a programmatic stop
+  (`interruptTask`, `stop(preservesCancelledMarker: false)`) leaves none;
+  an empty cancelled turn renders "Interrupted — stopped before a response
+  was produced." (string with upstream's translations). #2388 and #2392
+  were marked PORT in the 0.24.3 triage and never landed, which is how
+  `cov_reaudit.py --mentioned` came about.
+- **Data Visualizer (#2084):** `capabilities_load` of the built-in skill
+  also loads `render_chart`.
+
+Tests: upstream's `SkillStoreFileContainmentTests`;
+`IntelCovReauditGapTests` (tool-choice rules, frame test, cancelled
+marker and its save/render, the chart skill).
+
+**Build-folder note:** macOS deletes files under `/private/tmp` that
+haven't been touched for three days. A SwiftPM `--scratch-path` there that
+lives longer than that loses pieces (here the copied `Sparkle.framework`'s
+module map) and fails with `no such module 'Sparkle'`. Delete the damaged
+product (`<scratch>/arm64-apple-macosx/debug/Sparkle.framework`) or the
+whole scratch folder and rebuild.
+
 ### Background runs, stage 2-2 (`W-background-runs-sync`) — 2026-11-06
 
 Chat windows hand running chats to `BackgroundTaskManager` the way

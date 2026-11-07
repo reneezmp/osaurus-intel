@@ -974,6 +974,55 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
     /// `tool_choice` in OpenAI Chat Completions form; the Anthropic and Codex
     /// adapters translate each form.
+    /// Downgrade `tool_choice` values the provider rejects (upstream
+    /// `RemoteReasoningPolicy.sanitizedToolChoice`, #1940 / #3051):
+    /// - newer Claude generations reject forced tool use on every host;
+    /// - DeepSeek (host or model) rejects `required` and named-function
+    ///   choices with HTTP 400 "Thinking mode does not support this
+    ///   tool_choice" unless `thinking: {"type": "disabled"}` is on the wire.
+    /// Forced choices become `auto`; `auto` / `none` pass through. Intel: the
+    /// built-in DeepSeek path (no provider) counts as an OpenAI-compatible
+    /// provider.
+    nonisolated static func sanitizedToolChoice(
+        _ choice: ToolChoiceOption?,
+        providerType: RemoteProviderType?,
+        host: String,
+        model: String,
+        thinkingDisabled: Bool
+    ) -> ToolChoiceOption? {
+        guard let choice else { return nil }
+        let forced: Bool
+        switch choice {
+        case .required, .function: forced = true
+        case .auto, .none: forced = false
+        }
+        guard forced else { return choice }
+        if rejectsForcedToolChoice(model: model) { return .auto }
+        switch providerType {
+        case nil, .some(.openaiLegacy), .some(.azureOpenAI):
+            break
+        case .some(.anthropic), .some(.openResponses), .some(.openAICodex), .some(.gemini),
+            .some(.osaurus), .some(.osaurusRouter):
+            return choice
+        }
+        let isDeepSeek =
+            host.range(of: "deepseek", options: .caseInsensitive) != nil
+            || model.range(of: "deepseek", options: .caseInsensitive) != nil
+        guard isDeepSeek, !thinkingDisabled else { return choice }
+        return .auto
+    }
+
+    /// Claude models that return HTTP 400 "tool_choice: type \"tool\" and
+    /// \"any\" are not supported for this model" (upstream). Matched on the
+    /// bare model id so OpenRouter and native ids both hit.
+    nonisolated static func rejectsForcedToolChoice(model: String) -> Bool {
+        let bare =
+            (model.lowercased().split(separator: "/").last.map(String.init) ?? model.lowercased())
+            .replacingOccurrences(of: ".", with: "-")
+        let prefixes = ["claude-opus-5-5", "claude-sonnet-5-5", "claude-fable-5", "claude-mythos-5"]
+        return prefixes.contains(where: { bare.hasPrefix($0) })
+    }
+
     nonisolated static func wireToolChoice(_ choice: ToolChoiceOption?) -> Any {
         switch choice {
         case nil, .some(.auto): return "auto"
@@ -1260,6 +1309,21 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 into: &body
                             )
                             self.applyReasoningMode(request, endpoint: endpoint, into: &body)
+                            // After the reasoning switch: a forced choice is
+                            // legal on DeepSeek only with thinking disabled.
+                            if body["tool_choice"] != nil {
+                                let thinkingDisabled =
+                                    (body["thinking"] as? [String: Any])?["type"] as? String == "disabled"
+                                body["tool_choice"] = Self.wireToolChoice(
+                                    Self.sanitizedToolChoice(
+                                        request.tool_choice,
+                                        providerType: endpoint.provider?.providerType,
+                                        host: URL(string: endpoint.url)?.host ?? "",
+                                        model: endpoint.modelId,
+                                        thinkingDisabled: thinkingDisabled
+                                    )
+                                )
+                            }
                             Self.applyVeniceParameters(
                                 request.modelOptions, host: URL(string: endpoint.url)?.host ?? "", into: &body)
                             if endpoint.usesAnthropicWire {

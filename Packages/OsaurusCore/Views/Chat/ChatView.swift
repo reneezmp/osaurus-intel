@@ -325,6 +325,8 @@ final class ChatSession: ObservableObject {
 
     /// Tracks if session has unsaved content changes
     private var isDirty: Bool = false
+    /// See `stop(preservesCancelledMarker:)`; reset by the trim.
+    private var stopPreservesCancelledMarker = true
 
     // MARK: - Memoization Cache
     private let blockMemoizer = BlockMemoizer()
@@ -1644,13 +1646,20 @@ final class ChatSession: ObservableObject {
         send(text, attachments: attachments)
     }
 
-    func stop() {
+    /// `preservesCancelledMarker` (upstream #2392) distinguishes the user's
+    /// Stop, which must leave a record that a run was cancelled, from
+    /// programmatic stops (a plugin's soft interrupt) that keep the clean
+    /// trim, so no ghost "cancelled" row appears.
+    func stop(preservesCancelledMarker: Bool = true) {
         #if OSAURUS_INTEL
         print(
             "[ChatSession] stop() called — isStreaming=\(isStreaming) "
                 + "activeRunId=\(String(describing: activeRunId)) sessionId=\(String(describing: sessionId))"
         )
         #endif
+        stopPreservesCancelledMarker = preservesCancelledMarker
+        // Whether a send was in flight, captured before cleanup resets it.
+        let hadActiveSend = isStreaming || activeRunId != nil || currentTask != nil
         stopRequested = true
         pendingWorkingFolderContinuation = false
         let task = currentTask
@@ -1659,6 +1668,17 @@ final class ChatSession: ObservableObject {
             finalizeRun(runId: runId, persistConversationArtifacts: false)
         } else {
             completeRunCleanup()
+        }
+        // A Stop that beats the run's own assistant turn leaves the
+        // transcript ending on the user row with no record that a run
+        // happened (upstream #2392). Append the cancelled marker after
+        // cleanup so the trim can't drop it.
+        if preservesCancelledMarker, hadActiveSend, let last = turns.last, last.role == .user {
+            let cancelledTurn = ChatTurn(role: .assistant, content: "")
+            cancelledTurn.terminalStopReason = "cancelled"
+            turns.append(cancelledTurn)
+            isDirty = true
+            rebuildVisibleBlocks()
         }
     }
 
@@ -2723,10 +2743,16 @@ final class ChatSession: ObservableObject {
             // Never drop a turn the router billed — even a zero-output charge
             // must stay so the user sees the "you were charged" notice instead
             // of a silent gap (upstream).
-            lastTurn.routerBilling == nil
+            lastTurn.routerBilling == nil,
+            // Never drop a turn carrying a terminal stop reason (upstream
+            // #2392): a Stop before the first delta leaves the turn blank and
+            // stat-less, but `finalizeRun` already stamped it `cancelled`.
+            // Programmatic stops opt back into the clean trim.
+            lastTurn.terminalStopReason == nil || !stopPreservesCancelledMarker
         {
             turns.removeLast()
         }
+        stopPreservesCancelledMarker = true
     }
 
     /// Stamp an Osaurus Router billing event onto an assistant turn. Adopts the
@@ -2896,6 +2922,21 @@ final class ChatSession: ObservableObject {
         }
 
         let context = activeRunContext
+        // Upstream #2388: a user Stop is recorded as `cancelled` on the turn
+        // it interrupted, so the saved transcript doesn't read as a reply
+        // that finished on its own.
+        // Intel: only the reply to the latest user message — a Stop before
+        // this run appended its turn must not re-stamp the previous,
+        // completed reply (`stop()` appends the marker for that case).
+        if stopRequested, let lastAssistant = turns.lastIndex(where: { $0.role == .assistant }),
+            lastAssistant > (turns.lastIndex(where: { $0.role == .user }) ?? -1)
+        {
+            if turns[lastAssistant].terminalStopReason == nil
+                || turns[lastAssistant].terminalStopReason == "stop"
+            {
+                turns[lastAssistant].terminalStopReason = "cancelled"
+            }
+        }
         activeRunId = nil
         activeRunContext = nil
 

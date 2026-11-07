@@ -3045,3 +3045,22 @@ kept by the same manager as schedules.
       running.
 - [ ] Open three tabs, rearrange them, and quit right away (⌘Q). After
       relaunch, the window opens with the same tabs in the same order.
+
+## Coverage re-audit fixes (2026-11-07)
+
+`W-cov-reaudit` stage 2 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage 2").
+Not in candidate 66.
+
+- [ ] Ask a question and press Stop right away, before any text appears.
+      The reply row says "Interrupted — stopped before a response was
+      produced." Quit and relaunch: the conversation still shows it.
+- [ ] Ask a long question and press Stop mid-reply: the partial reply
+      stays, with no "Interrupted" line.
+- [ ] A custom agent with the Data Visualizer skill: ask it to "chart these
+      numbers: 3, 7, 2, 9". It loads the skill and draws a chart (no
+      "tool not found" loop).
+- [ ] Skills → open a skill, add a reference file, then check it appears
+      in the skill's file list and opens.
+- [ ] If you have a second display: move a chat window and Settings onto
+      it, close both, unplug the display, and reopen them. Both appear on
+      the remaining screen.

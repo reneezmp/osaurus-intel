@@ -1514,6 +1514,14 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         } else {
             window.setFrameAutosaveName(Self.frameAutosaveName)
         }
+        // Upstream #2154: a saved frame on a display that's gone (or one
+        // collapsed to a sliver) falls back to the default size, centred.
+        IntelWindowFrameRecovery.recoverIfNeeded(
+            window,
+            fallbackSize: Self.initialFrame(on: screen, cascadeIndex: 0).size,
+            screen: screen,
+            label: "chat window"
+        )
     }
 
     /// Height the unified titlebar + toolbar strip adds above the root view.

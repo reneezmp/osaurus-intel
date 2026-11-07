@@ -735,6 +735,17 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
             if let tab = initialTab {
                 ManagementStateManager.shared.selectedTab = tab
             }
+            // Upstream #2154: the reused window may still sit on a display
+            // that has since been unplugged.
+            let available = Self.managementAvailableContentSize(on: NSScreen.main)
+            IntelWindowFrameRecovery.recoverIfNeeded(
+                existing,
+                fallbackSize: NSSize(
+                    width: available.width > 0 ? min(1000, available.width) : 1000,
+                    height: available.height > 0 ? min(700, available.height) : 700
+                ),
+                label: "Settings window"
+            )
             existing.makeKeyAndOrderFront(nil)
             managementWindowLifecycle?.repairAfterPresentation(reason: "reuse")
             return

@@ -4,6 +4,7 @@
 Usage (from the repo root):
     python3 scripts/upstream/cov_reaudit.py [upstream-ref]          # worklist
     python3 scripts/upstream/cov_reaudit.py [upstream-ref] --show H  # one commit
+    python3 scripts/upstream/cov_reaudit.py [upstream-ref] --mentioned  # examined, but absent?
 
 `W-cov-reaudit` (docs/COV_REAUDIT.md). The file classifiers only see files
 Intel doesn't compile; a file Intel compiles (its own copy, or an upstream
@@ -20,6 +21,14 @@ many appear anywhere in Intel's OsaurusCore sources. A low score means the
 change is probably not on Intel. Triage verdicts go in the table in
 docs/COV_REAUDIT.md (its hash mention takes the commit off this list), so the
 run ends with "UNTRIAGED 0" when everything has a verdict.
+
+`--mentioned` scores the commits the docs DO mention instead, and lists the
+ones whose code is mostly absent (presence < 50%). A doc mention means the
+commit was examined, not that it was ported: the 0.24.3 triage marked #2388
+and #2392 PORT, and neither reached Intel. A listed commit is fine when its
+doc verdict was skip/defer/omit; a PORT verdict with absent code is a gap.
+Ones re-checked are recorded in docs/COV_REAUDIT.md ("Examined but absent")
+by hash, prefixed `re-checked`, which takes them off this list.
 """
 import collections, glob, os, re, subprocess, sys
 
@@ -27,6 +36,7 @@ PRE = "Packages/OsaurusCore/"
 args = [a for a in sys.argv[1:] if not a.startswith("--")]
 REF = args[0] if args else "upstream/main"
 SHOW = sys.argv[sys.argv.index("--show") + 1] if "--show" in sys.argv else None
+MENTIONED = "--mentioned" in sys.argv
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 from gap_features import F
@@ -64,8 +74,26 @@ def meaningful(n):
 
 
 docs = "".join(open(p).read() for p in glob.glob("docs/*.md"))
+rechecked = set(re.findall(r"re-checked[^`]*`([0-9a-f]{7,12})`", docs))
+rechecked = {h[:7] for h in rechecked}
 doc_prs = set(re.findall(r"#(\d{3,5})\b", docs))
 doc_hashes = {h[:7] for h in re.findall(r"\b[0-9a-f]{7,12}\b", docs)}
+
+# For --mentioned: the ledger lines outside this audit's own table, and the
+# words that record a decision not to port.
+ledger_lines = [
+    l for p in glob.glob("docs/*.md") if not p.endswith("COV_REAUDIT.md") for l in open(p)
+]
+DECLINED = re.compile(
+    r"\b(SKIP|Skip|skip|skipped|DEFER|Defer|defer|deferred|Omit|omit|OMIT|IGNORE|Ignore|"
+    r"Incompatible|incompatible|amputated|N/A|Not applicable|not applicable|MLX|vMLX|vmlx)\b"
+    r"|\| I \||\| \*\*I\*\* \|"
+)
+
+
+def ledger_mentions(h, prs):
+    pats = [re.compile(r"\b" + h[:7])] + [re.compile(rf"#{p}\b") for p in prs]
+    return [l for l in ledger_lines if any(p.search(l) for p in pats)]
 
 intel_lines = set()
 for root, _, files in os.walk(PRE):
@@ -133,9 +161,21 @@ skipped = collections.Counter()
 rows = []
 for h, subject, files in commits:
     prs = re.findall(r"\(#(\d+)\)", subject)
-    if h[:7] in doc_hashes or any(p in doc_prs for p in prs):
-        skipped["mentioned in docs"] += 1
+    mentioned = h[:7] in doc_hashes or any(p in doc_prs for p in prs)
+    if mentioned != MENTIONED:
+        skipped["mentioned in docs" if mentioned else "not mentioned in docs"] += 1
         continue
+    if MENTIONED:
+        if h[:7] in rechecked:
+            skipped["re-checked"] += 1
+            continue
+        lines = ledger_mentions(h, prs)
+        if not lines:
+            skipped["only in this audit's table"] += 1
+            continue
+        if any(DECLINED.search(l) for l in lines):
+            skipped["declined in the ledger (skip/defer/omit/MLX)"] += 1
+            continue
     src = [f for f in files if f.endswith(".swift") and not f.startswith("Tests/")]
     if not src:
         skipped["tests/resources only"] += 1
@@ -151,6 +191,9 @@ for h, subject, files in commits:
         skipped["only I/D/N files"] += 1
         continue
     surv, pres, _ = presence(h, src)
+    if MENTIONED and (not surv or pres / surv >= 0.5):
+        skipped["mentioned, mostly present or superseded"] += 1
+        continue
     rows.append((h, subject, surv, pres, sorted(cats)))
 
 print(f"fork {FORK[:9]} .. {REF}: {len(commits)} commits touch OsaurusCore")
@@ -160,4 +203,4 @@ rows.sort(key=lambda r: (r[3] / r[2]) if r[2] else 2)
 for h, subject, surv, pres, cats in rows:
     score = f"{pres:4d}/{surv:<4d}" if surv else "  superseded"
     print(f"{h} {score} {subject[:90]} | {','.join(c.split(':')[0] for c in cats)}")
-print("UNTRIAGED", len(rows))
+print("ABSENT-UNCHECKED" if MENTIONED else "UNTRIAGED", len(rows))

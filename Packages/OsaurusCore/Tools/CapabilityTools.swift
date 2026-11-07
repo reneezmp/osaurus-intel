@@ -469,6 +469,15 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
 
     // MARK: Load
 
+    /// Built-in skills are not plugin-backed, so nothing cascades their tools
+    /// when they load (upstream #2084). Data Visualizer teaches the model to
+    /// call `render_chart`; without loading it too, small models loop on
+    /// `tool_not_found`. Keyed by skill name here because Intel's catalog
+    /// lists skills by name.
+    static let builtInSkillToolDependencies: [String: [String]] = [
+        "Data Visualizer": ["render_chart"]
+    ]
+
     private func load(ids: [String], catalog: CapabilityCatalog) async -> String {
         var toolNames: [String] = []
         var skillNames: [String] = []
@@ -507,6 +516,15 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
                 } else {
                     unknown.append(id)
                 }
+            }
+        }
+
+        for skillName in skillNames {
+            let isBuiltIn = Skill.builtInSkills.contains {
+                $0.name.caseInsensitiveCompare(skillName) == .orderedSame
+            }
+            if isBuiltIn, let deps = Self.builtInSkillToolDependencies[skillName] {
+                deps.forEach(addTool)
             }
         }
 

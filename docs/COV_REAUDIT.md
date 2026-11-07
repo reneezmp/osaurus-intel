@@ -60,16 +60,32 @@ Also found while triaging:
 - **Skill folders:** Intel's `SkillStore` keeps a renamed skill's original
   folder (`directoryName`), where upstream moves it (#1321). Not a gap.
 
+## Examined but absent (`--mentioned`)
+
+Found in stage 2: a doc mention means a commit was examined, not ported. The
+0.24.3 triage (`UPSTREAM_TRIAGE_0.24.3.md`) marked #2388 and #2392 PORT, and
+neither reached Intel. `cov_reaudit.py --mentioned` scores the mentioned
+commits and lists those whose code is mostly absent (presence < 50%) and
+whose ledger lines record no skip/defer/omit/incompatible decision. At
+`bce907045` that is **166 commits** (stage 3 triages them with the Check
+groups). Re-checked ones are listed here as "re-checked `<hash>`" so the
+tool drops them:
+
+- re-checked `ccd310ed0` (#2388): ported in stage 2.
+- re-checked `b9b8b7fc8` (#2392): ported in stage 2.
+
 ## Plan (each stage a report and push)
 
 1. **Stage 1 (this doc):** the tool and the triage.
-2. **Stage 2, the six gaps:** skill file path containment (#1275, security);
+2. **Stage 2, the six gaps (done 2026-11-07, five ported; #2306 moved to
+   stage 5):** skill file path containment (#1275, security);
    DeepSeek thinking-mode `tool_choice` downgrade (#1940); window frame
    recovery (#2154); the cancelled-turn record and its "Interrupted" row
    (#2516, with upstream's `stop(preservesCancelledMarker:)` /
    `terminalStopReason`); the Data Visualizer skill loading `render_chart`
    (#2084); the Abilities context-impact readout (#2306, #2323).
-3. **Stage 3, the Check groups** by area: providers (#1594, #2108, #1428),
+3. **Stage 3, the Check groups and the 166 examined-but-absent commits**
+   by area: providers (#1594, #2108, #1428),
    capabilities (#1679, #2393, #2308), knowledge (#2067, #2117, #2132,
    #2338, #2383), chat UI (#1259, #1272, #1283, #1352, #1468, #2486),
    context preview (#1324), crashes and hangs (#1337, #1353, #1359, #1431),
@@ -80,8 +96,8 @@ Also found while triaging:
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
    original scope): commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with
-   chat storage, the prompt composer, `ChatEngine` and
-   `RemoteProviderService`.
+   chat storage, the prompt composer (with the Abilities context-impact
+   readout, #2306 / #2323), `ChatEngine` and `RemoteProviderService`.
 
 The 47 upstream commits past `bce907045` are a separate audit (carried
 follow-up); rerun this tool with the new ref after it.
@@ -90,12 +106,12 @@ follow-up); rerun this tool with the new ref after it.
 
 | Verdict | Commit | PR | Presence | Subject | Note |
 |---|---|---|---|---|---|
-| Gap:agents | `8b0b59790` | #2323 | superseded | fix context impact ability count chip wrapping to two lines | With the missing context-impact readout (#2306) in `AgentAbilitiesOverviewView`. |
-| Gap:capabilities | `33dc9c0ee` | #2084 | 0/5 | Fix built-in Data Visualizer chart tool activation | `capabilities_load` of the built-in Data Visualizer skill doesn't load `render_chart`; Intel's `CapabilityTools` is its own, a third of upstream's. |
-| Gap:chat | `c02c007cd` | #2516 | 5/10 | Render the recorded cancelled state instead of an invisible empty turn | A cancelled turn with no answer should render "Interrupted — stopped before a response was produced."; Intel records no `terminalStopReason` (no cancelled marker, see 2-1 notes). |
-| Gap:providers | `3587ab0ad` | #1940 | 7/21 | Fix DeepSeek thinking-mode tool_choice HTTP 400 | DeepSeek thinking mode rejects a forced `tool_choice` (HTTP 400); Intel's `CloudChatEngine.wireToolChoice` passes "required"/named choices from local API clients through unchanged. |
-| Gap:skills | `b32b368a7` | #1275 | 11/95 | [codex] Contain skill file paths | Skill file paths aren't contained: Intel's `SkillStore` writes reference/asset files by name without rejecting `..` or absolute paths. |
-| Gap:windows | `84271e386` | #2154 | 2/14 | fix settings window opening offscreen with stale saved frame | Settings/management window reopening offscreen from a stale saved frame isn't recovered. |
+| Gap:agents | `8b0b59790` | #2323 | superseded | fix context impact ability count chip wrapping to two lines | Moved to stage 5: the readout (#2306) needs a prompt preview from Intel's own composer. |
+| Gap:capabilities | `33dc9c0ee` | #2084 | 0/5 | Fix built-in Data Visualizer chart tool activation | Done 2026-11-07 (stage 2): `CapabilitiesTool.builtInSkillToolDependencies` loads `render_chart` with the built-in Data Visualizer skill. |
+| Gap:chat | `c02c007cd` | #2516 | 5/10 | Render the recorded cancelled state instead of an invisible empty turn | Done 2026-11-07 (stage 2), with #2388 and #2392: `ChatTurn.terminalStopReason` (persisted), `stop(preservesCancelledMarker:)`, the trim keeps a stamped turn, and an empty cancelled turn renders "Interrupted". |
+| Gap:providers | `3587ab0ad` | #1940 | 7/21 | Fix DeepSeek thinking-mode tool_choice HTTP 400 | Done 2026-11-07 (stage 2): `ChatEngine.sanitizedToolChoice` (also #3051: newer Claude generations) after the reasoning switch. |
+| Gap:skills | `b32b368a7` | #1275 | 11/95 | [codex] Contain skill file paths | Done 2026-11-07 (stage 2): upstream's containment (`SkillStoreFileError`, contained read/write/remove) and recursive, symlink-skipping file listing in Intel's `SkillStore`. |
+| Gap:windows | `84271e386` | #2154 | 2/14 | fix settings window opening offscreen with stale saved frame | Done 2026-11-07 (stage 2): `IntelWindowFrameRecovery` for chat windows (after the saved frame) and the reused Settings window. |
 | Check:agents | `848f2c4c3` | #1837 | 54/160 | Add recoverable agent backup restore path | Recoverable agent backup restore (`AgentStore`); Intel keeps its own agent store. |
 | Check:applescript | `0d4c8077d` | #2394 | 11/26 | Report an unusable AppleScript model assignment instead of swapping it | AppleScript agent reports an unusable model assignment instead of swapping it. |
 | Check:capabilities | `1a6bbd339` | #1679 | 1/3 | stop wasted iterations on repeated failing capabilities_load calls | Repeated failing `capabilities_load` calls end early. |
