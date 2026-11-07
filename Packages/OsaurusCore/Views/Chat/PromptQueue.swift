@@ -35,10 +35,23 @@ public enum PromptItem: Identifiable {
     case secret(SecretPromptState)
     case clarify(ClarifyPromptState)
 
-    public nonisolated var id: ObjectIdentifier {
+    nonisolated public var id: ObjectIdentifier {
         switch self {
         case .secret(let s): return ObjectIdentifier(s)
         case .clarify(let c): return ObjectIdentifier(c)
+        }
+    }
+
+    /// Whether the prompt contains sensitive input that should visually
+    /// obscure the conversation behind it. Clarify prompts need the prior
+    /// assistant reasoning readable while the user picks an option; secret
+    /// prompts still get the stronger privacy treatment.
+    nonisolated public var obscuresConversation: Bool {
+        switch self {
+        case .secret:
+            return true
+        case .clarify:
+            return false
         }
     }
 
@@ -50,6 +63,18 @@ public enum PromptItem: Identifiable {
         switch self {
         case .secret(let s): s.cancel()
         case .clarify(let c): c.cancel()
+        }
+    }
+
+    /// Cancel triggered by an explicit user gesture (card Cancel button,
+    /// Esc). Distinct from `cancel()` so clarify can leave a visible
+    /// trace of the dismissed question; teardown paths (queue drain,
+    /// view disappearance) stay silent.
+    @MainActor
+    func cancelByUser() {
+        switch self {
+        case .secret(let s): s.cancel()
+        case .clarify(let c): c.cancelByUser()
         }
     }
 }
@@ -87,6 +112,16 @@ public final class PromptQueue: ObservableObject {
         }
     }
 
+    /// Cancel and drop specific prompts, leaving the rest queued.
+    public func dismiss(_ ids: Set<ObjectIdentifier>) {
+        for item in pending where ids.contains(item.id) { item.cancel() }
+        pending.removeAll { ids.contains($0.id) }
+        if let cur = current, ids.contains(cur.id) {
+            cur.cancel()
+            advance()
+        }
+    }
+
     /// Cancel everything in the queue (current + pending) and clear.
     /// Used by reset paths so a brand-new conversation doesn't
     /// inherit dangling prompts from the previous one.
@@ -121,6 +156,7 @@ public final class ClarifyPromptState: ObservableObject {
 
     private let onSubmit: (String) -> Void
     private let onCancel: () -> Void
+    private let onUserCancel: () -> Void
     private var resolved = false
 
     public init(
@@ -128,7 +164,8 @@ public final class ClarifyPromptState: ObservableObject {
         options: [String] = [],
         allowMultiple: Bool = false,
         onSubmit: @escaping (String) -> Void,
-        onCancel: @escaping () -> Void = {}
+        onCancel: @escaping () -> Void = {},
+        onUserCancel: @escaping () -> Void = {}
     ) {
         self.question = question
         self.options = options
@@ -138,6 +175,7 @@ public final class ClarifyPromptState: ObservableObject {
         self.allowMultiple = options.isEmpty ? false : allowMultiple
         self.onSubmit = onSubmit
         self.onCancel = onCancel
+        self.onUserCancel = onUserCancel
     }
 
     /// Submit the user's answer. Multi-select callers should join their
@@ -158,6 +196,20 @@ public final class ClarifyPromptState: ObservableObject {
     public func cancel() {
         guard !resolved else { return }
         resolved = true
+        onCancel()
+    }
+
+    /// Dismiss via an explicit user gesture (Cancel button / Esc).
+    /// Fires `onUserCancel` (e.g. so the chat can keep the question
+    /// visible in the transcript) in addition to `onCancel`. Teardown
+    /// paths — `PromptQueue.drainAll()`, overlay `onDisappear` — must
+    /// keep calling `cancel()` instead: they fire during session
+    /// resets/loads where appending transcript turns would corrupt the
+    /// incoming conversation.
+    public func cancelByUser() {
+        guard !resolved else { return }
+        resolved = true
+        onUserCancel()
         onCancel()
     }
 }

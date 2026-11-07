@@ -23,6 +23,7 @@
 //                        or the chip selection?").
 //
 
+import AppKit
 import SwiftUI
 
 // MARK: - Overlay
@@ -44,7 +45,10 @@ struct ClarifyPromptOverlay: View {
     }
 
     private func cancelAndDismiss() {
-        state.cancel()
+        // User-initiated dismissal (Cancel button / Esc) — lets the
+        // session preserve the question in the transcript, unlike the
+        // silent `cancel()` used by teardown safety nets.
+        state.cancelByUser()
         onDismiss()
     }
 }
@@ -84,9 +88,12 @@ private struct ClarifyPromptCard: View {
 
     @State private var freeFormAnswer: String = ""
     @State private var selectedOptions: Set<String> = []
-    @FocusState private var isInputFocused: Bool
+    @State private var isInputFocused: Bool = false
+    @State private var isComposing: Bool = false
     @Environment(\.theme) private var theme
-    @Environment(\.accessibilityReduceMotion) private var reduceMotion
+    /// Settings ▸ Chat ▸ Check Spelling While Typing, applied live.
+    @AppStorage(ComposerSpellCheckSetting.defaultsKey)
+    private var spellCheckEnabled: Bool = ComposerSpellCheckSetting.defaultValue
 
     private var mode: ClarifyMode {
         ClarifyMode(options: state.options, allowMultiple: state.allowMultiple)
@@ -94,6 +101,17 @@ private struct ClarifyPromptCard: View {
 
     private var canSubmitFreeForm: Bool {
         !freeFormAnswer.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
+    private var inputFontSize: CGFloat { CGFloat(theme.bodySize) - 1 }
+
+    /// Cap the free-form editor at ~4 lines (matching the previous
+    /// `lineLimit(1...4)`); beyond that it scrolls.
+    private var inputMaxHeight: CGFloat {
+        let font = NSFont.systemFont(ofSize: inputFontSize)
+        let lineHeight = font.ascender - font.descender + font.leading
+        // 4 lines + the text view's vertical container insets (2pt × 2).
+        return ceil(lineHeight * 4) + 4
     }
 
     private var canSubmitMultiSelect: Bool {
@@ -116,10 +134,10 @@ private struct ClarifyPromptCard: View {
 
     private func autoFocusIfNeeded() {
         guard mode.wantsTextInput else { return }
-        let delay: TimeInterval = reduceMotion ? 0 : 0.20
-        DispatchQueue.main.asyncAfter(deadline: .now() + delay) {
-            isInputFocused = true
-        }
+        // `EditableTextView.syncFocus` claims first responder from the
+        // binding on the next runloop tick, so no entry-animation delay
+        // race: keystrokes land in the field as soon as it's mounted.
+        isInputFocused = true
     }
 
     // MARK: - Body slot: chips
@@ -211,40 +229,62 @@ private struct ClarifyPromptCard: View {
         }
     }
 
+    /// NSTextView-backed editor so the chat input conventions hold:
+    /// Enter submits, Shift+Enter inserts a newline, Esc cancels the
+    /// prompt. The previous SwiftUI `TextField(axis: .vertical)` had
+    /// its own Return semantics that didn't match the main composer.
     private var freeFormTextField: some View {
-        TextField("", text: $freeFormAnswer, axis: .vertical)
-            .font(theme.font(size: CGFloat(theme.bodySize) - 1, weight: .regular))
-            .foregroundColor(theme.primaryText)
-            .textFieldStyle(.plain)
-            .focused($isInputFocused)
-            .lineLimit(1 ... 4)
-            .padding(.horizontal, 12)
-            .padding(.vertical, 9)
-            .overlay(alignment: .topLeading) {
-                if freeFormAnswer.isEmpty {
-                    // Different placeholder when chips exist: signals
-                    // the input is an alternate path ("type instead")
-                    // rather than the only path.
-                    Text(
-                        mode.hasChips ? "Or type a custom answer…" : "Type your answer…",
-                        bundle: .module
-                    )
-                    .font(theme.font(size: CGFloat(theme.bodySize) - 1, weight: .regular))
-                    .foregroundColor(theme.placeholderText)
-                    .padding(.leading, 12)
-                    .padding(.top, 9)
-                    .allowsHitTesting(false)
-                }
+        EditableTextView(
+            text: $freeFormAnswer,
+            fontSize: inputFontSize,
+            textColor: theme.primaryText,
+            cursorColor: theme.accentColor,
+            isFocused: $isInputFocused,
+            isComposing: $isComposing,
+            maxHeight: inputMaxHeight,
+            spellCheckEnabled: spellCheckEnabled,
+            onCommit: { submitFreeForm() },
+            onShiftCommit: nil,  // Shift+Enter → newline
+            onEscape: {
+                onCancel()
+                return true
             }
-            .background(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .fill(theme.tertiaryBackground.opacity(0.4))
-            )
-            .overlay(
-                RoundedRectangle(cornerRadius: 8, style: .continuous)
-                    .strokeBorder(theme.primaryBorder.opacity(0.15), lineWidth: 1)
-            )
-            .onSubmit { submitFreeForm() }
+        )
+        // Pin to the intrinsic height (1 line empty → ~4 lines, then
+        // scrolls via the text view's own cap). The representable is
+        // height-flexible and the overlay proposes the full window, so
+        // without this the field balloons to fill the card; an outer
+        // `.frame(maxHeight:)` would instead adopt the cap height and
+        // vertically center the smaller editor inside it.
+        .fixedSize(horizontal: false, vertical: true)
+        // EditableTextView carries a 6pt/2pt internal container inset;
+        // pad the remainder so the visual frame matches the old 12/9.
+        .padding(.horizontal, 6)
+        .padding(.vertical, 7)
+        .overlay(alignment: .topLeading) {
+            if freeFormAnswer.isEmpty {
+                // Different placeholder when chips exist: signals
+                // the input is an alternate path ("type instead")
+                // rather than the only path.
+                Text(
+                    mode.hasChips ? "Or type a custom answer…" : "Type your answer…",
+                    bundle: .module
+                )
+                .font(theme.font(size: inputFontSize, weight: .regular))
+                .foregroundColor(theme.placeholderText)
+                .padding(.leading, 12)
+                .padding(.top, 9)
+                .allowsHitTesting(false)
+            }
+        }
+        .background(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .fill(theme.tertiaryBackground.opacity(0.4))
+        )
+        .overlay(
+            RoundedRectangle(cornerRadius: 8, style: .continuous)
+                .strokeBorder(theme.primaryBorder.opacity(0.15), lineWidth: 1)
+        )
     }
 
     private var submitArrowButton: some View {
@@ -366,6 +406,9 @@ private struct OptionChip: View {
 /// between them and wraps to a new line when the next child would
 /// overflow the proposed width. Each child gets exactly its ideal
 /// size — no equal-width column squashing.
+///
+/// Internal (not file-private) so other clarify surfaces can
+/// reuse the same wrapping behavior as the in-chat prompt card.
 struct ChipFlowLayout: Layout {
     var spacing: CGFloat = 8
     var lineSpacing: CGFloat = 8

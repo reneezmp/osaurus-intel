@@ -98,6 +98,21 @@ final class NativeHeaderView: NSView {
     private var storedOnCancelEdit: (() -> Void)?
     private var currentRole: MessageRole = .assistant
     private var currentTheme: (any ThemeProtocol)?
+    private var messageTimestamp: Date = Date()
+    /// Assistant turn that answered this message; backs the overflow menu's
+    /// "Inspect response". Nil when there's no reply yet (upstream #1939).
+    private var responseTurnId: UUID?
+    /// The ellipsis "…" control, kept so its overflow menu can anchor to it.
+    private weak var overflowControl: HeaderCircleActionControl?
+
+    /// Formats the message timestamp for the overflow menu header, e.g.
+    /// "Jun 20, 10:17 PM". Localized template so order/separators follow locale.
+    /// Mirrors `NativeAssistantActionsView.timestampFormatter`.
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMd jmm")
+        return formatter
+    }()
 
     override init(frame: NSRect) {
         super.init(frame: frame)
@@ -174,6 +189,8 @@ final class NativeHeaderView: NSView {
         customAvatarPath: String?,
         isEditing: Bool,
         isHovered: Bool,
+        timestamp: Date = Date(),
+        responseTurnId: UUID? = nil,
         theme: any ThemeProtocol,
         onCopy: ((UUID) -> Void)?,
         onRegenerate: ((UUID) -> Void)?,
@@ -193,6 +210,8 @@ final class NativeHeaderView: NSView {
     ) {
         self.allowsEdit = allowsEdit
         self.turnId = turnId
+        self.messageTimestamp = timestamp
+        self.responseTurnId = responseTurnId
         self.isEditing = isEditing
         self.onCopy = onCopy
         self.onRegenerate = onRegenerate
@@ -428,20 +447,114 @@ final class NativeHeaderView: NSView {
             self.onDelete?(self.turnId)
         }
 
+        // Overflow "…" carrying the message timestamp, mirroring the assistant
+        // footer's overflow menu (upstream #1939).
+        overflowControl = addBtn(icon: "ellipsis", help: L("More"), theme: theme, tint: nil) { [weak self] in
+            self?.presentOverflowMenu()
+        }
+
         if isEditing, let onCancelEdit {
             addBtn(icon: "xmark", help: L("Cancel edit"), theme: theme, tint: nil, action: onCancelEdit)
         }
     }
 
+    /// Drops a menu under the "…" button mirroring the assistant footer's
+    /// overflow menu: a disabled header showing when the message was sent, then
+    /// an "Inspect response" action that opens the reply's request/response log.
+    /// A user turn has no log of its own, so Inspect keys on the assistant reply
+    /// rather than this turn, and is shown whenever a reply turn exists.
+    ///
+    /// The item is gated only on the O(1) `responseTurnId != nil` check — no log
+    /// lookup happens here, so building/showing the popover never scans the log
+    /// on the main thread. Whether the log still exists is resolved lazily
+    /// on click (`inspectResponseFromMenu`), exactly like the assistant menu.
+    private func presentOverflowMenu() {
+        guard let anchor = overflowControl else { return }
+        let menu = NSMenu()
+        menu.autoenablesItems = false
+
+        let header = NSMenuItem(
+            title: Self.timestampFormatter.string(from: messageTimestamp),
+            action: nil,
+            keyEquivalent: ""
+        )
+        header.isEnabled = false
+        menu.addItem(header)
+
+        if responseTurnId != nil {
+            menu.addItem(.separator())
+            let inspect = NSMenuItem(
+                title: L("Inspect response"),
+                action: #selector(inspectResponseFromMenu),
+                keyEquivalent: ""
+            )
+            inspect.target = self
+            if let theme = currentTheme {
+                let pointSize = CGFloat(theme.captionSize)
+                let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+                // `waveform.path.ecg.magnifyingglass` is macOS 14+.
+                inspect.image = SymbolImageCache.image(
+                    "waveform.path.ecg",
+                    accessibilityDescription: nil
+                )?.withSymbolConfiguration(cfg)
+            }
+            menu.addItem(inspect)
+        }
+
+        // Anchor the menu's top-left just under the button's bottom-left so it
+        // opens downward like the assistant overflow menu. The button is a
+        // non-flipped NSView, so its bottom edge is y == 0 and the 4pt gap sits
+        // below it at a negative y.
+        menu.popUp(positioning: nil, at: NSPoint(x: 0, y: -4), in: anchor)
+    }
+
+    @objc private func inspectResponseFromMenu() {
+        // Focus the reply's request/response log, resolved lazily here; the
+        // alert covers a log that was never recorded or has been pruned.
+        guard let responseTurnId else { return }
+        MainActor.assumeIsolated {
+            if InsightsService.shared.focus(turnId: responseTurnId) {
+                AppDelegate.shared?.showManagementWindow(initialTab: .insights)
+            } else {
+                presentLogUnavailableAlert()
+            }
+        }
+    }
+
+    @MainActor
+    private func presentLogUnavailableAlert() {
+        // Scope the alert to this chat window when we can resolve it, so it
+        // dims and centers over the chat rather than another surface.
+        let scope: ThemedAlertScope =
+            window.flatMap { ChatWindowManager.shared.windowId(for: $0) }
+            .map { .chat($0) } ?? .content
+        let requestId = UUID()
+        ThemedAlertCenter.shared.present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: L("Insights Unavailable"),
+                message: L(
+                    "Detailed request logs are kept only for a short duration to save storage, so there's nothing to show for this response."
+                ),
+                buttons: [.primary(L("OK")) {}],
+                onDismiss: {
+                    ThemedAlertCenter.shared.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
+    }
+
     private static let actionButtonSize: CGFloat = 28
 
+    @discardableResult
     private func addBtn(
         icon: String,
         help: String,
         theme: any ThemeProtocol,
         tint: NSColor?,
         action: @escaping () -> Void
-    ) {
+    ) -> HeaderCircleActionControl {
         let control = HeaderCircleActionControl(action: action)
         let pointSize = CGFloat(theme.captionSize) - 1
         let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .medium)
@@ -459,6 +572,7 @@ final class NativeHeaderView: NSView {
             control.heightAnchor.constraint(equalToConstant: Self.actionButtonSize),
         ])
         actionStack.addArrangedSubview(control)
+        return control
     }
 }
 
@@ -581,6 +695,16 @@ final class NativeAssistantActionsView: NSView {
     var onSpeak: ((UUID) -> Void)?
     private var onDeleteMessage: ((UUID) -> Void)?
     private var responseStatsForTurn: ((UUID) -> String?)?
+    private var responseTimestamp: Date = Date()
+
+    /// Formats the response timestamp for the overflow menu header, e.g.
+    /// "Jun 20, 10:17 PM". Localized template so order/separators follow
+    /// locale (upstream #1655).
+    private static let timestampFormatter: DateFormatter = {
+        let formatter = DateFormatter()
+        formatter.setLocalizedDateFormatFromTemplate("MMMd jmm")
+        return formatter
+    }()
 
     nonisolated(unsafe) private var ttsObservation: NSObjectProtocol?
     nonisolated(unsafe) private var ttsConfigObservation: NSObjectProtocol?
@@ -788,6 +912,7 @@ final class NativeAssistantActionsView: NSView {
 
     func configure(
         turnId: UUID,
+        timestamp: Date = Date(),
         theme: any ThemeProtocol,
         onCopy: ((UUID) -> Void)?,
         onRegenerate: ((UUID) -> Void)?,
@@ -797,6 +922,7 @@ final class NativeAssistantActionsView: NSView {
     ) {
         self.turnId = turnId
         self.responseStatsForTurn = responseStatsForTurn
+        self.responseTimestamp = timestamp
         self.onCopy = onCopy
         self.onRegenerate = onRegenerate
         self.onSpeak = onSpeak
@@ -835,6 +961,17 @@ final class NativeAssistantActionsView: NSView {
         let menu = NSMenu()
         menu.autoenablesItems = false
 
+        // A disabled header showing when the response arrived, then the
+        // Inspect action (upstream #1655).
+        let header = NSMenuItem(
+            title: Self.timestampFormatter.string(from: responseTimestamp),
+            action: nil,
+            keyEquivalent: ""
+        )
+        header.isEnabled = false
+        menu.addItem(header)
+        menu.addItem(.separator())
+
         let inspect = NSMenuItem(
             title: L("Inspect response"),
             action: #selector(inspectResponse),
@@ -862,6 +999,15 @@ final class NativeAssistantActionsView: NSView {
             inspect.action = nil
             inspect.submenu = details
         }
+        if let theme = currentTheme {
+            let pointSize = CGFloat(theme.captionSize)
+            let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+            // `waveform.path.ecg.magnifyingglass` is macOS 14+.
+            inspect.image = SymbolImageCache.image(
+                "waveform.path.ecg",
+                accessibilityDescription: nil
+            )?.withSymbolConfiguration(cfg)
+        }
         menu.addItem(inspect)
 
         if onDeleteMessage != nil {
@@ -873,6 +1019,12 @@ final class NativeAssistantActionsView: NSView {
             )
             delete.target = self
             delete.isEnabled = true
+            if let theme = currentTheme {
+                let pointSize = CGFloat(theme.captionSize)
+                let cfg = NSImage.SymbolConfiguration(pointSize: pointSize, weight: .regular)
+                delete.image = SymbolImageCache.image("trash", accessibilityDescription: nil)?
+                    .withSymbolConfiguration(cfg)
+            }
             menu.addItem(delete)
         }
 
@@ -999,6 +1151,7 @@ private final class PaddedInlineButtonCell: NSButtonCell {
 
 private final class PaddedInlineButton: NSButton {
     private let paddedButtonCell: PaddedInlineButtonCell
+    private var hoverArea: NSTrackingArea?
 
     fileprivate var paddedCell: PaddedInlineButtonCell { paddedButtonCell }
 
@@ -1012,6 +1165,39 @@ private final class PaddedInlineButton: NSButton {
     }
 
     required init?(coder: NSCoder) { fatalError() }
+
+    // Pointing-hand cursor + subtle alpha dim on hover, matching the
+    // hover affordances of the SwiftUI buttons elsewhere in chat.
+
+    override func resetCursorRects() {
+        if isEnabled {
+            addCursorRect(bounds, cursor: .pointingHand)
+        }
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let hoverArea { removeTrackingArea(hoverArea) }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseEnteredAndExited, .activeInKeyWindow],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        hoverArea = area
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        guard isEnabled else { return }
+        animator().alphaValue = 0.85
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        animator().alphaValue = 1.0
+    }
 }
 
 // MARK: - UserMessageInlineEditView
@@ -1023,6 +1209,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
     private let textView: CustomNSTextView
     private let editBox = NSView()
     private let buttonStack = NSStackView()
+    private let hintLabel = NSTextField(labelWithString: "")
     private var cancelButton: PaddedInlineButton!
     private var confirmButton: PaddedInlineButton!
 
@@ -1034,6 +1221,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
 
     private var lastTheme: (any ThemeProtocol)?
     private var didApplyInitialFocus = false
+    private var lastLayoutWidth: CGFloat = 0
 
     /// Undo state scoped to this editor's lifetime. Without this, NSTextView
     /// registers undo actions with the WINDOW's undo manager; after the edit
@@ -1063,6 +1251,10 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         tv.isAutomaticQuoteSubstitutionEnabled = false
         tv.isAutomaticDashSubstitutionEnabled = false
         tv.isAutomaticTextReplacementEnabled = false
+        // Opt out of ChatView's window-level Esc monitor so Esc reaches
+        // this text view's `cancelOperation(_:)` and cancels the edit
+        // instead of closing the chat window.
+        tv.handlesEscapeLocally = true
         self.textView = tv
         super.init(frame: frameRect)
         translatesAutoresizingMaskIntoConstraints = false
@@ -1085,10 +1277,24 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         editBox.translatesAutoresizingMaskIntoConstraints = false
 
         buttonStack.orientation = .horizontal
-        buttonStack.spacing = 0
+        // Non-zero spacing guarantees a visible gap between the hint
+        // and the buttons even when the spacer collapses to zero on
+        // narrow bubbles.
+        buttonStack.spacing = 12
         buttonStack.alignment = .centerY
         buttonStack.distribution = .fill
         buttonStack.translatesAutoresizingMaskIntoConstraints = false
+
+        // Keyboard-convention hint on the leading side of the button
+        // row. Kept short — Shift+Enter behaves like every other text
+        // field so it doesn't need calling out; truncates first when
+        // the row gets narrow.
+        hintLabel.stringValue = L("Enter to save · Esc to cancel")
+        hintLabel.lineBreakMode = .byTruncatingTail
+        hintLabel.maximumNumberOfLines = 1
+        hintLabel.isSelectable = false
+        hintLabel.setContentHuggingPriority(.required, for: .horizontal)
+        hintLabel.setContentCompressionResistancePriority(.defaultLow - 1, for: .horizontal)
 
         let spacer = NSView()
         spacer.setContentHuggingPriority(.defaultLow, for: .horizontal)
@@ -1104,6 +1310,9 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         buttonPair.setContentHuggingPriority(.required, for: .horizontal)
         buttonPair.setContentCompressionResistancePriority(.required, for: .horizontal)
 
+        // Esc is handled by the text view's `cancelOperation(_:)` (see
+        // `textView(_:doCommandBy:)`) and by ChatView's Esc cascade when
+        // the editor isn't focused — no keyEquivalent needed here.
         cancelButton = PaddedInlineButton(frame: .zero)
         cancelButton.target = self
         cancelButton.action = #selector(cancelTapped)
@@ -1111,8 +1320,6 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         cancelButton.isBordered = false
         cancelButton.wantsLayer = true
         cancelButton.translatesAutoresizingMaskIntoConstraints = false
-        cancelButton.keyEquivalent = "\u{1b}"
-        cancelButton.keyEquivalentModifierMask = []
 
         confirmButton = PaddedInlineButton(frame: .zero)
         confirmButton.target = self
@@ -1134,6 +1341,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         addSubview(buttonStack)
         buttonPair.addArrangedSubview(cancelButton)
         buttonPair.addArrangedSubview(confirmButton)
+        buttonStack.addArrangedSubview(hintLabel)
         buttonStack.addArrangedSubview(spacer)
         buttonStack.addArrangedSubview(buttonPair)
 
@@ -1179,7 +1387,9 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
 
         let radius = CGFloat(theme.inputCornerRadius)
         editBox.layer?.cornerRadius = radius
-        editBox.layer?.backgroundColor = NSColor(theme.primaryBackground).cgColor
+        // Input chrome (matches the composer / prompt-card fields) with
+        // an accent border so the box reads as "actively editing".
+        editBox.layer?.backgroundColor = NSColor(theme.inputBackground).cgColor
         editBox.layer?.borderWidth = CGFloat(theme.defaultBorderWidth)
         editBox.layer?.borderColor = NSColor(theme.accentColor).withAlphaComponent(theme.borderOpacity + 0.2).cgColor
 
@@ -1187,6 +1397,9 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         textView.font = .systemFont(ofSize: body)
         textView.textColor = NSColor(theme.primaryText)
         textView.insertionPointColor = NSColor(theme.accentColor)
+
+        hintLabel.font = NSFont.systemFont(ofSize: CGFloat(theme.captionSize) - 1)
+        hintLabel.textColor = NSColor(theme.tertiaryText)
 
         if textView.string != getText() {
             textView.string = getText()
@@ -1223,6 +1436,43 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         scrollView.tile()
     }
 
+    /// Re-measure once the editor knows its real width.
+    ///
+    /// Row height is derived from `fittingSize`, which reads the text
+    /// view's *cached intrinsic height* — and that is computed from the
+    /// text container's current width, not the final bubble width (Auto
+    /// Layout has no height-for-width). At configure time and even at
+    /// the start of this layout pass the scroll view hasn't tiled the
+    /// document view to its final width yet, so long text that wraps to
+    /// more lines at the real (narrower) width measured short and
+    /// rendered with the first line scrolled out of view.
+    ///
+    /// So on a real width change: force the document view to the final
+    /// clip width *now*, re-measure, then push the new row height on
+    /// the next runloop tick (mutating table row heights from inside an
+    /// active layout pass is what the "never layoutSubtreeIfNeeded in
+    /// measureFittedRowHeight" comment guards against). Width-gated so
+    /// steady-state layout passes (scrolling, hover) do no extra work.
+    override func layout() {
+        super.layout()
+        let width = bounds.width
+        guard width > 0, abs(width - lastLayoutWidth) > 0.5 else { return }
+        lastLayoutWidth = width
+
+        scrollView.tile()
+        let clipWidth = scrollView.contentView.bounds.width
+        if clipWidth > 0, abs(textView.frame.width - clipWidth) > 0.5 {
+            textView.setFrameSize(NSSize(width: clipWidth, height: textView.frame.height))
+        }
+
+        textView.invalidateIntrinsicContentSize()
+        scrollView.invalidateIntrinsicContentSize()
+        refreshScrollerVisibility()
+        DispatchQueue.main.async { [weak self] in
+            self?.onHeightChanged()
+        }
+    }
+
     /// Matches ContentBlockView.InlineEditView — Cancel secondary chrome; Save accent + white when non-empty.
     private func updateConfirmButtons(theme: any ThemeProtocol) {
         let empty = textView.string.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
@@ -1237,7 +1487,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         cancelButton.layer?.borderWidth = CGFloat(theme.defaultBorderWidth)
         cancelButton.layer?.borderColor = NSColor(theme.primaryBorder).withAlphaComponent(theme.borderOpacity).cgColor
         cancelButton.attributedTitle = NSAttributedString(
-            string: "Cancel",
+            string: L("Cancel"),
             attributes: [
                 .foregroundColor: NSColor(theme.secondaryText),
                 .font: NSFont.systemFont(ofSize: cap, weight: .medium),
@@ -1254,7 +1504,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         if empty {
             confirmButton.layer?.backgroundColor = NSColor(theme.secondaryBackground).cgColor
             confirmButton.attributedTitle = NSAttributedString(
-                string: "Save & Regenerate",
+                string: L("Save & Regenerate"),
                 attributes: [
                     .foregroundColor: NSColor(theme.secondaryText),
                     .font: NSFont.systemFont(ofSize: cap, weight: .semibold),
@@ -1264,7 +1514,7 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
         } else {
             confirmButton.layer?.backgroundColor = NSColor(theme.accentColor).cgColor
             confirmButton.attributedTitle = NSAttributedString(
-                string: "Save & Regenerate",
+                string: L("Save & Regenerate"),
                 attributes: [
                     .foregroundColor: NSColor.white,
                     .font: NSFont.systemFont(ofSize: cap, weight: .semibold),
@@ -1315,6 +1565,13 @@ private final class UserMessageInlineEditView: NSView, NSTextViewDelegate {
                 return false
             }
             confirmTapped()
+            return true
+        }
+        if commandSelector == #selector(NSResponder.cancelOperation(_:)) {
+            // Esc cancels the inline edit. The window-level Esc monitor
+            // passes the event through because our text view sets
+            // `handlesEscapeLocally` (see init).
+            onCancel?()
             return true
         }
         return false
@@ -1687,11 +1944,13 @@ final class NativeMessageCellView: NSTableCellView {
         case let .activityGroup(children):
             configureAsActivityGroup(block: block, children: children, context: context, sameKind: sameKind)
 
-        case let .userMessage(text, attachments, envelope):
+        case let .userMessage(text, attachments, timestamp, responseTurnId, envelope):
             configureAsUserMessage(
                 block: block,
                 text: text,
                 attachments: attachments,
+                timestamp: timestamp,
+                responseTurnId: responseTurnId,
                 envelope: envelope,
                 context: context,
                 sameKind: sameKind
@@ -1751,8 +2010,8 @@ final class NativeMessageCellView: NSTableCellView {
                 sameKind: sameKind
             )
 
-        case let .assistantActions(turnId):
-            configureAsAssistantActions(turnId: turnId, context: context, sameKind: sameKind)
+        case let .assistantActions(turnId, timestamp):
+            configureAsAssistantActions(turnId: turnId, timestamp: timestamp, context: context, sameKind: sameKind)
 
         case let .emptyResponseNotice(turnId, outputTokens, costMicro, _):
             configureAsEmptyResponseNotice(
@@ -2033,6 +2292,8 @@ final class NativeMessageCellView: NSTableCellView {
         block: ContentBlock,
         text rawText: String,
         attachments: [Attachment],
+        timestamp: Date,
+        responseTurnId: UUID?,
         envelope: DispatchEnvelope?,
         context: CellRenderingContext,
         sameKind: Bool
@@ -2340,6 +2601,8 @@ final class NativeMessageCellView: NSTableCellView {
             customAvatarPath: nil,
             isEditing: context.editingTurnId == block.turnId,
             isHovered: context.isTurnHovered,
+            timestamp: timestamp,
+            responseTurnId: responseTurnId,
             theme: context.theme,
             onCopy: context.onCopy,
             onRegenerate: context.onRegenerate,
@@ -2438,6 +2701,7 @@ final class NativeMessageCellView: NSTableCellView {
 
     private func configureAsAssistantActions(
         turnId: UUID,
+        timestamp: Date,
         context: CellRenderingContext,
         sameKind: Bool
     ) {
@@ -2457,6 +2721,7 @@ final class NativeMessageCellView: NSTableCellView {
         }
         nativeAssistantActionsView?.configure(
             turnId: turnId,
+            timestamp: timestamp,
             theme: context.theme,
             onCopy: context.onCopy,
             onRegenerate: context.onRegenerate,
@@ -3101,7 +3366,7 @@ enum NativeCellHeightEstimator {
             let lines = max(1, (text.count + chars - 1) / chars)
             return CGFloat(lines) * 22 + 24
 
-        case let .userMessage(rawText, attachments, envelope):
+        case let .userMessage(rawText, attachments, _, _, envelope):
             // Enveloped turns paint the human-authored text under a badge row.
             let text = envelope?.displayText ?? rawText
             let hasBadges = !(envelope?.badges.isEmpty ?? true)

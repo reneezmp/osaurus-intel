@@ -1393,10 +1393,18 @@ private struct PluginDetailView: View {
                         let toolCount = caps.tools?.count ?? 0
                         let skillCount = caps.skills?.count ?? 0
                         if toolCount > 0 {
-                            heroStatBadge(icon: "wrench.and.screwdriver", text: "\(toolCount) tools", color: .orange)
+                            heroStatBadge(
+                                icon: "wrench.and.screwdriver",
+                                text: toolCount == 1 ? L("1 tool") : L("\(toolCount) tools"),
+                                color: .orange
+                            )
                         }
                         if skillCount > 0 {
-                            heroStatBadge(icon: "lightbulb", text: "\(skillCount) skills", color: .cyan)
+                            heroStatBadge(
+                                icon: "lightbulb",
+                                text: skillCount == 1 ? L("1 skill") : L("\(skillCount) skills"),
+                                color: .cyan
+                            )
                         }
                     }
                     if loadedPlugin?.webConfig != nil {

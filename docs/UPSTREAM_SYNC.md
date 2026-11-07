@@ -5649,6 +5649,60 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3b-1: composer and message actions (`W-cov-reaudit`) — 2026-11-07
+
+3b compares the chat display and model picker rows (22 with #1991): 3 in,
+in Intel's own form; 2 incompatible; 6 ported here (3b-1); 11 left for
+3b-2 (the transcript) and 3b-3 (the pickers). Verdicts and notes:
+[`COV_REAUDIT.md`](COV_REAUDIT.md).
+
+- **Esc cascade (#1468):** Intel's window-level Esc closed the chat window
+  unless voice, the find bar or the slash menu was up, so Esc while editing
+  a message or answering a clarify card lost the window. Now upstream's
+  order: popover, themed alert (`ThemedAlertCenter.cancelActive`, which
+  swallows Esc even without a cancel button), voice overlay, clarify or
+  secret prompt (`PromptItem.cancelByUser`; a dismissed clarify question is
+  appended to the transcript, `appendClarifyQuestionTrace`), the inline
+  editor (`CustomNSTextView.handlesEscapeLocally`, or
+  `ChatWindowState.cancelInlineEdit` when it lost focus), the completion
+  banner, then close. The composer refocuses when the last prompt resolves.
+  Upstream's inline editor (Enter/Esc hint, hover cursor, width
+  re-measure), `PromptQueue` and `ClarifyPromptOverlay` (its free-form
+  field is an `EditableTextView`, no `@FocusState`) are taken whole.
+  Alert buttons carry Return / Esc shortcuts.
+- **Message times (#1939, #1655):** `ContentBlockKind.userMessage` carries
+  `timestamp` and `responseTurnId` (the next visible assistant turn; Intel's
+  memoizer rebuilds every pass, so it never goes stale) and
+  `.assistantActions` carries `timestamp`. The user header gets a "…" menu
+  (time, Inspect response); the reply's "…" menu starts with its time.
+  #1655 was PORT in the 0.24.3 triage and never landed.
+- **Chart save (#1352):** upstream's `NativeChartView` (PNG via
+  `WKWebView.takeSnapshot`, toast with Reveal in Finder, and #1283's
+  `animateInitialDraw`). Intel keeps `chart.bar.xaxis`: the `.ascending`
+  symbol is SF Symbols 5 (macOS 14) and draws nothing on Ventura.
+- **Input style (#2256):** `CustomTheme.inputStyle` was decoded but unused.
+  The composer and the theme preview follow it; Themes › Borders & Effects
+  has the Input Box picker.
+- **Plural labels (#2074):** applied hunk by hunk; 17 files already had it,
+  hunks for text Intel doesn't show were skipped.
+- **Window fit (#2730):** added the re-fit on display changes, the
+  on-screen origin clamp at creation, and the full-screen / mouse-down
+  guards to Intel's `fitToScreen`.
+- **Method note:** Intel's transcript files (`NativeMarkdownView`,
+  `MessageTableRepresentable`, `NativeMessageCellView`) have 23, 27 and 44
+  upstream commits since the fork. 3b-2 syncs them as files (like the model
+  picker), not commit by commit.
+
+Tests: `IntelChatDisplayReauditTests` (alert cancel, clarify user-cancel and
+trace, block timestamps and reply ids). `IntelVenturaControlGuardTests`
+caught two upstream pieces that draw blank on Ventura: the Input Box picker
+now uses `ThemedSegmentedPicker`, and the Inspect menu icon is
+`waveform.path.ecg` (`waveform.path.ecg.magnifyingglass` is macOS 14).
+**Flaky test seen once:** `RelayTunnelSupersededTests.disconnectAll_clearsSupersession`
+failed in one full run (the supersession mark was already gone right after
+`handleAgentRemoved`; shared `RelayTunnelManager` state with earlier tests'
+deferred agent deletes) and passed alone and in the next full run.
+
 ### Coverage re-audit, stage 3a: providers (`W-cov-reaudit`) — 2026-11-07
 
 Stage 3 first triaged the 164 examined-but-absent commits

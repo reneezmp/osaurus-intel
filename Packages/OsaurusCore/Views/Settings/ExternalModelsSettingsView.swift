@@ -68,7 +68,8 @@ struct ExternalModelsSettingsView: View {
                         .font(.system(size: 11))
                         .foregroundColor(theme.tertiaryText)
                 } else {
-                    Text("\(hfCount + lmStudioCount) external models found", bundle: .module)
+                    let count = hfCount + lmStudioCount
+                    Text(count == 1 ? L("1 external model found") : L("\(count) external models found"))
                         .font(.system(size: 11))
                         .foregroundColor(theme.tertiaryText)
                 }
@@ -96,7 +97,12 @@ struct ExternalModelsSettingsView: View {
                         Image(systemName: "exclamationmark.triangle.fill")
                             .font(.system(size: 10, weight: .semibold))
                             .foregroundColor(theme.warningColor)
-                        Text("\(scanReport.skipped.count) external candidate(s) skipped", bundle: .module)
+                        let count = scanReport.skipped.count
+                        Text(
+                            count == 1
+                                ? L("1 external candidate skipped")
+                                : L("\(count) external candidates skipped")
+                        )
                             .font(.system(size: 11, weight: .medium))
                             .foregroundColor(theme.secondaryText)
                     }

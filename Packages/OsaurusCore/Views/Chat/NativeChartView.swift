@@ -8,12 +8,15 @@
 
 import AppKit
 import AAInfographics
+import UniformTypeIdentifiers
+import WebKit
 
 final class NativeChartView: NSView {
 
     private let card = NSView()
     private let titleLabel = NSTextField(labelWithString: "")
     private let typePicker = NSPopUpButton()
+    private let downloadButton = NSButton()
     private let noteLabel = NSTextField(labelWithString: "")
     private let chartView = AAChartView()
 
@@ -46,6 +49,8 @@ final class NativeChartView: NSView {
         case "line": return "chart.xyaxis.line"
         case "spline": return "chart.line.uptrend.xyaxis"
         case "column": return "chart.bar.fill"
+        // `chart.bar.xaxis.ascending` is SF Symbols 5 (macOS 14); Ventura
+        // shows nothing for it.
         case "bar": return "chart.bar.xaxis"
         case "area": return "chart.line.flattrend.xyaxis.circle.fill"
         case "areaspline": return "chart.line.uptrend.xyaxis.circle.fill"
@@ -102,6 +107,21 @@ final class NativeChartView: NSView {
         typePicker.action = #selector(chartTypeChanged)
         card.addSubview(typePicker)
 
+        // Download button — snapshots the rendered chart to a PNG file
+        downloadButton.image = NSImage(
+            systemSymbolName: "square.and.arrow.down",
+            accessibilityDescription: "Save chart as image"
+        )
+        downloadButton.imagePosition = .imageOnly
+        downloadButton.bezelStyle = .roundRect
+        downloadButton.controlSize = .small
+        downloadButton.isBordered = true
+        downloadButton.toolTip = "Save chart as image"
+        downloadButton.translatesAutoresizingMaskIntoConstraints = false
+        downloadButton.target = self
+        downloadButton.action = #selector(downloadChart)
+        card.addSubview(downloadButton)
+
         // Suppress WKWebView's white background before JS renders
         chartView.setValue(false, forKey: "drawsBackground")
         chartView.underPageBackgroundColor = .clear
@@ -142,7 +162,10 @@ final class NativeChartView: NSView {
             titleLabel.centerYAnchor.constraint(equalTo: typePicker.centerYAnchor),
 
             typePicker.topAnchor.constraint(equalTo: card.topAnchor, constant: p - 2),
-            typePicker.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -p),
+            typePicker.trailingAnchor.constraint(equalTo: downloadButton.leadingAnchor, constant: -6),
+
+            downloadButton.centerYAnchor.constraint(equalTo: typePicker.centerYAnchor),
+            downloadButton.trailingAnchor.constraint(equalTo: card.trailingAnchor, constant: -p),
 
             chartView.topAnchor.constraint(equalTo: typePicker.bottomAnchor, constant: 4),
             chartView.leadingAnchor.constraint(equalTo: card.leadingAnchor),
@@ -159,7 +182,12 @@ final class NativeChartView: NSView {
 
     // MARK: - Configure
 
-    func configure(spec: ChartSpec, theme: any ThemeProtocol) {
+    /// `animateInitialDraw` controls only the first paint on this NSView
+    /// instance. Cells get recycled across scroll, so the coordinator tracks
+    /// which block ids have already animated once and passes `false` on
+    /// re-attach to suppress the entry animation. Picker-driven redraws
+    /// always animate (see `chartTypeChanged`).
+    func configure(spec: ChartSpec, theme: any ThemeProtocol, animateInitialDraw: Bool = true) {
         let bgColor = NSColor(theme.cardBackground)
         let bgHex = bgColor.hexString
         let textColor = NSColor(theme.primaryText)
@@ -199,7 +227,7 @@ final class NativeChartView: NSView {
             typePicker.selectItem(at: idx)
         }
 
-        redraw(spec: spec, bgHex: bgHex, textHex: textColor.hexString, theme: theme)
+        redraw(spec: spec, bgHex: bgHex, textHex: textColor.hexString, theme: theme, animate: animateInitialDraw)
     }
 
     func measuredCardHeight() -> CGFloat {
@@ -229,6 +257,70 @@ final class NativeChartView: NSView {
         redraw(spec: updated, bgHex: bgHex, textHex: textHex, theme: theme, forceFullRedraw: true)
     }
 
+    // MARK: - Download action
+
+    /// Snapshots the rendered chart (AAChartView is a WKWebView) into a PNG and
+    /// prompts the user for a save location.
+    @objc private func downloadChart() {
+        let config = WKSnapshotConfiguration()
+        config.afterScreenUpdates = true
+        chartView.takeSnapshot(with: config) { [weak self] image, error in
+            guard let self, let image, error == nil else { return }
+            self.presentSavePanel(for: image)
+        }
+    }
+
+    private func presentSavePanel(for image: NSImage) {
+        let panel = NSSavePanel()
+        panel.allowedContentTypes = [.png]
+        panel.canCreateDirectories = true
+        let baseName = (lastSpec?.title?.isEmpty == false ? lastSpec?.title : nil) ?? "chart"
+        panel.nameFieldStringValue = "\(baseName).png"
+
+        let completion: (NSApplication.ModalResponse) -> Void = { response in
+            guard response == .OK, let url = panel.url else { return }
+            // Pull the (cheap) bitmap off the image on the main actor, then hand
+            // the Sendable TIFF Data to a detached task for the expensive PNG
+            // encode + disk write so the main thread never blocks.
+            Task { @MainActor in
+                guard let tiff = image.tiffRepresentation else {
+                    NSSound.beep()
+                    return
+                }
+                let saved = await Self.encodeAndWritePNG(tiff: tiff, to: url)
+                guard saved else {
+                    NSSound.beep()
+                    return
+                }
+                ToastManager.shared.action(
+                    L("Chart saved"),
+                    message: url.lastPathComponent,
+                    action: .revealInFinder(url),
+                    buttonTitle: L("Reveal in Finder")
+                )
+            }
+        }
+        // beginSheetModal is async (non-blocking); runModal is a blocking
+        // fallback only when the view isn't yet in a window.
+        if let window = self.window {
+            panel.beginSheetModal(for: window, completionHandler: completion)
+        } else {
+            completion(panel.runModal())
+        }
+    }
+
+    /// PNG-encodes `tiff` and writes it to `url` off the main thread.
+    private nonisolated static func encodeAndWritePNG(tiff: Data, to url: URL) async -> Bool {
+        await Task.detached(priority: .userInitiated) {
+            guard
+                let bitmap = NSBitmapImageRep(data: tiff),
+                let png = bitmap.representation(using: .png, properties: [:]),
+                (try? png.write(to: url)) != nil
+            else { return false }
+            return true
+        }.value
+    }
+
     // MARK: - Draw / Refresh
 
     private func redraw(
@@ -236,9 +328,16 @@ final class NativeChartView: NSView {
         bgHex: String,
         textHex: String,
         theme: any ThemeProtocol,
-        forceFullRedraw: Bool = false
+        forceFullRedraw: Bool = false,
+        animate: Bool = true
     ) {
-        let (options, seriesElements) = buildChartModel(from: spec, bgHex: bgHex, textHex: textHex, theme: theme)
+        let (options, seriesElements) = buildChartModel(
+            from: spec,
+            bgHex: bgHex,
+            textHex: textHex,
+            theme: theme,
+            animate: animate
+        )
 
         if !hasDrawn || forceFullRedraw {
             hasDrawn = true
@@ -254,7 +353,8 @@ final class NativeChartView: NSView {
         from spec: ChartSpec,
         bgHex: String,
         textHex: String,
-        theme: any ThemeProtocol
+        theme: any ThemeProtocol,
+        animate: Bool = true
     ) -> (AAOptions, [AASeriesElement]) {
         let gridHex = NSColor(theme.primaryBorder).withAlphaComponent(0.2).hexString
 
@@ -278,7 +378,7 @@ final class NativeChartView: NSView {
             .chartType(AAChartType(rawValue: spec.chartType) ?? .column)
             .backgroundColor(bgHex)
             .animationType(.easeInOutQuart)
-            .animationDuration(600)
+            .animationDuration(animate ? 600 : 0)
             .dataLabelsEnabled(spec.dataLabelsEnabled ?? false)
             .dataLabelsStyle(AAStyle().color(textHex).fontSize(11))
             .tooltipValueSuffix(spec.tooltipSuffix ?? "")

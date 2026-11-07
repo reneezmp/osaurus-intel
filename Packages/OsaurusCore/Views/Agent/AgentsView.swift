@@ -5287,7 +5287,7 @@ struct AgentDetailView: View {
                                         let turnCount =
                                             sessionTurnCounts[session.id]
                                             ?? session.turns.count
-                                        Text("\(turnCount) turns", bundle: .module)
+                                        Text(turnCount == 1 ? L("1 turn") : L("\(turnCount) turns"))
                                             .font(.system(size: 10))
                                             .foregroundColor(theme.tertiaryText)
                                         Image(systemName: "arrow.up.right")

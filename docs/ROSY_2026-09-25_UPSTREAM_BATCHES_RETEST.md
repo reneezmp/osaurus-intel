@@ -3065,6 +3065,32 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Composer and message actions re-audit (2026-11-07)
+
+`W-cov-reaudit` stage 3b-1 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3b-1"). Not in candidate 66.
+
+- [ ] Edit one of your messages (pencil), then press Esc: the edit is
+      cancelled and the window stays open. Start editing again, click the
+      empty part of the chat, press Esc: same.
+- [ ] Ask an agent something that makes it ask a clarifying question; when
+      the card appears press Esc. The card closes, the question stays in
+      the chat as a message, the window stays open, and you can type an
+      answer straight away.
+- [ ] Close a chat that's still answering so the "Keep this chat running?"
+      alert appears, then press Esc: only the alert closes.
+- [ ] With nothing open, Esc still closes the chat window.
+- [ ] Hover one of your messages → "…": it shows when you sent it and
+      Inspect response. A reply's "…" menu starts with its time.
+- [ ] Ask for a chart, then use the download button on the chart card:
+      it saves a PNG and shows "Chart saved" with Reveal in Finder. The
+      chart-type icons all show.
+- [ ] Settings → Themes → edit a theme → Borders & Effects → Input Box →
+      Shadow: the preview and the chat's input box get a soft shadow.
+- [ ] A plugin with one tool shows "1 tool" (not "1 tools").
+- [ ] If you have a second display: put a chat window on it, then change
+      its resolution (or unplug it): the window ends up fully on screen.
+
 ## Providers re-audit (2026-11-07)
 
 `W-cov-reaudit` stage 3a (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage 3a").

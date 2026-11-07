@@ -96,18 +96,18 @@ its code absent is a candidate gap.
 | Check:chat | re-checked `5bb946f7f` | #2144 | 92/249 | auto generate chat titles | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
 | Check:chat | re-checked `bda1c895d` | #2170 | 9/19 | Add connectivity-driven offline mode for chat | UPSTREAM_TRIAGE_0.24.3 |
 | Check:chat-import | re-checked `098cbd4ed` | #2650 | 13/29 | recognize claude's export index and point users at the batch zips | MEMORY_PLAN, UPSTREAM_TRIAGE_0.24.7 |
-| Check:chat-ui | re-checked `0129221a0` | #2538 | 24/79 | Warn when switching models mid-conversation | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `13d04eb83` | #2365 | 2/9 | minor UI polish | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `18bfc8563` | #1939 | 38/77 | added timestamps to user message cells | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `234e3bc20` | #3067 | 2/6 | make copy button copy only the response | FEATURE_PARITY, ROSY_2026-09-25_UPSTREAM_BATCHES_RETEST, UPSTREAM_AUDIT_2026-10- |
-| Check:chat-ui | re-checked `286c4a9a4` | #2020 | 0/2 | fixed find bar crash when scrolling to a match in a partially rendered message | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `3a17bc04d` | #2730 | 16/55 | Fix Orchestrator row selection and fit the chat window to small screens | UPSTREAM_AUDIT_2026-09-25 |
-| Check:chat-ui | re-checked `435426db4` | #1894 | 9/27 | Show live tool-call progress card during buffered tool generation | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `4b96ae0ab` | #2074 | 82/215 | Fix singular and plural count labels | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `8bd7106cc` | #2038 | 54/144 | make the chat window responsive down to narrow widths | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `a82aa1447` | #2381 | 12/56 | added full screen preview for generated images | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `d0b9502b8` | #2256 | 11/32 | Add optional shadow style for chat input | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-ui | re-checked `dbfc3420a` | #1969 | 63/311 | fixed in-chat search bar focus, per occurrence navigation, and current match highlighting | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `0129221a0` | #2538 | 24/79 | Warn when switching models mid-conversation | 3b: upstream now warns only when the previous model is an on-device MLX model (`isLocalChatModel`: only that drops an Osaurus-held prefix cache); Intel has none. |
+| In | re-checked `13d04eb83` | #2365 | 2/9 | minor UI polish | 3b: the diff spinner fix is in (`NativeFileDiffView` matches upstream); Intel's agents sink runs `receive(on: RunLoop.main)`, after the list is set, so the per-agent theme never trails by one. |
+| Done (3b-1) | re-checked `18bfc8563` | #1939 | 38/77 | added timestamps to user message cells | Done 2026-11-07 (3b-1): `.userMessage` carries `timestamp` and `responseTurnId`; the user header's "…" menu shows the time and Inspect response. With #1655 (`f67c3a3e1`, PORT in the 0.24.3 triage but never landed): the reply's "…" menu starts with its time. |
+| In | re-checked `234e3bc20` | #3067 | 2/6 | make copy button copy only the response | 3b: Intel's copy button already leaves thinking out (`copyTurnContent`); the missing lines are the dispatch-envelope and image-only copy from other commits. |
+| Check:chat-ui | re-checked `286c4a9a4` | #2020 | 0/2 | fixed find bar crash when scrolling to a match in a partially rendered message | 3b-2: goes with #1969 (Intel's find bar is per message, without `rectOfSearchOccurrence`). |
+| Done (3b-1) | re-checked `3a17bc04d` | #2730 | 16/55 | Fix Orchestrator row selection and fit the chat window to small screens | Done 2026-11-07 (3b-1): the floor, the creation fit and the sidebar's `.subviews` mask were in; added the re-fit on display changes (`didChangeScreenParametersNotification`), the on-screen origin clamp at creation, and the full-screen and mouse-down guards. |
+| I | re-checked `435426db4` | #1894 | 9/27 | Show live tool-call progress card during buffered tool generation | 3b: the tool-call progress hint is emitted only by the local MLX runtime, which buffers the whole envelope; cloud streams name the tool on its first delta. |
+| Done (3b-1) | re-checked `4b96ae0ab` | #2074 | 82/215 | Fix singular and plural count labels | Done 2026-11-07 (3b-1): 17 files already had it; the rest applied where Intel shows the text (tool and thinking cards, Identity, memory, skills, plugins, external models, calendar/reminder probes). Strings Intel doesn't show were skipped. |
+| Check:chat-ui | re-checked `8bd7106cc` | #2038 | 54/144 | make the chat window responsive down to narrow widths | 3b-2: the composer's chip row doesn't collapse at narrow widths (`metaCompact` / `chipsCompact`). |
+| Check:chat-ui | re-checked `a82aa1447` | #2381 | 12/56 | added full screen preview for generated images | 3b-2: Intel's NativeMarkdownView still renders images in a plain `NSImageView` (no `MarkdownSegmentImageView`), so the click-to-preview comes with the NativeMarkdownView sync. |
+| Done (3b-1) | re-checked `d0b9502b8` | #2256 | 11/32 | Add optional shadow style for chat input | Done 2026-11-07 (3b-1): the theme's `inputStyle` (Gradient / Shadow) drives the composer border and shadow; Themes › Borders & Effects has the Input Box picker and the preview follows it. |
+| Check:chat-ui | re-checked `dbfc3420a` | #1969 | 63/311 | fixed in-chat search bar focus, per occurrence navigation, and current match highlighting | 3b-2: Intel's find bar is per message (ChatFindMatcher `matchTurnIds`); upstream's per-occurrence navigation, highlight and NativeMarkdownView rects come with the NativeMarkdownView sync. |
 | Check:crashes | re-checked `161e6ca57` | #1699 | 2/21 | fix app hang watchdog stalls across folder, tool listing, permissions, and launch | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
 | Check:crashes | re-checked `18367d94b` | #1754 | 8/30 | fixed main thread freezes | UPSTREAM_TRIAGE_0.24.3 |
 | Check:crashes | re-checked `1fd695a68` | #1672 | 11/28 | fixed app hangs | UPSTREAM_TRIAGE_0.24.3 |
@@ -128,9 +128,9 @@ its code absent is a candidate gap.
 | Check:mcp | re-checked `0901780cc` | #2805 | 38/89 | Preserve typed MCP image results in Chat and agent history | UPSTREAM_AUDIT_2026-09-25 |
 | Check:memory | re-checked `79cc7dfe4` | #1834 | 20/113 | Clarify memory ingestion diagnostics | UPSTREAM_TRIAGE_0.24.3 |
 | Check:mobile | re-checked `6673ecf0b` | #3070 | 1/20 | stop showing injected memory in user bubbles for chats continued from the phone | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
-| Check:model-picker | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | UPSTREAM_TRIAGE_0.24.3 |
-| Check:model-picker | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | UPSTREAM_SYNC |
-| Check:model-picker | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | UPSTREAM_TRIAGE_0.24.3 |
+| Check:model-picker | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | 3b-3: upstream's legacy `ModelPickerView` (agent editor, Settings, compaction) has a Favorites tab and hearts; Intel's SwiftUI rewrite has neither. |
+| Check:model-picker | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | 3b-3: provider labels in search and favourites, tab switching from the keyboard, descriptions. |
+| Check:model-picker | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | 3b-3: with #1973. |
 | Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
 | Check:prompt | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | UPSTREAM_TRIAGE_0.24.3 |
 | Check:prompt | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | UPSTREAM_TRIAGE_0.24.3 |
@@ -142,7 +142,7 @@ its code absent is a candidate gap.
 | In | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | 3a: Intel's compaction sends `disableThinking`, and non-strict hosts get `chat_template_kwargs.enable_thinking=false`. |
 | Done (3a) | re-checked `31dd9f260` | #1954 | 15/68 | Fix ChatGPT/Codex test-button model count mismatch; add grok-4.5 to xAI catalog | Codex Test/discovery already use the live catalog; grok-4.5 (and grok-4.6) came with upstream's `XAIOAuthService`. |
 | Done (3a) | re-checked `3877f5e99` | #2416 | 1/13 | fix openai codex models reporting a fallback context window | `OpenAICodexOAuthService.lastContextWindows` from the live catalog's `context_window`. |
-| Check:model-picker | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | 3a: catalog-driven reasoning controls in the picker; moved to 3b. |
+| Check:model-picker | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | 3b-3: the live reasoning catalog (`RemoteReasoningCapabilityCatalog`), staged since W-model-picker-2947. |
 | In | re-checked `40031d8e1` | #1879 | 10/37 | fixed image attachments being blocked or silently dropped for remote provider model | 3a: remote models count as image-capable and Intel's Anthropic adapter sends image blocks. |
 | In | re-checked `4137884fa` | #2562 | 111/459 | Recover media rejections and harden OpenAI Responses | 3a: media rejections are remembered (`IntelImageInputFallback`); keeping Responses-native output items across turns goes to stage 5 (ChatEngine audit). |
 | In | re-checked `4569b76f7` | #1530 | 0/4 | Route OAuth requests through global proxy | 3a: Intel's OAuth services use `GlobalProxySettings` sessions. |
@@ -261,8 +261,13 @@ its code absent is a candidate gap.
    `terminalStopReason`); the Data Visualizer skill loading `render_chart`
    (#2084); the Abilities context-impact readout (#2306, #2323).
 3. **Stage 3, the Check rows of both tables (125), by area** (each a report
-   and push): **3a** providers (21); **3b** chat display and the model
-   picker (21); **3c** capabilities, the agent loop and prompts (14);
+   and push): **3a** providers (21, done 2026-11-07); **3b** chat display
+   and the model picker (22 with #1991), in three parts: **3b-1** composer
+   and message actions (done 2026-11-07), **3b-2** the transcript (sync
+   `NativeMarkdownView`, `MessageTableRepresentable` and the message cell
+   with upstream as files: find per match, image preview, streaming
+   scroll, durations, narrow chips), **3b-3** the pickers (Favourites in
+   the legacy picker, the live reasoning catalog); **3c** capabilities, the agent loop and prompts (14);
    **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
@@ -294,12 +299,12 @@ follow-up); rerun this tool with the new ref after it.
 | Check:capabilities | `9a593c5d3` | #2393 | 17/27 | Answer a bare capabilities call with the enabled list, not a rejection | A bare `capabilities` call answers with the enabled list. |
 | Check:capabilities | `f6384c3ce` | #2308 | 4/39 | Fix MCP capability indexing and custom agent scope | MCP capability indexing and custom-agent scope in upstream's `ToolSearchService`; Intel's tool discovery is its own (`COV-tool-discovery`). |
 | Check:chat-errors | `f6657eb53` |  | 7/25 | Fix plugin tool-loop default iterations | `ChatErrorMessages` (system-resource exhaustion message) and plugin tool-loop default iterations; Intel has no `ChatErrorMessages`. |
-| Check:chat-ui | `10dd0e915` | #1259 | 263/652 | chat improvements | "chat improvements" #1259 (large). |
-| Check:chat-ui | `6d841a22b` | #1352 | 21/51 | save chart as image | Save a chart as an image. |
-| Check:chat-ui | `8b86266fb` | #1468 | 65/146 | cascading esc on chat view states | Cascading Esc across chat view states. |
-| Check:chat-ui | `972e49b31` |  | 75/315 | chat polish with smoother streaming, stable tool call animations and scroll cache fixes (# | Chat polish #1283: chart-drawn tracking in `MessageTableRepresentable`, delta processor `finalize()`; Intel's chat views are partly its own. |
-| Check:chat-ui | `a69299136` | #1272 | 18/39 | fixed scroll to bottom lag & mid stream jumps during streaming | Scroll-to-bottom lag and mid-stream jumps. |
-| Check:chat-ui | `ca2c1d202` | #2486 | 4/6 | fix leaked pacing timer on mid-stream processor dealloc | Leaked pacing timer when the delta processor is freed mid-stream. |
+| Check:chat-ui | `10dd0e915` | #1259 | 263/652 | chat improvements | 3b-2: no thinking or tool-call durations on Intel's turns (`thinkingDuration`, `toolCallDurations`). |
+| Done (3b-1) | `6d841a22b` | #1352 | 21/51 | save chart as image | Done 2026-11-07 (3b-1): upstream's `NativeChartView` (save as PNG, toast with Reveal in Finder; also #1283's no-replay entry animation flag). Intel keeps `chart.bar.xaxis` (the ascending symbol is macOS 14). |
+| Done (3b-1) | `8b86266fb` | #1468 | 65/146 | cascading esc on chat view states | Done 2026-11-07 (3b-1): the Esc cascade (popover, themed alert via `ThemedAlertCenter.cancelActive`, voice overlay, clarify/secret prompt via `cancelByUser` with the question kept in the transcript, inline editor via `handlesEscapeLocally` / `cancelInlineEdit`, completion banner, then close); upstream's inline editor (hint, hover cursor, width re-measure) and clarify card (`EditableTextView`: Enter submits, Esc cancels); alert buttons carry Return/Esc shortcuts. |
+| Check:chat-ui | `972e49b31` |  | 75/315 | chat polish with smoother streaming, stable tool call animations and scroll cache fixes (# | 3b-2: no chart / tool-group view caches across cell recycles; MessageTableRepresentable sync. |
+| Check:chat-ui | `a69299136` | #1272 | 18/39 | fixed scroll to bottom lag & mid stream jumps during streaming | 3b-2: Intel's `scheduleStreamingHeightUpdate` still cancels and reschedules (text grows below the viewport while tokens stream fast) and wipes the streaming row's height; MessageTableRepresentable sync. |
+| In | `ca2c1d202` | #2486 | 4/6 | fix leaked pacing timer on mid-stream processor dealloc | 3b: Intel's `StreamingDeltaProcessor` invalidates both timers in a plain `deinit` (`nonisolated(unsafe)` timers; `isolated deinit` needs a newer runtime). |
 | Check:context | `78788ce18` | #1324 | 7/38 | fixed issue with context budget being out of sync | Context-budget preview sync; Intel has its own estimate refresh. |
 | Check:context | `f6c5d13ae` |  | 1/7 | fix broken test | Context-budget preview refresh on agent change; Intel has its own `refreshContextEstimates`. |
 | Check:crashes | `0336a4a2a` | #1359 | 32/63 | fixed fatal crashes & freezes | "fixed fatal crashes & freezes" #1359. |

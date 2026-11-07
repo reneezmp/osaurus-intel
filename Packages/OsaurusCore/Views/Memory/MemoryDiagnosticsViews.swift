@@ -190,13 +190,23 @@ extension MemoryView {
     }
 
     private static func summarize(backfill final: MemoryBackfillProgress) -> String {
+        let sessions =
+            final.sessionsProcessed == 1
+            ? L("1 session")
+            : L("\(final.sessionsProcessed) sessions")
+        let turns =
+            final.turnsBuffered == 1
+            ? L("1 turn")
+            : L("\(final.turnsBuffered) turns")
         switch final.stage {
         case .cancelled:
-            return
-                "Backfill cancelled after \(final.sessionsProcessed) session(s) — \(final.turnsBuffered) turns buffered. Run 'Distill pending' to drain them."
+            return L(
+                "Backfill cancelled after \(sessions) — \(turns) buffered. Run 'Distill pending' to drain them."
+            )
         default:
-            return
-                "Backfill complete: \(final.sessionsProcessed) session(s) buffered (\(final.turnsBuffered) turns), \(final.sessionsSkipped) skipped. Distillation finished."
+            return L(
+                "Backfill complete: \(sessions) buffered (\(turns)), \(final.sessionsSkipped) skipped. Distillation finished."
+            )
         }
     }
 
@@ -974,9 +984,11 @@ struct MemoryDiagnosticsTabContent: View {
             ) { snapshot in
                 backfillProgress = snapshot
             }
+            let sessions = final.sessionsProcessed == 1 ? L("1 session") : L("\(final.sessionsProcessed) sessions")
+            let turns = final.turnsBuffered == 1 ? L("1 turn") : L("\(final.turnsBuffered) turns")
             backfillSummary = final.stage == .cancelled
-                ? "Backfill cancelled after \(final.sessionsProcessed) session(s); pending turns remain recoverable."
-                : "Backfill complete: \(final.sessionsProcessed) session(s), \(final.turnsBuffered) turns buffered, \(final.sessionsSkipped) skipped."
+                ? L("Backfill cancelled after \(sessions); pending turns remain recoverable.")
+                : L("Backfill complete: \(sessions), \(turns) buffered, \(final.sessionsSkipped) skipped.")
             backfillRunning = false
             refresh()
         }

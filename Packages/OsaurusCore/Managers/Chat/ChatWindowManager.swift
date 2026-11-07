@@ -1039,7 +1039,8 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         window.isReleasedWhenClosed = false
         window.delegate = self
         applyWindowFramePersistence(window, screen: screen)
-        fitToScreen(window, state: state)
+        ensureScreenParametersObserver()
+        fitToScreen(window, state: state, repositions: true)
         nsWindows[info.id] = window
         // Remembered tabs of windows that are gone (last launch, or a window
         // closed earlier) come back in this one; then track its own tabs.
@@ -1533,16 +1534,35 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
         return CGSize(width: visible.width, height: visible.height - chatChromeHeight)
     }
 
-    /// Clamp the chat floor to the window's screen and shrink an oversized
-    /// frame to fit (upstream 3a17bc04d).
-    private func fitToScreen(_ window: NSWindow, state: ChatWindowState) {
-        let screen = window.screen ?? NSScreen.main
+    /// Keep `window` inside its screen's visible frame (upstream #2730):
+    /// clamp the floor the SwiftUI root enforces, then shrink the frame if it
+    /// is larger than the screen and move it back on screen. Runs after
+    /// creation (the restored autosave frame may come from a larger display),
+    /// whenever the window lands on another screen, and when a display's
+    /// resolution or arrangement changes.
+    ///
+    /// `repositions` also pulls a window that FITS but sits partly off
+    /// screen back into view; only creation wants that. A window the user
+    /// dragged partly off screen on purpose is left alone, and nothing moves
+    /// while a mouse button is down (a drag between displays is in
+    /// progress; snapping mid-drag would fight the user). Full screen is
+    /// left to AppKit.
+    private func fitToScreen(_ window: NSWindow, state: ChatWindowState, repositions: Bool) {
+        guard !window.styleMask.contains(.fullScreen),
+            let screen = window.screen ?? NSScreen.main
+        else { return }
         state.updateMinimumContentSize(availableContentSize: Self.chatAvailableContentSize(on: screen))
-        guard let visible = screen?.visibleFrame else { return }
+        guard NSEvent.pressedMouseButtons == 0 else { return }
+        let visible = screen.visibleFrame
         var frame = window.frame
         frame.size.width = min(frame.size.width, visible.width)
         frame.size.height = min(frame.size.height, visible.height)
-        if frame.size != window.frame.size { window.setFrame(frame, display: false) }
+        if repositions || frame.size != window.frame.size {
+            frame.origin.x = min(max(frame.minX, visible.minX), visible.maxX - frame.width)
+            frame.origin.y = min(max(frame.minY, visible.minY), visible.maxY - frame.height)
+        }
+        guard frame != window.frame else { return }
+        window.setFrame(frame, display: true)
     }
 
     public func windowDidChangeScreen(_ notification: Notification) {
@@ -1550,7 +1570,27 @@ public final class ChatWindowManager: NSObject, ObservableObject, NSWindowDelega
             let id = windowId(for: window),
             let state = windowStates[id]
         else { return }
-        fitToScreen(window, state: state)
+        fitToScreen(window, state: state, repositions: false)
+    }
+
+    private var screenParametersCancellable: AnyCancellable?
+
+    /// Re-fit every chat window when a display's resolution or arrangement
+    /// changes (e.g. switching to "Larger Text" scaling, or unplugging the
+    /// external display the window was on). Armed on first window creation
+    /// (upstream #2730).
+    private func ensureScreenParametersObserver() {
+        guard screenParametersCancellable == nil else { return }
+        screenParametersCancellable = NotificationCenter.default
+            .publisher(for: NSApplication.didChangeScreenParametersNotification)
+            .receive(on: RunLoop.main)
+            .sink { [weak self] _ in
+                guard let self else { return }
+                for (id, window) in self.nsWindows {
+                    guard let state = self.windowStates[id] else { continue }
+                    self.fitToScreen(window, state: state, repositions: false)
+                }
+            }
     }
 
     private func bringToFront(_ window: NSWindow) {

@@ -127,13 +127,13 @@ struct DispatchEnvelopeTests {
         let turn = ChatTurn(role: .user, content: stored)
         let block = BlockMemoizer().unrolledBlocks(from: [turn], sessionSource: .watcher)
             .first { $0.id.hasPrefix("user-") }
-        guard case let .userMessage(text, _, envelope) = block?.kind else {
+        guard case let .userMessage(text, _, _, _, envelope) = block?.kind else {
             Issue.record("no user block")
             return
         }
         #expect(text == stored)
         #expect(envelope?.displayText == "Sort.")
         let chat = BlockMemoizer().unrolledBlocks(from: [turn], sessionSource: .chat).first { $0.id.hasPrefix("user-") }
-        if case let .userMessage(_, _, chatEnvelope) = chat?.kind { #expect(chatEnvelope == nil) }
+        if case let .userMessage(_, _, _, _, chatEnvelope) = chat?.kind { #expect(chatEnvelope == nil) }
     }
 }

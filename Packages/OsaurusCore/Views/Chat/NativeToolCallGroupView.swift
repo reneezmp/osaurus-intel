@@ -197,7 +197,8 @@ enum PreviewGenerator {
                 let itemDescriptions = array.prefix(3).map { formatValue($0) }
                 let preview = itemDescriptions.joined(separator: ", ")
                 let suffix = array.count > 3 ? " +\(array.count - 3) more" : ""
-                let result = "[\(array.count) items] \(preview)\(suffix)"
+                let countLabel = array.count == 1 ? "1 item" : "\(array.count) items"
+                let result = "[\(countLabel)] \(preview)\(suffix)"
                 if result.count > maxLength {
                     return String(result.prefix(maxLength - 3)) + "..."
                 }
@@ -213,7 +214,7 @@ enum PreviewGenerator {
                 if let preview = jsonPreview(trimmed, maxLength: maxLength) {
                     return preview
                 }
-                return "{\(dict.count) keys}"
+                return dict.count == 1 ? "{1 key}" : "{\(dict.count) keys}"
             }
         }
 
@@ -225,7 +226,10 @@ enum PreviewGenerator {
 
         if firstLine.count <= maxLength {
             if lines.count > 1 {
-                return "\(firstLine) (+\(lines.count - 1) lines)"
+                let remaining = lines.count - 1
+                return remaining == 1
+                    ? "\(firstLine) (+1 line)"
+                    : "\(firstLine) (+\(remaining) lines)"
             }
             return firstLine
         }
@@ -263,7 +267,7 @@ enum PreviewGenerator {
         case let bool as Bool:
             return bool ? "true" : "false"
         case let arr as [Any]:
-            return "[\(arr.count) items]"
+            return arr.count == 1 ? "[1 item]" : "[\(arr.count) items]"
         case let dict as [String: Any]:
             // Try to get a meaningful preview from the dict
             if let name = dict["title"] as? String ?? dict["name"] as? String {
@@ -273,7 +277,7 @@ enum PreviewGenerator {
                 }
                 return clean
             }
-            return "{\(dict.count) keys}"
+            return dict.count == 1 ? "{1 key}" : "{\(dict.count) keys}"
         default:
             return String(describing: value)
         }

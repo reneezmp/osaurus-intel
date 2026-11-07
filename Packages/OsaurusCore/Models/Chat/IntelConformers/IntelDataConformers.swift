@@ -337,10 +337,20 @@ enum ContentBlockKind: Equatable {
     /// children, whose own ids keep per-item expansion working. Built only by
     /// `ContentBlock.rollupActivityBlocks`, never cached.
     case activityGroup(children: [ContentBlock])
+    /// `responseTurnId` is the assistant turn that answered this message (the
+    /// first assistant turn that follows it), used by the overflow menu's
+    /// "Inspect response" to open that reply's request/response log. Nil when the
+    /// message has no assistant reply yet (upstream #1939).
     /// `envelope` is set when the stored text is a machine-generated
     /// dispatch envelope (self-scheduled or watcher run): the cell renders
     /// its human-authored text under a badge row (upstream).
-    case userMessage(text: String, attachments: [Attachment], envelope: DispatchEnvelope? = nil)
+    case userMessage(
+        text: String,
+        attachments: [Attachment],
+        timestamp: Date,
+        responseTurnId: UUID?,
+        envelope: DispatchEnvelope? = nil
+    )
     case sharedArtifact(artifact: SharedArtifact)
     case pendingToolCall(toolName: String, argPreview: String?, argSize: Int)
     case preflightCapabilities(items: [PreflightCapabilityItem])
@@ -353,7 +363,8 @@ enum ContentBlockKind: Equatable {
     case typingIndicator
     case groupSpacer
     case chart(spec: ChartSpec)
-    case assistantActions(turnId: UUID)
+    /// `timestamp` heads the overflow menu (upstream #1655).
+    case assistantActions(turnId: UUID, timestamp: Date)
     /// GitHub-style diff card under a `file_write` / `file_edit` call
     /// (upstream #1683 + #2907 part A), or its live preview while the call
     /// streams.
@@ -382,7 +393,11 @@ enum ContentBlockKind: Equatable {
             return lIdx == rIdx && lText == rText && lStream == rStream
         case let (.activityGroup(lChildren), .activityGroup(rChildren)):
             return lChildren == rChildren
-        case let (.userMessage(lText, lAttach, lEnv), .userMessage(rText, rAttach, rEnv)):
+        case let (
+            .userMessage(lText, lAttach, lTime, lResp, lEnv),
+            .userMessage(rText, rAttach, rTime, rResp, rEnv)
+        ):
+            guard lTime == rTime && lResp == rResp else { return false }
             return lText == rText && lAttach.count == rAttach.count && lEnv == rEnv
         case let (.sharedArtifact(lArt), .sharedArtifact(rArt)):
             return lArt == rArt
@@ -398,7 +413,8 @@ enum ContentBlockKind: Equatable {
                 && lTotal == rTotal
         case (.typingIndicator, .typingIndicator), (.groupSpacer, .groupSpacer): return true
         case let (.chart(lSpec), .chart(rSpec)): return lSpec == rSpec
-        case let (.assistantActions(lId), .assistantActions(rId)): return lId == rId
+        case let (.assistantActions(lId, lTime), .assistantActions(rId, rTime)):
+            return lId == rId && lTime == rTime
         case let (.fileDiff(lDiff), .fileDiff(rDiff)): return lDiff == rDiff
         case let (.followUpSuggestions(lId, lSugg), .followUpSuggestions(rId, rSugg)):
             return lId == rId && lSugg == rSugg
@@ -2001,6 +2017,13 @@ final class BlockMemoizer: @unchecked Sendable {
 
             // User message
             if isUser && !turn.content.isEmpty {
+                // The reply this message produced = the first assistant turn
+                // that follows it. Nil until a reply exists. Powers the
+                // overflow menu's "Inspect response" (upstream #1939).
+                let next = visibleIndex + 1
+                let responseTurnId: UUID? =
+                    next < visibleTurns.count && visibleTurns[next].role == .assistant
+                    ? visibleTurns[next].id : nil
                 blocks.append(ContentBlock(
                     id: "user-\(turn.id.uuidString)",
                     turnId: turn.id,
@@ -2011,6 +2034,8 @@ final class BlockMemoizer: @unchecked Sendable {
                     kind: .userMessage(
                         text: turn.content,
                         attachments: turn.attachments,
+                        timestamp: turn.createdAt,
+                        responseTurnId: responseTurnId,
                         envelope: DispatchEnvelope.parse(turn.content, sessionSource: sessionSource)
                     )
                 ))
@@ -2192,7 +2217,7 @@ final class BlockMemoizer: @unchecked Sendable {
                 blocks.append(ContentBlock(
                     id: "actions-\(turn.id.uuidString)",
                     turnId: turn.id,
-                    kind: .assistantActions(turnId: turn.id)
+                    kind: .assistantActions(turnId: turn.id, timestamp: turn.createdAt)
                 ))
             }
         }
