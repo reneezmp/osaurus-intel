@@ -729,6 +729,9 @@ git log d132b728..upstream/main --oneline
 # Then check nothing new slipped past the gap scripts (both must exit 0):
 python3 scripts/upstream/classify_gap.py
 python3 scripts/upstream/classify_gated.py
+# And that every upstream commit touching a file Intel compiles was examined
+# (ends with "UNTRIAGED 0"; verdicts in docs/COV_REAUDIT.md):
+python3 scripts/upstream/cov_reaudit.py upstream/main
 # When done:
 #   1. update the "Last synced upstream commit" hash + "Upstream version era" above
 #   2. update IntelBuildInfo.swift (upstreamBase + upstreamCommit) to match
