@@ -364,6 +364,9 @@ final class ChatSession: ObservableObject {
     /// the engine intercepts `complete` and breaks the loop. The chat
     /// view renders it as a "Completed" banner inline.
     @Published var lastCompletionSummary: String?
+    /// True when `complete` closed a tracked task with unchecked todo items
+    /// (upstream #2171): the banner reads "Blocked" instead of "Done".
+    @Published var lastCompletionWasBlocked = false
 
     /// Notification observer for AgentTodoStore updates. Removed in deinit.
     nonisolated(unsafe) private var agentTodoObserver: NSObjectProtocol?
@@ -743,6 +746,15 @@ final class ChatSession: ObservableObject {
         sessionId?.uuidString ?? "chatwindow-\(ObjectIdentifier(self).hashValue)"
     }
 
+    /// Whether a successful `complete` result closed a tracked task with
+    /// unchecked todo items (`CompleteTool` reports `outcome: blocked` only
+    /// for a todo written in this run). Upstream reads the session todo
+    /// directly; the tool's run-scoped answer is the same truth.
+    nonisolated static func completionWasBlocked(result: String) -> Bool {
+        guard let payload = ToolEnvelope.successPayload(result) as? [String: Any] else { return false }
+        return payload["outcome"] as? String == "blocked"
+    }
+
     /// Pull `summary` out of a `complete(...)` tool call's JSON body.
     /// Returns nil when the JSON is malformed; the caller falls back to
     /// the raw tool result string.
@@ -771,12 +783,14 @@ final class ChatSession: ObservableObject {
         guard AgentLoopRunEnd.endsRun(toolName: name, result: result) else { return }
         switch name {
         case "complete":
+            lastCompletionWasBlocked = Self.completionWasBlocked(result: result)
             lastCompletionSummary = Self.parseCompleteSummary(from: arguments) ?? result
             promptQueue.drainAll()
         case "clarify":
             guard let payload = Self.parseClarifyPayload(from: arguments) else { return }
             awaitingClarify = payload
             lastCompletionSummary = nil
+            lastCompletionWasBlocked = false
             promptQueue.enqueue(
                 .clarify(
                     ClarifyPromptState(
@@ -1799,6 +1813,7 @@ final class ChatSession: ObservableObject {
         // Reset agent-loop UI state.
         currentTodo = nil
         lastCompletionSummary = nil
+        lastCompletionWasBlocked = false
         promptQueue.drainAll()
         let oldSid = expectedTodoSessionId
         Task { await AgentTodoStore.shared.clear(for: oldSid) }
@@ -3437,6 +3452,7 @@ final class ChatSession: ObservableObject {
         // somehow still queued, dismiss it before sending so the new
         // turn doesn't race a stale overlay resolution.
         lastCompletionSummary = nil
+        lastCompletionWasBlocked = false
         if promptQueue.current != nil {
             promptQueue.drainAll()
         }
@@ -3793,7 +3809,11 @@ final class ChatSession: ObservableObject {
                     // the system prompt — keeps the system prefix byte-stable
                     // across turns so the MLX paged KV cache can reuse the
                     // entire conversation prefix.
-                    SystemPromptComposer.injectMemoryPrefix(context.memorySection, into: &msgs)
+                    SystemPromptComposer.injectMemoryPrefix(
+                        context.memorySection,
+                        // Upstream #2173: the date and zone every turn.
+                        timeContext: SystemPromptTemplates.timeContext(now: Date(), timeZone: .current),
+                        into: &msgs)
 
                     let convTokens =
                         msgs
@@ -3818,6 +3838,10 @@ final class ChatSession: ObservableObject {
                     req.samplingParametersAreImplicit = true
                     req.modelOptions = activeModelOptions.isEmpty ? nil : activeModelOptions
                     req.ttftTrace = ttftTrace
+                    // Intel: the engine runs the tool rounds itself, so it gets
+                    // what is left of Max Tool Attempts (upstream's
+                    // `maxIterations`); it used to stop at its own default of 12.
+                    req.maxToolRounds = max(1, maxAttempts - attempts + 1)
                     debugLog(
                         "send: attempt=\(attempts) model=\(req.model) tools=\(req.tools?.count ?? 0) sessionId=\(req.session_id ?? "nil")"
                     )
@@ -3895,6 +3919,14 @@ final class ChatSession: ObservableObject {
                             transientRetries = 0
                             break  // finished normally
                         }
+                    } catch is ChatEngine.ToolRoundLimitReached {
+                        // The engine used every round it was given: the
+                        // step-limit wrap-up below runs, as upstream's does
+                        // after `iterationCapReached`. Its text goes in the
+                        // reply the engine opened after the last tool result.
+                        assistantTurn = liveAssistantTurn(fallback: assistantTurn)
+                        reachedToolLimit = true
+                        break outer
                     } catch let error as RemoteProviderServiceError {
                         // Transient provider-side stream errors — most commonly
                         // mid-tool-args truncation flagged by
@@ -3911,7 +3943,10 @@ final class ChatSession: ObservableObject {
                                 "[Osaurus] Transient stream error (retry \(transientRetries)/\(maxTransientRetries)): \(error.localizedDescription)"
                             )
                             // Roll back any partial UI state from the failed
-                            // attempt so the retry starts clean.
+                            // attempt so the retry starts clean. After tool
+                            // rounds that is the engine's newest reply, not
+                            // the run's first one.
+                            assistantTurn = liveAssistantTurn(fallback: assistantTurn)
                             assistantTurn.pendingToolName = nil
                             assistantTurn.clearPendingToolArgs()
                             rebuildVisibleBlocks()
@@ -4045,6 +4080,7 @@ final class ChatSession: ObservableObject {
                             // retries with a real summary.
                             if inv.toolName == "complete" {
                                 if !ToolEnvelope.isError(resultText) {
+                                    self.lastCompletionWasBlocked = Self.completionWasBlocked(result: resultText)
                                     self.lastCompletionSummary =
                                         Self.parseCompleteSummary(from: inv.jsonArguments) ?? resultText
                                     // Drain any pending prompts so a stale
@@ -4107,6 +4143,7 @@ final class ChatSession: ObservableObject {
                                     )
                                     self.promptQueue.enqueue(.clarify(clarifyState))
                                     self.lastCompletionSummary = nil
+                                    self.lastCompletionWasBlocked = false
                                     break outer
                                 }
                                 // Fall through on failure (empty question,
@@ -4237,91 +4274,139 @@ final class ChatSession: ObservableObject {
                 }
 
                 if reachedToolLimit && isRunActive(runId) {
-                    do {
-                        var finalReq = ChatCompletionRequest(
-                            model: selectedModel ?? "default",
-                            messages: buildMessages(),
-                            temperature: effectiveTemp,
-                            max_tokens: effectiveMaxTokensForAgent,
-                            stream: true,
-                            top_p: chatCfg.topPOverride,
-                            frequency_penalty: nil,
-                            presence_penalty: nil,
-                            stop: nil,
-                            n: nil,
-                            tools: nil,
-                            tool_choice: nil,
-                            session_id: sessionId?.uuidString
-                        )
-                        finalReq.samplingParametersAreImplicit = true
-                        finalReq.modelOptions = activeModelOptions.isEmpty ? nil : activeModelOptions
+                    // Upstream (#2167, #2175): a todo this run wrote that still
+                    // has unchecked items gets the honest step-limit message,
+                    // not a tool-free wrap-up that can only guess at the
+                    // unfinished work.
+                    let todoKey = sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
+                    var unfinishedTodoItems = 0
+                    if todoRunScope.hasCurrentRunTodo, let todo = await AgentTodoStore.shared.todo(for: todoKey) {
+                        unfinishedTodoItems = todo.totalCount - todo.doneCount
+                    }
+                    if unfinishedTodoItems > 0 {
+                        let message = AgentToolLoop.unfinishedTodoCapFallback(pending: unfinishedTodoItems)
+                        assistantTurn.content = message
+                        lastStreamError = message
+                        rebuildVisibleBlocks()
+                    } else {
+                        do {
+                            var finalReq = ChatCompletionRequest(
+                                model: selectedModel ?? "default",
+                                messages: buildMessages(),
+                                temperature: effectiveTemp,
+                                max_tokens: effectiveMaxTokensForAgent,
+                                stream: true,
+                                top_p: chatCfg.topPOverride,
+                                frequency_penalty: nil,
+                                presence_penalty: nil,
+                                stop: nil,
+                                n: nil,
+                                tools: nil,
+                                tool_choice: nil,
+                                session_id: sessionId?.uuidString
+                            )
+                            finalReq.samplingParametersAreImplicit = true
+                            finalReq.modelOptions = activeModelOptions.isEmpty ? nil : activeModelOptions
+                            finalReq.isToolFreeWrapUp = true
+                            // The request has no tools; the notice says so, so
+                            // the model reports what is unfinished instead of
+                            // imitating a tool call (upstream #2235). It rides
+                            // the engine's notice channel (on the last tool
+                            // result), as every Intel loop notice does.
+                            finalReq.transientNotices = [AgentToolLoop.iterationCapWrapUpNotice]
 
-                        let processor = StreamingDeltaProcessor(
-                            turn: assistantTurn
-                        ) { [weak self] in
-                            self?.rebuildVisibleBlocks()
-                        }
+                            let processor = StreamingDeltaProcessor(
+                                turn: assistantTurn
+                            ) { [weak self] in
+                                self?.rebuildVisibleBlocks()
+                            }
 
-                        let stream = try await ChatExecutionContext.$currentFolderRoot
-                            .withValue(folderState.rootPath) {
-                                try await ChatExecutionContext.$currentAgentId.withValue(effectiveAgentId) {
-                                    try await ChatExecutionContext.$currentProjectId.withValue(projectId) {
-                                        try await ChatExecutionContext.$currentSessionId.withValue(
-                                            sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
-                                        ) {
-                                            try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
-                                                try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
-                                                    // `speak` ties playback to this reply (speaker
-                                                    // button, row spinner).
-                                                    try await ChatExecutionContext.$currentAssistantTurnId
-                                                        .withValue(assistantTurn.id) {
-                                                            try await ChatExecutionContext.$toolResultImagesEnabled
-                                                                .withValue(self.selectedModelSupportsImages) {
-                                                                    try await ChatExecutionContext.$interactiveChatRun
-                                                                        .withValue(true) {
-                                                                            try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
-                                                                                try await ChatExecutionContext.$currentUserRequest.withValue(
-                                                                                    trimmed.isEmpty ? nil : trimmed
-                                                                                ) {
-                                                                                    try await engine.streamChat(request: finalReq)
+                            let stream = try await ChatExecutionContext.$currentFolderRoot
+                                .withValue(folderState.rootPath) {
+                                    try await ChatExecutionContext.$currentAgentId.withValue(effectiveAgentId) {
+                                        try await ChatExecutionContext.$currentProjectId.withValue(projectId) {
+                                            try await ChatExecutionContext.$currentSessionId.withValue(
+                                                sessionId?.uuidString ?? "draft-\(effectiveAgentId.uuidString)"
+                                            ) {
+                                                try await ChatExecutionContext.$currentChatSessionBox.withValue(folderPromptBox) {
+                                                    try await ChatExecutionContext.$agentTodoRunScope.withValue(todoRunScope) {
+                                                        // `speak` ties playback to this reply (speaker
+                                                        // button, row spinner).
+                                                        try await ChatExecutionContext.$currentAssistantTurnId
+                                                            .withValue(assistantTurn.id) {
+                                                                try await ChatExecutionContext.$toolResultImagesEnabled
+                                                                    .withValue(self.selectedModelSupportsImages) {
+                                                                        try await ChatExecutionContext.$interactiveChatRun
+                                                                            .withValue(true) {
+                                                                                try await ChatExecutionContext.$currentExecutionMode.withValue(executionMode) {
+                                                                                    try await ChatExecutionContext.$currentUserRequest.withValue(
+                                                                                        trimmed.isEmpty ? nil : trimmed
+                                                                                    ) {
+                                                                                        try await engine.streamChat(request: finalReq)
+                                                                                    }
                                                                                 }
                                                                             }
-                                                                        }
-                                                                }
-                                                        }
+                                                                    }
+                                                            }
+                                                    }
                                                 }
                                             }
                                         }
                                     }
                                 }
+                            for try await delta in stream {
+                                noteRunProgress(delta.first == "\u{FFFE}" ? .discrete : .stream)
+                                if !isRunActive(runId) { break }
+                                // Hints are not text: feeding them to the processor
+                                // leaked `\u{FFFE}` envelopes into the reply
+                                // (upstream fixed the same leak by routing this
+                                // stream through its typed decoder).
+                                if let billing = StreamingBillingHint.decode(delta) {
+                                    recordRouterBilling(billing, on: assistantTurn)
+                                } else if let reasoning = StreamingReasoningHint.decode(delta) {
+                                    processor.receiveReasoning(reasoning)
+                                } else if StreamingToolHint.isSentinel(delta) {
+                                    continue
+                                } else if !delta.isEmpty {
+                                    processor.receiveDelta(delta)
+                                }
                             }
-                        for try await delta in stream {
-                            noteRunProgress(delta.first == "\u{FFFE}" ? .discrete : .stream)
-                            if !isRunActive(runId) { break }
-                            // Hints are not text: feeding them to the processor
-                            // leaked `\u{FFFE}` envelopes into the reply
-                            // (upstream fixed the same leak by routing this
-                            // stream through its typed decoder).
-                            if let billing = StreamingBillingHint.decode(delta) {
-                                recordRouterBilling(billing, on: assistantTurn)
-                            } else if let reasoning = StreamingReasoningHint.decode(delta) {
-                                processor.receiveReasoning(reasoning)
-                            } else if StreamingToolHint.isSentinel(delta) {
-                                continue
-                            } else if !delta.isEmpty {
-                                processor.receiveDelta(delta)
+                            await processor.finalize(immediately: !isRunActive(runId))
+                            // Nothing visible (thinking only, or nothing): say
+                            // where the work stands (upstream).
+                            if isRunActive(runId), assistantTurn.contentIsBlank {
+                                assistantTurn.content = AgentToolLoop.iterationCapEmptyWrapUpText
+                                rebuildVisibleBlocks()
                             }
+                        } catch {
+                            debugLog("send: final wrap-up call failed: \(error.localizedDescription)")
+                            let message =
+                                "The agent reached the configured step limit, and its final wrap-up failed: "
+                                + error.localizedDescription
+                            assistantTurn.content = message
+                            lastStreamError = message
+                            rebuildVisibleBlocks()
                         }
-                        await processor.finalize(immediately: !isRunActive(runId))
-                    } catch {
-                        debugLog("send: final wrap-up call failed: \(error.localizedDescription)")
                     }
                 }
             } catch {
+                // After tool rounds the error belongs under the tool results,
+                // in the engine's newest reply; writing it to the run's first
+                // reply replaced what the model said before the tools.
+                assistantTurn = liveAssistantTurn(fallback: assistantTurn)
                 assistantTurn.content = "Error: \(error.localizedDescription)"
                 lastStreamError = error.localizedDescription
             }
         }
+    }
+
+    /// Intel: `CloudChatEngine` streams each reply after a tool result into a
+    /// fresh assistant turn, and `processStreamDeltas` hands the newest one
+    /// back only when the stream ends cleanly. After a throw, this run's
+    /// newest reply is the last turn.
+    func liveAssistantTurn(fallback: ChatTurn) -> ChatTurn {
+        guard let last = turns.last, last.role == .assistant else { return fallback }
+        return last
     }
 }
 
@@ -5087,12 +5172,10 @@ struct ChatView: View {
         if let summary = session.lastCompletionSummary {
             InlineCompleteBlock(
                 summary: summary,
-                // Always false on Intel: the badge distinguishes an agent run that
-                // halted awaiting approval from a completed one, and the agent loop
-                // is amputated here, so a completion summary is never "blocked".
-                isBlocked: false,
+                isBlocked: session.lastCompletionWasBlocked,
                 onDismiss: { [weak session] in
                     session?.lastCompletionSummary = nil
+                    session?.lastCompletionWasBlocked = false
                 }
             )
             // Asymmetric transition: appear with a soft slide+scale so
@@ -5666,6 +5749,7 @@ extension ChatView {
                 // closes the window.
                 if session.lastCompletionSummary != nil {
                     session.lastCompletionSummary = nil
+                    session.lastCompletionWasBlocked = false
                     return nil
                 }
 

@@ -60,18 +60,6 @@ enum IntelAppleAppsGuidance {
         return lines.joined(separator: "\n")
     }
 
-    /// Per-turn clock line: local date/time with offset, weekday and zone.
-    static func clock(now: Date = Date(), timeZone: TimeZone = .current) -> String {
-        let iso = ISO8601DateFormatter()
-        iso.timeZone = timeZone
-        iso.formatOptions = [.withInternetDateTime]
-        let weekday = DateFormatter()
-        weekday.locale = Locale(identifier: "en_US_POSIX")
-        weekday.timeZone = timeZone
-        weekday.dateFormat = "EEEE"
-        return "## Current local time\n\(iso.string(from: now)) (\(weekday.string(from: now)), \(timeZone.identifier))"
-    }
-
     /// Apps whose tools are in `toolNames`, in catalog order.
     static func activeApps(in toolNames: Set<String>) -> [AppleApp] {
         AppleApp.allCases.filter { !$0.toolNames.isDisjoint(with: toolNames) }

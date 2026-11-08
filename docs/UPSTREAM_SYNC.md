@@ -5649,6 +5649,86 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3c-1: the agent loop and capabilities (`W-cov-reaudit`) — 2026-11-08
+
+3c ([`COV_REAUDIT.md`](COV_REAUDIT.md)) splits in two: **3c-1** the agent
+loop, capabilities and the time block (this entry); **3c-2** the prompt
+commits (#2278 generative greetings removal, #1430, #1317, #2862, #3033).
+Intel's tool loop is its own (`CloudChatEngine`), not upstream's
+`AgentToolLoop`, so each commit was checked for behaviour.
+
+- **Terminal recovery (#1681, #2167, #2344):** Intel's engine took any round
+  without a tool call as the final answer, so an empty reply, a
+  reasoning-only stop ("I have a tool for this. Let me call it.", then
+  nothing) and a reply cut at the output limit all ended the run silently.
+  `Services/Chat/IntelAgentLoopTerminal.swift` has upstream's
+  `AgentLoopModelStep.classifyTerminal` and messages verbatim, and
+  `IntelTerminalRecovery` does what upstream's driver does for chat: an empty
+  turn is re-asked with `emptyTurnNotice` twice, then gets
+  `emptyTurnFallback` (`emptyToolTaskFallback` after tool work); reasoning
+  only, after tool work or with tools offered, gets one fresh retry (the
+  attempt stays on screen, out of model history, through the grounded-retry
+  hint), then `incompleteReasoningFallback`; `finish_reason: length` with no
+  tool call gets `lengthExhaustedFallback`. Chat runs only (like the
+  grounded checks). The engine passes no visible content, so upstream's
+  announce-only and continuation-request recoveries (#2480) stay off — stage
+  5, with the API and plugin surfaces.
+- **Step limit (#2235):** the chat never passed Settings › Conversation ›
+  Max Tool Attempts (default 15) to the engine, which stopped at its own 12
+  rounds and threw; the chat then showed "Error: Tool-call limit reached…"
+  and its own wrap-up code never ran (the engine never hands tool calls back,
+  so the chat's attempt loop runs once). Now `maxToolRounds` is the setting,
+  the engine's `ToolRoundLimitReached` leads to upstream's tool-free wrap-up
+  with `iterationCapWrapUpNotice` (no tools, honest status), a blank wrap-up
+  gets `iterationCapEmptyWrapUpText` and a failed one upstream's message, and
+  a todo written this run with unchecked items gets `unfinishedTodoCapFallback`
+  instead (#2167, #2175). The wrap-up request sets
+  `ChatCompletionRequest.isToolFreeWrapUp`, which turns the engine's terminal
+  recovery and grounded checks off (upstream streams it outside its driver),
+  and carries the notice in `transientNotices`, so the engine appends it to
+  the last tool result like its other notices (upstream's second tool
+  message with the same id is what strict hosts such as DeepSeek reject).
+  Upstream's chat turns its budget warning off (`budgetWarningThreshold: 0`),
+  so Intel adds none.
+- **Found:** after tool rounds, an engine error ("Error: …") replaced the
+  run's *first* reply (what the model wrote before the tools), and a
+  transient retry streamed into it, because `processStreamDeltas` hands the
+  newest turn back only on a clean finish. Both now use the run's newest
+  reply (`ChatSession.liveAssistantTurn`).
+- **Blocked completion (#2171):** the Done banner hard-coded
+  `isBlocked: false` (a stale note said the agent loop was missing). It reads
+  "Blocked" when `complete`'s result reports `outcome: blocked` (a todo
+  written this run still has unchecked items), as upstream's
+  `lastCompletionWasBlocked`. The rest of #2171 is retired upstream: its
+  three todo rules now return nil ("Todo is advisory UI state"), and the
+  frozen tool specs belong to upstream's per-chat prompt freeze, which Intel
+  doesn't have (it composes each call) — stage 5 with the prompt composer.
+- **Capabilities (#1725, #1679):** Intel's `capabilities` gateway is its own
+  (`TOOL_DISCOVERY_INTEL.md`) and already adopts loaded tools on the next
+  round (#1725's same-turn activation) and answers a bare call with the
+  enabled list (#2393). Missing: upstream's schema check — a plugin or MCP
+  tool whose schema is malformed (`validateDynamicToolSchema`, verbatim) is
+  skipped with a diagnostic instead of offered, at load and wherever Intel
+  offers loaded tools (`CapabilityLoadBuffer.validSpecs`). An id that matches
+  nothing now fails as not retryable (closed vocabulary, #1679). #2308 is
+  covered by Intel's live catalog (no startup indexing race; built-in
+  configuration tools are never in it).
+- **Current time (#2173):** Intel sent no date or time except to agents with
+  Apple Apps tools (`## Current local time`). Every chat and HTTP agent
+  request now carries upstream's `[Current Time]` block
+  (`SystemPromptTemplates.timeContext`, minute granularity) last in the
+  per-turn prefix on the latest user message; the Apple-only clock is gone.
+- **Elsewhere:** #2157 (secret-argument redaction) only covers
+  `sandbox_secret_set`, which Intel doesn't compile → `W-seatbelt-sandbox`.
+  The 0.24.3 triage skipped #2175 and #2192 as "agent subsystem amputated",
+  stale since the loop was ported; their live chat piece is the
+  unfinished-todo step-limit message above.
+
+Tests: upstream `ReasoningOnlyTurnClassificationTests` (verbatim);
+`IntelAgentLoopTerminalTests` (recovery, the engine on an HTTP fixture,
+schema checks, the blocked outcome, upstream's time-block cases);
+`IntelAppleAppsTests` updated for the shared time block.
+
 ### Coverage re-audit, stage 3b-3: the model pickers (`W-cov-reaudit`) — 2026-11-07
 
 The last 4 rows of 3b ([`COV_REAUDIT.md`](COV_REAUDIT.md)); 3b is complete.

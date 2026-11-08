@@ -53,10 +53,13 @@ releases so each app gets its own Ventura permission check before it ships.
 - **EventKit on Ventura:** `CalendarService`/`RemindersService.requireAccess`
   accept `.authorized` (macOS 13's equivalent of macOS 14's `.fullAccess`);
   requests go through `requestAccessCompat`.
-- **No `get_current_time` tool on Intel.** The guidance tells the model to
-  resolve dates against a `## Current local time` line (ISO 8601 with
-  offset, weekday, zone) that rides the per-turn prefix, so the stable
-  prompt stays cacheable.
+- **Dates resolve against the per-turn time block.** The guidance tells the
+  model to resolve dates against the current time given with the user's
+  message. Since 2026-11-08 (`W-cov-reaudit` 3c-1, upstream #2173) that is
+  upstream's `[Current Time]` block on every chat turn
+  (`SystemPromptTemplates.timeContext`, minute granularity, with offset,
+  weekday and zone); the Apple Apps-only `## Current local time` line it
+  replaced is gone. The stable prompt stays cacheable.
 - **No pre-dispatch schema validator** (upstream `SchemaValidator` is not
   compiled on Intel): closed-schema rejection of unknown keys does not
   happen; the tools' own argument parsing still returns `invalid_args`.

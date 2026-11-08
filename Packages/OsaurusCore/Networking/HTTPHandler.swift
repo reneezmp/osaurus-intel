@@ -167,6 +167,16 @@ struct ChatCompletionRequest: Codable, Sendable {
     /// `maxToolAttempts` for `/agents/{id}/run`); `nil` keeps the engine's
     /// own. Not encoded.
     var maxToolRounds: Int? = nil
+    /// Intel: the chat's tool-free status step after the step limit
+    /// (upstream streams it outside its loop driver), so the engine's
+    /// terminal recovery stays off and a blank reply gets the chat's own
+    /// limit text. Not encoded.
+    var isToolFreeWrapUp: Bool = false
+    /// Intel: `[System Notice]` lines for the first round only, applied the
+    /// engine's way (appended to the trailing tool result, else a trailing
+    /// user message; `CloudChatEngine.appendingTransientNotices`). Never
+    /// saved. Not encoded.
+    var transientNotices: [String] = []
     /// Osaurus Connect: continue one of the Mac's own chat sessions — its
     /// turns become the model context and the new turns are appended back
     /// (upstream MOBILE_PROTOCOL §14.5). Owner callers only.

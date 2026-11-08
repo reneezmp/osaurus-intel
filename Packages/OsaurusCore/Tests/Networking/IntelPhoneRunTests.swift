@@ -95,7 +95,10 @@ struct IntelPhoneRunTests {
         #expect(try phone.openStream(data, requestSeq: seq).contains("ok"))
         let sent = try #require(await engine.lastRequest)
         let lastUser = try #require(sent.messages.last(where: { $0.role == "user" })?.content)
-        #expect(lastUser.hasPrefix("hi\n\n[Voice call]"))
+        // The per-turn time block (upstream #2173) leads; the voice note
+        // follows the user's text.
+        #expect(lastUser.hasPrefix("[Current Time]"))
+        #expect(lastUser.contains("[/Current Time]\n\nhi\n\n[Voice call]"))
         #expect(lastUser.hasSuffix("[/Voice call]"))
     }
 

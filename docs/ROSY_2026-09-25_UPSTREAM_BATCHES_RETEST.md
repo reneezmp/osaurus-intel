@@ -3065,6 +3065,33 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Agent loop re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3c-1 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3c-1"). Not in candidate 66.
+
+- [ ] Settings › Conversation › Advanced: set Max Tool Attempts to 3. Ask
+      a custom agent with folder or web tools for a job that needs many
+      steps ("read every file in this folder and summarise each"). After 3
+      tool rounds the reply is a short honest status that says what is
+      unfinished, not "Error: Tool-call limit reached". Set it back after.
+- [ ] Same limit, but first ask the agent to keep a todo list ("make a todo
+      list, then …"). At the limit the reply says the step limit was reached
+      with N todo items unfinished.
+- [ ] Ask a custom agent "what is today's date and time?" with no tools
+      needed: it answers with the right date and your time zone. Ask
+      "remind me tomorrow at 9" to an agent with Reminders: the reminder is
+      due tomorrow at 9 local time.
+- [ ] A task that ends with `complete` while todo items are still unchecked:
+      the banner says "Blocked" (orange), not "Done".
+- [ ] A reasoning model (e.g. DeepSeek with Thinking on) asked something
+      that needs a tool: if it ever stops after only thinking, the chat
+      retries once on its own and then answers (or shows "The model ended in
+      reasoning…"), never a thought bubble with nothing under it.
+- [ ] A multi-step tool run that fails mid-way (e.g. switch the network off
+      after the first tool card): the error appears under the tool cards,
+      and the model's first reply above them is unchanged.
+
 ## Model pickers re-audit (2026-11-07)
 
 `W-cov-reaudit` stage 3b-3 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

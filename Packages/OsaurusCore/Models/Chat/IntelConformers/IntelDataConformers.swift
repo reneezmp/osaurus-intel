@@ -2895,7 +2895,8 @@ final class SystemPromptComposer: @unchecked Sendable {
                 }
                 tools.removeAll { dynamicNames.contains($0.function.name) && !loaded.contains($0.function.name) }
                 let present = Set(tools.map(\.function.name))
-                tools += ToolRegistry.shared.openAISpecs(named: loaded.sorted().filter { !present.contains($0) })
+                tools += CapabilityLoadBuffer.validSpecs(
+                    ToolRegistry.shared.openAISpecs(named: loaded.sorted().filter { !present.contains($0) }))
                 if let manifest = CapabilityManifest.render(catalog) {
                     tools += ToolRegistry.shared.openAISpecs(named: [CapabilitiesTool.toolName])
                     let block = "\n\n" + CapabilityManifest.discoveryGuidance + "\n\n" + manifest
@@ -2923,8 +2924,8 @@ final class SystemPromptComposer: @unchecked Sendable {
             }
         }
         // Built-in Apple apps (docs/APPLE_APPS_INTEL_PLAN.md): guidance for the
-        // apps that resolved into this turn's schema; the clock rides the
-        // per-turn prefix below.
+        // apps that resolved into this turn's schema; they resolve dates
+        // against the `[Current Time]` block every turn carries (#2173).
         let activeAppleApps = IntelAppleAppsGuidance.activeApps(in: Set(tools.map { $0.function.name }))
         if !activeAppleApps.isEmpty {
             let block = "\n\n" + IntelAppleAppsGuidance.guidance(apps: activeAppleApps)
@@ -2995,11 +2996,6 @@ final class SystemPromptComposer: @unchecked Sendable {
                 .joined(separator: "\n\n")
         }
 
-        if !activeAppleApps.isEmpty {
-            memorySection = [IntelAppleAppsGuidance.clock(), memorySection].compactMap { $0 }
-                .joined(separator: "\n\n")
-        }
-
         return ComposedContext(
             prompt: prompt, toolTokens: toolTokens, tools: tools,
             memorySection: memorySection, promptSections: sections)
@@ -3030,14 +3026,22 @@ final class SystemPromptComposer: @unchecked Sendable {
     /// repeated its previous answer on every turn. Intel difference: a user
     /// message with image or audio parts gets the block as a leading text
     /// part (upstream leaves such a message without it).
-    static func injectMemoryPrefix(_ section: String?, into messages: inout [ChatMessage]) {
-        guard let section,
-            case let trimmed = section.trimmingCharacters(in: .whitespacesAndNewlines),
-            !trimmed.isEmpty,
-            let idx = messages.lastIndex(where: { $0.role == "user" })
-        else { return }
+    ///
+    /// `timeContext` (upstream #2173, `SystemPromptTemplates.timeContext`)
+    /// rides last, right against the user's text, as in upstream's
+    /// `composeInjectedUserPrefix`.
+    static func injectMemoryPrefix(
+        _ section: String?, timeContext: String? = nil, into messages: inout [ChatMessage]
+    ) {
+        var prefix = ""
+        if let trimmed = section?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
+        }
+        if let trimmed = timeContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix += "\(trimmed)\n\n"
+        }
+        guard !prefix.isEmpty, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return }
         let existing = messages[idx]
-        let prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
         messages[idx] = ChatMessage(
             role: existing.role,
             content: prefix + (existing.content ?? ""),

@@ -88,11 +88,11 @@ its code absent is a candidate gap.
 | Check:agents | re-checked `3085b242a` | #2870 | 4/19 | Keep agent purpose metadata current across remote and voice consumers | UPSTREAM_AUDIT_2026-09-25 |
 | Check:agents | re-checked `81d201c4a` | #1756 | 1/17 | Make built-in Default agent non-configurable; fix sub-agent toggle persistence | UPSTREAM_TRIAGE_0.24.3 |
 | Check:agents | re-checked `cf01aa146` | #3121 | 3/13 | Avoid repeated @Published agents lookups in liveAgentSources | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
-| Check:capabilities | re-checked `2d238592c` | #1725 | 28/97 | Fix same-turn capability tool activation | UPSTREAM_TRIAGE_0.24.3 |
-| Check:capabilities | re-checked `554ace8e2` | #2157 | 28/150 | Redact secret tool arguments across agent surfaces | UPSTREAM_TRIAGE_0.24.3 |
-| Check:capabilities | re-checked `7ec54935b` | #2171 | 88/349 | Fix tracked tool completion and prompt cache stability | UPSTREAM_TRIAGE_0.24.3 |
-| Check:capabilities | re-checked `bc6146f1a` | #2344 | 0/3 | Fix #2327: a reasoning-only turn with tools offered was classified as a finished answer | UPSTREAM_TRIAGE_0.24.3 |
-| Check:capabilities | re-checked `c05947f02` | #1681 | 16/81 | Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn | UPSTREAM_TRIAGE_0.24.3 |
+| Done (3c-1) | re-checked `2d238592c` | #1725 | 28/97 | Fix same-turn capability tool activation | Same-turn activation was already Intel's (`CloudChatEngine` adopts loaded tools on the next round); upstream's `validateDynamicToolSchema` now skips a malformed plugin/MCP schema with a diagnostic, at load and at every offer (`CapabilityLoadBuffer.validSpecs`). |
+| W-seatbelt-sandbox | re-checked `554ace8e2` | #2157 | 28/150 | Redact secret tool arguments across agent surfaces | Redacts only `sandbox_secret_set`'s value; that tool is not compiled on Intel (`SandboxSecretTools.swift` excluded). Lands with the sandbox tools. |
+| Done (3c-1) | re-checked `7ec54935b` | #2171 | 88/349 | Fix tracked tool completion and prompt cache stability | The Done banner reads Blocked from `complete`'s `outcome: blocked`. Its three todo rules are retired upstream (return nil); frozen tool specs belong to the per-chat prompt freeze Intel doesn't have (stage 5). |
+| Done (3c-1) | re-checked `bc6146f1a` | #2344 | 0/3 | Fix #2327: a reasoning-only turn with tools offered was classified as a finished answer | Reasoning-only stop with tools offered gets one fresh retry (`IntelTerminalRecovery`, upstream `classifyTerminal` verbatim). |
+| Done (3c-1) | re-checked `c05947f02` | #1681 | 16/81 | Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn | Empty turn: re-asked twice, then a visible fallback (`emptyToolTaskFallback` after tool work). Chat runs; the API and plugin surfaces are stage 5. |
 | Check:chat | re-checked `5bb946f7f` | #2144 | 92/249 | auto generate chat titles | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
 | Check:chat | re-checked `bda1c895d` | #2170 | 9/19 | Add connectivity-driven offline mode for chat | UPSTREAM_TRIAGE_0.24.3 |
 | Check:chat-import | re-checked `098cbd4ed` | #2650 | 13/29 | recognize claude's export index and point users at the batch zips | MEMORY_PLAN, UPSTREAM_TRIAGE_0.24.7 |
@@ -132,7 +132,7 @@ its code absent is a candidate gap.
 | Done (3b-3) | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | Provider labels on rows that mix sources (All, Favorites, search); descriptions were already shown. Arrow-key tab switching doesn't apply: Intel's picker has no keyboard navigation (Ventura rule). |
 | Done (3b-3) | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | Favorites tab pinned first (shown while a favourite is among the options), hearts on hover, filled hearts persistent (`FavoriteModelsStore`, shared with the chat picker). Intel keeps All as the default tab. |
 | Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
-| Check:prompt | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | UPSTREAM_TRIAGE_0.24.3 |
+| Done (3c-1) | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | `[Current Time]` (upstream's current, minute granularity) rides last on the latest user message for chat and HTTP agent runs; replaces Intel's Apple Apps-only clock. |
 | Check:prompt | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | UPSTREAM_TRIAGE_0.24.3 |
 | Check:prompt | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | UPSTREAM_SYNC |
 | Check:prompt | re-checked `849bc4837` | #2862 | 0/5 | Stop quoting a settings shortcut that is not bound | UPSTREAM_AUDIT_2026-09-25 |
@@ -151,7 +151,7 @@ its code absent is a candidate gap.
 | Check:stage5 | re-checked `5f12d260f` | #1961 | 265/665 | Remote provider hardening: crash/hang fixes, endpoint trust, Router spend safety, streaming perf | 3a: spread across upstream's `RemoteProviderService` (streaming producer, watchdog, trust gates); compared in stage 5's engine audit. |
 | In | re-checked `7bdb440f4` | #1983 | 42/110 | fix: support Codex Responses Lite for GPT-5.6 models | 3a: `OpenAICodexOAuthService.usesResponsesLite` from the live catalog. |
 | Done (3a) | re-checked `bce51e0f1` | #2464 | 1/18 | hardcode openai context windows as api never returns them | `ModelPickerItem.officialOpenAIContextWindow` for the official host. |
-| Check:capabilities | re-checked `c81491b4b` | #2235 | 49/240 | Fix four reported runtime and model metadata issues | 3a: MLX and Seatbelt parts are incompatible / `W-seatbelt-sandbox`; the agent-loop terminal-failure and iteration-cap wrap-up part goes to 3c. |
+| Done (3c-1) | re-checked `c81491b4b` | #2235 | 49/240 | Fix four reported runtime and model metadata issues | Agent-loop part: Max Tool Attempts reaches the engine (it stopped at 12 with an error), upstream's tool-free step-limit wrap-up with `iterationCapWrapUpNotice`, blank and failed wrap-up text. 3a: MLX and Seatbelt parts are incompatible / `W-seatbelt-sandbox`. |
 | Done (3a) | re-checked `f01e5d44a` | #2463 | 2/29 | fix xai oauth models reporting a stale catalog and fallback context window | The xAI OAuth catalog's documented windows (upstream `XAIOAuthService.contextWindows`). |
 | In | re-checked `f52fc9a32` | #3068 | 1/11 | read nested metadata.context_length so DeepInfra context windows resolve | 3a: `RemoteProviderManager.advertisedContextLength` reads DeepInfra's `metadata.context_length`. |
 | In | re-checked `f9478c0f1` | #2205 | 3/25 | fall back to lenient decode for nonstandard streaming chunks during tool calls | 3a: Intel parses stream frames with `JSONSerialization` (already lenient) and skips unparseable ones. |
@@ -181,7 +181,7 @@ its code absent is a candidate gap.
 | I | re-checked `b12a646eb` | #2293 | 0/4 | Fix DSV4 thinking default, duplicate pre-send warmups, and 1M context resolution | UPSTREAM_TRIAGE_0.24.3 |
 | I | re-checked `b6863d77f` | #2253 | 6/27 | Stabilize execution modes, prompts, and cache warmup | UPSTREAM_TRIAGE_0.24.3 |
 | I | re-checked `c654abc1e` | #1593 | 1/8 | Laguna-M.1 + VibeThinker-3B serving: fix Laguna chat garbage (missing-BOS) + drop rep-penalty special-case | UPSTREAM_TRIAGE_0.24.3 |
-| I | re-checked `cc0898026` | #2167 | 141/412 | Fix Gemma and Qwen post-tool completion | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_TRIAGE_0.24.3 |
+| Done (3c-1) | re-checked `cc0898026` | #2167 | 141/412 | Fix Gemma and Qwen post-tool completion | Re-checked 2026-11-08: its loop part is not MLX-only — reasoning-only recovery and the unfinished-todo step-limit message are on Intel now; the Gemma/Qwen runtime parts stay incompatible. |
 | I | re-checked `ec38ab2a4` | #2310 | 25/177 | Clarify model memory estimates and fit guidance | UPSTREAM_TRIAGE_0.24.3 |
 | I | re-checked `f3d776096` | #1793 | 16/40 | Generation params: wire seed into the sampler, accept string stop, native penalties, min_p | UPSTREAM_TRIAGE_0.24.3 |
 | I | re-checked `f6b872371` | #2752 | 47/276 | Fix RAM admission measurement, capacity and token-budget contracts | UPSTREAM_AUDIT_2026-09-25 |
@@ -268,7 +268,13 @@ its code absent is a candidate gap.
    `NativeMarkdownView`, `MessageTableRepresentable` and the message cell
    with upstream as files: find per match, image preview, streaming
    scroll, durations, narrow chips), **3b-3** the pickers (done 2026-11-07;
-   Favourites in the legacy picker, the live reasoning catalog); **3c** capabilities, the agent loop and prompts (14);
+   Favourites in the legacy picker, the live reasoning catalog); **3c**
+   capabilities, the agent loop and prompts (14 with #2235's loop part), in
+   two parts: **3c-1** the loop and capabilities (done 2026-11-08;
+   upstream's terminal recovery in `CloudChatEngine`, the step limit and its
+   wrap-up, the Blocked banner, schema checks, the time block; #1507, #2167,
+   #2175 and #2192 re-checked with it), **3c-2** the prompt commits (#2278
+   generative greetings removal, #1430, #1317, #2862, #3033);
    **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
@@ -279,7 +285,12 @@ its code absent is a candidate gap.
    original scope): commits since the fork are covered by stages 1–4; this
    compares behaviour Intel's replacements never had at all, starting with
    chat storage, the prompt composer (with the Abilities context-impact
-   readout, #2306 / #2323), `ChatEngine` and `RemoteProviderService`.
+   readout, #2306 / #2323, and upstream's per-chat freeze of the prompt and
+   tool specs, #2171), `ChatEngine` and `RemoteProviderService`. From 3c-1:
+   the engine's terminal recovery runs on chat only and skips upstream's
+   announce-only and continuation-request cases (#2480); compare the rest
+   of `AgentToolLoop.run` (truncated tool calls, repeated-retrieval and
+   announce wrap-ups, the API and plugin surfaces).
 
 The 47 upstream commits past `bce907045` are a separate audit (carried
 follow-up); rerun this tool with the new ref after it.
@@ -296,9 +307,11 @@ follow-up); rerun this tool with the new ref after it.
 | Gap:windows | `84271e386` | #2154 | 2/14 | fix settings window opening offscreen with stale saved frame | Done 2026-11-07 (stage 2): `IntelWindowFrameRecovery` for chat windows (after the saved frame) and the reused Settings window. |
 | Check:agents | `848f2c4c3` | #1837 | 54/160 | Add recoverable agent backup restore path | Recoverable agent backup restore (`AgentStore`); Intel keeps its own agent store. |
 | Check:applescript | `0d4c8077d` | #2394 | 11/26 | Report an unusable AppleScript model assignment instead of swapping it | AppleScript agent reports an unusable model assignment instead of swapping it. |
-| Check:capabilities | `1a6bbd339` | #1679 | 1/3 | stop wasted iterations on repeated failing capabilities_load calls | Repeated failing `capabilities_load` calls end early. |
-| Check:capabilities | `9a593c5d3` | #2393 | 17/27 | Answer a bare capabilities call with the enabled list, not a rejection | A bare `capabilities` call answers with the enabled list. |
-| Check:capabilities | `f6384c3ce` | #2308 | 4/39 | Fix MCP capability indexing and custom agent scope | MCP capability indexing and custom-agent scope in upstream's `ToolSearchService`; Intel's tool discovery is its own (`COV-tool-discovery`). |
+| Done (3c-1) | `1a6bbd339` | #1679 | 1/3 | stop wasted iterations on repeated failing capabilities_load calls | An id matching nothing fails as not retryable in Intel's `capabilities`. |
+| In | `9a593c5d3` | #2393 | 17/27 | Answer a bare capabilities call with the enabled list, not a rejection | Intel's `capabilities` answers a bare call with the paged enabled list and recovers id shapes (`recoveredIds`). |
+| In | `f6384c3ce` | #2308 | 4/39 | Fix MCP capability indexing and custom agent scope | Intel's catalog is built live from the registry (no startup indexing race) and holds only loadable plugin/MCP tools, never the built-in configuration tools. |
+| Done (3c-1) | `3c6941823` | #2175 | 24/35 | Stop completed agent runs from reopening on stale todos | Added 2026-11-08 (0.24.3 triage skipped it as "agent subsystem amputated", stale since the loop was ported). Upstream's reopening is retired (`prepareTrackedTaskContinuation` is never called); its live chat piece, `unfinishedTodoCapFallback` at the step limit for a todo written this run, is on Intel now. |
+| In | `ca8bf2813` | #2192 | 33/78 | Fix stale Todo agent-loop completion and strengthen cache proof | Added 2026-11-08 (0.24.3 triage skipped it as "agent subsystem amputated", stale since the loop was ported). Its live part is on Intel: `complete` turns blocked only for a todo written this run (`AgentTodoRunScope`, upstream `AgentLoopTools`). The loop's recoverable-result rule is retired upstream; the cache proof is eval tooling. |
 | Check:chat-errors | `f6657eb53` |  | 7/25 | Fix plugin tool-loop default iterations | `ChatErrorMessages` (system-resource exhaustion message) and plugin tool-loop default iterations; Intel has no `ChatErrorMessages`. |
 | Done (3b-2) | `10dd0e915` | #1259 | 263/652 | chat improvements | `thinkingDuration` and `toolCallDurations` on Intel's `ChatTurn` (saved in the chat JSON), "Thought for 12s" / "Thought", and "· 1.2s" on tool rows. Friendly titles and the pending shimmer were already in; Intel's activity roll-up covers tool-group coalescing. |
 | Done (3b-1) | `6d841a22b` | #1352 | 21/51 | save chart as image | Done 2026-11-07 (3b-1): upstream's `NativeChartView` (save as PNG, toast with Reveal in Finder; also #1283's no-replay entry animation flag). Intel keeps `chart.bar.xaxis` (the ascending symbol is macOS 14). |
@@ -530,7 +543,7 @@ follow-up); rerun this tool with the new ref after it.
 | In | `f385681f8` | #1246 | 65/67 | allow custom base URL for built in remote providers | Most of its surviving code is in Intel (presence ≥ 90%). |
 | In | `f44fe022b` | #1267 | 15/15 | Fix zero free space on external model volumes | Most of its surviving code is in Intel (presence ≥ 90%). |
 | In | `fb5359427` | #2406 | 3/3 | added close button to router account sheet | Most of its surviving code is in Intel (presence ≥ 90%). |
-| N | `1877babba` | #1507 | 15/41 | Fix test-core CI failure by skipping TCC status probes under tests | CI: skip TCC probes under tests. |
+| Done (3c-1) | `1877babba` | #1507 | 15/41 | Fix test-core CI failure by skipping TCC status probes under tests | Re-checked 2026-11-08: not only CI — it brought the empty-turn recovery (`emptyTurnNotice`, `emptyTurnFallback`), now in Intel's engine. |
 | N | `3d47a9d74` | #1500 | 4/6 | Restore Swift-format parity on current main | swift-format parity. |
 | N | `858eb6c2a` | #1464 | 182/256 | added frontier evals and improved harness stability | Frontier evals. |
 | N | `c12a01bb2` | #1438 | 422/772 | harness hardening with tools and evals | Eval harness hardening. |

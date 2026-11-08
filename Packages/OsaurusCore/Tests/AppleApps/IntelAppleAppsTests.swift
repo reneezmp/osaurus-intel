@@ -221,7 +221,9 @@ struct IntelAppleAppsTests {
             #expect(onContext.prompt.contains("## Apple apps"))
             #expect(onContext.prompt.contains("Calendar, Shortcuts"))
             #expect(!onContext.prompt.contains("Reminders,"))
-            #expect(onContext.memorySection?.contains("## Current local time") == true)
+            // The date rides every turn as upstream's `[Current Time]` block
+            // (#2173), not an Apple Apps-only clock.
+            #expect(onContext.memorySection?.contains("## Current local time") != true)
             #expect(onContext.promptSections.contains { $0.id == "appleApps" })
 
             let offContext = await SystemPromptComposer.composeChatContext(agentId: off.id, query: "hi")
@@ -236,7 +238,7 @@ struct IntelAppleAppsTests {
         }
     }
 
-    @Test("Guidance names only active apps; the clock carries offset, weekday and zone")
+    @Test("Guidance names only active apps; the time block carries offset, weekday and zone")
     func guidance() throws {
         #expect(IntelAppleAppsGuidance.guidance(apps: []).isEmpty)
         let text = IntelAppleAppsGuidance.guidance(apps: [.notes])
@@ -246,7 +248,7 @@ struct IntelAppleAppsTests {
         #expect(IntelAppleAppsGuidance.activeApps(in: ["notes_read", "file_read"]) == [.notes])
 
         let zone = try #require(TimeZone(identifier: "America/Sao_Paulo"))
-        let clock = IntelAppleAppsGuidance.clock(now: Date(timeIntervalSince1970: 1_790_000_000), timeZone: zone)
+        let clock = SystemPromptTemplates.timeContext(now: Date(timeIntervalSince1970: 1_790_000_000), timeZone: zone)
         #expect(clock.contains("-03:00"))
         #expect(clock.contains("America/Sao_Paulo"))
         #expect(clock.contains("day,"))  // a weekday name

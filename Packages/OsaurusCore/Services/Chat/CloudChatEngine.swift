@@ -1199,12 +1199,17 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                     let taskState = AgentTaskState()
                     // Upstream: "Allow for This Task" grants last for this run only.
                     let permissionRunScope = ToolPermissionRunScope()
-                    var pendingHarnessNotices: [String] = []
+                    var pendingHarnessNotices: [String] = request.transientNotices
                     // Chat runs get what upstream wires through chat-only
                     // loop hooks: the grounded-claim checks (the chat splits a
                     // corrected answer into its own turn) and the history trim.
                     let interactiveChatRun = ChatExecutionContext.interactiveChatRun
                     var grounded = IntelGroundedClaimGuard()
+                    // Upstream's terminal recovery (IntelAgentLoopTerminal.swift):
+                    // a round with no tool call that is empty, reasoning only,
+                    // or cut at the output limit is not a finished answer.
+                    var terminalRecovery = IntelTerminalRecovery()
+                    var toolWorkThisRun = false
                     // Upstream scopes the config check to runs offering
                     // `osaurus_config`; read live, as `capabilities` loads tools.
                     func configToolOffered() -> Bool {
@@ -1274,6 +1279,30 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         let roundTextStart = responseText.utf8.count
                         func roundVisibleText() -> String {
                             String(decoding: responseText.utf8.dropFirst(roundTextStart), as: UTF8.self)
+                        }
+                        // Whether this round streamed any non-blank reasoning.
+                        var roundHasReasoning = false
+                        func noteReasoning(_ text: String) {
+                            if !roundHasReasoning, text.contains(where: { !$0.isWhitespace }) {
+                                roundHasReasoning = true
+                            }
+                        }
+                        // Upstream `classifyTerminal` for a round that ended
+                        // without a tool call (chat runs, like the grounded
+                        // checks). No content is passed, so announce-only and
+                        // continuation-request recovery stay off.
+                        func terminalAction(visible: String, finishReason: String?) -> IntelTerminalRecovery.Action {
+                            guard interactiveChatRun, !request.isToolFreeWrapUp else { return .finish }
+                            let step = AgentLoopModelStep.classifyTerminal(
+                                contentIsBlank: !visible.contains(where: { !$0.isWhitespace }),
+                                thinkingIsBlank: !roundHasReasoning,
+                                stopReason: finishReason,
+                                requiresVisibleFinalResponse:
+                                    AgentLoopVisibleResponsePolicy.requiresVisibleFinalResponse(
+                                        hasStructuredToolWork: toolWorkThisRun, isRemoteAgentTarget: false),
+                                toolsWereOffered: !(liveToolSpecs?.isEmpty ?? true)
+                            )
+                            return terminalRecovery.action(for: step, completedToolWork: toolWorkThisRun)
                         }
                         if let liveToolSpecs {
                             body["tools"] = liveToolSpecs
@@ -1463,6 +1492,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     for emission in try decoder.append(buffer) {
                                         totalChunks += 1
                                         captureResponseText(emission)
+                                        if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                         continuation.yield(emission)
                                     }
                                     buffer.removeAll(keepingCapacity: true)
@@ -1473,6 +1503,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 for emission in try decoder.append(buffer) {
                                     totalChunks += 1
                                     captureResponseText(emission)
+                                    if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                     continuation.yield(emission)
                                 }
                             }
@@ -1480,10 +1511,34 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             for emission in finalized.emissions {
                                 totalChunks += 1
                                 captureResponseText(emission)
+                                if let reasoning = StreamingReasoningHint.decode(emission) { noteReasoning(reasoning) }
                                 continuation.yield(emission)
                             }
                             if finalized.completion.toolCalls.isEmpty {
-                                if interactiveChatRun,
+                                // An incomplete response already failed the
+                                // stream, so this path has no `length` stop.
+                                switch terminalAction(visible: roundVisibleText(), finishReason: nil) {
+                                case .finish:
+                                    break
+                                case .retry(let notice):
+                                    pendingHarnessNotices = [notice]
+                                    round -= 1
+                                    continue
+                                case .retryInFreshTurn:
+                                    continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                    round -= 1
+                                    continue
+                                case .finishWithText(let text):
+                                    let tail = IntelTerminalRecovery.appendedText(text, afterVisible: roundVisibleText())
+                                    responseText += tail
+                                    continuation.yield(tail)
+                                    NSLog("[CloudChatEngine] Codex stream ended without an answer; showed the fallback")
+                                    yieldUsageIfRequested()
+                                    logInference()
+                                    continuation.finish()
+                                    return
+                                }
+                                if interactiveChatRun, !request.isToolFreeWrapUp,
                                     let notice = grounded.finalAnswerNotice(
                                         visibleText: roundVisibleText(), configToolOffered: configToolOffered())
                                 {
@@ -1517,6 +1572,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                 continuation.finish()
                                 return
                             }
+                            toolWorkThisRun = true
+                            terminalRecovery.noteToolRound()
 
                             var results: [IntelCodexResponsesToolResult] = []
                             var resultImages: [Data] = []
@@ -1794,6 +1851,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
 
                                 if let reasoning = delta["reasoning_content"] as? String, !reasoning.isEmpty {
                                     totalChunks += 1
+                                    noteReasoning(reasoning)
                                     continuation.yield(StreamingReasoningHint.encode(reasoning))
                                 }
                                 if let content = delta["content"] as? String, !content.isEmpty {
@@ -1849,12 +1907,38 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         // No tools requested this round → the assistant's final
                         // answer has streamed; we're done.
                         if partials.isEmpty {
+                            switch terminalAction(visible: assistantContent, finishReason: roundFinishReason) {
+                            case .finish:
+                                break
+                            case .retry(let notice):
+                                // Nothing streamed, so the retry continues
+                                // the same reply.
+                                pendingHarnessNotices = [notice]
+                                round -= 1
+                                continue
+                            case .retryInFreshTurn:
+                                // The reasoning-only attempt stays on screen
+                                // but out of the next request (upstream
+                                // `prepareIncompleteReasoningContinuation`).
+                                continuation.yield(StreamingGroundedRetryHint.sentinel)
+                                round -= 1
+                                continue
+                            case .finishWithText(let text):
+                                let tail = IntelTerminalRecovery.appendedText(text, afterVisible: assistantContent)
+                                responseText += tail
+                                continuation.yield(tail)
+                                NSLog("[CloudChatEngine] Round ended without an answer (finish=\(roundFinishReason ?? "nil")); showed the fallback")
+                                yieldUsageIfRequested()
+                                logInference()
+                                continuation.finish()
+                                return
+                            }
                             // Upstream's grounded-claim checks: an answer
                             // claiming a write / change / read nothing
                             // grounded stays visible, never enters the next
                             // request, and is regenerated once with the
                             // factual notice (bounded per run).
-                            if interactiveChatRun,
+                            if interactiveChatRun, !request.isToolFreeWrapUp,
                                 let notice = grounded.finalAnswerNotice(
                                     visibleText: assistantContent, configToolOffered: configToolOffered())
                             {
@@ -1890,6 +1974,8 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             continuation.finish()
                             return
                         }
+                        toolWorkThisRun = true
+                        terminalRecovery.noteToolRound()
                         wireMessages.append([
                             "role": "assistant",
                             "content": assistantContent,
@@ -2500,7 +2586,7 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         let names = await buffer.drain()
         guard !names.isEmpty else { return nil }
         var current = tools ?? []
-        for spec in ToolRegistry.shared.openAISpecs(named: names)
+        for spec in CapabilityLoadBuffer.validSpecs(ToolRegistry.shared.openAISpecs(named: names))
         where !current.contains(where: { $0.function.name == spec.function.name }) {
             current.append(spec)
         }

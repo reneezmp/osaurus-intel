@@ -32,6 +32,29 @@ import Foundation
 
 // MARK: - CapabilityLoadBuffer
 
+/// Structured diagnostic for a dynamically-loaded tool schema that cannot be
+/// exposed safely. Dynamic schemas must fail closed: a missing/malformed
+/// provider schema is not silently replaced with `{}` because that teaches the
+/// model to call an underspecified tool and then rely on parser repair.
+struct CapabilitySchemaDiagnostic: Sendable {
+    let toolName: String
+    let kind: ToolEnvelope.Kind
+    let message: String
+    let field: String?
+    let expected: String?
+
+    func dictionary() -> [String: Any] {
+        var dict: [String: Any] = [
+            "tool_name": toolName,
+            "kind": kind.rawValue,
+            "message": message,
+        ]
+        if let field { dict["field"] = field }
+        if let expected { dict["expected"] = expected }
+        return dict
+    }
+}
+
 /// Tool names `capabilities` loaded during one engine run. The engine binds
 /// `current` around its tool loop and drains after every call.
 actor CapabilityLoadBuffer {
@@ -48,6 +71,86 @@ actor CapabilityLoadBuffer {
     func drain() -> [String] {
         defer { pending = [] }
         return pending
+    }
+
+    /// The specs that pass `validateDynamicToolSchema` (upstream #1725): a
+    /// malformed provider schema is never offered.
+    static func validSpecs(_ specs: [Tool]) -> [Tool] {
+        specs.filter { validateDynamicToolSchema($0) == nil }
+    }
+
+    // Upstream's check, verbatim (`CapabilityTools.swift` at bce907045).
+    static func validateDynamicToolSchema(_ tool: Tool) -> CapabilitySchemaDiagnostic? {
+        let name = tool.function.name.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !name.isEmpty else {
+            return CapabilitySchemaDiagnostic(
+                toolName: tool.function.name,
+                kind: .invalidArgs,
+                message: "Loaded tool schema is missing a function name.",
+                field: "name",
+                expected: "non-empty function name"
+            )
+        }
+        guard tool.type == "function" else {
+            return CapabilitySchemaDiagnostic(
+                toolName: name,
+                kind: .invalidArgs,
+                message: "Loaded tool '\(name)' has unsupported tool type '\(tool.type)'.",
+                field: "type",
+                expected: "function"
+            )
+        }
+        guard let parameters = tool.function.parameters else {
+            // Existing no-argument tools legitimately use nil parameters; the
+            // OpenAI encoder normalizes nil to an empty object schema.
+            return nil
+        }
+        guard case .object(let schema) = parameters else {
+            return CapabilitySchemaDiagnostic(
+                toolName: name,
+                kind: .invalidArgs,
+                message: "Loaded tool '\(name)' has a non-object parameter schema.",
+                field: "parameters",
+                expected: "JSON Schema object with type: object"
+            )
+        }
+        guard case .string("object")? = schema["type"] else {
+            return CapabilitySchemaDiagnostic(
+                toolName: name,
+                kind: .invalidArgs,
+                message: "Loaded tool '\(name)' parameter schema must declare type: object.",
+                field: "parameters.type",
+                expected: "object"
+            )
+        }
+        if let properties = schema["properties"], case .object = properties {
+            // Valid.
+        } else if schema["properties"] != nil {
+            return CapabilitySchemaDiagnostic(
+                toolName: name,
+                kind: .invalidArgs,
+                message: "Loaded tool '\(name)' parameter schema has non-object properties.",
+                field: "parameters.properties",
+                expected: "object mapping property names to schemas"
+            )
+        }
+        if let required = schema["required"] {
+            guard case .array(let values) = required,
+                values.allSatisfy({
+                    if case .string = $0 { return true }
+                    return false
+                })
+            else {
+                return CapabilitySchemaDiagnostic(
+                    toolName: name,
+                    kind: .invalidArgs,
+                    message: "Loaded tool '\(name)' parameter schema has malformed required fields.",
+                    field: "parameters.required",
+                    expected: "array of strings"
+                )
+            }
+        }
+        return nil
     }
 }
 
@@ -528,6 +631,32 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
             }
         }
 
+        // Upstream #1725: a tool whose provider schema is malformed fails
+        // closed with a diagnostic instead of being offered.
+        var skipped: [CapabilitySchemaDiagnostic] = []
+        if !toolNames.isEmpty {
+            var rejected: Set<String> = []
+            for spec in ToolRegistry.shared.openAISpecs(named: toolNames) {
+                if let diagnostic = CapabilityLoadBuffer.validateDynamicToolSchema(spec) {
+                    skipped.append(diagnostic)
+                    rejected.insert(spec.function.name)
+                }
+            }
+            toolNames.removeAll { rejected.contains($0) }
+        }
+        let skippedLines = skipped.map { "Skipped tool '\($0.toolName)': \($0.message)" }
+
+        if toolNames.isEmpty, skillNames.isEmpty, unknown.isEmpty, let first = skipped.first {
+            return ToolEnvelope.failure(
+                kind: first.kind,
+                message: skippedLines.joined(separator: "\n"),
+                field: first.field,
+                expected: first.expected,
+                tool: name,
+                retryable: false
+            )
+        }
+
         guard !toolNames.isEmpty || !skillNames.isEmpty else {
             var suggestions: [String] = []
             for id in unknown {
@@ -538,12 +667,16 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
                 suggestions.isEmpty
                 ? "Call `capabilities` with no arguments to list the enabled ids."
                 : "Closest enabled ids: \(suggestions.joined(separator: ", "))."
+            // Capability ids are a closed vocabulary: the same call fails
+            // the same way every time (upstream #1679).
             return ToolEnvelope.failure(
                 kind: .invalidArgs,
-                message: "No enabled capability matches \(unknown.joined(separator: ", ")). \(hint)",
+                message: (["No enabled capability matches \(unknown.joined(separator: ", ")). \(hint)"]
+                    + skippedLines).joined(separator: "\n"),
                 field: "ids",
                 expected: "exact ids from the Enabled capabilities list or a search",
-                tool: name
+                tool: name,
+                retryable: false
             )
         }
 
@@ -578,6 +711,7 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
         if !unknown.isEmpty {
             parts.append("Not found: \(unknown.joined(separator: ", ")).")
         }
+        parts.append(contentsOf: skippedLines)
         var result: [String: Any] = [
             "kind": "capabilities_loaded",
             "loaded_tools": toolNames,
@@ -585,6 +719,7 @@ final class CapabilitiesTool: OsaurusTool, @unchecked Sendable {
         ]
         if !skillPayloads.isEmpty { result["skills"] = skillPayloads }
         if !unknown.isEmpty { result["not_found"] = unknown }
+        if !skipped.isEmpty { result["skipped"] = skipped.map { $0.dictionary() } }
         return ToolEnvelope.success(tool: name, result: result)
     }
 

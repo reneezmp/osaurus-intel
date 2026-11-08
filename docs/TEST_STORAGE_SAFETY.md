@@ -253,6 +253,10 @@ hit on those paths is that app, not a test: confirm with `ps -o lstart= -p
 $(pgrep -f /Applications/osaurus.app)` and the test log (no PluginSpecs
 mention). Intel code under test writes only to the test root. Any other hit
 is still a failed run.
+Seen again 2026-11-08 (stage 3c-1 gate): `PluginSpecs/central` (upstream's
+`osaurus-tools` registry, not Intel's plugin repo) replaced at 01:17:55,
+inside the test window, app pid 63553 running since 2026-11-03; the log has
+no mention of `~/.osaurus` and nothing else changed.
 
 **Correction (2026-10-10): Intel's live root is `~/.osaurus`, not
 `~/.osaurus-intel`** (kept on purpose, see "Dev-Mac rule" above). The `~/.osaurus-intel` split (`62aec8881`, M11) and

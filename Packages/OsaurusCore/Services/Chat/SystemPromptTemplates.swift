@@ -69,6 +69,45 @@ public enum SystemPromptTemplates {
         - `share_artifact(...)` — hands the user a file to keep or open: a generated image, chart, document, or code file. Text the user asked for in the chat (an answer, a poem, a message, a summary, a short snippet) goes in your reply, never in an artifact; the user reads your reply. **A `path` file MUST exist before this call.** Sandbox: save under your home dir (default cwd) — files in `/tmp` won't be findable. If unsure where you wrote it, verify with `sandbox_search_files(target="files", pattern="<name>")` first. For a text file, use `content`+`filename` mode and skip the file write entirely.
         """
 
+    // MARK: - Time Context
+
+    /// Per-turn current date/time block injected into the latest user
+    /// message alongside memory — never into the system prompt, which must
+    /// stay byte-stable across turns for paged KV-cache reuse (see
+    /// `injectMemoryPrefix`). Without it, small local models burn tool
+    /// turns discovering what "today" means — or worse, hallucinate a date
+    /// — before they can fill absolute date-time tool arguments like a
+    /// reminder's `dueDate` (live-confirmed 2026-07-27: Ornith-9B passed
+    /// `2025-05-15` for "today").
+    ///
+    /// Minute granularity, deliberately: the block exists to resolve
+    /// relative dates and fill absolute date-time arguments, none of which
+    /// need seconds — and seconds made the rendered bytes unique per send,
+    /// so two fresh chats could never share a prefill past this block. At
+    /// minute granularity, chats started in the same minute render
+    /// byte-identical time blocks and stay KV/L2-shareable. It also rides
+    /// at the TAIL of the injected prefix (see
+    /// `composeInjectedUserPrefix`) so the stabler memory/screen blocks
+    /// sit adjacent to the shared static prefix and only the tail diverges.
+    /// Keep this block factual: an imperative with example dates is part of
+    /// the user-role prefix and can be mistaken for an additional task by
+    /// the delegating model, even when the real request has no date work.
+    public static func timeContext(now: Date, timeZone: TimeZone) -> String {
+        let readable = DateFormatter()
+        readable.locale = Locale(identifier: "en_US_POSIX")
+        readable.timeZone = timeZone
+        readable.dateFormat = "EEEE, MMMM d, yyyy 'at' h:mm a"
+        let iso = DateFormatter()
+        iso.locale = Locale(identifier: "en_US_POSIX")
+        iso.timeZone = timeZone
+        iso.dateFormat = "yyyy-MM-dd'T'HH:mmZZZZZ"
+        return """
+            [Current Time]
+            \(readable.string(from: now)) — \(iso.string(from: now)) (\(timeZone.identifier))
+            [/Current Time]
+            """
+    }
+
     // MARK: - Grounding
 
     /// Anti-fabrication directive injected whenever tools are present

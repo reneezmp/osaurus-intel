@@ -56,6 +56,8 @@ revision).
 | `capabilities_discover` / `capabilities_load` kept for non-chat callers | Only the `capabilities` gateway (its schema/description verbatim). |
 | Manifest frozen per session, compact tier for small models | Rendered per compose (verbose form, 70 tools / 30 skills cap); the catalog only changes when settings change, which resets the session anyway. |
 | Methods in search results | None (methods are retired upstream; see `W-methods`). |
+| Loaded schemas validated in `CapabilityLoadBuffer.add` (`validateDynamicToolSchema`, #1725) | Same check, verbatim, run on the loaded tools' specs in `capabilities` (a malformed one is skipped with a diagnostic, or the call fails when nothing else loaded) and again wherever loaded tools are offered (`CapabilityLoadBuffer.validSpecs`). Since 2026-11-08. |
+| Unknown-id failure not retryable (#1679) | Same (`retryable: false`). Since 2026-11-08. |
 
 Upstream files not compiled, now classified `COV-tool-discovery` in
 `scripts/upstream/classify_gap.py`: `ToolIndexService`, `ToolSearchService`,

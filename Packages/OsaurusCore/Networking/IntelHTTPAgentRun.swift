@@ -130,7 +130,11 @@ extension HTTPHandler {
         if !composed.prompt.isEmpty {
             SystemPromptComposer.injectSystemContent(composed.prompt, into: &messages)
         }
-        SystemPromptComposer.injectMemoryPrefix(composed.memorySection, into: &messages)
+        SystemPromptComposer.injectMemoryPrefix(
+            composed.memorySection,
+            // Upstream #2173 (`enrichWithAgentContext`): the date and zone.
+            timeContext: SystemPromptTemplates.timeContext(now: Date(), timeZone: .current),
+            into: &messages)
         let mergedTools = await mergeAgentContextTools(composed.tools, clientTools: request.tools)
         let toolChoice: ToolChoiceOption? = {
             guard let mergedTools, !mergedTools.isEmpty else { return request.tool_choice }
