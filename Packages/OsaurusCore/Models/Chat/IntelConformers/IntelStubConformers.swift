@@ -1147,7 +1147,13 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     // FolderToolManager when a working folder is selected, and unregister when
     // it's cleared. No sandbox/DB/capability built-ins (those are amputated) —
     // the folder tool suite is the Intel-supported set.
-    private var toolsByName: [String: OsaurusTool] = [:]
+    private var toolsByName: [String: OsaurusTool] = [:] {
+        didSet { cachedListTools = nil }
+    }
+    /// Memoized `listTools()` (upstream #1672): it sorts every tool and builds
+    /// each schema, slow enough on render paths to stall the main thread.
+    /// Cleared whenever the tools or the global switches change.
+    private var cachedListTools: [ToolEntry]?
 
     /// Knowledge retrieval is a real built-in on Intel. Visibility is gated
     /// by the agent/project grant scope at prompt composition and again at
@@ -1368,7 +1374,9 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// Tool names the user has switched OFF in the Tools tab. Excluded from
     /// `openAISpecs()` (the model never sees them) and reported by `listTools`.
     /// Session-scoped; survives a tab reload (register doesn't clear it).
-    private var disabledToolNames: Set<String> = []
+    private var disabledToolNames: Set<String> = [] {
+        didSet { cachedListTools = nil }
+    }
 
     /// OpenAI-compatible specs for the currently registered tools, fed into
     /// `ComposedContext.tools` so the model sees them on the next send.
@@ -2031,7 +2039,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
     /// The tools registered on Intel — the folder tool suite once a working
     /// folder is selected (M12 Gap 3). ToolsManagerView renders the list.
     func listTools() -> [ToolEntry] {
-        toolsByName.values
+        if let cachedListTools { return cachedListTools }
+        let entries = toolsByName.values
             .sorted { $0.name < $1.name }
             .map {
                 ToolEntry(
@@ -2041,6 +2050,8 @@ final class ToolRegistry: ObservableObject, @unchecked Sendable {
                     parameters: $0.parameters
                 )
             }
+        cachedListTools = entries
+        return entries
     }
 
     /// Whether a tool is switched on globally (upstream API; Intel keeps the

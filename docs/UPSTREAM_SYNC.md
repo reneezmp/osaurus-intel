@@ -5649,6 +5649,57 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3e: crashes and hangs (`W-cov-reaudit`) — 2026-11-08
+
+The 16 crash and hang rows ([`COV_REAUDIT.md`](COV_REAUDIT.md)). Many touch
+upstream files Intel excludes or compiles as dead code (`#if !OSAURUS_INTEL`:
+`MemoryView`, the upstream `ChatWindowState`, part of
+`SystemPermissionService`), so each fix was checked against the code Intel
+actually runs.
+
+- **Chat saves off the main thread (#1948):** `ChatSession.save()` wrote the
+  whole conversation as pretty JSON on the main actor at run teardown. It now
+  calls `ChatSessionsManager.saveAsync` (in-memory list at once, the write on
+  the existing persist queue with write generations). `refresh()` /
+  `loadFromDisk` wait for queued writes first, and quit flushes them
+  (`ChatSessionsManager.flushPendingWrites`).
+- **Schedule writes queued (#2128):** every create, update, enable, delete,
+  trigger and completion applied to disk synchronously and then reloaded all
+  schedules. They now apply in memory and queue the write on upstream's
+  serial I/O queue. Intel keeps `refresh()` synchronous (callers read
+  `schedules` straight after), running the load on that queue so it sees
+  queued writes. Quit flushes it.
+- **System monitor (#1598, #1337):** Intel's copy sampled CPU, memory and
+  disk on the main thread every 2 s and republished every value. Upstream's
+  file now: a `ResourceSampler` off the main thread, the storage query in its
+  own task, publish only on change, decimal GB for disks. Adapted: no
+  `SwapPressureMonitor` / telemetry (local models), and
+  `reclaimableMemoryBytes` kept in the sampler.
+- **Smaller fixes:** `ToolRegistry.listTools()` is memoized, cleared when
+  tools or switches change (#1672); proxy lookups cache the decoded server
+  config by mtime (#1920); the delegation target map tolerates duplicate
+  agent ids (#1920); long or multi-line messages skip bubble measurement
+  (#1754); revocation and whitelist keychain writes run in the background
+  (#1781); memory pressure also clears the monogram and theme-preview caches,
+  the monogram cache is capped at 256, attachment caches at 2,048 entries,
+  and the message table drops heights for blocks that left the thread
+  (#1901); `FlowLayout` caches its rows (#1431).
+- **Not ported:** the launch prewarms (status panel #1359, chat view #1353)
+  and their low-power guard: they run heavy SwiftUI work a second after
+  launch, and can't be launch-tested on the build Mac. Agent JSON writes stay
+  synchronous (`AgentManager.persist` reads the file first to keep unknown
+  fields; stage 5).
+- **Found:** Intel has no Bonjour browser (the upstream file and its observer
+  are dead code; discovered agents are a stub), which 3f's mobile rows
+  cover. Intel's registry never prompts for a plugin's declared system
+  permissions (stage 5).
+
+Tests: `IntelHangFixTests` (the tool-list memo, a queued chat save and a
+reload, queued schedule writes). Existing proxy, session, schedule and
+runtime-lane tests pass unchanged.
+Filtered gate: 190 tests. Full gate: 5,090 tests, only the known avatar-cache
+failure; no live writes. x86_64 build clean.
+
 ### Coverage re-audit, stage 3d: knowledge (`W-cov-reaudit`) — 2026-11-08
 
 The five knowledge rows ([`COV_REAUDIT.md`](COV_REAUDIT.md)). Intel's

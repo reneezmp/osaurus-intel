@@ -198,7 +198,9 @@ struct IntelOrchestratorDelegationTool: OsaurusTool, PermissionedTool {
         let configuration = DefaultAgentConfigurationStore.load().delegation
         let live = await MainActor.run { () -> ([UUID: IntelOrchestratorDelegationRuntime.TargetSnapshot], Set<String>) in
             let manager = AgentManager.shared
-            let targets = Dictionary(uniqueKeysWithValues: manager.agents.map { agent in
+            // Tolerate duplicate agent ids (upstream #1920): `uniqueKeysWithValues`
+            // traps on a duplicate, which a copied agent file can produce.
+            let targets = Dictionary(manager.agents.map { agent in
                 let snapshot = IntelOrchestratorDelegationRuntime.TargetSnapshot(
                     agentID: agent.id,
                     isBuiltIn: agent.isBuiltIn,
@@ -208,7 +210,7 @@ struct IntelOrchestratorDelegationTool: OsaurusTool, PermissionedTool {
                     effectiveMaxTokens: manager.effectiveMaxTokens(for: agent.id)
                 )
                 return (agent.id, snapshot)
-            })
+            }, uniquingKeysWith: { first, _ in first })
             let cloudModels = Set(ModelPickerItemCache.shared.items.compactMap { item -> String? in
                 guard case .remote = item.source,
                       item.isLikelyChatCapable,

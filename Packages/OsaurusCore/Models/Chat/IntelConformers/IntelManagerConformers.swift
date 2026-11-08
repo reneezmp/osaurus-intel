@@ -1503,6 +1503,22 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
         sessions[data.id] = data
         persist(data, generation: nextWriteGeneration(for: data.id))
     }
+
+    /// Upstream #1948 `saveAsync`: the in-memory list updates now, the encode
+    /// and write of the whole conversation run on the persist queue. The chat
+    /// saves at run teardown on the main actor, where a long conversation's
+    /// synchronous write could pass the app-hang watchdog. Write generations
+    /// keep a newer snapshot from being overtaken by an older queued one.
+    func saveAsync(_ data: ChatSessionData) {
+        guard !isDeleted(data.id) else { return }
+        sessions[data.id] = data
+        persistAsync(data)
+    }
+
+    /// Land queued session writes (app termination).
+    static func flushPendingWrites() {
+        persistQueue.sync {}
+    }
     func delete(id: UUID) {
         deletionLock.lock()
         deletedSessionIDs.insert(id)
@@ -1594,6 +1610,9 @@ final class ChatSessionsManager: ObservableObject, @unchecked Sendable {
     // MARK: - Disk persistence
 
     private func loadFromDisk() {
+        // Land queued writes first (`saveAsync`, the metadata setters), so a
+        // reload never reads an older copy than the one in memory.
+        Self.persistQueue.sync {}
         let dir = OsaurusPaths.sessions()
         guard
             let files = try? FileManager.default.contentsOfDirectory(

@@ -428,9 +428,20 @@ final class NativeHeaderView: NSView {
             return true
         }
         monogramCacheLock.lock()
+        // Safety-net cap (reset-on-overflow, upstream #1901): keys vary by
+        // initial/tint/size, and monograms are cheap to re-render.
+        if monogramCache.count >= 256 { monogramCache.removeAll() }
         monogramCache[key] = image
         monogramCacheLock.unlock()
         return image
+    }
+
+    /// Drop all memoized monograms (memory-pressure response); re-rendered
+    /// lazily on next display.
+    static func clearMonogramCache() {
+        monogramCacheLock.lock()
+        monogramCache.removeAll()
+        monogramCacheLock.unlock()
     }
 
     override var intrinsicContentSize: NSSize {
@@ -2460,6 +2471,18 @@ final class NativeMessageCellView: NSTableCellView {
         let maxBubbleWidth = floor(innerWidth * 0.65)
         let bubbleWidth: CGFloat = {
             guard !text.isEmpty && !wantsInlineEdit else { return maxBubbleWidth }
+            // The measurement below only exists to shrink the bubble around
+            // short, single-line text; anything that wraps resolves to
+            // `maxBubbleWidth`. A message containing a newline is multi-line by
+            // definition, and a 65%-width bubble holds only a few dozen
+            // single-line characters, so any longer text is guaranteed to wrap.
+            // In both cases skip the measurement entirely — typesetting a large
+            // pasted blob synchronously on the main thread hung the UI
+            // (upstream #1754).
+            let measurementCap = 512
+            if text.contains("\n") || text.count > measurementCap {
+                return maxBubbleWidth
+            }
             let font =
                 NSFont(name: theme.primaryFontName, size: CGFloat(theme.bodySize))
                 ?? NSFont.systemFont(ofSize: CGFloat(theme.bodySize))

@@ -3065,6 +3065,27 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Hang re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3e (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3e"). Not in candidate 66.
+
+- [ ] Have a long chat (hundreds of messages), send one more and let it
+      finish: no beach ball at the end. Quit right away and reopen: the last
+      reply is there.
+- [ ] Rename, pin and archive that chat, quit at once, reopen: all three
+      stuck.
+- [ ] Schedules: create, edit, disable and delete a schedule; each change
+      shows at once. Quit right after creating one and reopen: it's there.
+- [ ] Settings with the resource monitor visible: CPU, memory and disk
+      values update every couple of seconds; the disk figure matches
+      Finder's (decimal GB).
+- [ ] Paste a very long text (several pages) into a message and send it:
+      the bubble appears without a stall.
+- [ ] Settings › Server: set and clear a global proxy; tools that go online
+      use the new setting right away.
+- [ ] Pair or revoke a device, quit at once, reopen: the change stuck.
+
 ## Knowledge re-audit (2026-11-08)
 
 `W-cov-reaudit` stage 3d (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

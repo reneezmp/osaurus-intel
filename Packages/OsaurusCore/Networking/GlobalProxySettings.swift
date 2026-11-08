@@ -145,10 +145,46 @@ public enum GlobalProxySettings {
             resolvedPath = resolved.path
         }
         resolvedConfigURLLock.unlock()
+        // A FRESH URL per lookup is load-bearing: Foundation caches resource
+        // values per URL instance, so statting a memoized URL can return a
+        // stale modification date and pin the decoded-config cache to an old
+        // file — observed as proxy changes never being picked up.
         let url = URL(fileURLWithPath: resolvedPath)
-        guard let data = try? Data(contentsOf: url) else { return nil }
-        return try? JSONDecoder().decode(ServerConfiguration.self, from: data)
+        // Only the mtime is needed for cache validation. `attributesOfItem`
+        // builds the full attribute dictionary, whose owner/group-name fields
+        // resolve through an opendirectoryd XPC round-trip (getgrgid_r) that
+        // has hung the main thread at launch. `resourceValues` stats the file
+        // without that lookup.
+        let modified =
+            (try? url.resourceValues(forKeys: [.contentModificationDateKey]))?
+            .contentModificationDate
+        configCacheLock.lock()
+        defer { configCacheLock.unlock() }
+        if let state = configCache, state.path == url.path, state.modified == modified {
+            return state.configuration
+        }
+        var configuration: ServerConfiguration?
+        if let data = try? Data(contentsOf: url) {
+            configuration = try? JSONDecoder().decode(ServerConfiguration.self, from: data)
+        }
+        configCache = ConfigCacheState(path: url.path, modified: modified, configuration: configuration)
+        return configuration
     }
+
+    private struct ConfigCacheState {
+        let path: String
+        let modified: Date?
+        let configuration: ServerConfiguration?
+    }
+
+    /// Decoded-config cache validated by the file's modification date
+    /// (upstream #1920). Every proxy lookup used to re-read and re-decode
+    /// server.json, and lookups run on the main thread (settings views,
+    /// session builds), where the read is an observed hang under disk
+    /// pressure. A single stat per call replaces the read and decode; an edit
+    /// still applies at once because the mtime changes.
+    private static let configCacheLock = NSLock()
+    private nonisolated(unsafe) static var configCache: ConfigCacheState?
 }
 
 /// Safe, display-oriented summary of the persisted global proxy setting.

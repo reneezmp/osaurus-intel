@@ -110,24 +110,11 @@ public final class WhitelistStore: @unchecked Sendable {
             agents: agentAddresses.mapValues { Array($0) }
         )
         guard let data = try? JSONEncoder().encode(model) else { return }
-
-        let query: [String: Any] = [
-            kSecClass as String: kSecClassGenericPassword,
-            kSecAttrService as String: Self.keychainService,
-            kSecAttrAccount as String: Self.keychainAccount,
-            kSecUseAuthenticationUI as String: kSecUseAuthenticationUISkip,
-        ]
-
-        let existing = SecItemCopyMatching(query as CFDictionary, nil)
-        if existing == errSecSuccess {
-            let update: [String: Any] = [kSecValueData as String: data]
-            SecItemUpdate(query as CFDictionary, update as CFDictionary)
-        } else {
-            var add = query
-            add[kSecValueData as String] = data
-            add[kSecAttrAccessible as String] = kSecAttrAccessibleWhenUnlockedThisDeviceOnly
-            SecItemAdd(add as CFDictionary, nil)
-        }
+        // Off the main thread on the shared keychain write queue (upstream
+        // #1781): a synchronous SecItem round-trip here showed up in hang
+        // reports. Drained at quit by `Keychain.flushPendingWrites`.
+        Keychain.writeInBackground(
+            service: Self.keychainService, account: Self.keychainAccount, data: data)
     }
 
     private func load() {

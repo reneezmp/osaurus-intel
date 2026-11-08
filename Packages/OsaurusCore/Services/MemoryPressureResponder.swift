@@ -50,6 +50,8 @@ public final class MemoryPressureResponder: @unchecked Sendable {
         ChatImageCache.shared.removeAll()
         LaTeXRenderer.shared.clearCache()
         SymbolImageCache.clear()
+        NativeHeaderView.clearMonogramCache()
         AvatarBitmapRenderer.shared.removeAll()
+        Task { await ThemePreviewImageCache.shared.removeAll() }
     }
 }

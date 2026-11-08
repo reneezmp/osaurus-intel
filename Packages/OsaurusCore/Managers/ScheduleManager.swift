@@ -85,9 +85,38 @@ public final class ScheduleManager: ObservableObject {
 
     // MARK: - Public API
 
-    /// Reload schedules from disk
+    /// Serial queue for every `ScheduleStore` write (upstream #2128): saves
+    /// used to run synchronously on the main actor and showed up in hang
+    /// reports. Mutations apply to `schedules` in memory first, then queue
+    /// the write; one queue keeps the writes in order.
+    private nonisolated static let ioQueue = DispatchQueue(
+        label: "com.dinoki.osaurus.schedule-io", qos: .userInitiated)
+
+    private nonisolated static func persist(_ work: @escaping @Sendable () -> Void) {
+        ioQueue.async(execute: work)
+    }
+
+    /// Land queued schedule writes (app termination, tests).
+    nonisolated static func flushPendingWrites() {
+        ioQueue.sync {}
+    }
+
+    /// Reload schedules from disk. Intel keeps this synchronous (callers
+    /// read `schedules` right after); the load runs on the I/O queue, so it
+    /// sees every write queued before it.
     public func refresh() {
-        schedules = ScheduleStore.loadAll()
+        schedules = Self.ioQueue.sync { ScheduleStore.loadAll() }
+        recomputeAgentCounts()
+    }
+
+    /// Apply a created/updated schedule in memory (upstream), so the timer
+    /// and the UI see it without waiting on disk.
+    private func applyLocal(_ schedule: Schedule) {
+        if let index = schedules.firstIndex(where: { $0.id == schedule.id }) {
+            schedules[index] = schedule
+        } else {
+            schedules.append(schedule)
+        }
         recomputeAgentCounts()
     }
 
@@ -133,8 +162,8 @@ public final class ScheduleManager: ObservableObject {
             updatedAt: Date()
         )
 
-        ScheduleStore.save(schedule)
-        refresh()
+        applyLocal(schedule)
+        Self.persist { ScheduleStore.save(schedule) }
         scheduleNextTimer()
 
         NotificationCenter.default.post(name: .schedulesChanged, object: nil)
@@ -147,8 +176,8 @@ public final class ScheduleManager: ObservableObject {
     public func update(_ schedule: Schedule) {
         var updated = schedule
         updated.updatedAt = Date()
-        ScheduleStore.save(updated)
-        refresh()
+        applyLocal(updated)
+        Self.persist { [updated] in ScheduleStore.save(updated) }
         scheduleNextTimer()
 
         NotificationCenter.default.post(name: .schedulesChanged, object: nil)
@@ -165,9 +194,10 @@ public final class ScheduleManager: ObservableObject {
         }
         runningTasks.removeValue(forKey: id)
 
-        guard ScheduleStore.delete(id: id) else { return false }
-
-        refresh()
+        guard schedules.contains(where: { $0.id == id }) else { return false }
+        schedules.removeAll { $0.id == id }
+        recomputeAgentCounts()
+        Self.persist { _ = ScheduleStore.delete(id: id) }
         scheduleNextTimer()
 
         NotificationCenter.default.post(name: .schedulesChanged, object: nil)
@@ -181,8 +211,8 @@ public final class ScheduleManager: ObservableObject {
         guard var schedule = schedules.first(where: { $0.id == id }) else { return }
         schedule.isEnabled = enabled
         schedule.updatedAt = Date()
-        ScheduleStore.save(schedule)
-        refresh()
+        applyLocal(schedule)
+        Self.persist { [schedule] in ScheduleStore.save(schedule) }
         scheduleNextTimer()
 
         NotificationCenter.default.post(name: .schedulesChanged, object: nil)
@@ -375,8 +405,8 @@ public final class ScheduleManager: ObservableObject {
 
         var triggeredSchedule = schedule
         triggeredSchedule.lastTriggeredAt = scheduledFireTime ?? Date()
-        ScheduleStore.save(triggeredSchedule)
-        refresh()
+        applyLocal(triggeredSchedule)
+        Self.persist { [triggeredSchedule] in ScheduleStore.save(triggeredSchedule) }
 
         runningTasks[triggeredSchedule.id] = ScheduleRunInfo(
             scheduleId: triggeredSchedule.id,
@@ -439,8 +469,8 @@ public final class ScheduleManager: ObservableObject {
             updatedSchedule.lastChatSessionId = chatSessionId
             if case .once = schedule.frequency { updatedSchedule.isEnabled = false }
 
-            ScheduleStore.save(updatedSchedule)
-            refresh()
+            applyLocal(updatedSchedule)
+            Self.persist { [updatedSchedule] in ScheduleStore.save(updatedSchedule) }
 
             NotificationCenter.default.post(
                 name: .scheduleExecutionCompleted,

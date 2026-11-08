@@ -593,6 +593,8 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         // Upstream: land pending off-main writes before the process exits, so
         // a setting or secret saved right before quit isn't dropped.
         ToolConfigurationStore.flushPendingWrites()
+        ChatSessionsManager.flushPendingWrites()
+        ScheduleManager.flushPendingWrites()
         ConfigDiskWriter.flushPendingWrites(timeout: 2.5)
         Keychain.flushPendingWrites(timeout: 2.5)
     }

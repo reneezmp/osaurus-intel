@@ -2241,7 +2241,10 @@ final class ChatSession: ObservableObject {
         }
 
         let data = toSessionData()
-        ChatSessionsManager.shared.save(data)
+        // Persist off the main actor (upstream #1948): serializing a long
+        // conversation synchronously here (run teardown calls this) could
+        // block past the app-hang watchdog. The session list updates now.
+        ChatSessionsManager.shared.saveAsync(data)
         onSessionChanged?()
     }
 

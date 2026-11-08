@@ -108,15 +108,15 @@ its code absent is a candidate gap.
 | Done (3b-2) | re-checked `a82aa1447` | #2381 | 12/56 | added full screen preview for generated images | Generated (markdown) images open full screen (`onImagePreviewImage` through the thread, table and cell); the "Generating image…" status shimmers. |
 | Done (3b-1) | re-checked `d0b9502b8` | #2256 | 11/32 | Add optional shadow style for chat input | Done 2026-11-07 (3b-1): the theme's `inputStyle` (Gradient / Shadow) drives the composer border and shadow; Themes › Borders & Effects has the Input Box picker and the preview follows it. |
 | Done (3b-2) | re-checked `dbfc3420a` | #1969 | 63/311 | fixed in-chat search bar focus, per occurrence navigation, and current match highlighting | Per-occurrence find: upstream `ChatFindMatcher` (off-main, debounced, spinner), `ChatFindBar` (refocus on Cmd+F; Up/Down on macOS 14+ only, `onKeyPress`), current-match highlight via the synced renderer, block offsets and scroll-to-line in `MessageTableRepresentable`. Also fixed Intel's `scrollToTurn`, which looked for upstream's `usermsg-` block ids (Intel's are `user-`). |
-| Check:crashes | re-checked `161e6ca57` | #1699 | 2/21 | fix app hang watchdog stalls across folder, tool listing, permissions, and launch | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `18367d94b` | #1754 | 8/30 | fixed main thread freezes | UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `1fd695a68` | #1672 | 11/28 | fixed app hangs | UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `4bfc9bb85` | #1920 | 17/52 | fixed sentry hangs & crashes | UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `973c771fa` | #1948 | 18/44 | fixed main thread hangs | UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `995376800` | #2307 | 60/186 | fixed main thread hangs | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `ad5a2c5f9` | #1598 | 10/24 | fix app hang render path | UPSTREAM_TRIAGE_0.24.3 |
-| Check:crashes | re-checked `cc1823517` | #2817 | 18/53 | fixed main thread hangs in the composer, markdown parsing and sidebar rows | CHAT_UX_INTEL, UPSTREAM_AUDIT_2026-09-25 |
-| Check:crashes | re-checked `f6b9c984a` | #1781 | 13/29 | triage and fix sentry app hangs and crashes | UPSTREAM_TRIAGE_0.24.3 |
+| In | re-checked `161e6ca57` | #1699 | 2/21 | fix app hang watchdog stalls across folder, tool listing, permissions, and launch | Folder `hasActiveFolder` and the locale-free tool sort were in; the chat-history open is upstream's SQLite store (Intel keeps JSON, NA). `missingPermissions` is dead on Intel (behind `#if !OSAURUS_INTEL`): Intel's registry never prompts for a plugin's declared system permissions (stage 5). |
+| Done (3e) | re-checked `18367d94b` | #1754 | 8/30 | fixed main thread freezes | The bubble skips text measurement for multi-line or long messages (`NativeMessageCellView`). TTS is a stub on Intel; the storage-rotation preview guard is upstream's preview (Intel builds its own). |
+| Done (3e) | re-checked `1fd695a68` | #1672 | 11/28 | fixed app hangs | `ToolRegistry.listTools()` is memoized on Intel's registry, cleared when tools or switches change. Folder bookmarks were in; the `isVLM` cache is MLX. |
+| Done (3e) | re-checked `4bfc9bb85` | #1920 | 17/52 | fixed sentry hangs & crashes | Proxy lookups cache the decoded server config by mtime (`GlobalProxySettings`); the delegation target map tolerates duplicate agent ids. `MemoryView` is dead on Intel; the foundation-model probe, image generation and vMLX parts are incompatible; the rest was in. |
+| Done (3e) | re-checked `973c771fa` | #1948 | 18/44 | fixed main thread hangs | Chat saves are written off the main thread (`ChatSessionsManager.saveAsync`; a reload and quit wait for them). Prompt card and code block were in; Intel has no launch UI prewarms to skip. |
+| In | re-checked `995376800` | #2307 | 60/186 | fixed main thread hangs | Master key, plugin secret memo and async chat metadata writes were in; Intel's knowledge availability is a stored status. The external model catalog is MLX. Agent JSON writes stay synchronous on Intel (`AgentManager.persist` reads the file to keep unknown fields; stage 5). |
+| Done (3e) | re-checked `ad5a2c5f9` | #1598 | 10/24 | fix app hang render path | The system monitor is upstream's (sampling and the storage query off the main thread, publish only on change); the download-date cache is MLX; the theme part was in. |
+| In | re-checked `cc1823517` | #2817 | 18/53 | fixed main thread hangs in the composer, markdown parsing and sidebar rows | Markdown parsing, process environment and paths were in; the local vision evidence is MLX; the sidebar's share-to-workspace rows wait for workspaces (deferred). |
+| Done (3e) | re-checked `f6b9c984a` | #1781 | 13/29 | triage and fix sentry app hangs and crashes | Revocation and whitelist keychain writes go through `Keychain.writeInBackground`. The clipboard catcher is superseded upstream by the private pasteboard connection Intel already has; the screen-context distiller is `W-computer-use`. |
 | Check:folders | re-checked `3034800ef` | #2765 | 87/194 | add recent folders to the + menu and agent working folder setting | UPSTREAM_AUDIT_2026-09-25 |
 | Check:folders | re-checked `438b01222` | #2675 | 13/33 | apply project working folder by turning the agent sandbox off | UPSTREAM_AUDIT_2026-09-25 |
 | Check:folders | re-checked `97498c331` | #2701 | 28/162 | Make the chat folder chip persist as the agent's working folder | UPSTREAM_AUDIT_2026-09-25 |
@@ -275,9 +275,9 @@ now that Intel has both. Stage 6 re-reads them.
 | Done (3c-3) | re-checked `d89626227` | #2089 | 24/67 | Fix skill discovery metadata loss and MCP capability-load reliability seams | Skill slug lookups (catalog and `SkillManager`), keywords in capability search, the editor's Keywords field and pass-through, top-level `keywords:` on import, the picker copy, the MCP and skills docs. The vector-index buffering is `SkillSearchService` (not compiled, `COV-tool-discovery`). |
 | Check:chat | re-checked `7e109ade6` | #2668 | 0/1 | Chat: a run cancelled during its cold load must not roll back the retry that already owns the session | A cancelled cold-load run must not roll back the retry that owns the turn; check Intel's retry ownership. |
 | Check:chat | re-checked `880752784` | #2661 | 3/31 | fix history dialog row actions and keep the dialog open under nested alerts | History dialog row actions and nested alerts (`CHAT_WINDOW_LAYOUT_INTEL.md` lists it as a source). |
-| Check:crashes | re-checked `4daee7b36` | #2128 | 92/197 | fixed app hangs | App hangs #2128. |
-| Check:crashes | re-checked `a9ae5fd9c` | #1901 | 80/176 | Free model memory on chat close, respond to memory pressure, and cap unbounded caches | Memory pressure and unbounded caches; the model-unload half is MLX. |
-| Check:crashes | re-checked `b621603fb` | #2015 | 11/38 | Checkpoint: stop the gemma tool-loop, two crashes, and lying tok/s | Two crashes and tok/s reporting; the Gemma loop half is MLX. |
+| Done (3e) | re-checked `4daee7b36` | #2128 | 92/197 | fixed app hangs | Schedule writes go through a serial I/O queue and apply in memory first (`ScheduleManager`; Intel's `refresh()` stays synchronous on that queue). Search provider, knowledge watcher, agent database and string cleaning were in; the chat database and model lookups are NA / MLX. |
+| Done (3e) | re-checked `a9ae5fd9c` | #1901 | 80/176 | Free model memory on chat close, respond to memory pressure, and cap unbounded caches | Memory pressure also clears the monogram cache (now capped at 256) and the theme preview cache; attachment line and token caches are bounded (2,048); the message table drops heights for blocks that left the thread. Model unloading is MLX. |
+| I | re-checked `b621603fb` | #2015 | 11/38 | Checkpoint: stop the gemma tool-loop, two crashes, and lying tok/s | The background load intent and the tok/s fix are local-model; the crash fixes in the markdown and cell views were in. |
 | I | re-checked `2b15a5078` | #1950 | 7/22 | Repin vmlx to 0d3444ca (gemma4 parser fix #128) + fix reasoning-toggle default display | The toggle shows the local template's default; Intel's `LocalReasoningCapability` stub never reports one. The vMLX repin is incompatible. |
 | Done (3c-3) | re-checked `2ecf2b058` | #2250 | 466/937 | Make the Mac harness leaner and more reliable | Mostly the sandbox VM (incompatible); the file-format policy, HTML source reads, task-state and permission parts were in. The trusted-folder prompt text and the loop changes are Intel's own composer and engine (stage 5). |
 | Done (3c-3) | re-checked `54aa52ada` | #2653 | 6/20 | Chat: queued steer ordering, stale notices across the steer boundary, empty wrap-up bubble | Mid-run steering itself was missing (#1433, below); ported into the engine's round boundary with both ordering fixes. The empty wrap-up bubble was in since 3c-1. |
@@ -335,7 +335,7 @@ now that Intel has both. Stage 6 re-reads them.
    #2101; memory and time frozen on the user turn, #1798; skill slugs and
    keywords, #2089);
    **3d** knowledge (5; done 2026-11-08: the grant prompt, the category
-   chip, frontmatter pass-through, the read connection, the copy); **3e** crashes and hangs (13); **3f** the rest
+   chip, frontmatter pass-through, the read connection, the copy); **3e** crashes and hangs (13 + 3; done 2026-11-08: chat and schedule writes off the main thread, the off-main system monitor, the tool-list memo, the proxy config cache, bounded caches); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
    (Check:i18n) go to stage 4.
@@ -358,7 +358,10 @@ now that Intel has both. Stage 6 re-reads them.
    `W-privacy-filter`. From 3c-3: Intel's engine never ends a run on a
    replayed failed call or a `rejected` envelope (upstream's
    `shouldStopAfterToolOutcome`), and upstream's trusted-folder prompt text
-   (`leanFolderContext`, #2250) differs from Intel's folder section.
+   (`leanFolderContext`, #2250) differs from Intel's folder section. From 3e: Intel's
+   registry never prompts for a plugin's declared system permissions
+   (upstream `runPermissionGate`); `AgentManager.persist` writes agent JSON
+   on the main thread (upstream #2307 queues it).
 6. **Stage 6, the declined verdicts:** re-read the 0.24.3 and 0.24.7 SKIP
    verdicts the feasibility audit did not revisit (456 commits at
    `bce907045` still count as declined) and drop the ones whose reason no
@@ -396,10 +399,10 @@ follow-up); rerun this tool with the new ref after it.
 | In | `ca2c1d202` | #2486 | 4/6 | fix leaked pacing timer on mid-stream processor dealloc | 3b: Intel's `StreamingDeltaProcessor` invalidates both timers in a plain `deinit` (`nonisolated(unsafe)` timers; `isolated deinit` needs a newer runtime). |
 | Check:context | `78788ce18` | #1324 | 7/38 | fixed issue with context budget being out of sync | Context-budget preview sync; Intel has its own estimate refresh. |
 | Check:context | `f6c5d13ae` |  | 1/7 | fix broken test | Context-budget preview refresh on agent change; Intel has its own `refreshContextEstimates`. |
-| Check:crashes | `0336a4a2a` | #1359 | 32/63 | fixed fatal crashes & freezes | "fixed fatal crashes & freezes" #1359. |
-| Check:crashes | `9150c0d68` | #1337 | 145/283 | fixed main thread freeze | "fixed main thread freeze" #1337. |
-| Check:crashes | `a50e84448` | #1431 | 9/65 | fixed main thread hangs | Bonjour browser main-thread hang fix; Intel compiles its own `BonjourBrowser`. |
-| Check:crashes | `efd4cd4e3` | #1353 | 60/98 | fixed app hangs across permissions, model browsing, audio and chat launch | App hangs across permissions, model browsing, audio, chat launch. |
+| In | `0336a4a2a` | #1359 | 32/63 | fixed fatal crashes & freezes | Folder context reads, clipboard, markdown and code block were in; the status-panel prewarm is launch work Intel doesn't do (not ported: needs a launch test on Rosy). |
+| Done (3e) | `9150c0d68` | #1337 | 145/283 | fixed main thread freeze | The storage query moved off the main thread with #1598's monitor; clipboard, permissions and plugins were in; crash reporting is absent; the model download views are MLX. |
+| Done (3e) | `a50e84448` | #1431 | 9/65 | fixed main thread hangs | `FlowLayout` caches its rows (upstream's file). Intel has no Bonjour browser (the upstream file and `ChatWindowState` are dead on Intel; discovered agents are a stub, 3f mobile). |
+| In | `efd4cd4e3` | #1353 | 60/98 | fixed app hangs across permissions, model browsing, audio and chat launch | Speech, permissions and the registry part were in; model metadata and downloads are MLX; the chat-view prewarm is not ported (launch work, needs a Rosy launch test). |
 | Check:file-tools | `53e657252` | #1311 | 191/296 | combined sandbox file operations into unified file operations | Unified file operations (#1311); container half is incompatible. |
 | Check:flags | `2c04c6edd` | #1344 | 83/187 | updated feature flag logic and moved more features behind feature flags | Feature-flag logic (#1344). |
 | Check:folders | `15543ac37` | #1313 | 348/413 | added stateful agent folder ops | Stateful agent folder operations (container half incompatible). |
