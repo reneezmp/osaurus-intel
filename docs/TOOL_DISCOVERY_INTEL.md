@@ -58,6 +58,8 @@ revision).
 | Methods in search results | None (methods are retired upstream; see `W-methods`). |
 | Loaded schemas validated in `CapabilityLoadBuffer.add` (`validateDynamicToolSchema`, #1725) | Same check, verbatim, run on the loaded tools' specs in `capabilities` (a malformed one is skipped with a diagnostic, or the call fails when nothing else loaded) and again wherever loaded tools are offered (`CapabilityLoadBuffer.validSpecs`). Since 2026-11-08. |
 | Unknown-id failure not retryable (#1679) | Same (`retryable: false`). Since 2026-11-08. |
+| A call to a tool the request didn't offer gets a `tool_not_found` envelope from the registry's scope gate and the loop goes on (#2018, #2145, #2309) | Same, in the engine (`IntelToolScopeGate`): folder steer, Apple app switch, the `capabilities` load hint for an enabled tool, the group-id redirect, else opaque. It used to end the turn. Since 2026-11-08. |
+| Skill lookups fall back to the Agent Skills slug; search indexes keywords (#2089) | Same in `CapabilityCatalog.skill(named:)` and `CapabilitySearch`. Since 2026-11-08. |
 
 Upstream files not compiled, now classified `COV-tool-discovery` in
 `scripts/upstream/classify_gap.py`: `ToolIndexService`, `ToolSearchService`,

@@ -141,7 +141,9 @@ struct IntelMemoryDistillationRegressionTests {
     }
 
     @Test func staleUnofferedToolGetsTerminalFailureText() {
-        let result = ChatEngine.unofferedToolResult("search_memory")
+        // Upstream's scope gate answers it (IntelToolScopeGate, 3c-3).
+        let result = IntelToolScopeGate.envelope(
+            forUnofferedCall: "search_memory", offeredNames: [], agentId: nil, catalog: .empty)
         let encoded = StreamingToolHint.encodeDone(
             callId: "stale-call",
             name: "search_memory",
@@ -153,7 +155,7 @@ struct IntelMemoryDistillationRegressionTests {
         #expect(terminal?.callId == "stale-call")
         #expect(terminal?.name == "search_memory")
         #expect(terminal?.result == result)
-        #expect(result.contains("not offered"))
+        #expect(result.contains("is not available in this conversation"))
     }
 
     // MARK: - Core-model fallback (upstream 93513e8d6, Intel policy)

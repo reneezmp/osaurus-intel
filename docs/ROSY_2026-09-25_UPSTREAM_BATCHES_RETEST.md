@@ -3065,6 +3065,39 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Hidden-rows re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3c-3 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3c-3"). Not in candidate 66.
+
+- [ ] Steering: ask a custom agent with folder tools for a multi-step job
+      ("read every file and summarise each"). While it works, type "also
+      count the lines in each" and press Return: the chip shows Queued, and
+      after the current tool finishes your message appears in the
+      transcript after that tool's result (not above it) and the agent
+      takes it into account without being stopped. Queue a message with an
+      attachment instead: it waits until the run ends.
+- [ ] Not-offered tools: in a chat with no folder, ask a custom agent to
+      "write hello into notes.txt". The run doesn't fail with "requested a
+      tool that was not offered": the model is told a folder is needed
+      (and may open the folder picker) and answers.
+- [ ] With an Auto-mode agent whose plugin tools aren't loaded yet, ask for
+      something only a plugin tool does: it loads it with `capabilities`
+      and continues (no turn-ending error).
+- [ ] Thinking: with a model that has a Thinking switch, start a long tool
+      run, then flip Thinking in the picker mid-run. The rest of that run
+      keeps the setting it started with; the next message uses the new one.
+- [ ] Memory: with memory on, send two messages in a chat with an
+      Anthropic or OpenAI model. In Insights, the second request still
+      carries the first message's `[Memory]` block (unchanged) and the
+      second message has its own. Reopen the chat after relaunching: same.
+- [ ] Skills: edit a custom skill; the editor has a Keywords field. Add
+      "lint" and save. Ask an Auto-mode agent "find a capability for
+      lint": the skill is offered. Its references and folder survive the
+      edit.
+- [ ] Context popover with a folder mounted: one "Working Directory" row
+      and one "Grounding" row.
+
 ## Prompt re-audit (2026-11-08)
 
 `W-cov-reaudit` stage 3c-2 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
@@ -3078,9 +3111,10 @@ Not in candidate 66.
       chat. Clear them: the time-of-day greeting and "How can I help you
       today?" come back.
 - [ ] Open the context budget popover in a chat with a custom agent that
-      has a folder mounted: the rows include Model Family Guidance,
-      Grounding, Code Style, Risk-Aware Actions, Agent Loop and Folder Tool
-      Use. With Disable Tools on, none of them appear.
+      has a folder mounted: the rows include Working Directory, Model
+      Family Guidance, Grounding (once), Code Style, Risk-Aware Actions,
+      Agent Loop and Folder Tool Use. With Disable Tools on, none of them
+      appear except Working Directory.
 - [ ] With DeepSeek and a folder mounted, ask "what files are in this
       folder?": it calls `file_tree` (or `file_read`) and lists real names;
       it doesn't describe a plan or invent files.

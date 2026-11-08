@@ -107,6 +107,7 @@ Create your own skills with the built-in editor:
    - **Name** — A clear, descriptive name
    - **Description** — Brief summary (shown in the skill list)
    - **Category** — Optional grouping (e.g., "Development", "Writing")
+   - **Keywords** — Comma-separated discovery terms (see below)
    - **Instructions** — Detailed guidance for the AI (Markdown supported)
 3. Click **Save**
 
@@ -116,6 +117,8 @@ Create your own skills with the built-in editor:
 - Include examples of expected behavior
 - Define any frameworks or methodologies to follow
 - Specify output formats when relevant
+
+**Keywords are how the AI finds your skill.** The capability search indexes the skill's name, keywords, and description, not its instructions. Add the words a user would actually say when they need the skill ("summarize, tldr, key points" rather than "text processing"). A custom skill without keywords is only found through its name and description.
 
 ---
 
@@ -234,7 +237,8 @@ No per-agent skill configuration is needed. The system automatically matches the
 ### Skills not appearing in chat
 
 - Verify the skill is enabled (toggle is on)
-- Check that the skill's description clearly describes its purpose (the RAG search uses this)
+- Add **keywords** to the skill (edit it in the library): the capability search indexes name + keywords + description
+- Check that the skill's description clearly describes its purpose (the search uses this too)
 - Start a new chat session
 - Try setting a wider search mode in chat configuration
 

@@ -168,6 +168,11 @@ struct CapabilityCatalog: Sendable {
     struct SkillItem: Sendable, Equatable {
         let name: String
         let description: String
+        /// Discovery keywords (upstream #2089 indexes them with the name and
+        /// description).
+        var keywords: [String] = []
+        /// The skill's folder name, for slug lookups.
+        var directoryName: String? = nil
     }
 
     struct Group: Sendable, Equatable {
@@ -224,7 +229,11 @@ struct CapabilityCatalog: Sendable {
         let skills = SkillManager.shared.skills
             .filter { $0.enabled && (skillAllowlist?.contains($0.name) ?? true) }
             .sorted { $0.name.localizedCaseInsensitiveCompare($1.name) == .orderedAscending }
-            .map { SkillItem(name: $0.name, description: oneLine($0.description)) }
+            .map {
+                SkillItem(
+                    name: $0.name, description: oneLine($0.description),
+                    keywords: $0.keywords, directoryName: $0.directoryName)
+            }
 
         let groups = groupOrder.compactMap { groupsById[$0] }
             .sorted { $0.display.localizedCaseInsensitiveCompare($1.display) == .orderedAscending }
@@ -235,8 +244,18 @@ struct CapabilityCatalog: Sendable {
         tools.first { $0.name == name }
     }
 
+    /// The display name first, then the Agent Skills slug (upstream
+    /// `SkillManager.skills(named:)`, #2089): `skill/code-reviewer` names
+    /// "Code Reviewer".
     func skill(named name: String) -> SkillItem? {
-        skills.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        if let exact = skills.first(where: { $0.name.caseInsensitiveCompare(name) == .orderedSame }) {
+            return exact
+        }
+        let slug = Skill.agentSkillsSlug(for: name)
+        guard !slug.isEmpty else { return nil }
+        return skills.first {
+            Skill.agentSkillsSlug(for: $0.name) == slug || $0.directoryName?.lowercased() == slug
+        }
     }
 
     func group(id: String) -> Group? {
@@ -308,7 +327,10 @@ enum CapabilitySearch {
                 let group = tool.groupId.flatMap { id in catalog.groups.first { $0.id == id }?.display } ?? ""
                 return ("tool/\(tool.name)", "\(tool.name) \(group) \(tool.description)", tool.description)
             }
-            + catalog.skills.map { ("skill/\($0.name)", "\($0.name) \($0.description)", $0.description) }
+            // Name, keywords and description together (upstream #2089).
+            + catalog.skills.map {
+                ("skill/\($0.name)", "\($0.name) \($0.keywords.joined(separator: " ")) \($0.description)", $0.description)
+            }
         guard !docs.isEmpty else { return [] }
 
         let bm25 = bm25Scores(query: query, documents: docs.map(\.text))

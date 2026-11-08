@@ -352,6 +352,33 @@ The vendor's MCP server doesn't publish [RFC 9728 protected-resource metadata](h
 - Check the server's tool configuration.
 - For scoped OAuth providers, check that you approved all the requested scopes.
 
+### Connected, but the agent doesn't call the tools
+
+Upstream #2089, with Intel's names. A green **Connected** badge means
+discovery succeeded; it doesn't mean every agent can call every tool. Work
+through these in order:
+
+1. **Agent capability grant.** Each custom agent has its own tool allowlist
+   (agent editor → Tools). A remote tool left unchecked there is invisible to
+   that agent: it isn't in the agent's Enabled capabilities list, a
+   `capabilities` search doesn't return it, and loading it is refused.
+2. **Auto vs Manual tool mode.** In **Auto** mode remote MCP tools are not in
+   the model's first tool list: the agent sees them in its "Enabled
+   capabilities" list and loads one with `capabilities` when a task needs it.
+   In **Manual** mode only the tools you picked are sent and the list is
+   omitted, so pick the remote tools you want the agent to use.
+3. **Namespaced tool names.** The callable name is provider-prefixed
+   (`linear_search_issues`, not `search_issues`). A model that invents the
+   bare vendor name gets `tool_not_found` (the run goes on, so it can
+   correct itself).
+4. **Permission prompts.** Remote MCP tools default to **Ask**. A pending or
+   denied approval stops that call; check for an approval card before
+   concluding the tool "wasn't called". You can relax the per-tool policy in
+   Tools settings.
+5. **Model capability.** Smaller models skip the search → load step more
+   often on long tasks. Try a stronger model or fewer connected providers so
+   the list stays short.
+
 ### Debug Mode
 
 Use the **Insights** tab to monitor MCP provider activity:

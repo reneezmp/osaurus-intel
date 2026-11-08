@@ -270,25 +270,25 @@ now that Intel has both. Stage 6 re-reads them.
 | Verdict | Commit | PR | Presence | Subject | Note |
 |---|---|---|---|---|---|
 | Check:agents | re-checked `ad0698d78` | #1608 | 82/196 | Stabilize the default configuration agent and fix disappearing custom agents | Default configuration agent and disappearing custom agents. |
-| Check:capabilities | re-checked `06af55e7a` | #2336 | 24/60 | Bound capability group-load schemas + repin vmlx (Muse Glimmer runtime) | Group-load schema bounds (3c-3); the vMLX repin is incompatible. |
-| Check:capabilities | re-checked `5d16b603f` | #2309 | 18/77 | Clarify capability IDs and recover grouped tool calls | Capability ids in the manifest, grouped tool-call recovery (3c-3). |
-| Check:capabilities | re-checked `d89626227` | #2089 | 24/67 | Fix skill discovery metadata loss and MCP capability-load reliability seams | Skill discovery metadata and MCP capability-load seams (3c-3; `W-tools-tab-sync` holds the wording). |
+| Done (3c-3) | re-checked `06af55e7a` | #2336 | 24/60 | Bound capability group-load schemas + repin vmlx (Muse Glimmer runtime) | Not applicable: Intel's `capabilities` load result carries no schemas (the loaded tools join the request's tool list), so the result budget has nothing to bound; the vMLX repin and Muse Glimmer are incompatible. |
+| Done (3c-3) | re-checked `5d16b603f` | #2309 | 18/77 | Clarify capability IDs and recover grouped tool calls | Manifest and gateway wording were in; the group-id call rescue is in `IntelToolScopeGate` with upstream's scope gate (an un-offered call no longer ends the turn). The eval fixture protocol is N. |
+| Done (3c-3) | re-checked `d89626227` | #2089 | 24/67 | Fix skill discovery metadata loss and MCP capability-load reliability seams | Skill slug lookups (catalog and `SkillManager`), keywords in capability search, the editor's Keywords field and pass-through, top-level `keywords:` on import, the picker copy, the MCP and skills docs. The vector-index buffering is `SkillSearchService` (not compiled, `COV-tool-discovery`). |
 | Check:chat | re-checked `7e109ade6` | #2668 | 0/1 | Chat: a run cancelled during its cold load must not roll back the retry that already owns the session | A cancelled cold-load run must not roll back the retry that owns the turn; check Intel's retry ownership. |
 | Check:chat | re-checked `880752784` | #2661 | 3/31 | fix history dialog row actions and keep the dialog open under nested alerts | History dialog row actions and nested alerts (`CHAT_WINDOW_LAYOUT_INTEL.md` lists it as a source). |
 | Check:crashes | re-checked `4daee7b36` | #2128 | 92/197 | fixed app hangs | App hangs #2128. |
 | Check:crashes | re-checked `a9ae5fd9c` | #1901 | 80/176 | Free model memory on chat close, respond to memory pressure, and cap unbounded caches | Memory pressure and unbounded caches; the model-unload half is MLX. |
 | Check:crashes | re-checked `b621603fb` | #2015 | 11/38 | Checkpoint: stop the gemma tool-loop, two crashes, and lying tok/s | Two crashes and tok/s reporting; the Gemma loop half is MLX. |
-| Check:loop | re-checked `2b15a5078` | #1950 | 7/22 | Repin vmlx to 0d3444ca (gemma4 parser fix #128) + fix reasoning-toggle default display | Reasoning toggle default display; the vMLX repin is incompatible (3c-3). |
-| Check:loop | re-checked `2ecf2b058` | #2250 | 466/937 | Make the Mac harness leaner and more reliable | Mac harness reliability (3c-3); the container and workspace parts go with their items. |
-| Check:loop | re-checked `54aa52ada` | #2653 | 6/20 | Chat: queued steer ordering, stale notices across the steer boundary, empty wrap-up bubble | Queued steer ordering, notices across a steer, empty wrap-up bubble (3c-3). |
-| Check:loop | re-checked `846ca9185` | #2101 | 2/17 | Preserve explicit Thinking mode across agent tool turns | Explicit Thinking mode kept across tool turns (3c-3). |
-| Check:loop | re-checked `9b0331fd4` | #2105 | 5/72 | fix: honor reasoning toggle across agent tool loops | Reasoning toggle held across tool rounds (3c-3). |
-| Check:loop | re-checked `e00a9d88d` | #2656 | 41/123 | Research completion: announce-only recovery names what the model can do; promised-work endings recovered; replayed retrieval failures escalate before stopping; window-close crash fixed | Announce-only recovery and promised-work endings (3c-3, with the stage-5 note on #2480). |
+| I | re-checked `2b15a5078` | #1950 | 7/22 | Repin vmlx to 0d3444ca (gemma4 parser fix #128) + fix reasoning-toggle default display | The toggle shows the local template's default; Intel's `LocalReasoningCapability` stub never reports one. The vMLX repin is incompatible. |
+| Done (3c-3) | re-checked `2ecf2b058` | #2250 | 466/937 | Make the Mac harness leaner and more reliable | Mostly the sandbox VM (incompatible); the file-format policy, HTML source reads, task-state and permission parts were in. The trusted-folder prompt text and the loop changes are Intel's own composer and engine (stage 5). |
+| Done (3c-3) | re-checked `54aa52ada` | #2653 | 6/20 | Chat: queued steer ordering, stale notices across the steer boundary, empty wrap-up bubble | Mid-run steering itself was missing (#1433, below); ported into the engine's round boundary with both ordering fixes. The empty wrap-up bubble was in since 3c-1. |
+| Done (3c-3) | re-checked `846ca9185` | #2101 | 2/17 | Preserve explicit Thinking mode across agent tool turns | `ChatTurnGenerationControls` freezes the model options at send; Intel's request has no `enable_thinking`, so only the options are applied. |
+| I | re-checked `9b0331fd4` | #2105 | 5/72 | fix: honor reasoning toggle across agent tool loops | Agent runs default to thinking off for toggleable local templates; Intel's capability stub never reports one, and the persisted-options lookup is in the excluded `ChatEngine.swift`. |
+| Done (3c-3) | re-checked `e00a9d88d` | #2656 | 41/123 | Research completion: announce-only recovery names what the model can do; promised-work endings recovered; replayed retrieval failures escalate before stopping; window-close crash fixed | Tour crash, search fetch bound, replay helpers and the closing-sentence classifier were in; the Codex path now logs tool wall time. Intel's engine never ends a run on a replayed failure. The announce-only wording waits for announce-only recovery (stage 5, #2480). |
 | Check:mobile | re-checked `67fba7464` | #1623 | 149/397 | harden remote agent security and reliability | Remote agent security and reliability. |
 | Check:mobile | re-checked `d1b96a5e7` | #1658 | 40/176 | Harden Bonjour discovery (security, reliability, discoverability) | Bonjour discovery hardening; compare with Intel's discovered agents. |
 | Check:mobile | re-checked `f7e683dfb` | #1636 | 29/158 | Fix and harden remote agent (Mode 2) runs | Remote agent (Mode 2) runs; compare with Intel's paired relay agents. |
-| Check:prompt | re-checked `4be5a5776` | #1798 | 52/232 | Cut per-turn prompt cost: remote prompt caching + local KV prefix reuse + measured text trims | Remote prompt caching and prompt text trims; the local KV half is incompatible (3c-3). |
-| Check:prompt | re-checked `61dad2f36` | #2051 | 19/85 | Reduce redundant agent prompt context | Redundant agent prompt context trimmed (3c-3; Intel's composer is its own). |
+| Done (3c-3) | re-checked `4be5a5776` | #1798 | 52/232 | Cut per-turn prompt cost: remote prompt caching + local KV prefix reuse + measured text trims | Memory and the time block are frozen on the user turn and replayed (`injectedContextPrefix`, persisted); remote `cache_control` was in; the local KV half is incompatible. |
+| In | re-checked `61dad2f36` | #2051 | 19/85 | Reduce redundant agent prompt context | Intel's HTTP and plugin paths already pass the request model to the composer; Intel never emits the trimmed discovery and skills-govern sections; channel tools wait for `W-channels`; the eval telemetry is N. |
 | Check:server | re-checked `34a64dc2d` | #2606 | 2/11 | fix /api/show for external models and report tool/thinking capabilities | `/api/show` for external models, with tool and thinking capabilities. |
 | Check:settings | re-checked `64bc65808` | #2442 | 18/105 | Sampling Defaults were inert on almost every model, and nothing showed what actually ran | Sampling defaults applied and shown for remote models; the MLX half is incompatible. |
 | W-channels | re-checked `44548e901` | #2202 | 487/1065 | Native channel presence, formatting, and reactions | Channel presence and reactions. |
@@ -330,7 +330,10 @@ now that Intel has both. Stage 6 re-reads them.
    static discipline sections in Intel's composer, #1430 and #1317; the CLI
    plugin template's settings path, #2862; the judge polarity prompt,
    #3033), **3c-3** the loop, capability and prompt rows the decline filter
-   hid (11; see "Feasibility rows the decline filter hid");
+   hid (11; done 2026-11-08: mid-run steering, #1433 and #2653; upstream's
+   tool scope gate, #2309 with #2018 / #2145; Thinking frozen per run,
+   #2101; memory and time frozen on the user turn, #1798; skill slugs and
+   keywords, #2089);
    **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
@@ -351,12 +354,17 @@ now that Intel has both. Stage 6 re-reads them.
    before the discipline sections (upstream: after Agent loop), never picks
    the compact variants (no context size class on Intel), and has no
    Capability Discovery section; upstream's Bulk edits section lands with
-   `W-privacy-filter`.
+   `W-privacy-filter`. From 3c-3: Intel's engine never ends a run on a
+   replayed failed call or a `rejected` envelope (upstream's
+   `shouldStopAfterToolOutcome`), and upstream's trusted-folder prompt text
+   (`leanFolderContext`, #2250) differs from Intel's folder section.
 6. **Stage 6, the declined verdicts:** re-read the 0.24.3 and 0.24.7 SKIP
    verdicts the feasibility audit did not revisit (456 commits at
    `bce907045` still count as declined) and drop the ones whose reason no
    longer holds on Intel ("subsystem excluded" for a subsystem Intel now
-   has).
+   has). Two found in 3c-3 and ported: #2018 (`b73015a22`, a request may
+   only execute the tools it exposed) and #2149 (`6dc2f190d`), both "skills
+   excluded" in 0.24.3.
 
 The 47 upstream commits past `bce907045` are a separate audit (carried
 follow-up); rerun this tool with the new ref after it.
@@ -617,7 +625,7 @@ follow-up); rerun this tool with the new ref after it.
 | N | `cc232be83` | #1289 | superseded | removed unused configurations | Removes unused configuration; nothing to port. |
 | N | `e6f3d3ba5` | #1527 | 5/105 | Add system prompt injection proof trace | System-prompt injection proof trace for the MLX runtime harness. |
 | N | `f4bb1c2cd` | #1339 | 0/1 | remove old migrations and deprecated code | Removes old migrations. |
-| N | `fefd7a5bc` | #1433 | 547/1207 | harness improvements | Eval harness. |
+| Done (3c-3) | `fefd7a5bc` | #1433 | 547/1207 | harness improvements | Mostly the eval harness, but it also added mid-run steering (`injectQueuedSteerIfEligible`), missed in stage 1; ported in 3c-3 (`IntelMidRunSteer.swift`). |
 | NA | `3d212f797` | #1749 | 4/26 | fix continuing and exporting conversations after the encryption update | Upstream's encrypted SQLite chat store recovery. |
 | NA | `6fb655d81` | #1742 | 4/34 | Recover chat continuation from transcript fallback | Transcript recovery for upstream's encrypted SQLite chat store; Intel stores chats as JSON. |
 | NA | `a041e512e` | #1755 | 8/26 | Fix chat history loss from non-idempotent schema migrations | Upstream's SQLite chat history migrations; Intel stores chats as JSON. |

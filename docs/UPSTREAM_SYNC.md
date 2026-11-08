@@ -5649,6 +5649,99 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3c-3: the rows the decline filter hid (`W-cov-reaudit`) — 2026-11-08
+
+The 11 loop, capability and prompt rows of "Feasibility rows the decline
+filter hid" ([`COV_REAUDIT.md`](COV_REAUDIT.md)).
+
+- **Mid-run steering (#1433, with #2653's fixes):** a text-only message
+  typed while the agent works used to wait for the run to end. Upstream
+  injects it at the next loop iteration; #1433's chat part was marked "eval
+  harness" in stage 1 and never ported. Intel's engine runs the tool rounds
+  itself, so `CloudChatEngine` asks the chat for the queued text at each
+  round boundary (`ChatExecutionContext.midRunSteer`, bound only by the
+  chat), adds it to the wire history after the round's tool results (on the
+  Responses wire, as a replay item), resets the within-message tracking
+  (`AgentTaskState.beginMessage`) and drops the notices staged for the
+  previous message except the budget warning
+  (`AgentToolLoop.noticesSurvivingNewUserMessage`, #2653). It then yields a
+  sentinel (`StreamingSteerHint`, `IntelMidRunSteer.swift`) so the chat
+  records the user turn in stream order, before the round's fresh empty
+  reply (#2653's `appendMidRunUserTurn`): upstream's bug persisted
+  `[assistant(call), user(steer), tool(result)]`. The chat's own loop
+  boundary (after a tool it ran itself) injects the same way. Attachments
+  and one-off skills stay queued for the run's end or Send Now. Remote
+  steers wait for `W-channels`. #2653's empty wrap-up bubble was in since
+  3c-1.
+- **Tool scope gate (#2018, #2145, #2279, #2309):** a call to a tool the
+  request didn't offer ended the whole turn ("The provider requested a tool
+  that was not offered"). Upstream answers it with a `tool_not_found`
+  envelope and the loop goes on, so the model gets one correction.
+  `IntelToolScopeGate` now does that on both wires: folder tools with no
+  folder say to attach one (without upstream's Autonomous execution
+  option), Apple app tools say where the switch is (Agents › Abilities ›
+  Apple Apps), an enabled capability one load away gets the `capabilities`
+  load hint, a plugin group id called as a function is redirected to its
+  `plugin/<id>` load (#2309), anything else stays opaque. Never run either
+  way. #2309's manifest and gateway wording was already in. #2018 and #2149
+  were 0.24.3 SKIPs ("skills/agents excluded"), the kind stage 6 re-reads.
+- **Thinking frozen per run (#2101):** the tool rounds read the live model
+  options, so changing Thinking mid-run changed the next round's request.
+  `ChatTurnGenerationControls` captures them at send. Adapted: Intel's
+  request has no `enable_thinking` (its engine reads `modelOptions`), so
+  only the options are applied. #2105 (agent runs default to thinking off
+  for toggleable local templates) and #1950 (the toggle shows the local
+  template's default) are local-model only: Intel's `LocalReasoningCapability`
+  is a stub that never reports a toggleable template.
+- **Memory and time frozen on the user turn (#1798):** Intel put the memory
+  block and the `[Current Time]` line on whichever user message was newest,
+  every round, so it vanished from the previous turn on the next send and a
+  provider's prompt cache lost the last exchange each turn (and the block
+  could land on the budget notice). Now, as upstream, they are recorded once
+  on the user turn at send (`ChatTurn.injectedContextPrefix`, persisted in
+  `ChatTurnData`) and replayed byte for byte; a regenerate keeps the first
+  bytes. Intel keeps its difference: an image or audio message gets the
+  block as a leading text part. The Conversation budget row leaves out the
+  current turn's block (it has the Memory row). The HTTP path still injects
+  per request (its messages come from the client). The remote prompt-caching
+  half was in (`IntelAnthropicMessagesAdapter`'s `cache_control`); the
+  local KV half is MLX.
+- **Skills (#2089):** `skill/code-reviewer` (the Agent Skills slug, or the
+  skill's folder name) now finds "Code Reviewer" in `capabilities` loads and
+  in `SkillManager.skill(named:)`; capability search indexes a skill's
+  keywords with its name and description; the skill editor has upstream's
+  Keywords field and keeps references, assets, folder and plugin on save;
+  SKILL.md imports read top-level `keywords:`; the picker says "Skills come
+  from the shared library; limit them below". Docs: `SKILLS.md` keywords,
+  `REMOTE_MCP_PROVIDERS.md` "Connected, but the agent doesn't call the
+  tools". Found: Intel's built-in skills are still the pre-#2050 set
+  (Research Analyst, …) and the editor and Skills page are far behind
+  upstream; both go with `W-tools-tab-sync`.
+- **Also:** the Codex path logs each tool's wall time (#2656; the rest of
+  #2656 was in: the tour window-close crash, the search fetch bound, the
+  replay helpers; its announce-only wording waits for the announce-only
+  recovery in stage 5). Intel's folder rail in the context popover is now
+  upstream's "Working Directory" (`folderContext`); it used the id
+  `grounding`, which 3c-2's Grounding section also uses.
+- **Covered or not applicable:** #2051 (Intel's HTTP and plugin paths
+  already pass the request's model to the composer; Intel never emits the
+  trimmed sections; channel tools wait for `W-channels`), #2336 (Intel's
+  load result carries no schemas, the loaded tools join the request's tool
+  list; Muse Glimmer is MLX), #2250 (the sandbox VM parts are incompatible;
+  the file-format policy, HTML source reads and task-state helpers were in;
+  the trusted-folder prompt text is Intel's own composer, stage 5).
+
+Tests: `IntelMidRunSteerTests` (steer ordering, eligibility, notices, the
+engine round with and without a steer, an un-offered call continuing, the
+gate's five cases), `IntelFrozenUserPrefixTests` (prefix order, freeze once,
+replay with media, persistence, slug lookups, keyword search, top-level
+keywords, the editor parser), upstream's `ChatTurnGenerationControlsTests`
+(adapted), `IntelMemoryDistillationRegressionTests` updated for the gate.
+Filtered gate: 96 tests passed. Full gate: 5,083 tests, only the known
+avatar-cache failure (the office-detector flake did not recur). x86_64 build
+clean. One in-window live write, the app's own memory WAL
+(`TEST_STORAGE_SAFETY.md`).
+
 ### Coverage re-audit, stage 3c-2: the prompt commits (`W-cov-reaudit`) — 2026-11-08
 
 The prompt rows of 3c ([`COV_REAUDIT.md`](COV_REAUDIT.md)).

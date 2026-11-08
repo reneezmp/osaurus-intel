@@ -27,6 +27,7 @@ struct SkillEditorSheet: View {
     @State private var version: String = "1.0.0"
     @State private var author: String = ""
     @State private var category: String = ""
+    @State private var keywords: String = ""
     @State private var instructions: String = ""
     @State private var enabled: Bool = true
 
@@ -259,6 +260,30 @@ struct SkillEditorSheet: View {
                             )
                             .disabled(isBuiltIn)
                         }
+
+                        // Keywords — the discovery signal capabilities_discover
+                        // searches. Built-in skills ship rich keyword lists;
+                        // custom skills without them are only found by name +
+                        // description (upstream #2089).
+                        VStack(alignment: .leading, spacing: 6) {
+                            Text("Keywords", bundle: .module)
+                                .font(.system(size: 11, weight: .medium))
+                                .foregroundColor(themeManager.currentTheme.secondaryText)
+
+                            SkillStyledTextField(
+                                placeholder: L("Comma-separated, e.g. research, web, citations"),
+                                text: $keywords,
+                                icon: nil
+                            )
+                            .disabled(isBuiltIn)
+
+                            Text(
+                                "Help the AI find this skill: add words users would say when they need it.",
+                                bundle: .module
+                            )
+                            .font(.system(size: 10))
+                            .foregroundColor(themeManager.currentTheme.tertiaryText)
+                        }
                     }
                 }
 
@@ -449,8 +474,22 @@ struct SkillEditorSheet: View {
         version = skill.version
         author = skill.author ?? ""
         category = skill.category ?? ""
+        keywords = skill.keywords.joined(separator: ", ")
         instructions = skill.instructions
         enabled = skill.enabled
+    }
+
+    /// Comma-separated keywords field → keyword list, dropping empties
+    /// (upstream #2089).
+    nonisolated static func parseKeywords(_ raw: String) -> [String] {
+        raw.split(separator: ",")
+            .map { $0.trimmingCharacters(in: .whitespacesAndNewlines) }
+            .filter { !$0.isEmpty }
+    }
+
+    private var editingSkill: Skill? {
+        if case .edit(let skill) = mode { return skill }
+        return nil
     }
 
     private func saveSkill() {
@@ -465,11 +504,19 @@ struct SkillEditorSheet: View {
             version: version.trimmingCharacters(in: .whitespacesAndNewlines),
             author: author.isEmpty ? nil : author.trimmingCharacters(in: .whitespacesAndNewlines),
             category: category.isEmpty ? nil : category.trimmingCharacters(in: .whitespacesAndNewlines),
+            keywords: Self.parseKeywords(keywords),
             enabled: enabled,
             instructions: trimmedInstructions,
             isBuiltIn: false,
             createdAt: existingCreatedAt ?? Date(),
-            updatedAt: Date()
+            updatedAt: Date(),
+            // Fields the editor does not expose pass through unchanged
+            // (upstream #2089: rebuilding with defaults erased imported
+            // keywords and references on every edit).
+            references: editingSkill?.references ?? [],
+            assets: editingSkill?.assets ?? [],
+            directoryName: editingSkill?.directoryName,
+            pluginId: editingSkill?.pluginId
         )
 
         onSave(skill)

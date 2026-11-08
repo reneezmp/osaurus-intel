@@ -132,6 +132,13 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// user Stop. Persisted, and kept through the trailing-blank trim so a
     /// Stop before the first delta still leaves a record (#2392).
     var terminalStopReason: String?
+    /// Frozen memory / time block this USER turn was first sent with,
+    /// including its trailing separator (upstream #1798,
+    /// `SystemPromptComposer.composeInjectedUserPrefix`). Recorded once at
+    /// send time and replayed verbatim on every later request, so the turn's
+    /// wire bytes never change and provider prompt caches stay valid. Never
+    /// shown in the bubble; persisted.
+    var injectedContextPrefix: String?
     /// Ledger rows written for this turn during the live run, finalized with
     /// the rendered outcome at run cleanup. Transient (upstream).
     var billingEntryIds: Set<String> = []
@@ -190,6 +197,8 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
             (turn as? ChatTurnData)?.modelContextExcluded ?? (turn as? ChatTurn)?.modelContextExcluded ?? false
         self.terminalStopReason =
             (turn as? ChatTurnData)?.terminalStopReason ?? (turn as? ChatTurn)?.terminalStopReason
+        self.injectedContextPrefix =
+            (turn as? ChatTurnData)?.injectedContextPrefix ?? (turn as? ChatTurn)?.injectedContextPrefix
         self.toolCallDurations =
             (turn as? ChatTurnData)?.toolCallDurations ?? (turn as? ChatTurn)?.toolCallDurations ?? [:]
         self.thinkingDuration =
@@ -732,6 +741,7 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var routerBilling: RouterBillingSummary?
     var modelContextExcluded: Bool = false
     var terminalStopReason: String?
+    var injectedContextPrefix: String?
     var toolCallDurations: [String: TimeInterval] = [:]
     var thinkingDuration: TimeInterval?
 
@@ -766,6 +776,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
             (turn as? ChatTurn)?.modelContextExcluded ?? (turn as? ChatTurnData)?.modelContextExcluded ?? false
         self.terminalStopReason =
             (turn as? ChatTurn)?.terminalStopReason ?? (turn as? ChatTurnData)?.terminalStopReason
+        self.injectedContextPrefix =
+            (turn as? ChatTurn)?.injectedContextPrefix ?? (turn as? ChatTurnData)?.injectedContextPrefix
         self.toolCallDurations =
             (turn as? ChatTurn)?.toolCallDurations ?? (turn as? ChatTurnData)?.toolCallDurations ?? [:]
         self.thinkingDuration =
@@ -832,6 +844,7 @@ extension ChatTurnData: Codable {
         case routerBilling
         case modelContextExcluded
         case terminalStopReason
+        case injectedContextPrefix
         case toolCallDurations, thinkingDuration
     }
 
@@ -857,6 +870,7 @@ extension ChatTurnData: Codable {
         self.routerBilling = try? c.decodeIfPresent(RouterBillingSummary.self, forKey: .routerBilling)
         self.modelContextExcluded = (try? c.decodeIfPresent(Bool.self, forKey: .modelContextExcluded)) ?? false
         self.terminalStopReason = try? c.decodeIfPresent(String.self, forKey: .terminalStopReason)
+        self.injectedContextPrefix = try? c.decodeIfPresent(String.self, forKey: .injectedContextPrefix)
         self.toolCallDurations =
             (try? c.decodeIfPresent([String: TimeInterval].self, forKey: .toolCallDurations)) ?? [:]
         self.thinkingDuration = try? c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
@@ -881,6 +895,7 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(routerBilling, forKey: .routerBilling)
         if modelContextExcluded { try c.encode(true, forKey: .modelContextExcluded) }
         try c.encodeIfPresent(terminalStopReason, forKey: .terminalStopReason)
+        try c.encodeIfPresent(injectedContextPrefix, forKey: .injectedContextPrefix)
         if !toolCallDurations.isEmpty { try c.encode(toolCallDurations, forKey: .toolCallDurations) }
         try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
     }
@@ -1257,6 +1272,7 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
         version: String = "1.0.0",
         author: String? = nil,
         category: String? = nil,
+        keywords: [String] = [],
         instructions: String = ""
     ) async -> Skill {
         let skill = Skill(
@@ -1265,6 +1281,7 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
             version: version,
             author: author,
             category: category,
+            keywords: keywords,
             instructions: instructions
         )
         await SkillStore.save(skill)
@@ -1443,7 +1460,24 @@ final class SkillManager: ObservableObject, @unchecked Sendable {
     func skill(for id: UUID) -> Skill? { skills.first { $0.id == id } }
 
     func skill(named name: String) -> Skill? {
-        skills.first { $0.name.caseInsensitiveCompare(name) == .orderedSame }
+        skills(named: name).first
+    }
+
+    /// Upstream `skills(named:)` (#2089): case-insensitive display name
+    /// first, then the Agent Skills slug (`code-reviewer`, what slash commands
+    /// and on-disk folders show and what models copy into a load), matched
+    /// against each skill's slug or its folder name. An exact name always wins.
+    func skills(named name: String) -> [Skill] {
+        let lowered = name.lowercased()
+        let exact = skills.filter { $0.name.lowercased() == lowered }
+        if !exact.isEmpty { return exact }
+
+        let slug = Skill.agentSkillsSlug(for: name)
+        guard !slug.isEmpty else { return [] }
+        return skills.filter { candidate in
+            if Skill.agentSkillsSlug(for: candidate.name) == slug { return true }
+            return candidate.directoryName?.lowercased() == slug
+        }
     }
 
     // Upstream `SkillManager.buildFullInstructions` / `loadReferenceContents`.
@@ -2736,13 +2770,17 @@ final class SystemPromptComposer: @unchecked Sendable {
                 """
         }
         // Track each slice of the prompt so the budget popover can show them as
-        // distinct rails (Persona / Grounding / Agent Loop / …).
+        // distinct rails (Persona / Working Directory / Grounding / …).
         var sections: [PromptSection] = []
         if !basePrompt.isEmpty {
             sections.append(PromptSection(id: "persona", label: "Persona", text: basePrompt, tint: .purple))
         }
         if !folderSection.isEmpty {
-            sections.append(PromptSection(id: "grounding", label: "Grounding", text: folderSection, tint: .teal))
+            // Upstream's id and label for this section ("folderContext",
+            // "Working Directory"); "grounding" is the Grounding discipline
+            // section (3c-2).
+            sections.append(
+                PromptSection(id: "folderContext", label: "Working Directory", text: folderSection, tint: .teal))
         }
         if !toolDirective.isEmpty {
             sections.append(PromptSection(id: "folderToolUse", label: "Folder Tool Use", text: toolDirective, tint: .indigo))
@@ -3046,14 +3084,9 @@ final class SystemPromptComposer: @unchecked Sendable {
     static func injectMemoryPrefix(
         _ section: String?, timeContext: String? = nil, into messages: inout [ChatMessage]
     ) {
-        var prefix = ""
-        if let trimmed = section?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-            prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
-        }
-        if let trimmed = timeContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
-            prefix += "\(trimmed)\n\n"
-        }
-        guard !prefix.isEmpty, let idx = messages.lastIndex(where: { $0.role == "user" }) else { return }
+        guard let prefix = composeInjectedUserPrefix(memorySection: section, timeContext: timeContext),
+            let idx = messages.lastIndex(where: { $0.role == "user" })
+        else { return }
         let existing = messages[idx]
         messages[idx] = ChatMessage(
             role: existing.role,
@@ -3063,6 +3096,21 @@ final class SystemPromptComposer: @unchecked Sendable {
             reasoning_content: existing.reasoning_content,
             contentParts: existing.contentParts.map { [.text(prefix)] + $0 }
         )
+    }
+
+    /// Upstream `composeInjectedUserPrefix` (#1798, #2173): the memory block,
+    /// then the time block right against the user's text, each with its
+    /// trailing separator; nil when both are empty. Intel has no screen or
+    /// automation context.
+    static func composeInjectedUserPrefix(memorySection: String?, timeContext: String? = nil) -> String? {
+        var prefix = ""
+        if let trimmed = memorySection?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix = "[Memory]\n\(trimmed)\n[/Memory]\n\n"
+        }
+        if let trimmed = timeContext?.trimmingCharacters(in: .whitespacesAndNewlines), !trimmed.isEmpty {
+            prefix += "\(trimmed)\n\n"
+        }
+        return prefix.isEmpty ? nil : prefix
     }
 
     /// Upstream: merge content into the first system message (prepending or

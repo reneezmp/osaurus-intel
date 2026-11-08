@@ -1245,8 +1245,8 @@ final class ChatSession: ObservableObject {
         let previewTools =
             ChatConfiguration.shared.disableTools ? [] : ToolRegistry.shared.openAISpecs()
         // Mirror the section split that `composeChatContext` emits on send, so
-        // the preview popover lists the same rails (Persona, and Grounding when
-        // a working folder is mounted) rather than a single "System Prompt".
+        // the preview popover lists the same rails (Persona, and Working
+        // Directory when a working folder is mounted) rather than a single "System Prompt".
         var previewSections: [PromptSection] = []
         if !previewPrompt.isEmpty {
             previewSections.append(
@@ -1256,7 +1256,7 @@ final class ChatSession: ObservableObject {
             from: folderState.context)
         if !previewFolderSection.isEmpty {
             previewSections.append(
-                PromptSection(id: "grounding", label: "Grounding", text: previewFolderSection, tint: .teal))
+                PromptSection(id: "folderContext", label: "Working Directory", text: previewFolderSection, tint: .teal))
         }
         let preview = ComposedContext(
             prompt: previewPrompt + previewFolderSection,
@@ -1316,6 +1316,46 @@ final class ChatSession: ObservableObject {
         }
 
         return parts.joined(separator: "\n\n")
+    }
+
+    /// Prepend a user turn's frozen memory / time prefix to its rendered
+    /// message (upstream #1798). The prefix already carries its trailing
+    /// separator, so this is a pure byte concatenation. Intel difference
+    /// (kept from Intel's injector): a message with image or audio parts gets
+    /// the block as a leading text part; upstream leaves it without one.
+    static func applyingFrozenInjectedPrefix(
+        _ prefix: String?,
+        to message: ChatMessage
+    ) -> ChatMessage {
+        guard let prefix, !prefix.isEmpty else { return message }
+        return ChatMessage(
+            role: message.role,
+            content: prefix + (message.content ?? ""),
+            tool_calls: message.tool_calls,
+            tool_call_id: message.tool_call_id,
+            reasoning_content: message.reasoning_content,
+            contentParts: message.contentParts.map { [.text(prefix)] + $0 }
+        )
+    }
+
+    /// Freeze this run's memory and time blocks onto the latest user turn,
+    /// once, at send time (upstream #1798, with #2173's time block). From
+    /// then on the turn replays the same bytes on every request, in this run
+    /// and in later ones, so the provider's prompt cache keeps the whole
+    /// earlier exchange (the block used to move to whichever user message
+    /// was newest and vanish from the one before). A regenerated turn keeps
+    /// its original bytes.
+    func freezeInjectedContextOntoLatestUserTurn(memorySection: String?, now: Date = Date()) {
+        guard let turn = turns.last(where: { $0.role == .user }) else { return }
+        guard turn.injectedContextPrefix == nil else { return }
+        guard
+            let prefix = SystemPromptComposer.composeInjectedUserPrefix(
+                memorySection: memorySection,
+                timeContext: SystemPromptTemplates.timeContext(now: now, timeZone: .current)
+            )
+        else { return }
+        turn.injectedContextPrefix = prefix
+        isDirty = true
     }
 
     static func buildUserChatMessage(
@@ -1659,9 +1699,11 @@ final class ChatSession: ObservableObject {
     /// Capture the current `input` + `pendingAttachments` + `pendingOneOffSkillId`
     /// into a single-slot pending send and clear the input. No-op if the
     /// payload is empty. Replacing semantics: a second call while a queue
-    /// is already pending overwrites it. The transcript is NOT touched —
-    /// the queued message only materializes as a `user` turn when the run
-    /// finishes (auto-flush) or when `sendNowInterrupting()` is invoked.
+    /// is already pending overwrites it. The transcript is NOT touched at
+    /// enqueue time — a text-only payload is injected as a `user` turn at
+    /// the next loop iteration boundary (`takeQueuedSteerIfEligible`),
+    /// while payloads carrying attachments or a one-off skill materialize
+    /// when the run finishes (auto-flush) or via `sendNowInterrupting()`.
     func enqueueSend(_ text: String, attachments: [Attachment]) {
         let trimmed = text.trimmingCharacters(in: .whitespacesAndNewlines)
         let hasContent = !trimmed.isEmpty || !attachments.isEmpty
@@ -1679,6 +1721,56 @@ final class ChatSession: ObservableObject {
     /// Drop the queued send without dispatching it.
     func cancelQueuedSend() {
         queuedSend = nil
+    }
+
+    /// Mid-run steering (upstream `injectQueuedSteerIfEligible`, #1433):
+    /// dequeue an eligible queued send so the next tool round carries it, no
+    /// Stop required. Only text-only payloads are eligible: attachments and
+    /// one-off skills need the full `send(...)` path, so they stay queued for
+    /// the run-end flush or Send Now. Intel splits upstream's function: the
+    /// engine asks for the text at a round boundary, and the user turn is
+    /// recorded when its sentinel arrives (`appendMidRunUserTurn`), after
+    /// the round's tool results. Remote steers wait for `W-channels`.
+    func takeQueuedSteerIfEligible() -> String? {
+        guard let pending = queuedSend,
+            pending.attachments.isEmpty,
+            pending.oneOffSkillId == nil,
+            !pending.text.isEmpty
+        else { return nil }
+        queuedSend = nil
+        return pending.text
+    }
+
+    /// Append the queued steer's user turn at an iteration boundary. The tool
+    /// loop appends the NEXT iteration's
+    /// empty assistant placeholder right after each tool result — before the
+    /// driver's `buildMessages` hook injects the steer — so a plain
+    /// `turns.append` lands the user turn after that placeholder. The model
+    /// then fills the placeholder with its call and the call's result is
+    /// appended after the steer, persisting `[assistant(call), user(steer),
+    /// tool(result)]` for the rest of the session: the user's instruction
+    /// reads as arriving after the model's own call, with the result after
+    /// it, on every later iteration and turn. Insert before a trailing empty
+    /// placeholder instead; the placeholder object keeps its identity so the
+    /// stream still lands in it. Only the iteration-boundary steer uses this:
+    /// there the trailing placeholder is guaranteed fresh (no delta has
+    /// streamed into it yet). `appendInterruptMessage` stops the run right
+    /// after appending and keeps its own shape.
+    func appendMidRunUserTurn(_ turn: ChatTurn) {
+        if let last = turns.last, Self.isEmptyAssistantPlaceholder(last) {
+            turns.insert(turn, at: turns.count - 1)
+        } else {
+            turns.append(turn)
+        }
+        isDirty = true
+        rebuildVisibleBlocks()
+    }
+
+    static func isEmptyAssistantPlaceholder(_ turn: ChatTurn) -> Bool {
+        turn.role == .assistant
+            && turn.contentIsEmpty
+            && turn.thinkingIsEmpty
+            && (turn.toolCalls ?? []).isEmpty
     }
 
     /// Stop the currently streaming run and immediately dispatch the queued
@@ -3065,6 +3157,14 @@ final class ChatSession: ObservableObject {
                     rebuildVisibleBlocks()
                     continue
                 }
+                // Upstream's mid-run steer (#1433): the engine took the
+                // queued text at a round boundary; record it after the
+                // round's tool results, before the fresh placeholder (#2653).
+                if let steer = StreamingSteerHint.decode(delta) {
+                    await processor.finalize()
+                    appendMidRunUserTurn(ChatTurn(role: .user, content: steer))
+                    continue
+                }
                 // Upstream `prepareGroundedClaimRetry`: the ungrounded answer
                 // stays visible but leaves model history; the corrected one
                 // streams into a fresh assistant turn.
@@ -3312,6 +3412,13 @@ final class ChatSession: ObservableObject {
             )
         )
 
+        // Freeze prompt-affecting model controls at send time (upstream
+        // #2101). Every tool round rebuilds its request; reading the live
+        // picker inside the loop could change Thinking halfway through a run.
+        let turnGenerationControls = ChatTurnGenerationControls.capture(
+            activeModelOptions: activeModelOptions
+        )
+
         currentTask = Task { @MainActor [weak self] in
             guard let self else { return }
             guard self.isRunActive(runId) else {
@@ -3423,6 +3530,10 @@ final class ChatSession: ObservableObject {
                 )
                 guard isRunActive(runId) else { return }
 
+                // Upstream #1798: memory and time ride the user turn they
+                // were first sent with, frozen, before any message is built.
+                freezeInjectedContextOntoLatestUserTurn(memorySection: context.memorySection)
+
                 var sys = context.prompt
 
                 // Plugin-dispatched tasks (host->dispatch) carry their
@@ -3525,13 +3636,16 @@ final class ChatSession: ObservableObject {
                             tool_call_id: t.toolCallId
                         )
                     case .user:
-                        return Self.buildUserChatMessage(
+                        let base = Self.buildUserChatMessage(
                             content: t.content,
                             attachments: t.attachments,
                             supportsImages: selectedModelSupportsImages,
                             supportsAudio: selectedModelSupportsAudio,
                             supportsVideo: selectedModelSupportsVideo
                         )
+                        // The frozen memory / time block this turn was first
+                        // sent with (upstream #1798).
+                        return Self.applyingFrozenInjectedPrefix(t.injectedContextPrefix, to: base)
                     default:
                         return ChatMessage(role: t.role.rawValue, content: t.content)
                     }
@@ -3581,6 +3695,12 @@ final class ChatSession: ObservableObject {
 
                 outer: while attempts < maxAttempts {
                     attempts += 1
+                    // Upstream's mid-run steer at this loop's own boundary
+                    // (after a tool the chat ran itself); the engine handles
+                    // its rounds. Only the run's budget notice survives it.
+                    if attempts > 1, let steer = takeQueuedSteerIfEligible() {
+                        appendMidRunUserTurn(ChatTurn(role: .user, content: steer))
+                    }
                     ttftTrace?.mark("build_messages_start")
                     var msgs = buildMessages()
                     ttftTrace?.mark("build_messages_done")
@@ -3610,21 +3730,21 @@ final class ChatSession: ObservableObject {
                         pendingBudgetNotice = nil
                     }
 
-                    // Memory now lives on the latest user message instead of
-                    // the system prompt — keeps the system prefix byte-stable
-                    // across turns so the MLX paged KV cache can reuse the
-                    // entire conversation prefix.
-                    SystemPromptComposer.injectMemoryPrefix(
-                        context.memorySection,
-                        // Upstream #2173: the date and zone every turn.
-                        timeContext: SystemPromptTemplates.timeContext(now: Date(), timeZone: .current),
-                        into: &msgs)
-
+                    // Memory and time ride the user turns as frozen prefixes
+                    // (`freezeInjectedContextOntoLatestUserTurn`, upstream
+                    // #1798), so `buildMessages()` already rendered them. The
+                    // current turn's block has its own budget row (Memory),
+                    // so it leaves the Conversation total; earlier turns'
+                    // frozen blocks are history and stay counted.
+                    let currentInjectedTokens =
+                        turns.last(where: { $0.role == .user })?.injectedContextPrefix
+                        .map { ContextBudgetManager.estimateTokens(for: $0) } ?? 0
                     let convTokens =
                         msgs
                         .filter { $0.role != "system" }
                         .reduce(0) { $0 + ContextBudgetManager.estimateTokens(for: $1.content) }
-                    budgetTracker.updateConversation(tokens: convTokens, finishedOutputTurn: assistantTurn)
+                        - currentInjectedTokens
+                    budgetTracker.updateConversation(tokens: max(0, convTokens), finishedOutputTurn: assistantTurn)
                     var req = ChatCompletionRequest(
                         model: selectedModel ?? "default",
                         messages: msgs,
@@ -3641,7 +3761,7 @@ final class ChatSession: ObservableObject {
                         session_id: sessionId?.uuidString
                     )
                     req.samplingParametersAreImplicit = true
-                    req.modelOptions = activeModelOptions.isEmpty ? nil : activeModelOptions
+                    turnGenerationControls.apply(to: &req)
                     req.ttftTrace = ttftTrace
                     // Intel: the engine runs the tool rounds itself, so it gets
                     // what is left of Max Tool Attempts (upstream's
@@ -3693,7 +3813,15 @@ final class ChatSession: ObservableObject {
                                                                                 try await ChatExecutionContext.$currentUserRequest.withValue(
                                                                                     trimmed.isEmpty ? nil : trimmed
                                                                                 ) {
-                                                                                    try await engine.streamChat(request: req)
+                                                                                    // Upstream's mid-run steer (#1433).
+                                                                                    try await ChatExecutionContext.$midRunSteer.withValue({ [weak self] in
+                                                                                        await MainActor.run {
+                                                                                            guard let self, self.isRunActive(runId) else { return nil }
+                                                                                            return self.takeQueuedSteerIfEligible()
+                                                                                        }
+                                                                                    }) {
+                                                                                        try await engine.streamChat(request: req)
+                                                                                    }
                                                                                 }
                                                                             }
                                                                         }
@@ -4111,7 +4239,7 @@ final class ChatSession: ObservableObject {
                                 session_id: sessionId?.uuidString
                             )
                             finalReq.samplingParametersAreImplicit = true
-                            finalReq.modelOptions = activeModelOptions.isEmpty ? nil : activeModelOptions
+                            turnGenerationControls.apply(to: &finalReq)
                             finalReq.isToolFreeWrapUp = true
                             // The request has no tools; the notice says so, so
                             // the model reports what is unfinished instead of

@@ -227,6 +227,10 @@ After the run:
   **2026-11-05 (plugin 2d gate):** the same three `activity/` files, held
   only by the app pid; that run had also stopped early (no summary line),
   so it was rerun: complete, no live writes.
+  **2026-11-08 (`W-cov-reaudit` 3c-3 full gate, marker 12:02:39):**
+  `memory/memory.sqlite-wal` changed at 12:03:57, held only by the app pid
+  (63553, `/Applications/osaurus.app`); the run completed with its summary
+  line and both keychain `mdat`s unchanged. The app's own memory writes.
   **2026-10-28 (agent detail gate):** the app relaunched at 17:26:59 (new
   pid; `ps -o lstart= -p $(pgrep -f /Applications/osaurus.app)`) during
   the build, and its launch wrote ~20 files (`last-exit-verdict.json`,

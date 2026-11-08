@@ -1242,6 +1242,29 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         roundCompletionTokens = nil
                         roundUsageOpen = true
 
+                        // Upstream's mid-run steering (#1433, #2653): a
+                        // text-only message the user queued during the run
+                        // joins at this round boundary, after the previous
+                        // round's tool results. It starts a new user message,
+                        // so the notices staged for the previous one go
+                        // (except the run's tool-budget warning) and the
+                        // within-message tracking resets. The sentinel tells
+                        // the chat to record the turn here, in stream order.
+                        if round > 1, let steer = await ChatExecutionContext.midRunSteer?() {
+                            if endpoint.usesResponsesWire {
+                                codexReplayItems.append([
+                                    "type": "message", "role": "user",
+                                    "content": [["type": "input_text", "text": steer]],
+                                ])
+                            } else {
+                                wireMessages.append(["role": "user", "content": steer])
+                            }
+                            pendingHarnessNotices = AgentToolLoop.noticesSurvivingNewUserMessage(
+                                pendingHarnessNotices)
+                            taskState.beginMessage()
+                            continuation.yield(StreamingSteerHint.encode(steer))
+                        }
+
                         // Trim first, then the transient notices (upstream's
                         // order): compaction decisions stay notice-independent.
                         var sendMessages = wireMessages
@@ -1585,24 +1608,23 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                     name: Self.resolvedOfferedToolName(rawCall.name, offered: activeTools),
                                     arguments: rawCall.arguments
                                 )
-                                guard activeTools?.contains(where: { $0.function.name == call.name }) == true else {
-                                    continuation.yield(
-                                        StreamingToolHint.encodeDone(
-                                            callId: call.callID,
-                                            name: call.name,
-                                            arguments: call.arguments,
-                                            result: Self.unofferedToolResult(call.name)
-                                        )
-                                    )
-                                    throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
-                                }
-                                if request.reportsToolStarts {
+                                // Upstream's scope gate (IntelToolScopeGate.swift).
+                                let isOffered = activeTools?.contains(where: { $0.function.name == call.name }) == true
+                                if request.reportsToolStarts, isOffered {
                                     continuation.yield(
                                         StreamingToolHint.encodeStarted(
                                             callId: call.callID, name: call.name, arguments: call.arguments))
                                 }
                                 var result: String
-                                if let harnessResult = Self.harnessResult(
+                                if !isOffered {
+                                    NSLog("[CloudChatEngine] refusing '\(call.name)': not offered in this request")
+                                    let offered = activeTools
+                                    result = await MainActor.run {
+                                        IntelToolScopeGate.envelope(
+                                            forUnofferedCall: call.name, offered: offered,
+                                            agentId: ChatExecutionContext.currentAgentId)
+                                    }
+                                } else if let harnessResult = Self.harnessResult(
                                     taskState, name: call.name, arguments: call.arguments,
                                     notices: &pendingHarnessNotices)
                                 {
@@ -1679,6 +1701,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                             : Self.unapprovedReason
                                         result = "⛔️ “\(call.name)” was not run — \(reason)."
                                     } else {
+                                        // Upstream #2656: the tool's wall time, so a
+                                        // late return shows in the run log.
+                                        let toolStart = Date()
                                         do {
                                             // Tools that bind UI to their call (`speak`)
                                             // read the call id from the task-local.
@@ -1696,7 +1721,9 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                                                     }
                                                 }
                                             }
+                                            NSLog("[CloudChatEngine] tool '\(call.name)' finished in \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s (result \(result.count) chars)")
                                         } catch {
+                                            NSLog("[CloudChatEngine] tool '\(call.name)' THREW after \(String(format: "%.1f", Date().timeIntervalSince(toolStart)))s: \(error.localizedDescription)")
                                             result = ToolEnvelope.fromError(error, tool: call.name)
                                         }
                                     }
@@ -1998,24 +2025,12 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                         for call in orderedCalls {
                             try Task.checkCancellation()
                             let callId = call.id.isEmpty ? "call_\(UUID().uuidString.prefix(20))" : call.id
-                            guard activeTools?.contains(where: { $0.function.name == call.name }) == true else {
-                                // A stale provider-side tool choice is still a
-                                // security rejection, but the card already
-                                // exists because its name/arguments streamed
-                                // earlier. Terminate that card before failing
-                                // the turn so Ventura does not display an
-                                // eternal in-progress call.
-                                continuation.yield(
-                                    StreamingToolHint.encodeDone(
-                                        callId: callId,
-                                        name: call.name,
-                                        arguments: call.arguments,
-                                        result: Self.unofferedToolResult(call.name)
-                                    )
-                                )
-                                throw EngineError(message: "The provider requested a tool that was not offered: \(call.name)")
-                            }
-                            if request.reportsToolStarts {
+                            // Upstream's scope gate (IntelToolScopeGate.swift): a
+                            // tool this request didn't offer is never run; the
+                            // model gets a `tool_not_found` envelope and the run
+                            // goes on (it used to end the turn).
+                            let isOffered = activeTools?.contains(where: { $0.function.name == call.name }) == true
+                            if request.reportsToolStarts, isOffered {
                                 continuation.yield(
                                     StreamingToolHint.encodeStarted(
                                         callId: callId, name: call.name, arguments: call.arguments))
@@ -2023,7 +2038,15 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
                             var result: String
                             let toolStart = Date()
 
-                            if let harnessResult = Self.harnessResult(
+                            if !isOffered {
+                                NSLog("[CloudChatEngine] refusing '\(call.name)': not offered in this request")
+                                let offered = activeTools
+                                result = await MainActor.run {
+                                    IntelToolScopeGate.envelope(
+                                        forUnofferedCall: call.name, offered: offered,
+                                        agentId: ChatExecutionContext.currentAgentId)
+                                }
+                            } else if let harnessResult = Self.harnessResult(
                                 taskState, name: call.name, arguments: call.arguments,
                                 notices: &pendingHarnessNotices)
                             {
@@ -2593,9 +2616,6 @@ actor ChatEngine: Sendable, ChatEngineProtocol {
         return current
     }
 
-    nonisolated static func unofferedToolResult(_ name: String) -> String {
-        "⛔️ “\(name)” was not run — it is not offered in this turn."
-    }
 
     private nonisolated static func completionText(from value: Any?) throws -> String? {
         if value == nil || value is NSNull { return nil }

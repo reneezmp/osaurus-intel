@@ -130,6 +130,12 @@ public enum ChatExecutionContext {
     /// window every round. Other callers (HTTP API, schedules) are unchanged.
     @TaskLocal public static var interactiveChatRun: Bool = false
 
+    /// Intel: upstream's mid-run steering (#1433). Chat binds a closure that
+    /// hands over a text-only message the user queued during the run;
+    /// `CloudChatEngine` calls it at each tool-round boundary
+    /// (`IntelMidRunSteer.swift`). Unbound for every other caller.
+    @TaskLocal static var midRunSteer: (@Sendable () async -> String?)?
+
     /// Intel: the chat's execution mode (folder or none), bound by chat
     /// around the cloud engine so engine-run `share_artifact` calls resolve
     /// paths as upstream's chat loop does (`processShareArtifactResult`).
