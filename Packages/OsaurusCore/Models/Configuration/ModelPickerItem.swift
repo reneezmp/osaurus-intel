@@ -261,6 +261,28 @@ extension ModelPickerItem {
         ("gpt-3.5-turbo", 16_385),
     ]
 
+    /// Documented public-API reasoning contract for the official host, keyed
+    /// by model family (upstream #1991). Nil for families without a
+    /// documented profile (they fall through to the static profiles).
+    static func officialOpenAIReasoningCapabilities(forModelId modelId: String) -> ModelReasoningCapabilities? {
+        if isPublicGPT6ModelId(modelId) { return .officialOpenAIGPT6Astra }
+        if isPublicGPT56ModelId(modelId) { return .officialOpenAIGPT56 }
+        return nil
+    }
+
+    static func isPublicGPT56ModelId(_ id: String) -> Bool {
+        let bare = id.split(separator: "/").last.map(String.init) ?? id
+        return bare.lowercased().hasPrefix("gpt-5.6")
+    }
+
+    /// `gpt-6-astra` and any dated snapshot of it.
+    static func isPublicGPT6ModelId(_ id: String) -> Bool {
+        let bare = (id.split(separator: "/").last.map(String.init) ?? id).lowercased()
+        guard bare.hasPrefix("gpt-6") else { return false }
+        let rest = bare.dropFirst("gpt-6".count)
+        return rest.isEmpty || rest.hasPrefix("-") || rest.hasPrefix(".")
+    }
+
     static func officialOpenAIContextWindow(forModelId modelId: String) -> Int? {
         let bare = (modelId.split(separator: "/").last.map(String.init) ?? modelId).lowercased()
         return officialOpenAIContextWindows

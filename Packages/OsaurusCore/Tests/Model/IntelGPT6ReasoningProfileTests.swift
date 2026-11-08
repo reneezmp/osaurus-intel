@@ -28,9 +28,11 @@ struct IntelGPT6ReasoningProfileTests {
     @Test func fusedSuffixAndOlderFamiliesAreNotGPT6() {
         #expect(!OpenAIGPT6ReasoningProfile.matches(modelId: "gpt-60"))
         #expect(!OpenAIGPT6ReasoningProfile.matches(modelId: "gpt-5.5"))
+        // Upstream's per-version profiles (#1991 audit, via the 3b-3 sync):
+        // GPT-5.2 and later have their own effort set.
         #expect(
             ModelProfileRegistry.profile(for: "gpt-5.5").map(ObjectIdentifier.init)
-                == ObjectIdentifier(OpenAIReasoningProfile.self))
+                == ObjectIdentifier(OpenAIGPT52PlusReasoningProfile.self))
     }
 
     @Test func reasoningModelsDropTemperatureOthersKeepIt() {

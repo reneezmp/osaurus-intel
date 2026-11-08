@@ -128,9 +128,9 @@ its code absent is a candidate gap.
 | Check:mcp | re-checked `0901780cc` | #2805 | 38/89 | Preserve typed MCP image results in Chat and agent history | UPSTREAM_AUDIT_2026-09-25 |
 | Check:memory | re-checked `79cc7dfe4` | #1834 | 20/113 | Clarify memory ingestion diagnostics | UPSTREAM_TRIAGE_0.24.3 |
 | Check:mobile | re-checked `6673ecf0b` | #3070 | 1/20 | stop showing injected memory in user bubbles for chats continued from the phone | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
-| Check:model-picker | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | 3b-3: upstream's legacy `ModelPickerView` (agent editor, Settings, compaction) has a Favorites tab and hearts; Intel's SwiftUI rewrite has neither. |
-| Check:model-picker | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | 3b-3: provider labels in search and favourites, tab switching from the keyboard, descriptions. |
-| Check:model-picker | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | 3b-3: with #1973. |
+| Done (3b-3) | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | Intel's SwiftUI `ModelPickerView` (agent editor, Settings, compaction): the favourites heart sits after the name; filled and always shown in the Favorites tab, where tapping removes. |
+| Done (3b-3) | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | Provider labels on rows that mix sources (All, Favorites, search); descriptions were already shown. Arrow-key tab switching doesn't apply: Intel's picker has no keyboard navigation (Ventura rule). |
+| Done (3b-3) | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | Favorites tab pinned first (shown while a favourite is among the options), hearts on hover, filled hearts persistent (`FavoriteModelsStore`, shared with the chat picker). Intel keeps All as the default tab. |
 | Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
 | Check:prompt | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | UPSTREAM_TRIAGE_0.24.3 |
 | Check:prompt | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | UPSTREAM_TRIAGE_0.24.3 |
@@ -142,7 +142,7 @@ its code absent is a candidate gap.
 | In | re-checked `10e66ca5c` | #3042 | 14/88 | Compaction turns reasoning off in a form self-hosted servers read | 3a: Intel's compaction sends `disableThinking`, and non-strict hosts get `chat_template_kwargs.enable_thinking=false`. |
 | Done (3a) | re-checked `31dd9f260` | #1954 | 15/68 | Fix ChatGPT/Codex test-button model count mismatch; add grok-4.5 to xAI catalog | Codex Test/discovery already use the live catalog; grok-4.5 (and grok-4.6) came with upstream's `XAIOAuthService`. |
 | Done (3a) | re-checked `3877f5e99` | #2416 | 1/13 | fix openai codex models reporting a fallback context window | `OpenAICodexOAuthService.lastContextWindows` from the live catalog's `context_window`. |
-| Check:model-picker | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | 3b-3: the live reasoning catalog (`RemoteReasoningCapabilityCatalog`), staged since W-model-picker-2947. |
+| Done (3b-3) | re-checked `3dcd8f9b6` | #1991 | 204/470 | feat: catalog-driven reasoning controls + unified model options in the picker | Upstream's `ModelOptions.swift` (live `RemoteReasoningCapabilityCatalog`, audited per-version OpenAI / Mistral / DeepSeek-V4.1 profiles) and `ModelFamilyNames`; Codex catalog levels (`CodexModelMetadata`), the official OpenAI GPT-5.6 / GPT-6 contract and route-scoped Gemini levels fill the catalog from Intel's `ModelPickerItemCache`; the card uses catalog defaults and level descriptions. Intel stubs `DeclaredReasoningEffort` (local bundles). |
 | In | re-checked `40031d8e1` | #1879 | 10/37 | fixed image attachments being blocked or silently dropped for remote provider model | 3a: remote models count as image-capable and Intel's Anthropic adapter sends image blocks. |
 | In | re-checked `4137884fa` | #2562 | 111/459 | Recover media rejections and harden OpenAI Responses | 3a: media rejections are remembered (`IntelImageInputFallback`); keeping Responses-native output items across turns goes to stage 5 (ChatEngine audit). |
 | In | re-checked `4569b76f7` | #1530 | 0/4 | Route OAuth requests through global proxy | 3a: Intel's OAuth services use `GlobalProxySettings` sessions. |
@@ -267,8 +267,8 @@ its code absent is a candidate gap.
    2026-11-07; sync
    `NativeMarkdownView`, `MessageTableRepresentable` and the message cell
    with upstream as files: find per match, image preview, streaming
-   scroll, durations, narrow chips), **3b-3** the pickers (Favourites in
-   the legacy picker, the live reasoning catalog); **3c** capabilities, the agent loop and prompts (14);
+   scroll, durations, narrow chips), **3b-3** the pickers (done 2026-11-07;
+   Favourites in the legacy picker, the live reasoning catalog); **3c** capabilities, the agent loop and prompts (14);
    **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations

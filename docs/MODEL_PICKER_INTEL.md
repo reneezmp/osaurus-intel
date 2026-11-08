@@ -151,7 +151,8 @@ ports upstream/main's current files, not the commits one by one. Plan:
 ## Status
 
 Stages A–E shipped 2026-10-06. Staged: the composer credits chip and its
-wallet card (Intel never had the chip), live reasoning catalog
-capabilities. Media-model categories and prices arrived with
+wallet card (Intel never had the chip). The live reasoning catalog shipped
+2026-11-07 (`W-cov-reaudit` 3b-3, `UPSTREAM_SYNC.md`), with the legacy
+picker's Favorites tab. Media-model categories and prices arrived with
 `W-media-generation` (2026-10-28).
 

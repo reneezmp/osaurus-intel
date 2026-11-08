@@ -4,10 +4,6 @@ import Testing
 
 /// Gemini text models resolve their own documented level set, and nothing
 /// else named `gemini` picks one up (#3108).
-///
-/// Intel (2026-10-27): upstream #3115's file; `capabilities(forModelId:)`
-/// returns the level ids and default directly (Intel has no
-/// `ModelReasoningCapabilities`).
 @Suite("Gemini reasoning contract")
 struct GeminiReasoningContractTests {
 
@@ -24,8 +20,8 @@ struct GeminiReasoningContractTests {
         ]
         for (modelId, levels, defaultLevel) in cases {
             let capabilities = GeminiReasoningContract.capabilities(forModelId: modelId)
-            #expect(capabilities?.levels == levels, "\(modelId)")
-            #expect(capabilities?.defaultLevel == defaultLevel, "\(modelId)")
+            #expect(capabilities?.levels.map(\.id) == levels, "\(modelId)")
+            #expect(capabilities?.defaultLevelId == defaultLevel, "\(modelId)")
         }
     }
 

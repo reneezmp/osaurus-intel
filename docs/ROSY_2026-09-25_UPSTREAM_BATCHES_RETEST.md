@@ -3065,6 +3065,24 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Model pickers re-audit (2026-11-07)
+
+`W-cov-reaudit` stage 3b-3 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3b-3"). Not in candidate 66.
+
+- [ ] Agents → an agent → its default model picker: hover a model, click
+      the heart. A Favorites tab appears first; the heart stays filled.
+      In Favorites, clicking the heart removes it.
+- [ ] Same picker, All tab or a search: each row names its provider.
+- [ ] If you use ChatGPT sign-in (Codex): pick a GPT-5.6 model in the chat
+      picker. The options column offers the catalog's levels (e.g. up to
+      Ultra) with descriptions on hover, and the pill shows the default.
+      Send a message at a non-default level: no error.
+- [ ] With an OpenAI API key (Responses): GPT-6 Astra offers Light to Max
+      (no None); a GPT-5.x model offers only levels the API accepts.
+- [ ] A Gemini 3 model through OpenRouter or Google shows its own levels;
+      through a custom proxy it shows no effort control.
+
 ## Transcript re-audit (2026-11-07)
 
 `W-cov-reaudit` stage 3b-2 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

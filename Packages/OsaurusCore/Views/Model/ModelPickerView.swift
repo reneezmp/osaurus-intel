@@ -477,6 +477,31 @@ struct ModelPickerView: View {
     @State private var searchText = ""
     /// `nil` = the "All" tab; otherwise a `Source.uniqueKey`.
     @State private var selectedSourceKey: String?
+    @ObservedObject private var favoritesStore = FavoriteModelsStore.shared
+    /// Row under the pointer; its outline heart shows (upstream #1889).
+    @State private var hoveredModelId: String?
+
+    /// Stable key for the synthetic Favorites tab (upstream #1889). It only
+    /// exists while at least one favourite is among the current options.
+    private static let favoritesTabKey = "favorites"
+
+    /// Options the user has favourited, in the order they were added.
+    /// Favourites whose model isn't available (provider offline, deleted)
+    /// don't appear until the model returns.
+    private var favoriteItems: [ModelPickerItem] {
+        guard !favoritesStore.favoriteKeys.isEmpty else { return [] }
+        let byKey = Dictionary(options.map { ($0.favoriteKey, $0) }, uniquingKeysWith: { first, _ in first })
+        return favoritesStore.favoriteKeys.compactMap { byKey[$0] }
+    }
+
+    private var isFavoritesTab: Bool { selectedSourceKey == Self.favoritesTabKey }
+
+    /// Rows mixing sources (All, Favorites, search) name their provider so
+    /// identical model ids from different providers stay distinguishable
+    /// (upstream #1467).
+    private var showsProviderLabels: Bool {
+        selectedSourceKey == nil || isFavoritesTab || isSearching
+    }
     @State private var sortOrder: ModelPickerSortOrder = .default
     @State private var contextFilter: ModelPickerContextFilter = .any
     @State private var visionFilter: ModelPickerVisionFilter = .any
@@ -493,7 +518,7 @@ struct ModelPickerView: View {
     /// Sort/filter only makes sense on a single source tab that actually carries
     /// router pricing/context metadata (the Osaurus tab), and not while searching.
     private var showSortButton: Bool {
-        guard !isSearching, let key = selectedSourceKey else { return false }
+        guard !isSearching, let key = selectedSourceKey, key != Self.favoritesTabKey else { return false }
         return options.contains { $0.source.uniqueKey == key && $0.inputPriceMicroPerMTok != nil }
     }
 
@@ -504,7 +529,9 @@ struct ModelPickerView: View {
     private var visibleModels: [ModelPickerItem] {
         let query = searchText.trimmingCharacters(in: .whitespacesAndNewlines).lowercased()
         var items = options
-        if let key = selectedSourceKey {
+        if isFavoritesTab {
+            items = favoriteItems
+        } else if let key = selectedSourceKey {
             items = items.filter { $0.source.uniqueKey == key }
         }
         if !query.isEmpty {
@@ -514,7 +541,7 @@ struct ModelPickerView: View {
         }
         // Filters + price sort apply only on a specific tab (where router
         // metadata exists); the "All" tab keeps the grouped/alphabetical order.
-        if selectedSourceKey != nil {
+        if selectedSourceKey != nil, !isFavoritesTab {
             items =
                 items
                 .filteredByContext(contextFilter)
@@ -529,7 +556,7 @@ struct ModelPickerView: View {
             header
             Divider().background(theme.primaryBorder.opacity(0.3))
             searchField
-            if groups.count > 1 {
+            if groups.count > 1 || !favoriteItems.isEmpty {
                 sourceTabs
             }
             Divider().background(theme.primaryBorder.opacity(0.3))
@@ -745,6 +772,15 @@ struct ModelPickerView: View {
     private var sourceTabs: some View {
         ScrollView(.horizontal, showsIndicators: false) {
             HStack(spacing: 6) {
+                // Pinned first so a few preferred models are always the
+                // shortest path (upstream #1889).
+                if !favoriteItems.isEmpty {
+                    tabPill(
+                        label: String(localized: "Favorites", bundle: .module),
+                        count: favoriteItems.count,
+                        key: Self.favoritesTabKey
+                    )
+                }
                 tabPill(label: String(localized: "All", bundle: .module), count: options.count, key: nil)
                 ForEach(groups, id: \.source.uniqueKey) { group in
                     tabPill(
@@ -811,10 +847,13 @@ struct ModelPickerView: View {
                     .foregroundColor(isSelected ? theme.accentColor : theme.secondaryText.opacity(0.5))
                     .frame(width: 18)
                 VStack(alignment: .leading, spacing: 2) {
-                    Text(item.displayName)
-                        .font(theme.font(size: 13, weight: .medium))
-                        .foregroundColor(theme.primaryText)
-                        .lineLimit(1)
+                    HStack(spacing: 6) {
+                        Text(item.displayName)
+                            .font(theme.font(size: 13, weight: .medium))
+                            .foregroundColor(theme.primaryText)
+                            .lineLimit(1)
+                        favoriteButton(for: item)
+                    }
                     if let description = item.description, !description.isEmpty {
                         Text(description)
                             .font(theme.font(size: 11))
@@ -823,6 +862,9 @@ struct ModelPickerView: View {
                     }
                 }
                 Spacer(minLength: 6)
+                if showsProviderLabels {
+                    providerBadge(for: item)
+                }
                 if item.isVLM {
                     visionBadge
                 }
@@ -833,6 +875,48 @@ struct ModelPickerView: View {
             .background(isSelected ? theme.accentColor.opacity(0.06) : Color.clear)
         }
         .buttonStyle(.plain)
+        .onHover { hovering in
+            if hovering {
+                hoveredModelId = item.id
+            } else if hoveredModelId == item.id {
+                hoveredModelId = nil
+            }
+        }
+    }
+
+    /// The favourite heart after the name (upstream #1889 / #1973): an
+    /// outline on hover for a model not yet favourited, a filled heart that
+    /// stays for one that is. In the Favorites tab the filled heart removes.
+    @ViewBuilder
+    private func favoriteButton(for item: ModelPickerItem) -> some View {
+        let isFavorite = favoritesStore.isFavorite(item.favoriteKey)
+        if isFavorite || hoveredModelId == item.id {
+            Button {
+                favoritesStore.toggle(item.favoriteKey)
+            } label: {
+                Image(systemName: isFavorite ? "heart.fill" : "heart")
+                    .font(.system(size: 10, weight: .semibold))
+                    .foregroundColor(isFavorite ? theme.accentColor : theme.tertiaryText)
+                    .frame(width: 16, height: 16)
+                    .contentShape(Rectangle())
+            }
+            .buttonStyle(.plain)
+            .help(isFavorite ? Text("Remove from favorites", bundle: .module) : Text("Add to favorites", bundle: .module))
+            .accessibilityLabel(
+                Text(isFavorite ? L("Remove from favorites") : L("Add to favorites"))
+            )
+        }
+    }
+
+    /// Where a model comes from, for rows that mix sources.
+    private func providerBadge(for item: ModelPickerItem) -> some View {
+        Text(item.source.displayName)
+            .font(theme.font(size: 9, weight: .medium))
+            .foregroundColor(theme.secondaryText)
+            .lineLimit(1)
+            .padding(.horizontal, 6)
+            .padding(.vertical, 2)
+            .background(Capsule().fill(theme.secondaryBackground.opacity(0.8)))
     }
 
     private var visionBadge: some View {

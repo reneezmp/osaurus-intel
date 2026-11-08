@@ -5649,6 +5649,44 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3b-3: the model pickers (`W-cov-reaudit`) — 2026-11-07
+
+The last 4 rows of 3b ([`COV_REAUDIT.md`](COV_REAUDIT.md)); 3b is complete.
+
+- **Legacy picker (#1467, #1889, #1973):** Intel's SwiftUI `ModelPickerView`
+  (agent editor, Chat Settings, compaction, Orchestrator) gains upstream's
+  Favorites tab (pinned first, while a favourite is among the options),
+  hearts after the name (outline on hover, filled persistent; tapping in
+  Favorites removes) and provider labels on rows that mix sources. Intel
+  keeps All as its default tab and has no arrow-key tab switching (Ventura
+  keyboard rule).
+- **Live reasoning catalog (#1991):** `ModelOptions.swift` and
+  `ModelFamilyNames.swift` are upstream's. Intel's own copy was missing the
+  per-version effort audit (GPT-5.1 vs 5.2+ vs GPT-6, o-series, Mistral,
+  DeepSeek-V4.1), so some saved efforts could reach the wire where the API
+  rejects them. `RemoteReasoningCapabilityCatalog` is filled by Intel's
+  `ModelPickerItemCache` on every rebuild, keyed by picker id:
+  - Codex: the live `/models` catalog's levels and descriptions
+    (`CodexModelMetadata`, `OpenAICodexOAuthService.lastModelMetadata`);
+  - official OpenAI (`openResponses` on `api.openai.com`): the documented
+    GPT-5.6 / GPT-6 contracts;
+  - Gemini on routes that forward the effort (`routeHonorsContract`),
+    replacing Intel's `GeminiReasoningProfile`.
+  The picker card shows the catalog default and level descriptions as help.
+  `DeclaredReasoningEffort` (local bundle stamps) is an Intel stub;
+  `LocalReasoningCapability.Capability` gained `defaultThinkingOn`.
+- **Test target:** `Model/ModelProfileRegistryTests.swift` was excluded in
+  `Package.swift` (written for an older registry), so neither Intel's nor
+  upstream's registry tests ran. It is upstream's now and included (one
+  `MLXBatchAdapter` test dropped).
+
+Tests: upstream `ModelProfileRegistryTests`, `GeminiReasoningContractTests`;
+`IntelReasoningCatalogTests`; `IntelGeminiReasoningTests` rewritten for the
+catalog.
+The Ventura symbol guard caught upstream's
+`arrow.up.right.and.arrow.down.left` (macOS 14) on the image Resolution
+options; Intel keeps `arrow.down.right.and.arrow.up.left`.
+
 ### Coverage re-audit, stage 3b-2: the transcript (`W-cov-reaudit`) — 2026-11-07
 
 The 7 transcript rows of 3b ([`COV_REAUDIT.md`](COV_REAUDIT.md)): #1969 and

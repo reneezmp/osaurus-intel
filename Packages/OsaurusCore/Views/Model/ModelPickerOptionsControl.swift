@@ -30,6 +30,10 @@ struct ModelPickerThinkingControl {
 /// Inline model-options state for the picker's selected model: the semantic
 /// Thinking row plus every other option the model's profile exposes.
 struct ModelPickerOptionsControl {
+    /// Catalog-driven reasoning capabilities (Codex live catalog, official
+    /// OpenAI contract, Gemini levels), upstream #1991. Supplies per-level
+    /// descriptions; nil for profile-only models.
+    var capabilities: ModelReasoningCapabilities? = nil
     var thinking: ModelPickerThinkingControl? = nil
     /// Non-thinking option definitions, in profile order.
     let options: [ModelOptionDefinition]

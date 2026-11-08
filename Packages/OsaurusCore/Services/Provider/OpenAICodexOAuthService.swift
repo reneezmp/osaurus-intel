@@ -59,6 +59,48 @@ public enum OpenAICodexOAuthError: LocalizedError, Sendable {
     }
 }
 
+/// One reasoning level a Codex model advertises in the live `/models`
+/// catalog, in the catalog's order. `effort` is the exact wire value
+/// (`low`, `xhigh`, `ultra`, ...); `description` is ChatGPT's own copy for
+/// the level, surfaced as secondary text in the effort picker (upstream
+/// #1991).
+public struct CodexReasoningLevel: Sendable, Equatable, Hashable {
+    public let effort: String
+    public let description: String?
+
+    public init(effort: String, description: String? = nil) {
+        self.effort = effort
+        self.description = description
+    }
+}
+
+/// Per-model capability metadata decoded from the live Codex `/models`
+/// catalog. This is the authoritative source for a model's reasoning
+/// surface — sets differ per model (Terra offers `ultra`, Luna stops at
+/// `max`) and must never be inferred from model names (upstream #1991).
+public struct CodexModelMetadata: Sendable, Equatable, Hashable {
+    public let slug: String
+    public let displayName: String?
+    /// Catalog default effort. Display-only: shown when the user made no
+    /// explicit choice but never injected into requests.
+    public let defaultReasoningLevel: String?
+    /// Supported efforts in catalog order. Empty when the catalog exposes no
+    /// reasoning contract for the model.
+    public let supportedReasoningLevels: [CodexReasoningLevel]
+
+    public init(
+        slug: String,
+        displayName: String? = nil,
+        defaultReasoningLevel: String? = nil,
+        supportedReasoningLevels: [CodexReasoningLevel] = []
+    ) {
+        self.slug = slug
+        self.displayName = displayName
+        self.defaultReasoningLevel = defaultReasoningLevel
+        self.supportedReasoningLevels = supportedReasoningLevels
+    }
+}
+
 public enum OpenAICodexOAuthService {
 
     // MARK: - Configuration
@@ -83,6 +125,18 @@ public enum OpenAICodexOAuthService {
     /// back to their own window resolution.
     public static var lastContextWindows: [String: Int] {
         contextWindowsBox.withLock { $0 }
+    }
+
+    private static let modelMetadataBox = OSAllocatedUnfairLock<[String: CodexModelMetadata]>(initialState: [:])
+
+    /// Slug -> reasoning metadata from the latest catalog (upstream #1991).
+    /// Empty before the first successful discovery.
+    public static var lastModelMetadata: [String: CodexModelMetadata] {
+        modelMetadataBox.withLock { $0 }
+    }
+
+    public static func modelMetadata(forSlug slug: String) -> CodexModelMetadata? {
+        modelMetadataBox.withLock { $0[slug] }
     }
 
     public static func usesResponsesLite(modelId: String) -> Bool {
@@ -206,7 +260,21 @@ public enum OpenAICodexOAuthService {
                 if let window = entry.context_window, window > 0 { map[entry.slug] = window }
             }
         }
+        modelMetadataBox.withLock { state in
+            state = metadataBySlug(compatible)
+        }
         return compatible.map(\.slug).uniqued()
+    }
+
+    private static func metadataBySlug(_ entries: [ModelEntry]) -> [String: CodexModelMetadata] {
+        Dictionary(entries.map { ($0.slug, $0.capabilityMetadata) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// Reasoning metadata for the Codex-compatible entries of a `/models`
+    /// response, as discovery records it. Nil when the body doesn't decode.
+    static func catalogModelMetadata(fromModelsJSON data: Data) -> [String: CodexModelMetadata]? {
+        guard let decoded = try? JSONDecoder().decode(ModelsResponse.self, from: data) else { return nil }
+        return metadataBySlug(decoded.models.filter(isCodexCompatible))
     }
 
     /// True when a `/models` entry can be used through the Codex Responses
@@ -369,6 +437,32 @@ public enum OpenAICodexOAuthService {
         let use_responses_lite: Bool?
         /// Total context window in tokens (upstream #2416).
         let context_window: Int?
+        let display_name: String?
+        let default_reasoning_level: String?
+        let supported_reasoning_levels: [ReasoningLevelEntry]?
+
+        /// The publishable capability slice of this entry, preserving the
+        /// catalog's level order and dropping malformed (effort-less) levels.
+        var capabilityMetadata: CodexModelMetadata {
+            func trimmed(_ value: String?) -> String? {
+                guard let t = value?.trimmingCharacters(in: .whitespacesAndNewlines), !t.isEmpty else { return nil }
+                return t
+            }
+            return CodexModelMetadata(
+                slug: slug,
+                displayName: trimmed(display_name),
+                defaultReasoningLevel: trimmed(default_reasoning_level),
+                supportedReasoningLevels: (supported_reasoning_levels ?? []).compactMap { level in
+                    guard let effort = trimmed(level.effort) else { return nil }
+                    return CodexReasoningLevel(effort: effort, description: level.description)
+                }
+            )
+        }
+    }
+
+    private struct ReasoningLevelEntry: Decodable {
+        let effort: String?
+        let description: String?
     }
 
     private struct TokenResponse: Decodable {

@@ -1209,6 +1209,12 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
         let built: [ModelPickerItem] = await MainActor.run {
             var out: [ModelPickerItem] = []
             var seen = Set<String>()
+            // Live reasoning capabilities by full picker id (upstream #1991):
+            // the Codex catalog's per-model levels, the official OpenAI
+            // contract for GPT-5.6 / GPT-6, and Gemini's documented levels on
+            // routes that forward the effort.
+            var reasoningCapabilities: [String: ModelReasoningCapabilities] = [:]
+            let codexMetadata = OpenAICodexOAuthService.lastModelMetadata
             if ClaudeCodeConfiguration.isAvailable() {
                 let sourceId = UUID(uuidString: "C1A0DE00-C0DE-4000-8000-000000000001")!
                 for model in ClaudeCodeModel.allCases {
@@ -1256,6 +1262,21 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                             )
                         )
                     } else {
+                        let capabilities: ModelReasoningCapabilities?
+                        if provider.providerType == .openAICodex {
+                            capabilities = codexMetadata[modelId].flatMap(ModelReasoningCapabilities.init(codex:))
+                        } else if provider.providerType == .openResponses,
+                            provider.host.lowercased() == "api.openai.com"
+                        {
+                            capabilities = ModelPickerItem.officialOpenAIReasoningCapabilities(forModelId: modelId)
+                        } else if GeminiReasoningContract.routeHonorsContract(
+                            providerType: provider.providerType, host: provider.host)
+                        {
+                            capabilities = GeminiReasoningContract.capabilities(forModelId: modelId)
+                        } else {
+                            capabilities = nil
+                        }
+                        if let capabilities { reasoningCapabilities[pickerId] = capabilities }
                         out.append(
                             ModelPickerItem(
                                 id: pickerId,
@@ -1290,6 +1311,9 @@ final class ModelPickerItemCache: ObservableObject, @unchecked Sendable {
                     .fromMediaModel($0, providerId: RemoteProviderManager.osaurusRouterProviderId)
                 }
             )
+            // Replaced whole on every rebuild, which also drops entries for
+            // removed or disconnected providers (upstream).
+            RemoteReasoningCapabilityCatalog.replaceAll(reasoningCapabilities)
             // Published on the main actor: concurrent rebuilds (notification
             // observers, prewarm, chat refresh) must not race on `items`.
             self.items = out

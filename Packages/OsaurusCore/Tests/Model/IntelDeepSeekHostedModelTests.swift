@@ -9,7 +9,6 @@ struct IntelDeepSeekHostedModelTests {
         for id in [
             "deepseek-flash",
             "deepseek/deepseek-flash",
-            "DeepSeek-V4.1-Flash",
             "deepseek-v4-pro",
         ] {
             #expect(ModelFamilyNames.isDSV4Family(id), "expected DSV4 family for \(id)")
@@ -18,6 +17,12 @@ struct IntelDeepSeekHostedModelTests {
                     == DSV4ReasoningProfile.displayName
             )
         }
+        // V4.1 is still DSV4 for the wire mapping (`dsv4Effort`) but gets
+        // upstream's own V4.1 effort ladder in the picker.
+        #expect(ModelFamilyNames.isDSV4Family("DeepSeek-V4.1-Flash"))
+        #expect(
+            ModelProfileRegistry.profile(for: "DeepSeek-V4.1-Flash")?.displayName
+                == DSV41ReasoningProfile.displayName)
 
         #expect(!ModelFamilyNames.isDSV4Family("deepseek-chat"))
         #expect(!ModelFamilyNames.isDSV4Family("deepseek-v3"))

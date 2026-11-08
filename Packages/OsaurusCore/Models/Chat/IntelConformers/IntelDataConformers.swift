@@ -344,10 +344,27 @@ enum DirectoryPickerService {
 enum LocalReasoningCapability {
     struct Capability {
         let isToggleableThinking: Bool
+        var defaultThinkingOn: Bool = false
     }
     static func capability(forModelId modelId: String) -> Capability {
         Capability(isToggleableThinking: false)
     }
+}
+
+// MARK: - DeclaredReasoningEffort (Intel stub)
+//
+// Upstream's `Services/DeclaredReasoningEffort.swift` reads the effort set a
+// local MLX bundle declares (`jang_config.json`, or the chat template's own
+// closed-set guard). Intel has no local bundles, so nothing is ever declared;
+// `ModelProfileRegistry` (upstream's) falls through to the live remote
+// catalog and the static profiles.
+enum DeclaredReasoningEffort {
+    enum Control: Equatable, Sendable {
+        case noEffortControl
+    }
+    static func control(forModelId modelId: String) -> Control? { nil }
+    static func mode(forNativeEffort effort: String, control: Control?) -> String? { nil }
+    static func capabilities(forModelId modelId: String) -> ModelReasoningCapabilities? { nil }
 }
 
 // Note: the Phase 8C-prep-2 `NSImage.pngData()` shim that used to live

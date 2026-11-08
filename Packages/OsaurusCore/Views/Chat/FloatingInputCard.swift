@@ -2244,11 +2244,24 @@ extension FloatingInputCard {
             )
         }
         guard !options.isEmpty || thinking != nil else { return nil }
+        // Live catalog levels (Codex, official OpenAI, Gemini on routes that
+        // forward the effort), upstream #1991. Display-only defaults: the
+        // catalog default for catalog-driven effort, otherwise the profile's.
+        let capabilities = ModelProfileRegistry.reasoningCapabilities(for: model).flatMap {
+            $0.isEmpty ? nil : $0
+        }
+        let defaults: [String: ModelOptionValue]
+        if let capabilities {
+            defaults = capabilities.defaultLevelId.map { ["reasoningEffort": .string($0)] } ?? [:]
+        } else {
+            defaults = ModelProfileRegistry.defaults(for: model)
+        }
         return ModelPickerOptionsControl(
+            capabilities: capabilities,
             thinking: thinking,
             options: options,
             values: ModelProfileRegistry.normalizedOptions(for: model, persisted: activeModelOptions),
-            defaults: ModelProfileRegistry.defaults(for: model),
+            defaults: defaults,
             onChange: { optionId, newValue in
                 DispatchQueue.main.async {
                     guard selectedModel == model else { return }

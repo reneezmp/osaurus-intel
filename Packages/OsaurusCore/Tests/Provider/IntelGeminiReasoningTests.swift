@@ -17,33 +17,69 @@ struct IntelGeminiReasoningTests {
 
     // MARK: Picker profile
 
-    @Test func profileOffersEachModelsOwnLevels() throws {
-        func levels(_ modelId: String) -> [String]? {
-            guard
-                let option = ModelProfileRegistry.options(for: modelId).first(where: { $0.id == "reasoningEffort" }),
-                case .segmented(let segments) = option.kind
-            else { return nil }
-            return segments.map(\.id)
+    /// Since `W-cov-reaudit` 3b-3 the levels come from the live reasoning
+    /// catalog, as upstream: Intel's picker cache registers a Gemini model's
+    /// documented levels under its picker id only on routes that forward the
+    /// effort. These tests register them directly.
+    private func withCatalog(_ ids: [String], _ body: () throws -> Void) rethrows {
+        let saved = RemoteReasoningCapabilityCatalog.snapshot()
+        defer { RemoteReasoningCapabilityCatalog.replaceAll(saved) }
+        var entries: [String: ModelReasoningCapabilities] = [:]
+        for id in ids {
+            if let capabilities = GeminiReasoningContract.capabilities(forModelId: id) { entries[id] = capabilities }
         }
-        #expect(levels("google/gemini-3-pro-preview") == ["low", "high"])
-        #expect(levels("openrouter/google/gemini-3.8-flash") == ["low", "medium", "high"])
-        #expect(levels("google/gemini-3.6-flash") == ["minimal", "low", "medium", "high"])
-        #expect(levels("google/gemini-3-pro-image-preview") == nil)
-        #expect(levels("google/gemini-2.0-flash") == nil)
-        #expect(ModelProfileRegistry.profile(for: "google/gemini-2.5-pro") is GeminiReasoningProfile.Type)
+        RemoteReasoningCapabilityCatalog.replaceAll(entries)
+        try body()
+    }
+
+    private func levels(_ modelId: String) -> [String]? {
+        guard
+            let option = ModelProfileRegistry.options(for: modelId).first(where: { $0.id == "reasoningEffort" }),
+            case .segmented(let segments) = option.kind
+        else { return nil }
+        return segments.map(\.id)
+    }
+
+    @Test func catalogOffersEachModelsOwnLevels() {
+        let ids = [
+            "google/gemini-3-pro-preview", "openrouter/google/gemini-3.8-flash", "google/gemini-3.6-flash",
+            "google/gemini-3-pro-image-preview", "google/gemini-2.0-flash",
+        ]
+        withCatalog(ids) {
+            #expect(levels("google/gemini-3-pro-preview") == ["low", "high"])
+            #expect(levels("openrouter/google/gemini-3.8-flash") == ["low", "medium", "high"])
+            #expect(levels("google/gemini-3.6-flash") == ["minimal", "low", "medium", "high"])
+            #expect(levels("google/gemini-3-pro-image-preview") == nil)
+            #expect(levels("google/gemini-2.0-flash") == nil)
+        }
+    }
+
+    @Test func noCatalogEntryMeansNoEffortControl() {
+        // A route that doesn't forward the effort never registers the model.
+        withCatalog([]) {
+            #expect(levels("litellm/google/gemini-3-pro-preview") == nil)
+            #expect(
+                ModelProfileRegistry.normalizedOptions(
+                    for: "litellm/google/gemini-3-pro-preview", persisted: ["reasoningEffort": .string("low")]
+                ).isEmpty)
+        }
     }
 
     @Test func defaultIsDisplayOnly() {
-        #expect(ModelProfileRegistry.defaults(for: "openrouter/google/gemini-3.8-flash")["reasoningEffort"] == .string("medium"))
-        #expect(ModelProfileRegistry.defaults(for: "google/gemini-2.5-pro").isEmpty)
-        #expect(
-            ModelProfileRegistry.inlineReasoningSuffixLabel(for: "google/gemini-3-pro-preview", values: [:]) == "High")
-        // Nothing is synthesized into a request without an explicit choice.
-        #expect(ModelProfileRegistry.normalizedOptions(for: "google/gemini-3-pro-preview", persisted: nil).isEmpty)
-        #expect(
-            ModelProfileRegistry.normalizedOptions(
-                for: "google/gemini-3-pro-preview", persisted: ["reasoningEffort": .string("low")])
-                == ["reasoningEffort": .string("low")])
+        withCatalog(["openrouter/google/gemini-3.8-flash", "google/gemini-3-pro-preview"]) {
+            #expect(
+                ModelProfileRegistry.reasoningCapabilities(for: "openrouter/google/gemini-3.8-flash")?.defaultLevelId
+                    == "medium")
+            #expect(
+                ModelProfileRegistry.inlineReasoningSuffixLabel(for: "google/gemini-3-pro-preview", values: [:])
+                    == ModelReasoningCapabilities.displayLabel(forEffort: "high"))
+            // Nothing is synthesized into a request without an explicit choice.
+            #expect(ModelProfileRegistry.normalizedOptions(for: "google/gemini-3-pro-preview", persisted: nil).isEmpty)
+            #expect(
+                ModelProfileRegistry.normalizedOptions(
+                    for: "google/gemini-3-pro-preview", persisted: ["reasoningEffort": .string("low")])
+                    == ["reasoningEffort": .string("low")])
+        }
     }
 
     // MARK: Composer route check

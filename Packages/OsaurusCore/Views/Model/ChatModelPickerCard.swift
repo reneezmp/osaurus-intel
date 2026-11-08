@@ -9,9 +9,9 @@
 //    drives arrows and Return inside the card's panel; Escape is the
 //    presenter's. Rows only draw the `focused` underline.
 //  - Single-value `onChange` (macOS 13); `initial:` runs from `onAppear`.
-//  - No catalog reasoning capabilities, and Intel's option definitions carry
-//    no help text: effort rows use the segment label as help, and no
-//    section shows a footnote.
+//  - Effort rows use the live catalog's level description as help when it
+//    has one (Codex), else the segment label; Intel's option definitions
+//    carry no help text, so no section shows a footnote.
 //
 
 import AppKit
@@ -166,7 +166,11 @@ private struct ChatPickerOptionsSnapshot: Equatable {
                     Row(
                         id: "option:\(option.id):\(segment.id)",
                         label: segment.label,
-                        help: segment.label,
+                        // The catalog's own copy for the level when it has
+                        // one (upstream #1991), else the label.
+                        help: option.id == "reasoningEffort"
+                            ? control.capabilities?.levels.first { $0.id == segment.id }?.description ?? segment.label
+                            : segment.label,
                         selected: selectedID == segment.id,
                         action: .segment(optionID: option.id, segmentID: segment.id)
                     )

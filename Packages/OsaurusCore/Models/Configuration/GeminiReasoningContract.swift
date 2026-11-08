@@ -4,13 +4,11 @@
 //
 //  Documented thinking-level contract for Gemini text models.
 //
-//  Intel (2026-10-27, upstream #3115): verbatim except the picker surface.
-//  Upstream hands `capabilities(forModelId:)` to its live reasoning catalog
-//  (`ModelReasoningCapabilities` on `ModelPickerItem`), which Intel doesn't
-//  have; Intel's picker reads `GeminiReasoningProfile` (ModelOptions.swift),
-//  built from the same entries, and `IntelGeminiReasoningRoute` applies
-//  `routeHonorsContract` to the selected model's provider. The native
-//  `thinkingConfig` is a dictionary written by `IntelGeminiAdapter`.
+//  Intel (2026-10-27, upstream #3115): verbatim except the wire shape.
+//  `capabilities(forModelId:)` feeds the live reasoning catalog as upstream
+//  (Intel's `ModelPickerItemCache`, route-scoped by `routeHonorsContract`,
+//  since `W-cov-reaudit` 3b-3). The native `thinkingConfig` is a dictionary
+//  written by `IntelGeminiAdapter`, and `wireAccepts` is Intel's.
 //
 
 import Foundation
@@ -80,11 +78,12 @@ enum GeminiReasoningContract {
         }
     }
 
-    /// Intel: the level ids and display default for the picker (upstream
-    /// returns `ModelReasoningCapabilities` here).
-    static func capabilities(forModelId modelId: String) -> (levels: [String], defaultLevel: String?)? {
+    static func capabilities(forModelId modelId: String) -> ModelReasoningCapabilities? {
         guard let entry = entry(forModelId: modelId) else { return nil }
-        return (entry.levels, entry.defaultLevel)
+        return ModelReasoningCapabilities(
+            levels: entry.levels.map { ModelReasoningCapabilities.Level(id: $0) },
+            defaultLevelId: entry.defaultLevel
+        )
     }
 
     /// Routes that carry the effort to Gemini intact: the native API (via

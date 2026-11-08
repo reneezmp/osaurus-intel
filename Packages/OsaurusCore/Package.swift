@@ -258,7 +258,6 @@ let package = Package(
                 "Service/RuntimePolicySourceTests.swift",
                 "Service/StreamingHintTests.swift",
                 "Sandbox/DiagnosticWarningsTests.swift",
-                "Model/ModelProfileRegistryTests.swift",
                 "Chat/SandboxImportContractTests.swift",
                 "Chat/FolderContextRenderTests.swift",
                 "Service/StreamingReasoningHintTests.swift",
