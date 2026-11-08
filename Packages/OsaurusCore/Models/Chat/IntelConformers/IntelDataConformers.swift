@@ -84,7 +84,28 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
     /// Artifact cards on this turn (upstream), e.g. a `/screenshot` capture.
     @Published var sharedArtifacts: [SharedArtifact] = []
 
-    var pendingToolName: String? = nil
+    var pendingToolName: String? = nil {
+        didSet {
+            // First detection of a tool starts the clock; the imminent call
+            // append consumes it in `markToolCallStarted` (upstream #1259).
+            if pendingToolName != nil, pendingToolStartedAt == nil {
+                pendingToolStartedAt = Date()
+            }
+        }
+    }
+    /// Wall-clock duration (seconds) each tool call took to finish, keyed by
+    /// call id. Recorded by `setToolResult(_:for:)` and persisted so a
+    /// reloaded chat still shows "· 1.2s" next to the tool title (upstream
+    /// #1259).
+    @Published var toolCallDurations: [String: TimeInterval] = [:]
+    /// How long the model spent thinking (seconds) — from the first reasoning
+    /// token to the first content/tool that follows. Drives "Thought for
+    /// 30s"; persisted.
+    @Published var thinkingDuration: TimeInterval?
+    private var thinkingStartedAt: Date?
+    private var accumulatedThinkingDuration: TimeInterval = 0
+    private var pendingToolStartedAt: Date?
+    private var toolCallStartedAt: [String: Date] = [:]
     var pendingToolArgPreview: String? = nil
     var pendingToolArgSize: Int = 0
     var pendingToolArgFragmentCount: Int = 0
@@ -169,11 +190,56 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
             (turn as? ChatTurnData)?.modelContextExcluded ?? (turn as? ChatTurn)?.modelContextExcluded ?? false
         self.terminalStopReason =
             (turn as? ChatTurnData)?.terminalStopReason ?? (turn as? ChatTurn)?.terminalStopReason
+        self.toolCallDurations =
+            (turn as? ChatTurnData)?.toolCallDurations ?? (turn as? ChatTurn)?.toolCallDurations ?? [:]
+        self.thinkingDuration =
+            (turn as? ChatTurnData)?.thinkingDuration ?? (turn as? ChatTurn)?.thinkingDuration
     }
 
     func appendContent(_ s: String) {
         guard !s.isEmpty else { return }
+        // First visible content marks the end of any thinking phase.
+        finalizeThinkingDuration()
         content += s
+    }
+
+    /// Durations shorter than this aren't shown — they're indistinguishable
+    /// from "instant" and usually mean the call + result arrived in the same
+    /// tick without an observable execution window.
+    private static let minDisplayableToolDuration: TimeInterval = 0.05
+
+    /// Mark a tool call as started so its duration can be measured.
+    /// Idempotent; uses the pending-detection start when present (so the
+    /// timer spans the whole detect→result window), else now.
+    func markToolCallStarted(_ callId: String) {
+        // A tool following reasoning also ends the thinking phase.
+        finalizeThinkingDuration()
+        guard toolCallStartedAt[callId] == nil else { return }
+        toolCallStartedAt[callId] = pendingToolStartedAt ?? Date()
+        pendingToolStartedAt = nil
+    }
+
+    /// Record the thinking duration at the first content/tool that follows
+    /// reasoning. No-op for turns without thinking or below the threshold.
+    func finalizeThinkingDuration(at: Date = Date()) {
+        guard let start = thinkingStartedAt else { return }
+        accumulatedThinkingDuration += max(0, at.timeIntervalSince(start))
+        thinkingStartedAt = nil
+        if accumulatedThinkingDuration >= Self.minDisplayableToolDuration {
+            thinkingDuration = accumulatedThinkingDuration
+        }
+    }
+
+    /// Set a tool call's result and record how long it took (if we saw it
+    /// start). Use this instead of assigning `toolResults` directly so
+    /// durations persist.
+    func setToolResult(_ result: String, for callId: String) {
+        toolResults[callId] = result
+        guard toolCallDurations[callId] == nil, let start = toolCallStartedAt[callId] else { return }
+        let elapsed = Date().timeIntervalSince(start)
+        if elapsed >= Self.minDisplayableToolDuration {
+            toolCallDurations[callId] = elapsed
+        }
     }
 
     func appendContentAndNotify(_ s: String) {
@@ -181,8 +247,9 @@ final class ChatTurn: ChatTurnProtocol, ObservableObject, Identifiable, @uncheck
         objectWillChange.send()
     }
 
-    func appendThinking(_ s: String) {
+    func appendThinking(_ s: String, at: Date = Date()) {
         guard !s.isEmpty else { return }
+        if thinkingStartedAt == nil { thinkingStartedAt = at }
         thinking += s
     }
 
@@ -302,8 +369,12 @@ enum BlockPosition: Equatable {
 struct ToolCallItem: Equatable {
     let call: ToolCall
     let result: String?
+    /// How long the call took to finish (seconds), shown as "· 1.2s". Nil
+    /// until measured / for calls whose duration wasn't recorded (upstream
+    /// #1259).
+    var duration: TimeInterval? = nil
     static func == (lhs: ToolCallItem, rhs: ToolCallItem) -> Bool {
-        lhs.call.id == rhs.call.id && lhs.result == rhs.result
+        lhs.call.id == rhs.call.id && lhs.result == rhs.result && lhs.duration == rhs.duration
     }
 }
 
@@ -330,7 +401,8 @@ enum ContentBlockKind: Equatable {
     case header(role: MessageRole, agentName: String, isFirstInGroup: Bool)
     case paragraph(index: Int, text: String, isStreaming: Bool, role: MessageRole)
     case toolCallGroup(calls: [ToolCallItem])
-    case thinking(index: Int, text: String, isStreaming: Bool)
+    /// `duration` drives "Thought for 12s" (upstream #1259).
+    case thinking(index: Int, text: String, isStreaming: Bool, duration: TimeInterval?)
     /// Upstream display-time roll-up of a run of consecutive `.thinking` /
     /// `.toolCallGroup` blocks (possibly across the assistant turns of an
     /// agent loop). Collapsed it is one summary row; expanded it renders its
@@ -389,8 +461,8 @@ enum ContentBlockKind: Equatable {
             return lIdx == rIdx && lText == rText && lStream == rStream && lRole == rRole
         case let (.toolCallGroup(lCalls), .toolCallGroup(rCalls)):
             return lCalls == rCalls
-        case let (.thinking(lIdx, lText, lStream), .thinking(rIdx, rText, rStream)):
-            return lIdx == rIdx && lText == rText && lStream == rStream
+        case let (.thinking(lIdx, lText, lStream, lDur), .thinking(rIdx, rText, rStream, rDur)):
+            return lIdx == rIdx && lText == rText && lStream == rStream && lDur == rDur
         case let (.activityGroup(lChildren), .activityGroup(rChildren)):
             return lChildren == rChildren
         case let (
@@ -434,6 +506,21 @@ struct ContentBlock: Identifiable, Equatable, @unchecked Sendable {
     let id: String
     let turnId: UUID
     let kind: ContentBlockKind
+
+    /// The text the find bar searches in this block, exactly as painted:
+    /// user and assistant paragraphs and user messages (an enveloped one by
+    /// its displayed text, so occurrence indices line up with the bubble).
+    /// Nil for blocks the find bar doesn't search (upstream #1969).
+    var searchableText: String? {
+        switch kind {
+        case let .paragraph(_, text, _, role) where role == .user || role == .assistant:
+            return text
+        case let .userMessage(text, _, _, _, envelope):
+            return envelope?.displayText ?? text
+        default:
+            return nil
+        }
+    }
     var position: BlockPosition = .only
 
     var role: MessageRole {
@@ -628,6 +715,8 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
     var routerBilling: RouterBillingSummary?
     var modelContextExcluded: Bool = false
     var terminalStopReason: String?
+    var toolCallDurations: [String: TimeInterval] = [:]
+    var thinkingDuration: TimeInterval?
 
     var turnId: UUID? { id }
     var imageData: Data? { nil }
@@ -660,6 +749,10 @@ struct ChatTurnData: ChatTurnProtocol, ChatTurnDataProtocol, @unchecked Sendable
             (turn as? ChatTurn)?.modelContextExcluded ?? (turn as? ChatTurnData)?.modelContextExcluded ?? false
         self.terminalStopReason =
             (turn as? ChatTurn)?.terminalStopReason ?? (turn as? ChatTurnData)?.terminalStopReason
+        self.toolCallDurations =
+            (turn as? ChatTurn)?.toolCallDurations ?? (turn as? ChatTurnData)?.toolCallDurations ?? [:]
+        self.thinkingDuration =
+            (turn as? ChatTurn)?.thinkingDuration ?? (turn as? ChatTurnData)?.thinkingDuration
     }
 
     static func == (lhs: ChatTurnData, rhs: ChatTurnData) -> Bool {
@@ -722,6 +815,7 @@ extension ChatTurnData: Codable {
         case routerBilling
         case modelContextExcluded
         case terminalStopReason
+        case toolCallDurations, thinkingDuration
     }
 
     init(from decoder: Decoder) throws {
@@ -746,6 +840,9 @@ extension ChatTurnData: Codable {
         self.routerBilling = try? c.decodeIfPresent(RouterBillingSummary.self, forKey: .routerBilling)
         self.modelContextExcluded = (try? c.decodeIfPresent(Bool.self, forKey: .modelContextExcluded)) ?? false
         self.terminalStopReason = try? c.decodeIfPresent(String.self, forKey: .terminalStopReason)
+        self.toolCallDurations =
+            (try? c.decodeIfPresent([String: TimeInterval].self, forKey: .toolCallDurations)) ?? [:]
+        self.thinkingDuration = try? c.decodeIfPresent(TimeInterval.self, forKey: .thinkingDuration)
     }
 
     func encode(to encoder: Encoder) throws {
@@ -767,6 +864,8 @@ extension ChatTurnData: Codable {
         try c.encodeIfPresent(routerBilling, forKey: .routerBilling)
         if modelContextExcluded { try c.encode(true, forKey: .modelContextExcluded) }
         try c.encodeIfPresent(terminalStopReason, forKey: .terminalStopReason)
+        if !toolCallDurations.isEmpty { try c.encode(toolCallDurations, forKey: .toolCallDurations) }
+        try c.encodeIfPresent(thinkingDuration, forKey: .thinkingDuration)
     }
 }
 
@@ -2011,7 +2110,9 @@ final class BlockMemoizer: @unchecked Sendable {
                 blocks.append(ContentBlock(
                     id: "thinking-\(turn.id.uuidString)",
                     turnId: turn.id,
-                    kind: .thinking(index: blocks.count, text: turn.thinking, isStreaming: turn.id == streamingTurnId)
+                    kind: .thinking(
+                        index: blocks.count, text: turn.thinking, isStreaming: turn.id == streamingTurnId,
+                        duration: turn.thinkingDuration)
                 ))
             }
 
@@ -2130,7 +2231,8 @@ final class BlockMemoizer: @unchecked Sendable {
                 }
                 for call in toolCalls {
                     let result = turn.toolResults[call.id]
-                    regularItems.append(ToolCallItem(call: call, result: result))
+                    regularItems.append(
+                        ToolCallItem(call: call, result: result, duration: turn.toolCallDurations[call.id]))
                     guard let diff = Self.fileDiff(
                         for: call, result: result, isStreaming: isStreaming, knownFiles: knownFiles)
                     else { continue }

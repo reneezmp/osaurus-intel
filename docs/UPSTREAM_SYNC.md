@@ -5649,6 +5649,50 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3b-2: the transcript (`W-cov-reaudit`) — 2026-11-07
+
+The 7 transcript rows of 3b ([`COV_REAUDIT.md`](COV_REAUDIT.md)): #1969 and
+#2020 (find), #2381 (image preview), #2038 (narrow chips), #1272 and #1283
+(streaming scroll, view caches), #1259 (durations).
+
+- **Taken whole from upstream** (Intel's copies were strict subsets):
+  `NativeMarkdownView` (23 upstream commits since the fork: per-occurrence
+  find highlight and rects, `MarkdownSegmentImageView` with click-to-preview,
+  streaming cursor, display math, hang fixes), `SelectableTextView`
+  (bold-wrapped inline code, redaction hover tracking), `CodeBlockView`
+  (Highlightr behind a lock, off-main prewarm), and `NativeCodeBlockView`
+  inside `NativeBlockViews` (no highlighting while a fence streams, a
+  throttled live pass, the pause cursor). Intel's typing-indicator labels in
+  `NativeBlockViews` stay.
+- **Pulled forward from `W-privacy-filter`:** `RedactionHighlighter` and
+  `RedactionHoverController` (with upstream `RedactionHighlightTests`). The
+  renderer needs them; they stay idle until the privacy filter supplies
+  highlights.
+- **Targeted ports** (Intel's own code kept): `MessageTableRepresentable`
+  keeps its Ventura frame clamp, sizing and non-animated height notes; it
+  gains the leading-edge streaming height throttle, the streaming row's
+  height kept across reconfigures, no anchor capture around height notes,
+  chart / tool-group view caches, and find offsets plus scroll-to-line.
+  `NativeMessageCellView` gains the caches, the current-match index, the
+  image preview hook and the "Generating image…" shimmer.
+- **Find (#1969):** upstream `ChatFindMatcher` and `ChatFindBar`;
+  debounced, off-main scan with a spinner; Cmd+F refocuses the field.
+  Up/Down step matches only on macOS 14+ (`onKeyPress`); Ventura uses Enter
+  and the chevrons.
+- **Bug found:** Intel's `scrollToTurn` looked for upstream's `usermsg-`
+  block ids, but Intel's user blocks are `user-<id>`, so minimap and find
+  jumps fell back to a header that later assistant turns don't have. It now
+  tries `user-`, the header, then the turn's first row.
+- **Durations (#1259):** `ChatTurn.thinkingDuration` / `toolCallDurations`
+  (saved in the chat JSON), `markToolCallStarted` / `setToolResult` in the
+  agent loop, "Thought for 12s" and "· 1.2s".
+- **Narrow chips (#2038):** the composer's toggle chips collapse to icons by
+  measured width; a chosen folder keeps its name.
+
+Tests: upstream `ChatFindMatcherTests`, `SearchOccurrenceIndexTests`,
+`RedactionHighlightTests`; `IntelTranscriptSyncTests` (durations, saving,
+blocks, searchable text).
+
 ### Coverage re-audit, stage 3b-1: composer and message actions (`W-cov-reaudit`) — 2026-11-07
 
 3b compares the chat display and model picker rows (22 with #1991): 3 in,

@@ -32,7 +32,7 @@ final class NativeMarkdownView: NSView {
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
     nonisolated static func makeRemoteImageSession() -> URLSession {
-        GlobalProxySettings.makeSession()
+        GlobalProxySettings.sharedSession()
     }
 
     override func hitTest(_ point: NSPoint) -> NSView? {
@@ -59,6 +59,13 @@ final class NativeMarkdownView: NSView {
     private var segmentViews: [(view: NSView, key: String)] = []
     /// only used in mixed segment layout — needed for correct height (spacingBefore between segments).
     private var lastMixedSegments: [ContentSegment] = []
+    /// Layout signature (segment ids + spacing, in order) of the constraint
+    /// chain currently installed by `applyMixedSegments`. When the next pass
+    /// produces the same signature — the common case while content streams
+    /// into existing segments — the vertical chain is already correct and the
+    /// teardown/re-pin is skipped, so steady-state streaming performs no
+    /// constraint mutations at all.
+    private var installedSegmentLayoutSignature: [String] = []
     private var heightConstraint: NSLayoutConstraint?
     private var mathHeightConstraints: [String: NSLayoutConstraint] = [:]
 
@@ -66,21 +73,98 @@ final class NativeMarkdownView: NSView {
 
     private var coordinator = SelectableTextView.Coordinator()
     private let fader = TrailingTextFader()
+    /// Blinking interpunct shown at the trailing edge of streaming text
+    /// **only during quiet gaps** — when the SSE source has stopped
+    /// emitting tokens for a moment but the stream is still alive. While
+    /// text is actively being revealed, the cursor stays hidden so it
+    /// doesn't race the moving text. Cleared when streaming ends.
+    private var streamingCursor: StreamingCursorOverlay?
+    /// Timestamp of the last text-storage mutation made while streaming.
+    /// `nil` means we haven't received a streaming reveal yet.
+    private var lastTextRevealAt: Date?
+    /// Idle-check timer (~50ms) that flips the cursor on whenever
+    /// `now - lastTextRevealAt > pauseThreshold`. Lives only while
+    /// `isStreaming == true`.
+    private var idleTimer: Timer?
+    /// Captured at `enterStreamingMode` so `idleTick` doesn't need to
+    /// re-resolve the theme on every tick.
+    private var streamingCursorColor: NSColor?
+    /// How long the stream must be silent before the cursor blinks on.
+    /// 150ms is short enough that it appears during real network gaps
+    /// (200-500ms typical) but long enough that brief sync hiccups don't
+    /// flash it during a steady reveal.
+    private static let cursorPauseThreshold: TimeInterval = 0.15
     private var lastText: String = ""
     private var lastBlocks: [SelectableTextBlock] = []
     private var lastWidth: CGFloat = 0
     private var lastThemeFingerprint: String = ""
     private var lastIsStreaming: Bool = false
     private var parseTask: Task<Void, Never>?
-    /// cancels stale loads when segment id is reused with a new URL or view is removed
-    private var imageLoadTasks: [String: (UUID, Task<Void, Never>)] = [:]
+    /// Cell-supplied original -> redaction map. Re-applied via
+    /// `RedactionHighlighter` after every textStorage edit on the
+    /// pure-text path, the mixed-segment text path, and any nested
+    /// `NativeMarkdownView` (math/image segments don't carry text).
+    /// Empty dict short-circuits the highlighter, so the property
+    /// has no perf cost in chats that never trigger the filter.
+    private var redactionHighlights: [String: RedactionHighlight] = [:]
+    /// Last set of applied highlight ranges, in textStorage
+    /// coordinates. The hover controller reads this list (instead of
+    /// re-scanning the storage) when picking the popover target.
+    private(set) var appliedHighlightRanges: [AppliedRedactionRange] = []
+    /// Highest text-storage location the highlighter has finished
+    /// painting in the current text. Streaming deltas reuse this as
+    /// the start of an incremental scan window so chunk N+1 only
+    /// scans the appended tail (plus a small lookback to catch
+    /// originals that straddle the boundary).
+    /// Reset to 0 when:
+    ///   * `redactionHighlights` changes (different key set ⇒ full
+    ///     re-scan from the top),
+    ///   * the storage is mutated NOT by append (configureWithBlocks
+    ///     swaps the attributed string wholesale),
+    ///   * the text view is rebuilt.
+    private var redactionHighlightAppliedThrough: Int = 0
+    /// Fingerprint of the last `redactionHighlights` dict so we can
+    /// distinguish "same map, more text" (incremental safe) from
+    /// "different map, must redo" (full apply).
+    private var lastRedactionHighlightsHash: Int = 0
+    /// Hover controller attached to `textView`. Created lazily the
+    /// first time `redactionHighlights` becomes non-empty; reused
+    /// across updates so the NSTrackingArea stays installed.
+    private var hoverController: RedactionHoverController?
     /// Active in-conversation find query (Cmd+F). Every case-insensitive
     /// occurrence in the body text gets a translucent background. Empty =
     /// feature inactive, zero cost.
     private var searchHighlightQuery: String = ""
     /// Ranges the search highlighter painted, so a query change (or clear)
-    /// removes exactly what it added.
+    /// removes exactly what it added — never a background the markdown
+    /// renderer itself owns (e.g. inline-code chips).
     private var appliedSearchRanges: [NSRange] = []
+    /// Occurrence index (local to this view's subtree, counting this view's
+    /// own text first, then mixed-segment children in display order) that
+    /// should be painted as the *current* find match. Nil when the current
+    /// match lives in another cell / earlier sibling.
+    private var searchCurrentLocalIndex: Int?
+    /// Query occurrences found in this view's own textStorage on the last
+    /// highlight pass — including occurrences that were skipped for painting
+    /// because they already carry a background (inline-code chips). Used to
+    /// distribute the current-match index across mixed-segment children.
+    private var searchOwnOccurrenceCount: Int = 0
+    /// Character range of every occurrence found on the last highlight pass
+    /// (painted or skipped), in textStorage coordinates. Backs
+    /// `rectOfSearchOccurrence` so the find bar can scroll *within* a tall
+    /// message instead of just to its row.
+    private var searchAllOccurrenceRanges: [NSRange] = []
+    /// cancels stale loads when segment id is reused with a new URL or view is removed
+    private var imageLoadTasks: [String: (UUID, Task<Void, Never>)] = [:]
+    /// Per-image height constraint, updated to match the loaded image's
+    /// aspect ratio at the current layout width so wide banners render
+    /// short/full-width instead of being letterboxed in a fixed-height box.
+    private var imageHeightConstraints: [String: NSLayoutConstraint] = [:]
+    /// width / height of each loaded image, keyed by segment id.
+    private var imageAspectRatios: [String: CGFloat] = [:]
+    /// Height used before an image loads, and the ceiling once it has.
+    private static let imagePlaceholderHeight: CGFloat = 160
+    private static let imageMaxHeight: CGFloat = 360
     /// invalid until first layout pass with positive width — drives remeasure in `layout()`
     private var lastLayoutWidthForHeight: CGFloat = -1
     /// avoids re-entrant `measuredHeight` when `layoutSubtreeIfNeeded` runs during tool-row expand (same instance)
@@ -90,6 +174,10 @@ final class NativeMarkdownView: NSView {
 
     /// Called after the attributed string is set and height can be measured.
     var onHeightChanged: (() -> Void)?
+
+    /// Fired when an inline image (e.g. a generated image) is clicked, carrying
+    /// its decoded bitmap so the owner can open the full-screen preview.
+    var onImagePreview: ((NSImage) -> Void)?
 
     // MARK: Init
 
@@ -110,7 +198,13 @@ final class NativeMarkdownView: NSView {
         // first `measuredHeight` often runs before `bounds.width` exists; remeasure once width is real
         // so row height and text wrapping match (avoids clipped last line + trailing edge mismatch).
         let w = bounds.width
-        guard textView != nil, w > 0.5 else { return }
+        // Mixed-segment content (textView == nil) must also remeasure here:
+        // its height memo can be keyed on a stale recycled-cell bounds width,
+        // and layout() is the only signal that the real width has settled.
+        guard w > 0.5, textView != nil || !lastMixedSegments.isEmpty else { return }
+        if streamingCursor != nil {
+            repositionStreamingCursor()
+        }
         guard abs(w - lastLayoutWidthForHeight) > 0.5 else { return }
         lastLayoutWidthForHeight = w
         let before = heightConstraint?.constant ?? 0
@@ -127,6 +221,303 @@ final class NativeMarkdownView: NSView {
     }
 
     // MARK: Configure (text-based entry point)
+
+    /// Set the cell's current original -> placeholder map. Stored
+    /// on the view so streaming updates re-apply the highlighter
+    /// pass on every textStorage edit. Cell layer also forwards
+    /// this into nested `NativeMarkdownView`s via the mixed-segment
+    /// path. Idempotent — re-setting the same dict triggers a
+    /// re-paint, which is harmless because the highlighter is
+    /// keyed on character ranges.
+    func setRedactionHighlights(
+        _ highlights: [String: RedactionHighlight],
+        theme: any ThemeProtocol
+    ) {
+        let changed = highlights != redactionHighlights
+        redactionHighlights = highlights
+        if changed || !highlights.isEmpty {
+            applyRedactionHighlightsIfNeeded(theme: theme)
+        }
+        // Propagate to mixed-segment children so a code/text/image
+        // assistant turn highlights uniformly across all segments.
+        for entry in segmentViews {
+            if let child = entry.view as? NativeMarkdownView {
+                child.setRedactionHighlights(highlights, theme: theme)
+            }
+        }
+    }
+
+    /// Set the active find query (Cmd+F). Repaints when the query or the
+    /// current-match index changed and propagates into mixed-segment
+    /// children like the redaction path. `currentIndex` is the occurrence
+    /// (zero-based, local to this view's subtree) to paint as the current
+    /// match; nil means no occurrence in this subtree is current. Returns
+    /// the total number of occurrences in the subtree so callers can keep
+    /// distributing the index across ordered siblings.
+    @discardableResult
+    func setSearchHighlight(
+        query: String, currentIndex: Int? = nil, theme: any ThemeProtocol
+    ) -> Int {
+        let changed = query != searchHighlightQuery || currentIndex != searchCurrentLocalIndex
+        searchHighlightQuery = query
+        searchCurrentLocalIndex = currentIndex
+        if changed {
+            applySearchHighlightsIfNeeded(theme: theme)
+        }
+        // Hand the remainder of the current-match index to children in
+        // display order: this view's own text counts first, then each
+        // child consumes its own occurrence count.
+        var consumed = searchOwnOccurrenceCount
+        for entry in segmentViews {
+            if let child = entry.view as? NativeMarkdownView {
+                let childCurrent = currentIndex.flatMap { index -> Int? in
+                    let local = index - consumed
+                    return local >= 0 ? local : nil
+                }
+                consumed += child.setSearchHighlight(
+                    query: query, currentIndex: childCurrent, theme: theme)
+            }
+        }
+        return consumed
+    }
+
+    /// Bounding rect (in this view's coordinate space) of the occurrence at
+    /// `index`, distributing across mixed-segment children the same way
+    /// `setSearchHighlight` does. Nil when the index is out of range or the
+    /// view isn't in a window yet (rects come from first-rect geometry,
+    /// which needs live layout). Lets the find bar scroll to the exact line
+    /// of the current match inside a message taller than the viewport.
+    func rectOfSearchOccurrence(_ index: Int) -> NSRect? {
+        // The upper bound was checked here; the lower bound was not, and this
+        // subscript trapped in production (Sentry APPLE-MACOS-10V: Array._checkSubscript,
+        // reached from the find bar's scroll-to-match). `searchAllOccurrenceRanges` is
+        // rebuilt on every highlight pass while the find bar navigates against counts
+        // taken from the *model's* text, so the index arriving here is not something this
+        // view can vouch for. Treat it as untrusted and answer "no such occurrence"
+        // rather than crashing the app mid-search.
+        guard index >= 0 else {
+            assertionFailure("negative search occurrence index \(index)")
+            return nil
+        }
+        if index < searchAllOccurrenceRanges.count {
+            guard let tv = textView, tv.window != nil else { return nil }
+            let range = searchAllOccurrenceRanges[index]
+            // firstRect works across TextKit 1/2 without forcing a layout-
+            // manager downgrade; it returns screen coordinates.
+            let screenRect = tv.firstRect(forCharacterRange: range, actualRange: nil)
+            guard screenRect.height > 0, let window = tv.window else { return nil }
+            let windowRect = window.convertFromScreen(screenRect)
+            let tvRect = tv.convert(windowRect, from: nil)
+            return tv.convert(tvRect, to: self)
+        }
+        var consumed = searchAllOccurrenceRanges.count
+        for entry in segmentViews {
+            guard let child = entry.view as? NativeMarkdownView else { continue }
+            let childCount = child.searchOccurrenceTotal
+            if index - consumed < childCount {
+                // This child owns the occurrence: return its answer, even when
+                // that answer is nil (text view not in a window yet, zero-height
+                // rect). Falling through here handed later siblings an
+                // already-consumed index — negative after the next `consumed`
+                // bump — which passed their upper-bound-only check and trapped
+                // in Array.subscript (Sentry APPLE-MACOS-10V).
+                guard let rect = child.rectOfSearchOccurrence(index - consumed) else {
+                    return nil
+                }
+                return child.convert(rect, to: self)
+            }
+            consumed += childCount
+        }
+        return nil
+    }
+
+    /// Total occurrences in this view's subtree on the last highlight pass.
+    var searchOccurrenceTotal: Int {
+        var total = searchAllOccurrenceRanges.count
+        for entry in segmentViews {
+            if let child = entry.view as? NativeMarkdownView {
+                total += child.searchOccurrenceTotal
+            }
+        }
+        return total
+    }
+
+    /// Repaint search-match backgrounds on the current textStorage. Always
+    /// removes the previously painted ranges first so a query change or
+    /// storage rebuild can't leave stale backgrounds behind. Occurrences
+    /// that already carry a background attribute (inline-code chips) are
+    /// skipped rather than clobbered. The occurrence whose index equals
+    /// `searchCurrentLocalIndex` gets a distinct, stronger background so
+    /// the current match reads differently from the rest (browser-style
+    /// orange vs. yellow).
+    private func applySearchHighlightsIfNeeded(theme: any ThemeProtocol) {
+        searchOwnOccurrenceCount = 0
+        searchAllOccurrenceRanges = []
+        guard let tv = textView, let storage = tv.textStorage else {
+            appliedSearchRanges = []
+            return
+        }
+        if !appliedSearchRanges.isEmpty {
+            storage.beginEditing()
+            for range in appliedSearchRanges where range.upperBound <= storage.length {
+                storage.removeAttribute(.backgroundColor, range: range)
+            }
+            storage.endEditing()
+            appliedSearchRanges = []
+        }
+        let query = searchHighlightQuery.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !query.isEmpty, storage.length > 0 else {
+            tv.needsDisplay = true
+            return
+        }
+        let color = NSColor(theme.accentColor).withAlphaComponent(0.3)
+        // Current match: same treatment browsers use — clearly warmer and
+        // more opaque than the surrounding matches, readable on both light
+        // and dark themes.
+        let currentColor = NSColor.systemOrange.withAlphaComponent(0.55)
+        let string = storage.string as NSString
+        var searchRange = NSRange(location: 0, length: string.length)
+        var occurrenceIndex = 0
+        storage.beginEditing()
+        while searchRange.length > 0 {
+            let found = string.range(of: query, options: [.caseInsensitive], range: searchRange)
+            if found.location == NSNotFound { break }
+            var hasExistingBackground = false
+            storage.enumerateAttribute(.backgroundColor, in: found, options: []) { value, _, stop in
+                if value != nil {
+                    hasExistingBackground = true
+                    stop.pointee = true
+                }
+            }
+            if !hasExistingBackground {
+                let isCurrent = occurrenceIndex == searchCurrentLocalIndex
+                storage.addAttribute(
+                    .backgroundColor, value: isCurrent ? currentColor : color, range: found)
+                appliedSearchRanges.append(found)
+            }
+            searchAllOccurrenceRanges.append(found)
+            occurrenceIndex += 1
+            let next = found.location + max(found.length, 1)
+            if next >= string.length { break }
+            searchRange = NSRange(location: next, length: string.length - next)
+        }
+        storage.endEditing()
+        searchOwnOccurrenceCount = occurrenceIndex
+        tv.needsDisplay = true
+    }
+
+    /// Re-paint highlights on the current textStorage. Called from
+    /// `setRedactionHighlights` and from every place we mutate
+    /// `textStorage` (pure text + configureWithBlocks paths).
+    ///
+    /// Uses the incremental highlighter path when the set of
+    /// `redactionHighlights` is unchanged from the previous call
+    /// AND the storage has only grown (typical streaming delta
+    /// shape — `setAttributedString` calls in the wholesale path
+    /// reset the cursor via `resetIncrementalHighlightCursor`).
+    /// Cross-painted state is detected by reading the existing
+    /// `.redactionPlaceholder` attribute runs, so a partial scan
+    /// can't double-paint a range.
+    private func applyRedactionHighlightsIfNeeded(theme: any ThemeProtocol) {
+        guard let tv = textView, let storage = tv.textStorage else {
+            appliedHighlightRanges = []
+            redactionHighlightAppliedThrough = 0
+            return
+        }
+        if redactionHighlights.isEmpty {
+            appliedHighlightRanges = []
+            redactionHighlightAppliedThrough = 0
+            lastRedactionHighlightsHash = 0
+            hoverController?.detach()
+            hoverController = nil
+            return
+        }
+        let accent = NSColor(theme.accentColor)
+        let dictHash = highlightsFingerprint(redactionHighlights)
+        let canIncrement =
+            dictHash == lastRedactionHighlightsHash
+            && redactionHighlightAppliedThrough > 0
+            && redactionHighlightAppliedThrough <= storage.length
+
+        let applied: [AppliedRedactionRange]
+        if canIncrement {
+            let delta = RedactionHighlighter.applyIncremental(
+                on: storage,
+                appliedThrough: redactionHighlightAppliedThrough,
+                highlights: redactionHighlights,
+                accentColor: accent,
+                a11yLabelBuilder: { highlight in
+                    Self.accessibilityLabel(for: highlight)
+                }
+            )
+            applied = appliedHighlightRanges + delta
+        } else {
+            applied = RedactionHighlighter.apply(
+                on: storage,
+                highlights: redactionHighlights,
+                accentColor: accent,
+                a11yLabelBuilder: { highlight in
+                    Self.accessibilityLabel(for: highlight)
+                }
+            )
+        }
+        appliedHighlightRanges = applied
+        redactionHighlightAppliedThrough = storage.length
+        lastRedactionHighlightsHash = dictHash
+
+        if hoverController == nil {
+            hoverController = RedactionHoverController()
+        }
+        hoverController?.attach(to: tv, theme: theme, ranges: applied)
+    }
+
+    /// Cheap hash so we can detect a change in the highlight dict
+    /// across two calls. We can't use `Dictionary.hashValue` because
+    /// it isn't stable across launches (Foundation seeds it), but
+    /// any process-stable hash is fine here — we only compare two
+    /// values inside one view's lifetime.
+    private func highlightsFingerprint(_ dict: [String: RedactionHighlight]) -> Int {
+        var hasher = Hasher()
+        hasher.combine(dict.count)
+        for key in dict.keys.sorted() {
+            hasher.combine(key)
+            if let value = dict[key] {
+                hasher.combine(value.placeholderToken)
+                hasher.combine(value.direction.rawValue)
+            }
+        }
+        return hasher.finalize()
+    }
+
+    /// Drop the incremental cursor so the next
+    /// `applyRedactionHighlightsIfNeeded` re-scans the whole
+    /// storage. Call this whenever the storage is mutated NOT by
+    /// append (block re-layout, full replace).
+    private func resetIncrementalHighlightCursor() {
+        redactionHighlightAppliedThrough = 0
+        appliedHighlightRanges = []
+        // The storage was swapped wholesale — previously painted search
+        // ranges point into the old string, so removing them from the new
+        // one could strip a background the renderer owns. The fresh string
+        // carries no search backgrounds; just forget the stale ranges.
+        appliedSearchRanges = []
+    }
+
+    /// Localized a11y label for VoiceOver. Outbound: "Redacted before
+    /// sending. Sent to cloud as [TOKEN]". Inbound: "Restored from
+    /// [TOKEN]". Falls back to the placeholder token when the
+    /// xcstrings catalog is missing.
+    private static func accessibilityLabel(for highlight: RedactionHighlight) -> String {
+        let key: String
+        switch highlight.direction {
+        case .outbound: key = "privacy.highlight.a11y.outbound"
+        case .inbound: key = "privacy.highlight.a11y.inbound"
+        case .preview: key = "privacy.highlight.a11y.preview"
+        }
+        let format = String(localized: String.LocalizationValue(key), bundle: .module)
+        if format == key { return highlight.placeholderToken }
+        return String(format: format, highlight.placeholderToken)
+    }
 
     func configure(
         text: String,
@@ -152,13 +543,15 @@ final class NativeMarkdownView: NSView {
         ChatPerfTrace.shared.count("markdown.configure.applied")
 
         // Fonts live in the attributed-string attributes, and the incremental
-        // text-storage path (`applyPureTextBlocks`'s `incrementalPath`) diffs
-        // blocks only — it would no-op on a theme-only change (e.g. font
-        // zoom, which changes `themeFingerprint` but not block content).
-        // Drop the block memo so the apply path takes the full rebuild
-        // branch and re-derives every attribute. Upstream 1b955c2b.
+        // text-storage path diffs blocks only — it would no-op on a theme-only
+        // change (e.g. font zoom). Drop the block memo so the apply path takes
+        // the full rebuild branch and re-derives every attribute.
         if themeChanged { lastBlocks = [] }
 
+        invalidateHeightMemo()
+        // Content is changing — any width observed by a previous tenancy of
+        // this (possibly recycled) view no longer counts as "already measured".
+        lastLayoutWidthForHeight = -1
         lastWidth = width
         lastThemeFingerprint = themeFingerprint
         lastIsStreaming = isStreaming
@@ -208,11 +601,24 @@ final class NativeMarkdownView: NSView {
         let textChanged = blocks != lastBlocks
         let widthChanged = abs(width - lastWidth) > 0.5
         let themeChanged = themeFingerprint != lastThemeFingerprint
+        // A demoted text segment (was the last/streaming segment, now followed
+        // by newer text after a code block) keeps the same blocks but flips to
+        // `isStreaming: false`. Without tracking this we'd early-return and skip
+        // the `exitStreamingMode()` below, leaving its cursor + idle timer alive
+        // — the "two blinking cursors at once" bug.
+        let streamingChanged = isStreaming != lastIsStreaming
 
-        guard textChanged || widthChanged || themeChanged else { return }
+        guard textChanged || widthChanged || themeChanged || streamingChanged else { return }
 
+        // Same as configure(): a theme-only change must not take the
+        // incremental path, whose block diff would no-op and keep stale fonts.
+        if themeChanged { lastBlocks = [] }
+
+        invalidateHeightMemo()
+        lastLayoutWidthForHeight = -1
         lastWidth = width
         lastThemeFingerprint = themeFingerprint
+        lastIsStreaming = isStreaming
 
         removeSegmentViews()
         let tv = ensureTextView(width: width, theme: theme)
@@ -232,6 +638,7 @@ final class NativeMarkdownView: NSView {
                 )
             } else {
                 tv.textStorage?.setAttributedString(stv.buildAttributedString(coordinator: coordinator))
+                resetIncrementalHighlightCursor()
             }
             lastBlocks = blocks
             updateFader(textView: tv, isStreaming: isStreaming, incrementalPath: incrementalPath)
@@ -239,82 +646,23 @@ final class NativeMarkdownView: NSView {
             // full rebuild path needs to mark the whole view dirty
             if !incrementalPath {
                 tv.needsDisplay = true
-                // storage was swapped wholesale — stale ranges point into the
-                // old string, forget them rather than risk stripping a
-                // background the renderer itself owns in the new one.
-                appliedSearchRanges = []
             }
+            applyRedactionHighlightsIfNeeded(theme: theme)
             applySearchHighlightsIfNeeded(theme: theme)
+            if isStreaming && textChanged {
+                notifyTextReveal()
+            }
         }
 
         // nested NativeMarkdownView (text segment inside mixed content) must update heightConstraint
         // or the default 100pt sticks and following segments overlap the text.
         _ = measuredHeight(for: width)
+        if isStreaming {
+            enterStreamingMode(theme: theme)
+        } else {
+            exitStreamingMode()
+        }
         onHeightChanged?()
-    }
-
-    // MARK: - Search Highlight (Cmd+F)
-
-    /// Set the active find query (Cmd+F). Repaints when the query changed
-    /// and propagates into mixed-segment children (nested text-group views).
-    func setSearchHighlight(query: String, theme: any ThemeProtocol) {
-        let changed = query != searchHighlightQuery
-        searchHighlightQuery = query
-        if changed {
-            applySearchHighlightsIfNeeded(theme: theme)
-        }
-        for entry in segmentViews {
-            if let child = entry.view as? NativeMarkdownView {
-                child.setSearchHighlight(query: query, theme: theme)
-            }
-        }
-    }
-
-    /// Repaint search-match backgrounds on the current textStorage. Always
-    /// removes the previously painted ranges first so a query change or
-    /// storage rebuild can't leave stale backgrounds behind.
-    private func applySearchHighlightsIfNeeded(theme: any ThemeProtocol) {
-        guard let tv = textView, let storage = tv.textStorage else {
-            appliedSearchRanges = []
-            return
-        }
-        if !appliedSearchRanges.isEmpty {
-            storage.beginEditing()
-            for range in appliedSearchRanges where range.upperBound <= storage.length {
-                storage.removeAttribute(.backgroundColor, range: range)
-            }
-            storage.endEditing()
-            appliedSearchRanges = []
-        }
-        let query = searchHighlightQuery.trimmingCharacters(in: .whitespacesAndNewlines)
-        guard !query.isEmpty, storage.length > 0 else {
-            tv.needsDisplay = true
-            return
-        }
-        let color = NSColor(theme.accentColor).withAlphaComponent(0.3)
-        let string = storage.string as NSString
-        var searchRange = NSRange(location: 0, length: string.length)
-        storage.beginEditing()
-        while searchRange.length > 0 {
-            let found = string.range(of: query, options: [.caseInsensitive], range: searchRange)
-            if found.location == NSNotFound { break }
-            var hasExistingBackground = false
-            storage.enumerateAttribute(.backgroundColor, in: found, options: []) { value, _, stop in
-                if value != nil {
-                    hasExistingBackground = true
-                    stop.pointee = true
-                }
-            }
-            if !hasExistingBackground {
-                storage.addAttribute(.backgroundColor, value: color, range: found)
-                appliedSearchRanges.append(found)
-            }
-            let next = found.location + max(found.length, 1)
-            if next >= string.length { break }
-            searchRange = NSRange(location: next, length: string.length - next)
-        }
-        storage.endEditing()
-        tv.needsDisplay = true
     }
 
     // MARK: Height
@@ -330,12 +678,35 @@ final class NativeMarkdownView: NSView {
         return candidates.min() ?? max(fallbackWidth, 1)
     }
 
+    /// Memoized result of the last full measurement pass. `measuredHeight` is
+    /// re-entered many times per table update (row height query, cell
+    /// configure, child height callbacks, post-layout re-measure) and each
+    /// pass runs `ensureLayout` over every text container in the subtree —
+    /// on long code-heavy replies that repeated TextKit work is the dominant
+    /// main-thread cost and can trip the app-hang watchdog. The memo is
+    /// invalidated on every content mutation and child height notification,
+    /// and keyed on both the requested width and the effective measurement
+    /// width (bounds can change without the requested width changing).
+    private var heightMemo: (paramWidth: CGFloat, contentWidth: CGFloat, height: CGFloat)?
+
+    private func invalidateHeightMemo() {
+        heightMemo = nil
+    }
+
     func measuredHeight(for width: CGFloat) -> CGFloat {
         if measurementDepth > 0 {
             return heightConstraint?.constant ?? 20
         }
         measurementDepth += 1
         defer { measurementDepth -= 1 }
+
+        let contentWidth = measurementContentWidth(fallbackWidth: width)
+        if let memo = heightMemo,
+            abs(memo.paramWidth - width) <= 0.5,
+            abs(memo.contentWidth - contentWidth) <= 0.5
+        {
+            return memo.height
+        }
 
         if let tv = textView {
             // widthTracksTextView syncs the container to the text view; before first layout, bounds can
@@ -353,6 +724,7 @@ final class NativeMarkdownView: NSView {
             let h = ceil(lm.usedRect(for: tc).height) + 8 + 4
             heightConstraint?.constant = max(h, 8)  // ensure minimum height
             invalidateIntrinsicContentSize()
+            heightMemo = (paramWidth: width, contentWidth: contentWidth, height: max(h, 8))
             return max(h, 8)
         }
 
@@ -361,17 +733,18 @@ final class NativeMarkdownView: NSView {
         for seg in lastMixedSegments {
             guard let entry = segmentViews.first(where: { $0.key == seg.id }) else { continue }
             totalH += seg.spacingBefore
-            totalH += measureMixedSegmentHeight(entry.view, width: width)
+            totalH += measureMixedSegmentHeight(entry.view, key: entry.key, width: width)
         }
         totalH += 4
         totalH = max(totalH, 20)
 
         heightConstraint?.constant = totalH
         invalidateIntrinsicContentSize()
+        heightMemo = (paramWidth: width, contentWidth: contentWidth, height: totalH)
         return totalH
     }
 
-    private func measureMixedSegmentHeight(_ view: NSView, width: CGFloat) -> CGFloat {
+    private func measureMixedSegmentHeight(_ view: NSView, key: String, width: CGFloat) -> CGFloat {
         if let nmv = view as? NativeMarkdownView {
             return nmv.measuredHeight(for: width)
         }
@@ -389,8 +762,8 @@ final class NativeMarkdownView: NSView {
             if h.isFinite, h > 0 { return ceil(h) }
             return 32
         }
-        if let iv = view as? NSImageView {
-            return iv.bounds.height > 0 ? iv.bounds.height : 160
+        if view is NSImageView {
+            return imageHeight(forSegmentId: key, width: width)
         }
         if let field = view as? NSTextField {
             if width > 0.5 {
@@ -413,6 +786,30 @@ final class NativeMarkdownView: NSView {
     // MARK: - Private: Unified Segment Dispatch
 
     private func applySegments(
+        _ segments: [ContentSegment],
+        cacheKey: String?,
+        textChanged: Bool,
+        widthChanged: Bool,
+        width: CGFloat,
+        theme: any ThemeProtocol,
+        isStreaming: Bool
+    ) {
+        // Traced: this runs per streaming tick and is the entry point of the
+        // markdown streaming app-hang cluster.
+        ChatPerfTrace.shared.time("markdown.applySegments") {
+            applySegmentsImpl(
+                segments,
+                cacheKey: cacheKey,
+                textChanged: textChanged,
+                widthChanged: widthChanged,
+                width: width,
+                theme: theme,
+                isStreaming: isStreaming
+            )
+        }
+    }
+
+    private func applySegmentsImpl(
         _ segments: [ContentSegment],
         cacheKey: String?,
         textChanged: Bool,
@@ -456,6 +853,32 @@ final class NativeMarkdownView: NSView {
         theme: any ThemeProtocol,
         isStreaming: Bool
     ) {
+        // Traced separately from the enclosing `markdown.applySegments`
+        // window so the report splits the pure-text path out of the
+        // segment total.
+        ChatPerfTrace.shared.time("markdown.applyPureTextBlocks") {
+            applyPureTextBlocksImpl(
+                blocks,
+                cacheKey: cacheKey,
+                textChanged: textChanged,
+                widthChanged: widthChanged,
+                width: width,
+                theme: theme,
+                isStreaming: isStreaming
+            )
+        }
+    }
+
+    private func applyPureTextBlocksImpl(
+        _ blocks: [SelectableTextBlock],
+        cacheKey: String?,
+        textChanged: Bool,
+        widthChanged: Bool,
+        width: CGFloat,
+        theme: any ThemeProtocol,
+        isStreaming: Bool
+    ) {
+        invalidateHeightMemo()
         removeSegmentViews()
 
         let tv = ensureTextView(width: width, theme: theme)
@@ -475,18 +898,27 @@ final class NativeMarkdownView: NSView {
                 )
             } else {
                 tv.textStorage?.setAttributedString(stv.buildAttributedString(coordinator: coordinator))
+                resetIncrementalHighlightCursor()
             }
             lastBlocks = blocks
             updateFader(textView: tv, isStreaming: isStreaming, incrementalPath: incrementalPath)
             if !incrementalPath {
                 tv.needsDisplay = true
-                appliedSearchRanges = []
             }
+            applyRedactionHighlightsIfNeeded(theme: theme)
             applySearchHighlightsIfNeeded(theme: theme)
+            if isStreaming && textChanged {
+                notifyTextReveal()
+            }
         }
 
         // must update heightConstraint — init leaves 100pt; otherwise user bubbles stay artificially tall
         _ = measuredHeight(for: width)
+        if isStreaming {
+            enterStreamingMode(theme: theme)
+        } else {
+            exitStreamingMode()
+        }
         onHeightChanged?()
     }
 
@@ -516,6 +948,7 @@ final class NativeMarkdownView: NSView {
         theme: any ThemeProtocol,
         isStreaming: Bool
     ) {
+        invalidateHeightMemo()
         removeTextView()
         lastMixedSegments = segments
 
@@ -524,6 +957,8 @@ final class NativeMarkdownView: NSView {
         segmentViews = segmentViews.filter { entry in
             if requiredKeys.contains(entry.key) { return true }
             cancelImageLoadTask(forSegmentId: entry.key)
+            imageHeightConstraints.removeValue(forKey: entry.key)
+            imageAspectRatios.removeValue(forKey: entry.key)
             if let constraint = mathHeightConstraints.removeValue(forKey: entry.key) {
                 constraint.isActive = false
             }
@@ -531,26 +966,63 @@ final class NativeMarkdownView: NSView {
             return false
         }
 
-        // this prevents conflicts as segments move or get pinned/unpinned from bottom.
-        let subviewPointers = Set(subviews.map { Unmanaged.passUnretained($0).toOpaque() })
-        let verticalConstraints = constraints.filter { c in
-            if c.firstAttribute == .top || c.firstAttribute == .bottom {
-                if let first = c.firstItem as? NSView,
-                    subviewPointers.contains(Unmanaged.passUnretained(first).toOpaque())
-                {
-                    return true
+        // When the segment structure (ids, order, spacing) matches what's already
+        // installed and every segment view survived the stale sweep, the vertical
+        // chain is correct as-is — only segment *content* changed. Skipping the
+        // teardown/re-pin keeps streaming ticks from churning the window's layout
+        // engine (the AutoLayout solve is the dominant main-thread cost while a
+        // long code-heavy reply streams).
+        let layoutSignature = segments.map { "\($0.id)|\($0.spacingBefore)" }
+        let structureUnchanged =
+            layoutSignature == installedSegmentLayoutSignature
+            && segmentViews.map { $0.key } == requiredKeys
+
+        if !structureUnchanged {
+            // this prevents conflicts as segments move or get pinned/unpinned from bottom.
+            let subviewPointers = Set(subviews.map { Unmanaged.passUnretained($0).toOpaque() })
+            let verticalConstraints = constraints.filter { c in
+                if c.firstAttribute == .top || c.firstAttribute == .bottom {
+                    if let first = c.firstItem as? NSView,
+                        subviewPointers.contains(Unmanaged.passUnretained(first).toOpaque())
+                    {
+                        return true
+                    }
                 }
+                return false
             }
-            return false
+            removeConstraints(verticalConstraints)
         }
-        removeConstraints(verticalConstraints)
+        installedSegmentLayoutSignature = layoutSignature
 
         var prevAnchor: NSLayoutYAxisAnchor = topAnchor
         var prevOffset: CGFloat = 4
 
+        // The streaming cursor is a text-view overlay, so it can only live on a
+        // `.textGroup` segment — and only on the *trailing* one. If the document
+        // currently ends in a non-text segment (a code block / table / image /
+        // math that is still streaming), the preceding text is already settled;
+        // parking the cursor there would put it ahead of the segment that's
+        // actually growing. In that case no text segment blinks.
+        let lastTextSegmentId: String? = {
+            guard case .textGroup = segments.last?.kind else { return nil }
+            return segments.last?.id
+        }()
+
         for seg in segments {
             let existingEntry = segmentViews.first(where: { $0.key == seg.id })
+            let isNewSegment = existingEntry == nil
             let segView: NSView
+
+            // The child views fire onHeightChanged synchronously from inside
+            // configure, which re-enters measuredHeight on this view. The
+            // segment must already be registered in `segmentViews` at that
+            // point or the mixed-branch measurement skips it, computes a
+            // near-zero total, and (via the height memo) freezes the row at
+            // that bogus height. So every creation branch below appends to
+            // `segmentViews` BEFORE its configure call runs.
+            func register(_ view: NSView) {
+                segmentViews.append((view: view, key: seg.id))
+            }
 
             switch seg.kind {
             case .textGroup(let blocks):
@@ -562,11 +1034,20 @@ final class NativeMarkdownView: NSView {
                     mv = NativeMarkdownView()
                     mv.translatesAutoresizingMaskIntoConstraints = false
                     addSubview(mv)
+                    register(mv)
                 }
                 mv.onHeightChanged = { [weak self] in
+                    self?.invalidateHeightMemo()
                     self?.onHeightChanged?()
                 }
-                mv.configureWithBlocks(blocks, width: width, theme: theme, cacheKey: cacheKey, isStreaming: isStreaming)
+                let segIsStreaming = isStreaming && (seg.id == lastTextSegmentId)
+                mv.configureWithBlocks(
+                    blocks,
+                    width: width,
+                    theme: theme,
+                    cacheKey: cacheKey,
+                    isStreaming: segIsStreaming
+                )
                 segView = mv
 
             case .codeBlock(let code, let language):
@@ -577,11 +1058,23 @@ final class NativeMarkdownView: NSView {
                     cv = NativeCodeBlockView()
                     cv.translatesAutoresizingMaskIntoConstraints = false
                     addSubview(cv)
+                    register(cv)
                 }
                 cv.onHeightChanged = { [weak self] in
+                    self?.invalidateHeightMemo()
                     self?.onHeightChanged?()
                 }
-                cv.configure(code: code, language: language, width: width, theme: theme)
+                // A trailing code segment while streaming is an open fence
+                // still growing — skip per-delta highlighting and show the
+                // blinking cursor inside the code card.
+                let segIsStreamingCode = isStreaming && seg.id == segments.last?.id
+                cv.configure(
+                    code: code,
+                    language: language,
+                    width: width,
+                    theme: theme,
+                    isStreaming: segIsStreamingCode
+                )
                 segView = cv
 
             case .image(let urlString, _):
@@ -589,15 +1082,31 @@ final class NativeMarkdownView: NSView {
                 if let existing = existingEntry?.view as? NSImageView {
                     iv = existing
                 } else {
-                    iv = NSImageView()
+                    let segImageView = MarkdownSegmentImageView()
+                    segImageView.onPreview = { [weak self] img in self?.onImagePreview?(img) }
+                    iv = segImageView
                     iv.translatesAutoresizingMaskIntoConstraints = false
                     iv.imageScaling = .scaleProportionallyUpOrDown
+                    iv.imageAlignment = .alignLeft
                     iv.wantsLayer = true
                     iv.layer?.cornerRadius = 6
                     iv.layer?.masksToBounds = true
-                    iv.heightAnchor.constraint(equalToConstant: 160).isActive = true
+                    // Don't let the image's intrinsic size fight the pinned
+                    // width/height constraints (a 1500px banner must not blow
+                    // out the layout).
+                    iv.setContentHuggingPriority(.defaultLow, for: .horizontal)
+                    iv.setContentHuggingPriority(.defaultLow, for: .vertical)
+                    iv.setContentCompressionResistancePriority(.defaultLow, for: .horizontal)
+                    iv.setContentCompressionResistancePriority(.defaultLow, for: .vertical)
+                    let hc = iv.heightAnchor.constraint(
+                        equalToConstant: Self.imagePlaceholderHeight
+                    )
+                    hc.isActive = true
+                    imageHeightConstraints[seg.id] = hc
                     addSubview(iv)
+                    register(iv)
                 }
+                applyImageHeight(segmentId: seg.id, width: width)
                 scheduleImageLoad(segmentId: seg.id, urlString: urlString, imageView: iv)
                 segView = iv
 
@@ -611,6 +1120,7 @@ final class NativeMarkdownView: NSView {
                     formulaView.imageScaling = .scaleProportionallyDown
                     formulaView.imageAlignment = .alignCenter
                     addSubview(formulaView)
+                    register(formulaView)
                 }
                 let formulaImage = LaTeXRenderer.shared.renderToImage(
                     latex: latex,
@@ -643,27 +1153,39 @@ final class NativeMarkdownView: NSView {
                 } else {
                     tv = NativeMarkdownTableView()
                     addSubview(tv)
+                    register(tv)
                 }
                 tv.onHeightChanged = { [weak self] in
+                    self?.invalidateHeightMemo()
                     self?.onHeightChanged?()
                 }
                 tv.configure(headers: headers, rows: rows, width: width, theme: theme)
                 segView = tv
             }
 
-            NSLayoutConstraint.activate([
-                segView.leadingAnchor.constraint(equalTo: leadingAnchor),
-                segView.trailingAnchor.constraint(equalTo: trailingAnchor),
-                segView.topAnchor.constraint(equalTo: prevAnchor, constant: prevOffset + seg.spacingBefore),
-            ])
-
-            if existingEntry == nil {
-                segmentViews.append((view: segView, key: seg.id))
+            // Horizontal pins are created once, when the segment view first joins
+            // the hierarchy. The teardown above only strips the vertical chain, so
+            // re-activating leading/trailing here on every pass would pile duplicate
+            // constraints into the window's layout engine on each streaming tick,
+            // progressively slowing every subsequent layout solve to a crawl.
+            if isNewSegment {
+                NSLayoutConstraint.activate([
+                    segView.leadingAnchor.constraint(equalTo: leadingAnchor),
+                    segView.trailingAnchor.constraint(equalTo: trailingAnchor),
+                ])
+            }
+            if !structureUnchanged {
+                NSLayoutConstraint.activate([
+                    segView.topAnchor.constraint(equalTo: prevAnchor, constant: prevOffset + seg.spacingBefore)
+                ])
             }
 
             prevAnchor = segView.bottomAnchor
             prevOffset = 0
         }
+        // Final measurement must be authoritative: mid-loop child callbacks can
+        // have memoized a partial total, so drop the memo before measuring.
+        invalidateHeightMemo()
         _ = measuredHeight(for: width)
         onHeightChanged?()
     }
@@ -744,10 +1266,31 @@ final class NativeMarkdownView: NSView {
 
     // MARK: - Cleanup
 
+    /// Deterministic teardown for the owning cell's `removeAllContentViews`.
+    /// AppKit recycles message cells aggressively and a `NativeMarkdownView`
+    /// can linger in an autorelease pool after `removeFromSuperview`, so
+    /// relying on dealloc to detach the redaction hover controller (and
+    /// clear the text view's `.mouseMoved` tracking flag) is too late —
+    /// exactly the teardown window where the launch SIGABRT was observed.
+    /// Calling this before dropping the view releases the hover area +
+    /// closures synchronously.
+    func tearDownForReuse() {
+        removeTextView()
+    }
+
     private func removeTextView() {
         fader.reset()
+        hoverController?.detach()
+        hoverController = nil
+        appliedHighlightRanges = []
+        redactionHighlightAppliedThrough = 0
+        lastRedactionHighlightsHash = 0
         textView?.removeFromSuperview()
         textView = nil
+        // Tear down the streaming cursor + idle timer if they were
+        // attached to this textView. Re-arms cleanly if streaming resumes
+        // (mixed-segment ↔ pure-text transitions).
+        exitStreamingMode()
         lastBlocks = []
         lastLayoutWidthForHeight = -1
     }
@@ -757,6 +1300,9 @@ final class NativeMarkdownView: NSView {
         for entry in segmentViews { entry.view.removeFromSuperview() }
         segmentViews = []
         lastMixedSegments = []
+        installedSegmentLayoutSignature = []
+        imageHeightConstraints.removeAll()
+        imageAspectRatios.removeAll()
         for constraint in mathHeightConstraints.values {
             constraint.isActive = false
         }
@@ -818,15 +1364,281 @@ final class NativeMarkdownView: NSView {
                 }
                 imageView.image = img
                 self.imageLoadTasks.removeValue(forKey: segmentId)
+                let size = img.size
+                if size.width > 0, size.height > 0 {
+                    self.imageAspectRatios[segmentId] = size.width / size.height
+                }
+                self.applyImageHeight(segmentId: segmentId, width: self.lastWidth)
+                self.invalidateHeightMemo()
                 self.onHeightChanged?()
             }
         }
         imageLoadTasks[segmentId] = (token, task)
     }
 
+    /// Height an image segment should occupy at `width`: the aspect-correct
+    /// height once the image has loaded (capped), otherwise a placeholder.
+    private func imageHeight(forSegmentId id: String, width: CGFloat) -> CGFloat {
+        guard let aspect = imageAspectRatios[id], aspect > 0, width > 0.5 else {
+            return Self.imagePlaceholderHeight
+        }
+        return min(Self.imageMaxHeight, max(1, width / aspect))
+    }
+
+    /// Sync an image segment's height constraint to `imageHeight(...)` and
+    /// reposition its overlaid download button to the displayed image's right
+    /// edge (the view is full-width while the image is left-aligned and scaled).
+    private func applyImageHeight(segmentId: String, width: CGFloat) {
+        guard let constraint = imageHeightConstraints[segmentId] else { return }
+        let target = imageHeight(forSegmentId: segmentId, width: width)
+        if abs(constraint.constant - target) > 0.5 {
+            constraint.constant = target
+        }
+        if let view = segmentViews.first(where: { $0.key == segmentId })?.view
+            as? MarkdownSegmentImageView
+        {
+            let displayedWidth: CGFloat
+            if let aspect = imageAspectRatios[segmentId], aspect > 0 {
+                displayedWidth = min(width, target * aspect)
+            } else {
+                displayedWidth = width
+            }
+            view.setImageRightEdge(displayedWidth)
+        }
+    }
+
     // MARK: - Theme Fingerprint
 
     private func makeThemeFingerprint(_ theme: any ThemeProtocol) -> String {
         "\(theme.primaryFontName)|\(theme.bodySize)|\(theme.codeSize)"
+    }
+
+    // MARK: - Streaming Cursor (interpunct)
+
+    /// Enter "streaming" lifecycle: start the idle-check timer that flips
+    /// the cursor on whenever tokens have been quiet for the threshold.
+    /// Does **not** show the cursor itself — that's gated on the idle
+    /// elapsed time, decided by `idleTick`.
+    fileprivate func enterStreamingMode(theme: any ThemeProtocol) {
+        streamingCursorColor = NSColor(theme.primaryText)
+        guard idleTimer == nil else { return }
+        idleTimer = Timer.scheduledTimer(withTimeInterval: 0.05, repeats: true) { [weak self] _ in
+            Task { @MainActor [weak self] in
+                self?.idleTick()
+            }
+        }
+    }
+
+    /// Exit "streaming" lifecycle: stop the idle timer, remove the cursor,
+    /// and clear the reveal timestamp so a future stream starts fresh.
+    fileprivate func exitStreamingMode() {
+        idleTimer?.invalidate()
+        idleTimer = nil
+        lastTextRevealAt = nil
+        streamingCursor?.removeFromSuperview()
+        streamingCursor = nil
+    }
+
+    /// Called from the text-update paths when text storage actually
+    /// changed during streaming. Stamps the reveal time and *removes*
+    /// the cursor if it was visible — active reveal is the opposite of
+    /// "still waiting."
+    fileprivate func notifyTextReveal() {
+        lastTextRevealAt = Date()
+        if streamingCursor != nil {
+            streamingCursor?.removeFromSuperview()
+            streamingCursor = nil
+        }
+    }
+
+    /// Idle-check tick. If the stream has been quiet long enough, show
+    /// (or refresh) the cursor at the trailing edge. Otherwise ensure
+    /// it's hidden.
+    private func idleTick() {
+        guard idleTimer != nil else { return }
+        let elapsed: TimeInterval
+        if let last = lastTextRevealAt {
+            elapsed = Date().timeIntervalSince(last)
+        } else {
+            // Stream started, no token yet. Treat as paused so the user
+            // sees the cursor while waiting for TTFT to elapse.
+            elapsed = Self.cursorPauseThreshold + 1
+        }
+        if elapsed > Self.cursorPauseThreshold {
+            installCursorIfNeeded()
+            repositionStreamingCursor()
+        } else {
+            if streamingCursor != nil {
+                streamingCursor?.removeFromSuperview()
+                streamingCursor = nil
+            }
+        }
+    }
+
+    private func installCursorIfNeeded() {
+        guard textView != nil, let color = streamingCursorColor else { return }
+        if streamingCursor == nil {
+            let cv = StreamingCursorOverlay()
+            cv.updateColor(color)
+            addSubview(cv)
+            streamingCursor = cv
+        } else {
+            streamingCursor?.updateColor(color)
+        }
+    }
+
+    /// Position the cursor frame to vertically align with the line that
+    /// contains the last character of the text storage, with horizontal
+    /// padding past the trailing glyph. Uses the line fragment's used
+    /// rect (not `boundingRect(forGlyphRange:)`) so soft-wrapped
+    /// trailing whitespace doesn't pull the cursor back to the previous
+    /// line. Converts the top AND bottom of the line through
+    /// `tv.convert(_:to:)` so it works whether the NSTextView is flipped
+    /// or not — `frame.origin.y` in a non-flipped parent must be the
+    /// **lower** of the two converted y values.
+    fileprivate func repositionStreamingCursor() {
+        guard let cursor = streamingCursor, let tv = textView else { return }
+        guard let lm = tv.layoutManager, let tc = tv.textContainer else { return }
+        lm.ensureLayout(for: tc)
+
+        let storageLength = tv.textStorage?.length ?? 0
+        let origin = tv.textContainerOrigin
+        let font = tv.font ?? .systemFont(ofSize: 13)
+        let trailingPadding: CGFloat = 6
+        let slotWidth: CGFloat = StreamingCursorOverlay.dotDiameter + 4
+        let slotHeight: CGFloat = StreamingCursorOverlay.dotDiameter
+
+        // Work from the text BASELINE rather than the line's top/bottom.
+        // The baseline is the only metric that lets us derive the text's
+        // true optical mid-line from the font itself; line-rect math drags
+        // in leading and ascender/descender asymmetry, which is what left
+        // the dot sitting above the line.
+        let trailingX: CGFloat
+        let baselineInTV: CGFloat
+
+        if storageLength == 0 {
+            trailingX = origin.x + trailingPadding
+            baselineInTV = origin.y + font.ascender
+        } else {
+            let lastCharIdx = storageLength - 1
+            let lastGlyphIdx = lm.glyphIndexForCharacter(at: lastCharIdx)
+            // Used rect (not bounding rect) so soft-wrapped trailing
+            // whitespace doesn't pull the dot back to the previous line.
+            let usedRect = lm.lineFragmentUsedRect(
+                forGlyphAt: lastGlyphIdx,
+                effectiveRange: nil
+            )
+            let lineFragRect = lm.lineFragmentRect(
+                forGlyphAt: lastGlyphIdx,
+                effectiveRange: nil
+            )
+            // `location(forGlyphAt:)` returns the glyph origin relative to
+            // its line fragment; its y is the baseline offset from the
+            // fragment top.
+            let baselineOffset = lm.location(forGlyphAt: lastGlyphIdx).y
+            trailingX = usedRect.maxX + origin.x + trailingPadding
+            baselineInTV = lineFragRect.minY + baselineOffset + origin.y
+        }
+
+        // The dot's center axis lands on the midpoint of the cap-height
+        // band above the baseline — the line's optical center for running
+        // text. Deriving the offset from `font.capHeight` keeps it aligned
+        // across font sizes, where the old fixed nudge drifted off-axis.
+        let textMiddleInTV = baselineInTV - font.capHeight / 2
+
+        // Convert just the mid-line point and center the symmetric slot on
+        // it: this is independent of whether `self` is flipped, so we no
+        // longer have to reason about which converted edge is the lower y.
+        let centerInSelf = tv.convert(
+            NSPoint(x: trailingX, y: textMiddleInTV),
+            to: self
+        )
+        cursor.frame = NSRect(
+            x: centerInSelf.x,
+            y: centerInSelf.y - slotHeight / 2,
+            width: slotWidth,
+            height: slotHeight
+        )
+    }
+}
+
+// MARK: - StreamingCursorOverlay
+
+/// Tiny overlay view that renders a blinking dot. Used by
+/// `NativeMarkdownView` (and `NativeCodeBlockView` for a trailing
+/// streaming code fence) to indicate "still streaming" during the SSE
+/// quiet gaps that no amount of pacing can fully smooth over.
+final class StreamingCursorOverlay: NSView {
+
+    /// Diameter of the dot in points. Tuned to read as a deliberate
+    /// "still going" pulse without competing with the body text.
+    static let dotDiameter: CGFloat = 12
+
+    private let dotLayer = CAShapeLayer()
+    private static let suppressedActions: [String: CAAction] = [
+        "bounds": NSNull(),
+        "position": NSNull(),
+        "frame": NSNull(),
+        "path": NSNull(),
+        "fillColor": NSNull(),
+    ]
+
+    override init(frame frameRect: NSRect) {
+        super.init(frame: frameRect)
+        // Frame-based positioning — caller sets the frame each time the
+        // trailing glyph rect changes. Auto Layout would otherwise pin the
+        // overlay to (0, 0) at its zero intrinsic size and ignore our
+        // frame writes.
+        translatesAutoresizingMaskIntoConstraints = true
+        wantsLayer = true
+        layer?.actions = Self.suppressedActions
+        dotLayer.actions = Self.suppressedActions
+        layer?.addSublayer(dotLayer)
+        startBlinking()
+    }
+
+    required init?(coder: NSCoder) { fatalError() }
+
+    override func layout() {
+        super.layout()
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        // Center the dot within the overlay view.
+        let d = Self.dotDiameter
+        let dotFrame = CGRect(
+            x: (bounds.width - d) / 2,
+            y: (bounds.height - d) / 2,
+            width: d,
+            height: d
+        )
+        dotLayer.frame = dotFrame
+        dotLayer.path = CGPath(ellipseIn: CGRect(origin: .zero, size: dotFrame.size), transform: nil)
+        CATransaction.commit()
+    }
+
+    func updateColor(_ color: NSColor) {
+        // Skip when unchanged: this is called on every 50ms idle tick, and a
+        // top-level explicit CATransaction.commit synchronously flushes the
+        // whole window's pending layer tree to the render server — an
+        // observed multi-second hang on memory-starved machines. The color
+        // only actually changes on a theme switch.
+        let cgColor = color.cgColor
+        guard dotLayer.fillColor != cgColor else { return }
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        dotLayer.fillColor = cgColor
+        CATransaction.commit()
+    }
+
+    private func startBlinking() {
+        let anim = CABasicAnimation(keyPath: "opacity")
+        anim.fromValue = 1.0
+        anim.toValue = 0.2
+        anim.duration = 0.65
+        anim.autoreverses = true
+        anim.repeatCount = .infinity
+        anim.timingFunction = CAMediaTimingFunction(name: .easeInEaseOut)
+        anim.isRemovedOnCompletion = false
+        layer?.add(anim, forKey: "blink")
     }
 }

@@ -273,7 +273,7 @@ struct SelectableTextView: NSViewRepresentable {
         }
 
         // Render and append changed/new blocks
-        let scale = Typography.scale(for: baseWidth)
+        let scale = Typography.scale(for: Typography.baseWidth)
         let bodyFontSize = CGFloat(theme.bodySize) * scale
 
         for i in diffIndex ..< newBlocks.count {
@@ -320,7 +320,7 @@ struct SelectableTextView: NSViewRepresentable {
 
     func buildAttributedString(coordinator: Coordinator) -> NSMutableAttributedString {
         let result = NSMutableAttributedString()
-        let scale = Typography.scale(for: baseWidth)
+        let scale = Typography.scale(for: Typography.baseWidth)
         let bodyFontSize = CGFloat(theme.bodySize) * scale
         var lengths: [Int] = []
 
@@ -681,19 +681,20 @@ struct SelectableTextView: NSViewRepresentable {
         if InlineMathScanner.mayContainMath(text) {
             let segments = InlineMathScanner.split(text)
             if segments.contains(where: { $0.isMath }) {
-                return renderSegmentsWithMath(
-                    segments,
-                    fontSize: fontSize,
-                    weight: weight,
-                    isItalic: isItalic,
-                    baseAttributes: baseAttributes
-                )
+                return withKnowledgeLinks(
+                    renderSegmentsWithMath(
+                        segments,
+                        fontSize: fontSize,
+                        weight: weight,
+                        isItalic: isItalic,
+                        baseAttributes: baseAttributes
+                    ))
             }
         }
 
         // Fast path: skip markdown parsing for plain text
         guard likelyContainsMarkdown(text) else {
-            return NSMutableAttributedString(string: text, attributes: baseAttributes)
+            return withKnowledgeLinks(NSMutableAttributedString(string: text, attributes: baseAttributes))
         }
 
         // Try to parse as markdown
@@ -731,6 +732,9 @@ struct SelectableTextView: NSViewRepresentable {
         return attrString
     }
 
+    // MARK: - Inline Math Helpers
+
+    // The delimiter rules live in `InlineMathScanner` so they can be tested without a view.
 
     /// Build an attributed string from mixed text/math segments.
     private func renderSegmentsWithMath(
@@ -776,10 +780,9 @@ struct SelectableTextView: NSViewRepresentable {
                 {
                     let mutable = NSMutableAttributedString(attributedString: markdownAttr)
                     applyThemeStyling(to: mutable, baseFontSize: fontSize, baseWeight: weight, isItalic: isItalic)
-                    result.append(withKnowledgeLinks(mutable))
+                    result.append(mutable)
                 } else {
-                    result.append(
-                        withKnowledgeLinks(NSMutableAttributedString(string: segment.text, attributes: baseAttributes)))
+                    result.append(NSMutableAttributedString(string: segment.text, attributes: baseAttributes))
                 }
             }
         }
@@ -840,32 +843,45 @@ struct SelectableTextView: NSViewRepresentable {
         // Enumerate and fix fonts/styles
         attrString.enumerateAttributes(in: fullRange, options: []) { attributes, range, _ in
             var newFont = baseFont
-
+            // Foundation's markdown parser doesn't always express a code span
+            // through the font: nested forms like `**`code`**` can carry the
+            // code-ness only in the presentation intent, with a non-monospace
+            // font. Check both signals.
+            let intent = Self.inlineIntent(attributes)
+            var traits: NSFontDescriptor.SymbolicTraits = []
             if let existingFont = attributes[.font] as? NSFont {
-                let traits = existingFont.fontDescriptor.symbolicTraits
+                traits = existingFont.fontDescriptor.symbolicTraits
+            }
 
-                // Check for inline code (usually monospace)
-                if traits.contains(.monoSpace) {
-                    // Inline code styling
-                    attrString.addAttribute(.font, value: codeFont, range: range)
-                    attrString.addAttribute(.foregroundColor, value: accentColor, range: range)
-                    // Upstream: a code span naming a real knowledge document
-                    // becomes a clickable link to it (existence-gated).
-                    if attributes[.link] == nil {
-                        let span = attrString.attributedSubstring(from: range).string
-                        if let match = KnowledgeLinkResolver.linkURL(forCodeSpan: span) {
-                            let linkRange = NSRange(location: range.location, length: match.matchedLength)
-                            attrString.addAttribute(.link, value: match.url, range: linkRange)
-                            attrString.addAttribute(
-                                .underlineStyle, value: NSUnderlineStyle.single.rawValue, range: linkRange)
-                        }
+            // Check for inline code
+            if traits.contains(.monoSpace) || intent.contains(.code) {
+                // Inline code styling (bold-wrapped code keeps its bold)
+                let isBoldCode = traits.contains(.bold) || intent.contains(.stronglyEmphasized)
+                let font = isBoldCode ? cachedMonoFont(size: baseFontSize * 0.9, weight: .bold) : codeFont
+                attrString.addAttribute(.font, value: font, range: range)
+                attrString.addAttribute(.foregroundColor, value: accentColor, range: range)
+                // A code span naming a real knowledge document becomes a
+                // clickable link to it (existence-gated, so ordinary
+                // path-shaped spans are untouched).
+                if attributes[.link] == nil {
+                    let span = attrString.attributedSubstring(from: range).string
+                    if let match = KnowledgeLinkResolver.linkURL(forCodeSpan: span) {
+                        let linkRange = NSRange(location: range.location, length: match.matchedLength)
+                        attrString.addAttribute(.link, value: match.url, range: linkRange)
+                        attrString.addAttribute(
+                            .underlineStyle, value: NSUnderlineStyle.single.rawValue, range: linkRange
+                        )
                     }
-                    return
                 }
+                return
+            }
 
-                // Determine weight and italic from existing font
-                let isBold = traits.contains(.bold) || baseWeight == .bold || baseWeight == .semibold
-                let fontIsItalic = traits.contains(.italic) || isItalic
+            if attributes[.font] is NSFont {
+                // Determine weight and italic from existing font or intent
+                let isBold =
+                    traits.contains(.bold) || intent.contains(.stronglyEmphasized)
+                    || baseWeight == .bold || baseWeight == .semibold
+                let fontIsItalic = traits.contains(.italic) || intent.contains(.emphasized) || isItalic
 
                 // Use pre-cached fonts
                 if isBold && fontIsItalic {
@@ -885,6 +901,18 @@ struct SelectableTextView: NSViewRepresentable {
                 attrString.addAttribute(.underlineStyle, value: NSUnderlineStyle.single.rawValue, range: range)
             }
         }
+    }
+
+    /// Read the markdown parser's inline presentation intent off a run's
+    /// attributes. Bridged NSAttributedStrings carry it as an NSNumber.
+    nonisolated static func inlineIntent(_ attributes: [NSAttributedString.Key: Any]) -> InlinePresentationIntent {
+        if let intent = attributes[.inlinePresentationIntent] as? InlinePresentationIntent {
+            return intent
+        }
+        if let raw = attributes[.inlinePresentationIntent] as? NSNumber {
+            return InlinePresentationIntent(rawValue: raw.uintValue)
+        }
+        return []
     }
 
     // MARK: - Font Helpers
@@ -995,6 +1023,17 @@ final class SelectableNSTextView: NSTextView, CrossSelectableTextView {
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
 
+    /// Context-menu Copy and Edit > Copy prefer the cross-block selection
+    /// (see `copyCrossSelectionIfActive`).
+    override func copy(_ sender: Any?) {
+        if copyCrossSelectionIfActive() { return }
+        super.copy(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        crossSelectionEnablesCopy(item) || super.validateUserInterfaceItem(item)
+    }
+
     override func becomeFirstResponder() -> Bool {
         let result = super.becomeFirstResponder()
         if result { needsDisplay = true }
@@ -1063,41 +1102,6 @@ final class SelectableNSTextView: NSTextView, CrossSelectableTextView {
         }
         ChatCrossSelection.shared.clear()
         super.mouseDown(with: event)
-    }
-
-    /// Context-menu Copy and Edit > Copy prefer the cross-block selection
-    /// (see `copyCrossSelectionIfActive`).
-    override func copy(_ sender: Any?) {
-        if copyCrossSelectionIfActive() { return }
-        super.copy(sender)
-    }
-
-    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-        crossSelectionEnablesCopy(item) || super.validateUserInterfaceItem(item)
-    }
-
-    /// Cursor comes from a `.cursorUpdate` tracking area — legacy cursor
-    /// rects don't survive layer-backed table-cell recycling (see
-    /// `chatTextCursorUpdate`).
-    private var cursorTrackingArea: NSTrackingArea?
-
-    override func cursorUpdate(with event: NSEvent) {
-        chatTextCursorUpdate(with: event)
-    }
-
-    override func updateTrackingAreas() {
-        super.updateTrackingAreas()
-        if let cursorTrackingArea {
-            removeTrackingArea(cursorTrackingArea)
-        }
-        let area = NSTrackingArea(
-            rect: bounds,
-            options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
-            owner: self,
-            userInfo: nil
-        )
-        addTrackingArea(area)
-        cursorTrackingArea = area
     }
 
     /// Open the knowledge document a link points at. Falls back to
@@ -1276,6 +1280,96 @@ final class SelectableNSTextView: NSTextView, CrossSelectableTextView {
     var blockquoteBarColor: NSColor = .controlAccentColor
     var secondaryBackgroundColor: NSColor = .clear
 
+    /// Closure invoked on every `mouseMoved` (when the text view is
+    /// the owner of an `NSTrackingArea` with `.mouseMoved`). Used by
+    /// `RedactionHoverController` to drive its popover without
+    /// duplicating tracking-area management. Cleared by the
+    /// controller's `detach()` so streaming chat with no privacy
+    /// hits doesn't pay for an idle dispatch on every cursor wiggle.
+    var onMouseHover: ((NSEvent) -> Void)?
+    /// Closure invoked on `mouseExited`. Drives the controller's
+    /// 80ms hide debounce.
+    var onMouseExitedHover: (() -> Void)?
+
+    /// Whether the redaction-hover `.mouseMoved` tracking area should be
+    /// installed. Toggled by `RedactionHoverController`. The area itself is
+    /// created/destroyed inside `updateTrackingAreas()` with `owner: self`,
+    /// so AppKit manages its lifecycle and it is torn down with the view —
+    /// it can never be left dangling for the tracking-area manager to
+    /// dispatch `mouseMoved:` into a freed owner (the
+    /// `-[_NSTrackingAreaAKManager mouseMoved:]` launch SIGABRT, issue
+    /// #1632). The pre-fix code added the area imperatively from the
+    /// controller without reconciling it in `updateTrackingAreas()`, so a
+    /// view moved between windows (prewarm) or torn down via a cell path
+    /// that skipped `detach()` could leave a stale area behind.
+    var wantsRedactionHoverTracking: Bool = false {
+        didSet {
+            guard oldValue != wantsRedactionHoverTracking else { return }
+            if wantsRedactionHoverTracking { window?.acceptsMouseMovedEvents = true }
+            updateTrackingAreas()
+        }
+    }
+
+    /// Our owned hover tracking area. Reconciled on every
+    /// `updateTrackingAreas()` pass; nil when hover tracking is disabled.
+    private var redactionHoverTrackingArea: NSTrackingArea?
+
+    /// Drives the I-beam/pointing-hand cursor. Legacy cursor rects don't
+    /// survive layer-backed table-cell recycling, so the cursor comes from
+    /// a `.cursorUpdate` tracking area (see `chatTextCursorUpdate`).
+    private var cursorTrackingArea: NSTrackingArea?
+
+    override func cursorUpdate(with event: NSEvent) {
+        chatTextCursorUpdate(with: event)
+    }
+
+    override func updateTrackingAreas() {
+        super.updateTrackingAreas()
+        if let cursorTrackingArea {
+            removeTrackingArea(cursorTrackingArea)
+        }
+        let cursorArea = NSTrackingArea(
+            rect: bounds,
+            options: [.cursorUpdate, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(cursorArea)
+        cursorTrackingArea = cursorArea
+        // Reconcile only the area we own (tracked by reference). NSTextView
+        // manages its own areas — for the I-beam cursor etc. — via
+        // `super`, and we must not disturb those. Remove-then-add against
+        // the current bounds so the area always matches the live geometry.
+        if let existing = redactionHoverTrackingArea {
+            removeTrackingArea(existing)
+            redactionHoverTrackingArea = nil
+        }
+        guard wantsRedactionHoverTracking else { return }
+        let area = NSTrackingArea(
+            rect: bounds,
+            options: [.mouseMoved, .mouseEnteredAndExited, .activeInKeyWindow, .inVisibleRect],
+            owner: self,
+            userInfo: nil
+        )
+        addTrackingArea(area)
+        redactionHoverTrackingArea = area
+    }
+
+    override func mouseMoved(with event: NSEvent) {
+        super.mouseMoved(with: event)
+        onMouseHover?(event)
+    }
+
+    override func mouseEntered(with event: NSEvent) {
+        super.mouseEntered(with: event)
+        onMouseHover?(event)
+    }
+
+    override func mouseExited(with event: NSEvent) {
+        super.mouseExited(with: event)
+        onMouseExitedHover?()
+    }
+
     override func draw(_ dirtyRect: NSRect) {
         drawCrossSelectionHighlight()
         guard let layoutManager = layoutManager,
@@ -1314,9 +1408,12 @@ final class SelectableNSTextView: NSTextView, CrossSelectableTextView {
                 yRadius: 6
             ).fill()
 
+            // Inset the bar 2pt from the background's top/bottom so it stays
+            // inside the corner curvature (radius 6 from x:4) instead of
+            // poking past the rounded corners.
             blockquoteBarColor.setFill()
             NSBezierPath(
-                roundedRect: NSRect(x: 6, y: rect.origin.y - 2, width: 3, height: rect.height + 4),
+                roundedRect: NSRect(x: 6, y: rect.origin.y, width: 3, height: rect.height),
                 xRadius: 1.5,
                 yRadius: 1.5
             ).fill()

@@ -18,11 +18,22 @@ import SwiftUI
 // Highlightr wraps highlight.js via JavaScriptCore — initialisation is expensive,
 // so we keep a single instance for the process lifetime. The theme is switched
 // lazily when the resolved highlight theme name changes.
+//
+// The underlying `JSContext` is NOT thread-safe and Highlightr offers no
+// internal synchronization: concurrent `highlight(...)` / `setTheme(...)`
+// calls (e.g. a background highlight pass racing a theme switch on the main
+// thread) can corrupt the context or tear the theme-tracking globals below.
+// All access goes through `highlightrLock` so it is serialized.
 nonisolated(unsafe) private let sharedHighlightr: Highlightr? = {
     guard let h = Highlightr() else { return nil }
     h.setTheme(to: "atom-one-dark")
     return h
 }()
+
+/// Serializes every touch of `sharedHighlightr` and the theme-tracking
+/// globals. Held only for the duration of a single highlight / theme read,
+/// which is the correct granularity for a non-reentrant JSContext.
+private let highlightrLock = NSLock()
 
 /// Track which Highlightr theme is currently loaded so we only call setTheme when it changes.
 nonisolated(unsafe) private var currentHighlightrTheme: String = "atom-one-dark"
@@ -30,18 +41,35 @@ nonisolated(unsafe) private var currentHighlightrTheme: String = "atom-one-dark"
 private let defaultDarkHighlightTheme = "atom-one-dark"
 private let defaultLightHighlightTheme = "atom-one-light"
 
+/// Kick the shared Highlightr's lazy initialization — which evaluates
+/// highlight.js inside a fresh JSContext, tens-to-hundreds of ms plus any
+/// JavaScriptCore GC pause — on a background thread, so the first code block
+/// a table cell configures doesn't pay it on main. Safe to race real use:
+/// the `let` global initializes exactly once and every touch is serialized
+/// by `highlightrLock`.
+func prewarmHighlightrOffMain() {
+    DispatchQueue.global(qos: .utility).async {
+        highlightrLock.lock()
+        _ = sharedHighlightr
+        highlightrLock.unlock()
+    }
+}
+
 /// Returns the available Highlightr theme names (cached after first call).
 nonisolated(unsafe) private var cachedAvailableThemes: [String]?
 func availableHighlightrThemes() -> [String] {
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
     if let cached = cachedAvailableThemes { return cached }
     let themes = (sharedHighlightr?.availableThemes() ?? []).sorted()
     cachedAvailableThemes = themes
     return themes
 }
 
-/// Resolves which Highlightr theme to use and switches if needed.
-/// Call this before highlighting — it's a no-op when the theme hasn't changed.
-func ensureHighlightrTheme(for theme: any ThemeProtocol) {
+/// Resolves which Highlightr theme to use and switches if needed (no-op when
+/// unchanged). Assumes `highlightrLock` is already held — only call from
+/// inside a locked section (`ensureHighlightrTheme` / `highlightCode`).
+private func switchHighlightrThemeLocked(for theme: any ThemeProtocol) {
     let resolved =
         theme.codeHighlightTheme
         ?? (theme.isDark ? defaultDarkHighlightTheme : defaultLightHighlightTheme)
@@ -50,31 +78,57 @@ func ensureHighlightrTheme(for theme: any ThemeProtocol) {
     currentHighlightrTheme = resolved
 }
 
-/// Memoized highlight results (upstream): re-highlighting the same code on
-/// every cell reconfigure can stall the main thread on large outputs.
+/// Resolves which Highlightr theme to use and switches if needed.
+/// Call this before highlighting — it's a no-op when the theme hasn't changed.
+func ensureHighlightrTheme(for theme: any ThemeProtocol) {
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
+    switchHighlightrThemeLocked(for: theme)
+}
+
+/// Switch the theme (if needed) and highlight `code` as a single atomic
+/// operation under `highlightrLock`, so a concurrent theme switch can't
+/// land mid-highlight and corrupt the shared JSContext.
+///
+/// Results are cached per (theme, language, code): highlighting runs through
+/// JavaScriptCore and is expensive enough that re-highlighting unchanged code
+/// blocks — e.g. every cell reconfigure when a tool-call row expands or
+/// collapses — can stall the main thread on large outputs. NSCache evicts
+/// under memory pressure; entries are cheap relative to re-running the JS.
 nonisolated(unsafe) private let highlightCache = NSCache<NSString, NSAttributedString>()
 
-/// Above this many UTF-16 units, skip syntax highlighting (upstream): the
-/// JavaScriptCore tokenizer's cost grows super-linearly and runs on the main
-/// thread during cell layout.
+/// Above this many UTF-16 units, skip syntax highlighting and render plain
+/// monospaced text. Highlightr runs a JavaScriptCore tokenizer whose cost grows
+/// super-linearly with input size, and it runs synchronously on the main thread
+/// during cell layout — a single huge code block (a pasted file, a long tool
+/// output) can blow past the 3s app-hang watchdog. Losing color on an
+/// enormous block the user has to scroll anyway is a good trade for not
+/// freezing the UI. Normal code blocks are far under this.
 private let maxHighlightableLength = 50_000
 
-/// Syntax-highlight `code` for the diff card (upstream `highlightCode`).
-/// Intel: no highlighter lock (Intel's shared Highlightr is only used from
-/// the main thread); otherwise as upstream.
 func highlightCode(
     _ code: String,
     language: String?,
     theme: any ThemeProtocol,
     cache: Bool = true
 ) -> NSAttributedString? {
+    // Cheap length gate before taking the lock or touching JSCore.
     guard code.utf16.count <= maxHighlightableLength else { return nil }
-    ensureHighlightrTheme(for: theme)
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
+    switchHighlightrThemeLocked(for: theme)
+    // `cache: false` for the throttled mid-stream passes — every pass sees a
+    // different prefix of the growing code, so caching them would only fill
+    // the cache with dead entries.
     let key = "\(currentHighlightrTheme)|\(language?.lowercased() ?? "")|\(code)" as NSString
     if cache, let cached = highlightCache.object(forKey: key) { return cached }
-    guard let highlighted = sharedHighlightr?.highlight(code, as: language?.lowercased(), fastRender: true)
+    guard
+        let highlighted = sharedHighlightr?.highlight(
+            code, as: language?.lowercased(), fastRender: true)
     else { return nil }
-    if cache { highlightCache.setObject(highlighted, forKey: key, cost: code.utf16.count) }
+    if cache {
+        highlightCache.setObject(highlighted, forKey: key, cost: code.utf16.count)
+    }
     return highlighted
 }
 
@@ -82,7 +136,7 @@ func highlightCode(
 /// background for a theme other than the active one requires switching the
 /// shared highlighter (a JavaScriptCore call), so callers that only need the
 /// color, like the theme editor preview, should not pay that on every body
-/// evaluation. Upstream `11f26f9a8`.
+/// evaluation.
 nonisolated(unsafe) private var highlightrBackgroundColorCache: [String: NSColor] = [:]
 
 /// Returns the background color of the Highlightr theme `theme` resolves to,
@@ -92,11 +146,13 @@ func highlightrThemeBackgroundColor(for theme: any ThemeProtocol) -> Color {
     let resolved =
         theme.codeHighlightTheme
         ?? (theme.isDark ? defaultDarkHighlightTheme : defaultLightHighlightTheme)
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
     if let cached = highlightrBackgroundColorCache[resolved] {
         return Color(cached)
     }
     let previous = currentHighlightrTheme
-    ensureHighlightrTheme(for: theme)
+    switchHighlightrThemeLocked(for: theme)
     let bg = sharedHighlightr?.theme.themeBackgroundColor ?? NSColor(white: 0.1, alpha: 1)
     highlightrBackgroundColorCache[resolved] = bg
     if previous != currentHighlightrTheme {
@@ -109,6 +165,8 @@ func highlightrThemeBackgroundColor(for theme: any ThemeProtocol) -> Color {
 /// Returns the background color from the current Highlightr theme as a SwiftUI Color.
 /// Falls back to a sensible default if unavailable.
 func highlightrThemeBackgroundColor() -> Color {
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
     if let bg = sharedHighlightr?.theme.themeBackgroundColor {
         return Color(bg)
     }
@@ -117,7 +175,9 @@ func highlightrThemeBackgroundColor() -> Color {
 
 /// Returns the background color from the current Highlightr theme as an NSColor.
 func highlightrThemeBackgroundNSColor() -> NSColor {
-    sharedHighlightr?.theme.themeBackgroundColor ?? NSColor(white: 0.1, alpha: 1)
+    highlightrLock.lock()
+    defer { highlightrLock.unlock() }
+    return sharedHighlightr?.theme.themeBackgroundColor ?? NSColor(white: 0.1, alpha: 1)
 }
 
 // MARK: - CodeBlockView
@@ -288,14 +348,19 @@ struct CodeContentView: NSViewRepresentable {
 
     /// Build a syntax-highlighted attributed string without going through
     /// the NSViewRepresentable lifecycle. Used by NativeCodeBlockView.
+    /// `highlight: false` skips the Highlightr/JavaScriptCore pass and returns
+    /// plain monospaced text — used while a code block is still streaming,
+    /// where a full-document highlight per delta would stall the main thread.
     static func attributedString(
         code: String,
         language: String?,
         baseWidth: CGFloat,
-        theme: any ThemeProtocol
+        theme: any ThemeProtocol,
+        highlight: Bool = true,
+        cacheHighlight: Bool = true
     ) -> NSMutableAttributedString {
         let view = CodeContentView(code: code, language: language, baseWidth: baseWidth, theme: theme)
-        return view.buildAttributedString()
+        return view.buildAttributedString(highlight: highlight, cacheHighlight: cacheHighlight)
     }
 
     // MARK: - Attributed String
@@ -313,7 +378,10 @@ struct CodeContentView: NSViewRepresentable {
         return NSFont.monospacedSystemFont(ofSize: size, weight: weight)
     }
 
-    func buildAttributedString() -> NSMutableAttributedString {
+    func buildAttributedString(
+        highlight: Bool = true,
+        cacheHighlight: Bool = true
+    ) -> NSMutableAttributedString {
         let fontSize = codeFontSize
         let font = monoFont(size: fontSize, weight: .regular)
         let lines = code.components(separatedBy: "\n")
@@ -322,12 +390,13 @@ struct CodeContentView: NSViewRepresentable {
         let gutterWidth = CGFloat(gutterDigits + 2) * fontSize * 0.62
         let indent: CGFloat = 12 + gutterWidth
 
-        // Ensure the Highlightr theme matches the current app theme before highlighting.
-        ensureHighlightrTheme(for: theme)
-
-        // use Highlightr for syntax highlighting; fall back to plain text if it returns nil.
+        // Switch theme (if needed) + highlight atomically under the Highlightr
+        // lock; fall back to plain text if it returns nil.
         let result: NSMutableAttributedString
-        let highlightedCode = sharedHighlightr?.highlight(code, as: language?.lowercased(), fastRender: true)
+        let highlightedCode =
+            highlight
+            ? highlightCode(code, language: language, theme: theme, cache: cacheHighlight)
+            : nil
         if let highlighted = highlightedCode {
             result = NSMutableAttributedString(attributedString: highlighted)
             let fullRange = NSRange(location: 0, length: result.length)
@@ -380,6 +449,16 @@ final class CodeNSTextView: NSTextView, CrossSelectableTextView {
 
     override var acceptsFirstResponder: Bool { true }
     override func acceptsFirstMouse(for event: NSEvent?) -> Bool { true }
+
+    /// See SelectableNSTextView.copy — the cross-block selection wins.
+    override func copy(_ sender: Any?) {
+        if copyCrossSelectionIfActive() { return }
+        super.copy(sender)
+    }
+
+    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
+        crossSelectionEnablesCopy(item) || super.validateUserInterfaceItem(item)
+    }
 
     /// Suppress NSTextView's default scroll-rect-to-visible.
     /// See `SelectableNSTextView.scrollToVisible(_:)` for the rationale —
@@ -442,16 +521,6 @@ final class CodeNSTextView: NSTextView, CrossSelectableTextView {
         super.mouseDown(with: event)
     }
 
-    /// See SelectableNSTextView.copy — the cross-block selection wins.
-    override func copy(_ sender: Any?) {
-        if copyCrossSelectionIfActive() { return }
-        super.copy(sender)
-    }
-
-    override func validateUserInterfaceItem(_ item: NSValidatedUserInterfaceItem) -> Bool {
-        crossSelectionEnablesCopy(item) || super.validateUserInterfaceItem(item)
-    }
-
     override func draw(_ dirtyRect: NSRect) {
         drawCrossSelectionHighlight()
         guard let layoutManager = layoutManager,
@@ -469,6 +538,13 @@ final class CodeNSTextView: NSTextView, CrossSelectableTextView {
         let charWidth = codeFontSize * 0.62
         let leftPad: CGFloat = 12
         let gutterPointWidth = CGFloat(digits + 2) * codeFontSize * 0.62
+        // Monospaced font: every padded line number has the same width (digits x
+        // the fixed advance), so compute it arithmetically once instead of
+        // measuring each line through CoreText inside draw. The measurement
+        // crashed in production while CoreText copied its attribute dictionary,
+        // and skipping it also drops a per-visible-line layout round-trip.
+        let numWidth = CGFloat(digits) * font.maximumAdvancement.width
+        let x = leftPad + gutterPointWidth - numWidth - charWidth * 1.2
         let nsString = textStorage.string as NSString
         var charIndex = 0
 
@@ -486,9 +562,6 @@ final class CodeNSTextView: NSTextView, CrossSelectableTextView {
             }
 
             let numStr = String(lineNum).padding(toLength: digits, withPad: " ", startingAt: 0) as NSString
-            let numSize = numStr.size(withAttributes: attrs)
-            let x = leftPad + gutterPointWidth - numSize.width - charWidth * 1.2
-
             numStr.draw(at: NSPoint(x: x, y: fragRect.origin.y), withAttributes: attrs)
 
             let lineRange = nsString.lineRange(for: NSRange(location: charIndex, length: 0))

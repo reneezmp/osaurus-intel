@@ -13,6 +13,13 @@ struct ChatFindBar: View {
     @Environment(\.theme) private var theme
 
     @Binding var query: String
+    /// Bumped by the window's Cmd+F handler; every change re-focuses the
+    /// text field even when the bar is already visible.
+    var focusTrigger: Int = 0
+    /// True while a debounced recompute has been pending long enough to
+    /// warrant feedback; shows a small spinner trailing the text field in
+    /// place of the (stale) match count.
+    var isSearching: Bool = false
     /// Zero-based index of the current match; meaningless when `matchCount == 0`.
     let matchIndex: Int
     let matchCount: Int
@@ -39,11 +46,23 @@ struct ChatFindBar: View {
                     // buttons since TextField can't distinguish it here.
                     onNext()
                 }
+                // Arrow keys cycle matches while the field keeps focus, so
+                // the user can step through occurrences without leaving the
+                // keyboard. Intel: `onKeyPress` is macOS 14+; Ventura steps
+                // with Enter and the chevrons.
+                .modifier(FindFieldArrowKeys(onPrevious: onPrevious, onNext: onNext))
 
-            Text(matchCountLabel)
-                .font(.system(size: 11, weight: .medium).monospacedDigit())
-                .foregroundColor(theme.tertiaryText)
-                .frame(minWidth: 34)
+            if isSearching {
+                ProgressView()
+                    .controlSize(.small)
+                    .scaleEffect(0.6)
+                    .frame(minWidth: 34, alignment: .center)
+            } else {
+                Text(matchCountLabel)
+                    .font(.system(size: 11, weight: .medium).monospacedDigit())
+                    .foregroundColor(theme.tertiaryText)
+                    .frame(minWidth: 34)
+            }
 
             Divider().frame(height: 14)
 
@@ -73,7 +92,16 @@ struct ChatFindBar: View {
             RoundedRectangle(cornerRadius: 10)
                 .stroke(theme.primaryBorder, lineWidth: 1)
         )
-        .onAppear { isFieldFocused = true }
+        .onAppear {
+            // Setting @FocusState synchronously in onAppear races the
+            // overlay's insertion into the window's responder chain and
+            // silently loses (issue #1964) — the field appeared unfocused.
+            // Deferring one runloop turn lets the hosting view attach first.
+            DispatchQueue.main.async { isFieldFocused = true }
+        }
+        .onChange(of: focusTrigger) { _ in
+            isFieldFocused = true
+        }
     }
 
     private var matchCountLabel: String {
@@ -91,5 +119,31 @@ struct ChatFindBar: View {
         }
         .buttonStyle(.plain)
         .disabled(matchCount == 0)
+    }
+}
+
+
+/// Up/Down step through matches (upstream #1969). `onKeyPress` is macOS 14+,
+/// so Ventura keeps the caret behaviour.
+private struct FindFieldArrowKeys: ViewModifier {
+    let onPrevious: () -> Void
+    let onNext: () -> Void
+
+    func body(content: Content) -> some View {
+        if #available(macOS 14.0, *) {
+            content
+                // Consumed even with zero matches — a caret jump to start/end
+                // of the query is never what Up/Down means here.
+                .onKeyPress(.upArrow) {
+                    onPrevious()
+                    return .handled
+                }
+                .onKeyPress(.downArrow) {
+                    onNext()
+                    return .handled
+                }
+        } else {
+            content
+        }
     }
 }

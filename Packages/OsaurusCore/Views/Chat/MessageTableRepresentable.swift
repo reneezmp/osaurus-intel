@@ -190,6 +190,7 @@ struct MessageTableRepresentable: NSViewRepresentable {
     let onConfirmEdit: (() -> Void)?
     let onCancelEdit: (() -> Void)?
     var onUserImagePreview: ((String) -> Void)? = nil
+    var onImagePreviewImage: ((NSImage) -> Void)? = nil
 
     // Minimap support
     var onVisibleTopUserTurnChanged: ((UUID?) -> Void)? = nil
@@ -200,6 +201,16 @@ struct MessageTableRepresentable: NSViewRepresentable {
     /// Active in-conversation find query (Cmd+F); empty when the find bar is
     /// closed. Threaded into every cell so match occurrences are highlighted.
     var searchHighlightQuery: String = ""
+    /// Turn owning the find bar's current match, nil when none is current
+    /// (upstream #1969).
+    var searchCurrentTurnId: UUID? = nil
+    /// Occurrence index of the current match within its turn's content.
+    var searchCurrentOccurrence: Int = 0
+    /// Occurrence (within `scrollToTurnId`'s content) the pending scroll
+    /// request targets. Nil for turn-level scrolls (minimap). When set, the
+    /// coordinator scrolls to the block that renders that occurrence instead
+    /// of the top of the turn.
+    var scrollToFindOccurrence: Int? = nil
 
     // MARK: - NSViewRepresentable Lifecycle
 
@@ -276,14 +287,6 @@ struct MessageTableRepresentable: NSViewRepresentable {
             coordinator.scrollAnchor.scrollToBottom(animated: true)
         }
 
-        // Detect minimap scroll-to-turn request.
-        if scrollToTurnTrigger != coordinator.lastScrollToTurnTrigger {
-            coordinator.lastScrollToTurnTrigger = scrollToTurnTrigger
-            if let turnId = scrollToTurnId {
-                coordinator.scrollToTurn(turnId)
-            }
-        }
-
         // Sync any external expand-state changes (e.g. session load resets the store)
         if expandedBlocksStore.expandedIds != coordinator.expandedIds {
             coordinator.expandedIds = expandedBlocksStore.expandedIds
@@ -299,6 +302,24 @@ struct MessageTableRepresentable: NSViewRepresentable {
             lastAssistantTurnId: lastAssistantTurnId,
             autoScrollEnabled: autoScrollEnabled
         )
+
+        // Detect minimap / find-bar scroll-to-turn request. Runs after
+        // applyBlocks so the coordinator maps the request against the
+        // current query and block list — a find jump often arrives in the
+        // same update as the query change that produced it. The find bar's
+        // requests carry an occurrence so long turns scroll to the block
+        // containing the current match, not just the turn header (upstream
+        // #1969).
+        if scrollToTurnTrigger != coordinator.lastScrollToTurnTrigger {
+            coordinator.lastScrollToTurnTrigger = scrollToTurnTrigger
+            if let turnId = scrollToTurnId {
+                if let occurrence = scrollToFindOccurrence {
+                    coordinator.scrollToFindMatch(turnId: turnId, occurrence: occurrence)
+                } else {
+                    coordinator.scrollToTurn(turnId)
+                }
+            }
+        }
         coordinator.scheduleVisibleUserTurnUpdate()
 
         // Ensure the table column fills the (now-inset) clip view width.
@@ -364,8 +385,32 @@ struct MessageTableRepresentable: NSViewRepresentable {
             markFollowUpsShown: { [weak coordinator] id in
                 coordinator?.shownFollowUpBlockIds.insert(id)
             },
+            hasChartBeenDrawn: { [weak coordinator] id in
+                coordinator?.drawnChartBlockIds.contains(id) ?? false
+            },
+            markChartDrawn: { [weak coordinator] id in
+                coordinator?.drawnChartBlockIds.insert(id)
+            },
+            cachedChartView: { [weak coordinator] id in
+                coordinator?.chartViewCache[id]
+            },
+            cacheChartView: { [weak coordinator] id, view in
+                coordinator?.chartViewCache[id] = view
+            },
+            cachedToolGroupView: { [weak coordinator] id in
+                coordinator?.toolGroupViewCache[id]
+            },
+            cacheToolGroupView: { [weak coordinator] id, view in
+                coordinator?.toolGroupViewCache[id] = view
+            },
             onUserImagePreview: onUserImagePreview,
-            searchHighlightQuery: searchHighlightQuery
+            onImagePreviewImage: onImagePreviewImage,
+            searchHighlightQuery: searchHighlightQuery,
+            searchCurrentTurnId: searchCurrentTurnId,
+            searchCurrentOccurrence: searchCurrentOccurrence,
+            searchOccurrenceOffset: { [weak coordinator] blockId in
+                coordinator?.findOccurrenceOffsets[blockId] ?? 0
+            }
         )
     }
 
@@ -392,7 +437,10 @@ struct MessageTableRepresentable: NSViewRepresentable {
             onSpeak: onSpeak,
             onDeleteMessage: onDeleteMessage,
             onUserImagePreview: onUserImagePreview,
-            searchHighlightQuery: searchHighlightQuery
+            onImagePreviewImage: onImagePreviewImage,
+            searchHighlightQuery: searchHighlightQuery,
+            searchCurrentTurnId: searchCurrentTurnId,
+            searchCurrentOccurrence: searchCurrentOccurrence
         )
     }
 
@@ -605,6 +653,13 @@ extension MessageTableRepresentable {
         /// this chat (upstream), so recycled cells don't replay it.
         var shownFollowUpBlockIds: Set<String> = []
 
+        /// Chart block ids that already played their entry animation, and
+        /// the chart / tool-group views kept across cell recycles (upstream
+        /// #1283). Pruned to the current block ids on each `applyBlocks`.
+        var drawnChartBlockIds: Set<String> = []
+        var chartViewCache: [String: NativeChartView] = [:]
+        var toolGroupViewCache: [String: NativeToolCallGroupView] = [:]
+
         /// Weak reference to the session-level store for forwarding toggles.
         weak var sessionExpandedStore: ExpandedBlocksStore?
 
@@ -707,6 +762,9 @@ extension MessageTableRepresentable {
         private var lastEmittedUserTurnId: UUID?
         /// Tracks the last observed scroll-to-turn trigger from the view.
         var lastScrollToTurnTrigger: Int = 0
+        /// Per-block occurrence offset within the current match's turn
+        /// (see `recomputeFindOccurrenceOffsets`).
+        private(set) var findOccurrenceOffsets: [String: Int] = [:]
         private var minimapUpdateWork: DispatchWorkItem?
         private let minimapUpdateInterval: TimeInterval = 0.05
         nonisolated(unsafe) private var minimapBoundsObserver: NSObjectProtocol?
@@ -892,35 +950,7 @@ extension MessageTableRepresentable {
             noteRowHeightsChanged(rows)
         }
 
-        /// Re-measure specific rows without animation, keeping the visible top
-        /// glued to the same content across the height update.
-        ///
-        /// Uses an **absolute** anchor restore — capture (topRow, offset)
-        /// before `noteHeightOfRows`, snap to (newRowOrigin + offset) after.
-        /// This formulation survives every height-change pattern:
-        ///
-        /// - Row above topRow grows/shrinks: topRow's origin shifts → anchor
-        ///   follows, user stays glued.
-        /// - Row at topRow grows/shrinks: topRow's origin is unchanged → no shift.
-        /// - Row below topRow changes: topRow unaffected → no shift.
-        ///
-        /// Capture and apply are synchronous; `noteHeightOfRows` doesn't yield
-        /// to the runloop, so the user can't scroll between them.
-        ///
-        /// Skipped when pinned to bottom — callers handle that case via
-        /// `scrollToBottomCoalesced()`. Also skipped while the user is
-        /// actively scrolling (`isUserScrollingRecently`): inside a scroll
-        /// burst AppKit dequeues a swarm of off-screen rows whose
-        /// estimator-vs-actual deltas would otherwise drag the anchor
-        /// against the user's gesture. Letting the gesture be authoritative
-        /// during the burst feels smoother; the grace window also covers
-        /// async cell measurements (chart / artifact `DispatchQueue.main.async`
-        /// callbacks) that catch up shortly after a gesture ends, plus
-        /// discrete mouse-wheel ticks that don't fire
-        /// `willStartLiveScrollNotification` at all.
-        ///
-        /// Stateless: uses `captureAnchor` / `applyAnchor` directly so the
-        /// outer Path 3 `saveAnchor` / `restoreAnchor` bracket is undisturbed.
+        /// Re-measure specific rows without animation.
         private func noteRowHeightsChanged(_ rows: IndexSet, bypassBatch: Bool = false) {
             guard let tableView else { return }
             // Inside a batch, a note joins the pending set and lands with the
@@ -934,13 +964,8 @@ extension MessageTableRepresentable {
             }
             ChatPerfTrace.shared.count("noteHeightOfRows")
             ChatPerfTrace.shared.count("noteHeightOfRows.rows", rows.count)
-
-            let preserveAnchor =
-                !scrollAnchor.isPinnedToBottom
-                && !scrollAnchor.isUserScrollingRecently
-            let anchor: ScrollAnchorManager.Anchor? =
-                preserveAnchor ? scrollAnchor.captureAnchor() : nil
-
+            // No anchor capture/restore around the note (upstream #1272): it
+            // fought the user's own scroll and jumped the view mid-stream.
             for row in rows where row < blockIds.count {
                 let bid = blockIds[row]
                 if let h = heightCache[bid] { lastNotedHeight[bid] = h }
@@ -949,17 +974,6 @@ extension MessageTableRepresentable {
             NSAnimationContext.current.duration = 0
             tableView.noteHeightOfRows(withIndexesChanged: rows)
             NSAnimationContext.endGrouping()
-
-            // Refresh again post-update for callers that wipe `heightCache`
-            // and rely on the height delegate to repopulate it during
-            // `noteHeightOfRows` (e.g. width-change reconfigure). For
-            // `reportMeasuredHeight` callers the cache was already correct.
-            for row in rows where row < blockIds.count {
-                let bid = blockIds[row]
-                if let h = heightCache[bid] { lastNotedHeight[bid] = h }
-            }
-
-            if let anchor { scrollAnchor.applyAnchor(anchor) }
         }
 
         // MARK: - Apply Blocks (Main Entry Point)
@@ -1027,6 +1041,8 @@ extension MessageTableRepresentable {
             let expandedIdsChanged = context.expandedIds != ctx.expandedIds
             let previousEditingTurnId = ctx.editingTurnId
             let previousSearchHighlightQuery = ctx.searchHighlightQuery
+            let previousSearchCurrentTurnId = ctx.searchCurrentTurnId
+            let previousSearchCurrentOccurrence = ctx.searchCurrentOccurrence
             let previousStreaming = ctx.isStreaming
             let previousLastAssistantTurnId = ctx.lastAssistantTurnId
             // NSView backed cells snapshot the theme
@@ -1061,13 +1077,44 @@ extension MessageTableRepresentable {
             }
 
             // Find-highlight query also lives in the context, not the blocks.
-            // Repaint every materialized cell when it changes so matches
-            // highlight (and un-highlight on close) immediately.
+            // Keep per-block occurrence offsets fresh before any repaint so
+            // the current-match translation in the cells never reads stale
+            // offsets (block texts grow on every streaming delta).
+            recomputeFindOccurrenceOffsets(blocks: blocks)
+            // Repaint every materialized cell when the query changes so
+            // matches highlight (and un-highlight on close) immediately.
             if context.searchHighlightQuery != previousSearchHighlightQuery {
                 reconfigureAllCellsFromLookup(blockLookup)
+            } else if context.searchCurrentTurnId != previousSearchCurrentTurnId
+                || context.searchCurrentOccurrence != previousSearchCurrentOccurrence
+            {
+                // Same query, different current match — only the two affected
+                // turns need repainting.
+                reconfigureCellsForTurn(previousSearchCurrentTurnId)
+                if context.searchCurrentTurnId != previousSearchCurrentTurnId {
+                    reconfigureCellsForTurn(context.searchCurrentTurnId)
+                }
             }
 
             let newIds = blocks.map(\.id)
+            // Drop chart-animation marks and cached views for blocks that
+            // left the thread (chat switch / session reload).
+            if newIds != blockIds {
+                if !drawnChartBlockIds.isEmpty {
+                    drawnChartBlockIds.formIntersection(newIds)
+                }
+                if !chartViewCache.isEmpty || !toolGroupViewCache.isEmpty {
+                    let newIdSet = Set(newIds)
+                    for key in chartViewCache.keys where !newIdSet.contains(key) {
+                        chartViewCache[key]?.removeFromSuperview()
+                        chartViewCache.removeValue(forKey: key)
+                    }
+                    for key in toolGroupViewCache.keys where !newIdSet.contains(key) {
+                        toolGroupViewCache[key]?.removeFromSuperview()
+                        toolGroupViewCache.removeValue(forKey: key)
+                    }
+                }
+            }
             // Use uniquingKeysWith instead of uniqueKeysWithValues to avoid a
             // precondition crash if block IDs collide (e.g. stale memoizer cache
             // during session restore). Last-write-wins preserves correct behavior.
@@ -1186,8 +1233,16 @@ extension MessageTableRepresentable {
                     let cell = tableView.view(atColumn: 0, row: index, makeIfNecessary: false) as? NativeMessageCellView
                 else { continue }
 
-                // invalidate height cache for changed block
-                heightCache.removeValue(forKey: id)
+                // Invalidate height cache for changed block. The streaming row
+                // is the exception: its cell reports its real measured height
+                // via `reportMeasuredHeight`, and the dedup check in
+                // `scheduleStreamingHeightUpdate` compares `heightCache[bid]`
+                // against `lastNotedHeight[bid]` — wiping the cache breaks that
+                // comparison and causes a `noteHeightOfRows` per token
+                // (upstream #1272).
+                if id != streamId {
+                    heightCache.removeValue(forKey: id)
+                }
                 configureCell(cell, with: block)
                 reconfigured += 1
 
@@ -1490,9 +1545,17 @@ extension MessageTableRepresentable {
         // MARK: - Streaming Height Updates
 
         private func scheduleStreamingHeightUpdate(row: Int) {
-            streamingHeightWorkItem?.cancel()
+            // Leading-edge throttle (upstream #1272): if a work item is already
+            // pending, let it fire on its scheduled tick instead of
+            // cancel-and-reschedule. Tokens arriving faster than
+            // `streamingHeightInterval` would otherwise starve the work item
+            // indefinitely — the user sees text growing below the viewport
+            // because scrollToBottom never runs until streaming pauses.
+            if streamingHeightWorkItem != nil { return }
             let work = DispatchWorkItem { [weak self] in
-                guard let self, let tv = self.tableView, row < tv.numberOfRows else { return }
+                guard let self else { return }
+                self.streamingHeightWorkItem = nil
+                guard let tv = self.tableView, row < tv.numberOfRows else { return }
                 ChatPerfTrace.shared.count("streamingHeightUpdate.fire")
 
                 // skip when the measured height didn't actually change since the
@@ -1785,13 +1848,22 @@ extension MessageTableRepresentable {
         func scrollToTurn(_ turnId: UUID) {
             guard let tableView else { return }
 
-            // Prefer the user-message block; fall back to the turn's header.
-            let userBlockId = "usermsg-\(turnId.uuidString)"
+            // Prefer the user-message block, then the turn's header, then the
+            // turn's first row. Intel's user blocks are `user-<id>` (upstream's
+            // are `usermsg-<id>`), and an assistant turn inside a run has no
+            // header of its own.
+            let userBlockId = "user-\(turnId.uuidString)"
             let headerBlockId = "header-\(turnId.uuidString)"
             let row =
                 rowIndexByBlockId[userBlockId]
                 ?? rowIndexByBlockId[headerBlockId]
+                ?? blockIds.firstIndex(where: { blockLookup[$0]?.turnId == turnId })
             guard let targetRow = row, targetRow < tableView.numberOfRows else { return }
+            scrollToRow(targetRow)
+        }
+
+        private func scrollToRow(_ targetRow: Int) {
+            guard let tableView, targetRow < tableView.numberOfRows else { return }
 
             // drop pinned to bottom so subsequent applyBlocks restore our
             // anchor instead of snapping back to bottom
@@ -1815,6 +1887,103 @@ extension MessageTableRepresentable {
             // the minimap highlights the newly visible turn.
             DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
                 self?.scheduleVisibleUserTurnUpdate()
+            }
+        }
+
+        /// Rebuild `findOccurrenceOffsets` for the active query. Walks the
+        /// blocks in display order accumulating a per-turn occurrence count,
+        /// mirroring how `ChatFindMatcher` indexes occurrences over the
+        /// turn's full content (upstream #1969).
+        ///
+        /// Scoped to the *current match's* turn: offsets are only ever read
+        /// by `CellRenderingContext.searchCurrentIndex`, which returns early
+        /// for every other turn. This runs from `applyBlocks` — i.e. on
+        /// every streaming delta while the find bar is open — so scanning
+        /// one turn instead of the whole conversation keeps it cheap.
+        func recomputeFindOccurrenceOffsets(blocks: [ContentBlock]) {
+            let query = ctx.searchHighlightQuery
+            guard !query.isEmpty, let currentTurnId = ctx.searchCurrentTurnId else {
+                if !findOccurrenceOffsets.isEmpty { findOccurrenceOffsets = [:] }
+                return
+            }
+            var offsets: [String: Int] = [:]
+            var running = 0
+            for block in blocks where block.turnId == currentTurnId {
+                guard let text = block.searchableText else { continue }
+                offsets[block.id] = running
+                running += ChatFindMatcher.occurrenceCount(of: query, in: text)
+            }
+            findOccurrenceOffsets = offsets
+        }
+
+        // MARK: - Find bar: scroll to match occurrence
+
+        /// Scroll so the block rendering the given occurrence (within the
+        /// turn's content) is near the top of the visible area. Falls back
+        /// to the turn when the occurrence can't be located (e.g. the query
+        /// straddles a block boundary).
+        func scrollToFindMatch(turnId: UUID, occurrence: Int) {
+            let query = ctx.searchHighlightQuery
+            guard !query.isEmpty else {
+                scrollToTurn(turnId)
+                return
+            }
+            var running = 0
+            for blockId in blockIds {
+                guard let block = blockLookup[blockId], block.turnId == turnId,
+                    let text = block.searchableText
+                else { continue }
+                let count = ChatFindMatcher.occurrenceCount(of: query, in: text)
+                if occurrence < running + count {
+                    if let row = rowIndexByBlockId[blockId] {
+                        scrollToOccurrence(row: row, localOccurrence: occurrence - running)
+                        return
+                    }
+                    break
+                }
+                running += count
+            }
+            scrollToTurn(turnId)
+        }
+
+        /// Scroll so the given occurrence *within* the row's text is
+        /// comfortably visible. Rows can be far taller than the viewport, so
+        /// scrolling to the row's top never reaches occurrences in the lower
+        /// part of the cell. Reads the occurrence's line rect from the
+        /// materialized cell; when the cell isn't materialized yet (match far
+        /// offscreen), scrolls to the row first and retries once it exists.
+        private func scrollToOccurrence(row: Int, localOccurrence: Int, attempt: Int = 0) {
+            guard let tableView, let scrollView else { return }
+            if let cell = tableView.view(atColumn: 0, row: row, makeIfNecessary: false)
+                as? NativeMessageCellView,
+                let rect = cell.searchOccurrenceRect(localOccurrence)
+            {
+                let rectInTable = cell.convert(rect, to: tableView)
+                let clipBounds = scrollView.contentView.bounds
+                // Already comfortably visible? Don't move.
+                let comfortZone = clipBounds.insetBy(dx: 0, dy: 48)
+                if comfortZone.contains(rectInTable) {
+                    return
+                }
+                scrollAnchor.unpinFromBottom()
+                lastScrolledToTurnId = ctx.lastAssistantTurnId
+                let maxY = max(0, tableView.bounds.height - clipBounds.height)
+                // Land the match around the upper third of the viewport.
+                let targetY = min(maxY, max(0, rectInTable.midY - clipBounds.height * 0.35))
+                scrollAnchor.scrollToY(targetY, animated: true)
+                DispatchQueue.main.asyncAfter(deadline: .now() + 0.25) { [weak self] in
+                    self?.scheduleVisibleUserTurnUpdate()
+                }
+                return
+            }
+
+            scrollToRow(row)
+            guard attempt < 2 else { return }
+            // Row-top scroll materializes the cell (and its highlight pass);
+            // retry the precise scroll once layout has settled.
+            DispatchQueue.main.asyncAfter(deadline: .now() + 0.3) { [weak self] in
+                self?.scrollToOccurrence(
+                    row: row, localOccurrence: localOccurrence, attempt: attempt + 1)
             }
         }
 
@@ -1844,11 +2013,11 @@ extension MessageTableRepresentable {
             guard isStreaming else { return nil }
             return blocks.last(where: {
                 if case .paragraph(_, _, true, _) = $0.kind { return true }
-                if case .thinking(_, _, true) = $0.kind { return true }
+                if case .thinking(_, _, true, _) = $0.kind { return true }
                 if case .typingIndicator = $0.kind { return true }
                 if case let .activityGroup(children) = $0.kind {
                     return children.contains {
-                        if case .thinking(_, _, true) = $0.kind { return true }
+                        if case .thinking(_, _, true, _) = $0.kind { return true }
                         return false
                     }
                 }

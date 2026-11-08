@@ -1400,6 +1400,13 @@ final class NativeToolCallRowView: NSView {
     /// monospaced tool name. A running MCP call that reports progress shows
     /// it after the title (upstream #2990; upstream draws it in its shimmer
     /// label, which Intel's row doesn't have).
+    /// "320ms", "4.2s", "1m 5s" (upstream #1259).
+    private static func formatElapsed(_ t: TimeInterval) -> String {
+        if t < 1 { return "\(Int((t * 1000).rounded()))ms" }
+        if t < 60 { return String(format: "%.1fs", t) }
+        return "\(Int(t) / 60)m \(Int(t) % 60)s"
+    }
+
     private func applyNameLabel(expanded: Bool) {
         guard let item = currentItem else { return }
         if expanded {
@@ -1414,8 +1421,28 @@ final class NativeToolCallRowView: NSView {
                 failed: failed
             )
             let progress = item.result == nil ? MCPToolProgressRegistry.shared.message(for: item.call.id) : nil
-            nameLabel.stringValue = progress.map { "\(title) · \($0)" } ?? title
-            nameLabel.font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            let font = NSFont.systemFont(ofSize: 12, weight: .semibold)
+            nameLabel.font = font
+            if progress == nil, let elapsed = item.duration, let theme = lastConfiguredTheme {
+                // Append the recorded duration after an interpunct, dimmed
+                // (upstream #1259).
+                let s = NSMutableAttributedString(
+                    string: title,
+                    attributes: [.font: font, .foregroundColor: NSColor(theme.primaryText)]
+                )
+                s.append(
+                    NSAttributedString(
+                        string: " · \(Self.formatElapsed(elapsed))",
+                        attributes: [
+                            .font: NSFont.systemFont(ofSize: 12, weight: .regular),
+                            .foregroundColor: NSColor(theme.tertiaryText),
+                        ]
+                    )
+                )
+                nameLabel.attributedStringValue = s
+            } else {
+                nameLabel.stringValue = progress.map { "\(title) · \($0)" } ?? title
+            }
         }
     }
 

@@ -116,6 +116,7 @@ final class NativeThinkingView: NSView {
         width: CGFloat,
         isStreaming: Bool,
         isExpanded: Bool,
+        duration: TimeInterval? = nil,
         theme: any ThemeProtocol,
         blockId: String,
         onToggle: @escaping () -> Void,
@@ -132,6 +133,15 @@ final class NativeThinkingView: NSView {
 
         streamingSpinner.isHidden = !isStreaming
         if isStreaming { streamingSpinner.startAnimation(nil) } else { streamingSpinner.stopAnimation(nil) }
+        // Present tense while streaming; once done, past tense with the
+        // elapsed time ("Thought for 30s") when known (upstream #1259).
+        if isStreaming {
+            titleLabel.stringValue = L("Thinking")
+        } else if let duration {
+            titleLabel.stringValue = "\(L("Thought for")) \(Self.formatDuration(duration))"
+        } else {
+            titleLabel.stringValue = L("Thought")
+        }
 
         charCountLabel.isHidden = isExpanded || charCount == 0
         charCountLabel.stringValue = formatCharCount(charCount)
@@ -160,6 +170,14 @@ final class NativeThinkingView: NSView {
         }
 
         applyHeight()
+    }
+
+    /// Compact duration for "Thought for …": "320ms", "4.2s", "30s", "1m 5s".
+    private static func formatDuration(_ t: TimeInterval) -> String {
+        if t < 1 { return "\(Int((t * 1000).rounded()))ms" }
+        if t < 10 { return String(format: "%.1fs", t) }
+        if t < 60 { return "\(Int(t.rounded()))s" }
+        return "\(Int(t) / 60)m \(Int(t) % 60)s"
     }
 
     // MARK: Measured height (used by cell coordinator)

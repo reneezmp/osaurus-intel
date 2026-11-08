@@ -128,7 +128,7 @@ final class NativeActivityGroupView: NSView {
         // carry never-resolved calls) static.
         let live = children.contains { child in
             switch child.kind {
-            case let .thinking(_, _, streaming): return streaming
+            case let .thinking(_, _, streaming, _): return streaming
             case let .toolCallGroup(calls): return isStreaming && calls.contains { $0.result == nil }
             default: return false
             }
@@ -284,7 +284,7 @@ final class NativeActivityGroupView: NSView {
         for child in children {
             guard let view = childViews[child.id] else { continue }
             switch child.kind {
-            case let .thinking(_, text, streaming):
+            case let .thinking(_, text, streaming, _):
                 (view as? NativeThinkingView)?.configure(
                     thinking: text,
                     thinkingLength: text.count,

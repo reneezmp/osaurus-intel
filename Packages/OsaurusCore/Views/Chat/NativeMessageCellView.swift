@@ -50,15 +50,56 @@ struct CellRenderingContext {
     /// reveal when a recycled cell re-mounts it after scrolling (upstream).
     var hasFollowUpsShown: ((String) -> Bool)? = nil
     var markFollowUpsShown: ((String) -> Void)? = nil
+    /// Coordinator-scoped predicate: has the chart with this block id ever
+    /// been drawn (and thus already played its entry animation) in the
+    /// current chat? Lets `configureAsChart` suppress the animation when a
+    /// recycled cell re-mounts a chart the user has already seen (upstream
+    /// #1283).
+    var hasChartBeenDrawn: ((String) -> Bool)? = nil
+    var markChartDrawn: ((String) -> Void)? = nil
+    /// Coordinator-scoped chart view cache. Returning a non-nil view lets
+    /// `configureAsChart` reparent an existing (already-rendered)
+    /// `NativeChartView` instead of allocating a fresh WKWebView — no
+    /// visible re-render when a chart row scrolls back into view.
+    var cachedChartView: ((String) -> NativeChartView?)? = nil
+    var cacheChartView: ((String, NativeChartView) -> Void)? = nil
+    /// Same pattern for tool-call groups: a group re-dequeued into another
+    /// cell keeps its rendered view instead of replaying its appearance.
+    var cachedToolGroupView: ((String) -> NativeToolCallGroupView?)? = nil
+    var cacheToolGroupView: ((String, NativeToolCallGroupView) -> Void)? = nil
     /// Read at menu-open time so late generation statistics do not leave a
     /// recycled action row showing a stale response's metrics (#2959).
     var responseStatsForTurn: ((UUID) -> String?)? = nil
     /// attachment or shared-artifact id string → full screen preview from ChatView
     var onUserImagePreview: ((String) -> Void)? = nil
+    /// A markdown image in a reply or message was clicked; carries the
+    /// decoded bitmap for the full-screen preview (upstream #2381).
+    var onImagePreviewImage: ((NSImage) -> Void)? = nil
     /// Active in-conversation find query (Cmd+F). Empty when the find bar is
     /// closed. Message cells paint every case-insensitive occurrence in
     /// their body text via `NativeMarkdownView.setSearchHighlight`.
     var searchHighlightQuery: String = ""
+    /// Turn owning the find bar's *current* match, or nil when no match is
+    /// current (bar closed / no matches) (upstream #1969).
+    var searchCurrentTurnId: UUID? = nil
+    /// Zero-based occurrence index of the current match within its turn's
+    /// content. Meaningless when `searchCurrentTurnId` is nil.
+    var searchCurrentOccurrence: Int = 0
+    /// Coordinator-scoped lookup: number of query occurrences in the
+    /// searchable blocks that precede the given block id within its turn.
+    /// Cells subtract it from `searchCurrentOccurrence` to translate the
+    /// turn-relative index into a block-local one.
+    var searchOccurrenceOffset: ((String) -> Int)? = nil
+
+    /// Block-local occurrence index of the find bar's current match, or nil
+    /// when the current match isn't in this block's turn (or precedes this
+    /// block). Indices past this block's own occurrences are handled by the
+    /// renderer, which simply paints no current match for them.
+    func searchCurrentIndex(forBlock block: ContentBlock) -> Int? {
+        guard let searchCurrentTurnId, searchCurrentTurnId == block.turnId else { return nil }
+        let local = searchCurrentOccurrence - (searchOccurrenceOffset?(block.id) ?? 0)
+        return local >= 0 ? local : nil
+    }
 }
 
 // MARK: - Cell-Isolated ExpandedBlocksStore Proxy
@@ -1802,6 +1843,8 @@ final class NativeMessageCellView: NSTableCellView {
     private var nativeTypingView: NativeTypingIndicatorView?
     private var nativeArtifactView: NativeArtifactCardView?
     private var nativeChartView: NativeChartView?
+    /// Shimmering image-generation status line (upstream #2381).
+    private var statusShimmerLabel: ShimmerLabel?
     private var nativeFileDiffView: NativeFileDiffView?
     /// Follow-up suggestions are low-frequency (one per completed turn), so
     /// unlike the streaming-hot cells this one hosts the SwiftUI
@@ -1828,6 +1871,19 @@ final class NativeMessageCellView: NSTableCellView {
 
     private var currentKindTag: ContentBlockKindTag?
     private var currentBlockId: String?
+
+    /// Bounding rect (in this cell's coordinate space) of the find-match
+    /// occurrence at `index` within this cell's rendered text, or nil when
+    /// the cell renders no searchable text or the index is out of range.
+    /// Used by the table coordinator to scroll to the exact line of the
+    /// current match inside messages taller than the viewport (upstream
+    /// #1969).
+    func searchOccurrenceRect(_ index: Int) -> NSRect? {
+        guard let mv = nativeMarkdownView ?? userTextView,
+            let rect = mv.rectOfSearchOccurrence(index)
+        else { return nil }
+        return mv.convert(rect, to: self)
+    }
 
     /// tracks inline edit vs read-only markdown so we rebuild when edit mode toggles (same block kind)
     private var userMessageInlineEditActive: Bool = false
@@ -1929,11 +1985,12 @@ final class NativeMessageCellView: NSTableCellView {
                 sameKind: sameKind
             )
 
-        case let .thinking(_, text, isStreaming):
+        case let .thinking(_, text, isStreaming, duration):
             configureAsThinking(
                 block: block,
                 text: text,
                 isStreaming: isStreaming,
+                duration: duration,
                 context: context,
                 sameKind: sameKind
             )
@@ -2130,6 +2187,53 @@ final class NativeMessageCellView: NSTableCellView {
 
     // MARK: - Paragraph (native NSTextView)
 
+    /// True when an assistant paragraph is really a live image-generation status
+    /// ("Loading image model…" / "Generating image… 1/4"). Matched against the
+    /// same localized strings `ChatView` writes into `turn.content`.
+    private static func isImageGenerationStatus(_ text: String) -> Bool {
+        let t = text.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard !t.contains("\n") else { return false }
+        return t == L("Loading image model…") || t.hasPrefix(L("Generating image…"))
+    }
+
+    /// Render the image-generation status as a shimmering single-line label,
+    /// reusing the same `ShimmerLabel` the running tool/thinking titles use.
+    private func configureAsImageStatusShimmer(text: String, context: CellRenderingContext) {
+        let label: ShimmerLabel
+        if let existing = statusShimmerLabel {
+            label = existing
+        } else {
+            removeAllContentViews()
+            let l = ShimmerLabel()
+            l.translatesAutoresizingMaskIntoConstraints = false
+            l.wantsLayer = true
+            addSubview(l)
+            NSLayoutConstraint.activate([
+                l.leadingAnchor.constraint(equalTo: leadingAnchor, constant: 16),
+                l.trailingAnchor.constraint(lessThanOrEqualTo: trailingAnchor, constant: -16),
+                l.topAnchor.constraint(equalTo: topAnchor, constant: 4),
+            ])
+            statusShimmerLabel = l
+            label = l
+        }
+        let font =
+            NSFont(name: context.theme.primaryFontName, size: CGFloat(context.theme.bodySize))
+            ?? .systemFont(ofSize: CGFloat(context.theme.bodySize))
+        label.configure(
+            text: text,
+            font: font,
+            baseColor: NSColor(context.theme.primaryText).withAlphaComponent(0.4),
+            highlightColor: NSColor(context.theme.primaryText)
+        )
+        label.start()
+        if let id = currentBlockId {
+            // Mirror the paragraph path's inset budget (top 4 + bottom 4) on top
+            // of a single line so the row height matches the static text it swaps.
+            let lineHeight = ceil(font.ascender - font.descender + font.leading)
+            context.onHeightMeasured?(lineHeight + 8, id)
+        }
+    }
+
     private func configureAsParagraph(
         block: ContentBlock,
         text: String,
@@ -2138,6 +2242,19 @@ final class NativeMessageCellView: NSTableCellView {
         context: CellRenderingContext,
         sameKind: Bool
     ) {
+        // While an image is generating, the assistant "body" is a transient
+        // status string. Render it as a shimmer to match the running tool /
+        // thinking titles instead of flat, static text (upstream #2381).
+        if role == .assistant, Self.isImageGenerationStatus(text) {
+            configureAsImageStatusShimmer(text: text, context: context)
+            return
+        }
+        // Leaving the status state (e.g. the final image markdown replaces it):
+        // drop the shimmer and fall through to the normal markdown path.
+        if statusShimmerLabel != nil {
+            removeAllContentViews()
+        }
+
         if !sameKind || nativeMarkdownView == nil {
             removeAllContentViews()
             let mv = NativeMarkdownView()
@@ -2156,6 +2273,7 @@ final class NativeMessageCellView: NSTableCellView {
             let h = mv.measuredHeight(for: context.width - 32)
             context.onHeightMeasured?(h + 8, id)
         }
+        mv.onImagePreview = { img in context.onImagePreviewImage?(img) }
         mv.configure(
             text: text,
             width: context.width - 32,
@@ -2163,7 +2281,11 @@ final class NativeMessageCellView: NSTableCellView {
             cacheKey: block.id,
             isStreaming: isStreaming
         )
-        mv.setSearchHighlight(query: context.searchHighlightQuery, theme: context.theme)
+        mv.setSearchHighlight(
+            query: context.searchHighlightQuery,
+            currentIndex: context.searchCurrentIndex(forBlock: block),
+            theme: context.theme
+        )
 
         // Apply assistant bubble background only when the target value actually changes —
         // configure() runs on every streaming token, so unconditional CGColor assignment
@@ -2211,6 +2333,7 @@ final class NativeMessageCellView: NSTableCellView {
         block: ContentBlock,
         text: String,
         isStreaming: Bool,
+        duration: TimeInterval? = nil,
         context: CellRenderingContext,
         sameKind: Bool
     ) {
@@ -2228,7 +2351,7 @@ final class NativeMessageCellView: NSTableCellView {
         }
         let tv = nativeThinkingView!
         let thinkingLen: Int?
-        if case .thinking(_, _, _) = block.kind { thinkingLen = text.count } else { thinkingLen = nil }
+        if case .thinking = block.kind { thinkingLen = text.count } else { thinkingLen = nil }
 
         let isExpanded = context.expandedIds.contains(block.id)
         tv.configure(
@@ -2237,6 +2360,7 @@ final class NativeMessageCellView: NSTableCellView {
             width: context.width - 32,
             isStreaming: isStreaming,
             isExpanded: isExpanded,
+            duration: duration,
             theme: context.theme,
             blockId: block.id,
             onToggle: { [weak self] in
@@ -2260,9 +2384,25 @@ final class NativeMessageCellView: NSTableCellView {
         context: CellRenderingContext,
         sameKind: Bool
     ) {
-        if !sameKind || nativeToolCallGroupView == nil {
+        // Consult the cache up front: the same cell can be asked to render a
+        // *different* group block id in back-to-back configures, so remount
+        // whenever the mounted view isn't the one cached for `block.id`
+        // (upstream #1283).
+        let cachedGV = context.cachedToolGroupView?(block.id)
+        let needsRemount =
+            !sameKind
+            || nativeToolCallGroupView == nil
+            || nativeToolCallGroupView !== cachedGV && cachedGV != nil
+        if needsRemount {
             removeAllContentViews()
-            let gv = NativeToolCallGroupView()
+            let gv: NativeToolCallGroupView
+            if let cached = cachedGV {
+                cached.removeFromSuperview()
+                gv = cached
+            } else {
+                gv = NativeToolCallGroupView()
+                context.cacheToolGroupView?(block.id, gv)
+            }
             gv.translatesAutoresizingMaskIntoConstraints = false
             addSubview(gv)
             NSLayoutConstraint.activate([
@@ -2529,6 +2669,7 @@ final class NativeMessageCellView: NSTableCellView {
                 let totalH = self.measureFittedRowHeight()
                 context.onHeightMeasured?(totalH, id)
             }
+            mv.onImagePreview = { img in context.onImagePreviewImage?(img) }
             mv.configure(
                 text: text,
                 width: bubbleWidth - 24,
@@ -2536,7 +2677,11 @@ final class NativeMessageCellView: NSTableCellView {
                 cacheKey: block.id,
                 isStreaming: context.isStreaming
             )
-            mv.setSearchHighlight(query: context.searchHighlightQuery, theme: theme)
+            mv.setSearchHighlight(
+                query: context.searchHighlightQuery,
+                currentIndex: context.searchCurrentIndex(forBlock: block),
+                theme: theme
+            )
         }
 
         if let stack = userImageStack {
@@ -2781,9 +2926,23 @@ final class NativeMessageCellView: NSTableCellView {
         context: CellRenderingContext,
         sameKind: Bool
     ) {
-        if !sameKind || nativeChartView == nil {
+        let cachedCV = context.cachedChartView?(block.id)
+        let needsRemount =
+            !sameKind
+            || nativeChartView == nil
+            || nativeChartView !== cachedCV && cachedCV != nil
+        if needsRemount {
             removeAllContentViews()
-            let cv = NativeChartView()
+            // A cached chart keeps its rendered WKWebView contents, so
+            // reparenting avoids a fresh load (no flash, no animation).
+            let cv: NativeChartView
+            if let cached = cachedCV {
+                cached.removeFromSuperview()
+                cv = cached
+            } else {
+                cv = NativeChartView()
+                context.cacheChartView?(block.id, cv)
+            }
             cv.translatesAutoresizingMaskIntoConstraints = false
             addSubview(cv)
             let bottomToCell = cv.bottomAnchor.constraint(equalTo: bottomAnchor, constant: -6)
@@ -2807,7 +2966,9 @@ final class NativeMessageCellView: NSTableCellView {
         wantsLayer = true
         layer?.masksToBounds = true
         let blockId = block.id
-        nativeChartView?.configure(spec: spec, theme: context.theme)
+        let animateInitialDraw = !(context.hasChartBeenDrawn?(blockId) ?? false)
+        nativeChartView?.configure(spec: spec, theme: context.theme, animateInitialDraw: animateInitialDraw)
+        context.markChartDrawn?(blockId)
         DispatchQueue.main.async { [weak self] in
             guard let self, let cv = self.nativeChartView else { return }
             guard self.currentBlockId == blockId else { return }
@@ -3076,6 +3237,8 @@ final class NativeMessageCellView: NSTableCellView {
         // content — visible as charts bleeding through unrelated rows once
         // the user starts scrolling and recycling kicks in.
         nativeChartView?.removeFromSuperview(); nativeChartView = nil
+        statusShimmerLabel?.stop()
+        statusShimmerLabel?.removeFromSuperview(); statusShimmerLabel = nil
         nativeFileDiffView?.removeFromSuperview(); nativeFileDiffView = nil
         nativeFollowUpsView?.removeFromSuperview(); nativeFollowUpsView = nil
         nativeCompactionMarkerView?.removeFromSuperview(); nativeCompactionMarkerView = nil
@@ -3349,7 +3512,7 @@ enum NativeCellHeightEstimator {
             // header row + 52pt arg box + cell vertical insets
             return argPreview != nil ? 112 : 62
 
-        case let .thinking(_, text, _):
+        case let .thinking(_, text, _, _):
             if !isExpanded { return 56 }
             let innerW = max(width - 64, 100)
             let charsPerLine = max(Int(innerW / 7), 20)

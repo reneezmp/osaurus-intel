@@ -197,6 +197,9 @@ struct FloatingInputCard: View {
     // MARK: - Slash Command State
 
     private var slashRegistry = SlashCommandRegistry.shared
+    /// Width of the toggle-chip region in the selector row; drives
+    /// `chipsCompact` (upstream #2038).
+    @State private var chipRegionWidth: CGFloat = 0
     @State private var slashSelectedIndex: Int = 0
     /// Slash query the user dismissed with Escape. Suppresses the popup for
     /// that exact query so the typed text survives; cleared as soon as the
@@ -1929,18 +1932,53 @@ extension FloatingInputCard {
                     sourceImageCount: pendingAttachments.filter(\.isImage).count
                 )
             } else {
-                chatSelectorChips
+                // The toggle chips collapse to icon-only when the row is too
+                // narrow to show every label (upstream #2038): `chipsCompact`,
+                // from the measured region width. The ScrollView is the no-wrap
+                // safety net and fills the space like the old Spacer did.
+                ScrollView(.horizontal, showsIndicators: false) {
+                    HStack(spacing: 6) {
+                        chatSelectorChips(compact: chipsCompact)
+                    }
+                    .padding(.vertical, 2)
+                }
+                .onGeometryChange(for: CGFloat.self) { proxy in
+                    proxy.size.width
+                } action: { width in
+                    chipRegionWidth = width
+                }
             }
         }
     }
 
+    /// Whether the toggle chips should collapse to icon-only: the measured
+    /// region is narrower than the labeled chips would need. The per-chip
+    /// width is an estimate; the ScrollView absorbs any error (upstream
+    /// #2038).
+    private var chipsCompact: Bool {
+        guard chipRegionWidth > 0 else { return false }
+        let perLabeledChip: CGFloat = 96
+        return chipRegionWidth < CGFloat(visibleToggleChipCount) * perLabeledChip
+    }
+
+    /// Chips currently in the row, mirroring `chatSelectorChips`.
+    private var visibleToggleChipCount: Int {
+        var count = 1  // folder chip, always shown on Intel
+        if autoSpeakAssistant { count += 1 }
+        if isSandboxAvailable { count += 1 }
+        if AppConfiguration.shared.chatConfig.enableClipboardMonitoring && clipboardService.hasNewContent {
+            count += 1
+        }
+        return count
+    }
+
     @ViewBuilder
-    private var chatSelectorChips: some View {
+    private func chatSelectorChips(compact: Bool) -> some View {
         // Thinking and every other model option live in the picker's
         // third column now (upstream #2958); no separate chips.
 
         if autoSpeakAssistant {
-            autoSpeakToggleChip
+            autoSpeakToggleChip(compact: compact)
         }
 
         // Sandbox toggle: visible whenever the sandbox is available on
@@ -1954,16 +1992,14 @@ extension FloatingInputCard {
 
         // Clipboard chip (visible when there's something new on the clipboard and monitoring is enabled)
         if AppConfiguration.shared.chatConfig.enableClipboardMonitoring && clipboardService.hasNewContent {
-            clipboardToggleChip
+            clipboardToggleChip(compact: compact)
         }
 
         // Folder context selector: always available so the user can
         // point any chat at a working directory. Mutual exclusion with
         // sandbox is enforced inside the selection handlers (they
         // disable autonomous exec before opening the picker).
-        folderContextChip
-
-        Spacer()
+        folderContextChip(compact: compact)
     }
 
     // MARK: - Credits chip (upstream)
@@ -2251,7 +2287,7 @@ extension FloatingInputCard {
     // MARK: - Auto-Speak Toggle
 
     @ViewBuilder
-    private var autoSpeakToggleChip: some View {
+    private func autoSpeakToggleChip(compact: Bool = false) -> some View {
         SelectorChip(isActive: autoSpeakAssistant) {
             withAnimation(.spring(response: 0.2, dampingFraction: 0.7)) {
                 autoSpeakAssistant.toggle()
@@ -2263,9 +2299,13 @@ extension FloatingInputCard {
                     .foregroundColor(autoSpeakAssistant ? theme.accentColor : theme.tertiaryText)
                     .contentTransition(.opacity)
 
-                Text("Auto-speak", bundle: .module)
-                    .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
-                    .foregroundColor(autoSpeakAssistant ? theme.secondaryText : theme.tertiaryText)
+                if !compact {
+                    Text("Auto-speak", bundle: .module)
+                        .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
+                        .foregroundColor(autoSpeakAssistant ? theme.secondaryText : theme.tertiaryText)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
         .localizedHelp("Auto-speak every reply in this chat")
@@ -2586,13 +2626,16 @@ extension FloatingInputCard {
         }
     }
 
-    private var clipboardChipLabel: some View {
+    private func clipboardChipLabel(compact: Bool = false) -> some View {
         let info = clipboardChipInfo
         return HStack(spacing: 5) {
             Image(systemName: info.icon)
                 .font(.system(size: CGFloat(theme.captionSize) - 2, weight: .medium))
                 .foregroundColor(theme.accentColor)
 
+            // Collapsed, the chip is just its icon (hover names it) so it
+            // can't be clipped mid-word in a narrow row (upstream #2038).
+            if !compact {
             HStack(spacing: 4) {
                 Text("Paste \(info.label) From", bundle: .module)
                     .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
@@ -2608,12 +2651,13 @@ extension FloatingInputCard {
                 .font(theme.font(size: CGFloat(theme.captionSize) - 4, weight: .bold))
                 .foregroundColor(theme.tertiaryText.opacity(0.7))
                 .padding(.leading, 2)
+            }
         }
     }
 
-    private var clipboardToggleChip: some View {
+    private func clipboardToggleChip(compact: Bool = false) -> some View {
         Button(action: attachClipboardSnippet) {
-            clipboardChipLabel
+            clipboardChipLabel(compact: compact)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
                 .background(
@@ -2828,12 +2872,12 @@ extension FloatingInputCard {
 
     // MARK: - Folder Context Chip
 
-    private var folderContextChip: some View {
+    private func folderContextChip(compact: Bool = false) -> some View {
         let hasFolder = folderState.hasActiveFolder
 
         return HStack(spacing: 4) {
             Button(action: selectFolderWithSandboxOff) {
-                folderChipContent(hasFolder: hasFolder, canEdit: true)
+                folderChipContent(hasFolder: hasFolder, canEdit: true, compact: compact)
             }
             .buttonStyle(.plain)
             .help(hasFolder ? Text(localized: "Change working folder") : Text(localized: "Select a working folder"))
@@ -2980,7 +3024,10 @@ extension FloatingInputCard {
     }
 
     @ViewBuilder
-    private func folderChipContent(hasFolder: Bool, canEdit: Bool) -> some View {
+    /// A chosen folder keeps its name when `compact` (it's live state); only
+    /// the "Folder" placeholder and its chevron collapse to the icon
+    /// (upstream #2038).
+    private func folderChipContent(hasFolder: Bool, canEdit: Bool, compact: Bool = false) -> some View {
         HStack(spacing: 4) {
             Image(systemName: hasFolder ? "folder.fill" : "folder.badge.plus")
                 .font(theme.font(size: CGFloat(theme.captionSize) - 2))
@@ -2993,13 +3040,15 @@ extension FloatingInputCard {
                     .foregroundColor(canEdit ? theme.secondaryText : theme.tertiaryText)
                     .lineLimit(1)
                     .truncationMode(.middle)
-            } else if canEdit {
+            } else if canEdit && !compact {
                 Text("Folder", bundle: .module)
                     .font(theme.font(size: CGFloat(theme.captionSize), weight: .medium))
                     .foregroundColor(theme.tertiaryText)
+                    .lineLimit(1)
+                    .fixedSize()
             }
 
-            if canEdit {
+            if canEdit && (!compact || folderState.context != nil) {
                 Image(systemName: "chevron.up.chevron.down")
                     .font(theme.font(size: CGFloat(theme.captionSize) - 3, weight: .semibold))
                     .foregroundColor(theme.tertiaryText)

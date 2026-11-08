@@ -3065,6 +3065,36 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Transcript re-audit (2026-11-07)
+
+`W-cov-reaudit` stage 3b-2 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3b-2"). Not in candidate 66.
+
+- [ ] In a long chat, press Cmd+F and type a word that appears several
+      times in one long reply. The counter counts every occurrence (not
+      messages); Enter and the chevrons step through them, the current one
+      is highlighted differently, and the view scrolls to its line.
+- [ ] With the find bar open, click in the chat, then press Cmd+F again:
+      the cursor is back in the find field.
+- [ ] Type quickly in the find field: the view doesn't jump on every
+      keystroke; results land after a short pause.
+- [ ] Click the minimap: it jumps to that message (also for replies in the
+      middle of a tool run).
+- [ ] Generate an image (Venice or Osaurus Cloud): "Generating image…"
+      shimmers, and clicking the finished image opens it full screen.
+- [ ] Ask a long question to a fast cloud model and keep the chat scrolled
+      to the bottom: the text stays in view while it streams (it doesn't
+      grow below the window).
+- [ ] With a thinking model, finish a reply: the thinking row says "Thought
+      for …s". Tool rows show "· 1.2s". Both survive quitting and reopening
+      the chat.
+- [ ] Scroll a chart out of view and back: it doesn't redraw or replay its
+      animation.
+- [ ] Ask for a code block while it streams: the code appears without
+      stalls and gets colors when finished.
+- [ ] Make the chat window narrow: the Auto-speak / Paste / Folder chips
+      shrink to icons instead of wrapping; a chosen folder keeps its name.
+
 ## Composer and message actions re-audit (2026-11-07)
 
 `W-cov-reaudit` stage 3b-1 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

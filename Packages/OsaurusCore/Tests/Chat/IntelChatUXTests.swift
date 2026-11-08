@@ -165,7 +165,7 @@ struct IntelActivityRollupTests {
     @Test("Runs of two or more steps roll up; a paragraph breaks the run; one step stays bare")
     func rollupRules() {
         let turn = UUID()
-        let think = ContentBlock(id: "t1", turnId: turn, kind: .thinking(index: 0, text: "x", isStreaming: false))
+        let think = ContentBlock(id: "t1", turnId: turn, kind: .thinking(index: 0, text: "x", isStreaming: false, duration: nil))
         let tools = ContentBlock(id: "g1", turnId: turn, kind: .toolCallGroup(calls: [ToolCallItem(call: call("a"), result: nil)]))
         let para = ContentBlock(
             id: "p1", turnId: turn, kind: .paragraph(index: 0, text: "hi", isStreaming: false, role: .assistant))

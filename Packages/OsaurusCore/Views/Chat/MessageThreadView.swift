@@ -43,6 +43,7 @@ struct MessageThreadView: View {
     var onConfirmEdit: (() -> Void)? = nil
     var onCancelEdit: (() -> Void)? = nil
     var onUserImagePreview: ((String) -> Void)? = nil
+    var onImagePreviewImage: ((NSImage) -> Void)? = nil
 
     // Minimap
     var onVisibleTopUserTurnChanged: ((UUID?) -> Void)? = nil
@@ -50,6 +51,13 @@ struct MessageThreadView: View {
     var scrollToTurnTrigger: Int = 0
     /// Active in-conversation find query (Cmd+F); empty when the bar is closed.
     var searchHighlightQuery: String = ""
+    /// Turn owning the find bar's current match, nil when none is current.
+    var searchCurrentTurnId: UUID? = nil
+    /// Occurrence index of the current match within its turn's content.
+    var searchCurrentOccurrence: Int = 0
+    /// Occurrence the pending scroll request targets (find bar); nil for
+    /// turn-level scrolls (minimap).
+    var scrollToFindOccurrence: Int? = nil
 
     @Environment(\.theme) private var theme
 
@@ -107,10 +115,14 @@ struct MessageThreadView: View {
             onConfirmEdit: onConfirmEdit,
             onCancelEdit: onCancelEdit,
             onUserImagePreview: onUserImagePreview,
+            onImagePreviewImage: onImagePreviewImage,
             onVisibleTopUserTurnChanged: onVisibleTopUserTurnChanged,
             scrollToTurnId: scrollToTurnId,
             scrollToTurnTrigger: scrollToTurnTrigger,
-            searchHighlightQuery: searchHighlightQuery
+            searchHighlightQuery: searchHighlightQuery,
+            searchCurrentTurnId: searchCurrentTurnId,
+            searchCurrentOccurrence: searchCurrentOccurrence,
+            scrollToFindOccurrence: scrollToFindOccurrence
         )
     }
 }

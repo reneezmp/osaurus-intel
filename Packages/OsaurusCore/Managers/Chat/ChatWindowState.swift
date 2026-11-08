@@ -922,6 +922,9 @@ final class ChatWindowState: ObservableObject {
     /// key monitor (which cannot touch `ChatView`'s `@State`) and cleared by
     /// the bar's close button or the Esc dismissal chain.
     @Published var isFindBarVisible: Bool = false
+    /// Bumped by Cmd+F (even while the bar is open) so the find field takes
+    /// keyboard focus again (upstream #1969).
+    @Published var findBarFocusRequestID: Int = 0
     /// Imperative hook set by `ChatView` while the inline message editor
     /// is active (and cleared on save/cancel). The window-level Esc
     /// monitor invokes it so Esc cancels the edit even when the editor's
