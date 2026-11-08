@@ -66,7 +66,7 @@ struct HeaderActionButton: View {
                 .background(
                     Circle().fill(theme.accentColor.opacity(isActive ? (theme.isDark ? 0.22 : 0.14) : 0))
                 )
-                // Intel: no Liquid Glass backdrop (macOS 26 only).
+                .liquidGlassCircle()
                 .overlay(alignment: .topTrailing) {
                     if let badge, badge > 0 {
                         Text(badge > 99 ? "99+" : "\(badge)")
@@ -151,6 +151,7 @@ struct PinButton: View {
                 .foregroundColor(isPinned || isHovered ? theme.accentColor : theme.secondaryText)
                 .rotationEffect(.degrees(isPinned ? 0 : 45))
                 .frame(width: 28, height: 28)
+                .liquidGlassCircle()
                 .padding(.horizontal, 4)
                 .contentShape(Rectangle())
         }
@@ -726,6 +727,22 @@ private struct PopoverRow<Content: View>: View {
             withAnimation(.easeOut(duration: 0.12)) {
                 isHovered = hovering
             }
+        }
+    }
+}
+
+// MARK: - Liquid Glass (upstream #1297)
+
+extension View {
+    /// The Liquid Glass circle backdrop on macOS 26; unchanged before
+    /// (`#available` rule: Intel Macs on Tahoe get it, Ventura keeps the
+    /// plain button).
+    @ViewBuilder
+    func liquidGlassCircle() -> some View {
+        if #available(macOS 26.0, *) {
+            self.glassEffect(.regular.interactive(), in: .circle)
+        } else {
+            self
         }
     }
 }

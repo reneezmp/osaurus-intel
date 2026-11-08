@@ -3065,6 +3065,30 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Remaining-rows re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3f (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3f"). Not in candidate 66.
+
+- [ ] Give an agent a Default Working Folder. Create a schedule for it
+      with no folder and run it now: its chat works in that folder (ask it
+      to list files).
+- [ ] With an MCP server that returns screenshots (or any image), and a
+      vision model: call the tool; the model describes the image. The tool
+      card shows no base64.
+- [ ] Delete two agents in a row from the agent list: the confirmation
+      appears both times.
+- [ ] In a folder chat, ask "list the files here": the tool card shows a
+      readable list, not JSON.
+- [ ] In an existing chat, send a message and quit Osaurus while it's
+      still replying; reopen: your message is there.
+- [ ] Plugins page at its narrowest window width: cards stay readable
+      (one column).
+- [ ] On a Mac running macOS 26: the header buttons have the glass circle;
+      on Ventura they look as before.
+- [ ] (Only on a spare install) Settings › General › Factory Reset: the
+      overlay lists each step and Osaurus quits.
+
 ## Hang re-audit (2026-11-08)
 
 `W-cov-reaudit` stage 3e (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

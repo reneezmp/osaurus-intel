@@ -73,13 +73,18 @@ enum RemoteSessionContinuation {
         case .tool:
             return ChatMessage(role: "tool", content: turn.content, tool_call_id: turn.toolCallId)
         case .user:
-            return ChatSession.buildUserChatMessage(
-                content: turn.content,
-                attachments: turn.attachments,
-                supportsImages: supportsImages,
-                supportsAudio: false,
-                supportsVideo: false
-            )
+            // The memory / time block the turn was sent with goes back in
+            // front (upstream #3070), so the model reads the same bytes
+            // again and the provider's prompt cache still matches.
+            return ChatSession.applyingFrozenInjectedPrefix(
+                turn.injectedContextPrefix,
+                to: ChatSession.buildUserChatMessage(
+                    content: turn.content,
+                    attachments: turn.attachments,
+                    supportsImages: supportsImages,
+                    supportsAudio: false,
+                    supportsVideo: false
+                ))
         default:
             return nil
         }

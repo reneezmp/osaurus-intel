@@ -96,6 +96,11 @@ public final class AppDelegate: NSObject, NSApplicationDelegate, NSPopoverDelega
         OnboardingService.shared.reconcileExistingInstall(
             isPristineInstall: StorageMigrator.shared.isPristineInstall())
 
+        // Upstream #1608: move agent records stranded in a legacy `Personas/`
+        // folder into `agents/` before the first agent load (Intel reads
+        // `agents/` only). Idempotent and conflict-safe.
+        OsaurusPaths.migrateLegacyPersonasIfNeeded()
+
         // Seed the identity-existence memo off the main thread so the first
         // `existsCached()` caller (Credits, Search, Router chrome) doesn't pay
         // a synchronous keychain probe on the main thread (upstream #1523).

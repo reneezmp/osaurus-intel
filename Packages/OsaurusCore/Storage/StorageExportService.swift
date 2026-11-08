@@ -215,6 +215,10 @@ public actor StorageExportService {
         // the new key is installed (`W-plugin-reliability` stage 2b).
         try PluginDatabase.withStorageMutation {
         try OsaurusDatabaseHandle.withAllHandlesQuiesced {
+            // Per-agent databases aren't registered handles either (upstream
+            // #1615): close their live connections so the in-place rekey
+            // doesn't fight an open fd. They reopen lazily.
+            AgentDatabaseStore.shared.closeAll()
             for target in StorageMigrator.databaseTargets() {
                 do {
                     try rekeyDatabase(path: target.path, oldKey: oldKey, newKey: newKey)

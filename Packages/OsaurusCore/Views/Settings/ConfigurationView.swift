@@ -34,6 +34,8 @@ struct ConfigurationView: View {
     @State private var tempStartAtLogin: Bool = false
     @State private var tempHideDockIcon: Bool = false
     @State private var isResetting = false
+    /// Upstream #2191: the reset's step list and its failure notice.
+    @ObservedObject private var onboardingService = OnboardingService.shared
 
     @State private var tempChatHotkey: Hotkey? = nil
     @State private var tempCoreModelProvider: String = ""
@@ -83,6 +85,19 @@ struct ConfigurationView: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .background(theme.primaryBackground)
+        // Wipe-failure notice (upstream #2191): `.contained` so it layers
+        // above the reset overlay in this view. Dismissing it resumes
+        // `performFactoryReset`, which then quits.
+        .themedAlert(
+            "Factory Reset Incomplete",
+            isPresented: Binding(
+                get: { onboardingService.wipeFailureMessage != nil },
+                set: { if !$0 { OnboardingService.shared.acknowledgeWipeFailure() } }
+            ),
+            message: onboardingService.wipeFailureMessage,
+            buttons: [.destructive(L("Quit")) {}],
+            presentationStyle: .contained
+        )
         .environment(\.theme, themeManager.currentTheme)
         .onAppear { loadConfiguration() }
         .onReceive(ModelPickerItemCache.shared.$items) { options in
@@ -237,10 +252,6 @@ struct ConfigurationView: View {
                 .ignoresSafeArea()
 
             VStack(spacing: 24) {
-                ProgressView()
-                    .scaleEffect(1.5)
-                    .tint(theme.accentColor)
-
                 VStack(spacing: 8) {
                     Text("Resetting Osaurus", bundle: .module)
                         .font(.system(size: 18, weight: .bold))
@@ -249,6 +260,30 @@ struct ConfigurationView: View {
                     Text("Deleting data and preferences. Please wait…", bundle: .module)
                         .font(.system(size: 14))
                         .foregroundColor(theme.secondaryText)
+                }
+
+                // Upstream #2191: one row per reset step.
+                if let journey = onboardingService.resetJourney {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(journey.steps) { step in
+                            FactoryResetStepRow(step: step)
+                        }
+                    }
+                    .frame(width: 260)
+                    .padding(14)
+                    .background(
+                        RoundedRectangle(cornerRadius: 12)
+                            .fill(theme.primaryBackground.opacity(0.5))
+                            .overlay(
+                                RoundedRectangle(cornerRadius: 12)
+                                    .stroke(theme.cardBorder, lineWidth: 1)
+                            )
+                    )
+                    .animation(.easeOut(duration: 0.2), value: journey)
+                } else {
+                    ProgressView()
+                        .scaleEffect(1.5)
+                        .tint(theme.accentColor)
                 }
             }
             .padding(40)
@@ -641,6 +676,67 @@ private struct ToastPositionPicker: View {
             return "arrow.up.square"
         case .bottomRight, .bottomLeft, .bottomCenter:
             return "arrow.down.square"
+        }
+    }
+}
+
+// MARK: - Factory Reset Journey Row
+
+/// One row of the factory-reset overlay: status icon + phase label, in the
+/// same visual language as the sandbox provisioning journey's `StepRow`.
+private struct FactoryResetStepRow: View {
+    let step: FactoryResetJourney.Step
+
+    @Environment(\.theme) private var theme
+
+    var body: some View {
+        HStack(spacing: 10) {
+            statusIcon
+                .frame(width: 16)
+            Text(label)
+                .font(.system(size: 13, weight: step.status == .inProgress ? .semibold : .regular))
+                .foregroundColor(labelColor)
+            Spacer(minLength: 0)
+        }
+    }
+
+    private var label: String {
+        switch step.id {
+        case .browser: return L("Clearing browser data")
+        case .keychain: return L("Removing Keychain secrets")
+        case .preferences: return L("Clearing preferences")
+        case .data: return L("Deleting app data")
+        case .quit: return L("Quitting Osaurus")
+        }
+    }
+
+    @ViewBuilder
+    private var statusIcon: some View {
+        switch step.status {
+        case .completed:
+            Image(systemName: "checkmark.circle.fill")
+                .font(.system(size: 14))
+                .foregroundColor(theme.successColor)
+        case .inProgress:
+            ProgressView()
+                .controlSize(.small)
+                .scaleEffect(0.7)
+        case .pending:
+            Image(systemName: "circle")
+                .font(.system(size: 14))
+                .foregroundColor(theme.tertiaryText.opacity(0.6))
+        case .failed:
+            Image(systemName: "xmark.octagon.fill")
+                .font(.system(size: 14))
+                .foregroundColor(theme.errorColor)
+        }
+    }
+
+    private var labelColor: Color {
+        switch step.status {
+        case .completed, .inProgress: return theme.primaryText
+        case .pending: return theme.tertiaryText
+        case .failed: return theme.errorColor
         }
     }
 }

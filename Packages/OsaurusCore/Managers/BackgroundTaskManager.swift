@@ -708,10 +708,12 @@ public final class BackgroundTaskManager: ObservableObject {
         let reattach = lookupReattachableSession(for: request)
         let context: ExecutionContext
         if let existing = reattach {
+            // Same folder resolution as a fresh context (upstream #2701).
+            let folder = Self.resolveDispatchFolder(for: request)
             context = ExecutionContext(
                 reattaching: existing,
-                folderBookmark: request.folderBookmark,
-                folderPath: request.folderPath
+                folderBookmark: folder?.bookmark,
+                folderPath: folder?.path
             )
         } else {
             context = createContext(for: request)
@@ -1137,16 +1139,37 @@ public final class BackgroundTaskManager: ObservableObject {
     }
 
     private func createContext(for request: DispatchRequest) -> ExecutionContext {
-        ExecutionContext(
+        let folder = Self.resolveDispatchFolder(for: request)
+        return ExecutionContext(
             id: request.id,
             agentId: request.agentId ?? Agent.defaultId,
             title: request.title,
-            folderBookmark: request.folderBookmark,
-            folderPath: request.folderPath,
+            folderBookmark: folder?.bookmark,
+            folderPath: folder?.path,
             source: request.source,
             sourcePluginId: request.sourcePluginId,
             externalSessionKey: request.externalSessionKey
         )
+    }
+
+    /// The folder a dispatch runs in (upstream #2701): the request's own
+    /// folder when it names one (a Watcher's watched folder, a Schedule's
+    /// folder, a plugin's `folder_bookmark`), else the target agent's
+    /// Default Working Folder, so schedules and watchers created without a
+    /// folder, delegation and `/agents/{id}/dispatch` work where the agent's
+    /// chats do. Nil when neither is set.
+    static func resolveDispatchFolder(
+        for request: DispatchRequest
+    ) -> (bookmark: Data?, path: String?)? {
+        if request.folderBookmark != nil || request.folderPath?.isEmpty == false {
+            return (request.folderBookmark, request.folderPath)
+        }
+        guard let agentId = request.agentId, agentId != Agent.defaultId,
+            let agent = AgentManager.shared.agent(for: agentId)
+        else { return nil }
+        let path = agent.workingFolderPath?.trimmingCharacters(in: .whitespacesAndNewlines)
+        guard agent.workingFolderBookmark != nil || path?.isEmpty == false else { return nil }
+        return (agent.workingFolderBookmark, path?.isEmpty == false ? path : nil)
     }
 
     // MARK: - Private: Completion Helpers

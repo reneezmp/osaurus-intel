@@ -6,7 +6,9 @@
 //
 
 import Foundation
+import ImageIO
 import MCP
+import UniformTypeIdentifiers
 
 /// Server-declared behavior hints from an MCP tool's `annotations`. The spec
 /// treats these as untrusted: they only pick the *default* policy (see
@@ -493,22 +495,29 @@ extension MCPProviderTool {
         toolName: String? = nil
     ) -> String {
         var results: [[String: Any]] = []
+        var hasImages = false
 
         for item in content {
             switch item {
             case .text(let text, _, _):
                 results.append(["type": "text", "content": text])
-            // Intel chat is text-only (no multimodal attachments), so raw
-            // base64 media must never be pasted into the tool result: one
-            // screenshot is ~1 MB of text the model would be billed for.
-            // Keep a compact, truthful placeholder instead. Upstream routes
-            // these through its multimodal bridge (0901780cc).
+            // Upstream #2805: an image is staged in the attachment blob store
+            // and referenced by hash (`image_ref`), so the chat hands it to a
+            // vision model through `ToolResultMediaBridge` and the result
+            // text never carries base64. Raw base64 must never be pasted in:
+            // one screenshot is ~1 MB of text the model would be billed for.
+            // Data that isn't a decodable image keeps the placeholder.
             case .image(let data, let mimeType, _, _):
-                results.append([
-                    "type": "image",
-                    "mimeType": mimeType,
-                    "note": mediaOmittedNote(kind: "image", base64: data, mimeType: mimeType),
-                ])
+                if let staged = stagedImage(data, mimeType: mimeType) {
+                    results.append(staged)
+                    hasImages = true
+                } else {
+                    results.append([
+                        "type": "image",
+                        "mimeType": mimeType,
+                        "note": mediaOmittedNote(kind: "image", base64: data, mimeType: mimeType),
+                    ])
+                }
             case .audio(let data, let mimeType, _, _):
                 results.append([
                     "type": "audio",
@@ -516,6 +525,15 @@ extension MCPProviderTool {
                     "note": mediaOmittedNote(kind: "audio", base64: data, mimeType: mimeType),
                 ])
             case .resource(let resource, _, _):
+                if let mimeType = resource.mimeType, mimeType.hasPrefix("image/"),
+                    let blob = resource.blob,
+                    var image = stagedImage(blob, mimeType: mimeType)
+                {
+                    image["uri"] = resource.uri
+                    results.append(image)
+                    hasImages = true
+                    continue
+                }
                 var result: [String: Any] = [
                     "type": "resource",
                     "uri": resource.uri,
@@ -543,6 +561,10 @@ extension MCPProviderTool {
             results.append(["type": "text", "content": structuredText])
         }
 
+        if hasImages {
+            return imageEnvelope(results, toolName: toolName)
+        }
+
         // If single text result, return just the text
         if results.count == 1, let content = results[0]["content"] as? String {
             return content
@@ -561,5 +583,61 @@ extension MCPProviderTool {
     private static func structuredJSONText(_ value: MCP.Value) -> String? {
         guard let data = try? JSONEncoder.osaurusCanonical().encode(convertMCPValue(value)) else { return nil }
         return String(data: data, encoding: .utf8)
+    }
+
+    /// Upstream #2805: the typed `mcp_content` envelope, kept under the
+    /// universal text cap without cutting an image ref in half. Oversized
+    /// captions are truncated; the content array and image order stay.
+    private static func imageEnvelope(_ parts: [[String: Any]], toolName: String?) -> String {
+        let cap = ToolOutputCaps.universalResult
+        var output = ToolEnvelope.success(tool: toolName, result: ["kind": "mcp_content", "content": parts])
+        guard output.utf8.count > cap else { return output }
+        let warning = "MCP text exceeded the per-call output cap and was truncated; image references were preserved."
+        var fraction = min(1, Double(cap) / Double(output.utf8.count))
+        for attempt in 0..<12 {
+            let bounded = parts.map { part -> [String: Any] in
+                var part = part
+                let key: String
+                switch part["type"] as? String {
+                case "text": key = "content"
+                case "resource": key = "text"
+                default: return part
+                }
+                guard let text = part[key] as? String else { return part }
+                part[key] = attempt == 11
+                    ? "[MCP text omitted: per-call output cap]"
+                    : HeadTailTruncation.applyByteExact(
+                        text, byteCap: Int(Double(text.utf8.count) * fraction), headFraction: 2.0 / 3.0)
+                return part
+            }
+            output = ToolEnvelope.success(
+                tool: toolName, result: ["kind": "mcp_content", "content": bounded], warnings: [warning]
+            )
+            if output.utf8.count <= cap { return output }
+            fraction *= min(0.9, Double(cap) / Double(output.utf8.count))
+        }
+        return ToolEnvelope.failure(
+            kind: .executionError,
+            message: "MCP result metadata exceeds the per-call output cap even without its text. Request fewer items.",
+            tool: toolName
+        )
+    }
+
+    /// Upstream #2805: validate the image, store its bytes, and return the
+    /// typed part with an `image_ref`. Nil when the data isn't an image.
+    private static func stagedImage(_ encoded: String, mimeType: String) -> [String: Any]? {
+        guard mimeType.hasPrefix("image/"), let data = Data(base64Encoded: encoded), !data.isEmpty,
+            let source = CGImageSourceCreateWithData(data as CFData, [kCGImageSourceShouldCache: false] as CFDictionary),
+            let properties = CGImageSourceCopyPropertiesAtIndex(source, 0, nil) as? [CFString: Any],
+            let width = properties[kCGImagePropertyPixelWidth] as? Int, width > 0,
+            let height = properties[kCGImagePropertyPixelHeight] as? Int, height > 0,
+            let hash = try? AttachmentBlobStore.write(data)
+        else { return nil }
+        let actualMime = (CGImageSourceGetType(source) as String?).flatMap { UTType($0)?.preferredMIMEType } ?? mimeType
+        return [
+            "type": "image", "mimeType": actualMime,
+            "image_ref": ["hash": hash, "byte_count": data.count],
+            "width": width, "height": height,
+        ]
     }
 }

@@ -5649,6 +5649,56 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3f: the rest (`W-cov-reaudit`) — 2026-11-08
+
+The last 47 Check rows ([`COV_REAUDIT.md`](COV_REAUDIT.md)). Many were
+already on Intel under other names (Claude export index #2650, phone vision
+#3207, memory counters #1834, firmlinked writes #1900, `/completions`
+#1247, TTS device changes #2016); line matching undercounts renamed code.
+
+- **Background runs use the agent's folder (#2701):** Intel had the
+  explicit Default Working Folder (2026-09-29) but schedules, watchers,
+  dispatches and reattached runs ignored it. `resolveDispatchFolder`: the
+  request's own folder, else the agent's default (never for the built-in
+  agent).
+- **MCP images (#2805):** an image result (or an image resource) is
+  validated, stored in the attachment blob store, and returned as a typed
+  `mcp_content` envelope with an `image_ref`, under the universal cap
+  without cutting refs. Intel's media bridge already resolved those, so a
+  vision model now sees the picture; undecodable data keeps Intel's
+  placeholder, audio stays a placeholder.
+- **Factory reset (#2191):** Intel's reset stopped without quitting when a
+  folder couldn't be deleted, leaving the "Resetting" overlay up. Upstream's
+  service now: a step list in the overlay, rename-then-delete (live writers
+  can't fail it), always quits, and a "Factory Reset Incomplete" notice
+  naming what was left. Intel keeps its existing-install check and the
+  test keychain guard; no crash-reporter pause.
+- **Alert center (#2661):** upstream's stacked `ThemedAlertCenter`: a new
+  alert resets the presenter it replaces (the "agent deletion stopped
+  working" bug; carried follow-up "single-slot clobber"), and a container
+  dialog can host nested alerts. Intel's notch scope and the Ventura
+  `onChange` form kept. Upstream's `ThemedAlertCenterTests` now run.
+- **Smaller ports:** the user turn is saved before streaming in existing
+  chats (#1830); key rotation closes per-agent database connections
+  (#1615); legacy `Personas/` agent files move to `agents/` at launch
+  (#1608); tool cards show folder listings and filename searches as lists,
+  not JSON (#1313); continued phone history replays a turn's frozen prefix
+  (#3070); adaptive plugin grid (#2220); the Liquid Glass circle on header
+  buttons behind `#available(macOS 26)` (#1297; Intel had dropped it).
+- **Not ported, with reasons:** offline mode's hiding of cloud models
+  (#2170; no local fallback, the picker would go empty); storage
+  encryption opt-in (#1600; deferred by Renée 2026-09-02, now
+  `W-storage-encryption-optin`); remote-agent and Bonjour hardening
+  (#1623, #1636, #1658; `W-identity-mobile`, Intel has no Bonjour browser);
+  the default agent's tool surface (#1608, #1756; Orchestrator items).
+  Agent backup restore (#1837) and #1961 go to stage 5.
+
+Tests: `IntelStage3fTests` (dispatch folder, MCP image staging through the
+bridge, the Personas migration, the continuation prefix), upstream's
+`ThemedAlertCenterTests`.
+Filtered gate: 137 tests. Full gate: 5,100 tests, only the known avatar-cache
+failure; no live writes. x86_64 build clean.
+
 ### Coverage re-audit, stage 3e: crashes and hangs (`W-cov-reaudit`) — 2026-11-08
 
 The 16 crash and hang rows ([`COV_REAUDIT.md`](COV_REAUDIT.md)). Many touch

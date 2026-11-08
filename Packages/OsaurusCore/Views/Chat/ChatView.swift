@@ -3388,6 +3388,10 @@ final class ChatSession: ObservableObject {
                 let data = toSessionData()
                 ChatSessionsManager.shared.save(data)
                 onSessionChanged?()
+            } else {
+                // Upstream #1830: persist the user turn before streaming, so
+                // a crash or quit mid-reply never loses what the user typed.
+                save()
             }
         }
 

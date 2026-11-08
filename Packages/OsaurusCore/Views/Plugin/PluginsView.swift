@@ -70,6 +70,12 @@ struct PluginsView: View {
         #endif
     }
 
+    /// Keep cards readable in the management window's compact layout, while
+    /// still using multiple columns when the window has room (upstream #2220).
+    private static let responsiveGrid: [GridItem] = [
+        GridItem(.adaptive(minimum: 340), spacing: 20, alignment: .top)
+    ]
+
     var body: some View {
         ZStack {
             if !isShowingDetail {
@@ -372,13 +378,7 @@ struct PluginsView: View {
                         // registry-card grid is Apple-Silicon only.
                         #if !OSAURUS_INTEL
                         if !installedPlugins.isEmpty {
-                        LazyVGrid(
-                            columns: [
-                                GridItem(.flexible(minimum: 300), spacing: 20),
-                                GridItem(.flexible(minimum: 300), spacing: 20),
-                            ],
-                            spacing: 20
-                        ) {
+                        LazyVGrid(columns: Self.responsiveGrid, spacing: 20) {
                             ForEach(Array(installedPlugins.enumerated()), id: \.element.id) { index, plugin in
                                 PluginCard(
                                     plugin: plugin,
@@ -413,13 +413,7 @@ struct PluginsView: View {
     #if OSAURUS_INTEL
     /// Upstream's registry cards for installed plugins that failed to load.
     private var failedPluginsSection: some View {
-        LazyVGrid(
-            columns: [
-                GridItem(.flexible(minimum: 300), spacing: 20),
-                GridItem(.flexible(minimum: 300), spacing: 20),
-            ],
-            spacing: 20
-        ) {
+        LazyVGrid(columns: Self.responsiveGrid, spacing: 20) {
             ForEach(Array(failedInstalledPlugins.enumerated()), id: \.element.id) { index, plugin in
                 PluginCard(
                     plugin: plugin,
@@ -444,13 +438,7 @@ struct PluginsView: View {
 
     private var nativePluginsSection: some View {
         VStack(alignment: .leading, spacing: 12) {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(minimum: 300), spacing: 20),
-                    GridItem(.flexible(minimum: 300), spacing: 20),
-                ],
-                spacing: 20
-            ) {
+            LazyVGrid(columns: Self.responsiveGrid, spacing: 20) {
                 ForEach(nativePlugins) { plugin in
                     NativePluginCard(
                         plugin: plugin,
@@ -504,13 +492,7 @@ struct PluginsView: View {
 
     private var browseGrid: some View {
         ScrollView {
-            LazyVGrid(
-                columns: [
-                    GridItem(.flexible(minimum: 300), spacing: 20),
-                    GridItem(.flexible(minimum: 300), spacing: 20),
-                ],
-                spacing: 20
-            ) {
+            LazyVGrid(columns: Self.responsiveGrid, spacing: 20) {
                 ForEach(Array(filteredPlugins.enumerated()), id: \.element.id) { index, plugin in
                     PluginCard(
                         plugin: plugin,

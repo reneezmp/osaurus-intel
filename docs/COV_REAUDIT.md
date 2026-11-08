@@ -85,17 +85,17 @@ its code absent is a candidate gap.
 
 | Verdict | Commit | PR | Presence | Subject | Ledger |
 |---|---|---|---|---|---|
-| Check:agents | re-checked `3085b242a` | #2870 | 4/19 | Keep agent purpose metadata current across remote and voice consumers | UPSTREAM_AUDIT_2026-09-25 |
-| Check:agents | re-checked `81d201c4a` | #1756 | 1/17 | Make built-in Default agent non-configurable; fix sub-agent toggle persistence | UPSTREAM_TRIAGE_0.24.3 |
-| Check:agents | re-checked `cf01aa146` | #3121 | 3/13 | Avoid repeated @Published agents lookups in liveAgentSources | INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| NA | re-checked `3085b242a` | #2870 | 4/19 | Keep agent purpose metadata current across remote and voice consumers | Remote agent live metadata goes through upstream's `RemoteAgentManager`, which Intel doesn't compile; Intel's paired relay agents are its own (`W-identity-mobile`). |
+| W-subagents | re-checked `81d201c4a` | #1756 | 1/17 | Make built-in Default agent non-configurable; fix sub-agent toggle persistence | Intel's built-in agent is the Orchestrator with its own editor; the subagent toggles are Intel's own subagent surface. |
+| In | re-checked `cf01aa146` | #3121 | 3/13 | Avoid repeated @Published agents lookups in liveAgentSources | No live code gap. |
 | Done (3c-1) | re-checked `2d238592c` | #1725 | 28/97 | Fix same-turn capability tool activation | Same-turn activation was already Intel's (`CloudChatEngine` adopts loaded tools on the next round); upstream's `validateDynamicToolSchema` now skips a malformed plugin/MCP schema with a diagnostic, at load and at every offer (`CapabilityLoadBuffer.validSpecs`). |
 | W-seatbelt-sandbox | re-checked `554ace8e2` | #2157 | 28/150 | Redact secret tool arguments across agent surfaces | Redacts only `sandbox_secret_set`'s value; that tool is not compiled on Intel (`SandboxSecretTools.swift` excluded). Lands with the sandbox tools. |
 | Done (3c-1) | re-checked `7ec54935b` | #2171 | 88/349 | Fix tracked tool completion and prompt cache stability | The Done banner reads Blocked from `complete`'s `outcome: blocked`. Its three todo rules are retired upstream (return nil); frozen tool specs belong to the per-chat prompt freeze Intel doesn't have (stage 5). |
 | Done (3c-1) | re-checked `bc6146f1a` | #2344 | 0/3 | Fix #2327: a reasoning-only turn with tools offered was classified as a finished answer | Reasoning-only stop with tools offered gets one fresh retry (`IntelTerminalRecovery`, upstream `classifyTerminal` verbatim). |
 | Done (3c-1) | re-checked `c05947f02` | #1681 | 16/81 | Fix #1680: surface (not silently truncate) multi-step tool tasks on a premature-EOS empty turn | Empty turn: re-asked twice, then a visible fallback (`emptyToolTaskFallback` after tool work). Chat runs; the API and plugin surfaces are stage 5. |
-| Check:chat | re-checked `5bb946f7f` | #2144 | 92/249 | auto generate chat titles | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat | re-checked `bda1c895d` | #2170 | 9/19 | Add connectivity-driven offline mode for chat | UPSTREAM_TRIAGE_0.24.3 |
-| Check:chat-import | re-checked `098cbd4ed` | #2650 | 13/29 | recognize claude's export index and point users at the batch zips | MEMORY_PLAN, UPSTREAM_TRIAGE_0.24.7 |
+| In | re-checked `5bb946f7f` | #2144 | 92/249 | auto generate chat titles | Intel's own model-generated titles behind `autoGenerateChatTitles` (ported earlier). |
+| In | re-checked `bda1c895d` | #2170 | 9/19 | Add connectivity-driven offline mode for chat | The credits chip already stays hidden until a balance is fetched. Not ported: hiding every cloud model while offline (Intel has no local fallback, the picker would go empty). |
+| In | re-checked `098cbd4ed` | #2650 | 13/29 | recognize claude's export index and point users at the batch zips | Claude export index detection and the coordinator's index handling are on Intel (renamed). |
 | I | re-checked `0129221a0` | #2538 | 24/79 | Warn when switching models mid-conversation | 3b: upstream now warns only when the previous model is an on-device MLX model (`isLocalChatModel`: only that drops an Osaurus-held prefix cache); Intel has none. |
 | In | re-checked `13d04eb83` | #2365 | 2/9 | minor UI polish | 3b: the diff spinner fix is in (`NativeFileDiffView` matches upstream); Intel's agents sink runs `receive(on: RunLoop.main)`, after the list is set, so the per-agent theme never trails by one. |
 | Done (3b-1) | re-checked `18bfc8563` | #1939 | 38/77 | added timestamps to user message cells | Done 2026-11-07 (3b-1): `.userMessage` carries `timestamp` and `responseTurnId`; the user header's "…" menu shows the time and Inspect response. With #1655 (`f67c3a3e1`, PORT in the 0.24.3 triage but never landed): the reply's "…" menu starts with its time. |
@@ -117,21 +117,21 @@ its code absent is a candidate gap.
 | Done (3e) | re-checked `ad5a2c5f9` | #1598 | 10/24 | fix app hang render path | The system monitor is upstream's (sampling and the storage query off the main thread, publish only on change); the download-date cache is MLX; the theme part was in. |
 | In | re-checked `cc1823517` | #2817 | 18/53 | fixed main thread hangs in the composer, markdown parsing and sidebar rows | Markdown parsing, process environment and paths were in; the local vision evidence is MLX; the sidebar's share-to-workspace rows wait for workspaces (deferred). |
 | Done (3e) | re-checked `f6b9c984a` | #1781 | 13/29 | triage and fix sentry app hangs and crashes | Revocation and whitelist keychain writes go through `Keychain.writeInBackground`. The clipboard catcher is superseded upstream by the private pasteboard connection Intel already has; the screen-context distiller is `W-computer-use`. |
-| Check:folders | re-checked `3034800ef` | #2765 | 87/194 | add recent folders to the + menu and agent working folder setting | UPSTREAM_AUDIT_2026-09-25 |
-| Check:folders | re-checked `438b01222` | #2675 | 13/33 | apply project working folder by turning the agent sandbox off | UPSTREAM_AUDIT_2026-09-25 |
-| Check:folders | re-checked `97498c331` | #2701 | 28/162 | Make the chat folder chip persist as the agent's working folder | UPSTREAM_AUDIT_2026-09-25 |
-| Check:folders | re-checked `99ce8bd52` | #1900 | 2/10 | Fix folder file-write bugs: firmlinked-root rejection + new-file diff count | UPSTREAM_TRIAGE_0.24.3 |
+| In | re-checked `3034800ef` | #2765 | 87/194 | add recent folders to the + menu and agent working folder setting | Adapted 2026-09-25 (path-only recents in the folder chip menu); the agent editor list waits on the working-folder setting, which Intel has as an explicit default. |
+| I | re-checked `438b01222` | #2675 | 13/33 | apply project working folder by turning the agent sandbox off | Turning the agent sandbox off for a project folder: no sandbox on Intel. |
+| Done (3f) | re-checked `97498c331` | #2701 | 28/162 | Make the chat folder chip persist as the agent's working folder | Intel had the explicit Default Working Folder (2026-09-29); background runs now fall back to it (`BackgroundTaskManager.resolveDispatchFolder`). |
+| In | re-checked `99ce8bd52` | #1900 | 2/10 | Fix folder file-write bugs: firmlinked-root rejection + new-file diff count | Intel's lstat-based resolver handles new files under firmlinked roots; the empty-side diff count is in. |
 | Check:i18n | re-checked `392954aa7` | #1437 | 47/144 | updated chinese translations | UPSTREAM_SYNC |
 | Check:i18n | re-checked `50c2fb70e` | #1782 | 0/6 | Add Russian localization | UPSTREAM_TRIAGE_0.24.3 |
 | Check:i18n | re-checked `54d650bad` | #1553 | 17/40 | updated chinese translations | UPSTREAM_SYNC |
 | Check:i18n | re-checked `8a5606d0c` | #1633 | 0/38 | updated chinese translations | UPSTREAM_TRIAGE_0.24.3 |
-| Check:mcp | re-checked `0901780cc` | #2805 | 38/89 | Preserve typed MCP image results in Chat and agent history | UPSTREAM_AUDIT_2026-09-25 |
-| Check:memory | re-checked `79cc7dfe4` | #1834 | 20/113 | Clarify memory ingestion diagnostics | UPSTREAM_TRIAGE_0.24.3 |
-| Check:mobile | re-checked `6673ecf0b` | #3070 | 1/20 | stop showing injected memory in user bubbles for chats continued from the phone | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
+| Done (3f) | re-checked `0901780cc` | #2805 | 38/89 | Preserve typed MCP image results in Chat and agent history | MCP image results are staged by hash (`image_ref`) and reach vision models through the existing media bridge; undecodable data keeps Intel's placeholder. |
+| In | re-checked `79cc7dfe4` | #1834 | 20/113 | Clarify memory ingestion diagnostics | The diagnostics counters are filled by Intel's own queries; the panels that show them are Intel's. |
+| Done (3f) | re-checked `6673ecf0b` | #3070 | 1/20 | stop showing injected memory in user bubbles for chats continued from the phone | Continued phone history replays a user turn's frozen prefix; Intel stores the phone's own messages, so memory never reached the bubbles. |
 | Done (3b-3) | re-checked `1e62218a8` | #1973 | 0/2 | minor tweak in favorite models UI | Intel's SwiftUI `ModelPickerView` (agent editor, Settings, compaction): the favourites heart sits after the name; filled and always shown in the Favorites tab, where tapping removes. |
 | Done (3b-3) | re-checked `2a58c2397` | #1467 | 93/223 | improved model picker view UX | Provider labels on rows that mix sources (All, Favorites, search); descriptions were already shown. Arrow-key tab switching doesn't apply: Intel's picker has no keyboard navigation (Ventura rule). |
 | Done (3b-3) | re-checked `993c2b499` | #1889 | 0/8 | improved favorite models UI | Favorites tab pinned first (shown while a favourite is among the options), hearts on hover, filled hearts persistent (`FavoriteModelsStore`, shared with the chat picker). Intel keeps All as the default tab. |
-| Check:onboarding | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | UPSTREAM_TRIAGE_0.24.3 |
+| I | re-checked `1faccfa28` | #2487 | 3/16 | minor improvements in onboarding | Onboarding's local model ordering (LFM). |
 | Done (3c-1) | re-checked `0046b7b4a` | #2173 | 1/20 | inject current date and timezone into the latest user turn | `[Current Time]` (upstream's current, minute granularity) rides last on the latest user message for chat and HTTP agent runs; replaces Intel's Apple Apps-only clock. |
 | Done (3c-2) | re-checked `31d9ec56c` | #2278 | 1/3 | Remove generative greetings | Generative greetings removed as upstream: the Conversation → Greetings section, the agent Empty State AI/Custom picker (the Greeting, Message and Action Bar fields stay), the empty-state path, the greeting fields of `ChatConfiguration` and `AgentSettings` (old agent keys survive as unknown fields), `greetingPoolCacheFile`, Intel's no-op stubs and the two test files. |
 | Done (3c-2) | re-checked `4a9a23f0b` | #1430 | 15/111 | improved system prompts for better instructions following | Intel's composer now emits upstream's static sections (`IntelPromptDiscipline`: model family guidance, Grounding, Code style, Risk-aware actions, Agent loop; texts and `ModelFamilyGuidance.swift` at `bce907045`). Sandbox Plugin Creator skill removed, `PluginCreatorGate` synced, sentence-case folder headings. The sandbox ladder, Secret handling, Self-improvement and plugin recipe are sandbox-only; the manifest wording was rewritten again by #2309 (3c-3). |
@@ -155,14 +155,14 @@ its code absent is a candidate gap.
 | Done (3a) | re-checked `f01e5d44a` | #2463 | 2/29 | fix xai oauth models reporting a stale catalog and fallback context window | The xAI OAuth catalog's documented windows (upstream `XAIOAuthService.contextWindows`). |
 | In | re-checked `f52fc9a32` | #3068 | 1/11 | read nested metadata.context_length so DeepInfra context windows resolve | 3a: `RemoteProviderManager.advertisedContextLength` reads DeepInfra's `metadata.context_length`. |
 | In | re-checked `f9478c0f1` | #2205 | 3/25 | fall back to lenient decode for nonstandard streaming chunks during tool calls | 3a: Intel parses stream frames with `JSONSerialization` (already lenient) and skips unparseable ones. |
-| Check:server | re-checked `7664572c8` | #3207 | 0/7 | fix iphone rejecting images for remote provider models | IDENTITY_MOBILE_INTEL, INTEL_MISSING_FEATURES_BACKLOG, UPSTREAM_AUDIT_2026-10-26 |
-| Check:settings | re-checked `04e763bf7` | #2859 | 23/163 | Decide Automation permission probes from the error code, not the localized text | UPSTREAM_AUDIT_2026-09-25 |
-| Check:settings | re-checked `12c6de27b` | #2191 | 55/137 | fix factory reset hanging indefinitely and add reset progress ui | UPSTREAM_TRIAGE_0.24.3 |
-| Check:settings | re-checked `af68b0641` | #2220 | 1/7 | Fix plugin layout at compact widths | UPSTREAM_TRIAGE_0.24.3 |
-| Check:settings | re-checked `e06996e3e` | #2295 | 44/119 | surface specific keychain errors and recover from acl denied credential saves | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:storage | re-checked `311d90959` | #1600 | 370/958 | Make at-rest storage encryption opt-in (plaintext by default, FileVault-gated migration) | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
-| Check:storage | re-checked `3172aae24` | #1830 | 17/98 | Persist user turns before chat streaming | UPSTREAM_TRIAGE_0.24.3 |
-| Check:storage | re-checked `9ddb49b01` | #1615 | 51/107 | added additional migration hardening | SYNC_0.24.3_PLAN, UPSTREAM_SYNC, UPSTREAM_TRIAGE_0.24.3 |
+| In | re-checked `7664572c8` | #3207 | 0/7 | fix iphone rejecting images for remote provider models | Intel's server reports picker vision for cloud models (`IntelHTTPAgents`, `IntelHTTPModelPicker`). |
+| In | re-checked `04e763bf7` | #2859 | 23/163 | Decide Automation permission probes from the error code, not the localized text | The bug needs a translated "SUCCESS" prefix; Intel's probe text isn't localized, so the prefix check holds. |
+| Done (3f) | re-checked `12c6de27b` | #2191 | 55/137 | fix factory reset hanging indefinitely and add reset progress ui | Factory reset is upstream's: step list, rename-then-delete, always quits, a notice when data is left behind (Intel keeps its existing-install check and the test keychain guard). |
+| Done (3f) | re-checked `af68b0641` | #2220 | 1/7 | Fix plugin layout at compact widths | Plugin grids are adaptive (340 pt minimum). |
+| In | re-checked `e06996e3e` | #2295 | 44/119 | surface specific keychain errors and recover from acl denied credential saves | Keychain error surfacing was in; the channel parts wait for `W-channels`. |
+| W-storage-encryption-optin | re-checked `311d90959` | #1600 | 370/958 | Make at-rest storage encryption opt-in (plaintext by default, FileVault-gated migration) | Deferred by Renée (2026-09-02, `SYNC_0.24.3_PLAN.md` §10): its own branch, after the Rosy `hmac` decrypt error is root-caused. |
+| Done (3f) | re-checked `3172aae24` | #1830 | 17/98 | Persist user turns before chat streaming | A user turn is saved before streaming in existing chats too (new chats already were). The cancel rollback is upstream's restore-draft path, which Intel doesn't have. |
+| Done (3f) | re-checked `9ddb49b01` | #1615 | 51/107 | added additional migration hardening | Key rotation also closes per-agent database connections (plugin databases were already closed). |
 | I | re-checked `092e81cf7` | #2395 | 11/146 | Constrain reasoning_effort to the bundle's declared set so Qwen3.8 cannot hard-fail the render | UPSTREAM_TRIAGE_0.24.3 |
 | I | re-checked `0ef3d8335` | #2819 | 49/321 | Sandbox: attribute provisioning failures and stop the quit-time VM re-boot behind vmnet_in_use | UPSTREAM_AUDIT_2026-09-25 |
 | I | re-checked `1d17e9e02` | #2194 | 5/33 | Fix settings prompt warmup cache invalidation | UPSTREAM_TRIAGE_0.24.3 |
@@ -269,12 +269,12 @@ now that Intel has both. Stage 6 re-reads them.
 
 | Verdict | Commit | PR | Presence | Subject | Note |
 |---|---|---|---|---|---|
-| Check:agents | re-checked `ad0698d78` | #1608 | 82/196 | Stabilize the default configuration agent and fix disappearing custom agents | Default configuration agent and disappearing custom agents. |
+| Done (3f) | re-checked `ad0698d78` | #1608 | 82/196 | Stabilize the default configuration agent and fix disappearing custom agents | Legacy `Personas/` records move into `agents/` at launch (`OsaurusPaths.migrateLegacyPersonasIfNeeded`). The default agent's consolidated config tools go with `W-declarative-config`. |
 | Done (3c-3) | re-checked `06af55e7a` | #2336 | 24/60 | Bound capability group-load schemas + repin vmlx (Muse Glimmer runtime) | Not applicable: Intel's `capabilities` load result carries no schemas (the loaded tools join the request's tool list), so the result budget has nothing to bound; the vMLX repin and Muse Glimmer are incompatible. |
 | Done (3c-3) | re-checked `5d16b603f` | #2309 | 18/77 | Clarify capability IDs and recover grouped tool calls | Manifest and gateway wording were in; the group-id call rescue is in `IntelToolScopeGate` with upstream's scope gate (an un-offered call no longer ends the turn). The eval fixture protocol is N. |
 | Done (3c-3) | re-checked `d89626227` | #2089 | 24/67 | Fix skill discovery metadata loss and MCP capability-load reliability seams | Skill slug lookups (catalog and `SkillManager`), keywords in capability search, the editor's Keywords field and pass-through, top-level `keywords:` on import, the picker copy, the MCP and skills docs. The vector-index buffering is `SkillSearchService` (not compiled, `COV-tool-discovery`). |
-| Check:chat | re-checked `7e109ade6` | #2668 | 0/1 | Chat: a run cancelled during its cold load must not roll back the retry that already owns the session | A cancelled cold-load run must not roll back the retry that owns the turn; check Intel's retry ownership. |
-| Check:chat | re-checked `880752784` | #2661 | 3/31 | fix history dialog row actions and keep the dialog open under nested alerts | History dialog row actions and nested alerts (`CHAT_WINDOW_LAYOUT_INTEL.md` lists it as a source). |
+| In | re-checked `7e109ade6` | #2668 | 0/1 | Chat: a run cancelled during its cold load must not roll back the retry that already owns the session | Intel's send path has no cancel-then-restore-draft branch; every step checks the run id. |
+| Done (3f) | re-checked `880752784` | #2661 | 3/31 | fix history dialog row actions and keep the dialog open under nested alerts | `ThemedAlertCenter` is upstream's stacked center (the clobbered presenter is reset; container dialogs host nested alerts), with Intel's notch scope. Intel's history is a pane, so nothing nests yet. |
 | Done (3e) | re-checked `4daee7b36` | #2128 | 92/197 | fixed app hangs | Schedule writes go through a serial I/O queue and apply in memory first (`ScheduleManager`; Intel's `refresh()` stays synchronous on that queue). Search provider, knowledge watcher, agent database and string cleaning were in; the chat database and model lookups are NA / MLX. |
 | Done (3e) | re-checked `a9ae5fd9c` | #1901 | 80/176 | Free model memory on chat close, respond to memory pressure, and cap unbounded caches | Memory pressure also clears the monogram cache (now capped at 256) and the theme preview cache; attachment line and token caches are bounded (2,048); the message table drops heights for blocks that left the thread. Model unloading is MLX. |
 | I | re-checked `b621603fb` | #2015 | 11/38 | Checkpoint: stop the gemma tool-loop, two crashes, and lying tok/s | The background load intent and the tok/s fix are local-model; the crash fixes in the markdown and cell views were in. |
@@ -284,13 +284,13 @@ now that Intel has both. Stage 6 re-reads them.
 | Done (3c-3) | re-checked `846ca9185` | #2101 | 2/17 | Preserve explicit Thinking mode across agent tool turns | `ChatTurnGenerationControls` freezes the model options at send; Intel's request has no `enable_thinking`, so only the options are applied. |
 | I | re-checked `9b0331fd4` | #2105 | 5/72 | fix: honor reasoning toggle across agent tool loops | Agent runs default to thinking off for toggleable local templates; Intel's capability stub never reports one, and the persisted-options lookup is in the excluded `ChatEngine.swift`. |
 | Done (3c-3) | re-checked `e00a9d88d` | #2656 | 41/123 | Research completion: announce-only recovery names what the model can do; promised-work endings recovered; replayed retrieval failures escalate before stopping; window-close crash fixed | Tour crash, search fetch bound, replay helpers and the closing-sentence classifier were in; the Codex path now logs tool wall time. Intel's engine never ends a run on a replayed failure. The announce-only wording waits for announce-only recovery (stage 5, #2480). |
-| Check:mobile | re-checked `67fba7464` | #1623 | 149/397 | harden remote agent security and reliability | Remote agent security and reliability. |
-| Check:mobile | re-checked `d1b96a5e7` | #1658 | 40/176 | Harden Bonjour discovery (security, reliability, discoverability) | Bonjour discovery hardening; compare with Intel's discovered agents. |
-| Check:mobile | re-checked `f7e683dfb` | #1636 | 29/158 | Fix and harden remote agent (Mode 2) runs | Remote agent (Mode 2) runs; compare with Intel's paired relay agents. |
+| W-identity-mobile | re-checked `67fba7464` | #1623 | 149/397 | harden remote agent security and reliability | Remote agent security and reliability; Intel's relay agents are its own. |
+| W-identity-mobile | re-checked `d1b96a5e7` | #1658 | 40/176 | Harden Bonjour discovery (security, reliability, discoverability) | Bonjour discovery hardening; Intel has no Bonjour browser (the upstream file and its observer are dead on Intel). |
+| W-identity-mobile | re-checked `f7e683dfb` | #1636 | 29/158 | Fix and harden remote agent (Mode 2) runs | Remote agent (Mode 2) runs. |
 | Done (3c-3) | re-checked `4be5a5776` | #1798 | 52/232 | Cut per-turn prompt cost: remote prompt caching + local KV prefix reuse + measured text trims | Memory and the time block are frozen on the user turn and replayed (`injectedContextPrefix`, persisted); remote `cache_control` was in; the local KV half is incompatible. |
 | In | re-checked `61dad2f36` | #2051 | 19/85 | Reduce redundant agent prompt context | Intel's HTTP and plugin paths already pass the request model to the composer; Intel never emits the trimmed discovery and skills-govern sections; channel tools wait for `W-channels`; the eval telemetry is N. |
-| Check:server | re-checked `34a64dc2d` | #2606 | 2/11 | fix /api/show for external models and report tool/thinking capabilities | `/api/show` for external models, with tool and thinking capabilities. |
-| Check:settings | re-checked `64bc65808` | #2442 | 18/105 | Sampling Defaults were inert on almost every model, and nothing showed what actually ran | Sampling defaults applied and shown for remote models; the MLX half is incompatible. |
+| I | re-checked `34a64dc2d` | #2606 | 2/11 | fix /api/show for external models and report tool/thinking capabilities | External local model folders and local tool/thinking detection. |
+| I | re-checked `64bc65808` | #2442 | 18/105 | Sampling Defaults were inert on almost every model, and nothing showed what actually ran | Local sampling defaults, KV cache and the context-window cap; the settings-search keywords name settings Intel doesn't have. |
 | W-channels | re-checked `44548e901` | #2202 | 487/1065 | Native channel presence, formatting, and reactions | Channel presence and reactions. |
 | W-declarative-config | re-checked `8d7c3dd42` | #2485 | 1377/6646 | Default-agent declarative config + delegation orchestrator | The declarative configuration plane and orchestrator (`ORCHESTRATOR_INTEL_PLAN.md`). |
 | W-declarative-config | re-checked `b285b946c` | #2628 | 5/72 | Watcher dispatch grounds itself; config apply says DONE | Watcher dispatch grounding and config apply; lands with the item. |
@@ -337,8 +337,12 @@ now that Intel has both. Stage 6 re-reads them.
    **3d** knowledge (5; done 2026-11-08: the grant prompt, the category
    chip, frontmatter pass-through, the read connection, the copy); **3e** crashes and hangs (13 + 3; done 2026-11-08: chat and schedule writes off the main thread, the off-main system monitor, the tool-list memo, the proxy config cache, bounded caches); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
-   chat import, onboarding, mobile, windows, flags, misc). Translations
-   (Check:i18n) go to stage 4.
+   chat import, onboarding, mobile, windows, flags, misc; 47 rows, done
+   2026-11-08: background runs use the agent's default folder, MCP images,
+   upstream's factory reset, the stacked alert center, the user turn saved
+   before streaming, the Personas migration, tool-card listings, the
+   plugin grid, glass header buttons). Translations (Check:i18n) go to
+   stage 4; two rows (#1961, #1837) to stage 5.
 4. **Stage 4, translations:** bring upstream's translations for keys Intel
    shows.
 5. **Stage 5, behaviour audit of the `COV-intel-own` files** (the item's
@@ -383,30 +387,30 @@ follow-up); rerun this tool with the new ref after it.
 | Gap:providers | `3587ab0ad` | #1940 | 7/21 | Fix DeepSeek thinking-mode tool_choice HTTP 400 | Done 2026-11-07 (stage 2): `ChatEngine.sanitizedToolChoice` (also #3051: newer Claude generations) after the reasoning switch. |
 | Gap:skills | `b32b368a7` | #1275 | 11/95 | [codex] Contain skill file paths | Done 2026-11-07 (stage 2): upstream's containment (`SkillStoreFileError`, contained read/write/remove) and recursive, symlink-skipping file listing in Intel's `SkillStore`. |
 | Gap:windows | `84271e386` | #2154 | 2/14 | fix settings window opening offscreen with stale saved frame | Done 2026-11-07 (stage 2): `IntelWindowFrameRecovery` for chat windows (after the saved frame) and the reused Settings window. |
-| Check:agents | `848f2c4c3` | #1837 | 54/160 | Add recoverable agent backup restore path | Recoverable agent backup restore (`AgentStore`); Intel keeps its own agent store. |
-| Check:applescript | `0d4c8077d` | #2394 | 11/26 | Report an unusable AppleScript model assignment instead of swapping it | AppleScript agent reports an unusable model assignment instead of swapping it. |
+| Check:stage5 | `848f2c4c3` | #1837 | 54/160 | Add recoverable agent backup restore path | Agent backup restore lives in upstream's `AgentStore`; compare with Intel's `AgentManager` load in stage 5. |
+| In | `0d4c8077d` | #2394 | 11/26 | Report an unusable AppleScript model assignment instead of swapping it | No live code gap. |
 | Done (3c-1) | `1a6bbd339` | #1679 | 1/3 | stop wasted iterations on repeated failing capabilities_load calls | An id matching nothing fails as not retryable in Intel's `capabilities`. |
 | In | `9a593c5d3` | #2393 | 17/27 | Answer a bare capabilities call with the enabled list, not a rejection | Intel's `capabilities` answers a bare call with the paged enabled list and recovers id shapes (`recoveredIds`). |
 | In | `f6384c3ce` | #2308 | 4/39 | Fix MCP capability indexing and custom agent scope | Intel's catalog is built live from the registry (no startup indexing race) and holds only loadable plugin/MCP tools, never the built-in configuration tools. |
 | Done (3c-1) | `3c6941823` | #2175 | 24/35 | Stop completed agent runs from reopening on stale todos | Added 2026-11-08 (0.24.3 triage skipped it as "agent subsystem amputated", stale since the loop was ported). Upstream's reopening is retired (`prepareTrackedTaskContinuation` is never called); its live chat piece, `unfinishedTodoCapFallback` at the step limit for a todo written this run, is on Intel now. |
 | In | `ca8bf2813` | #2192 | 33/78 | Fix stale Todo agent-loop completion and strengthen cache proof | Added 2026-11-08 (0.24.3 triage skipped it as "agent subsystem amputated", stale since the loop was ported). Its live part is on Intel: `complete` turns blocked only for a todo written this run (`AgentTodoRunScope`, upstream `AgentLoopTools`). The loop's recoverable-result rule is retired upstream; the cache proof is eval tooling. |
-| Check:chat-errors | `f6657eb53` |  | 7/25 | Fix plugin tool-loop default iterations | `ChatErrorMessages` (system-resource exhaustion message) and plugin tool-loop default iterations; Intel has no `ChatErrorMessages`. |
+| In | `f6657eb53` |  | 7/25 | Fix plugin tool-loop default iterations | No live code gap. |
 | Done (3b-2) | `10dd0e915` | #1259 | 263/652 | chat improvements | `thinkingDuration` and `toolCallDurations` on Intel's `ChatTurn` (saved in the chat JSON), "Thought for 12s" / "Thought", and "· 1.2s" on tool rows. Friendly titles and the pending shimmer were already in; Intel's activity roll-up covers tool-group coalescing. |
 | Done (3b-1) | `6d841a22b` | #1352 | 21/51 | save chart as image | Done 2026-11-07 (3b-1): upstream's `NativeChartView` (save as PNG, toast with Reveal in Finder; also #1283's no-replay entry animation flag). Intel keeps `chart.bar.xaxis` (the ascending symbol is macOS 14). |
 | Done (3b-1) | `8b86266fb` | #1468 | 65/146 | cascading esc on chat view states | Done 2026-11-07 (3b-1): the Esc cascade (popover, themed alert via `ThemedAlertCenter.cancelActive`, voice overlay, clarify/secret prompt via `cancelByUser` with the question kept in the transcript, inline editor via `handlesEscapeLocally` / `cancelInlineEdit`, completion banner, then close); upstream's inline editor (hint, hover cursor, width re-measure) and clarify card (`EditableTextView`: Enter submits, Esc cancels); alert buttons carry Return/Esc shortcuts. |
 | Done (3b-2) | `972e49b31` |  | 75/315 | chat polish with smoother streaming, stable tool call animations and scroll cache fixes (# | Chart and tool-group views survive cell recycling (coordinator caches, pruned per chat), charts animate once; the code block's streaming cursor and throttled highlight come with upstream's `NativeCodeBlockView`. |
 | Done (3b-2) | `a69299136` | #1272 | 18/39 | fixed scroll to bottom lag & mid stream jumps during streaming | Leading-edge streaming height throttle (no more text growing below the viewport), the streaming row keeps its measured height, and no anchor capture around height notes. Intel keeps non-animated notes. |
 | In | `ca2c1d202` | #2486 | 4/6 | fix leaked pacing timer on mid-stream processor dealloc | 3b: Intel's `StreamingDeltaProcessor` invalidates both timers in a plain `deinit` (`nonisolated(unsafe)` timers; `isolated deinit` needs a newer runtime). |
-| Check:context | `78788ce18` | #1324 | 7/38 | fixed issue with context budget being out of sync | Context-budget preview sync; Intel has its own estimate refresh. |
-| Check:context | `f6c5d13ae` |  | 1/7 | fix broken test | Context-budget preview refresh on agent change; Intel has its own `refreshContextEstimates`. |
+| In | `78788ce18` | #1324 | 7/38 | fixed issue with context budget being out of sync | Intel's budget preview is its own (`#if OSAURUS_INTEL`). |
+| N | `f6c5d13ae` |  | 1/7 | fix broken test | Test fix; Intel's preview is its own. |
 | In | `0336a4a2a` | #1359 | 32/63 | fixed fatal crashes & freezes | Folder context reads, clipboard, markdown and code block were in; the status-panel prewarm is launch work Intel doesn't do (not ported: needs a launch test on Rosy). |
 | Done (3e) | `9150c0d68` | #1337 | 145/283 | fixed main thread freeze | The storage query moved off the main thread with #1598's monitor; clipboard, permissions and plugins were in; crash reporting is absent; the model download views are MLX. |
 | Done (3e) | `a50e84448` | #1431 | 9/65 | fixed main thread hangs | `FlowLayout` caches its rows (upstream's file). Intel has no Bonjour browser (the upstream file and `ChatWindowState` are dead on Intel; discovered agents are a stub, 3f mobile). |
 | In | `efd4cd4e3` | #1353 | 60/98 | fixed app hangs across permissions, model browsing, audio and chat launch | Speech, permissions and the registry part were in; model metadata and downloads are MLX; the chat-view prewarm is not ported (launch work, needs a Rosy launch test). |
-| Check:file-tools | `53e657252` | #1311 | 191/296 | combined sandbox file operations into unified file operations | Unified file operations (#1311); container half is incompatible. |
-| Check:flags | `2c04c6edd` | #1344 | 83/187 | updated feature flag logic and moved more features behind feature flags | Feature-flag logic (#1344). |
-| Check:folders | `15543ac37` | #1313 | 348/413 | added stateful agent folder ops | Stateful agent folder operations (container half incompatible). |
-| Check:folders | `270f3496e` | #1465 | 120/411 | Expose applied generation diagnostics | Applied generation diagnostics (MLX) plus `FolderContextService` ignore patterns. |
+| I | `53e657252` | #1311 | 191/296 | combined sandbox file operations into unified file operations | Sandbox file routes (containers). |
+| In | `2c04c6edd` | #1344 | 83/187 | updated feature flag logic and moved more features behind feature flags | Intel's agent model reads upstream's positive `toolsEnabled` / `memoryEnabled` keys; Background Processes is sandbox-only. |
+| Done (3f) | `15543ac37` | #1313 | 348/413 | added stateful agent folder ops | Tool cards render folder listings and filename searches as readable lists (`markdownForListing` / `markdownForSearch`); the task state was in. |
+| I | `270f3496e` | #1465 | 120/411 | Expose applied generation diagnostics | Generation diagnostics are local-model; the folder scan change is a refactor. |
 | Check:i18n | `3719bbee4` | #1380 | 15/83 | updated chinese translations | Translations; see the i18n group. |
 | Check:i18n | `62397745f` | #1822 | 0/1 | Polish Russian localization | Translations; see the i18n group. |
 | Check:i18n | `7f981963b` | #1491 | 8/16 | updated chinese translations | Translations; see the i18n group. |
@@ -419,19 +423,19 @@ follow-up); rerun this tool with the new ref after it.
 | Done (3d) | `d85efbb74` | #2117 | 219/356 | knowledge base improvements | Avatars and the detail sheet were in; the "Grant to agents" prompt after creating a collection is added (Intel's grants live in `AgentManager`; the location reads Abilities → Knowledge). |
 | Done (3d) | `dc13cff70` | #2383 | 95/316 | fix knowledge search timeouts and improve what gets indexed | Ignore rules, skipped build folders, include/exclude globs, the short-token filter, the "still indexing" reply and the headingless-section error were in; the separate read connection is added (`readSync`, falls back to the writer). The env-gated debug log is N. |
 | Done (3d) | `e4aafec52` | #2067 | 1/3 | updated knowledge empty state copy | Header subtitle and empty-state copy are upstream's (Intel indexes those formats). |
-| Check:memory | `d870213bb` | #1613 | 4/8 | fixed issue with memory distill failure | Memory distillation collects visible text without streaming tool-hint sentinels; check Intel's distillation call. |
-| Check:misc | `1342db202` | #1315 | 44/50 | minor UI improvements | Minor UI improvements #1315. |
-| Check:misc | `1a4c25542` | #1297 | 24/42 | minor improvements | "minor improvements" #1297. |
+| In | `d870213bb` | #1613 | 4/8 | fixed issue with memory distill failure | Intel's memory runs on its own engine; no live code gap. |
+| In | `1342db202` | #1315 | 44/50 | minor UI improvements | No live code gap. |
+| Done (3f) | `1a4c25542` | #1297 | 24/42 | minor improvements | The Liquid Glass circle on header buttons, behind `#available(macOS 26)` (Intel had dropped it). |
 | Done (3c-2) | `e2eec4a9e` | #1362 | 8/10 | disable generative greetings globally and moved to per agent configuration | Superseded: upstream removed generative greetings in #2278, ported in 3c-2. |
 | Done (3c-2) | `76614779f` | #1317 | 31/48 | improve prompt for better guidance | Grounding, Code style and Risk-aware texts and the family blocks (LFM2, default obedience) come with #1430's port; `capabilities_search` was renamed later and Intel offers the `capabilities` gateway. Preflight companions are not on Intel (`COV-tool-discovery`). |
 | In | `390eb33e2` | #1594 | 68/139 | anthropic compaction fix | 3a: Intel's `sanitizeToolSequence` pairs every call with a result, fills unanswered calls and demotes orphan results; a duplicate same-id result is demoted rather than merged. |
 | Done (3a) | `76c1f6ae8` | #2108 | 21/76 | Fix truncated remote tool arguments | A round that ends on `finish_reason=length` with tool calls pending throws upstream's output-limit message; Anthropic's `max_tokens` stop now reaches the engine as `length`. |
 | In | `b3472ce02` | #1428 | 20/26 | moved remote provider diagnostics to edit | 3a: the UI part is in (20/26); the missing lines are MLX disk-cache stats. |
-| Check:server | `6948489e0` | #2399 | superseded | Reserve answer room on API requests so thinking cannot eat the whole max_tokens | Reserve answer room on API requests so thinking can't use all of `max_tokens`. |
-| Check:server | `b51ef1ad8` | #1247 | 164/251 | added OpenAI compatible /v1/completions endpoint for FIM autocomplete | `/v1/completions` (FIM); upstream runs it on local MLX. |
-| Check:voice | `6d25337b4` | #2321 | 55/106 | fix tts drift on long text with per sentence synthesis | TTS drift on long text (per-sentence synthesis). |
-| Check:voice | `7b0babc73` | #2016 | 7/9 | Stop TTS from going silent after the output device changes | TTS goes silent after the output device changes. |
-| Check:windows | `8d56219ee` | #2121 | 2/3 | fix settings window not opening on sequoia | Settings window not opening on Sequoia. |
+| I | `6948489e0` | #2399 | superseded | Reserve answer room on API requests so thinking cannot eat the whole max_tokens | Answer room for local thinking budgets. |
+| In | `b51ef1ad8` | #1247 | 164/251 | added OpenAI compatible /v1/completions endpoint for FIM autocomplete | Intel serves `/completions` (server stage 2). |
+| I | `6d25337b4` | #2321 | 55/106 | fix tts drift on long text with per sentence synthesis | Per-sentence PocketTTS synthesis (local model). |
+| In | `7b0babc73` | #2016 | 7/9 | Stop TTS from going silent after the output device changes | Intel's TTS rebuilds on output device changes (`handleRouteChange`). |
+| In | `8d56219ee` | #2121 | 2/3 | fix settings window not opening on sequoia | Intel's management window opener is its own. |
 | I | `004f479ff` | #1457 | 17/68 | fixed main thread disk hangs | MLX model discovery off the main thread. |
 | I | `04465bb94` | #1292 | 4/11 | detect already downloaded local models in onboarding | Local MLX runtime, model or pin; no Intel local runtime. |
 | I | `07ab5fbcb` |  | superseded | Pin vMLX memory safety contract | Local MLX runtime, model or pin; no Intel local runtime. |

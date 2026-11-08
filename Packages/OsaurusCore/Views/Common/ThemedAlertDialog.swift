@@ -25,26 +25,91 @@ public final class ThemedAlertCenter: ObservableObject {
     /// Global singleton (MainActor/UI only).
     public static let shared = ThemedAlertCenter()
 
-    @Published private var activeByScope: [ThemedAlertScope: ThemedAlertRequest] = [:]
-
-    /// True while any scope has an alert up (upstream). The layout tour
-    /// waits for a clear moment before it starts.
-    public var hasAnyActiveAlert: Bool {
-        !activeByScope.isEmpty
-    }
+    /// Per-scope stack, bottom first. Normally one entry: a scope holds a
+    /// single alert and a new one replaces it. A request flagged
+    /// `hostsNestedAlerts` (the chat History dialog) is the exception —
+    /// alerts presented while it is on top push above it and pop back to
+    /// it, so its content raising a confirmation doesn't tear it down.
+    @Published private var stacksByScope: [ThemedAlertScope: [ThemedAlertRequest]] = [:]
 
     func present(_ request: ThemedAlertRequest, scope: ThemedAlertScope) {
-        activeByScope[scope] = request
+        var stack = stacksByScope[scope] ?? []
+        if let index = stack.firstIndex(where: { $0.id == request.id }) {
+            // Re-presenting an id (e.g. a progress alert updating its
+            // content) swaps it in place without touching its presenter.
+            stack[index] = request
+        } else if let top = stack.last, top.hostsNestedAlerts {
+            stack.append(request)
+        } else if let top = stack.last {
+            // Single-slot rule: a new alert replaces the one on top. Reset
+            // the clobbered presenter (e.g. an async sandbox-cleanup notice
+            // landing while a delete-confirmation is open) so its
+            // `isPresented` binding doesn't wedge at `true`. Without this,
+            // the source view's `@State` stays set and its `onChange`-driven
+            // re-present never fires again, so that control can never
+            // raise its alert a second time.
+            top.onDismiss()
+            stack[stack.count - 1] = request
+        } else {
+            stack = [request]
+        }
+        stacksByScope[scope] = stack
+    }
+
+    /// Present a Cancel / destructive confirmation in `scope`. The common
+    /// shape of every "Delete / Remove / Unshare / Leave?" dialog; keeps
+    /// call sites to one line and guarantees the dismiss bookkeeping.
+    func confirmDestructive(
+        scope: ThemedAlertScope,
+        title: String,
+        message: String?,
+        destructiveTitle: String,
+        cancelTitle: String = L("Cancel"),
+        onConfirm: @escaping () -> Void
+    ) {
+        let requestId = UUID()
+        present(
+            ThemedAlertRequest(
+                id: requestId,
+                title: title,
+                message: message,
+                buttons: [
+                    .cancel(cancelTitle),
+                    .destructive(destructiveTitle) { onConfirm() },
+                ],
+                onDismiss: { [weak self] in
+                    self?.dismiss(scope: scope, id: requestId)
+                }
+            ),
+            scope: scope
+        )
     }
 
     func dismiss(scope: ThemedAlertScope, id: UUID) {
-        if activeByScope[scope]?.id == id {
-            activeByScope[scope] = nil
-        }
+        guard var stack = stacksByScope[scope],
+            let index = stack.firstIndex(where: { $0.id == id })
+        else { return }
+        stack.remove(at: index)
+        stacksByScope[scope] = stack.isEmpty ? nil : stack
     }
 
+    /// The topmost (interactive) alert for `scope`.
     func active(for scope: ThemedAlertScope) -> ThemedAlertRequest? {
-        activeByScope[scope]
+        stacksByScope[scope]?.last
+    }
+
+    /// Every alert showing in `scope`, bottom first. Only the last entry
+    /// is interactive; the host renders the rest underneath it.
+    func stack(for scope: ThemedAlertScope) -> [ThemedAlertRequest] {
+        stacksByScope[scope] ?? []
+    }
+
+    /// True when ANY scope currently owns an alert. Read-only occupancy
+    /// signal for callers that must not stack a new dialog on top of an
+    /// existing one anywhere in the app (e.g. router announcement dialogs
+    /// defer to the next activation instead).
+    public var hasAnyActiveAlert: Bool {
+        stacksByScope.values.contains { !$0.isEmpty }
     }
 
     /// Cancel the active alert for `scope` as if its cancel-role button
@@ -54,7 +119,7 @@ public final class ThemedAlertCenter: ObservableObject {
     /// closing the window underneath the alert).
     ///
     /// Used by ChatView's window-level Esc monitor, which owns the key
-    /// event before SwiftUI keyboard shortcuts can see it (upstream #1468).
+    /// event before SwiftUI keyboard shortcuts can see it.
     @discardableResult
     public func cancelActive(scope: ThemedAlertScope) -> Bool {
         guard let request = active(for: scope) else { return false }
@@ -78,7 +143,7 @@ public enum ThemedAlertScope: Hashable, Sendable {
     case content
     /// Alert scoped to toast overlay panels
     case toastOverlay
-    /// Alert scoped to the notch overlay panel
+    /// Alert scoped to the notch overlay panel (Intel)
     case notchOverlay
     /// Alert scoped to a specific tool permission dialog
     case toolPermission(UUID)
@@ -95,6 +160,18 @@ public struct ThemedAlertRequest: Identifiable {
     public let title: String
     /// Optional message displayed below the title
     public let message: String?
+    /// Optional asset-catalog images (module bundle) rendered side by side
+    /// above the title in place of the standard SF Symbol circle. Use for
+    /// announcement-style dialogs that ship their own bundled artwork. Empty
+    /// keeps the existing icon header for every other alert.
+    public let headerImageNames: [String]
+    /// Accessibility description for the header artwork as a whole. Ignored
+    /// when no header images are set.
+    public let headerImageAccessibilityLabel: String?
+    /// False hides the default symbol header (the "?" / "!" badge) when no
+    /// header artwork is set — for content dialogs (e.g. chat history)
+    /// where a question-mark badge over a list reads as noise.
+    public let showsHeaderIcon: Bool
     /// Optional accessory view rendered between the message and the button row.
     /// Use for extras like a "Don't ask again" toggle.
     public let accessory: AnyView?
@@ -104,6 +181,11 @@ public struct ThemedAlertRequest: Identifiable {
     /// corner instead of inline. Useful for chooser-style alerts where the
     /// inline row would just be padding.
     public let showsCloseButton: Bool
+    /// Optional title point size. Defaults to the standard 16pt, which is
+    /// tuned for compact confirmations; wide announcement dialogs (e.g. the
+    /// Workspaces intro) pass a larger value so the title holds its own
+    /// over a big custom-content area.
+    public let titleFontSize: CGFloat?
     /// When set, replaces the standard message + accessory + divider +
     /// button-row section with this view. The header (icon / title) and
     /// the close X (if `showsCloseButton`) still render. Use for multi-
@@ -113,6 +195,14 @@ public struct ThemedAlertRequest: Identifiable {
     /// standard alert width (340). Useful for `customContent` flows
     /// that need more breathing room than a text alert.
     public let width: CGFloat?
+    /// True for container dialogs (e.g. chat History) whose content raises
+    /// alerts of its own — a delete confirmation, an export chooser, a
+    /// progress notice. While such a request is on top of its scope, a
+    /// newly presented alert STACKS above it instead of replacing it, and
+    /// the container comes back (state intact) once the nested alert is
+    /// dismissed. Off by default: plain alerts keep the single-slot
+    /// replacement contract that `ThemedAlertCenter.present` documents.
+    public let hostsNestedAlerts: Bool
 
     /// Callback invoked when the alert is dismissed
     public let onDismiss: () -> Void
@@ -121,21 +211,31 @@ public struct ThemedAlertRequest: Identifiable {
         id: UUID = UUID(),
         title: String,
         message: String?,
+        headerImageNames: [String] = [],
+        headerImageAccessibilityLabel: String? = nil,
+        showsHeaderIcon: Bool = true,
         accessory: AnyView? = nil,
         buttons: [AlertButtonConfig],
         showsCloseButton: Bool = false,
+        titleFontSize: CGFloat? = nil,
         customContent: AnyView? = nil,
         width: CGFloat? = nil,
+        hostsNestedAlerts: Bool = false,
         onDismiss: @escaping () -> Void
     ) {
         self.id = id
         self.title = title
         self.message = message
+        self.headerImageNames = headerImageNames
+        self.headerImageAccessibilityLabel = headerImageAccessibilityLabel
+        self.showsHeaderIcon = showsHeaderIcon
         self.accessory = accessory
         self.buttons = buttons
         self.showsCloseButton = showsCloseButton
+        self.titleFontSize = titleFontSize
         self.customContent = customContent
         self.width = width
+        self.hostsNestedAlerts = hostsNestedAlerts
         self.onDismiss = onDismiss
     }
 }
@@ -189,9 +289,13 @@ private struct ThemedAlertDialogContent: View {
 
     let title: String
     let message: String?
+    var headerImageNames: [String] = []
+    var headerImageAccessibilityLabel: String? = nil
+    var showsHeaderIcon: Bool = true
     let accessory: AnyView?
     let buttons: [AlertButtonConfig]
     let showsCloseButton: Bool
+    var titleFontSize: CGFloat? = nil
     let customContent: AnyView?
     let width: CGFloat?
     let presentationStyle: ThemedAlertPresentationStyle
@@ -217,7 +321,11 @@ private struct ThemedAlertDialogContent: View {
                 .overlay(alignment: .topTrailing) {
                     if showsCloseButton, let cancel = cancelButton {
                         closeButton(cancel)
-                            .padding(10)
+                            .padding(.horizontal, 10)
+                            // With no artwork above the title, the X
+                            // shares the title row: centre it on the
+                            // 16pt title (24pt top inset, ~19pt line).
+                            .padding(.top, titleLeadsHeader ? 22 + ((titleFontSize ?? 16) - 16) / 2 : 10)
                     }
                 }
                 .scaleEffect(isAppearing ? 1 : 0.9)
@@ -299,33 +407,58 @@ private struct ThemedAlertDialogContent: View {
 
     private var headerSection: some View {
         VStack(spacing: 12) {
-            // Icon
-            ZStack {
-                Circle()
-                    .fill(iconBackgroundColor.opacity(0.15))
-                    .frame(width: 48, height: 48)
-
-                // Pulsing ring for attention
-                Circle()
-                    .stroke(iconBackgroundColor.opacity(0.3), lineWidth: 2)
-                    .frame(width: 48, height: 48)
-                    .scaleEffect(isAppearing ? 1.2 : 1)
-                    .opacity(isAppearing ? 0 : 0.8)
-                    .animation(
-                        .easeOut(duration: 1.5).repeatForever(autoreverses: false),
-                        value: isAppearing
-                    )
-
-                Image(systemName: iconName)
-                    .font(.system(size: 20, weight: .semibold))
-                    .foregroundColor(iconBackgroundColor)
+            if !headerImageNames.isEmpty {
+                // Custom artwork header (announcement-style dialogs). Kept
+                // small and static — no pulsing ring — so it reads as a
+                // friendly mark, not an attention grab.
+                HStack(alignment: .bottom, spacing: 12) {
+                    ForEach(headerImageNames, id: \.self) { name in
+                        Image(name, bundle: .module)
+                            .resizable()
+                            .aspectRatio(contentMode: .fit)
+                            .frame(height: 84)
+                    }
+                }
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(headerImageAccessibilityLabel ?? "")
+                .accessibilityHidden(headerImageAccessibilityLabel == nil)
+            } else if showsHeaderIcon {
+                iconHeader
             }
 
             // Title
             Text(LocalizedStringKey(title), bundle: .module)
-                .font(.system(size: 16, weight: .semibold))
+                .font(.system(size: titleFontSize ?? 16, weight: .semibold))
                 .foregroundColor(theme.primaryText)
                 .multilineTextAlignment(.center)
+        }
+    }
+
+    /// True when the header is just the title (no images, no icon).
+    private var titleLeadsHeader: Bool {
+        headerImageNames.isEmpty && !showsHeaderIcon
+    }
+
+    private var iconHeader: some View {
+        ZStack {
+            Circle()
+                .fill(iconBackgroundColor.opacity(0.15))
+                .frame(width: 48, height: 48)
+
+            // Pulsing ring for attention
+            Circle()
+                .stroke(iconBackgroundColor.opacity(0.3), lineWidth: 2)
+                .frame(width: 48, height: 48)
+                .scaleEffect(isAppearing ? 1.2 : 1)
+                .opacity(isAppearing ? 0 : 0.8)
+                .animation(
+                    .easeOut(duration: 1.5).repeatForever(autoreverses: false),
+                    value: isAppearing
+                )
+
+            Image(systemName: iconName)
+                .font(.system(size: 20, weight: .semibold))
+                .foregroundColor(iconBackgroundColor)
         }
     }
 
@@ -370,11 +503,16 @@ private struct ThemedAlertDialogContent: View {
         return buttons.filter { $0.role != .cancel }
     }
 
+    /// Index of the inline button that takes the accent style and Return.
+    /// With the corner X shown, an explicit role-nil action (e.g. an
+    /// announcement's single call-to-action) still reads as primary; only
+    /// the "nothing but cancel" chooser case yields no primary (`-1`).
     private var inlinePrimaryIndex: Int {
+        if let explicit = inlineButtons.firstIndex(where: { $0.role == nil }) {
+            return explicit
+        }
         if showsCloseButton { return -1 }
-        return inlineButtons.firstIndex { $0.role == nil }
-            ?? inlineButtons.firstIndex { $0.role == .destructive }
-            ?? 0
+        return inlineButtons.firstIndex { $0.role == .destructive } ?? 0
     }
 
     private func closeButton(_ cancel: AlertButtonConfig) -> some View {
@@ -554,7 +692,7 @@ private struct ThemedAlertPresenterModifier: ViewModifier {
 
     func body(content: Content) -> some View {
         content
-            .onChange(of: isPresented) { newValue in
+            .onChange(of: isPresented) { newValue in  // Ventura: one-argument form
                 if newValue {
                     Task { @MainActor in
                         ThemedAlertCenter.shared.present(
@@ -611,26 +749,55 @@ public struct ThemedAlertHost: View {
     }
 
     public var body: some View {
+        let stack = center.stack(for: scope)
+        let topId = stack.last?.id
         ZStack {
-            if let request = center.active(for: scope) {
+            // Bottom first, so a nested alert (delete confirmation, export
+            // chooser) draws over the container dialog that raised it —
+            // each card brings its own dim, which reads as the container
+            // receding behind the modal. Only the top card takes clicks.
+            ForEach(stack) { request in
                 ThemedAlertDialogContent(
                     title: request.title,
                     message: request.message,
+                    headerImageNames: request.headerImageNames,
+                    headerImageAccessibilityLabel: request.headerImageAccessibilityLabel,
+                    showsHeaderIcon: request.showsHeaderIcon,
                     accessory: request.accessory,
                     buttons: request.buttons,
                     showsCloseButton: request.showsCloseButton,
+                    titleFontSize: request.titleFontSize,
                     customContent: request.customContent,
                     width: request.width,
                     presentationStyle: .window,
                     onDismiss: { request.onDismiss() }
                 )
+                // Identity-key by request so a replacement alert gets a
+                // FRESH view. Without this, a request presented into the
+                // scope right after a button dismissal reuses the old
+                // view whose `isAppearing` state already animated to
+                // false — the new card renders fully transparent
+                // (observed live: the PII-model download progress alert
+                // was invisible after Install replaced the ask alert).
+                .id(request.id)
+                // The host is attached as an `.overlay` AFTER the root's
+                // `.themedAlertScope(...)`, so nothing inside the card
+                // inherits that scope. Custom content that reads
+                // `@Environment(\.themedAlertScope)` (e.g. the History
+                // dialog's session rows) would otherwise present its own
+                // alerts into `.unspecified`, which no host renders — the
+                // row's Delete confirmation and Export chooser silently
+                // went nowhere. Stamp the host's scope so nested alerts
+                // land in this window.
+                .themedAlertScope(scope)
+                .allowsHitTesting(request.id == topId)
             }
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
-        .allowsHitTesting(center.active(for: scope) != nil)
+        .allowsHitTesting(topId != nil)
         .animation(
             .spring(response: 0.35, dampingFraction: 0.85),
-            value: center.active(for: scope)?.id
+            value: topId
         )
     }
 }
@@ -640,9 +807,8 @@ public struct ThemedAlertHost: View {
 extension View {
     /// Present a themed alert dialog with glass effects and spring animations.
     /// Supports 1–3 (or more) buttons; when 3+, buttons stack vertically for better ergonomics.
-    /// `accessory` renders between the message and the buttons (upstream;
-    /// e.g. File Changes' per-file revert outcomes). `width` overrides the
-    /// standard 340pt dialog width (honoured by the `.contained` style only).
+    /// `width` overrides the standard 340pt dialog width (honoured by the
+    /// `.contained` style only) — use when button labels would otherwise wrap.
     @ViewBuilder
     func themedAlert(
         _ title: String,
@@ -738,12 +904,12 @@ private extension View {
                     .ignoresSafeArea()
 
                 ThemedAlertDialogContent(
-                    title: "Cancel Background Task?",
-                    message: "The work task is still running. Dismissing will cancel the task.",
+                    title: L("Cancel Background Task?"),
+                    message: L("The work task is still running. Dismissing will cancel the task."),
                     accessory: nil,
                     buttons: [
-                        .destructive("Cancel Task") {},
-                        .cancel("Keep Running"),
+                        .destructive(L("Cancel Task")) {},
+                        .cancel(L("Keep Running")),
                     ],
                     showsCloseButton: false,
                     customContent: nil,
