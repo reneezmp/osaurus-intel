@@ -334,7 +334,8 @@ now that Intel has both. Stage 6 re-reads them.
    tool scope gate, #2309 with #2018 / #2145; Thinking frozen per run,
    #2101; memory and time frozen on the user turn, #1798; skill slugs and
    keywords, #2089);
-   **3d** knowledge (5); **3e** crashes and hangs (13); **3f** the rest
+   **3d** knowledge (5; done 2026-11-08: the grant prompt, the category
+   chip, frontmatter pass-through, the read connection, the copy); **3e** crashes and hangs (13); **3f** the rest
    (folders, storage, settings, agents, memory, voice, MCP, server, chat,
    chat import, onboarding, mobile, windows, flags, misc). Translations
    (Check:i18n) go to stage 4.
@@ -410,11 +411,11 @@ follow-up); rerun this tool with the new ref after it.
 | Check:i18n | `c19db3515` | #1466 | 8/83 | updated chinese translations | Translations; see the i18n group. |
 | Check:i18n | `c5385fc15` | #1579 | 0/4 | updated chinese translations | Translations; see the i18n group. |
 | Check:i18n | `d14a60a2c` | #1354 | 8/52 | updated chinese translations | Translations; see the i18n group. |
-| Check:knowledge | `0c6563c66` | #2132 | 32/151 | auto categorize knowledge documents and soften the uncategorized warning | Knowledge documents: auto-categorized `inferredType`, softer uncategorized warning. |
-| Check:knowledge | `2169524f6` | #2338 | 25/60 | pass full frontmatter through in read_knowledge output | `read_knowledge` passes full frontmatter. |
-| Check:knowledge | `d85efbb74` | #2117 | 219/356 | knowledge base improvements | Knowledge base improvements #2117. |
-| Check:knowledge | `dc13cff70` | #2383 | 95/316 | fix knowledge search timeouts and improve what gets indexed | Knowledge search timeouts, ignore rules and globs; Intel's knowledge stack is its own copy (`KnowledgeDatabase`, `KnowledgeView` differ by thousands of lines). |
-| Check:knowledge | `e4aafec52` | #2067 | 1/3 | updated knowledge empty state copy | Knowledge empty-state copy. |
+| Done (3d) | `0c6563c66` | #2132 | 32/151 | auto categorize knowledge documents and soften the uncategorized warning | Intel already inferred categories (v3 `inferred_type`); the document readers now carry it (`effectiveType`, `isTypeInferred`), and the card chip is upstream's: localized, the tooltip, the tap-for-list alert, and upstream's count (markdown only, never `index.md` / `log.md`, inferred types count). Intel's `read_knowledge` reads chunk rows, which carry the effective type without the "(inferred)" marker. |
+| Done (3d) | `2169524f6` | #2338 | 25/60 | pass full frontmatter through in read_knowledge output | Intel passed flat fields through; nested objects and lists are now rendered as upstream (`Skill.parseYamlBlock`, `extraFields`, `renderValue`). |
+| Done (3d) | `d85efbb74` | #2117 | 219/356 | knowledge base improvements | Avatars and the detail sheet were in; the "Grant to agents" prompt after creating a collection is added (Intel's grants live in `AgentManager`; the location reads Abilities → Knowledge). |
+| Done (3d) | `dc13cff70` | #2383 | 95/316 | fix knowledge search timeouts and improve what gets indexed | Ignore rules, skipped build folders, include/exclude globs, the short-token filter, the "still indexing" reply and the headingless-section error were in; the separate read connection is added (`readSync`, falls back to the writer). The env-gated debug log is N. |
+| Done (3d) | `e4aafec52` | #2067 | 1/3 | updated knowledge empty state copy | Header subtitle and empty-state copy are upstream's (Intel indexes those formats). |
 | Check:memory | `d870213bb` | #1613 | 4/8 | fixed issue with memory distill failure | Memory distillation collects visible text without streaming tool-hint sentinels; check Intel's distillation call. |
 | Check:misc | `1342db202` | #1315 | 44/50 | minor UI improvements | Minor UI improvements #1315. |
 | Check:misc | `1a4c25542` | #1297 | 24/42 | minor improvements | "minor improvements" #1297. |

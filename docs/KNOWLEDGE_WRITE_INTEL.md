@@ -102,10 +102,19 @@ Intel numbers its own index schema (its v1 differs from upstream's):
 **v2** adds `tickets`, **v3** adds `inferred_type`. The v3 migration fills
 `inferred_type` for existing documents (it depends only on the path), because
 the hash check would otherwise skip them. Readers use the explicit frontmatter
-`type` when present, else the inferred one (search hits, `list_knowledge`,
-`getDocument`); the Knowledge detail's "uncategorized" check still reports
-missing *frontmatter* types. `KnowledgeDatabase` gained an internal `init()` and
-`openInMemory()` for tests, as upstream.
+`type` when present, else the inferred one (search hits, `list_knowledge`).
+Since 2026-11-08 (`W-cov-reaudit` 3d) `listDocuments` and `getDocument`
+return both (`KnowledgeDocument.inferredType`, `effectiveType`), and the
+card's "uncategorized" chip counts as upstream: no explicit or inferred type,
+markdown only, never `index.md` / `log.md`. `KnowledgeDatabase` gained an
+internal `init()` and `openInMemory()` for tests, as upstream.
+
+**Read connection (2026-11-08, upstream #2383):** list, read and search
+queries run on a second connection with its own queue (`readSync`), so they
+don't wait behind the indexer's writes. It opens lazily with the same storage
+key; an in-memory database, a failed open, or a failed read (for example
+after a key change; the reader is then closed) falls back to the writer.
+`close()` closes both.
 
 ### Git sync
 

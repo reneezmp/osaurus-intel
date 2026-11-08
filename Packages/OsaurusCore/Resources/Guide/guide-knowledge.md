@@ -10,11 +10,11 @@ Knowledge is what you teach your agents: a library of your own documents (SOPs, 
 
 ## Setup
 
-1. Settings… (⌘,) → Knowledge → **Add Collection** — point it at any folder of guides, templates, standards, or an exported wiki.
-2. Open a custom agent → Abilities → Overview → **Knowledge** — enable the toggle and choose the collections that agent may use.
+1. Settings… (⌘,) → Knowledge → **Add Collection** — point it at any folder of guides, templates, standards, or an exported wiki. After saving, pick the agents that may use it in the **Grant to agents** sheet (or skip it).
+2. To change grants later, open a custom agent → Abilities → Overview → **Knowledge** — enable the toggle and choose the collections that agent may use.
 3. Chat. The agent can search, list, and read the granted library when a task calls for it.
 
-Files are indexed in place and never moved. Edits made to the folder outside Osaurus are re-indexed within a few seconds. Markdown, MDX, and plain text are read directly. PDF, Word, Excel, PowerPoint, CSV, source-code, and other formats supported by Osaurus's document adapters are converted to searchable text locally. Optional YAML frontmatter (`type`, `title`, `description`, `tags`) improves filtering and display.
+Files are indexed in place and never moved. Edits made to the folder outside Osaurus are re-indexed within a few seconds. Markdown, MDX, and plain text are read directly. PDF, Word, Excel, PowerPoint, CSV, source-code, and other formats supported by Osaurus's document adapters are converted to searchable text locally. Optional YAML frontmatter (`type`, `title`, `description`, `tags`) improves filtering and display; a document without `type` takes its top folder's name as its category, and other frontmatter fields are shown to the agent when it reads the document. Categories are optional: the collection card's chip counts markdown files with none, and clicking it lists them.
 
 Projects can share collections too. Open a project and select collections in its **Knowledge** section; every chat in that project receives those collections in addition to the running custom agent's own grants.
 

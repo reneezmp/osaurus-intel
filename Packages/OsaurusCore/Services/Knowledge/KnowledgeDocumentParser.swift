@@ -58,10 +58,77 @@ public enum KnowledgeDocumentParser {
             case "title": fm.title = value
             case "description": fm.summary = value
             case "tags": fm.tags = normalizedTags(value)
-            default: if !value.isEmpty { fm.extras.append(.init(key: key, value: value)) }
+            default: break
             }
         }
+        // Upstream #2338: every other field passes through to `read_knowledge`,
+        // nested objects and lists included, via the same YAML parser skills
+        // use (this line parser drops indented children).
+        fm.extras = extraFields(raw: Skill.parseYamlBlock(fieldLines), frontmatterLines: fieldLines)
         return (fm, lines[close...].dropFirst().joined(separator: "\n"))
+    }
+
+    private static let reservedKeys: Set<String> = ["type", "title", "description", "tags"]
+
+    /// Collect non-reserved fields in source order (upstream). The YAML
+    /// dictionary is unordered, so top-level key order comes from the lines.
+    private static func extraFields(
+        raw: [String: Any],
+        frontmatterLines: [String]
+    ) -> [KnowledgeFrontmatterField] {
+        var orderedKeys: [String] = []
+        var seen: Set<String> = []
+        for line in frontmatterLines {
+            guard line.first != " ", line.first != "\t" else { continue }
+            let stripped = line.trimmingCharacters(in: .whitespaces)
+            guard !stripped.isEmpty, !stripped.hasPrefix("#"),
+                let colon = stripped.firstIndex(of: ":")
+            else { continue }
+            let key = String(stripped[..<colon]).trimmingCharacters(in: .whitespaces)
+            guard !key.isEmpty, seen.insert(key).inserted else { continue }
+            orderedKeys.append(key)
+        }
+        var extras: [KnowledgeFrontmatterField] = []
+        for key in orderedKeys where !reservedKeys.contains(key.lowercased()) {
+            guard let value = raw[key] else { continue }
+            let rendered = renderValue(value)
+            guard !rendered.isEmpty else { continue }
+            extras.append(KnowledgeFrontmatterField(key: key, value: rendered))
+        }
+        return extras
+    }
+
+    /// Render a parsed YAML value for pass-through display (upstream):
+    /// scalars verbatim, lists comma-joined, nested objects as `sub: value`.
+    private static func renderValue(_ value: Any) -> String {
+        if let dict = value as? [String: Any] {
+            return dict.keys.sorted()
+                .compactMap { key in
+                    let rendered = renderValue(dict[key] ?? "")
+                    return rendered.isEmpty ? nil : key + ": " + rendered
+                }
+                .joined(separator: ", ")
+        }
+        if let array = value as? [Any] {
+            return array.map { renderValue($0) }.filter { !$0.isEmpty }
+                .joined(separator: ", ")
+        }
+        // The skill YAML parser keeps flow-style lists (`[a, b]`) as a
+        // plain string; unwrap them, preserving case and order.
+        let scalar: String =
+            (value as? String)?.trimmingCharacters(in: .whitespacesAndNewlines)
+            ?? String(describing: value).trimmingCharacters(in: .whitespacesAndNewlines)
+        if scalar.hasPrefix("["), scalar.hasSuffix("]") {
+            return scalar.dropFirst().dropLast()
+                .components(separatedBy: ",")
+                .map {
+                    $0.trimmingCharacters(in: .whitespaces)
+                        .trimmingCharacters(in: CharacterSet(charactersIn: "\"'"))
+                }
+                .filter { !$0.isEmpty }
+                .joined(separator: ", ")
+        }
+        return scalar
     }
 
     public static func resolveTitle(frontmatter: KnowledgeFrontmatter, body: String, relPath: String) -> String {

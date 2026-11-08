@@ -44,6 +44,9 @@ struct KnowledgeView: View {
     @State private var selectedTab: KnowledgeTab = .collections
     /// Open staleness tickets agents filed (upstream curation list).
     @State private var openTickets: [KnowledgeTicket] = []
+    /// A freshly created collection awaiting upstream's "grant to agents"
+    /// prompt (#2117), so access is granted inline instead of in each agent.
+    @State private var grantingCollection: KnowledgeGrantTarget?
 
     var body: some View {
         VStack(spacing: 0) {
@@ -108,6 +111,21 @@ struct KnowledgeView: View {
                 onCancel: { isCreating = false }
             )
         }
+        .sheet(item: $grantingCollection) { target in
+            KnowledgeGrantAgentsSheet(
+                target: target,
+                onDone: { grantedCount in
+                    grantingCollection = nil
+                    if grantedCount > 0 {
+                        showToast(
+                            grantedCount == 1
+                                ? L("Granted \"\(target.name)\" to 1 agent")
+                                : L("Granted \"\(target.name)\" to \(grantedCount) agents")
+                        )
+                    }
+                }
+            )
+        }
         .sheet(item: $editingCollection) { collection in
             KnowledgeCollectionEditorSheet(
                 title: "Edit Knowledge Collection",
@@ -157,13 +175,13 @@ struct KnowledgeView: View {
         if writeRuns.isEmpty {
             ManagerHeaderWithActions(
                 title: L("Knowledge"),
-                subtitle: L("Searchable folders of guides, policies, and templates"),
+                subtitle: L("Folders of documents your agents can search and read on demand"),
                 count: integration.collections.count
             ) { headerActions }
         } else {
             ManagerHeaderWithTabs(
                 title: L("Knowledge"),
-                subtitle: L("Searchable folders of guides, policies, and templates"),
+                subtitle: L("Folders of documents your agents can search and read on demand"),
                 count: integration.collections.count,
                 actions: { headerActions },
                 tabsRow: {
@@ -393,23 +411,23 @@ struct KnowledgeView: View {
             icon: "books.vertical.fill",
             title: L("Add Your First Knowledge Collection"),
             subtitle: L(
-                "Point Osaurus at a folder of guides, templates, and standards so agents can consult it on demand."
+                "Point Osaurus at a folder of guides, templates, and standards and grant it to agents so they can consult it on demand. Markdown, plain text, code, PDF, Word, Excel, PowerPoint, and CSV files are supported."
             ),
             examples: [
                 .init(
                     icon: "doc.text",
                     title: L("Guides & Policies"),
-                    description: L("How your team does things")
+                    description: L("How your team does things, written down")
                 ),
                 .init(
                     icon: "square.on.square",
                     title: L("Templates"),
-                    description: L("Wording you reuse")
+                    description: L("Wording you reuse, like email replies")
                 ),
                 .init(
                     icon: "book",
                     title: L("How-To Steps"),
-                    description: L("Instructions for everyday tasks")
+                    description: L("Simple instructions for everyday tasks")
                 ),
             ],
             primaryAction: .init(
@@ -496,7 +514,8 @@ struct KnowledgeView: View {
                 }
                 createPrefillName = ""
                 createGrantProjectId = nil
-                showToast("Added \"\(name)\"")
+                showToast("Added \"\(name)\", indexing in the background")
+                grantingCollection = KnowledgeGrantTarget(id: collectionId, name: name)
             } catch {
                 showToast(error.localizedDescription, isError: true)
             }
@@ -597,16 +616,59 @@ private struct KnowledgeCollectionCard: View {
     }
 
     @State private var categoryStatus: CategoryStatus = .checking
+    /// Upstream #2132: tapping the chip lists the uncategorized documents.
+    @State private var showingCategoryAlert = false
+    @State private var uncategorizedPaths: [String] = []
 
     private var categoryLabel: String {
         switch categoryStatus {
         case .checking:
-            return "Checking categories…"
+            return L("Checking categories…")
         case .allCategorized:
-            return "All categorized"
+            return L("All categorized")
         case .uncategorized(let count):
-            return count == 1 ? "1 doc uncategorized" : "\(count) docs uncategorized"
+            return count == 1 ? L("1 doc uncategorized") : String(format: L("%lld docs uncategorized"), count)
         }
+    }
+
+    private var categoryHelp: String {
+        switch categoryStatus {
+        case .allCategorized:
+            return L(
+                "Every document has a category, so agents can filter the library by it. Categories come from frontmatter `type:` or are inferred automatically from folder names."
+            )
+        case .uncategorized(let count):
+            return count == 1
+                ? L(
+                    "1 document has no category. This is optional, agents can still search and read it. To let agents filter by category, add a `type:` line (e.g. `type: policy`) to the top of the file. Click for the list."
+                )
+                : String(
+                    format: L(
+                        "%lld documents have no category. This is optional, agents can still search and read them. To let agents filter by category, add a `type:` line (e.g. `type: policy`) to the top of each file. Click for the list."
+                    ), count)
+        case .checking:
+            return L("Checking that every document declares a category (its `type`)…")
+        }
+    }
+
+    private var categoryAlertTitle: String {
+        if uncategorizedPaths.isEmpty { return L("All documents categorized") }
+        return uncategorizedPaths.count == 1
+            ? L("1 document has no category")
+            : String(format: L("%lld documents have no category"), uncategorizedPaths.count)
+    }
+
+    private var categoryAlertMessage: String {
+        if uncategorizedPaths.isEmpty {
+            return L(
+                "Every document has a category, from its frontmatter `type:` or inferred from its folder name. Agents can filter this collection by category."
+            )
+        }
+        let sample = uncategorizedPaths.prefix(8).joined(separator: "\n")
+        let more = uncategorizedPaths.count - min(8, uncategorizedPaths.count)
+        return L(
+            "This is optional. Agents can still search and read these documents.\n\nTo let agents filter by category, move them into a folder (the folder name becomes the category) or add a `type:` line to their frontmatter.\n\n"
+        ) + sample + (more > 0 ? "\n" + String(format: L("and %lld more"), more) : "")
     }
 
     private var categoryIcon: String {
@@ -705,16 +767,31 @@ private struct KnowledgeCollectionCard: View {
                 .foregroundColor(theme.secondaryText)
             }
 
-            HStack(spacing: 4) {
-                Image(systemName: categoryIcon)
-                    .font(.system(size: 9))
-                Text(verbatim: categoryLabel)
-                    .font(.system(size: 9, weight: .bold))
+            Button(action: {
+                Task {
+                    await refreshCategoryStatus()
+                    showingCategoryAlert = true
+                }
+            }) {
+                HStack(spacing: 4) {
+                    Image(systemName: categoryIcon)
+                        .font(.system(size: 9))
+                    Text(verbatim: categoryLabel)
+                        .font(.system(size: 9, weight: .bold))
+                }
+                .padding(.horizontal, 6)
+                .padding(.vertical, 2)
+                .background(Capsule().fill(categoryColor.opacity(0.15)))
+                .foregroundColor(categoryColor)
             }
-            .padding(.horizontal, 6)
-            .padding(.vertical, 2)
-            .background(Capsule().fill(categoryColor.opacity(0.15)))
-            .foregroundColor(categoryColor)
+            .buttonStyle(.plain)
+            .help(categoryHelp)
+            .themedAlert(
+                categoryAlertTitle,
+                isPresented: $showingCategoryAlert,
+                message: categoryAlertMessage,
+                primaryButton: .cancel(L("OK"))
+            )
             .task(id: collection.updatedAt) { await refreshCategoryStatus() }
             .onChange(of: collection.isIndexing) { indexing in
                 if !indexing { Task { await refreshCategoryStatus() } }
@@ -800,14 +877,22 @@ private struct KnowledgeCollectionCard: View {
             if !KnowledgeDatabase.shared.isOpen { try? KnowledgeDatabase.shared.open() }
             return (try? KnowledgeDatabase.shared.listDocuments(collectionId: collectionId)) ?? []
         }.value
-        let uncategorized = documents.filter {
-            $0.docType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
-        }.count
+        // Upstream `uncategorizedDocuments` (#2132): no explicit or inferred
+        // category, markdown only (other formats have no frontmatter to
+        // fix), and never the collection's own `index.md` / `log.md`.
+        let reserved: Set<String> = ["index.md", "log.md"]
+        let uncategorized = documents.filter { document in
+            document.effectiveType.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+                && !reserved.contains(document.relPath.lowercased())
+                && KnowledgeIndexService.markdownExtensions.contains(
+                    (document.relPath as NSString).pathExtension.lowercased())
+        }.map(\.relPath)
         await MainActor.run {
+            uncategorizedPaths = uncategorized
             categoryStatus =
-                uncategorized == 0
+                uncategorized.isEmpty
                 ? .allCategorized
-                : .uncategorized(uncategorized)
+                : .uncategorized(uncategorized.count)
         }
     }
 }
@@ -977,6 +1062,157 @@ private struct KnowledgeCollectionEditorSheet: View {
         raw.split(whereSeparator: { $0 == "," || $0.isNewline })
             .map { $0.trimmingCharacters(in: .whitespaces) }
             .filter { !$0.isEmpty }
+    }
+}
+
+/// The collection a grant prompt is for.
+private struct KnowledgeGrantTarget: Identifiable, Equatable {
+    let id: UUID
+    let name: String
+}
+
+/// Upstream's "grant to agents" prompt (#2117), shown right after a
+/// collection is created. Intel keeps grants in `AgentManager`
+/// (`updateKnowledgeSettings`), and an agent's Knowledge switch lives under
+/// Abilities.
+private struct KnowledgeGrantAgentsSheet: View {
+    @ObservedObject private var themeManager = ThemeManager.shared
+    private var theme: ThemeProtocol { themeManager.currentTheme }
+
+    let target: KnowledgeGrantTarget
+    /// Passes the number of agents actually granted (0 when none/skipped).
+    let onDone: (Int) -> Void
+
+    /// Editable agents, in display order (the built-in agent has no grants).
+    private let agents: [Agent]
+    @State private var selectedIds: Set<UUID>
+
+    init(target: KnowledgeGrantTarget, onDone: @escaping (Int) -> Void) {
+        self.target = target
+        self.onDone = onDone
+        let manager = AgentManager.shared
+        let editable = manager.agents.filter { !$0.isBuiltIn }
+        self.agents = editable
+        // Pre-select agents that already have Knowledge on, so the common
+        // "grant this to my knowledge-using agents" path is one click.
+        _selectedIds = State(
+            initialValue: Set(editable.filter { manager.knowledgeEnabled(for: $0.id) }.map(\.id))
+        )
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 16) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text("Grant \"\(target.name)\" to agents", bundle: .module)
+                    .font(.system(size: 15, weight: .semibold))
+                    .foregroundColor(theme.primaryText)
+                Text(
+                    "Pick which agents can search and read this collection. You can change this later in each agent's Abilities → Knowledge section.",
+                    bundle: .module
+                )
+                .font(.system(size: 11))
+                .foregroundColor(theme.tertiaryText)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+
+            if agents.isEmpty {
+                Text(
+                    "No agents to grant yet. Create an agent, then enable Knowledge for it in its Abilities section.",
+                    bundle: .module
+                )
+                .font(.system(size: 12))
+                .foregroundColor(theme.secondaryText)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .padding(.vertical, 24)
+            } else {
+                ScrollView {
+                    VStack(spacing: 0) {
+                        ForEach(agents) { agent in
+                            agentRow(agent)
+                        }
+                    }
+                }
+                .frame(minHeight: 160, maxHeight: 320)
+                .background(RoundedRectangle(cornerRadius: 8).fill(theme.secondaryBackground))
+            }
+
+            HStack {
+                Spacer()
+                Button {
+                    onDone(0)
+                } label: {
+                    Text(agents.isEmpty ? "Close" : "Skip", bundle: .module)
+                }
+                .buttonStyle(SettingsButtonStyle())
+                .keyboardShortcut(.cancelAction)
+                if !agents.isEmpty {
+                    Button {
+                        grant()
+                    } label: {
+                        Text("Grant Access", bundle: .module)
+                    }
+                    .buttonStyle(SettingsButtonStyle(isPrimary: true))
+                    .keyboardShortcut(.defaultAction)
+                    .disabled(selectedIds.isEmpty)
+                }
+            }
+        }
+        .padding(20)
+        .frame(width: 460)
+        .background(theme.primaryBackground)
+        .environment(\.theme, themeManager.currentTheme)
+    }
+
+    private func agentRow(_ agent: Agent) -> some View {
+        let selected = selectedIds.contains(agent.id)
+        return Button {
+            if selected {
+                selectedIds.remove(agent.id)
+            } else {
+                selectedIds.insert(agent.id)
+            }
+        } label: {
+            HStack(spacing: 8) {
+                Image(systemName: selected ? "checkmark.circle.fill" : "circle")
+                    .font(.system(size: 14))
+                    .foregroundColor(selected ? theme.accentColor : theme.tertiaryText)
+                VStack(alignment: .leading, spacing: 1) {
+                    Text(agent.name)
+                        .font(.system(size: 13, weight: .medium))
+                        .foregroundColor(theme.primaryText)
+                    if !agent.displayDescription.isEmpty {
+                        Text(agent.displayDescription)
+                            .font(.system(size: 11))
+                            .foregroundColor(theme.tertiaryText)
+                            .lineLimit(1)
+                    }
+                }
+                Spacer()
+                if !AgentManager.shared.knowledgeEnabled(for: agent.id) {
+                    Text("Enables Knowledge", bundle: .module)
+                        .font(.system(size: 9, weight: .medium))
+                        .foregroundColor(theme.secondaryText)
+                }
+            }
+            .padding(10)
+            .contentShape(Rectangle())
+        }
+        .buttonStyle(.plain)
+    }
+
+    /// Add the collection to every selected agent and turn Knowledge on so
+    /// the grant takes effect. Agents already holding it are left untouched.
+    private func grant() {
+        let manager = AgentManager.shared
+        var granted = 0
+        for agent in agents where selectedIds.contains(agent.id) {
+            var ids = manager.knowledgeCollectionIds(for: agent.id)
+            if manager.knowledgeEnabled(for: agent.id), ids.contains(target.id) { continue }
+            if !ids.contains(target.id) { ids.append(target.id) }
+            manager.updateKnowledgeSettings(enabled: true, collectionIds: ids, for: agent.id)
+            granted += 1
+        }
+        onDone(granted)
     }
 }
 
@@ -1203,8 +1439,8 @@ private struct KnowledgeCollectionDetailSheet: View {
                                     .truncationMode(.middle)
                             }
                             Spacer()
-                            if !document.docType.isEmpty {
-                                Text(document.docType)
+                            if !document.effectiveType.isEmpty {
+                                Text(document.effectiveType)
                                     .font(.system(size: 9, weight: .bold))
                                     .foregroundColor(theme.accentColor)
                                     .padding(.horizontal, 7)

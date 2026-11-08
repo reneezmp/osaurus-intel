@@ -35,6 +35,16 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     /// upstream's `tickets` table, v3 upstream's `inferred_type` column
     /// (docs/KNOWLEDGE_WRITE_INTEL.md).
     private static let schemaVersion = 3
+    /// Upstream #2383: a second connection, on its own serial queue, for the
+    /// read-only tool queries (search, list, read). WAL lets it read while
+    /// the indexer writes, so `search_knowledge` no longer waits behind a
+    /// large collection's write backlog on `queue`. Opened lazily; reads fall
+    /// back to the writer when it can't open or a read on it fails.
+    private var readDB: OpaquePointer?
+    private let readQueue = DispatchQueue(label: "ai.osaurus.knowledge.database.read")
+    /// A `:memory:` database is private to its connection, so tests keep
+    /// every read on the writer.
+    private var isInMemory = false
     /// Internal (not private) so tests can build isolated instances, as upstream.
     init() {}
     deinit { close() }
@@ -44,6 +54,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         try queue.sync {
             guard db == nil else { return }
             db = try EncryptedSQLiteOpener.open(path: ":memory:", key: nil, applyPerfPragmas: false)
+            isInMemory = true
             do { try migrate() } catch { closeLocked(); throw error }
         }
     }
@@ -111,8 +122,28 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         KnowledgeLogger.database.warning("Quarantined \(moved) derived Knowledge index file(s): \(quarantineReason, privacy: .public)")
     }
 
-    public func close() { queue.sync { closeLocked() } }
-    private func closeLocked() { if let db { sqlite3_close(db) }; db = nil }
+    public func close() {
+        readQueue.sync { closeReadLocked() }
+        queue.sync { closeLocked() }
+    }
+    private func closeLocked() { if let db { sqlite3_close(db) }; db = nil; isInMemory = false }
+    private func closeReadLocked() { if let readDB { sqlite3_close(readDB) }; readDB = nil }
+
+    /// Lazily open the read connection; on `readQueue`. Nil (the caller uses
+    /// the writer) when the writer isn't open, the database is in memory, or
+    /// the key or file can't be opened.
+    private func ensureReadConnectionLocked() -> OpaquePointer? {
+        if let readDB { return readDB }
+        guard queue.sync(execute: { db != nil && !isInMemory }) else { return nil }
+        guard let key = try? StorageKeyManager.shared.currentKey(),
+            let connection = try? EncryptedSQLiteOpener.open(path: Self.fileURL.path, key: key)
+        else {
+            KnowledgeLogger.database.warning("Knowledge read connection unavailable; reads use the writer")
+            return nil
+        }
+        readDB = connection
+        return connection
+    }
 
     private func migrate() throws {
         guard let connection = db else { throw KnowledgeDatabaseError.notOpen }
@@ -221,11 +252,11 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     /// Documents shown by the Knowledge management surface. The database owns
     /// its serial queue, so callers may safely load these off the main actor.
     public func listDocuments(collectionId: String, limit: Int = 2_000) throws -> [KnowledgeDocument] {
-        try sync { connection in
+        try readSync { connection in
             var result: [KnowledgeDocument] = []
             try query(connection, """
                 SELECT id,collection_id,rel_path,title,doc_type,summary,tags_csv,
-                       content_hash,size_bytes,modified_at,indexed_at
+                       content_hash,size_bytes,modified_at,indexed_at,inferred_type
                 FROM documents WHERE collection_id=?1
                 ORDER BY rel_path COLLATE NOCASE LIMIT ?2
                 """, bind: { statement in
@@ -244,7 +275,8 @@ public final class KnowledgeDatabase: @unchecked Sendable {
                             contentHash: columnText(statement, 7),
                             sizeBytes: Int(sqlite3_column_int64(statement, 8)),
                             modifiedAt: columnText(statement, 9),
-                            indexedAt: columnText(statement, 10)
+                            indexedAt: columnText(statement, 10),
+                            inferredType: columnText(statement, 11)
                         ))
                     }
                 }
@@ -402,12 +434,13 @@ public final class KnowledgeDatabase: @unchecked Sendable {
         }
     }
 
-    /// One indexed document's metadata (upstream), with the effective type.
+    /// One indexed document's metadata (upstream): the explicit and the
+    /// inferred type (`effectiveType` picks).
     public func getDocument(collectionId: String, relPath: String) throws -> KnowledgeDocument? {
-        try sync { connection in
+        try readSync { connection in
             var document: KnowledgeDocument?
             try query(connection, """
-                SELECT d.id,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.summary,d.tags_csv,d.content_hash,d.size_bytes,d.modified_at,d.indexed_at
+                SELECT d.id,d.collection_id,d.rel_path,d.title,d.doc_type,d.summary,d.tags_csv,d.content_hash,d.size_bytes,d.modified_at,d.indexed_at,d.inferred_type
                 FROM documents d WHERE d.collection_id = ?1 AND d.rel_path = ?2 LIMIT 1
                 """, bind: { bindText($0, 1, collectionId); bindText($0, 2, relPath) }) { statement in
                     if sqlite3_step(statement) == SQLITE_ROW {
@@ -416,7 +449,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
                             relPath: columnText(statement, 2), title: columnText(statement, 3), docType: columnText(statement, 4),
                             summary: columnText(statement, 5), tagsCSV: columnText(statement, 6), contentHash: columnText(statement, 7),
                             sizeBytes: Int(sqlite3_column_int64(statement, 8)), modifiedAt: columnText(statement, 9),
-                            indexedAt: columnText(statement, 10))
+                            indexedAt: columnText(statement, 10), inferredType: columnText(statement, 11))
                     }
                 }
             return document
@@ -425,7 +458,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
 
     public func searchChunksText(query text: String, collectionIds: [String], limit: Int) throws -> [KnowledgeChunkHit] {
         guard !collectionIds.isEmpty, !text.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty else { return [] }
-        return try sync { connection in
+        return try readSync { connection in
             let placeholders = collectionIds.indices.map { "?\($0 + 2)" }.joined(separator: ",")
             let sql = """
                 SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
@@ -449,7 +482,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
 
     public func vectorChunks(collectionIds: [String], model: String) throws -> [KnowledgeVectorChunk] {
         guard !collectionIds.isEmpty else { return [] }
-        return try sync { connection in
+        return try readSync { connection in
             let placeholders = collectionIds.indices.map { "?\($0 + 2)" }.joined(separator: ",")
             var result: [KnowledgeVectorChunk] = []
             try query(connection, """
@@ -464,7 +497,7 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     }
 
     public func allChunks(collectionId: String) throws -> [KnowledgeChunkHit] {
-        try sync { connection in
+        try readSync { connection in
             var result: [KnowledgeChunkHit] = []
             try query(connection, """
                 SELECT d.id,c.chunk_index,c.heading_path,c.content,d.collection_id,d.rel_path,d.title,\(Self.effectiveTypeSQL),d.tags_csv
@@ -522,6 +555,27 @@ public final class KnowledgeDatabase: @unchecked Sendable {
     }
 
     private func sync<T>(_ body: (OpaquePointer) throws -> T) throws -> T { try queue.sync { guard let db else { throw KnowledgeDatabaseError.notOpen }; return try body(db) } }
+
+    /// A read-only query on the read connection (upstream #2383), else on
+    /// the writer. A failed read closes the reader (for example after a
+    /// storage key change) and runs again on the writer.
+    private func readSync<T>(_ body: (OpaquePointer) throws -> T) throws -> T {
+        dispatchPrecondition(condition: .notOnQueue(readQueue))
+        var value: T?
+        let ran: Bool = readQueue.sync {
+            guard let connection = ensureReadConnectionLocked() else { return false }
+            do {
+                value = try body(connection)
+                return true
+            } catch {
+                KnowledgeLogger.database.warning("Knowledge read connection failed; retrying on the writer: \(error)")
+                closeReadLocked()
+                return false
+            }
+        }
+        if ran, let value { return value }
+        return try sync(body)
+    }
     private func execute(_ connection: OpaquePointer, _ sql: String) throws { guard sqlite3_exec(connection, sql, nil, nil, nil) == SQLITE_OK else { throw lastError(connection) } }
     private func query(_ connection: OpaquePointer, _ sql: String, bind: (OpaquePointer) -> Void = { _ in }, process: (OpaquePointer) throws -> Void) throws {
         var statement: OpaquePointer?; guard sqlite3_prepare_v2(connection, sql, -1, &statement, nil) == SQLITE_OK, let statement else { throw lastError(connection) }; defer { sqlite3_finalize(statement) }; bind(statement); try process(statement)

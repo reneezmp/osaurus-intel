@@ -3065,6 +3065,30 @@ Not in candidate 66.
       it, close both, unplug the display, and reopen them. Both appear on
       the remaining screen.
 
+## Knowledge re-audit (2026-11-08)
+
+`W-cov-reaudit` stage 3d (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage
+3d"). Not in candidate 66.
+
+- [ ] Knowledge with no collections: the subtitle reads "Folders of
+      documents your agents can search and read on demand" and the empty
+      state lists the supported formats.
+- [ ] Add a collection: right after saving, a "Grant "…" to agents" sheet
+      opens. Agents that already use Knowledge are ticked; pick one more and
+      press Grant Access. The toast says how many agents got it, and that
+      agent's Abilities › Knowledge shows the collection. Skip closes it.
+- [ ] Use a folder with a `recipes/` subfolder of markdown files without
+      `type:` lines, a root `notes.md` without one, and a PDF. The card's
+      chip counts only `notes.md` as uncategorized. Hover: the tooltip says
+      categories are optional. Click: an alert lists `notes.md`.
+- [ ] Give a markdown file `review:` with indented `owner: sam` and
+      `due: 2026-09-01`, plus `aliases: [a, b]`. Ask an agent to read it
+      with `read_knowledge`: the output shows `review: due: 2026-09-01,
+      owner: sam` and `aliases: a, b`.
+- [ ] Add a large folder (thousands of files) and ask an agent to search it
+      while it's still indexing: the search answers within seconds (a
+      "still indexing, retry" reply is fine), not after a 120 s timeout.
+
 ## Hidden-rows re-audit (2026-11-08)
 
 `W-cov-reaudit` stage 3c-3 (`UPSTREAM_SYNC.md`, "Coverage re-audit, stage

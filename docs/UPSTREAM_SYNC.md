@@ -5649,6 +5649,48 @@ Tests:
   written directly, never `#if`-fenced (a fenced Intel branch never
   compiles).
 
+### Coverage re-audit, stage 3d: knowledge (`W-cov-reaudit`) — 2026-11-08
+
+The five knowledge rows ([`COV_REAUDIT.md`](COV_REAUDIT.md)). Intel's
+knowledge stack was rebuilt on 2026-09-09 (`74f7599c5`), not imported, so it
+is compact and differs from upstream by thousands of lines; most of these
+commits' behaviour was already there in Intel's own form.
+
+- **Grant to agents (#2117):** creating a collection now opens upstream's
+  "Grant "…" to agents" prompt (agents with Knowledge on are preselected;
+  "Enables Knowledge" marks the others). Grants go through Intel's
+  `AgentManager.updateKnowledgeSettings`; the copy says Abilities →
+  Knowledge, where Intel keeps the switch. The card avatars and the detail
+  sheet were already in.
+- **Categories (#2132):** Intel inferred them (schema v3) but the document
+  list ignored the inferred one, so the card counted those documents as
+  uncategorized, PDFs and other formats too. `KnowledgeDocument` now carries
+  `inferredType` (`effectiveType`, `isTypeInferred`); `getDocument` returns
+  the explicit and inferred types separately, as upstream's model does. The
+  card chip is upstream's: localized labels, the explanatory tooltip, and a
+  tap opens the list of uncategorized documents; only markdown files count,
+  never `index.md` / `log.md`. The detail list shows the effective type.
+- **Frontmatter (#2338):** non-reserved fields reach `read_knowledge` with
+  nested objects (`review: {owner, due}` → `due: …, owner: …`) and lists
+  (`[a, b]` → `a, b`), via upstream's `extraFields` / `renderValue` over
+  `Skill.parseYamlBlock`; Intel's line parser dropped indented children.
+- **Search under indexing (#2383):** a second SQLite connection on its own
+  queue serves list, read and search queries (`readSync`), so a search no
+  longer waits behind the indexer's writes on the writer's queue. Opened
+  lazily with the same storage key; an in-memory database, a failed open or
+  a failed read uses the writer. The rest of #2383 (ignore rules, excluded
+  build folders, globs, the short-token filter, the "still indexing" reply,
+  the headingless-section error) was in.
+- **Copy (#2067):** the header says "Folders of documents your agents can
+  search and read on demand" and the empty state names the supported
+  formats, as upstream.
+
+Tests: `IntelKnowledgeReauditTests` (upstream's two frontmatter cases, the
+effective type, the readers through the database);
+`IntelKnowledgeWriteTests`' v1-upgrade case reads `effectiveType`.
+Filtered gate: 142 knowledge tests. Full gate: 5,087 tests, only the known
+avatar-cache failure; no live writes. x86_64 build clean.
+
 ### Coverage re-audit, stage 3c-3: the rows the decline filter hid (`W-cov-reaudit`) — 2026-11-08
 
 The 11 loop, capability and prompt rows of "Feasibility rows the decline

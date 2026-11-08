@@ -13,14 +13,23 @@ public struct KnowledgeDocument: Sendable, Equatable, Identifiable {
     public var sizeBytes: Int
     public var modifiedAt: String
     public var indexedAt: String
+    /// Upstream #2132: the category inferred from the folder when the
+    /// frontmatter has no `type`.
+    public var inferredType: String
 
     public init(id: Int, collectionId: String, relPath: String, title: String, docType: String,
                 summary: String, tagsCSV: String, contentHash: String, sizeBytes: Int,
-                modifiedAt: String, indexedAt: String) {
+                modifiedAt: String, indexedAt: String, inferredType: String = "") {
         self.id = id; self.collectionId = collectionId; self.relPath = relPath; self.title = title
         self.docType = docType; self.summary = summary; self.tagsCSV = tagsCSV
         self.contentHash = contentHash; self.sizeBytes = sizeBytes; self.modifiedAt = modifiedAt; self.indexedAt = indexedAt
+        self.inferredType = inferredType
     }
+
+    /// The explicit `type`, else the inferred one (upstream).
+    public var effectiveType: String { docType.isEmpty ? inferredType : docType }
+    /// The category came from the folder, not the frontmatter (upstream).
+    public var isTypeInferred: Bool { docType.isEmpty && !inferredType.isEmpty }
 
     public var tags: [String] { tagsCSV.split(separator: ",").map(String.init).filter { !$0.isEmpty } }
 }

@@ -179,9 +179,9 @@ struct IntelKnowledgeWriteTests {
 
             try KnowledgeDatabase.shared.open()
             let soup = try #require(try KnowledgeDatabase.shared.getDocument(collectionId: "c1", relPath: "recipes/soup.md"))
-            #expect(soup.docType == "recipes")  // inferred from the folder
+            #expect(soup.effectiveType == "recipes" && soup.isTypeInferred)  // inferred from the folder
             let note = try #require(try KnowledgeDatabase.shared.getDocument(collectionId: "c1", relPath: "notes/a.md"))
-            #expect(note.docType == "guide")  // explicit type wins
+            #expect(note.effectiveType == "guide" && !note.isTypeInferred)  // explicit type wins
             let ticket = try KnowledgeDatabase.shared.createTicket(
                 collectionId: "c1", relPath: "recipes/soup.md", reason: "old", evidence: "", createdBy: "")
             #expect(try KnowledgeDatabase.shared.getTicket(id: ticket)?.status == .open)
